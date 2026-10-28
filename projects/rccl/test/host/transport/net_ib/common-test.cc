@@ -8,7 +8,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <cstring>
+#include <new>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -17,14 +19,53 @@
 #include "fakes/param_redirect.h"
 #include "fakes/transport_net_ib_fakes.h"
 #include "fakes/transport_net_ib_resiliency_fakes.h"
+#include "transport/net_ib/NetIbGlobals.h"
 
 #include NET_IB_COMMON_CC_PATH
 
+void NetIbResetGlobals() {
+  for (ncclIbDev& dev : ncclIbDevs) {
+    std::free(dev.pciPath);
+    std::free(dev.mrCache.slots);
+    dev.~ncclIbDev();
+    new (&dev) ncclIbDev();
+  }
+  std::memset(ncclIbMergedDevs, 0, sizeof(ncclIbMergedDevs));
+  ncclNIbDevs = -1;
+  ncclNMergedIbDevs = -1;
+  std::memset(ncclIbIfName, 0, sizeof(ncclIbIfName));
+  std::memset(&ncclIbIfAddr, 0, sizeof(ncclIbIfAddr));
+  ncclIbRelaxedOrderingEnabled = 0;
+  ncclIbSpeedChangeCounter = 0;
+  ncclProfilerFunction = nullptr;
+}
+
 namespace {
+
+// ncclIbResiliencyInit hands out `resiliency` (null for none) and returns `result`.
+struct ResiliencyInitReturns : ScopedHook<ncclResult_t(ncclIbNetCommBase*, ncclIbResiliency**)> {
+  explicit ResiliencyInitReturns(ncclIbResiliency* resiliency, ncclResult_t result = ncclSuccess)
+      : ScopedHook(g_ncclIbResiliencyInit, [resiliency, result](ncclIbNetCommBase* owner, ncclIbResiliency** out) {
+          if (resiliency) resiliency->baseComm = owner;
+          *out = resiliency;
+          return result;
+        }) {}
+};
+
+// ibv_event_type_str names every event "event".
+struct EventTypeStrNames : ScopedHook<ncclResult_t(char**, ibv_event_type)> {
+  EventTypeStrNames()
+      : ScopedHook(g_ibvEventTypeStr, [](char** text, ibv_event_type) {
+          static char name[] = "event";
+          *text = name;
+          return ncclSuccess;
+        }) {}
+};
 
 class NetIbCommonMicrotest : public ::testing::Test {
  protected:
   void TearDown() override {
+    NetIbResetGlobals();
     ResetTransportNetIbResiliencyFakes();
     ResetTransportNetIbFakes();
     ResetIbvwrapFakes();
@@ -67,13 +108,27 @@ TEST_F(NetIbCommonMicrotest, GetNetCommDevBase_SelectsSendOrReceiveStorage) {
 
 TEST_F(NetIbCommonMicrotest, BaseCommInit_InitializesQpStateAndDefaultMatching) {
   ncclIbNetCommBase base{};
+  // Left over from an earlier use of the storage, so every reset below is observable.
+  base.nqps = 4;
+  base.nDataQps = 2;
+  base.ready = 1;
+  base.speedChangeCounter = 9;
+  base.totalSpeed = 400;
+  for (int d = 0; d < NCCL_IB_MAX_DEVS_PER_NIC; ++d) {
+    base.weights[d] = 50;
+    base.devSpeeds[d] = 100;
+  }
+  ncclIbQp& stale = base.qps[NCCL_IB_MAX_QPS - 1];
+  stale.devIndex = 1;
+  stale.remDevIdx = 1;
+  stale.eceSupported = 1;
+  stale.ece.vendor_id = 0x15b3;
+  stale.initAttr.pkeyIndex = 3;
+  stale.rtrAttr.localGidIndex = 7;
+  stale.rtsAttr.timeout = 14;
+  base.activeQps[NCCL_IB_MAX_QPS - 1] = &base.qps[0];
   ncclIbResiliency resiliency{};
-  ScopedHook init(g_ncclIbResiliencyInit,
-                  [&resiliency](ncclIbNetCommBase* owner, ncclIbResiliency** out) {
-                    resiliency.baseComm = owner;
-                    *out = &resiliency;
-                    return ncclSuccess;
-                  });
+  ResiliencyInitReturns init(&resiliency);
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     if (std::strcmp(name, "IB_SPLIT_DATA_ON_QPS") == 0) return int64_t{1};
     return fallback;
@@ -86,42 +141,50 @@ TEST_F(NetIbCommonMicrotest, BaseCommInit_InitializesQpStateAndDefaultMatching) 
   EXPECT_EQ(base.nDataQps, -1);
   EXPECT_EQ(base.splitDataOnQps, 1);
   EXPECT_EQ(base.ready, 0);
+  EXPECT_EQ(base.speedChangeCounter, 0u);
+  EXPECT_EQ(base.totalSpeed, 0u);
+  for (int d = 0; d < NCCL_IB_MAX_DEVS_PER_NIC; ++d) {
+    EXPECT_EQ(base.weights[d], 0) << "device " << d;
+    EXPECT_EQ(base.devSpeeds[d], 0u) << "device " << d;
+  }
   EXPECT_EQ(base.recvMatchingScheme, BY_INDEX);
   EXPECT_EQ(base.resiliency, &resiliency);
+  EXPECT_EQ(resiliency.baseComm, &base);
+  EXPECT_EQ(stale.devIndex, -1);
+  EXPECT_EQ(stale.remDevIdx, -1);
+  EXPECT_EQ(stale.eceSupported, 0);
+  EXPECT_EQ(stale.ece.vendor_id, 0u);
+  EXPECT_EQ(stale.initAttr.pkeyIndex, 0);
+  EXPECT_EQ(stale.rtrAttr.localGidIndex, 0);
+  EXPECT_EQ(stale.rtsAttr.timeout, 0);
   EXPECT_EQ(base.qps[0].devIndex, -1);
-  EXPECT_EQ(base.qps[NCCL_IB_MAX_QPS - 1].remDevIdx, -1);
-  EXPECT_EQ(base.activeQps[17], &base.qps[17]);
+  EXPECT_EQ(base.activeQps[NCCL_IB_MAX_QPS - 1], &stale);
   EXPECT_EQ(init.calls, 1);
 }
 
-TEST_F(NetIbCommonMicrotest, BaseCommInit_OooRqForcesIdMatching) {
-  ncclIbNetCommBase base{};
-  ncclIbResiliency resiliency{};
-  ScopedHook init(g_ncclIbResiliencyInit,
-                  [&resiliency](ncclIbNetCommBase*, ncclIbResiliency** out) {
-                    *out = &resiliency;
-                    return ncclSuccess;
-                  });
-  ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
-    if (std::strcmp(name, "IB_OOO_RQ") == 0) return int64_t{1};
-    if (std::strcmp(name, "IB_RECEIVER_SIDE_MATCHING_SCHEME") == 0) return int64_t{BY_INDEX};
-    return fallback;
-  });
+TEST_F(NetIbCommonMicrotest, BaseCommInit_OooRqOrPortFailoverForcesIdMatching) {
+  for (const char* param : {"IB_OOO_RQ", "IB_RESILIENCY_PORT_FAILOVER"}) {
+    SCOPED_TRACE(param);
+    ncclIbNetCommBase base{};
+    ncclIbResiliency resiliency{};
+    ResiliencyInitReturns init(&resiliency);
+    ScopedHook params(g_loadParam, [param](const char* name, int64_t fallback) {
+      if (std::strcmp(name, param) == 0) return int64_t{1};
+      if (std::strcmp(name, "IB_RECEIVER_SIDE_MATCHING_SCHEME") == 0) return int64_t{BY_INDEX};
+      return fallback;
+    });
 
-  ASSERT_EQ(ncclIbBaseCommInit(&base, false), ncclSuccess);
+    ASSERT_EQ(ncclIbBaseCommInit(&base, false), ncclSuccess);
 
-  EXPECT_FALSE(base.isSend);
-  EXPECT_EQ(base.recvMatchingScheme, BY_ID);
+    EXPECT_FALSE(base.isSend);
+    EXPECT_EQ(base.recvMatchingScheme, BY_ID);
+  }
 }
 
 TEST_F(NetIbCommonMicrotest, RecvCommInit_ResiliencyOrOooRqForcesPreposting) {
   ncclIbRecvComm recv{};
   ncclIbResiliency resiliency{};
-  ScopedHook init(g_ncclIbResiliencyInit,
-                  [&resiliency](ncclIbNetCommBase*, ncclIbResiliency** out) {
-                    *out = &resiliency;
-                    return ncclSuccess;
-                  });
+  ResiliencyInitReturns init(&resiliency);
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     if (std::strcmp(name, "IB_PREPOST_RECEIVE_WORK_REQUESTS") == 0) return int64_t{0};
     return fallback;
@@ -136,11 +199,7 @@ TEST_F(NetIbCommonMicrotest, RecvCommInit_ResiliencyOrOooRqForcesPreposting) {
 
 TEST_F(NetIbCommonMicrotest, RecvCommInit_OooRqForcesPrepostingWithoutResiliency) {
   ncclIbRecvComm recv{};
-  ScopedHook init(g_ncclIbResiliencyInit,
-                  [](ncclIbNetCommBase*, ncclIbResiliency** out) {
-                    *out = nullptr;
-                    return ncclSuccess;
-                  });
+  ResiliencyInitReturns init(nullptr);
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     if (std::strcmp(name, "IB_PREPOST_RECEIVE_WORK_REQUESTS") == 0) return int64_t{0};
     if (std::strcmp(name, "IB_OOO_RQ") == 0) return int64_t{1};
@@ -153,35 +212,41 @@ TEST_F(NetIbCommonMicrotest, RecvCommInit_OooRqForcesPrepostingWithoutResiliency
   EXPECT_EQ(recv.base.resiliency, nullptr);
 }
 
-TEST_F(NetIbCommonMicrotest, RecvCommInit_DefaultOrExplicitDisabledUsesOnDemandPosting) {
-  ScopedHook init(g_ncclIbResiliencyInit, [](ncclIbNetCommBase*, ncclIbResiliency** out) {
-    *out = nullptr;
-    return ncclSuccess;
-  });
+TEST_F(NetIbCommonMicrotest, RecvCommInit_PrepostParamSelectsPostingWithoutResiliency) {
+  ResiliencyInitReturns init(nullptr);
   int64_t prepost = -2;
   ScopedHook params(g_loadParam, [&prepost](const char* name, int64_t fallback) {
     if (std::strcmp(name, "IB_PREPOST_RECEIVE_WORK_REQUESTS") == 0) return prepost;
     return fallback;
   });
-  ncclIbRecvComm defaultRecv{};
-  ncclIbRecvComm disabledRecv{};
+  struct Case {
+    int64_t param;
+    bool preposted;
+  };
+  for (const Case& c : {Case{-2, false}, Case{0, false}, Case{1, true}}) {
+    SCOPED_TRACE(::testing::Message() << "IB_PREPOST_RECEIVE_WORK_REQUESTS=" << c.param);
+    prepost = c.param;
+    ncclIbRecvComm recv{};
 
-  ASSERT_EQ(ncclIbRecvCommInit(&defaultRecv), ncclSuccess);
-  prepost = 0;
-  ASSERT_EQ(ncclIbRecvCommInit(&disabledRecv), ncclSuccess);
+    ASSERT_EQ(ncclIbRecvCommInit(&recv), ncclSuccess);
 
-  EXPECT_FALSE(defaultRecv.prepostReceiveWorkRequests);
-  EXPECT_FALSE(disabledRecv.prepostReceiveWorkRequests);
+    EXPECT_EQ(recv.prepostReceiveWorkRequests, c.preposted);
+  }
+}
+
+TEST_F(NetIbCommonMicrotest, RecvCommInit_BaseInitFailureLeavesFlushFdClosed) {
+  ResiliencyInitReturns init(nullptr, ncclSystemError);
+  ncclIbRecvComm recv{};
+  recv.flagFlushDmabufFd = 7;
+
+  EXPECT_EQ(ncclIbRecvCommInit(&recv), ncclSystemError);
+  EXPECT_EQ(recv.flagFlushDmabufFd, -1);
 }
 
 TEST_F(NetIbCommonMicrotest, SendCommInit_InitializesSendBase) {
   ncclIbSendComm send{};
   ncclIbResiliency resiliency{};
-  ScopedHook init(g_ncclIbResiliencyInit,
-                  [&resiliency](ncclIbNetCommBase*, ncclIbResiliency** out) {
-                    *out = &resiliency;
-                    return ncclSuccess;
-                  });
+  ResiliencyInitReturns init(&resiliency);
 
   ASSERT_EQ(ncclIbSendCommInit(&send), ncclSuccess);
 
@@ -285,21 +350,24 @@ TEST_F(NetIbCommonMicrotest, CommBaseGetQpByQpNum_FindsQpWithinRequestedDevice) 
 TEST_F(NetIbCommonMicrotest, ComputeDevSpeeds_UsesMinimumOfLocalAndAdvertisedRemote) {
   ncclIbSendComm comm{};
   comm.base.isSend = true;
-  comm.base.vProps.ndevs = 2;
-  comm.devs[0].base.ibDevN = 0;
-  comm.devs[1].base.ibDevN = 1;
+  comm.base.vProps.ndevs = 3;
+  for (int d = 0; d < 3; ++d) comm.devs[d].base.ibDevN = d;
   comm.base.qps[0].remDevIdx = 1;
   comm.base.qps[1].remDevIdx = 0;
+  comm.base.qps[2].remDevIdx = 2;
   ncclIbDevs[0].currSpeed = 100;
   ncclIbDevs[1].currSpeed = 200;
+  ncclIbDevs[2].currSpeed = 400;
   comm.base.remDevs[0].currSpeed = 300;
   comm.base.remDevs[1].currSpeed = 50;
+  comm.base.remDevs[2].currSpeed = 0;  // not advertised: the local speed stands
 
   ncclIbComputeDevSpeeds(&comm.base);
 
   EXPECT_EQ(comm.base.devSpeeds[0], 50u);
   EXPECT_EQ(comm.base.devSpeeds[1], 200u);
-  EXPECT_EQ(comm.base.totalSpeed, 250u);
+  EXPECT_EQ(comm.base.devSpeeds[2], 400u);
+  EXPECT_EQ(comm.base.totalSpeed, 650u);
 }
 
 TEST_F(NetIbCommonMicrotest, GidInfoSnapshot_CopiesDeviceStateIntoCommBase) {
@@ -346,6 +414,35 @@ TEST_F(NetIbCommonMicrotest, CheckSpeedChanges_RefreshesRemoteSpeedsWeightsAndCo
   EXPECT_EQ(comm.base.totalSpeed, 3000u);
   EXPECT_EQ(comm.base.weights[0], 33);
   EXPECT_EQ(comm.base.weights[1], 67);
+}
+
+TEST_F(NetIbCommonMicrotest, CheckSpeedChanges_LocalCounterAloneRecomputesSpeedsAndWeights) {
+  ncclIbSendComm comm{};
+  comm.base.isSend = true;
+  comm.base.vProps.ndevs = 2;
+  comm.base.nRemDevs = 2;
+  comm.devs[0].base.ibDevN = 0;
+  comm.devs[1].base.ibDevN = 1;
+  comm.base.qps[0].remDevIdx = 0;
+  comm.base.qps[1].remDevIdx = 1;
+  ncclIbDevs[0].currSpeed = 1000;
+  ncclIbDevs[1].currSpeed = 3000;
+  ncclIbSpeedChangeCounter = 5;
+  comm.base.speedChangeCounter = 4;
+  comm.remoteSpeedCounter = 8;
+  comm.remoteSpeedBuf.counter = 8;
+  comm.remoteSpeedBuf.speedGbps[0] = 9;  // stale: the remote counter did not move, so this is not read
+  ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
+    return std::strcmp(name, "IB_EVENT_BASED_LB") == 0 ? int64_t{1} : fallback;
+  });
+
+  ncclIbCheckSpeedChanges(&comm, &comm.base);
+
+  EXPECT_EQ(comm.base.speedChangeCounter, 5u);
+  EXPECT_EQ(comm.base.remDevs[0].currSpeed, 0u);
+  EXPECT_EQ(comm.base.totalSpeed, 4000u);
+  EXPECT_EQ(comm.base.weights[0], 25);
+  EXPECT_EQ(comm.base.weights[1], 75);
 }
 
 TEST_F(NetIbCommonMicrotest, StatsInitAndGidBitExtractorsPublishExpectedValues) {
@@ -515,35 +612,38 @@ TEST_F(NetIbCommonMicrotest, AsyncThread_HandlesFatalChangeAndInformationalEvent
   ibv_cq cq{};
   ncclIbStats cqStats{};
   cq.cq_context = &cqStats;
-  ibv_qp qp{};
-  ncclIbStats qpStats{};
-  qp.qp_context = &qpStats;
-  qp.send_cq = &cq;
-  qp.recv_cq = &cq;
+  // One QP per fatal QP event, each with its own counter.
+  ibv_qp qps[3]{};
+  ncclIbStats qpStats[3]{};
+  for (int i = 0; i < 3; ++i) {
+    qps[i].qp_context = &qpStats[i];
+    qps[i].send_cq = &cq;
+    qps[i].recv_cq = &cq;
+  }
   ibv_srq srq{};
-  std::vector<ibv_async_event> events(8);
+  std::vector<ibv_async_event> events(10);
   events[0].event_type = IBV_EVENT_DEVICE_FATAL;
   events[1].event_type = IBV_EVENT_CQ_ERR;
   events[1].element.cq = &cq;
   events[2].event_type = IBV_EVENT_QP_FATAL;
-  events[2].element.qp = &qp;
-  events[3].event_type = IBV_EVENT_SRQ_ERR;
-  events[3].element.srq = &srq;
-  events[4].event_type = IBV_EVENT_GID_CHANGE;
-  events[5].event_type = IBV_EVENT_DEVICE_SPEED_CHANGE;
-  events[6].event_type = IBV_EVENT_PORT_ACTIVE;
-  events[7].event_type = IBV_EVENT_COMM_EST;
+  events[2].element.qp = &qps[0];
+  events[3].event_type = IBV_EVENT_QP_REQ_ERR;
+  events[3].element.qp = &qps[1];
+  events[4].event_type = IBV_EVENT_QP_ACCESS_ERR;
+  events[4].element.qp = &qps[2];
+  events[5].event_type = IBV_EVENT_SRQ_ERR;
+  events[5].element.srq = &srq;
+  events[6].event_type = IBV_EVENT_GID_CHANGE;
+  events[7].event_type = IBV_EVENT_DEVICE_SPEED_CHANGE;
+  events[8].event_type = IBV_EVENT_PORT_ACTIVE;
+  events[9].event_type = IBV_EVENT_COMM_EST;
   size_t next = 0;
   ScopedHook getEvent(g_ibvGetAsyncEvent, [&events, &next](ibv_context*, ibv_async_event* out) {
     if (next == events.size()) return ncclSystemError;
     *out = events[next++];
     return ncclSuccess;
   });
-  ScopedHook eventText(g_ibvEventTypeStr, [](char** text, ibv_event_type) {
-    static char name[] = "event";
-    *text = name;
-    return ncclSuccess;
-  });
+  EventTypeStrNames eventText;
   ScopedHook queryQp(g_ibvQueryQp, [](ibv_qp*, ibv_qp_attr* attr, int, ibv_qp_init_attr*) {
     *attr = ibv_qp_attr{};
     return ncclSuccess;
@@ -558,7 +658,8 @@ TEST_F(NetIbCommonMicrotest, AsyncThread_HandlesFatalChangeAndInformationalEvent
 
   EXPECT_EQ(dev.stats.fatalErrorCount, 1);
   EXPECT_EQ(cqStats.fatalErrorCount, 1);
-  EXPECT_EQ(qpStats.fatalErrorCount, 1);
+  for (int i = 0; i < 3; ++i) EXPECT_EQ(qpStats[i].fatalErrorCount, 1) << "QP " << i;
+  EXPECT_EQ(queryQp.calls, 3);
   EXPECT_EQ(speed.calls, 1);
   EXPECT_EQ(ack.calls, static_cast<int>(events.size()));
 }
@@ -580,11 +681,7 @@ TEST_F(NetIbCommonMicrotest, AsyncThread_EventStringOrAckFailureStopsProgress) {
   EXPECT_EQ(getCalls, 1);
 
   getCalls = 0;
-  ScopedHook stringOk(g_ibvEventTypeStr, [](char** text, ibv_event_type) {
-    static char name[] = "event";
-    *text = name;
-    return ncclSuccess;
-  });
+  EventTypeStrNames stringOk;
   ScopedHook ackFail(g_ibvAckAsyncEvent, [](ibv_async_event*) {
     return ncclSystemError;
   });
@@ -603,11 +700,7 @@ TEST_F(NetIbCommonMicrotest, AsyncThread_GidRefreshFailureMarksDeviceFatal) {
     event->event_type = IBV_EVENT_GID_CHANGE;
     return ncclSuccess;
   });
-  ScopedHook eventText(g_ibvEventTypeStr, [](char** text, ibv_event_type) {
-    static char name[] = "gid";
-    *text = name;
-    return ncclSuccess;
-  });
+  EventTypeStrNames eventText;
   ScopedHook query(g_ibvQueryPort, [](ibv_context*, uint8_t, ibv_port_attr*) {
     return ncclRemoteError;
   });

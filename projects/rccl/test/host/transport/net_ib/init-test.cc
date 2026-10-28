@@ -9,11 +9,15 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
-#include <thread>
+#include <future>
+#include <mutex>
 
+#include "IbVerbsWorld.h"
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
 #include "fakes/ibvwrap_fakes.h"
@@ -25,20 +29,17 @@
 #include "fakes/transport_net_ib_p2p_fakes.h"
 #include "fakes/transport_net_ib_recovery_fakes.h"
 #include "transport/net_ib/NetIbDmaBufProbe.h"
+#include "transport/net_ib/NetIbGlobals.h"
+#include "transport/net_ib/NetIbSupportSeams.h"
 #include "transport/net_ib/common.h"
 
 namespace {
 
-static ncclResult_t DefaultPropertySupport() { return ncclSystemError; }
-std::function<ncclResult_t()> g_testGdrSupport = DefaultPropertySupport;
-std::function<ncclResult_t(int)> g_testDmaBufSupport = [](int) { return ncclSystemError; };
 std::function<char*(const char*, char*)> g_testRealpath = [](const char*, char*) -> char* { return nullptr; };
 std::function<int(const char*, int)> g_testOpen = [](const char*, int) { return -1; };
 std::function<ssize_t(int, void*, size_t)> g_testRead = [](int, void*, size_t) { return ssize_t{-1}; };
 std::function<int(int)> g_testClose = [](int) { return 0; };
 
-ncclResult_t TestGdrSupport() { return g_testGdrSupport(); }
-ncclResult_t TestDmaBufSupport(int dev) { return g_testDmaBufSupport(dev); }
 char* TestRealpath(const char* path, char* resolved) { return g_testRealpath(path, resolved); }
 int TestOpen(const char* path, int flags) { return g_testOpen(path, flags); }
 ssize_t TestRead(int fd, void* buffer, size_t size) { return g_testRead(fd, buffer, size); }
@@ -50,10 +51,8 @@ void* TestIbAsyncThreadMain(void*) { return nullptr; }
 
 }  // namespace
 
-void ncclSetThreadName(std::thread&, const char*, ...) {}
-
-#define ncclIbGdrSupport TestGdrSupport
-#define ncclIbDmaBufSupport TestDmaBufSupport
+#define ncclIbGdrSupport NetIbTestGdrSupport
+#define ncclIbDmaBufSupport NetIbTestDmaBufSupport
 #define realpath TestRealpath
 #define open TestOpen
 #define read TestRead
@@ -70,69 +69,16 @@ void ncclSetThreadName(std::thread&, const char*, ...) {}
 
 namespace {
 
-class ScopedInitDevicesBaseline {
- private:
-  ibv_device** devices_;
-  int count_;
-
- public:
-  ScopedInitDevicesBaseline(ibv_device** devices, int count)
-      : devices_(devices),
-        count_(count),
-        symbols(g_ibvSymbols, [] { return ncclSuccess; }),
-        forkInit(g_ibvForkInit, [] { return ncclSuccess; }),
-        findInterfaces(g_ncclFindInterfaces,
-                       [this](char* names, ncclSocketAddress*, int nameSize, int maxIfs, int* count) {
-          findInterfacesMaxIfs = maxIfs;
-          std::snprintf(names, nameSize, "eth0");
-          *count = 1;
-          return ncclSuccess;
-        }),
-        getDevices(g_ibvGetDeviceList, [this](ibv_device*** out, int* count) {
-          *out = devices_;
-          *count = count_;
-          return ncclSuccess;
-        }),
-        freeDevices(g_ibvFreeDeviceList, [this](ibv_device** devices) {
-          freedDevices = devices;
-          return ncclSuccess;
-        }),
-        relaxedProbe(g_ibvRegMrIova2, [](ibv_mr**, ibv_pd*, void*, size_t, uint64_t, int) {
-          return ncclInternalError;
-        }),
-        socketToString(g_ncclSocketToString, [](const ncclSocketAddress*, char* text, size_t, int) {
-          std::strcpy(text, "127.0.0.1");
-          return text;
-        }) {}
-
-  int findInterfacesMaxIfs = -1;
-  ibv_device** freedDevices = nullptr;
-  ScopedHook<ncclResult_t()> symbols;
-  ScopedHook<ncclResult_t()> forkInit;
-  ScopedHook<ncclResult_t(char*, ncclSocketAddress*, int, int, int*)> findInterfaces;
-  ScopedHook<ncclResult_t(ibv_device***, int*)> getDevices;
-  ScopedHook<ncclResult_t(ibv_device**)> freeDevices;
-  ScopedHook<ncclResult_t(ibv_mr**, ibv_pd*, void*, size_t, uint64_t, int)> relaxedProbe;
-  ScopedHook<const char*(const ncclSocketAddress*, char*, size_t, int)> socketToString;
-};
-
 class NetIbInitMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     netRefCount = 0;
-    ncclNIbDevs = -1;
-    ncclNMergedIbDevs = -1;
-    ncclIbRelaxedOrderingEnabled = 0;
     ResetTransportNetIbP2pFakes();
   }
 
   void TearDown() override {
-    for (int dev = 0; dev < MAX_IB_DEVS; ++dev) {
-      std::free(ncclIbDevs[dev].pciPath);
-      ncclIbDevs[dev].pciPath = nullptr;
-    }
-    g_testGdrSupport = DefaultPropertySupport;
-    g_testDmaBufSupport = [](int) { return ncclSystemError; };
+    NetIbResetGlobals();
+    ResetNetIbSupportSeams();
     g_testRealpath = [](const char*, char*) -> char* { return nullptr; };
     g_testOpen = [](const char*, int) { return -1; };
     g_testRead = [](int, void*, size_t) { return ssize_t{-1}; };
@@ -145,6 +91,17 @@ class NetIbInitMicrotest : public ::testing::Test {
     ResetIbvwrapFakes();
     ResetEnvFakes();
     ResetNcclFakes();
+  }
+
+  // A RoCE physical device at index `dev`, as discovery publishes it; device d sits on PCI bus 0x41 + d.
+  static void PublishRoceDevice(int dev, const char* name, int speed, int railId) {
+    std::snprintf(ncclIbDevs[dev].devName, sizeof(ncclIbDevs[dev].devName), "%s", name);
+    ncclIbDevs[dev].speed = speed;
+    ncclIbDevs[dev].link = IBV_LINK_LAYER_ETHERNET;
+    ncclIbDevs[dev].railId = railId;
+    char path[64];
+    std::snprintf(path, sizeof(path), "/sys/devices/pci0000:00/0000:%02x:00.0", 0x41 + dev);
+    ncclIbDevs[dev].pciPath = strdup(path);
   }
 };
 
@@ -442,9 +399,14 @@ TEST_F(NetIbInitMicrotest, Mlx5DmaBufCapable_ProbeErrnoSelectsCapability) {
                            });
     EXPECT_FALSE(ncclMlx5dvDmaBufCapable(&context));
   }
-  EXPECT_EQ(dmaProbe.alloc.calls, 3);
-  EXPECT_EQ(dmaProbe.probe.calls, 3);
-  EXPECT_EQ(dmaProbe.dealloc.calls, 3);
+  dmaProbe.allocFails = true;
+  EXPECT_FALSE(ncclMlx5dvDmaBufCapable(&context));
+  dmaProbe.allocFails = false;
+  dmaProbe.deallocFails = true;
+  EXPECT_FALSE(ncclMlx5dvDmaBufCapable(&context));
+  EXPECT_EQ(dmaProbe.alloc.calls, 5);
+  EXPECT_EQ(dmaProbe.probe.calls, 4);
+  EXPECT_EQ(dmaProbe.dealloc.calls, 4);
 }
 
 TEST_F(NetIbInitMicrotest, AutoAssignRailPlane_NoRailPolicyLeavesExplicitIdsUnchanged) {
@@ -495,16 +457,10 @@ TEST_F(NetIbInitMicrotest, MakeVDevice_InvalidCountIndexOrIncompatibleLinkIsReje
 TEST_F(NetIbInitMicrotest, MakeVDevice_CompatibleDevicesAggregateNameSpeedRailAndPlane) {
   ncclNIbDevs = 2;
   ncclNMergedIbDevs = 0;
-  std::strcpy(ncclIbDevs[0].devName, "mlx5_0");
-  std::strcpy(ncclIbDevs[1].devName, "mlx5_1");
-  ncclIbDevs[0].speed = 100;
-  ncclIbDevs[1].speed = 200;
-  ncclIbDevs[0].link = ncclIbDevs[1].link = IBV_LINK_LAYER_ETHERNET;
-  ncclIbDevs[0].railId = ncclIbDevs[1].railId = 4;
+  PublishRoceDevice(0, "mlx5_0", 100, /*railId=*/4);
+  PublishRoceDevice(1, "mlx5_1", 200, /*railId=*/4);
   ncclIbDevs[0].planeIdx = 1;
   ncclIbDevs[1].planeIdx = 3;
-  ncclIbDevs[0].pciPath = strdup("/sys/devices/pci0000:00/0000:41:00.0");
-  ncclIbDevs[1].pciPath = strdup("/sys/devices/pci0000:00/0000:42:00.0");
   ncclNetVDeviceProps_t props{};
   props.ndevs = 2;
   props.devs[0] = 0;
@@ -525,12 +481,7 @@ TEST_F(NetIbInitMicrotest, MakeVDevice_CompatibleDevicesAggregateNameSpeedRailAn
 TEST_F(NetIbInitMicrotest, MakeVDevice_DuplicatePhysicalIndexIsIncludedOnce) {
   ncclNIbDevs = 1;
   ncclNMergedIbDevs = 0;
-  std::strcpy(ncclIbDevs[0].devName, "mlx5_0");
-  ncclIbDevs[0].speed = 100;
-  ncclIbDevs[0].link = IBV_LINK_LAYER_ETHERNET;
-  ncclIbDevs[0].railId = 1;
-  ncclIbDevs[0].planeId = 2;
-  ncclIbDevs[0].pciPath = strdup("/sys/devices/pci0000:00/0000:41:00.0");
+  PublishRoceDevice(0, "mlx5_0", 100, /*railId=*/1);
   ncclNetVDeviceProps_t props{};
   props.ndevs = 2;
   props.devs[0] = 0;
@@ -544,23 +495,24 @@ TEST_F(NetIbInitMicrotest, MakeVDevice_DuplicatePhysicalIndexIsIncludedOnce) {
   EXPECT_STREQ(ncclIbMergedDevs[0].devName, "mlx5_0");
 }
 
-TEST_F(NetIbInitMicrotest, MakeVDevice_PublicApiSerializesAndPublishesDevice) {
+TEST_F(NetIbInitMicrotest, MakeVDevice_PublicApiWaitsForIbMutexThenDelegatesToInternal) {
   ncclNIbDevs = 1;
   ncclNMergedIbDevs = 0;
-  std::strcpy(ncclIbDevs[0].devName, "mlx5_0");
-  ncclIbDevs[0].speed = 100;
-  ncclIbDevs[0].link = IBV_LINK_LAYER_ETHERNET;
-  ncclIbDevs[0].railId = 1;
-  ncclIbDevs[0].planeId = 2;
-  ncclIbDevs[0].pciPath = strdup("/sys/devices/pci0000:00/0000:41:00.0");
+  PublishRoceDevice(0, "mlx5_0", 100, /*railId=*/1);
   ncclNetVDeviceProps_t props{};
   props.ndevs = 1;
   props.devs[0] = 0;
   int output = -1;
+  std::unique_lock<std::mutex> discovery(ncclIbMutex);
 
-  EXPECT_EQ(ncclIbMakeVDevice(&output, &props), ncclSuccess);
+  auto made = std::async(std::launch::async, [&] { return ncclIbMakeVDevice(&output, &props); });
+  EXPECT_EQ(made.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  discovery.unlock();
+
+  EXPECT_EQ(made.get(), ncclSuccess);
   EXPECT_EQ(output, 0);
   EXPECT_EQ(ncclNMergedIbDevs, 1);
+  EXPECT_STREQ(ncclIbMergedDevs[0].devName, "mlx5_0");
 }
 
 TEST_F(NetIbInitMicrotest, Devices_ReturnsMergedDeviceCount) {
@@ -581,8 +533,8 @@ TEST_F(NetIbInitMicrotest, GetPhysProperties_PublishesCapabilitiesAndDeviceMetad
   ncclIbDevs[0].planeId = 5;
   std::strcpy(ncclIbDevs[0].devName, "mlx5_0");
   ncclIbDevs[0].pciPath = strdup("/sys/devices/0000:41:00.0");
-  g_testGdrSupport = [] { return ncclSuccess; };
-  g_testDmaBufSupport = [](int dev) {
+  g_netIbGdrSupport = [] { return ncclSuccess; };
+  g_netIbDmaBufSupport = [](int dev) {
     EXPECT_EQ(dev, 0);
     return ncclSuccess;
   };
@@ -610,8 +562,6 @@ TEST_F(NetIbInitMicrotest, GetProperties_ValidMergedDeviceOverridesAggregateFiel
   ncclIbMergedDevs[0].railId = 6;
   ncclIbMergedDevs[0].planeId = 7;
   std::strcpy(ncclIbDevs[0].devName, "mlx5_0");
-  g_testGdrSupport = [] { return ncclSystemError; };
-  g_testDmaBufSupport = [](int) { return ncclSystemError; };
   ncclNetProperties_t props{};
 
   ASSERT_EQ(ncclIbGetProperties(0, &props), ncclSuccess);
@@ -626,37 +576,16 @@ TEST_F(NetIbInitMicrotest, GetProperties_ValidMergedDeviceOverridesAggregateFiel
 }
 
 TEST_F(NetIbInitMicrotest, InitDevices_OneActivePortPublishesPhysicalAndMergedDevice) {
-  ibv_device device{};
-  std::strcpy(device.name, "mlx5_0");
-  std::strcpy(device.dev_name, "uverbs0");
-  ibv_device* devices[] = {&device, nullptr};
-  ibv_context context{};
-  ScopedInitDevicesBaseline baseline(devices, 1);
-  ScopedHook mlxSymbols(g_mlx5dvSymbols, [] { return ncclSuccess; });
-  ScopedHook open(g_ibvOpenDevice, [&context, &device](ibv_context** out, ibv_device* value) {
-    EXPECT_EQ(value, &device);
-    *out = &context;
-    return ncclSuccess;
-  });
-  ScopedHook queryDevice(g_ibvQueryDevice, [](ibv_context*, ibv_device_attr* attr) {
-    *attr = ibv_device_attr{};
-    attr->phys_port_cnt = 1;
-    attr->sys_image_guid = 0xabc;
-    attr->vendor_id = 0x2c9;
-    attr->vendor_part_id = 123;
-    attr->max_qp = 99;
-    std::strcpy(attr->fw_ver, "28.1");
-    return ncclSuccess;
-  });
-  ScopedHook queryPort(g_ibvQueryPort, [](ibv_context*, uint8_t port, ibv_port_attr* attr) {
-    EXPECT_EQ(port, 1);
-    *attr = ibv_port_attr{};
-    attr->state = IBV_PORT_ACTIVE;
-    attr->link_layer = IBV_LINK_LAYER_ETHERNET;
-    attr->active_width = 1;
-    attr->active_speed = 1;
-    return ncclSuccess;
-  });
+  IbVerbsWorld world;
+  FakeHca& hca = world.AddHca("mlx5_0");
+  hca.mlx5 = true;
+  hca.attr.sys_image_guid = 0xabc;
+  hca.attr.vendor_id = 0x2c9;
+  hca.attr.vendor_part_id = 123;
+  hca.attr.max_qp = 99;
+  std::strcpy(hca.attr.fw_ver, "28.1");
+  hca.ports[0].active_width = 1;
+  hca.ports[0].active_speed = 1;
   int speedQueries = 0;
   ScopedHook querySpeed(g_ibvQueryPortSpeed, [&speedQueries](ibv_context*, uint8_t, uint64_t* speed) {
     if (speedQueries++ == 0) {
@@ -665,7 +594,6 @@ TEST_F(NetIbInitMicrotest, InitDevices_OneActivePortPublishesPhysicalAndMergedDe
     }
     return ncclSystemError;
   });
-  ScopedHook provider(g_mlx5dvIsSupported, [](ibv_device*) { return true; });
   ibv_pd pd{};
   ScopedDmaBufProbe dmaProbe(&pd, EBADF);
   ScopedHook mlxDmaProbe(g_mlx5dvDirectRegDmabufMr,
@@ -703,6 +631,11 @@ TEST_F(NetIbInitMicrotest, InitDevices_OneActivePortPublishesPhysicalAndMergedDe
   EXPECT_STREQ(ncclIbDevs[0].devName, "mlx5_0");
   EXPECT_STREQ(ncclIbDevs[1].devName, "mlx5_0_dma");
   EXPECT_EQ(ncclIbDevs[0].portNum, 1);
+  EXPECT_EQ(ncclIbDevs[0].guid, 0xabcu);
+  EXPECT_EQ(ncclIbDevs[0].vendorId, 0x2c9u);
+  EXPECT_EQ(ncclIbDevs[0].vendorPartId, 123u);
+  EXPECT_EQ(ncclIbDevs[0].maxQp, 99);
+  EXPECT_STREQ(ncclIbDevs[0].fwVer, "28.1");
   EXPECT_EQ(ncclIbDevs[1].capsProvider.mlx5.dataDirect, 1);
   EXPECT_STREQ(ncclIbDevs[1].pciPath, "/sys/class/infiniband/mlx5_0/device");
   EXPECT_EQ(ncclIbDevs[0].link, IBV_LINK_LAYER_ETHERNET);
@@ -712,18 +645,50 @@ TEST_F(NetIbInitMicrotest, InitDevices_OneActivePortPublishesPhysicalAndMergedDe
   EXPECT_EQ(ncclIbDevs[0].ar, 0);
   EXPECT_EQ(ncclIbDevs[1].ar, 0);
   EXPECT_EQ(ncclIbArThreshold, 4096);
+  EXPECT_EQ(ncclIbRelaxedOrderingEnabled, 0);
   EXPECT_EQ(ncclIbDevs[0].gidInfo.localGidIndex, 2);
   EXPECT_EQ(ncclIbMergedDevs[0].vProps.devs[0], 0);
   EXPECT_EQ(ncclIbMergedDevs[1].vProps.devs[0], 1);
-  EXPECT_EQ(baseline.findInterfacesMaxIfs, 1);
-  EXPECT_EQ(baseline.getDevices.calls, 1);
-  EXPECT_EQ(baseline.freeDevices.calls, 1);
-  EXPECT_EQ(baseline.freedDevices, devices);
-  EXPECT_EQ(dmaProbe.allocContext, &context);
+  EXPECT_EQ(world.findInterfacesMaxIfs, 1);
+  EXPECT_EQ(world.getDeviceList.calls, 1);
+  EXPECT_EQ(world.freeDeviceList.calls, 1);
+  EXPECT_EQ(dmaProbe.allocContext, &hca.context);
   EXPECT_EQ(dmaProbe.probePd, &pd);
   EXPECT_EQ(dmaProbe.alloc.calls, 1);
   EXPECT_EQ(dmaProbe.probe.calls, 1);
   EXPECT_EQ(dmaProbe.dealloc.calls, 1);
+}
+
+TEST_F(NetIbInitMicrotest, InitDevices_InfinibandDefaultsArOnAndOooRqKeepsArThreshold) {
+  IbVerbsWorld world;
+  FakeHca& hca = world.AddHca("mlx5_0");
+  hca.ports[0] = IbVerbsWorld::ActivePort(IBV_LINK_LAYER_INFINIBAND);
+  hca.portSpeed = 1000;
+  // The library has IBVERBS_1.8, so the relaxed-ordering probe succeeds.
+  ScopedHook relaxedProbe(g_ibvRegMrIova2, [](ibv_mr**, ibv_pd*, void*, size_t, uint64_t, int) {
+    return ncclSuccess;
+  });
+  ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
+    if (std::strcmp(name, "IB_OOO_RQ") == 0) return int64_t{1};
+    if (std::strcmp(name, "IB_AR_THRESHOLD") == 0) return int64_t{4096};
+    return fallback;
+  });
+  ScopedHook gid(g_ncclIbGidInfoQuery,
+                 [](ibv_context*, uint8_t, ibv_port_attr* attr, ncclIbGidInfo* info) {
+                   info->link_layer = attr->link_layer;
+                   info->localGidIndex = 2;
+                   info->localGid.raw[15] = 0xaa;
+                   return ncclSuccess;
+                 });
+
+  ASSERT_EQ(ncclIbInitDevices(nullptr, nullptr), ncclSuccess);
+
+  ASSERT_EQ(ncclNIbDevs, 1);
+  EXPECT_EQ(ncclIbDevs[0].link, IBV_LINK_LAYER_INFINIBAND);
+  EXPECT_EQ(ncclIbDevs[0].ar, 1);
+  EXPECT_EQ(ncclIbRelaxedOrderingEnabled, 1);
+  EXPECT_EQ(relaxedProbe.calls, 1);
+  EXPECT_EQ(ncclIbArThreshold, 8192);
 }
 
 TEST_F(NetIbInitMicrotest, InitDevices_DisabledOrMissingVerbsReturnsInternalError) {
@@ -778,56 +743,30 @@ TEST_F(NetIbInitMicrotest, InitDevices_DeviceEnumerationFailureIsPropagated) {
 }
 
 TEST_F(NetIbInitMicrotest, InitDevices_DeviceQueryFailureClosesContextAndContinuesWithoutDevice) {
-  ibv_device device{};
-  std::strcpy(device.name, "mlx5_0");
-  ibv_device* devices[] = {&device, nullptr};
-  ibv_context context{};
-  ScopedInitDevicesBaseline baseline(devices, 1);
-  ScopedHook open(g_ibvOpenDevice, [&context](ibv_context** out, ibv_device*) {
-    *out = &context;
-    return ncclSuccess;
-  });
-  ScopedHook query(g_ibvQueryDevice, [](ibv_context*, ibv_device_attr*) {
-    return ncclSystemError;
-  });
-  ScopedHook close(g_ibvCloseDevice, [&context](ibv_context* value) {
-    EXPECT_EQ(value, &context);
-    return ncclSuccess;
-  });
+  IbVerbsWorld world;
+  FakeHca& hca = world.AddHca("mlx5_0");
+  hca.queryDeviceFails = true;
+
   EXPECT_EQ(ncclIbInitDevices(nullptr, nullptr), ncclSuccess);
   EXPECT_EQ(ncclNIbDevs, 0);
-  EXPECT_EQ(close.calls, 1);
+  EXPECT_EQ(hca.closes, 1);
 }
 
 TEST_F(NetIbInitMicrotest, InitDevices_OpenFailureSkipsDeviceAndContinues) {
-  ibv_device device{};
-  std::strcpy(device.name, "mlx5_0");
-  ibv_device* devices[] = {&device, nullptr};
-  ScopedInitDevicesBaseline baseline(devices, 1);
-  ScopedHook open(g_ibvOpenDevice, [](ibv_context** out, ibv_device*) {
-    *out = nullptr;
-    return ncclSystemError;
-  });
+  IbVerbsWorld world;
+  FakeHca& hca = world.AddHca("mlx5_0");
+  hca.openFails = true;
+
   EXPECT_EQ(ncclIbInitDevices(nullptr, nullptr), ncclSuccess);
   EXPECT_EQ(ncclNIbDevs, 0);
-  EXPECT_EQ(open.calls, 1);
+  EXPECT_EQ(world.openDevice.calls, 1);
+  EXPECT_EQ(hca.closes, 0);
 }
 
 TEST_F(NetIbInitMicrotest, InitDevices_UnusablePortsAreSkippedAndContextIsClosed) {
-  ibv_device device{};
-  std::strcpy(device.name, "mlx5_0");
-  ibv_device* devices[] = {&device, nullptr};
-  ibv_context context{};
-  ScopedInitDevicesBaseline baseline(devices, 1);
-  ScopedHook open(g_ibvOpenDevice, [&context](ibv_context** out, ibv_device*) {
-    *out = &context;
-    return ncclSuccess;
-  });
-  ScopedHook queryDevice(g_ibvQueryDevice, [](ibv_context*, ibv_device_attr* attr) {
-    *attr = ibv_device_attr{};
-    attr->phys_port_cnt = 3;
-    return ncclSuccess;
-  });
+  IbVerbsWorld world;
+  FakeHca& hca = world.AddHca("mlx5_0");
+  hca.ports.resize(3);
   ScopedHook queryPort(g_ibvQueryPort, [](ibv_context*, uint8_t port, ibv_port_attr* attr) {
     *attr = ibv_port_attr{};
     if (port == 1) return ncclSystemError;
@@ -840,11 +779,11 @@ TEST_F(NetIbInitMicrotest, InitDevices_UnusablePortsAreSkippedAndContextIsClosed
     }
     return ncclSuccess;
   });
-  ScopedHook close(g_ibvCloseDevice, [](ibv_context*) { return ncclSuccess; });
+
   EXPECT_EQ(ncclIbInitDevices(nullptr, nullptr), ncclSuccess);
   EXPECT_EQ(ncclNIbDevs, 0);
   EXPECT_EQ(queryPort.calls, 3);
-  EXPECT_EQ(close.calls, 1);
+  EXPECT_EQ(hca.closes, 1);
 }
 
 TEST_F(NetIbInitMicrotest, InitDevices_AdditionalReferenceSkipsRediscovery) {

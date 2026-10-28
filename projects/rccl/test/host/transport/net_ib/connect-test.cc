@@ -20,26 +20,27 @@
 #include <set>
 #include <vector>
 
+#include "IbVerbsScene.h"
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
-#include "fakes/ibv_ops_fakes.h"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/mlx5dvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
+#include "fakes/os_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "fakes/transport_net_ib_fakes.h"
 #include "fakes/transport_net_ib_resiliency_fakes.h"
 #include "fakes/transport_net_ib_wqe_lat_fakes.h"
+#include "transport/net_ib/NetIbGlobals.h"
+#include "transport/net_ib/NetIbSupportSeams.h"
 
 namespace {
 
 std::function<int(const char*, int)> g_connectOpen = [](const char*, int) { return -1; };
 std::function<ssize_t(int, void*, size_t)> g_connectRead = [](int, void*, size_t) { return ssize_t{-1}; };
 std::function<int(int)> g_connectClose = [](int) { return 0; };
-std::function<ncclResult_t()> g_connectGdrSupport = [] { return ncclSystemError; };
-std::function<ncclResult_t(int)> g_connectDmaBufSupport = [](int) { return ncclSystemError; };
 std::function<ncclResult_t(void**, size_t)> g_connectMemAlloc = [](void** ptr, size_t) {
   if (ptr) *ptr = nullptr;
   return ncclSystemError;
@@ -48,8 +49,6 @@ std::function<ncclResult_t(void**, size_t)> g_connectMemAlloc = [](void** ptr, s
 int TestConnectOpen(const char* path, int flags) { return g_connectOpen(path, flags); }
 ssize_t TestConnectRead(int fd, void* data, size_t size) { return g_connectRead(fd, data, size); }
 int TestConnectClose(int fd) { return g_connectClose(fd); }
-ncclResult_t TestConnectGdrSupport() { return g_connectGdrSupport(); }
-ncclResult_t TestConnectDmaBufSupport(int dev) { return g_connectDmaBufSupport(dev); }
 ncclResult_t TestConnectMemAlloc(void** ptr, size_t size) { return g_connectMemAlloc(ptr, size); }
 
 }  // namespace
@@ -70,8 +69,8 @@ ncclResult_t TestConnectMemAlloc(void** ptr, size_t size) { return g_connectMemA
 #define open TestConnectOpen
 #define read TestConnectRead
 #define close TestConnectClose
-#define ncclIbGdrSupport TestConnectGdrSupport
-#define ncclIbDmaBufSupport TestConnectDmaBufSupport
+#define ncclIbGdrSupport NetIbTestGdrSupport
+#define ncclIbDmaBufSupport NetIbTestDmaBufSupport
 #define ncclMemAlloc TestConnectMemAlloc
 #include NET_IB_CONNECT_CC_PATH
 #undef ncclMemAlloc
@@ -92,9 +91,6 @@ ncclResult_t TestConnectMemAlloc(void** ptr, size_t size) { return g_connectMemA
 #undef ncclIbGidInfoQuery
 #undef ncclParamIbQpsPerConn
 
-// Owned by src/init.cc, which this host-only binary does not compile.
-struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
-
 namespace {
 
 union ibv_gid Ipv4Gid(const char* address) {
@@ -110,6 +106,78 @@ union ibv_gid Ipv6Gid(const char* address) {
   EXPECT_EQ(inet_pton(AF_INET6, address, gid.raw), 1);
   return gid;
 }
+
+// The connection metadata a peer with one RoCE device sends.
+ncclIbConnectionMetadata PeerMetadata(uint64_t ctsAddr, uint32_t qpn, uint16_t lid, uint32_t rkey,
+                                      const ibv_gid& gid) {
+  ncclIbConnectionMetadata meta{};
+  meta.ndevs = 1;
+  meta.isP2p = 1;
+  meta.addr = ctsAddr;
+  meta.devs[0].ib_port = 1;
+  meta.devs[0].mtu = IBV_MTU_4096;
+  meta.devs[0].lid = lid;
+  meta.devs[0].link_layer = IBV_LINK_LAYER_ETHERNET;
+  meta.devs[0].gid = gid;
+  meta.devs[0].rkey = rkey;
+  meta.devs[0].currSpeed = 100000;
+  meta.qpInfo[0].qpn = qpn;
+  meta.qpInfo[0].devIndex = 0;
+  return meta;
+}
+
+// The peer's side of a connect or accept handshake over the fake socket. Each stage's first transfer stops one byte
+// short; after that the peer sends one device, then `remoteMeta`, then a ready flag.
+class ScriptedHandshakePeer {
+ public:
+  ScriptedHandshakePeer(std::function<int()> stage, const ncclIbConnectionMetadata& remoteMeta)
+      : stage_(std::move(stage)),
+        remoteMeta_(remoteMeta),
+        init_(g_ncclSocketInit, [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType,
+                                   volatile uint32_t*, int, int) { return ncclSuccess; }),
+        progress_(g_ncclSocketProgress, [this](int op, ncclSocket*, void* data, int size, int* offset, bool*) {
+          return Progress(op, data, size, offset);
+        }) {}
+
+  int sendCalls = 0;
+  int recvCalls = 0;
+  int sentIsP2p = -1;
+  std::set<int> partialStages;
+
+ private:
+  ncclResult_t Progress(int op, void* data, int size, int* offset) {
+    if (partialStages.insert(stage_()).second) {
+      *offset = size - 1;
+      return ncclSuccess;
+    }
+    if (op == NCCL_SOCKET_SEND) {
+      ++sendCalls;
+      if (size == static_cast<int>(sizeof(ncclIbConnectionMetadata))) {
+        sentIsP2p = static_cast<ncclIbConnectionMetadata*>(data)->isP2p;
+      }
+    } else if (recvCalls++ == 0) {
+      ncclNetVDeviceProps_t remote{};
+      remote.ndevs = 1;
+      remote.devs[0] = 0;
+      std::memcpy(data, &remote, sizeof(remote));
+      ncclIbDevExtraProps extra{};
+      std::memcpy(static_cast<char*>(data) + sizeof(remote), &extra, sizeof(extra));
+    } else if (recvCalls == 2) {
+      std::memcpy(data, &remoteMeta_, sizeof(remoteMeta_));
+    } else {
+      *static_cast<int*>(data) = 1;
+    }
+    *offset = size;
+    return ncclSuccess;
+  }
+
+  std::function<int()> stage_;
+  ncclIbConnectionMetadata remoteMeta_;
+  ScopedHook<ncclResult_t(ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int,
+                          int)>
+      init_;
+  ScopedHook<ncclResult_t(int, ncclSocket*, void*, int, int*, bool*)> progress_;
+};
 
 class NetIbConnectMicrotest : public ::testing::Test {
  protected:
@@ -192,10 +260,13 @@ class NetIbConnectMicrotest : public ::testing::Test {
   }
 
   void TearDown() override {
+    NetIbResetGlobals();
+    ResetNetIbSupportSeams();
     ResetTransportNetIbWqeLatFakes();
     ResetTransportNetIbResiliencyFakes();
     ResetTransportNetIbFakes();
     ResetSocketFakes();
+    ResetOsFakes();
     ResetHipFakes();
     ResetIbvwrapFakes();
     ResetMlx5dvwrapFakes();
@@ -204,33 +275,12 @@ class NetIbConnectMicrotest : public ::testing::Test {
     g_connectOpen = [](const char*, int) { return -1; };
     g_connectRead = [](int, void*, size_t) { return ssize_t{-1}; };
     g_connectClose = [](int) { return 0; };
-    g_connectGdrSupport = [] { return ncclSystemError; };
-    g_connectDmaBufSupport = [](int) { return ncclSystemError; };
     g_connectMemAlloc = [](void** ptr, size_t) {
       if (ptr) *ptr = nullptr;
       return ncclSystemError;
     };
-    ncclNIbDevs = -1;
-    ncclNMergedIbDevs = -1;
-    for (int dev = 0; dev < 2; ++dev) {
-      ncclIbMergedDevs[dev].vProps = {};
-      ncclIbMergedDevs[dev].devName[0] = '\0';
-    }
-    for (int dev = 0; dev < 2; ++dev) {
-      ncclIbDevs[dev].context = nullptr;
-      ncclIbDevs[dev].portNum = 0;
-      ncclIbDevs[dev].portAttr = {};
-      ncclIbDevs[dev].gidInfo = {};
-      ncclIbDevs[dev].ar = 0;
-      ncclIbDevs[dev].ibProvider = IB_PROVIDER_NONE;
-      ncclIbDevs[dev].oooRqSize = 0;
-      ncclIbDevs[dev].pd = nullptr;
-      ncclIbDevs[dev].pdRefs = 0;
-      COMPILER_ATOMIC_STORE(&ncclIbDevs[dev].currSpeed, uint64_t{0}, std::memory_order_relaxed);
-    }
     qps_.clear();
     mrs_.clear();
-    ResetIbvOpsFakes();
   }
 
   ibv_context context_{};
@@ -443,10 +493,11 @@ TEST_F(NetIbConnectMicrotest, GidInfoQuery_ConfiguredIndexPublishesLinkLayerInde
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     return std::strcmp(name, "IB_GID_INDEX") == 0 ? int64_t{2} : fallback;
   });
-  ScopedHook query(g_ibvQueryGid, [&expected](ibv_context* seenContext, uint8_t portNum, int index, ibv_gid* gid) {
+  ScopedHook query(g_ibvQueryGid, [&expected, &context](ibv_context* seenContext, uint8_t portNum, int index,
+                                                       ibv_gid* gid) {
     EXPECT_EQ(portNum, 3);
     EXPECT_EQ(index, 2);
-    EXPECT_NE(seenContext, nullptr);
+    EXPECT_EQ(seenContext, &context);
     *gid = expected;
     return ncclSuccess;
   });
@@ -517,50 +568,57 @@ TEST_F(NetIbConnectMicrotest, PkeyIndex_MissingValueReturnsInvalidUsage) {
   EXPECT_EQ(ncclIbGetPkeyIndex(&context, 1, &port, &index), ncclInvalidUsage);
 }
 
-TEST_F(NetIbConnectMicrotest, InitAndDestroyCommDevBaseManagePdCqGidAndPkey) {
+TEST_F(NetIbConnectMicrotest, InitAndDestroyCommDevBase_SharedPdIsAllocatedOnceAndReleasedByLastBase) {
   ibv_context context{};
   ibv_pd pd{};
-  ibv_cq cq{};
+  std::array<ibv_cq, 2> cqs{};
   ncclIbDevs[0].context = &context;
-  ncclIbDevs[0].pd = nullptr;
-  ncclIbDevs[0].pdRefs = 0;
   ncclIbDevs[0].portNum = 2;
-  ncclIbDevs[0].portAttr.pkey_tbl_len = 0;
   ncclIbDevs[0].gidInfo.localGidIndex = 3;
+  ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
+    if (std::strcmp(name, "IB_PKEY_VALUE") == 0) return int64_t{-1};
+    if (std::strcmp(name, "IB_PKEY") == 0) return int64_t{5};
+    return fallback;
+  });
   ScopedHook alloc(g_ibvAllocPd, [&pd](ibv_pd** out, ibv_context*) {
     *out = &pd;
     return ncclSuccess;
   });
-  ScopedHook createCq(g_ibvCreateCq,
-                      [&cq](ibv_cq** out, ibv_context*, int cqe, void* contextPtr, ibv_comp_channel*, int) {
-                        EXPECT_EQ(cqe, 32);
-                        EXPECT_EQ(contextPtr, reinterpret_cast<void*>(0x1234));
-                        *out = &cq;
-                        return ncclSuccess;
-                      });
-  ScopedHook destroyCq(g_ibvDestroyCq, [&cq](ibv_cq* seen) {
-    EXPECT_EQ(seen, &cq);
+  int nextCq = 0;
+  ScopedHook createCq(g_ibvCreateCq, [&cqs, &nextCq](ibv_cq** out, ibv_context*, int cqe, void* contextPtr,
+                                                     ibv_comp_channel*, int) {
+    EXPECT_EQ(cqe, 32);
+    EXPECT_EQ(contextPtr, reinterpret_cast<void*>(0x1234));
+    *out = &cqs[nextCq++];
     return ncclSuccess;
   });
+  ScopedHook destroyCq(g_ibvDestroyCq, [](ibv_cq*) { return ncclSuccess; });
   ScopedHook dealloc(g_ibvDeallocPd, [&pd](ibv_pd* seen) {
     EXPECT_EQ(seen, &pd);
     return ncclSuccess;
   });
-  ncclIbNetCommDevBase base{};
+  ncclIbNetCommDevBase first{};
+  ncclIbNetCommDevBase second{};
 
-  ASSERT_EQ(ncclIbInitCommDevBase(0, &base, reinterpret_cast<void*>(0x1234), 32), ncclSuccess);
-  EXPECT_EQ(base.ibDevN, 0);
-  EXPECT_EQ(base.pd, &pd);
-  EXPECT_EQ(base.cq, &cq);
-  EXPECT_EQ(base.gidInfo.localGidIndex, 3);
-  EXPECT_EQ(base.pkeyIndex, 0);
-  EXPECT_EQ(ncclIbDevs[0].pdRefs, 1);
-
-  EXPECT_EQ(ncclIbDestroyBase(&base), ncclSuccess);
-  EXPECT_EQ(ncclIbDevs[0].pdRefs, 0);
+  ASSERT_EQ(ncclIbInitCommDevBase(0, &first, reinterpret_cast<void*>(0x1234), 32), ncclSuccess);
+  ASSERT_EQ(ncclIbInitCommDevBase(0, &second, reinterpret_cast<void*>(0x1234), 32), ncclSuccess);
   EXPECT_EQ(alloc.calls, 1);
-  EXPECT_EQ(createCq.calls, 1);
-  EXPECT_EQ(destroyCq.calls, 1);
+  EXPECT_EQ(ncclIbDevs[0].pdRefs, 2);
+  for (const ncclIbNetCommDevBase* base : {&first, &second}) {
+    EXPECT_EQ(base->ibDevN, 0);
+    EXPECT_EQ(base->pd, &pd);
+    EXPECT_EQ(base->gidInfo.localGidIndex, 3);
+    EXPECT_EQ(base->pkeyIndex, 5);
+  }
+  EXPECT_EQ(first.cq, &cqs[0]);
+  EXPECT_EQ(second.cq, &cqs[1]);
+
+  EXPECT_EQ(ncclIbDestroyBase(&first), ncclSuccess);
+  EXPECT_EQ(ncclIbDevs[0].pdRefs, 1);
+  EXPECT_EQ(dealloc.calls, 0);
+  EXPECT_EQ(ncclIbDestroyBase(&second), ncclSuccess);
+  EXPECT_EQ(ncclIbDevs[0].pdRefs, 0);
+  EXPECT_EQ(destroyCq.calls, 2);
   EXPECT_EQ(dealloc.calls, 1);
 }
 
@@ -865,6 +923,40 @@ TEST_F(NetIbConnectMicrotest, FindDevBySubnet_DefaultMismatchSelectsFullyReachab
   EXPECT_EQ(query.calls, 2);
 }
 
+TEST_F(NetIbConnectMicrotest, FindDevBySubnet_FusedDefaultWithOnePfOffSubnetIsReplaced) {
+  ConfigureSingleDevice();
+  // Merged device 0 fuses PFs 0 and 1; merged device 1 is PF 2 alone.
+  std::array<ibv_context, 2> otherContexts{};
+  ncclNIbDevs = 3;
+  ncclNMergedIbDevs = 2;
+  for (int pf = 1; pf < 3; ++pf) {
+    ncclIbDevs[pf].context = &otherContexts[pf - 1];
+    ncclIbDevs[pf].portNum = 1;
+    ncclIbDevs[pf].portAttr.link_layer = IBV_LINK_LAYER_ETHERNET;
+  }
+  ncclIbMergedDevs[0].vProps.ndevs = 2;
+  ncclIbMergedDevs[0].vProps.devs[1] = 1;
+  ncclIbMergedDevs[1].vProps.ndevs = 1;
+  ncclIbMergedDevs[1].vProps.devs[0] = 2;
+  auto remote = Ipv4Gid("10.2.9.9");
+  auto matching = Ipv4Gid("10.2.1.1");
+  auto wrong = Ipv4Gid("10.1.1.1");
+  ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
+    if (std::strcmp(name, "IB_SUBNET_PREFIX_LEN") == 0) return int64_t{16};
+    if (std::strcmp(name, "IB_GID_INDEX") == 0) return int64_t{0};
+    return fallback;
+  });
+  ScopedHook query(g_ibvQueryGid, [&](ibv_context* context, uint8_t, int, ibv_gid* gid) {
+    *gid = context == &otherContexts[0] ? wrong : matching;
+    return ncclSuccess;
+  });
+  int found = -1;
+
+  EXPECT_EQ(ncclIbFindDevBySubnet(&remote, 1, 0, &found), ncclSuccess);
+  EXPECT_EQ(found, 1);
+  EXPECT_EQ(query.calls, 3);
+}
+
 TEST_F(NetIbConnectMicrotest, SubnetMatchesAny_IgnoresInvalidGidsAndMatchesReachablePeer) {
   auto local = Ipv4Gid("10.2.1.1");
   std::array<ibv_gid, 2> remotes{};
@@ -888,6 +980,37 @@ TEST_F(NetIbConnectMicrotest, UpdateGidIndex_CandidateWithRequestedFamilyAndSubn
 
   EXPECT_EQ(ncclUpdateGidIndex(&context, 1, AF_INET, &prefix, 16, 2, 1, &index), ncclSuccess);
   EXPECT_EQ(index, 1);
+}
+
+TEST_F(NetIbConnectMicrotest, UpdateGidIndex_SameFamilyCandidateIsTakenOnlyForConfiguredRoceVersion) {
+  ibv_device device{};
+  ibv_context context{};
+  context.device = &device;
+  auto current = Ipv4Gid("10.2.1.1");
+  auto candidate = Ipv4Gid("10.2.3.4");
+  ScopedHook query(g_ibvQueryGid, [&current, &candidate](ibv_context*, uint8_t, int index, ibv_gid* gid) {
+    *gid = index == 0 ? current : candidate;
+    return ncclSuccess;
+  });
+  ScopedHook name(g_ibvGetDeviceName, [](ibv_device*) { return "micro"; });
+  // gid_attrs/types/0 reads back RoCE v1 and types/1 RoCE v2.
+  ScopedHook open(g_connectOpen, [](const char* path, int) {
+    return std::strcmp(path, "/sys/class/infiniband/micro/ports/1/gid_attrs/types/0") == 0 ? 30 : 31;
+  });
+  ScopedHook read(g_connectRead, [](int fd, void* data, size_t) {
+    std::memcpy(data, fd == 30 ? "RoCE v1\n" : "RoCE v2\n", 8);
+    return ssize_t{8};
+  });
+  in_addr prefix{};
+  ASSERT_EQ(inet_pton(AF_INET, "10.2.0.0", &prefix), 1);
+
+  int index = 0;
+  EXPECT_EQ(ncclUpdateGidIndex(&context, 1, AF_INET, &prefix, 16, /*roceVer=*/2, 1, &index), ncclSuccess);
+  EXPECT_EQ(index, 1);
+  index = 0;
+  EXPECT_EQ(ncclUpdateGidIndex(&context, 1, AF_INET, &prefix, 16, /*roceVer=*/1, 1, &index), ncclSuccess);
+  EXPECT_EQ(index, 0);
+  EXPECT_EQ(read.calls, 4);
 }
 
 TEST_F(NetIbConnectMicrotest, Listen_SuccessPublishesHandleAndCloseReleasesComm) {
@@ -937,57 +1060,13 @@ TEST_F(NetIbConnectMicrotest, Connect_NotReadyThenCompletedHandshakePublishesSen
   ncclIbHandle handle{};
   handle.magic = NCCL_SOCKET_MAGIC;
   handle.isP2p = 1;
-  g_ncclSocketInit = [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType,
-                        volatile uint32_t*, int, int) { return ncclSuccess; };
+  ScriptedHandshakePeer peer([&handle] { return static_cast<int>(handle.stage.state); },
+                             PeerMetadata(/*ctsAddr=*/0x9000, /*qpn=*/200, /*lid=*/8, /*rkey=*/0x91,
+                                          Ipv6Gid("2001:db8::2")));
   g_ncclSocketConnect = [](ncclSocket*) { return ncclSuccess; };
   int readyCalls = 0;
   g_ncclSocketReady = [&readyCalls](ncclSocket*, int* ready) {
     *ready = readyCalls++ > 0;
-    return ncclSuccess;
-  };
-  int sendCalls = 0;
-  int recvCalls = 0;
-  int recvCompleted = 0;
-  int sentIsP2p = -1;
-  std::set<int> partialStates;
-  g_ncclSocketProgress = [&](int op, ncclSocket*, void* data, int size, int* offset, bool*) {
-    const int state = handle.stage.state;
-    if (partialStates.insert(state).second) {
-      *offset = size - 1;
-      return ncclSuccess;
-    }
-    if (op == NCCL_SOCKET_SEND) {
-      ++sendCalls;
-      if (size == static_cast<int>(sizeof(ncclIbConnectionMetadata))) {
-        sentIsP2p = static_cast<ncclIbConnectionMetadata*>(data)->isP2p;
-      }
-    } else {
-      ++recvCalls;
-      if (recvCompleted++ == 0) {
-        ncclNetVDeviceProps_t remote{};
-        remote.ndevs = 1;
-        remote.devs[0] = 0;
-        std::memcpy(data, &remote, sizeof(remote));
-        ncclIbDevExtraProps extra{};
-        std::memcpy(static_cast<char*>(data) + sizeof(remote), &extra, sizeof(extra));
-      } else {
-        ncclIbConnectionMetadata remote{};
-        remote.ndevs = 1;
-        remote.isP2p = 1;
-        remote.addr = 0x9000;
-        remote.devs[0].ib_port = 1;
-        remote.devs[0].mtu = IBV_MTU_4096;
-        remote.devs[0].lid = 8;
-        remote.devs[0].link_layer = IBV_LINK_LAYER_ETHERNET;
-        remote.devs[0].gid = Ipv6Gid("2001:db8::2");
-        remote.devs[0].rkey = 0x91;
-        remote.devs[0].currSpeed = 100000;
-        remote.qpInfo[0].qpn = 200;
-        remote.qpInfo[0].devIndex = 0;
-        std::memcpy(data, &remote, sizeof(remote));
-      }
-    }
-    *offset = size;
     return ncclSuccess;
   };
   void* sendComm = reinterpret_cast<void*>(0x1);
@@ -1014,10 +1093,10 @@ TEST_F(NetIbConnectMicrotest, Connect_NotReadyThenCompletedHandshakePublishesSen
   EXPECT_EQ(comm->base.nRemDevs, 1);
   EXPECT_EQ(comm->base.qps[0].remDevIdx, 0);
   EXPECT_EQ(handle.stage.state, ncclIbCommStateStart);
-  EXPECT_GE(sendCalls, 3);
-  EXPECT_GE(recvCalls, 2);
-  EXPECT_EQ(partialStates.size(), 5u);
-  EXPECT_EQ(sentIsP2p, 1);
+  EXPECT_GE(peer.sendCalls, 3);
+  EXPECT_GE(peer.recvCalls, 2);
+  EXPECT_EQ(peer.partialStages.size(), 5u);
+  EXPECT_EQ(peer.sentIsP2p, 1);
 
   EXPECT_EQ(NetIbConnectCloseSend(comm), ncclSuccess);
 }
@@ -1042,60 +1121,13 @@ TEST_F(NetIbConnectMicrotest, Accept_CompletedHandshakePublishesRecvCommAndClear
   });
   ncclIbListenComm listenComm{};
   listenComm.dev = 0;
-  g_ncclSocketInit = [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType,
-                        volatile uint32_t*, int, int) { return ncclSuccess; };
+  auto remoteMeta = PeerMetadata(/*ctsAddr=*/0xa000, /*qpn=*/300, /*lid=*/9, /*rkey=*/0xa1, remoteGid);
+  remoteMeta.sl = 2;
+  remoteMeta.tc = 19;
+  ScriptedHandshakePeer peer([&listenComm] { return static_cast<int>(listenComm.stage->state); }, remoteMeta);
   g_ncclSocketAccept = [](ncclSocket*, ncclSocket*, bool) { return ncclSuccess; };
   g_ncclSocketReady = [](ncclSocket*, int* ready) {
     *ready = 1;
-    return ncclSuccess;
-  };
-  int sendCalls = 0;
-  int recvCalls = 0;
-  int recvCompleted = 0;
-  int sentIsP2p = -1;
-  std::set<int> partialStates;
-  g_ncclSocketProgress = [&](int op, ncclSocket*, void* data, int size, int* offset, bool*) {
-    const int state = listenComm.stage->state;
-    if (partialStates.insert(state).second) {
-      *offset = size - 1;
-      return ncclSuccess;
-    }
-    if (op == NCCL_SOCKET_SEND) {
-      ++sendCalls;
-      if (size == static_cast<int>(sizeof(ncclIbConnectionMetadata))) {
-        sentIsP2p = static_cast<ncclIbConnectionMetadata*>(data)->isP2p;
-      }
-    } else if (recvCompleted++ == 0) {
-      ++recvCalls;
-      ncclNetVDeviceProps_t remote{};
-      remote.ndevs = 1;
-      remote.devs[0] = 0;
-      std::memcpy(data, &remote, sizeof(remote));
-      ncclIbDevExtraProps extra{};
-      std::memcpy(static_cast<char*>(data) + sizeof(remote), &extra, sizeof(extra));
-    } else if (recvCompleted == 2) {
-      ++recvCalls;
-      ncclIbConnectionMetadata remote{};
-      remote.ndevs = 1;
-      remote.isP2p = 1;
-      remote.addr = 0xa000;
-      remote.sl = 2;
-      remote.tc = 19;
-      remote.devs[0].ib_port = 1;
-      remote.devs[0].mtu = IBV_MTU_4096;
-      remote.devs[0].lid = 9;
-      remote.devs[0].link_layer = IBV_LINK_LAYER_ETHERNET;
-      remote.devs[0].gid = remoteGid;
-      remote.devs[0].rkey = 0xa1;
-      remote.devs[0].currSpeed = 100000;
-      remote.qpInfo[0].qpn = 300;
-      remote.qpInfo[0].devIndex = 0;
-      std::memcpy(data, &remote, sizeof(remote));
-    } else {
-      ++recvCalls;
-      *static_cast<int*>(data) = 1;
-    }
-    *offset = size;
     return ncclSuccess;
   };
   void* recvComm = nullptr;
@@ -1111,10 +1143,10 @@ TEST_F(NetIbConnectMicrotest, Accept_CompletedHandshakePublishesRecvCommAndClear
   EXPECT_EQ(comm->flushEnabled, 0);
   EXPECT_EQ(comm->remCtsFifo.addr, 0xa000u);
   EXPECT_EQ(listenComm.stage, nullptr);
-  EXPECT_GE(sendCalls, 2);
-  EXPECT_GE(recvCalls, 3);
-  EXPECT_EQ(partialStates.size(), 5u);
-  EXPECT_EQ(sentIsP2p, 1);
+  EXPECT_GE(peer.sendCalls, 2);
+  EXPECT_GE(peer.recvCalls, 3);
+  EXPECT_EQ(peer.partialStages.size(), 5u);
+  EXPECT_EQ(peer.sentIsP2p, 1);
   ASSERT_EQ(rtrs.size(), 1u);
   EXPECT_EQ(rtrs[0].dest_qp_num, 300u);
   EXPECT_EQ(std::memcmp(&rtrs[0].ah_attr.grh.dgid, &remoteGid, sizeof(remoteGid)), 0);
@@ -1171,12 +1203,12 @@ TEST_F(NetIbConnectMicrotest, CreateFlushQp_FirstUseCreatesLoopbackQpAndHostMr) 
 }
 
 TEST_F(NetIbConnectMicrotest, PostReceiveWorkRequests_ResiliencyDepthControlsPostCount) {
-  FakeIbvVerbs verbs(71);
+  IbVerbsScene verbs("mlx5_0", 71);
   ncclIbRecvComm comm{};
   ncclIbResiliency resiliency{};
   comm.base.resiliency = &resiliency;
   ncclIbQp qp{};
-  qp.qp = &verbs.qp;
+  qp.qp = &verbs.qps[0];
   qp.devIndex = 0;
   g_ncclIbResiliencyDataRqSizeGet = [](ncclIbResiliency*, uint, uint32_t* size) {
     *size = 3;
@@ -1184,21 +1216,21 @@ TEST_F(NetIbConnectMicrotest, PostReceiveWorkRequests_ResiliencyDepthControlsPos
   };
 
   EXPECT_EQ(ncclIbPostReceiveWorkRequestsOnQp(&comm, &qp), ncclSuccess);
-  EXPECT_EQ(g_ibvPostRecvQps, std::vector<ibv_qp*>(3, &verbs.qp));
+  EXPECT_EQ(verbs.postRecvQps, std::vector<ibv_qp*>(3, &verbs.qps[0]));
 }
 
 TEST_F(NetIbConnectMicrotest, ReceiverPrePostReceiveWorkRequests_VisitsEveryQp) {
-  FakeIbvVerbs first(72);
-  FakeIbvVerbs second(73);
+  IbVerbsScene verbs("mlx5_0", 72);
   ncclIbRecvComm comm{};
   comm.base.nqps = 2;
-  comm.base.qps[0].qp = &first.qp;
-  comm.base.qps[1].qp = &second.qp;
+  comm.base.qps[0].qp = &verbs.qps[0];
+  comm.base.qps[1].qp = &verbs.qps[1];
 
   EXPECT_EQ(ncclIbReceiverPrePostReceiveWorkRequests(&comm), ncclSuccess);
-  EXPECT_EQ(std::count(g_ibvPostRecvQps.begin(), g_ibvPostRecvQps.end(), &first.qp), NET_IB_MAX_REQUESTS);
-  EXPECT_EQ(std::count(g_ibvPostRecvQps.begin(), g_ibvPostRecvQps.end(), &second.qp), NET_IB_MAX_REQUESTS);
-  EXPECT_EQ(g_ibvPostRecvQps.size(), 2u * NET_IB_MAX_REQUESTS);
+  const auto& posts = verbs.postRecvQps;
+  EXPECT_EQ(std::count(posts.begin(), posts.end(), &verbs.qps[0]), NET_IB_MAX_REQUESTS);
+  EXPECT_EQ(std::count(posts.begin(), posts.end(), &verbs.qps[1]), NET_IB_MAX_REQUESTS);
+  EXPECT_EQ(posts.size(), 2u * NET_IB_MAX_REQUESTS);
 }
 
 TEST_F(NetIbConnectMicrotest, FreeGpuFlushMem_HipAllocationIsReleasedAndStateCleared) {

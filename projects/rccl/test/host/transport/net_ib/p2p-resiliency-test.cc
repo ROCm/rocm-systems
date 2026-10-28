@@ -15,8 +15,8 @@
 #include <functional>
 #include <vector>
 
+#include "IbVerbsScene.h"
 #include "ScopedHook.h"
-#include "fakes/ibv_ops_fakes.h"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
@@ -186,7 +186,6 @@ class NetIbP2pResiliencyMicrotest : public ::testing::Test {
     g_resiliencyPostFifoCalls = 0;
     g_resiliencyAddEventCalls = 0;
     ResetNetIbQpSeams();
-    ResetIbvOpsFakes();
     g_resiliencyIbMallocSizes.clear();
     g_resiliencyIbMallocPoison = false;
     ResetTransportNetIbRecoveryFakes();
@@ -859,11 +858,9 @@ TEST_F(NetIbP2pResiliencyMicrotest, HandleCompletionError_ReceiverFlushClearsFai
 
 TEST_F(NetIbP2pResiliencyMicrotest, ProbePost_BeforeDelayIsNoOpAndBoundaryPostsExactRecordAddress) {
   ResiliencyScene scene;
-  ibv_context context{};
-  context.ops.post_send = FakeIbvPostSend;
-  scene.verbsQps[1].context = &context;
+  IbVerbsScene verbs;
   scene.sendRes.base.devs[0].state.store(ncclIbResiliencyDevStateError, std::memory_order_release);
-  scene.sendRes.base.probingQps[1].qp = &scene.verbsQps[1];
+  scene.sendRes.base.probingQps[1].qp = &verbs.qps[1];
   scene.sendRes.base.probingQps[1].remDevIdx = 1;
   ibv_mr mr{};
   mr.lkey = 0x51;
@@ -885,17 +882,17 @@ TEST_F(NetIbP2pResiliencyMicrotest, ProbePost_BeforeDelayIsNoOpAndBoundaryPostsE
 
   g_netIbNowNs = 1000 + 10 * MSEC_TO_NSEC - 1;
   ASSERT_EQ(ncclIbResiliencyProbePost(&scene.sendRes, &failed), ncclSuccess);
-  EXPECT_TRUE(g_ibvPostedSends.empty());
+  EXPECT_TRUE(verbs.posted.empty());
   EXPECT_EQ(failed.state, ncclIbResiliencyRequestStatePending);
 
   g_netIbNowNs++;
   ASSERT_EQ(ncclIbResiliencyProbePost(&scene.sendRes, &failed), ncclSuccess);
-  ASSERT_EQ(g_ibvPostedSends.size(), 1u);
-  EXPECT_EQ(g_ibvPostedSends[0].wrId, 3u);
-  EXPECT_EQ(g_ibvPostedSends[0].remoteAddress,
+  ASSERT_EQ(verbs.posted.size(), 1u);
+  EXPECT_EQ(verbs.posted[0].wrId, 3u);
+  EXPECT_EQ(verbs.posted[0].remoteAddress,
             0x100000u + sizeof(ncclIbRequestCompletionRecord) * 3 + sizeof(int) * NCCL_NET_IB_MAX_RECVS);
-  EXPECT_EQ(g_ibvPostedSends[0].rkey, 0x52u);
-  EXPECT_EQ(g_ibvPostedSends[0].sge.lkey, 0x51u);
+  EXPECT_EQ(verbs.posted[0].rkey, 0x52u);
+  EXPECT_EQ(verbs.posted[0].sge.lkey, 0x51u);
   EXPECT_EQ(failed.state, ncclIbResiliencyRequestStateProbePosted);
   EXPECT_EQ(scene.sendRes.base.devs[1].nOutstandingProbes, 1);
 }
@@ -917,11 +914,8 @@ TEST_F(NetIbP2pResiliencyMicrotest, ProbeCompletion_SuccessMarksRequestCompleted
 
 TEST_F(NetIbP2pResiliencyMicrotest, ProbeProgress_DrainsCompletionAndDecrementsOutstandingCount) {
   ResiliencyScene scene;
-  ibv_context context{};
-  context.ops.poll_cq = FakeIbvPollCq;
-  ibv_cq cq{};
-  cq.context = &context;
-  scene.sendRes.base.devs[1].probingCq = &cq;
+  IbVerbsScene verbs;
+  scene.sendRes.base.devs[1].probingCq = &verbs.cq;
   scene.sendRes.base.devs[1].nOutstandingProbes = 1;
   auto& request = scene.send.base.reqs[5];
   request.id = 5;
@@ -930,7 +924,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, ProbeProgress_DrainsCompletionAndDecrementsO
   ibv_wc completion{};
   completion.status = IBV_WC_SUCCESS;
   completion.wr_id = 5;
-  g_ibvCompletions.push_back(completion);
+  verbs.wcs.push_back(completion);
 
   ASSERT_EQ(ncclIbResiliencyProbeProgress(&scene.sendRes), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.devs[1].nOutstandingProbes, 0);

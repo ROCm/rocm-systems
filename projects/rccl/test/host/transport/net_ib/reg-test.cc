@@ -10,12 +10,14 @@
 
 #include <array>
 #include <cstdlib>
+#include <memory>
 #include <vector>
 
 #include "ScopedHook.h"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/mlx5dvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "transport/net_ib/NetIbGlobals.h"
 
 #include NET_IB_REG_CC_PATH
 
@@ -32,11 +34,7 @@ class NetIbRegMicrotest : public ::testing::Test {
   }
 
   void TearDown() override {
-    for (int dev = 0; dev < 2; ++dev) {
-      std::free(ncclIbDevs[dev].mrCache.slots);
-      ncclIbDevs[dev].mrCache = {};
-    }
-    ncclIbRelaxedOrderingEnabled = 0;
+    NetIbResetGlobals();
     ResetMlx5dvwrapFakes();
     ResetIbvwrapFakes();
     ResetNcclFakes();
@@ -106,28 +104,42 @@ TEST_F(NetIbRegMicrotest, RegMrInternal_RegistrationFailureLeavesCacheEmpty) {
   EXPECT_EQ(ncclIbDevs[0].mrCache.population, 0);
 }
 
-TEST_F(NetIbRegMicrotest, RegMrInternal_ContainedRangeReusesCachedMrAndIncrementsRefs) {
+TEST_F(NetIbRegMicrotest, RegMrInternal_RangeEndingOnCachedPageReusesMrAndOnePastRegistersAnother) {
   const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
-  std::vector<unsigned char> storage(page * 2);
+  // Page-aligned, so the first registration caches exactly one page.
+  std::unique_ptr<unsigned char, decltype(&std::free)> storage(
+      static_cast<unsigned char*>(std::aligned_alloc(page, 2 * page)), &std::free);
+  ASSERT_NE(storage, nullptr);
   auto base = MakeDevBase();
-  ibv_mr mr{};
-  ScopedHook reg(g_ibvRegMr, [&mr](ibv_mr** out, ibv_pd*, void*, size_t, int) {
-    *out = &mr;
+  ibv_mr cachedMr{};
+  ibv_mr nextMr{};
+  int registrations = 0;
+  ScopedHook reg(g_ibvRegMr, [&](ibv_mr** out, ibv_pd*, void*, size_t, int) {
+    *out = registrations++ == 0 ? &cachedMr : &nextMr;
     return ncclSuccess;
   });
   ibv_mr* first = nullptr;
-  ibv_mr* second = nullptr;
+  ibv_mr* lastByte = nullptr;
+  ibv_mr* pastEnd = nullptr;
 
-  ASSERT_EQ(ncclIbRegMrDmaBufInternal2(&base, storage.data(), page, NCCL_PTR_HOST, 0, -1, 0, &first),
-            ncclSuccess);
-  ASSERT_EQ(ncclIbRegMrDmaBufInternal2(&base, storage.data() + 16, 32, NCCL_PTR_HOST, 0, -1, 0, &second),
+  ASSERT_EQ(ncclIbRegMrDmaBufInternal2(&base, storage.get(), page, NCCL_PTR_HOST, 0, -1, 0, &first), ncclSuccess);
+  ASSERT_EQ(ncclIbRegMrDmaBufInternal2(&base, storage.get() + page - 32, 32, NCCL_PTR_HOST, 0, -1, 0, &lastByte),
             ncclSuccess);
 
-  EXPECT_EQ(first, &mr);
-  EXPECT_EQ(second, &mr);
-  EXPECT_EQ(ncclIbDevs[0].mrCache.population, 1);
-  EXPECT_EQ(ncclIbDevs[0].mrCache.slots[0].refs, 2);
+  auto& cache = ncclIbDevs[0].mrCache;
+  EXPECT_EQ(first, &cachedMr);
+  EXPECT_EQ(lastByte, &cachedMr);
+  ASSERT_EQ(cache.population, 1);
+  EXPECT_EQ(cache.slots[0].pages, 1u);
+  EXPECT_EQ(cache.slots[0].refs, 2);
   EXPECT_EQ(reg.calls, 1);
+
+  ASSERT_EQ(ncclIbRegMrDmaBufInternal2(&base, storage.get() + page - 32, 33, NCCL_PTR_HOST, 0, -1, 0, &pastEnd),
+            ncclSuccess);
+  EXPECT_EQ(pastEnd, &nextMr);
+  EXPECT_EQ(cache.population, 2);
+  EXPECT_EQ(cache.slots[0].refs, 2);
+  EXPECT_EQ(reg.calls, 2);
 }
 
 TEST_F(NetIbRegMicrotest, RegMrInternal_LowerAddressInsertsBeforeExistingCacheEntry) {
@@ -352,6 +364,31 @@ TEST_F(NetIbRegMicrotest, DeregMrInternal_ReferenceThenFinalReleaseUpdatesCacheA
   EXPECT_EQ(cache.population, 0);
   EXPECT_EQ(cache.slots, nullptr);
   EXPECT_EQ(cache.capacity, 0);
+  EXPECT_EQ(dereg.calls, 1);
+}
+
+TEST_F(NetIbRegMicrotest, DeregMrInternal_FinalReleaseOfMiddleEntryMovesLastEntryIntoItsSlot) {
+  auto base = MakeDevBase();
+  ibv_mr mrs[3]{};
+  auto& cache = ncclIbDevs[0].mrCache;
+  cache.capacity = 32;
+  cache.population = 3;
+  cache.slots = static_cast<ncclIbMr*>(std::calloc(cache.capacity, sizeof(ncclIbMr)));
+  ASSERT_NE(cache.slots, nullptr);
+  for (int i = 0; i < 3; ++i) {
+    cache.slots[i].mr = &mrs[i];
+    cache.slots[i].refs = 1;
+  }
+  ScopedHook dereg(g_ibvDeregMr, [&mrs](ibv_mr* value) {
+    EXPECT_EQ(value, &mrs[1]);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclIbDeregMrInternal(&base, &mrs[1]), ncclSuccess);
+
+  ASSERT_EQ(cache.population, 2);
+  EXPECT_EQ(cache.slots[0].mr, &mrs[0]);
+  EXPECT_EQ(cache.slots[1].mr, &mrs[2]);
   EXPECT_EQ(dereg.calls, 1);
 }
 
