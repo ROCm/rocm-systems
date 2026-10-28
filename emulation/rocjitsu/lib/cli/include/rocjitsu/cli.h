@@ -16,10 +16,6 @@
 
 namespace rocjitsu::cli {
 
-using util::DiagnosticEmitter;
-using util::FailureOr;
-using util::Result;
-
 /// @brief Whether a flag consumes an argument or acts as a boolean switch.
 ///
 /// A switch consumes no following argument and passes "true" unless an
@@ -53,10 +49,10 @@ public:
   Flag &operator=(const Flag &) = delete;
   const FlagInfo &info() const { return info_; }
   virtual std::string format_value() const = 0;
-  Result parse_and_set(std::string_view text, DiagnosticEmitter diagnostic);
+  util::Result parse_and_set(std::string_view text, util::DiagnosticEmitter diagnostic);
 
 protected:
-  virtual Result parse_value(std::string_view text, DiagnosticEmitter diagnostic) = 0;
+  virtual util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) = 0;
 
 private:
   FlagInfo info_;
@@ -66,43 +62,44 @@ private:
 ///
 /// These helpers do not require flag metadata; callers provide the diagnostic
 /// context they want users to see.
-FailureOr<int64_t> parse_int(std::string_view text, DiagnosticEmitter diagnostic);
+util::FailureOr<int64_t> parse_int(std::string_view text, util::DiagnosticEmitter diagnostic);
 /// @brief Parse an unsigned decimal integer for custom flags.
-FailureOr<uint64_t> parse_uint(std::string_view text, DiagnosticEmitter diagnostic);
+util::FailureOr<uint64_t> parse_uint(std::string_view text, util::DiagnosticEmitter diagnostic);
 
 class BoolFlag final : public Flag {
 public:
   explicit BoolFlag(FlagInfo info, bool initial = false) : Flag(std::move(info)), value_(initial) {}
   bool value() const { return value_; }
-  Result set_value(bool value, DiagnosticEmitter diagnostic = {});
+  util::Result set_value(bool value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
 
 private:
-  Result parse_value(std::string_view text, DiagnosticEmitter diagnostic) override;
+  util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
   bool value_;
 };
 
-class IntFlag final : public Flag {
+class Int64Flag final : public Flag {
 public:
-  explicit IntFlag(FlagInfo info, int64_t initial = 0) : Flag(std::move(info)), value_(initial) {}
+  explicit Int64Flag(FlagInfo info, int64_t initial = 0) : Flag(std::move(info)), value_(initial) {}
   int64_t value() const { return value_; }
-  Result set_value(int64_t value, DiagnosticEmitter diagnostic = {});
+  util::Result set_value(int64_t value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
 
 private:
-  Result parse_value(std::string_view text, DiagnosticEmitter diagnostic) override;
+  util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
   int64_t value_;
 };
 
-class UIntFlag final : public Flag {
+class UInt64Flag final : public Flag {
 public:
-  explicit UIntFlag(FlagInfo info, uint64_t initial = 0) : Flag(std::move(info)), value_(initial) {}
+  explicit UInt64Flag(FlagInfo info, uint64_t initial = 0)
+      : Flag(std::move(info)), value_(initial) {}
   uint64_t value() const { return value_; }
-  Result set_value(uint64_t value, DiagnosticEmitter diagnostic = {});
+  util::Result set_value(uint64_t value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
 
 private:
-  Result parse_value(std::string_view text, DiagnosticEmitter diagnostic) override;
+  util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
   uint64_t value_;
 };
 
@@ -111,17 +108,17 @@ public:
   explicit StringFlag(FlagInfo info, std::string initial = {})
       : Flag(std::move(info)), value_(std::move(initial)) {}
   const std::string &value() const { return value_; }
-  Result set_value(std::string value, DiagnosticEmitter diagnostic = {});
+  util::Result set_value(std::string value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
 
 private:
-  Result parse_value(std::string_view text, DiagnosticEmitter diagnostic) override;
+  util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
   std::string value_;
 };
 
-/// @brief A help section, not a scope.
+/// @brief A group of flags shown together in formatted help.
 ///
-/// Every group shares its command's flag namespace.
+/// Every group contributes entries to its command's flag spelling namespace.
 struct FlagGroup {
   std::string description;
   std::vector<std::shared_ptr<Flag>> flags;
@@ -130,8 +127,8 @@ struct FlagGroup {
 /// @brief Where positional arguments are accepted for a command.
 ///
 /// Anywhere accepts bare positional arguments after option parsing. AfterSeparator
-/// requires callers to pass -- before any positional argument; this is useful for
-/// launchers that forward arbitrary application argv.
+/// requires callers to pass -- before any positional argument so launcher commands
+/// can forward application argv without parsing application options as their own.
 enum class PositionalMode { Anywhere, AfterSeparator };
 
 /// @brief A command scope containing child commands and flags.
@@ -161,19 +158,19 @@ public:
   ///
   /// The returned pointer is borrowed from this command and remains stable until
   /// this command is destroyed.
-  FailureOr<Command *> add_command(std::string name, DiagnosticEmitter diagnostic,
-                                   PositionalMode positional_mode = PositionalMode::Anywhere);
+  util::FailureOr<Command *> add_command(std::string name, util::DiagnosticEmitter diagnostic,
+                                         PositionalMode positional_mode = PositionalMode::Anywhere);
   /// @brief Register one flag before parsing.
   ///
   /// Before parsing, the same object is a no-op; conflicting spellings diagnose.
-  Result add_flag(std::shared_ptr<Flag> flag, DiagnosticEmitter diagnostic);
+  util::Result add_flag(std::shared_ptr<Flag> flag, util::DiagnosticEmitter diagnostic);
   /// @brief Register a help section of flags before parsing.
   ///
   /// All flags still share the command's spelling namespace. The same flag
   /// object can be registered repeatedly as a no-op; spelling conflicts fail the
   /// whole batch without partially adding new flags.
-  Result add_flags(std::string description, std::vector<std::shared_ptr<Flag>> flags,
-                   DiagnosticEmitter diagnostic);
+  util::Result add_flags(std::string description, std::vector<std::shared_ptr<Flag>> flags,
+                         util::DiagnosticEmitter diagnostic);
   /// @brief Find a flag by primary spelling or alias.
   ///
   /// Returns a retaining handle to the registered flag, or null if no spelling
@@ -193,8 +190,8 @@ public:
   std::vector<const Command *> commands() const;
 
 private:
-  friend FailureOr<struct ParsedArguments> parse(Command &, std::span<const std::string_view>,
-                                                 DiagnosticEmitter);
+  friend util::FailureOr<struct ParsedArguments> parse(Command &, std::span<const std::string_view>,
+                                                       util::DiagnosticEmitter);
   void seal();
   std::string name_;
   Command *parent_ = nullptr;
@@ -211,7 +208,7 @@ struct ParsedArguments {
   Command *command;
   /// @brief Owned positional arguments that remain valid independently.
   std::vector<std::string> positional;
-  /// @brief Whether parsing encountered --.
+  /// @brief Whether parsing encountered -- before collecting positional arguments.
   bool saw_separator = false;
 };
 
@@ -222,8 +219,8 @@ struct ParsedArguments {
 /// recognition. Repeated scalar flags apply in order; the last successful value
 /// wins unless a custom flag implements append semantics. A command without a
 /// child selection is returned to the caller for dispatch/help.
-FailureOr<ParsedArguments> parse(Command &root, std::span<const std::string_view> arguments,
-                                 DiagnosticEmitter diagnostic);
+util::FailureOr<ParsedArguments> parse(Command &root, std::span<const std::string_view> arguments,
+                                       util::DiagnosticEmitter diagnostic);
 
 /// @brief Format help from registered command and flag metadata.
 ///

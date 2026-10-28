@@ -36,10 +36,10 @@ util::Result register_cli_plugin_impl(rocjitsu::cli::Command &root, const Plugin
   using namespace rocjitsu::cli;
   auto plugin = root.add_command("plugin", diagnostic);
   if (plugin.failed())
-    return Result::failure();
+    return util::Result::failure();
   auto inspect = plugin.value()->add_command("inspect", diagnostic);
   if (inspect.failed())
-    return Result::failure();
+    return util::Result::failure();
   for (Command *command : {plugin.value(), inspect.value()}) {
     if (command
             ->add_flag(
@@ -47,7 +47,7 @@ util::Result register_cli_plugin_impl(rocjitsu::cli::Command &root, const Plugin
                             new BoolFlag({"--help", {"-h"}, "Show help", ValueMode::Switch})),
                 diagnostic)
             .failed())
-      return Result::failure();
+      return util::Result::failure();
   }
   return inspect.value()->add_flags("Output formatting",
                                     {host.retain(host.context, new FormatFlag)}, diagnostic);
