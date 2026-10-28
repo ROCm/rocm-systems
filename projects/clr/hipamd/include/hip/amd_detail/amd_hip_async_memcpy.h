@@ -8,26 +8,26 @@
 
 #include <hip/amd_detail/amd_hip_runtime.h>
 
-namespace details {
+namespace hip_impl {
 
-#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
+#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) &&                           \
     __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
-
-typedef int __attribute__((ext_vector_type(2))) vint2;
-typedef int __attribute__((ext_vector_type(4))) vint4;
-
-// Some size sanity checks
-static_assert(sizeof(char) == 1);
-static_assert(sizeof(int) == 4);
-static_assert(sizeof(vint2) == 8);
-static_assert(sizeof(vint4) == 16);
 
 template <typename TyElem>
 __device__ static __forceinline__ void accelerated_memcpy_global_to_lds(
     TyElem* __restrict__ dst, const TyElem* __restrict__ src, const size_t offset,
     const size_t count) {
+  typedef int __attribute__((ext_vector_type(2))) vint2;
+  typedef int __attribute__((ext_vector_type(4))) vint4;
+
+  // Some size sanity checks
+  static_assert(sizeof(char) == 1);
+  static_assert(sizeof(int) == 4);
+  static_assert(sizeof(vint2) == 8);
+  static_assert(sizeof(vint4) == 16);
+
   char* c_dst = ((char*)dst) + offset;
-  char* c_src = ((char*)src) + offset;
+  const char* c_src = ((const char*)src) + offset;
   size_t bytes_left = count;
 
   while (bytes_left > 0) {
@@ -71,8 +71,17 @@ template <typename TyElem>
 __device__ static __forceinline__ void accelerated_memcpy_lds_to_global(
     TyElem* __restrict__ dst, const TyElem* __restrict__ src, const size_t offset,
     const size_t count) {
+  typedef int __attribute__((ext_vector_type(2))) vint2;
+  typedef int __attribute__((ext_vector_type(4))) vint4;
+
+  // Some size sanity checks
+  static_assert(sizeof(char) == 1);
+  static_assert(sizeof(int) == 4);
+  static_assert(sizeof(vint2) == 8);
+  static_assert(sizeof(vint4) == 16);
+
   char* c_dst = ((char*)dst) + offset;
-  char* c_src = ((char*)src) + offset;
+  const char* c_src = ((const char*)src) + offset;
   size_t bytes_left = count;
 
   while (bytes_left > 0) {
@@ -114,4 +123,4 @@ __device__ static __forceinline__ void accelerated_memcpy_lds_to_global(
 
 #endif
 
-}  // namespace details
+}  // namespace hip_impl
