@@ -1,0 +1,18 @@
+InheritParentConfig: true
+Checks: >
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -concurrency-mt-unsafe,
+  -cert-err33-c,
+  -cert-msc51-cpp,
+  -google-build-using-namespace,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -cppcoreguidelines-narrowing-conversions,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -readability-function-cognitive-complexity
+CheckOptions:
+  - key: readability-identifier-length.MinimumVariableNameLength
+    value: 1
+  - key: readability-identifier-length.MinimumParameterNameLength
+    value: 1
