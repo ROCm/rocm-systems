@@ -58,6 +58,7 @@ constexpr int kPollBatch = 4;  // IbCastTest's batch off AINIC; test/host/CMakeL
 class NetIbCastP2pMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
+    InstallSucceedingSocketFakes();  // logging reads the peer address
     snprintf(verbs_[1].device.name, sizeof(verbs_[1].device.name), "mlx5_1");
     for (int i = 0; i < IbVerbsScene::kQps; i++) verbs_[1].qps[i].qp_num = 0x200 + i;
     for (int d = 0; d < 2; d++) {

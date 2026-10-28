@@ -84,10 +84,6 @@ void ResetCollectiveStubs() {
   g_ncclArgsGlobalCheck = DefaultArgsGlobalCheck;
 }
 
-// os.h
-int ncclOsCpuCount(const ncclAffinity&) { ::abort(); }
-ncclResult_t ncclOsSetAffinity(const ncclAffinity&) { ::abort(); }
-
 // transport.h -- only the connect/setup entry points group.cc references.
 ncclResult_t ncclTransportRingConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportTreeConnect(struct ncclComm*) { ::abort(); }
