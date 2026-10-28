@@ -141,43 +141,36 @@ in the ROCprofiler-SDK documentation.
 Why is a per-wave or per-cycle result ``N/A``?
 ==============================================
 
-The default normalization unit is ``per_kernel``.
-``-k`` selects one kernel for analysis.
-``-n`` / ``--normal-unit`` sets the unit for an existing profile.
-See :ref:`normalization-units`.
-``-n`` does not add a divisor that the profile does not contain.
-The same pass must contain the divisor and the other counters for that metric.
+The default normalization unit is ``per_kernel``. ``-n`` / ``--normal-unit``
+sets the unit for a profile that was already collected, and it does not
+supply a divisor the profile does not contain. See
+:ref:`normalization-units`. The divisor and the metric's other counters must
+be in the same pass.
 
-``per_wave`` divides by ``SQ_WAVES``.
-``per_cycle`` divides by ``GRBM_GUI_ACTIVE`` through ``$GRBM_GUI_ACTIVE_PER_XCD``.
-That value is ``GRBM_GUI_ACTIVE / $num_xcd``.
-On gfx1250, ``$GRBM_GUI_ACTIVE_PER_XCD`` is ``GRBM_GUI_ACTIVE_sum / $num_xcd``.
-That pass must contain ``GRBM_GUI_ACTIVE_sum``.
+``per_wave`` divides by ``SQ_WAVES``, and ``per_cycle`` divides by
+``GRBM_GUI_ACTIVE`` through ``$GRBM_GUI_ACTIVE_PER_XCD``, which is
+``GRBM_GUI_ACTIVE / $num_xcd``.
 
-The tool reads a single-pass metric from one pass.
-If that pass does not contain ``SQ_WAVES`` or ``GRBM_GUI_ACTIVE``, the metric has no value.
-The report shows ``N/A``.
-A divisor in a different pass stays in that pass.
-The tool separates a multi-pass metric into parts.
-Each part fits one pass.
-A part that needs the divisor uses the same rule.
+A single-pass metric is read from one pass. If that pass lacks ``SQ_WAVES``
+or ``GRBM_GUI_ACTIVE``, the metric has no value and the report shows ``N/A``.
+A divisor collected on another pass stays on that pass. A multi-pass metric
+is separated into parts that each fit one pass, and a part that needs the
+divisor follows the same rule.
 
 How do I collect the divisor in the same pass?
-==============================================
+----------------------------------------------
 
-Analyze replaces ``$denom``.
-An expression that contains only ``$denom`` does not put ``SQ_WAVES`` in the metric pass.
-That expression also does not put ``GRBM_GUI_ACTIVE`` in the metric pass.
-Name the divisor in the metric expression.
-The profile command then collects the divisor with the other counters for that metric.
+``$denom`` is replaced at analyze time. An expression that contains only
+``$denom`` does not put ``SQ_WAVES`` or ``GRBM_GUI_ACTIVE`` in the metric's
+pass. Name the divisor in the metric expression so the profile command
+collects it with the other counters for that metric.
 
 Build the config from the
 `panel config template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
-``--config-dir`` is the parent of the architecture directory.
-Examples of that directory are ``gfx942`` and ``gfx115x``.
-Use the same layout as the shipped ``analysis_configs`` directory.
-Pass ``--config-dir`` to ``profile``.
-Pass ``--config-dir`` to ``analyze``.
+``--config-dir`` is the parent of the architecture directory, such as
+``gfx942`` or ``gfx115x``. Use the same layout as the shipped
+``analysis_configs`` directory, and pass ``--config-dir`` to both
+``profile`` and ``analyze``.
 
 For a per-wave result, name ``SQ_WAVES``:
 
@@ -200,11 +193,11 @@ For a per-cycle result, name ``$GRBM_GUI_ACTIVE_PER_XCD``:
      unit: Instructions per cycle
 
 When do I need to profile again?
-================================
+--------------------------------
 
-Profile again when the divisor is in a different pass from the other counters for that metric.
-Name the divisor in the metric expression.
-The next profile then collects the divisor in the same pass.
+Profile again when the divisor is in a different pass from the other
+counters for that metric. Name the divisor in the metric expression so the
+next profile collects the divisor in the same pass.
 
 .. code-block:: shell-session
 
