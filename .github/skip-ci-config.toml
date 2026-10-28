@@ -32,11 +32,15 @@ common = [
     # silently stop CI for unrelated paths.
     ".github/skip-ci-config.toml",
 
-    # RCCL's workflows run on their own schedules/triggers and are never
-    # invoked by TheRock CI, so editing them cannot affect a TheRock build.
+    # Only `.github/workflows/therock-*.yml` participate in TheRock CI; every
+    # other workflow here runs on its own triggers and is never called by a
+    # TheRock run, so editing one cannot affect a TheRock build. fnmatch has no
+    # negation, so this is spelled as "does not start with t". New workflows
+    # whose names start with `t` simply don't skip CI, which fails safe.
+    ".github/workflows/[!t]*.yml",
+
     # `therock-rccl-*` is rooted at therock-rccl-ci.yml (schedule +
     # workflow_dispatch only), so it is likewise outside TheRock PR CI.
-    ".github/workflows/rccl[-_]*.yml",
     ".github/workflows/therock-rccl-*.yml",
     # Test drivers invoked only by those therock-rccl-* workflows; nothing in
     # the build consumes them.
