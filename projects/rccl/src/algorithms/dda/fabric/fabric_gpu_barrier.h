@@ -152,12 +152,14 @@ public:
       putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock));
     }
   }
-  __device__ __forceinline__ void waitPeer(int srcRank) {
+  // srcBlock: the block of rank srcRank whose token is consumed (a drain block waits for the push block it serves).
+  __device__ __forceinline__ void waitPeer(int srcRank, int srcBlock) {
     if (threadIdx.x == 0) {
-      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, blockIdx.x));
+      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, srcBlock));
     }
     __syncthreads();
   }
+  __device__ __forceinline__ void waitPeer(int srcRank) { waitPeer(srcRank, static_cast<int>(blockIdx.x)); }
 
   // Epoch flags of the peer-major push alltoall (own region; the toggle flags are untouched): a post stores a growing
   // value and never waits, a wait polls for at least a value, so every wave can poll one slot. A block's launch uses
@@ -165,10 +167,16 @@ public:
   // epochEnd, so it survives CUDA graph replays. Scratch accesses are system-scope: no fence besides orderDestWrites().
   __device__ __forceinline__ FlagType epochBegin() const { return epochCell()[blockIdx.x] + 1; }
 
-  // Must be called by every thread of the block after its last use of the epoch flags.
+  // Must be called by every thread of the block after its last use of the epoch flags. Every launch advances all the
+  // cells (cell e is written by block e % gridDim.x), so the cells stay equal across block indices, which a drain block
+  // needs: it waits on flags posted by other block indices.
   __device__ __forceinline__ void epochEnd(FlagType epoch, unsigned pieces) {
     __syncthreads();
-    if (threadIdx.x == 0) epochCell()[blockIdx.x] = epoch + pieces + 1;
+    const FlagType next = epoch + pieces + 1;
+    for (int e = static_cast<int>(blockIdx.x + threadIdx.x * gridDim.x); e < nBlocks_;
+         e += static_cast<int>(blockDim.x * gridDim.x)) {
+      epochCell()[e] = next;
+    }
   }
 
   // Entry handshake: posts epoch to rank `to` and waits for rank `from` to post at least epoch.
@@ -213,7 +221,11 @@ public:
 
   // The slot rank `from` posts to from this block index, in this rank's buffer. Every wave polls it.
   __device__ __forceinline__ const FlagType* epochFlagFrom(int from) const {
-    return peerFlags_[selfRank_] + getEpochFlagIdx(from, blockIdx.x);
+    return epochFlagFrom(from, static_cast<int>(blockIdx.x));
+  }
+  // The slot rank `from` posts to from its block `fromBlock`.
+  __device__ __forceinline__ const FlagType* epochFlagFrom(int from, int fromBlock) const {
+    return peerFlags_[selfRank_] + getEpochFlagIdx(from, fromBlock);
   }
 
   // ---- The flag calls of the peer-major pushes ----------------------------------------------------------------------
@@ -242,10 +254,14 @@ public:
   }
   // Waits until rank `from` has posted piece `piece` to this block.
   __device__ __forceinline__ void waitPeer(int from, FlagType epoch, unsigned piece) {
+    waitPeer(from, epoch, piece, static_cast<int>(blockIdx.x));
+  }
+  // fromBlock: the block of rank from that posted (a drain block passes the push block it serves).
+  __device__ __forceinline__ void waitPeer(int from, FlagType epoch, unsigned piece, int fromBlock) {
     if (useEpoch_) {
-      epochWaitPiece(epochFlagFrom(from), epoch, piece);
+      epochWaitPiece(epochFlagFrom(from, fromBlock), epoch, piece);
     } else {
-      waitPeer(from);
+      waitPeer(from, fromBlock);
     }
   }
 private:
