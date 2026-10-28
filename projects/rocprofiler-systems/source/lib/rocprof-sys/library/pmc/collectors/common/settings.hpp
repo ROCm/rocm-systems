@@ -433,7 +433,6 @@ private:
         return metrics;
     }
 
-public:
     static gpu::enabled_metrics parse_enabled_metrics(const std::string& input)
     {
         auto trimmed = utility::string::to_lower(utility::string::trim(input));
@@ -509,7 +508,6 @@ public:
         return metrics;
     }
 
-private:
     /**
      * @brief Parse comma or semicolon-separated list of names.
      */
