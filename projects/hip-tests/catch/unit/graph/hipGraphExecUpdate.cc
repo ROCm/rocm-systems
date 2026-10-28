@@ -26,9 +26,15 @@
 __global__ void GraphExecUpdateStore(int* output, int value) { output[0] = value; }
 
 __global__ void GraphExecUpdateDelayStore(int* output, int value, unsigned long long ticks) {
+#if HT_AMD
   const unsigned long long start = wall_clock64();
   while (wall_clock64() - start < ticks) {
   }
+#else
+  const unsigned long long start = clock64();
+  while (clock64() - start < ticks) {
+  }
+#endif
   output[0] = value;
 }
 
