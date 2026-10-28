@@ -555,6 +555,7 @@ impl Session {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::device::gpu::queue::{QueueParameters, QueuePriority, QueueRequest};
     use crate::driver::VirtualMemoryOperations;
     use crate::driver::test_driver::TestDriver;
     use crate::memory::device::VirtualAddress;
@@ -1003,6 +1004,99 @@ mod tests {
             ErrorKind::InvalidArgument
         );
         drop(device);
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    #[allow(unsafe_code)]
+    fn test_gpu_queue_routes_and_retains_dependencies_through_failed_retirement() {
+        struct Dependency(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for Dependency {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Release);
+            }
+        }
+
+        let first_id = [0x35; 16];
+        let second_id = [0x36; 16];
+        let test_gpu = |id| {
+            TestDriver::new(
+                id,
+                EndpointKind::Gpu {
+                    info: GpuInfo {
+                        asic_family_id: 11,
+                        ..GpuInfo::default()
+                    },
+                },
+                DriverContextLifetime::Session,
+            )
+        };
+        let first = test_gpu(first_id);
+        let failures = first.fail_queue_destroy.clone();
+        let destroys = first.queue_destroys.clone();
+        let mut session = Session::from_drivers(
+            vec![
+                DriverInstance::Test(Shared::new(first).unwrap()),
+                DriverInstance::Test(Shared::new(test_gpu(second_id)).unwrap()),
+            ],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let first_device = session
+            .activate(&session.open_endpoint(first_id).unwrap())
+            .unwrap();
+        let second_device = session
+            .activate(&session.open_endpoint(second_id).unwrap())
+            .unwrap();
+        let gpu = first_device.gpu().unwrap();
+        let request = QueueRequest {
+            ring_size_bytes: 4096,
+            parameters: QueueParameters::Sdma,
+            priority: QueuePriority::Normal,
+            device_producer: false,
+        };
+        let dependency_drops = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // SAFETY: The fake SDMA queue has no external addresses or producers.
+        let mut queue = unsafe {
+            gpu.create_queue_with_dependencies(request, Dependency(dependency_drops.clone()))
+        }
+        .unwrap();
+        assert_eq!(queue.info().ring_size_bytes, request.ring_size_bytes);
+        assert_eq!(queue.progress().unwrap(), (0, 0));
+        assert_eq!(
+            queue.map_device(gpu).unwrap().doorbell_device_address,
+            Some(0x8000)
+        );
+        assert_eq!(
+            queue
+                .map_device(second_device.gpu().unwrap())
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
+
+        drop(first_device);
+        drop(second_device);
+        assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
+        failures.store(true, Ordering::Release);
+        let mut callbacks = 0;
+        // SAFETY: No fake transport was published to a producer.
+        assert_eq!(
+            unsafe { queue.destroy_with_retained_transport(&mut |_| callbacks += 1) }
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Driver
+        );
+        assert_eq!(callbacks, 0);
+        assert_eq!(dependency_drops.load(Ordering::Acquire), 0);
+        assert_eq!(destroys.load(Ordering::Acquire), 0);
+        assert_eq!(queue.progress().unwrap(), (0, 0));
+        // SAFETY: No fake transport was published to a producer.
+        unsafe { queue.destroy_with_retained_transport(&mut |_| callbacks += 1) }.unwrap();
+        assert_eq!(callbacks, 1);
+        assert_eq!(destroys.load(Ordering::Acquire), 1);
+        drop(queue);
+        assert_eq!(dependency_drops.load(Ordering::Acquire), 1);
         session.destroy().unwrap();
     }
 
