@@ -48,7 +48,7 @@ rocprof-compute profile --experimental --trace-ml-api triton --name <name> -- py
 `torch.compile` / Inductor fused kernels use PyTorch's static launcher, so they
 do not get `|triton` ranges. Attribute them with `--trace-ml-api torch`.
 
-The two combine as `--trace-ml-api torch,triton`. User-defined ROCTx regions
+The two combine as `--trace-ml-api torch triton`. User-defined ROCTx regions
 are included with every `--trace-ml-api` run. A bare `--trace-ml-api` traces
 all supported ML frameworks as well.
 
@@ -100,8 +100,8 @@ rocprof-compute analyze \
 
 Patterns are shell-style globs, not regexes, matched against a `/`-separated
 operator hierarchy. `*relu*` contains relu, `*/aten::addmm` is an addmm leaf
-on the reconstructed path. Several patterns can be given, space or comma
-separated; a piece with no framework stays on the preceding one. Bare
+on the reconstructed path. Several patterns can be given, space-separated;
+a piece with no framework stays on the preceding one. Bare
 `--operator` or `**` matches everything.
 Quote patterns so the shell does not expand them.
 

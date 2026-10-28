@@ -921,7 +921,7 @@ Filtering by Operator
 framework stays on the preceding one. A piece before any framework matches
 all collected nodes. A pattern can match an operator's
 name or its full call path, such as ``nn.Module.Net.forward/aten::addmm``.
-Matching is case-sensitive. Spaces or commas separate patterns.
+Matching is case-sensitive. Spaces separate patterns.
 
 * **Wildcard** — ``*relu*`` matches any operator whose name contains ``relu``.
 * **Call path** — ``*/aten::addmm`` matches ``aten::addmm`` when another
@@ -954,16 +954,13 @@ These options do not change the printed operator tree. Kernel IDs depend on
    # Match all collected operators (no arguments)
    $ rocprof-compute analyze --experimental --operator --path ./workload
 
-**Filter multiple operators.** These two commands are the same filter.
-``*relu*`` stays on torch until ``triton:`` starts the next selector:
+**Filter multiple operators.** ``*relu*`` stays on torch until ``triton:``
+starts the next selector:
 
 .. code-block:: shell-session
 
    $ rocprof-compute analyze --experimental \
        --operator torch:*conv* *relu* triton:*matmul* --path ./workload
-
-   $ rocprof-compute analyze --experimental \
-       --operator torch:*conv*,*relu*,triton:*matmul* --path ./workload
 
 
 User-defined ROCTx regions

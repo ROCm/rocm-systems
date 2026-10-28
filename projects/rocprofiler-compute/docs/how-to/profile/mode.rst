@@ -1081,7 +1081,7 @@ Example:
 (``--operator``) accepts shell-style glob patterns, optionally prefixed with
 a framework such as ``torch:`` or ``triton:``. A pattern can match an operator
 name or its call path (for example ``torch:*relu*`` or ``*/aten::addmm``).
-Spaces or commas separate patterns. A piece with no framework stays on the
+Spaces separate patterns. A piece with no framework stays on the
 preceding one. To select all operators, pass no arguments or ``**``.
 
 Combining Torch operator with other options
@@ -1139,11 +1139,11 @@ To enable Triton kernel mapping, use ``--experimental`` with the
 
    $ rocprof-compute profile --experimental --trace-ml-api triton --name triton_ffn -- python triton_ffn.py
 
-``--trace-ml-api torch,triton`` instruments both frameworks in a single run:
+``--trace-ml-api torch triton`` instruments both frameworks in a single run:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --experimental --trace-ml-api torch,triton --name torch_triton_net -- python torch_triton_net.py
+   $ rocprof-compute profile --experimental --trace-ml-api torch triton --name torch_triton_net -- python torch_triton_net.py
 
 Each captured operator records which framework it came from, so you can
 analyze each framework separately. To enable all supported backends at once,

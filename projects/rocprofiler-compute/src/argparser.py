@@ -522,6 +522,7 @@ Examples:
         help=(
             "\t\t\tTrace ML APIs. User-defined ROCTx regions are included.\n"
             "\t\t\tuser is not a value.\n"
+            "\t\t\tSpaces separate names.\n"
             f"\t\t\tWith no arguments, traces {' and '.join(KNOWN_ML_API_BACKENDS)}.\n"
             f"\t\t\tValues: {', '.join(KNOWN_ML_API_BACKENDS)}."
         ),
@@ -668,6 +669,7 @@ Examples:
         help=(
             "\t\tList collected operators as a unified call tree.\n"
             "\t\tWith no arguments, lists every collected operator.\n"
+            "\t\tSpaces separate names.\n"
             "\t\tRequires --output-format stdout. Ignores --operator.\n"
             f"\t\tValues: {', '.join(OPERATOR_SELECTORS)}."
         ),
@@ -687,7 +689,7 @@ Examples:
             "\t\tFilter operators with glob patterns.\n"
             "\t\tA pattern with no framework stays on the preceding one.\n"
             "\t\tPrefix-less patterns are also legal.\n"
-            "\t\tSpaces or commas separate patterns.\n"
+            "\t\tSpaces separate patterns.\n"
             "\t\tExample: --operator torch:*conv* *relu* triton:*matmul*\n"
             "\t\tExample: --operator user:*UserDefined*\n"
             "\t\tWith no arguments, matches every collected operator.\n"
