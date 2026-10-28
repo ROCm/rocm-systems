@@ -77,15 +77,21 @@ fn pending_error_callback(
         // Publish the affected queue so a running system event worker can
         // attach the process fault's address and reason.
         let details = runtime.vm_fault_details;
+        let defer_to_system = runtime.system_event_worker.is_some()
+            && !runtime.system_event_failed.load(Ordering::Acquire);
         let queue = runtime.queue_state.queues.get_mut(&key)?;
         queue.vm_faulted = true;
         if let Some((_, address, reason)) = details.filter(|(agent, _, _)| *agent == queue.agent) {
             queue.vm_fault_address = address;
             queue.vm_fault_reason = reason;
         }
-        if runtime.system_event_worker.is_some() {
-            VM_FAULT_CONDVAR.notify_all();
-            return None;
+        match queue.vm_fault_callback_state.observe(defer_to_system) {
+            VmFaultCallbackAction::Defer => {
+                VM_FAULT_CONDVAR.notify_all();
+                return None;
+            }
+            VmFaultCallbackAction::Ignore => return None,
+            VmFaultCallbackAction::Callback => {}
         }
         // Without a system event handler, the queue callback is the only
         // fault notification available to the application.
@@ -221,13 +227,32 @@ pub(super) fn queue_event_worker(
     stop: &AtomicBool,
     alive: &AtomicBool,
     signal: &QueueEventSignal,
+    observer_failed: &AtomicBool,
     key: usize,
 ) {
     let mut inactive_armed = true;
     let mut error_armed = true;
+    let mut observer_failure_checked = false;
     while !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
         let error = signal.load_error();
-        let callback = if error != 0 && error_armed {
+        let callback = if !observer_failure_checked && observer_failed.load(Ordering::Acquire) {
+            observer_failure_checked = true;
+            let mut guard = match lock() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            let Some(queue) = runtime.queue_state.queues.get_mut(&key) else {
+                return;
+            };
+            if queue.vm_fault_callback_state.take_after_system_failure() {
+                pending_callback(runtime, key, MEMORY_FAULT)
+            } else {
+                None
+            }
+        } else if error != 0 && error_armed {
             error_armed = false;
             let mut guard = match lock() {
                 Ok(guard) => guard,
