@@ -8,13 +8,9 @@ This module provides shared fixtures and configuration for all test modules.
 """
 
 from __future__ import annotations
-from pathlib import Path
-from functools import lru_cache
-from typing import Any, Callable, Generator, Mapping, Optional
 
-import os
-import sys
 import json
+import os
 import re
 import shutil
 import signal
@@ -22,7 +18,7 @@ import sys
 import traceback
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Generator
+from typing import Any, Callable, Generator, Mapping
 
 try:
     import yaml
@@ -838,7 +834,7 @@ def assert_resolved_settings(
     result: TestResult,
     expected: Mapping[str, Any],
     *,
-    metadata_file: Optional[Path] = None,
+    metadata_file: Path | None = None,
 ) -> None:
     """Fail unless every key in ``expected`` is present with an equal value.
 
@@ -2902,6 +2898,7 @@ def assert_timemory(subtests, tests_dir, request):
         fail_regex: list[str] | None = None,
         skip_on_fail: bool = False,
         fail_message: str | None = None,
+        root: str = "timemory",
     ) -> None:
         with subtests.test(subtest_name):
             timemory_file = result.output_dir / file_name
@@ -2916,6 +2913,7 @@ def assert_timemory(subtests, tests_dir, request):
                 depths=depths,
                 print_output=print_output,
                 timeout=timeout,
+                root=root,
             )
             output = f"Command: {validation.command}\n\n{validation.message}"
             if not validation.is_valid:

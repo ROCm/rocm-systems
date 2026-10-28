@@ -93,7 +93,6 @@ View the help menu of ``rocprof-sys-sample`` with the ``-h`` / ``--help`` option
                                                 --trace-periods (min: 1)
                                                 --trace-clock-id (count: 1)
                                                 --profile-format (min: 1)
-                                                --profile-diff (min: 1)
                                                 --process-freq (count: 1)
                                                 --process-wait (count: 1)
                                                 --process-duration (count: 1)
@@ -162,8 +161,6 @@ View the help menu of ``rocprof-sys-sample`` with the ``-h`` / ``--help`` option
 
       --profile-format [ console | json | text ]
                                     Data formats for profiling results (min: 1)
-      --profile-diff                 Generate a diff output b/t the profile collected and an existing profile from another run Accepts 1-2 parameters
-                                    corresponding to the input path and the input prefix (min: 1)
 
       [HOST/DEVICE (PROCESS SAMPLING) OPTIONS]
                                     Process sampling is background measurements for resources available to the entire process. These samples are not tied

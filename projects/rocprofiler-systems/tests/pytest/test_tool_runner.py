@@ -11,8 +11,9 @@ argparse env handling, or conflict detection.
 from __future__ import annotations
 
 import json
-import shutil
 import signal
+from typing import ClassVar
+
 import pytest
 from conftest import RocprofsysTest, assert_resolved_settings
 
@@ -707,7 +708,7 @@ class TestTraceClockId(RocprofsysTest):
 class TestModeCoverage(RocprofsysTest):
     """--mode coverage turns tracing/sampling off and skips trace artifacts."""
 
-    MODE_FLAGS = ["--mode", "coverage"]
+    MODE_FLAGS: ClassVar[list[str]] = ["--mode", "coverage"]
 
     def test_disables_trace_and_sampling(self, target, cpu_workload):
         result = self.run_test(
@@ -741,78 +742,6 @@ class TestModeCoverage(RocprofsysTest):
 
 
 # =============================================================================
-# --profile-diff writes Timemory .diff. files against a prior profile. No HIP
-# dependency; profiles come from the CPU workload.
-# =============================================================================
-
-
-@pytest.mark.timeout(60)
-@pytest.mark.class_name("tool-runner-profile-diff")
-@pytest.mark.parametrize("target", TARGETS)
-class TestProfileDiff(RocprofsysTest):
-    """--profile-diff writes wall_clock.diff.{txt,json} next to the new run."""
-
-    def test_writes_diff_against_baseline(self, target, cpu_workload, test_output_dir):
-        first = self.run_test(
-            "baseline",
-            target=target,
-            env=SAMPLING_NO_DELAY,
-            run_args=["-P", *parallel_overhead_args(cpu_workload)],
-            fail_on_not_found=True,
-        )
-        profiles = [
-            path
-            for path in first.output_dir.iterdir()
-            if path.is_file() and "wall_clock" in path.name and ".diff." not in path.name
-        ]
-        if not profiles:
-            pytest.fail(f"no wall_clock profile under {first.output_dir} to diff against")
-        baseline = test_output_dir / "baseline"
-        baseline.mkdir()
-        for profile in profiles:
-            shutil.copy2(profile, baseline / profile.name)
-
-        flag_args = ["--profile-diff", str(baseline)]
-        result = self.run_test(
-            "baseline",
-            target=target,
-            env=SAMPLING_NO_DELAY,
-            run_args=["-P", *flag_args, *parallel_overhead_args(cpu_workload)],
-            fail_on_not_found=True,
-        )
-        assert_resolved_settings(
-            result,
-            {
-                "ROCPROFSYS_DIFF_OUTPUT": True,
-                "ROCPROFSYS_INPUT_PATH": str(baseline),
-            },
-        )
-        if any(baseline.glob("*.diff.*")):
-            pytest.fail(f"--profile-diff wrote a diff file into the baseline {baseline}")
-        diff_txt = result.output_dir / "wall_clock.diff.txt"
-        diff_json = result.output_dir / "wall_clock.diff.json"
-        if not diff_txt.is_file() or not diff_json.is_file():
-            pytest.fail(
-                f"--profile-diff did not write wall_clock.diff.txt and "
-                f"wall_clock.diff.json under {result.output_dir}"
-            )
-        self.assert_file_regex(
-            diff_txt,
-            pass_regex=[
-                r"vs\.",
-                r"baseline/wall_clock\.json",
-                r"sec\s+\|\s+-?\d+\.\d+",
-            ],
-            subtest_name="wall_clock.diff.txt compares the baseline in seconds",
-        )
-        self.assert_file_regex(
-            diff_json,
-            pass_regex=[r'"unit_repr"\s*:\s*"sec"', r'"repr_data"\s*:\s*-?\d+\.\d+'],
-            subtest_name="wall_clock.diff.json has second values",
-        )
-
-
-# =============================================================================
 # --sampling-cputime-signal on the CPU workload: armed-signal log + samples.
 # =============================================================================
 
@@ -824,7 +753,7 @@ class TestSamplingCputimeSignal(RocprofsysTest):
     """--sampling-cputime-signal moves the cputime sampler off SIGPROF."""
 
     CPUTIME_SIGNAL = str(signal.SIGVTALRM.value)
-    SIGNAL_FLAGS = ["--sampling-cputime-signal", CPUTIME_SIGNAL]
+    SIGNAL_FLAGS: ClassVar[list[str]] = ["--sampling-cputime-signal", CPUTIME_SIGNAL]
 
     def test_override_keeps_sampling(self, target, cpu_workload):
         result = self.run_test(
@@ -867,7 +796,13 @@ class TestSamplingCputimeSignal(RocprofsysTest):
 class TestCpuMetrics(RocprofsysTest):
     """-H --cpus --cpu-metrics selects frequency/load host counters."""
 
-    CPU_METRICS_FLAGS = ["-H", "--cpus", "0", "--cpu-metrics", "frequency,load"]
+    CPU_METRICS_FLAGS: ClassVar[list[str]] = [
+        "-H",
+        "--cpus",
+        "0",
+        "--cpu-metrics",
+        "frequency,load",
+    ]
 
     def test_frequency_and_load_counters(self, target, cpu_workload):
         result = self.run_test(
