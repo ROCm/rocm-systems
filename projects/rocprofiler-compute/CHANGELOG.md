@@ -130,6 +130,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--list-blocks` and `--list-available-metrics` will be removed in a future release.
 
+* Comma-separated `--specs-correction` pairs are deprecated and will be removed in a future release. Separate the pairs with spaces instead.
+
 ### Known issues
 
 ## ROCm Compute Profiler 3.10.0 for ROCm 10.2.0
