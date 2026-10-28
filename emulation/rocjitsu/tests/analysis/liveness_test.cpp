@@ -46,6 +46,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -6565,6 +6566,17 @@ TEST(ExecFlagsRealDecode, Cdna4WritelaneDestStaysLiveUnderFullExec) {
   auto maybe_is_live_writelane = liveness.is_live_before(writelane, {RegClass::VGPR, 5, 1});
   ASSERT_TRUE(maybe_is_live_writelane.succeeded());
   EXPECT_TRUE(maybe_is_live_writelane.value());
+}
+
+static_assert(!std::is_constructible_v<ExecMaskAnalysis, KernelBlockScope>);
+
+TEST(ExecMaskAnalysis, InvalidWaveSizeViolatesPrecondition) {
+#ifdef NDEBUG
+  GTEST_SKIP() << "Requires assertions enabled";
+#else
+  EXPECT_DEATH((ExecMaskAnalysis{KernelBlockScope{}, 0}),
+               "ExecMaskAnalysis: wave_size must be 32 or 64");
+#endif
 }
 
 TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
