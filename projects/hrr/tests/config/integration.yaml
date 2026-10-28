@@ -159,7 +159,12 @@ cases:
   Unit_HRR_EmbeddedPtrStruct_Direct: {}
   Unit_HRR_ExtMallocRoundtrip: {}
   Unit_HRR_ExtMalloc_Direct: {}
-  Unit_HRR_ExtMemcpyBatchRoundtrip: {}
+  Unit_HRR_ExtMemcpyBatchRoundtrip:
+    skip:
+      - when: {arch: ["gfx94*", "gfx95*", "gfx125*"], emulator: true}
+        kind: disabled
+        reason: "hipExtMemcpyBatchAsync with hipMemcpyFlagExtOpSwap hangs under rocJitsu: the SDMA decoder rejects COPY_LINEAR_SWAP (sub-opcode 9), the ring stops before the fence and the stream never syncs"
+        issue: "https://github.com/ROCm/rocm-systems/issues/14464"
   Unit_HRR_ExtMemcpyBatch_Direct: {}
   Unit_HRR_ExtModuleLaunchKernelRoundtrip: {}
   Unit_HRR_ExtModuleLaunchKernel_Direct: {}
