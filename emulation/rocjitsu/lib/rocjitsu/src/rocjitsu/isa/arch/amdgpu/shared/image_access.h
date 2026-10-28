@@ -81,14 +81,20 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     return fail(InstructionExecutionError::UnsupportedOperandValue);
   const auto arch = wf.cu().arch();
   const bool gfx9 = arch == ROCJITSU_CODE_ARCH_CDNA2;
+  ImageResource (*decode_resource)(const std::array<uint32_t, 8> &) = nullptr;
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA2:
     state.buffer_format_encoding = BufferFormatEncoding::Gfx9;
+    decode_resource = decode_gfx9_image_resource;
     break;
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
+    state.buffer_format_encoding = BufferFormatEncoding::Gfx11;
+    decode_resource = decode_gfx11_image_resource;
+    break;
   case ROCJITSU_CODE_ARCH_RDNA4:
     state.buffer_format_encoding = BufferFormatEncoding::Gfx11;
+    decode_resource = decode_gfx12_image_resource;
     break;
   default:
     return fail(InstructionExecutionError::UnimplementedInstruction);
@@ -99,21 +105,7 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   std::array<uint32_t, 8> words{};
   for (uint32_t i = 0; i < words.size(); ++i)
     words[i] = read_scalar_selector(wf, resource_reg + i);
-  ImageResource resource;
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA2:
-    resource = decode_gfx9_image_resource(words);
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    resource = decode_gfx11_image_resource(words);
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    resource = decode_gfx12_image_resource(words);
-    break;
-  default:
-    return fail(InstructionExecutionError::UnimplementedInstruction);
-  }
+  const ImageResource resource = decode_resource(words);
 
   if (resource.type < kImage1d || resource.data_format == 0)
     return util::Result::success();
@@ -182,7 +174,7 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
       return fail(InstructionExecutionError::UnimplementedInstruction);
     }
     const uint32_t resource_spatial_coordinates = resource.type == kImage3d ? 3 : has_y ? 2 : 1;
-    const uint32_t dim_coordinates = image_coordinate_register_count(dim, false);
+    const uint32_t dim_coordinates = image_coordinate_count(dim);
     if (dim_spatial_coordinates < resource_spatial_coordinates || dim_coordinates < coordinates)
       return fail(InstructionExecutionError::UnimplementedInstruction);
   }
