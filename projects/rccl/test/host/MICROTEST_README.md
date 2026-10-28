@@ -594,7 +594,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     suites `NetIbGdrMicrotest.*`.
   - `net_ib/wqe_lat_mon.cc` and `net_ib/wqe_lat_mon.h`
     (`NET_IB_WQE_LAT_MON_CC_PATH`, from `net_ib/wqe-lat-mon-test.cc`);
-    suites `NetIbWqeLatMonMicrotest.*`.
+    suites `NetIbWqeLatMonMicrotest.*`. These are the monitor's CPU-only
+    checks; `test/transport/NetIbMPI/NetIbWqeLatMonTests.cpp` runs it on live
+    net_ib connections.
   - `net_ib/net_ib_gid_inspect.cc` (`NET_IB_GID_INSPECT_CC_PATH`, from
     `net_ib/net-ib-gid-inspect-test.cc`); suites
     `NetIbGidInspectMicrotest.*`.

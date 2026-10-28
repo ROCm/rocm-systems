@@ -12,75 +12,27 @@
 #include <array>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <deque>
 #include <functional>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include <unistd.h>
-
+#include "HostAllocLedger.h"
 #include "IbVerbsScene.h"
 #include "ScopedHook.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/socket_fakes.h"
 #include "gin/gin_host.h"
+#include "transport/net_ib/NetIbGlobals.h"
+#include "transport/net_ib/NetIbSupportSeams.h"
 #include "transport/net_ib/common.h"
 #include "transport/net_ib/gin.h"
 
 namespace {
 
-std::unordered_set<void*> g_ginAllocations;
-int g_ginAllocCalls = 0;
-int g_ginAllocFailCall = -1;
 int g_ginSelfCopies = 0;
-
-ncclResult_t TestGinMalloc(void** ptr, size_t size) {
-  ++g_ginAllocCalls;
-  if (g_ginAllocCalls == g_ginAllocFailCall) return ncclSystemError;
-  if (size == 0) {
-    *ptr = nullptr;
-    return ncclSuccess;
-  }
-  const size_t pageSize = static_cast<size_t>(::getpagesize());
-  const size_t alignedSize = ((size + pageSize - 1) / pageSize) * pageSize;
-  void* allocation = nullptr;
-  if (posix_memalign(&allocation, pageSize, alignedSize) != 0) return ncclSystemError;
-  std::memset(allocation, 0, size);
-  *ptr = allocation;
-  g_ginAllocations.insert(allocation);
-  return ncclSuccess;
-}
-
-template <typename T>
-ncclResult_t TestGinCalloc(T** ptr, size_t count) {
-  ++g_ginAllocCalls;
-  if (g_ginAllocCalls == g_ginAllocFailCall) return ncclSystemError;
-  if (count == 0) {
-    *ptr = nullptr;
-    return ncclSuccess;
-  }
-  T* allocation = static_cast<T*>(std::calloc(count, sizeof(T)));
-  if (allocation == nullptr) return ncclSystemError;
-  *ptr = allocation;
-  g_ginAllocations.insert(allocation);
-  return ncclSuccess;
-}
-
-void TestGinFree(void* ptr) {
-  if (ptr == nullptr) return;
-  if (g_ginAllocations.erase(ptr) != 1) {
-    ADD_FAILURE() << "GIN unit freed an unowned or already-freed pointer " << ptr;
-    return;
-  }
-  std::free(ptr);
-}
-
-void ReleaseTrackedAllocationForFixture(void* ptr) {
-  if (ptr != nullptr && g_ginAllocations.erase(ptr) == 1) std::free(ptr);
-}
 
 void* TestGinMemcpy(void* dst, const void* src, size_t size) {
   if (dst == src) {
@@ -95,9 +47,6 @@ constexpr auto kGinHookNoOp = [](auto&&...) {};
 
 std::function<ncclResult_t(ncclDebugLogger_t, ncclProfilerCallback_t)> g_ginInitDevices = kGinHookFails;
 std::function<ncclResult_t()> g_ginFinalizeDevices = kGinHookFails;
-std::function<ncclResult_t()> g_ginGdrSupport = kGinHookFails;
-std::function<ncclResult_t()> g_ginPeerMemSupport = kGinHookFails;
-std::function<ncclResult_t(int)> g_ginDmaBufSupport = kGinHookFails;
 std::function<ncclResult_t(void*, int, void*, void**, ncclNetDeviceHandle_t**, int, int)> g_ginConnect =
     kGinHookFails;
 std::function<ncclResult_t(void*, void**, ncclNetDeviceHandle_t**, int)> g_ginAccept = kGinHookFails;
@@ -110,9 +59,6 @@ ncclResult_t TestGinInitDevices(ncclDebugLogger_t logger, ncclProfilerCallback_t
   return g_ginInitDevices(logger, profiler);
 }
 ncclResult_t TestGinFinalizeDevices() { return g_ginFinalizeDevices(); }
-ncclResult_t TestGinGdrSupport() { return g_ginGdrSupport(); }
-ncclResult_t TestGinPeerMemSupport() { return g_ginPeerMemSupport(); }
-ncclResult_t TestGinDmaBufSupport(int dev) { return g_ginDmaBufSupport(dev); }
 ncclResult_t TestGinConnect(void* ctx, int dev, void* handle, void** comm, ncclNetDeviceHandle_t** devComm,
                             int nQpsPerDev, int trafficClass) {
   return g_ginConnect(ctx, dev, handle, comm, devComm, nQpsPerDev, trafficClass);
@@ -172,9 +118,6 @@ ncclNet_t g_testGinNet{};
 void ResetGinHooks() {
   g_ginInitDevices = kGinHookFails;
   g_ginFinalizeDevices = kGinHookFails;
-  g_ginGdrSupport = kGinHookFails;
-  g_ginPeerMemSupport = kGinHookFails;
-  g_ginDmaBufSupport = kGinHookFails;
   g_ginConnect = kGinHookFails;
   g_ginAccept = kGinHookFails;
   g_ginSetTrafficClass = kGinHookNoOp;
@@ -209,15 +152,15 @@ void ResetGinHooks() {
 
 #undef ncclIbMalloc
 #undef ncclCalloc
-#define ncclIbMalloc TestGinMalloc
-#define ncclCalloc TestGinCalloc
-#define free TestGinFree
+#define ncclIbMalloc(...) g_hostAllocs.Malloc(__VA_ARGS__, __FILE__, __LINE__, __func__)
+#define ncclCalloc(...) g_hostAllocs.Calloc(__VA_ARGS__, __FILE__, __LINE__, __func__)
+#define free(ptr) g_hostAllocs.Free(ptr)
 #define ncclNetIb g_testGinNet
 #define ncclIbInitDevices TestGinInitDevices
 #define ncclIbFinalizeDevices TestGinFinalizeDevices
-#define ncclIbGdrSupport TestGinGdrSupport
-#define ncclIbPeerMemSupport TestGinPeerMemSupport
-#define ncclIbDmaBufSupport TestGinDmaBufSupport
+#define ncclIbGdrSupport NetIbTestGdrSupport
+#define ncclIbPeerMemSupport NetIbTestPeerMemSupport
+#define ncclIbDmaBufSupport NetIbTestDmaBufSupport
 #define ncclIbConnectImpl TestGinConnect
 #define ncclIbAcceptImpl TestGinAccept
 #define ncclIbSetTrafficClass TestGinSetTrafficClass
@@ -245,61 +188,37 @@ namespace {
 
 class NetIbGinMicrotest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    ResetGinHooks();
-    savedNIbDevs_ = ncclNIbDevs;
-    savedNMergedIbDevs_ = ncclNMergedIbDevs;
-    savedMergedDev_ = ncclIbMergedDevs[0];
-    for (size_t i = 0; i < savedProviders_.size(); ++i) savedProviders_[i] = ncclIbDevs[i].ibProvider;
-    savedDevContext_ = ncclIbDevs[0].context;
-    savedDevPd_ = ncclIbDevs[0].pd;
-  }
+  void SetUp() override { ResetGinHooks(); }
 
   void TearDown() override {
-    ncclNIbDevs = savedNIbDevs_;
-    ncclNMergedIbDevs = savedNMergedIbDevs_;
-    ncclIbMergedDevs[0] = savedMergedDev_;
-    for (size_t i = 0; i < savedProviders_.size(); ++i) ncclIbDevs[i].ibProvider = savedProviders_[i];
-    ncclIbDevs[0].context = savedDevContext_;
-    ncclIbDevs[0].pd = savedDevPd_;
-    g_ginAllocCalls = 0;
-    g_ginAllocFailCall = -1;
+    NetIbResetGlobals();
     g_ginSelfCopies = 0;
     ResetGinHooks();
+    ResetNetIbSupportSeams();
     ResetSocketFakes();
     ResetNcclFakes();
-    if (!g_ginAllocations.empty()) {
-      ADD_FAILURE() << "GIN unit leaked " << g_ginAllocations.size() << " tracked allocation(s)";
-    }
-    for (void* ptr : g_ginAllocations) std::free(ptr);
-    g_ginAllocations.clear();
+    EXPECT_TRUE(g_hostAllocs.Clean()) << "GIN unit: " << g_hostAllocs.Summary();
+    for (const auto& allocation : g_hostAllocs.live) std::free(allocation.first);
+    g_hostAllocs.Reset();
   }
-
- private:
-  int savedNIbDevs_ = 0;
-  int savedNMergedIbDevs_ = 0;
-  ncclIbMergedDev savedMergedDev_{};
-  std::array<ncclIbProvider, 3> savedProviders_{};
-  ibv_context* savedDevContext_ = nullptr;
-  ibv_pd* savedDevPd_ = nullptr;
 };
 
 TEST_F(NetIbGinMicrotest, GdrSupport_PeerMemoryOrDmaBufMakesGinAvailable) {
   bool supported = false;
-  g_ginGdrSupport = [] { return ncclSuccess; };
-  g_ginDmaBufSupport = [](int) { return ncclSystemError; };
-  ASSERT_EQ(ncclGinIbGdrSupport(&supported, false), ncclSuccess);
-  EXPECT_TRUE(supported);
-
-  g_ginGdrSupport = [] { return ncclSystemError; };
-  g_ginDmaBufSupport = [](int dev) {
-    EXPECT_EQ(dev, 0);
-    return ncclSuccess;
-  };
-  ASSERT_EQ(ncclGinIbGdrSupport(&supported, false), ncclSuccess);
-  EXPECT_TRUE(supported);
-
-  g_ginDmaBufSupport = [](int) { return ncclSystemError; };
+  {
+    ScopedHook gdr(g_netIbGdrSupport, [] { return ncclSuccess; });
+    ASSERT_EQ(ncclGinIbGdrSupport(&supported, false), ncclSuccess);
+    EXPECT_TRUE(supported);
+  }
+  {
+    ScopedHook dmaBuf(g_netIbDmaBufSupport, [](int dev) {
+      EXPECT_EQ(dev, 0);
+      return ncclSuccess;
+    });
+    ASSERT_EQ(ncclGinIbGdrSupport(&supported, false), ncclSuccess);
+    EXPECT_TRUE(supported);
+    EXPECT_EQ(dmaBuf.calls, 1);
+  }
   ASSERT_EQ(ncclGinIbGdrSupport(&supported, false), ncclSuccess);
   EXPECT_FALSE(supported);
 }
@@ -325,78 +244,71 @@ TEST_F(NetIbGinMicrotest, DevIsMlx5_RequiresValidMergedDeviceWithOnlyMlx5Members
   EXPECT_FALSE(ncclNetIbDevIsMlx5(0));
 }
 
-TEST_F(NetIbGinMicrotest, GdrGpuSupport_NoPeerMemoryOrDmaBufReturnsInvalidUsage) {
-  g_ginGdrSupport = [] { return ncclSystemError; };
-  g_ginDmaBufSupport = [](int) { return ncclSystemError; };
+TEST_F(NetIbGinMicrotest, GdrGpuSupport_DmaBufWithoutPeerMemorySucceeds) {
+  ScopedHook dmaBuf(g_netIbDmaBufSupport, [](int) { return ncclSuccess; });
 
-  EXPECT_EQ(ncclGinIbGdrGpuSupport(false), ncclInvalidUsage);
-
-  g_ginDmaBufSupport = [](int) { return ncclSuccess; };
   EXPECT_EQ(ncclGinIbGdrGpuSupport(false), ncclSuccess);
+  EXPECT_EQ(dmaBuf.calls, 1);
 }
 
 TEST_F(NetIbGinMicrotest, InitType_ValidDeviceAndGdrPublishesDefaultTrafficClassContext) {
-  g_ginInitDevices = [](ncclDebugLogger_t, ncclProfilerCallback_t) {
+  ScopedHook init(g_ginInitDevices, [](ncclDebugLogger_t, ncclProfilerCallback_t) {
     ncclNIbDevs = 1;
     return ncclSuccess;
-  };
-  g_ginGdrSupport = [] { return ncclSuccess; };
+  });
+  ScopedHook gdr(g_netIbGdrSupport, [] { return ncclSuccess; });
   void* context = nullptr;
 
   ASSERT_EQ(ncclGinIbInitType(&context, 7, nullptr, NCCL_GIN_TYPE_PROXY), ncclSuccess);
   ASSERT_NE(context, nullptr);
   EXPECT_EQ(static_cast<ncclIbNetCtx*>(context)->config.trafficClass, NCCL_NET_TRAFFIC_CLASS_UNDEF);
-  EXPECT_EQ(g_ginAllocations.size(), 1u);
-  TestGinFree(context);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_EQ(g_hostAllocs.live.size(), 1u);
+  g_hostAllocs.Free(context);
 }
 
 TEST_F(NetIbGinMicrotest, InitType_NoDevicesOrGdrReturnsErrorWithoutPublishingContext) {
-  g_ginInitDevices = [](ncclDebugLogger_t, ncclProfilerCallback_t) {
-    ncclNIbDevs = 0;
-    return ncclSuccess;
-  };
   void* context = nullptr;
-  EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, NCCL_GIN_TYPE_PROXY), ncclInternalError);
-  EXPECT_EQ(context, nullptr);
-
-  g_ginInitDevices = [](ncclDebugLogger_t, ncclProfilerCallback_t) {
+  {
+    ScopedHook init(g_ginInitDevices, [](ncclDebugLogger_t, ncclProfilerCallback_t) {
+      ncclNIbDevs = 0;
+      return ncclSuccess;
+    });
+    EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, NCCL_GIN_TYPE_PROXY), ncclInternalError);
+    EXPECT_EQ(context, nullptr);
+  }
+  ScopedHook init(g_ginInitDevices, [](ncclDebugLogger_t, ncclProfilerCallback_t) {
     ncclNIbDevs = 1;
     return ncclSuccess;
-  };
-  g_ginGdrSupport = [] { return ncclSystemError; };
-  g_ginDmaBufSupport = [](int) { return ncclSystemError; };
+  });
   EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, NCCL_GIN_TYPE_PROXY), ncclInternalError);
   EXPECT_EQ(context, nullptr);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 TEST_F(NetIbGinMicrotest, ProxyInit_UsesConfiguredTypeAndPublishesContext) {
-  g_ginInitDevices = [](ncclDebugLogger_t, ncclProfilerCallback_t) {
+  ScopedHook init(g_ginInitDevices, [](ncclDebugLogger_t, ncclProfilerCallback_t) {
     ncclNIbDevs = 1;
     return ncclSuccess;
-  };
-  g_ginGdrSupport = [] { return ncclSystemError; };
-  g_ginPeerMemSupport = [] { return ncclSuccess; };
-  g_ginDmaBufSupport = [](int) { return ncclSystemError; };
-  g_loadParam = [](const char* name, int64_t fallback) {
+  });
+  ScopedHook peerMem(g_netIbPeerMemSupport, [] { return ncclSuccess; });
+  ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
     return std::strcmp(name, "GIN_TYPE") == 0 ? int64_t{NCCL_GIN_TYPE_GDAKI} : fallback;
-  };
+  });
   void* context = nullptr;
 
   ASSERT_EQ(ncclRmaIbProxyInit(&context, 42, nullptr), ncclSuccess);
   ASSERT_NE(context, nullptr);
-  TestGinFree(context);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_EQ(peerMem.calls, 1);
+  g_hostAllocs.Free(context);
 }
 
 TEST_F(NetIbGinMicrotest, Finalize_FreesContextAndPropagatesDeviceFinalize) {
   void* context = nullptr;
-  ASSERT_EQ(TestGinMalloc(&context, 16), ncclSuccess);
-  g_ginFinalizeDevices = [] { return ncclRemoteError; };
+  ASSERT_EQ(g_hostAllocs.Malloc(&context, 16), ncclSuccess);
+  ScopedHook finalize(g_ginFinalizeDevices, [] { return ncclRemoteError; });
 
   EXPECT_EQ(ncclGinIbFinalize(context), ncclRemoteError);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 TEST_F(NetIbGinMicrotest, RmaProperties_HipReportsSignalsDoNotFlushAllPuts) {
@@ -409,11 +321,11 @@ TEST_F(NetIbGinMicrotest, RmaProperties_HipReportsSignalsDoNotFlushAllPuts) {
 }
 
 TEST_F(NetIbGinMicrotest, GetProperties_DelegatesAndMarksGinProxyDevice) {
-  g_ginNetGetProperties = [](int dev, ncclNetProperties_t* props) {
+  ScopedHook getProperties(g_ginNetGetProperties, [](int dev, ncclNetProperties_t* props) {
     EXPECT_EQ(dev, 2);
     props->speed = 123;
     return ncclSuccess;
-  };
+  });
   ncclNetProperties_t props{};
 
   ASSERT_EQ(ncclRmaIbProxyGetProperties(2, &props), ncclSuccess);
@@ -429,30 +341,34 @@ TEST_F(NetIbGinMicrotest, AllGather_ThreeRankRingCopiesLocalAndTransfersEachSlot
   coll.recvComm = reinterpret_cast<void*>(0x20);
   int sendHandle = 1;
   int recvHandle = 2;
-  g_ginNetRegMr = [&](void* comm, void*, size_t size, int type, void** handle) {
+  ScopedHook regMr(g_ginNetRegMr, [&](void* comm, void*, size_t size, int type, void** handle) {
     EXPECT_EQ(size, 3 * sizeof(int));
     EXPECT_EQ(type, NCCL_PTR_HOST);
     *handle = comm == coll.recvComm ? static_cast<void*>(&recvHandle) : static_cast<void*>(&sendHandle);
     return ncclSuccess;
-  };
+  });
   std::vector<std::pair<void*, void*>> deregistered;
-  g_ginNetDeregMr = [&](void* comm, void* handle) {
+  ScopedHook deregMr(g_ginNetDeregMr, [&](void* comm, void* handle) {
     deregistered.emplace_back(comm, handle);
     return ncclSuccess;
-  };
+  });
   std::vector<void*> sent;
   int sendRequest = 1;
-  g_ginNetIsend = [&](void*, void* data, size_t size, int tag, void* mhandle, void*, void** request) {
+  ScopedHook isend(g_ginNetIsend, [&](void* comm, void* data, size_t size, int tag, void* mhandle, void*,
+                                      void** request) {
+    EXPECT_EQ(comm, coll.sendComm);
     EXPECT_EQ(size, sizeof(int));
     EXPECT_EQ(tag, NCCL_GIN_IB_ALLGATHER_TAG);
     EXPECT_EQ(mhandle, static_cast<void*>(&sendHandle));
     sent.push_back(data);
     *request = &sendRequest;
     return ncclSuccess;
-  };
+  });
   std::vector<void*> received;
   int recvRequest = 2;
-  g_ginNetIrecv = [&](void*, int n, void** data, size_t* sizes, int* tags, void** mhandles, void**, void** request) {
+  ScopedHook irecv(g_ginNetIrecv, [&](void* comm, int n, void** data, size_t* sizes, int* tags, void** mhandles,
+                                      void**, void** request) {
+    EXPECT_EQ(comm, coll.recvComm);
     EXPECT_EQ(n, 1);
     EXPECT_EQ(*sizes, sizeof(int));
     EXPECT_EQ(*tags, NCCL_GIN_IB_ALLGATHER_TAG);
@@ -460,11 +376,11 @@ TEST_F(NetIbGinMicrotest, AllGather_ThreeRankRingCopiesLocalAndTransfersEachSlot
     received.push_back(*data);
     *request = &recvRequest;
     return ncclSuccess;
-  };
-  g_ginNetTest = [](void*, int* done, int*) {
+  });
+  ScopedHook test(g_ginNetTest, [](void*, int* done, int*) {
     *done = 1;
     return ncclSuccess;
-  };
+  });
   int source = 17;
   int gathered[3] = {};
 
@@ -490,71 +406,73 @@ TEST_F(NetIbGinMicrotest, AllGather_NullRequestsAndIncompleteTestsRetryWithoutAd
   coll.rank = 0;
   coll.nranks = 2;
   int registration = 1;
-  g_ginNetRegMr = [&](void*, void*, size_t, int, void** handle) {
+  ScopedHook regMr(g_ginNetRegMr, [&](void*, void*, size_t, int, void** handle) {
     *handle = &registration;
     return ncclSuccess;
-  };
-  g_ginNetDeregMr = [](void*, void*) { return ncclSuccess; };
+  });
+  ScopedHook deregMr(g_ginNetDeregMr, [](void*, void*) { return ncclSuccess; });
+  // Each side posts its request on the second try and completes on its second test.
   int sendToken = 1;
   int recvToken = 2;
-  int sendCalls = 0;
-  int recvCalls = 0;
-  g_ginNetIsend = [&](void*, void*, size_t, int, void*, void*, void** request) {
-    if (++sendCalls == 2) *request = &sendToken;
+  bool sendRetried = false;
+  bool recvRetried = false;
+  ScopedHook isend(g_ginNetIsend, [&](void*, void*, size_t, int, void*, void*, void** request) {
+    if (sendRetried) *request = &sendToken;
+    sendRetried = true;
     return ncclSuccess;
-  };
-  g_ginNetIrecv = [&](void*, int, void**, size_t*, int*, void**, void**, void** request) {
-    if (++recvCalls == 2) *request = &recvToken;
+  });
+  ScopedHook irecv(g_ginNetIrecv, [&](void*, int, void**, size_t*, int*, void**, void**, void** request) {
+    if (recvRetried) *request = &recvToken;
+    recvRetried = true;
     return ncclSuccess;
-  };
-  int sendTests = 0;
-  int recvTests = 0;
-  g_ginNetTest = [&](void* request, int* done, int*) {
-    int& calls = request == &sendToken ? sendTests : recvTests;
-    *done = ++calls == 2;
+  });
+  bool sendTested = false;
+  bool recvTested = false;
+  ScopedHook test(g_ginNetTest, [&](void* request, int* done, int*) {
+    bool& tested = request == &sendToken ? sendTested : recvTested;
+    *done = tested;
+    tested = true;
     return ncclSuccess;
-  };
+  });
   int source = 7;
   int gathered[2] = {};
 
   ASSERT_EQ(ncclGinIbAllGather(&coll, &source, gathered, sizeof(source)), ncclSuccess);
   EXPECT_EQ(gathered[0], source);
-  EXPECT_EQ(sendCalls, 2);
-  EXPECT_EQ(recvCalls, 2);
-  EXPECT_EQ(sendTests, 2);
-  EXPECT_EQ(recvTests, 2);
+  EXPECT_EQ(isend.calls, 2);
+  EXPECT_EQ(irecv.calls, 2);
+  EXPECT_EQ(test.calls, 4);
 }
 
 TEST_F(NetIbGinMicrotest, AllGather_SecondRegistrationFailureReleasesFirstHandle) {
   ncclGinIbCollComm coll{};
   coll.nranks = 2;
   int recvHandle = 1;
-  int calls = 0;
-  g_ginNetRegMr = [&](void*, void*, size_t, int, void** handle) {
-    if (++calls == 1) {
-      *handle = &recvHandle;
-      return ncclSuccess;
-    }
-    return ncclSystemError;
-  };
-  int deregistered = 0;
-  g_ginNetDeregMr = [&](void*, void* handle) {
-    EXPECT_EQ(handle, &recvHandle);
-    ++deregistered;
+  bool registered = false;
+  ScopedHook regMr(g_ginNetRegMr, [&](void*, void*, size_t, int, void** handle) {
+    if (registered) return ncclSystemError;
+    registered = true;
+    *handle = &recvHandle;
     return ncclSuccess;
-  };
+  });
+  ScopedHook deregMr(g_ginNetDeregMr, [&](void*, void* handle) {
+    EXPECT_EQ(handle, &recvHandle);
+    return ncclSuccess;
+  });
   int source = 1;
   int gathered[2] = {};
 
   EXPECT_EQ(ncclGinIbAllGather(&coll, &source, gathered, sizeof(source)), ncclSystemError);
-  EXPECT_EQ(deregistered, 1);
+  EXPECT_EQ(regMr.calls, 2);
+  EXPECT_EQ(deregMr.calls, 1);
 }
 
 TEST_F(NetIbGinMicrotest, AllToAll_ExtractsLocalRankColumnAndFreesScratch) {
   ncclGinIbCollComm coll{};
   coll.rank = 1;
   coll.nranks = 3;
-  coll.allGather = [](ncclGinIbCollComm*, void*, void* out, size_t) {
+  coll.allGather = [](ncclGinIbCollComm*, void*, void* out, size_t size) {
+    EXPECT_EQ(size, 3 * sizeof(int));
     int matrix[9] = {0, 1, 2, 10, 11, 12, 20, 21, 22};
     std::memcpy(out, matrix, sizeof(matrix));
     return ncclSuccess;
@@ -566,7 +484,7 @@ TEST_F(NetIbGinMicrotest, AllToAll_ExtractsLocalRankColumnAndFreesScratch) {
   EXPECT_EQ(received[0], 1);
   EXPECT_EQ(received[1], 11);
   EXPECT_EQ(received[2], 21);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 TEST_F(NetIbGinMicrotest, Connect_RetriesNullCommsAndPublishesRingContext) {
@@ -578,49 +496,56 @@ TEST_F(NetIbGinMicrotest, Connect_RetriesNullCommsAndPublishesRingContext) {
   for (TrafficClassCase tcCase : {TrafficClassCase{-1, 4}, TrafficClassCase{9, 9}}) {
     SCOPED_TRACE(tcCase.ginTc);
     ncclIbListenComm listen{};
-    listen.dev = 0;
+    listen.dev = 1;
     ncclGinIbCollComm* published = nullptr;
     void* handles[3] = {reinterpret_cast<void*>(0x10), reinterpret_cast<void*>(0x20),
                         reinterpret_cast<void*>(0x30)};
-    int sendToken = 1;
-    int recvToken = 2;
-    int connectCalls = 0;
-    int acceptCalls = 0;
-    g_loadParam = [tcCase](const char* name, int64_t fallback) {
+    ScopedHook params(g_loadParam, [tcCase](const char* name, int64_t fallback) {
       if (std::strcmp(name, "GIN_IB_TC") == 0) return tcCase.ginTc;
       if (std::strcmp(name, "IB_TC") == 0) return int64_t{4};
       return fallback;
-    };
-    g_ginConnect = [&](void*, int dev, void* handle, void** comm, ncclNetDeviceHandle_t**, int nQps, int tc) {
-      EXPECT_EQ(dev, 0);
+    });
+    // Both directions come up on the second try.
+    int sendToken = 1;
+    int recvToken = 2;
+    bool sendRetried = false;
+    bool recvRetried = false;
+    ScopedHook connect(g_ginConnect, [&](void*, int dev, void* handle, void** comm, ncclNetDeviceHandle_t**,
+                                         int nQps, int tc) {
+      EXPECT_EQ(dev, 1);
       EXPECT_EQ(handle, handles[2]);
       EXPECT_EQ(nQps, 1);
       EXPECT_EQ(tc, tcCase.expected);
-      if (++connectCalls == 2) *comm = &sendToken;
+      if (sendRetried) *comm = &sendToken;
+      sendRetried = true;
       return ncclSuccess;
-    };
-    g_ginAccept = [&](void* seen, void** comm, ncclNetDeviceHandle_t**, int nQps) {
+    });
+    ScopedHook accept(g_ginAccept, [&](void* seen, void** comm, ncclNetDeviceHandle_t**, int nQps) {
       EXPECT_EQ(seen, &listen);
       EXPECT_EQ(nQps, 1);
-      if (++acceptCalls == 2) *comm = &recvToken;
+      if (recvRetried) *comm = &recvToken;
+      recvRetried = true;
       return ncclSuccess;
-    };
+    });
     ibv_context verbsContext{};
     ibv_pd pd{};
-    ncclIbDevs[0].context = &verbsContext;
-    ncclIbDevs[0].pd = &pd;
+    ncclIbDevs[1].context = &verbsContext;
+    ncclIbDevs[1].pd = &pd;
 
     ASSERT_EQ(ncclGinIbConnect(nullptr, handles, 3, 1, &listen, reinterpret_cast<void**>(&published)), ncclSuccess);
     ASSERT_NE(published, nullptr);
-    EXPECT_EQ(connectCalls, 2);
-    EXPECT_EQ(acceptCalls, 2);
+    EXPECT_EQ(connect.calls, 2);
+    EXPECT_EQ(accept.calls, 2);
     EXPECT_EQ(published->rank, 1);
     EXPECT_EQ(published->nranks, 3);
+    EXPECT_EQ(published->dev, 1);
     EXPECT_EQ(published->sendComm, &sendToken);
     EXPECT_EQ(published->recvComm, &recvToken);
     EXPECT_EQ(published->ib.context, &verbsContext);
     EXPECT_EQ(published->ib.pd, &pd);
-    TestGinFree(published);
+    EXPECT_EQ(published->allGather, ncclGinIbAllGather);
+    EXPECT_EQ(published->allToAll, ncclGinIbAllToAll);
+    g_hostAllocs.Free(published);
   }
 }
 
@@ -628,90 +553,77 @@ TEST_F(NetIbGinMicrotest, Connect_AcceptFailureClosesEstablishedSendComm) {
   ncclIbListenComm listen{};
   void* handles[1] = {nullptr};
   int sendToken = 1;
-  g_ginConnect = [&](void*, int, void*, void** comm, ncclNetDeviceHandle_t**, int, int) {
+  ScopedHook connect(g_ginConnect, [&](void*, int, void*, void** comm, ncclNetDeviceHandle_t**, int, int) {
     *comm = &sendToken;
     return ncclSuccess;
-  };
-  g_ginAccept = [](void*, void**, ncclNetDeviceHandle_t**, int) { return ncclSystemError; };
-  int closed = 0;
-  g_ginNetCloseSend = [&](void* comm) {
+  });
+  ScopedHook accept(g_ginAccept, [](void*, void**, ncclNetDeviceHandle_t**, int) { return ncclSystemError; });
+  ScopedHook closeSend(g_ginNetCloseSend, [&](void* comm) {
     EXPECT_EQ(comm, &sendToken);
-    ++closed;
     return ncclSuccess;
-  };
+  });
   void* coll = reinterpret_cast<void*>(0x1);
 
   EXPECT_EQ(ncclGinIbConnect(nullptr, handles, 1, 0, &listen, &coll), ncclSystemError);
   EXPECT_EQ(coll, nullptr);
-  EXPECT_EQ(closed, 1);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_EQ(closeSend.calls, 1);
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 TEST_F(NetIbGinMicrotest, ProxyConnect_GdrSupportedBuildsProxyConnection) {
   ncclIbListenComm listen{};
-  listen.dev = 0;
   void* handles[1] = {nullptr};
   int sendToken = 1;
   int recvToken = 2;
-  g_ginGdrSupport = [] { return ncclSuccess; };
-  g_ginConnect = [&](void*, int, void*, void** comm, ncclNetDeviceHandle_t**, int, int) {
+  ScopedHook gdr(g_netIbGdrSupport, [] { return ncclSuccess; });
+  ScopedHook connect(g_ginConnect, [&](void*, int, void*, void** comm, ncclNetDeviceHandle_t**, int, int) {
     *comm = &sendToken;
     return ncclSuccess;
-  };
-  g_ginAccept = [&](void*, void** comm, ncclNetDeviceHandle_t**, int) {
+  });
+  ScopedHook accept(g_ginAccept, [&](void*, void** comm, ncclNetDeviceHandle_t**, int) {
     *comm = &recvToken;
     return ncclSuccess;
-  };
-  ibv_context verbsContext{};
-  ibv_pd pd{};
-  ncclIbDevs[0].context = &verbsContext;
-  ncclIbDevs[0].pd = &pd;
+  });
   void* coll = nullptr;
 
   ASSERT_EQ(ncclRmaIbProxyConnect(nullptr, handles, 1, 0, &listen, &coll), ncclSuccess);
   ASSERT_NE(coll, nullptr);
-  EXPECT_EQ(static_cast<ncclGinIbCollComm*>(coll)->sendComm, &sendToken);
-  EXPECT_EQ(static_cast<ncclGinIbCollComm*>(coll)->recvComm, &recvToken);
-  TestGinFree(coll);
+  g_hostAllocs.Free(coll);
 }
 
 TEST_F(NetIbGinMicrotest, ProxyConnect_NoGdrReturnsInvalidUsageBeforeConnecting) {
-  g_ginGdrSupport = [] { return ncclSystemError; };
-  g_ginDmaBufSupport = [](int) { return ncclSystemError; };
-  int connectCalls = 0;
-  g_ginConnect = [&](void*, int, void*, void**, ncclNetDeviceHandle_t**, int, int) {
-    ++connectCalls;
+  ScopedHook connect(g_ginConnect, [](void*, int, void*, void**, ncclNetDeviceHandle_t**, int, int) {
     return ncclSuccess;
-  };
+  });
   void* coll = nullptr;
 
   EXPECT_EQ(ncclRmaIbProxyConnect(nullptr, nullptr, 1, 0, nullptr, &coll), ncclInvalidUsage);
-  EXPECT_EQ(connectCalls, 0);
+  EXPECT_EQ(connect.calls, 0);
   EXPECT_EQ(coll, nullptr);
 }
 
 TEST_F(NetIbGinMicrotest, CloseColl_ClosesBothDirectionsAndFreesContext) {
-  auto* coll = static_cast<ncclGinIbCollComm*>(nullptr);
-  ASSERT_EQ(TestGinMalloc(reinterpret_cast<void**>(&coll), sizeof(*coll)), ncclSuccess);
+  ncclGinIbCollComm* coll = nullptr;
+  ASSERT_EQ(g_hostAllocs.Malloc(reinterpret_cast<void**>(&coll), sizeof(*coll)), ncclSuccess);
   int sendToken = 1;
   int recvToken = 2;
   coll->sendComm = &sendToken;
   coll->recvComm = &recvToken;
   std::vector<void*> closed;
-  g_ginNetCloseRecv = [&](void* comm) {
+  ScopedHook closeRecv(g_ginNetCloseRecv, [&](void* comm) {
     closed.push_back(comm);
     return ncclSuccess;
-  };
-  g_ginNetCloseSend = [&](void* comm) {
+  });
+  ScopedHook closeSend(g_ginNetCloseSend, [&](void* comm) {
     closed.push_back(comm);
     return ncclSuccess;
-  };
+  });
 
   ASSERT_EQ(ncclGinIbCloseColl(coll), ncclSuccess);
   ASSERT_EQ(closed.size(), 2u);
   EXPECT_NE(std::find(closed.begin(), closed.end(), &recvToken), closed.end());
   EXPECT_NE(std::find(closed.begin(), closed.end(), &sendToken), closed.end());
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 // One rank's ncclRmaIbProxyCreateContext. The handle all-gather writes each rank's index into its slot, so every
@@ -722,61 +634,17 @@ struct GinCreateContextScene {
     coll.nranks = nranks;
     coll.dev = 0;
     coll.ctx = &transportContext;
-    coll.allGather = [](ncclGinIbCollComm* comm, void*, void* dst, size_t size) {
-      for (int r = 0; r < comm->nranks; ++r) std::memcpy(static_cast<char*>(dst) + r * size, &r, sizeof(r));
-      return ncclSuccess;
-    };
-    g_ginNetListen = [this](void* ctx, int dev, void*, void** listen) {
-      ++listenCalls;
-      EXPECT_EQ(ctx, &transportContext);
-      EXPECT_EQ(dev, 0);
-      *listen = &listenToken;
-      return ncclSuccess;
-    };
-    g_ginNetCloseListen = [this](void* listen) {
-      EXPECT_EQ(listen, &listenToken);
-      return ncclSuccess;
-    };
-    g_ginSetTrafficClass = [this](void* ctx, int tc) {
-      ++trafficClassCalls;
-      EXPECT_EQ(ctx, &transportContext);
-      trafficClass = tc;
-    };
-    g_ginConnect = [this](void*, int, void* handle, void** comm, ncclNetDeviceHandle_t**, int, int) {
-      int peer = -1;
-      std::memcpy(&peer, handle, sizeof(peer));
-      connectPeers.push_back(peer);
-      connectSlots.push_back(comm);
-      *comm = &sendToken;
-      return ncclSuccess;
-    };
-    g_ginAccept = [this](void*, void** comm, ncclNetDeviceHandle_t**, int) {
-      acceptSlots.push_back(comm);
-      *comm = &recvToken;
-      return ncclSuccess;
-    };
-    g_ginNetRegMr = [this](void*, void*, size_t, int, void** handle) {
-      *handle = &registration;
-      return ncclSuccess;
-    };
-    g_ginNetDeregMr = [](void*, void*) { return ncclSuccess; };
-    g_ginNetIsend = [this](void*, void*, size_t, int, void*, void*, void** request) {
-      *request = &barrierRequest;
-      return ncclSuccess;
-    };
-    g_ginNetIrecv = [this](void*, int, void**, size_t*, int*, void**, void**, void** request) {
-      *request = &barrierRequest;
-      return ncclSuccess;
-    };
-    g_ginNetTest = [](void*, int* done, int*) {
-      *done = 1;
-      return ncclSuccess;
-    };
-    g_ginNetCloseSend = [](void*) { return ncclSuccess; };
-    g_ginNetCloseRecv = [](void*) { return ncclSuccess; };
+    coll.allGather = HandleAllGather;
   }
   GinCreateContextScene(const GinCreateContextScene&) = delete;
   GinCreateContextScene& operator=(const GinCreateContextScene&) = delete;
+
+  static ncclResult_t HandleAllGather(ncclGinIbCollComm* comm, void* src, void* dst, size_t size) {
+    EXPECT_EQ(size, static_cast<size_t>(NCCL_NET_HANDLE_MAXSIZE));
+    EXPECT_EQ(src, static_cast<void*>(static_cast<char*>(dst) + comm->rank * size));
+    for (int r = 0; r < comm->nranks; ++r) std::memcpy(static_cast<char*>(dst) + r * size, &r, sizeof(r));
+    return ncclSuccess;
+  }
 
   ncclGinIbCollComm coll{};
   int transportContext = 1;
@@ -785,12 +653,62 @@ struct GinCreateContextScene {
   int recvToken = 2;
   int registration = 1;
   int barrierRequest = 1;
-  int listenCalls = 0;
-  int trafficClassCalls = 0;
   int trafficClass = -1;
   std::vector<int> connectPeers;
+  std::vector<int> connectTcs;
   std::vector<void**> connectSlots;
   std::vector<void**> acceptSlots;
+
+  HookOf<decltype(g_ginNetListen)> listen{g_ginNetListen, [this](void* ctx, int dev, void*, void** comm) {
+    EXPECT_EQ(ctx, &transportContext);
+    EXPECT_EQ(dev, 0);
+    *comm = &listenToken;
+    return ncclSuccess;
+  }};
+  HookOf<decltype(g_ginNetCloseListen)> closeListen{g_ginNetCloseListen, [this](void* comm) {
+    EXPECT_EQ(comm, &listenToken);
+    return ncclSuccess;
+  }};
+  HookOf<decltype(g_ginSetTrafficClass)> setTrafficClass{g_ginSetTrafficClass, [this](void* ctx, int tc) {
+    EXPECT_EQ(ctx, &transportContext);
+    trafficClass = tc;
+  }};
+  HookOf<decltype(g_ginConnect)> connect{
+      g_ginConnect, [this](void*, int, void* handle, void** comm, ncclNetDeviceHandle_t**, int, int tc) {
+        int peer = -1;
+        std::memcpy(&peer, handle, sizeof(peer));
+        connectPeers.push_back(peer);
+        connectTcs.push_back(tc);
+        connectSlots.push_back(comm);
+        *comm = &sendToken;
+        return ncclSuccess;
+      }};
+  HookOf<decltype(g_ginAccept)> accept{g_ginAccept, [this](void*, void** comm, ncclNetDeviceHandle_t**, int) {
+    acceptSlots.push_back(comm);
+    *comm = &recvToken;
+    return ncclSuccess;
+  }};
+  HookOf<decltype(g_ginNetRegMr)> regMr{g_ginNetRegMr, [this](void*, void*, size_t, int, void** handle) {
+    *handle = &registration;
+    return ncclSuccess;
+  }};
+  HookOf<decltype(g_ginNetDeregMr)> deregMr{g_ginNetDeregMr, [](void*, void*) { return ncclSuccess; }};
+  HookOf<decltype(g_ginNetIsend)> isend{
+      g_ginNetIsend, [this](void*, void*, size_t, int, void*, void*, void** request) {
+        *request = &barrierRequest;
+        return ncclSuccess;
+      }};
+  HookOf<decltype(g_ginNetIrecv)> irecv{
+      g_ginNetIrecv, [this](void*, int, void**, size_t*, int*, void**, void**, void** request) {
+        *request = &barrierRequest;
+        return ncclSuccess;
+      }};
+  HookOf<decltype(g_ginNetTest)> test{g_ginNetTest, [](void*, int* done, int*) {
+    *done = 1;
+    return ncclSuccess;
+  }};
+  HookOf<decltype(g_ginNetCloseSend)> closeSend{g_ginNetCloseSend, [](void*) { return ncclSuccess; }};
+  HookOf<decltype(g_ginNetCloseRecv)> closeRecv{g_ginNetCloseRecv, [](void*) { return ncclSuccess; }};
 };
 
 TEST_F(NetIbGinMicrotest, CreateContext_SingleRankBuildsContextsAndClampsBatchSize) {
@@ -802,9 +720,9 @@ TEST_F(NetIbGinMicrotest, CreateContext_SingleRankBuildsContextsAndClampsBatchSi
        {BatchCase{1, NCCL_RMA_MAX_IB_WRS_PER_OP}, BatchCase{1000, NCCL_RMA_IB_WR_BATCHSIZE}}) {
     SCOPED_TRACE(batch.requested);
     GinCreateContextScene scene(/*nranks=*/1, /*rank=*/0);
-    g_loadParam = [batch](const char* name, int64_t fallback) {
+    ScopedHook params(g_loadParam, [batch](const char* name, int64_t fallback) {
       return std::strcmp(name, "RMA_IB_WR_BATCHSIZE") == 0 ? batch.requested : fallback;
-    };
+    });
     ncclRmaConfig_t config{};
     config.nContexts = 2;
     config.rankStride = 1;
@@ -813,8 +731,9 @@ TEST_F(NetIbGinMicrotest, CreateContext_SingleRankBuildsContextsAndClampsBatchSi
 
     ASSERT_EQ(ncclRmaIbProxyCreateContext(&scene.coll, &config, reinterpret_cast<void**>(&contexts)), ncclSuccess);
     ASSERT_NE(contexts, nullptr);
-    EXPECT_EQ(scene.listenCalls, 1);
-    EXPECT_EQ(scene.trafficClassCalls, 1);
+    EXPECT_EQ(scene.listen.calls, 1);
+    EXPECT_EQ(scene.closeListen.calls, 1);
+    EXPECT_EQ(scene.setTrafficClass.calls, 1);
     EXPECT_EQ(scene.trafficClass, 7);
     EXPECT_EQ(scene.connectPeers.size(), 2u);
     EXPECT_EQ(scene.acceptSlots.size(), 2u);
@@ -824,9 +743,11 @@ TEST_F(NetIbGinMicrotest, CreateContext_SingleRankBuildsContextsAndClampsBatchSi
     EXPECT_EQ(contexts[1].wrBatchsize, batch.expected);
 
     ASSERT_EQ(ncclRmaIbProxyDestroyContext(contexts), ncclSuccess);
-    ReleaseTrackedAllocationForFixture(contexts);
+    EXPECT_EQ(scene.closeSend.calls, 2);
+    EXPECT_EQ(scene.closeRecv.calls, 2);
+    // AICOMRCCL-3094: DestroyContext leaves the top-level array to its caller.
+    g_hostAllocs.Free(contexts);
   }
-  EXPECT_TRUE(g_ginAllocations.empty());
 }
 
 TEST_F(NetIbGinMicrotest, CreateContext_RankStrideConnectsForwardAndAcceptsBackward) {
@@ -844,10 +765,51 @@ TEST_F(NetIbGinMicrotest, CreateContext_RankStrideConnectsForwardAndAcceptsBackw
   EXPECT_EQ(scene.connectPeers, (std::vector<int>{1, 3, 5}));
   EXPECT_EQ(scene.connectSlots, (std::vector<void**>{&sends[1], &sends[3], &sends[5]}));
   EXPECT_EQ(scene.acceptSlots, (std::vector<void**>{&recvs[1], &recvs[5], &recvs[3]}));
+  // A ring barrier of nranks - 1 sends after each of the three peers.
+  EXPECT_EQ(scene.isend.calls, 3 * 5);
 
   ASSERT_EQ(ncclRmaIbProxyDestroyContext(contexts), ncclSuccess);
-  ReleaseTrackedAllocationForFixture(contexts);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_EQ(scene.closeSend.calls, 6);
+  EXPECT_EQ(scene.closeRecv.calls, 6);
+  g_hostAllocs.Free(contexts);
+}
+
+TEST_F(NetIbGinMicrotest, CreateContext_NoRankStrideConnectsEveryRank) {
+  GinCreateContextScene scene(/*nranks=*/4, /*rank=*/1);
+  ncclRmaConfig_t config{};
+  config.nContexts = 1;
+  config.rankStride = 0;
+  ncclRmaIbProxyCtx* contexts = nullptr;
+
+  ASSERT_EQ(ncclRmaIbProxyCreateContext(&scene.coll, &config, reinterpret_cast<void**>(&contexts)), ncclSuccess);
+  EXPECT_EQ(scene.connectPeers, (std::vector<int>{1, 2, 3, 0}));
+  ASSERT_EQ(ncclRmaIbProxyDestroyContext(contexts), ncclSuccess);
+  g_hostAllocs.Free(contexts);
+}
+
+TEST_F(NetIbGinMicrotest, CreateContext_PeerConnectionsTakeGinIbTcOverIbTc) {
+  struct TrafficClassCase {
+    int64_t ginTc;
+    int expected;
+  };
+  for (TrafficClassCase tcCase : {TrafficClassCase{-1, 4}, TrafficClassCase{9, 9}}) {
+    SCOPED_TRACE(tcCase.ginTc);
+    GinCreateContextScene scene(/*nranks=*/2, /*rank=*/1);
+    ScopedHook params(g_loadParam, [tcCase](const char* name, int64_t fallback) {
+      if (std::strcmp(name, "GIN_IB_TC") == 0) return tcCase.ginTc;
+      if (std::strcmp(name, "IB_TC") == 0) return int64_t{4};
+      return fallback;
+    });
+    ncclRmaConfig_t config{};
+    config.nContexts = 1;
+    config.rankStride = 1;
+    ncclRmaIbProxyCtx* contexts = nullptr;
+
+    ASSERT_EQ(ncclRmaIbProxyCreateContext(&scene.coll, &config, reinterpret_cast<void**>(&contexts)), ncclSuccess);
+    EXPECT_EQ(scene.connectTcs, (std::vector<int>{tcCase.expected, tcCase.expected}));
+    ASSERT_EQ(ncclRmaIbProxyDestroyContext(contexts), ncclSuccess);
+    g_hostAllocs.Free(contexts);
+  }
 }
 
 TEST_F(NetIbGinMicrotest, CreateContext_NonDivisibleStrideIsRejectedBeforeAllocation) {
@@ -859,7 +821,7 @@ TEST_F(NetIbGinMicrotest, CreateContext_NonDivisibleStrideIsRejectedBeforeAlloca
   void* context = reinterpret_cast<void*>(0x1);
 
   EXPECT_EQ(ncclRmaIbProxyCreateContext(&coll, &config, &context), ncclInternalError);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_EQ(g_hostAllocs.calls, 0);
 }
 
 // AICOMRCCL-3094: partial context creation must release child arrays allocated
@@ -873,12 +835,13 @@ TEST_F(NetIbGinMicrotest, DISABLED_CreateContext_PartialAllocationFailureRelease
     return ncclSuccess;
   };
   int listenToken = 1;
-  g_ginNetListen = [&](void*, int, void*, void** listen) {
-    *listen = &listenToken;
+  ScopedHook listen(g_ginNetListen, [&](void*, int, void*, void** comm) {
+    *comm = &listenToken;
     return ncclSuccess;
-  };
-  g_ginNetCloseListen = [](void*) { return ncclSuccess; };
-  g_ginAllocFailCall = 4;
+  });
+  ScopedHook closeListen(g_ginNetCloseListen, [](void*) { return ncclSuccess; });
+  // top-level context, handles, fullSendComm, then fullRecvComm
+  g_hostAllocs.failCall = 4;
   ncclRmaConfig_t config{};
   config.nContexts = 1;
   config.rankStride = 1;
@@ -886,7 +849,7 @@ TEST_F(NetIbGinMicrotest, DISABLED_CreateContext_PartialAllocationFailureRelease
 
   EXPECT_EQ(ncclRmaIbProxyCreateContext(&coll, &config, &context), ncclSystemError);
   EXPECT_EQ(context, nullptr);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 // AICOMRCCL-3094: failure after peers are established must close both
@@ -902,33 +865,29 @@ TEST_F(NetIbGinMicrotest, DISABLED_CreateContext_BarrierFailureClosesEstablished
   int listenToken = 1;
   int sendToken = 2;
   int recvToken = 3;
-  g_ginNetListen = [&](void*, int, void*, void** listen) {
-    *listen = &listenToken;
+  ScopedHook listen(g_ginNetListen, [&](void*, int, void*, void** comm) {
+    *comm = &listenToken;
     return ncclSuccess;
-  };
-  g_ginNetCloseListen = [](void*) { return ncclSuccess; };
-  g_ginConnect = [&](void*, int, void*, void** comm, ncclNetDeviceHandle_t**, int, int) {
+  });
+  ScopedHook closeListen(g_ginNetCloseListen, [](void*) { return ncclSuccess; });
+  ScopedHook connect(g_ginConnect, [&](void*, int, void*, void** comm, ncclNetDeviceHandle_t**, int, int) {
     *comm = &sendToken;
     return ncclSuccess;
-  };
-  g_ginAccept = [&](void*, void** comm, ncclNetDeviceHandle_t**, int) {
+  });
+  ScopedHook accept(g_ginAccept, [&](void*, void** comm, ncclNetDeviceHandle_t**, int) {
     *comm = &recvToken;
     return ncclSuccess;
-  };
-  int sendCloses = 0;
-  int recvCloses = 0;
-  g_ginNetCloseSend = [&](void* comm) {
+  });
+  ScopedHook closeSend(g_ginNetCloseSend, [&](void* comm) {
     EXPECT_EQ(comm, &sendToken);
-    ++sendCloses;
     return ncclSuccess;
-  };
-  g_ginNetCloseRecv = [&](void* comm) {
+  });
+  ScopedHook closeRecv(g_ginNetCloseRecv, [&](void* comm) {
     EXPECT_EQ(comm, &recvToken);
-    ++recvCloses;
     return ncclSuccess;
-  };
+  });
   // top-level context, handles, fullSendComm, fullRecvComm, then barrier dummy
-  g_ginAllocFailCall = 5;
+  g_hostAllocs.failCall = 5;
   ncclRmaConfig_t config{};
   config.nContexts = 1;
   config.rankStride = 1;
@@ -936,9 +895,9 @@ TEST_F(NetIbGinMicrotest, DISABLED_CreateContext_BarrierFailureClosesEstablished
 
   EXPECT_EQ(ncclRmaIbProxyCreateContext(&coll, &config, &context), ncclSystemError);
   EXPECT_EQ(context, nullptr);
-  EXPECT_EQ(sendCloses, 1);
-  EXPECT_EQ(recvCloses, 1);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_EQ(closeSend.calls, 1);
+  EXPECT_EQ(closeRecv.calls, 1);
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 TEST_F(NetIbGinMicrotest, RegMrSym_GathersBaseAddressesAndRkeysThenDeregisters) {
@@ -951,35 +910,32 @@ TEST_F(NetIbGinMicrotest, RegMrSym_GathersBaseAddressesAndRkeysThenDeregisters) 
   mr.rkey = 0x44;
   ncclIbMrHandle ibHandle{};
   ibHandle.mrs[0] = &mr;
-  g_ginRegMrDmaBuf = [&](void* comm, void*, size_t, int, uint64_t, int, uint64_t, void** handle) {
+  ScopedHook regMrDmaBuf(g_ginRegMrDmaBuf, [&](void* comm, void*, size_t, int, uint64_t, int, uint64_t,
+                                               void** handle) {
     EXPECT_EQ(comm, &recvToken);
     *handle = &ibHandle;
     return ncclSuccess;
-  };
-  int gatherCall = 0;
-  g_ginCollAllGather = [&](ncclGinIbCollComm*, void* src, void* dst, size_t size) {
-    if (gatherCall++ == 0) {
-      auto local = *static_cast<void**>(src);
+  });
+  // The first gather is each rank's base VA, the second its rkey.
+  ScopedHook gather(g_ginCollAllGather, [](ncclGinIbCollComm*, void* src, void* dst, size_t size) {
+    if (size == sizeof(uintptr_t)) {
       auto* bases = static_cast<uintptr_t*>(dst);
-      bases[0] = reinterpret_cast<uintptr_t>(local);
+      bases[0] = reinterpret_cast<uintptr_t>(*static_cast<void**>(src));
       bases[1] = 0x2000;
-      EXPECT_EQ(size, sizeof(uintptr_t));
     } else {
+      EXPECT_EQ(size, sizeof(uint32_t));
       auto* rkeys = static_cast<uint32_t*>(dst);
       rkeys[0] = *static_cast<uint32_t*>(src);
       rkeys[1] = 0x55;
-      EXPECT_EQ(size, sizeof(uint32_t));
     }
     return ncclSuccess;
-  };
+  });
   coll.allGather = GinCollAllGather;
-  int deregistered = 0;
-  g_ginNetDeregMr = [&](void* comm, void* handle) {
+  ScopedHook deregMr(g_ginNetDeregMr, [&](void* comm, void* handle) {
     EXPECT_EQ(comm, &recvToken);
     EXPECT_EQ(handle, &ibHandle);
-    ++deregistered;
     return ncclSuccess;
-  };
+  });
   int data = 0;
   ncclRmaIbProxyMrHandle* handle = nullptr;
 
@@ -987,13 +943,14 @@ TEST_F(NetIbGinMicrotest, RegMrSym_GathersBaseAddressesAndRkeysThenDeregisters) 
                                   reinterpret_cast<void**>(&handle)),
             ncclSuccess);
   ASSERT_NE(handle, nullptr);
+  EXPECT_EQ(gather.calls, 2);
   EXPECT_EQ(handle->base_vas[0], reinterpret_cast<uintptr_t>(&data));
   EXPECT_EQ(handle->base_vas[1], 0x2000u);
   EXPECT_EQ(handle->rkeys[0], 0x44u);
   EXPECT_EQ(handle->rkeys[1], 0x55u);
   ASSERT_EQ(ncclRmaIbProxyDeregMrSym(&coll, handle), ncclSuccess);
-  EXPECT_EQ(deregistered, 1);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_EQ(deregMr.calls, 1);
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 TEST_F(NetIbGinMicrotest, RegMrSym_FirstGatherFailureDeregistersAndFreesAllWrappers) {
@@ -1004,25 +961,24 @@ TEST_F(NetIbGinMicrotest, RegMrSym_FirstGatherFailureDeregistersAndFreesAllWrapp
   ibv_mr mr{};
   ncclIbMrHandle ibHandle{};
   ibHandle.mrs[0] = &mr;
-  g_ginRegMrDmaBuf = [&](void*, void*, size_t, int, uint64_t, int, uint64_t, void** handle) {
+  ScopedHook regMrDmaBuf(g_ginRegMrDmaBuf, [&](void*, void*, size_t, int, uint64_t, int, uint64_t,
+                                               void** handle) {
     *handle = &ibHandle;
     return ncclSuccess;
-  };
-  g_ginCollAllGather = [](ncclGinIbCollComm*, void*, void*, size_t) { return ncclSystemError; };
+  });
+  ScopedHook gather(g_ginCollAllGather, [](ncclGinIbCollComm*, void*, void*, size_t) { return ncclSystemError; });
   coll.allGather = GinCollAllGather;
-  int deregistered = 0;
-  g_ginNetDeregMr = [&](void*, void* handle) {
+  ScopedHook deregMr(g_ginNetDeregMr, [&](void*, void* handle) {
     EXPECT_EQ(handle, &ibHandle);
-    ++deregistered;
     return ncclSuccess;
-  };
+  });
   int data = 0;
   void* handle = nullptr;
 
   EXPECT_EQ(ncclRmaIbProxyRegMrSym(&coll, &data, sizeof(data), NCCL_PTR_HOST, 0, &handle), ncclSystemError);
   EXPECT_EQ(handle, nullptr);
-  EXPECT_EQ(deregistered, 1);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_EQ(deregMr.calls, 1);
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 struct GinDataScene {
@@ -1229,6 +1185,7 @@ TEST_F(NetIbGinMicrotest, IPutSignal_PutAndAddPostOrderedWriteThenAtomic) {
   EXPECT_EQ(scene.verbs.posted[1].rkey, 0x21u);
   EXPECT_EQ(scene.verbs.posted[1].compareAdd, 9u);
   EXPECT_EQ(scene.verbs.posted[1].sge.addr, reinterpret_cast<uintptr_t>(&scene.send.putSignalScratchpad));
+  EXPECT_EQ(scene.verbs.posted[1].sge.lkey, 0x91u);
   EXPECT_NE(scene.verbs.posted[1].sendFlags & IBV_SEND_SIGNALED, 0);
 }
 
@@ -1306,14 +1263,14 @@ TEST_F(NetIbGinMicrotest, Test_ErrorCompletionReturnsRemoteErrorWithoutCompletin
   ncclIbRequest* req = scene.PostPut();
   ASSERT_NE(req, nullptr);
   scene.QueueCompletion(req, IBV_WC_REM_ACCESS_ERR);
-  g_ncclSocketGetAddr = [](ncclSocket*, ncclSocketAddress* addr) {
+  ScopedHook getAddr(g_ncclSocketGetAddr, [](ncclSocket*, ncclSocketAddress* addr) {
     std::memset(addr, 0, sizeof(*addr));
     return ncclSuccess;
-  };
-  g_ncclSocketToString = [](const ncclSocketAddress*, char* line, size_t length, int) {
+  });
+  ScopedHook toString(g_ncclSocketToString, [](const ncclSocketAddress*, char* line, size_t length, int) {
     std::snprintf(line, length, "test-peer");
     return line;
-  };
+  });
   int done = 0;
 
   EXPECT_EQ(ncclRmaIbProxyTest(nullptr, req, &done), ncclRemoteError);
@@ -1335,30 +1292,45 @@ TEST_F(NetIbGinMicrotest, Test_PollFailurePropagatesWithoutCompletingRequest) {
   ncclIbFreeRequest(req);
 }
 
-TEST_F(NetIbGinMicrotest, IFlush_UsesLocalRankRegistrationAndFlushQp) {
+TEST_F(NetIbGinMicrotest, IFlush_DrainsAggregatedPutsThenReadsLocalRegistrationOnFlushQp) {
   GinDataScene scene;
-  int createFlushQpCalls = 0;
-  g_ginCreateFlushQp = [&](ncclIbRecvComm* comm) {
-    ++createFlushQpCalls;
+  ScopedHook createFlushQp(g_ginCreateFlushQp, [&](ncclIbRecvComm* comm) {
     EXPECT_EQ(comm, &scene.recv);
     return ncclSuccess;
-  };
+  });
+  ASSERT_NE(scene.PostPut(ncclRmaOptFlagsAggregateRequests), nullptr);
+  ASSERT_TRUE(scene.verbs.posted.empty());
   void* request = nullptr;
 
   ASSERT_EQ(ncclRmaIbProxyIFlush(&scene.context, 0, &scene.dstHandle, 1, &request), ncclSuccess);
   ASSERT_NE(request, nullptr);
-  EXPECT_EQ(createFlushQpCalls, 1);
-  ASSERT_EQ(scene.verbs.posted.size(), 1u);
-  EXPECT_EQ(scene.verbs.posted[0].opcode, IBV_WR_RDMA_READ);
-  EXPECT_EQ(scene.verbs.posted[0].remoteAddress, 0x3000u);
-  EXPECT_EQ(scene.verbs.posted[0].rkey, 0x20u);
-  EXPECT_EQ(scene.verbs.posted[0].sge.addr, 0x9000u);
-  EXPECT_NE(scene.verbs.posted[0].sendFlags & IBV_SEND_SIGNALED, 0);
+  EXPECT_EQ(createFlushQp.calls, 1);
+  ASSERT_EQ(scene.verbs.posted.size(), 2u);
+  EXPECT_EQ(scene.verbs.posted[0].qp, scene.dataQp);
+  EXPECT_EQ(scene.verbs.posted[0].opcode, IBV_WR_RDMA_WRITE);
+  const auto& flush = scene.verbs.posted[1];
+  EXPECT_EQ(flush.qp, scene.flushQp);
+  EXPECT_EQ(flush.opcode, IBV_WR_RDMA_READ);
+  EXPECT_EQ(flush.remoteAddress, 0x3000u);
+  EXPECT_EQ(flush.rkey, 0x20u);
+  EXPECT_EQ(flush.sge.addr, 0x9000u);
+  EXPECT_NE(flush.sendFlags & IBV_SEND_SIGNALED, 0);
+}
+
+TEST_F(NetIbGinMicrotest, IFlush_DisabledFlushReturnsNoRequest) {
+  GinDataScene scene;
+  scene.recv.flushEnabled = false;
+  void* request = reinterpret_cast<void*>(0x1);
+
+  ASSERT_EQ(ncclRmaIbProxyIFlush(&scene.context, 0, &scene.dstHandle, 1, &request), ncclSuccess);
+  EXPECT_EQ(request, nullptr);
+  EXPECT_TRUE(scene.verbs.posted.empty());
+  EXPECT_EQ(scene.recv.ginSeq.posted, 0u);
 }
 
 TEST_F(NetIbGinMicrotest, IFlush_CompletionAdvancesReceiveSequenceAndFreesRequest) {
   GinDataScene scene;
-  g_ginCreateFlushQp = [](ncclIbRecvComm*) { return ncclSuccess; };
+  ScopedHook createFlushQp(g_ginCreateFlushQp, [](ncclIbRecvComm*) { return ncclSuccess; });
   void* request = nullptr;
   ASSERT_EQ(ncclRmaIbProxyIFlush(&scene.context, 0, &scene.dstHandle, 1, &request), ncclSuccess);
   auto* req = static_cast<ncclIbRequest*>(request);
@@ -1420,7 +1392,7 @@ TEST_F(NetIbGinMicrotest, DISABLED_OtherDataApis_PostFailureRollsBackRequestSequ
   {
     GinDataScene scene;
     scene.verbs.postSendErr = EIO;
-    g_ginCreateFlushQp = [](ncclIbRecvComm*) { return ncclSuccess; };
+    ScopedHook createFlushQp(g_ginCreateFlushQp, [](ncclIbRecvComm*) { return ncclSuccess; });
     void* request = nullptr;
     EXPECT_EQ(ncclRmaIbProxyIFlush(&scene.context, 0, &scene.dstHandle, 1, &request), ncclSystemError);
     EXPECT_EQ(request, nullptr);
@@ -1435,10 +1407,10 @@ TEST_F(NetIbGinMicrotest, DISABLED_P2PBarrier_AllGatherFailureFreesScratch) {
   ncclGinIbCollComm coll{};
   coll.rank = 0;
   coll.nranks = 1;
-  g_ginNetRegMr = [](void*, void*, size_t, int, void**) { return ncclSystemError; };
+  ScopedHook regMr(g_ginNetRegMr, [](void*, void*, size_t, int, void**) { return ncclSystemError; });
 
   EXPECT_EQ(ncclGinIbP2PBarrier(&coll), ncclSystemError);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 // AICOMRCCL-3094: the local all-gather contribution should not invoke memcpy
@@ -1448,11 +1420,11 @@ TEST_F(NetIbGinMicrotest, DISABLED_P2PBarrier_LocalContributionAvoidsOverlapping
   coll.rank = 0;
   coll.nranks = 1;
   int registration = 1;
-  g_ginNetRegMr = [&](void*, void*, size_t, int, void** handle) {
+  ScopedHook regMr(g_ginNetRegMr, [&](void*, void*, size_t, int, void** handle) {
     *handle = &registration;
     return ncclSuccess;
-  };
-  g_ginNetDeregMr = [](void*, void*) { return ncclSuccess; };
+  });
+  ScopedHook deregMr(g_ginNetDeregMr, [](void*, void*) { return ncclSuccess; });
 
   ASSERT_EQ(ncclGinIbP2PBarrier(&coll), ncclSuccess);
   EXPECT_EQ(g_ginSelfCopies, 0);
@@ -1462,12 +1434,12 @@ TEST_F(NetIbGinMicrotest, DISABLED_P2PBarrier_LocalContributionAvoidsOverlapping
 // just like its child arrays and peer communications.
 TEST_F(NetIbGinMicrotest, DISABLED_DestroyContext_FreesTopLevelContext) {
   ncclRmaIbProxyCtx* context = nullptr;
-  ASSERT_EQ(TestGinCalloc(&context, 1), ncclSuccess);
+  ASSERT_EQ(g_hostAllocs.Calloc(&context, 1), ncclSuccess);
   context->nContexts = 1;
   context->nranks = 0;
 
   ASSERT_EQ(ncclRmaIbProxyDestroyContext(context), ncclSuccess);
-  EXPECT_TRUE(g_ginAllocations.empty());
+  EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
 // AICOMRCCL-3094: disabling the explicit flush must not leave an

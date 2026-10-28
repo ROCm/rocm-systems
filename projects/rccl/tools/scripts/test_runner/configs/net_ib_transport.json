@@ -514,22 +514,6 @@
       ]
     },
 
-    "net_ib_wqe_lat_unit": {
-      "extends": "net_ib_base",
-      "skip_if_missing": true,
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 120,
-      "tests": [
-        {
-          "name": "NetIB_WqeLatMon_Unit",
-          "description": "AICOMRCCL-2013: CPU-only checks of the WQE post-to-poll latency monitor state machine, Welford/P^2 statistics, slow threshold and stall check rate limiters",
-          "test_filter": "NetIbWqeLatMonUnit.*"
-        }
-      ]
-    },
-
     "net_ib_wqe_lat": {
       "extends": "net_ib_base",
       "timeout": 300,
@@ -1722,12 +1706,6 @@
       "name": "NET IB - CTS Depth Stress",
       "description": "CTS match-table depth stress / overflow reproducer (AINIC); fully under RCCL_IB_P2P_DISABLE_CTS=1 workaround so passes cleanly on healthy stacks",
       "config": "net_ib_cts_stress",
-      "enabled": true
-    },
-    {
-      "name": "NET IB - WQE Latency Monitor Unit",
-      "description": "AICOMRCCL-2013: WQE post-to-poll latency monitor statistics and state machine (CPU only)",
-      "config": "net_ib_wqe_lat_unit",
       "enabled": true
     },
     {
