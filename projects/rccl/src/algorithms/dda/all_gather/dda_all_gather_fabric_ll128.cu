@@ -31,6 +31,9 @@ constexpr int kDdaLL128AGDefaultMaxBlocks = 75;
 constexpr size_t kDdaLL128AGMaxBlocksAboveBytes = (size_t)2 * 1024 * 1024;
 
 RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", kDdaLL128AGDefaultThreads);
+// Slices a warp moves per pass: 1 or 4; any other value falls back to 1.
+// Env: RCCL_DDA_LL128_AG_UNROLL.
+RCCL_PARAM(DdaLL128AGUnroll, "DDA_LL128_AG_UNROLL", 1);
 RCCL_PARAM(DdaLL128AGMaxBlocks, "DDA_LL128_AG_MAXBLOCKS", kDdaLL128AGDefaultMaxBlocks);
 RCCL_PARAM(DdaLL128AGMaxBlocksAboveBytes, "DDA_LL128_AG_MAXBLOCKS_ABOVE_BYTES",
            (int64_t)kDdaLL128AGMaxBlocksAboveBytes);
@@ -116,15 +119,18 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
+  const bool unroll4 = rcclParamDdaLL128AGUnroll() == 4;
   INFO(NCCL_COLL,
        "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
-       "(warp-per-slice, bpp=%u, slotWords=%zu)",
+       "(warp-per-slice, bpp=%u, slotWords=%zu, unroll=%d)",
        nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
-       ddaLL128AgSlotWords(bankSize, nRanks));
+       ddaLL128AgSlotWords(bankSize, nRanks), unroll4 ? 4 : 1);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T>), grid, block, 0, stream, /*startEvent=*/nullptr,
+  const auto kernel =
+    unroll4 ? dda::common::ddaAllGatherFabricLL128<T, 4> : dda::common::ddaAllGatherFabricLL128<T, 1>;
+  hipExtLaunchKernelGGL(kernel, grid, block, 0, stream, /*startEvent=*/nullptr,
                         stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
                         perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
 

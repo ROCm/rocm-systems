@@ -35,8 +35,8 @@ const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
 constexpr size_t kSliceData = 1920;
 constexpr size_t kSliceWire = 2048;
 
-const void* Kernel() {
-  return KernelPtr(&dda::common::ddaAllGatherFabricLL128<int8_t>);
+const void* Kernel(int unroll = 1) {
+  return unroll == 4 ? KernelPtr(&dda::common::ddaAllGatherFabricLL128<int8_t, 4>) : KernelPtr(&dda::common::ddaAllGatherFabricLL128<int8_t, 1>);
 }
 
 class DdaAllGatherFabricLL128Microtest : public ::testing::Test {
@@ -190,6 +190,16 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_OneKernelForEveryRankCount) {
     EXPECT_EQ(launch.kernel, Kernel()) << "nRanks " << nRanks;
     EXPECT_EQ(launch.grid.x, static_cast<unsigned>(nRanks - 1));
     EXPECT_EQ(launch.Arg<int>(5), nRanks);
+  }
+}
+
+// DDA_LL128_AG_UNROLL picks the 4-slice-per-pass kernel; any value but 4 keeps one slice per pass.
+TEST_F(DdaAllGatherFabricLL128Microtest, Launch_UnrollFourPicksTheFourSliceKernel) {
+  EXPECT_EQ(RunOne(4).kernel, Kernel(1));
+  const std::pair<int64_t, int> cases[] = {{4, 4}, {1, 1}, {2, 1}, {0, 1}, {-4, 1}, {8, 1}};
+  for (const auto& [env, unroll] : cases) {
+    params_["RCCL_DDA_LL128_AG_UNROLL"] = env;
+    EXPECT_EQ(RunOne(4).kernel, Kernel(unroll)) << "DDA_LL128_AG_UNROLL " << env;
   }
 }
 

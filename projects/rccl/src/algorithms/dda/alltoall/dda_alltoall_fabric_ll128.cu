@@ -27,6 +27,9 @@
 // multiple of 32 (one warp per 2 KiB slice) in [32, 1024]; invalid values fall
 // back to the tuned default. Env: RCCL_DDA_LL128_A2A_THREADS.
 RCCL_PARAM(DdaLL128A2AThreads, "DDA_LL128_A2A_THREADS", 256);
+// Slices a warp moves per pass: 1 or 4; any other value falls back to 1.
+// Env: RCCL_DDA_LL128_A2A_UNROLL.
+RCCL_PARAM(DdaLL128A2AUnroll, "DDA_LL128_A2A_UNROLL", 1);
 
 namespace {
 
@@ -85,12 +88,16 @@ static ncclResult_t ncclAllToAllDdaFabricLL128V2(const void* sendbuff, void* rec
   const size_t slices = ddaLL128Slices(perChunkBytes);
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
   const auto gb = ddaAllToAllFabricLL128V2Geom(comm, perChunkBytes);
-  INFO(NCCL_COLL, "DDA fabric AllToAll LL128 v2: nRanks=%d perChunkBytes=%zu slices=%zu grid=%ux%u block=%u",
-       comm->nRanks, perChunkBytes, slices, gb.first.x, gb.first.y, gb.second.x);
+  const bool unroll4 = rcclParamDdaLL128A2AUnroll() == 4;
+  INFO(NCCL_COLL,
+       "DDA fabric AllToAll LL128 v2: nRanks=%d perChunkBytes=%zu slices=%zu grid=%ux%u block=%u unroll=%d",
+       comm->nRanks, perChunkBytes, slices, gb.first.x, gb.first.y, gb.second.x, unroll4 ? 4 : 1);
   int8_t** peers = reinterpret_cast<int8_t**>(comm->ddaPeerPtrsDev);
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
-  hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128V2<int8_t>), gb.first, gb.second, 0, stream,
+  const auto kernel = unroll4 ? dda::common::ddaAllToAllFabricLL128V2<int8_t, 4>
+                              : dda::common::ddaAllToAllFabricLL128V2<int8_t, 1>;
+  hipExtLaunchKernelGGL(kernel, gb.first, gb.second, 0, stream,
                         /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<int8_t*>(recvbuff),
                         static_cast<const int8_t*>(sendbuff), perChunkBytes, comm->rank, comm->nRanks,
                         comm->ddaLLEpochDev, comm->ddaLLEpochLen, slices, bankSize, params);

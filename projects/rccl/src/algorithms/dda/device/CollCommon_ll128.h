@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
 #include <hip/hip_runtime.h>
@@ -335,30 +336,83 @@ __device__ __forceinline__ int ddaLL128SliceBytes(size_t bytes, size_t s) {
   return rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
 }
 
-// Packs one slice of `eltN` bytes at `src` and stores it to `wire` (the slice's wire
-// base plus 2 * lane). There is no branch between the loads and the stores, so all
-// four loads are in flight before the first store, partial slices included.
-__device__ __forceinline__ void ddaLL128SendSlice(const int8_t* src, int eltN, uint64_t* wire, uint64_t flag, int lane,
-                                                  bool flagLane) {
-  uint64_t regs[kDdaLL128WordsPerThread];
-  ddaLL128LoadRegsBegin(regs, src, eltN, lane, flagLane);
+// Runs body(std::integral_constant<int, L>{}) for a warp's pass over its slices s0,
+// s0 + wstride, ..., s0 + (kUnroll - 1) * wstride, where L is how many of them exist:
+// kUnroll, or fewer on the warp's last pass. L is a compile-time constant, so the
+// pass body is straight-line.
+template <int kUnroll, typename Body>
+__device__ __forceinline__ void ddaLL128SlicePass(size_t s0, size_t wstride, size_t slicesTotal, Body&& body) {
+  static_assert(kUnroll >= 1 && kUnroll <= 4, "the switch below covers up to 4 slices");
+  if constexpr (kUnroll == 1) {
+    body(std::integral_constant<int, 1>{});
+  } else {
+    int slices = 1;
+#pragma unroll
+    for (int u = 1; u < kUnroll; ++u) {
+      if (s0 + (size_t)u * wstride < slicesTotal) slices = u + 1;
+    }
+    switch (slices) {
+    case 4:
+      if constexpr (kUnroll >= 4) body(std::integral_constant<int, 4>{});
+      break;
+    case 3:
+      if constexpr (kUnroll >= 3) body(std::integral_constant<int, 3>{});
+      break;
+    case 2:
+      body(std::integral_constant<int, 2>{});
+      break;
+    default:
+      body(std::integral_constant<int, 1>{});
+      break;
+    }
+  }
+}
+
+// Packs the L slices s0 + u * wstride (u < L) of the `bytes` at `src` and stores them
+// to `wire` (the slot base plus 2 * lane). There is no branch between the loads and the
+// stores, so every load of the pass is in flight before the first store, partial
+// slices included.
+template <int L>
+__device__ __forceinline__ void ddaLL128SendSlices(const int8_t* src, size_t bytes, uint64_t* wire, size_t s0,
+                                                   size_t wstride, uint64_t flag, int lane, bool flagLane) {
+  uint64_t regs[L][kDdaLL128WordsPerThread];
+#pragma unroll
+  for (int u = 0; u < L; ++u) {
+    const size_t s = s0 + (size_t)u * wstride;
+    ddaLL128LoadRegsBegin(regs[u], src + s * (size_t)kDdaLL128DataBytesPerSlice, ddaLL128SliceBytes(bytes, s), lane,
+                          flagLane);
+  }
 #if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_sched_barrier)
   // Without it the scheduler moves the flag-lane shuffle up between the loads, and
   // the loads after the shuffle wait for the ones before it.
   __builtin_amdgcn_sched_barrier(0);
 #endif
-  ddaLL128LoadRegsFinish(regs, flagLane);
-  ddaLL128StoreWire(wire, regs, flag, flagLane);
+#pragma unroll
+  for (int u = 0; u < L; ++u) {
+    ddaLL128LoadRegsFinish(regs[u], flagLane);
+    ddaLL128StoreWire(wire + (s0 + (size_t)u * wstride) * (size_t)kDdaLL128WireWordsPerSlice, regs[u], flag,
+                      flagLane);
+  }
 }
 
-// Polls one slice at `wire` (the slice's wire base plus 2 * lane) and unpacks its
-// `eltN` bytes to `dst`. Returns false, for the whole warp, if the comm abort flag is set.
-__device__ __forceinline__ bool ddaLL128RecvSlice(const uint64_t* wire, int8_t* dst, int eltN, uint64_t flag, int lane,
-                                                  bool flagLane, DdaKernelParams params) {
-  const uint64_t* const lines[1] = {wire};
-  uint64_t vr[1][kDdaLL128WordsPerThread];
-  if (!ddaLL128PollWireN<1>(lines, vr, flag, lane, params)) return false;
-  ddaLL128StoreRegs(dst, vr[0], eltN, lane, flagLane);
+// Polls the L slices s0 + u * wstride (u < L) at `wire` (the slot base plus 2 * lane),
+// all L in flight together, and unpacks them into the `bytes` at `dst`. Returns false,
+// for the whole warp, if the comm abort flag is set.
+template <int L>
+__device__ __forceinline__ bool ddaLL128RecvSlices(const uint64_t* wire, int8_t* dst, size_t bytes, size_t s0,
+                                                   size_t wstride, uint64_t flag, int lane, bool flagLane,
+                                                   DdaKernelParams params) {
+  const uint64_t* lines[L];
+#pragma unroll
+  for (int u = 0; u < L; ++u) lines[u] = wire + (s0 + (size_t)u * wstride) * (size_t)kDdaLL128WireWordsPerSlice;
+  uint64_t vr[L][kDdaLL128WordsPerThread];
+  if (!ddaLL128PollWireN<L>(lines, vr, flag, lane, params)) return false;
+#pragma unroll
+  for (int u = 0; u < L; ++u) {
+    const size_t s = s0 + (size_t)u * wstride;
+    ddaLL128StoreRegs(dst + s * (size_t)kDdaLL128DataBytesPerSlice, vr[u], ddaLL128SliceBytes(bytes, s), lane,
+                      flagLane);
+  }
   return true;
 }
 

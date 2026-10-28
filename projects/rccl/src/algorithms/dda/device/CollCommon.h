@@ -424,11 +424,29 @@ __device__ __forceinline__ void ddaSetLLEpoch(uint32_t* __restrict__ epochDev, i
 
 // Copies `bytes` (a multiple of 16) from src to dst in 16-byte vectors, thread `gtid` of
 // `gstride` threads taking every gstride-th vector, so the whole grid shares the copy.
+// Each thread issues kUnroll loads before their stores.
+template <int kUnroll = 1>
 __device__ __forceinline__ void ddaGridCopy16B(const void* src, void* dst, size_t bytes, size_t gtid, size_t gstride) {
   const v4u* s4 = reinterpret_cast<const v4u*>(src);
   v4u* d4 = reinterpret_cast<v4u*>(dst);
   const size_t nVec = bytes >> 4;
-  for (size_t i = gtid; i < nVec; i += gstride) d4[i] = s4[i];
+  if constexpr (kUnroll == 1) {
+    for (size_t i = gtid; i < nVec; i += gstride) d4[i] = s4[i];
+  } else {
+    for (size_t i0 = gtid; i0 < nVec; i0 += (size_t)kUnroll * gstride) {
+      v4u v[kUnroll];
+#pragma unroll
+      for (int u = 0; u < kUnroll; ++u) {
+        const size_t i = i0 + (size_t)u * gstride;
+        if (i < nVec) v[u] = s4[i];
+      }
+#pragma unroll
+      for (int u = 0; u < kUnroll; ++u) {
+        const size_t i = i0 + (size_t)u * gstride;
+        if (i < nVec) d4[i] = v[u];
+      }
+    }
+  }
 }
 
 } // namespace dda::common

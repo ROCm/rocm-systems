@@ -33,64 +33,11 @@ constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
-// Packs this warp's L slices s0 + u * wstride (u < L) and pushes them to the
-// peer's slot. Kept free of branches between the loads and the stores: any branch
-// there makes each slice's loads land before the next slice's are issued.
-template <int L>
-__device__ __forceinline__ void ddaLL128AgSendSlices(const int8_t* srcBytes, uint64_t* scatterSlot,
-                                                     size_t perRankBytes, size_t s0, size_t wstride,
-                                                     uint64_t flag, int lane, bool flagLane) {
-  uint64_t regs[L][kDdaLL128WordsPerThread];
-#pragma unroll
-  for (int u = 0; u < L; ++u) {
-    const size_t dataByte = (s0 + (size_t)u * wstride) * (size_t)kDdaLL128DataBytesPerSlice;
-    const size_t rem = perRankBytes - dataByte;
-    const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-    ddaLL128LoadRegsBegin<int8_t>(regs[u], srcBytes + dataByte, eltInSlice, lane, flagLane);
-  }
-#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_sched_barrier)
-  // Without it the scheduler moves the flag-lane shuffle up between the loads, and
-  // the loads after the shuffle wait for the ones before it.
-  __builtin_amdgcn_sched_barrier(0);
-#endif
-#pragma unroll
-  for (int u = 0; u < L; ++u) {
-    ddaLL128LoadRegsFinish(regs[u], flagLane);
-    ddaLL128StoreWire(scatterSlot + (s0 + (size_t)u * wstride) * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
-                      regs[u], flag, flagLane);
-  }
-}
-
-// Polls this warp's L slices s0 + u * wstride (u < L) in the peer's slot and
-// unpacks them. Straight-line like ddaLL128AgSendSlices, so the polls of all L
-// slices are in flight together. Returns false if the comm abort flag is set.
-template <int L>
-__device__ __forceinline__ bool ddaLL128AgRecvSlices(const uint64_t* gatherSlot, int8_t* dstBytes,
-                                                     size_t perRankBytes, size_t s0, size_t wstride,
-                                                     uint64_t flag, int lane, bool flagLane,
-                                                     DdaKernelParams params) {
-  const uint64_t* wire[L];
-#pragma unroll
-  for (int u = 0; u < L; ++u) {
-    wire[u] = gatherSlot + (s0 + (size_t)u * wstride) * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
-  }
-  uint64_t vr[L][kDdaLL128WordsPerThread];
-  if (!ddaLL128PollWireN<L>(wire, vr, flag, lane, params)) return false;
-#pragma unroll
-  for (int u = 0; u < L; ++u) {
-    const size_t dataByte = (s0 + (size_t)u * wstride) * (size_t)kDdaLL128DataBytesPerSlice;
-    const size_t rem = perRankBytes - dataByte;
-    const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-    ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr[u], eltInSlice, lane, flagLane);
-  }
-  return true;
-}
-
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
-// peer; grid.y splits that peer's slices across blocks, and a warp takes one of
-// its slices at a time. Each column packs this rank's payload into its peer's
-// slot, then polls its own slot for that peer's payload and unpacks it.
-template <typename T>
+// peer; grid.y splits that peer's slices across blocks, and a warp takes kUnroll
+// (1 or 4) of its slices per pass. Each column packs this rank's payload into its
+// peer's slot, then polls its own slot for that peer's payload and unpacks it.
+template <typename T, int kUnroll>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
@@ -130,31 +77,31 @@ __launch_bounds__(1024)
 
   const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff);
   uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
-    (uint64_t)selfRank * (uint64_t)slotWords;
+    (uint64_t)selfRank * (uint64_t)slotWords + 2 * lane;
   const uint64_t* gatherSlot = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords +
-    (uint64_t)peer * (uint64_t)slotWords;
+    (uint64_t)peer * (uint64_t)slotWords + 2 * lane;
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perRankBytes;
 
   // Phase 1: pack and push this column's slices to the one peer it owns.
-  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    ddaLL128AgSendSlices<1>(srcBytes, scatterSlot, perRankBytes, s, wstride, flag, lane, flagLane);
+  const size_t pstride = (size_t)kUnroll * wstride;
+  for (size_t s0 = gwarp; s0 < slicesTotal; s0 += pstride) {
+    ddaLL128SlicePass<kUnroll>(s0, wstride, slicesTotal, [&](auto slices) {
+      ddaLL128SendSlices<slices>(srcBytes, perRankBytes, scatterSlot, s0, wstride, flag, lane, flagLane);
+    });
   }
 
   // Local copy sendbuff -> recvbuff[selfRank].
-  {
-    v4u_gptr s4 = (v4u_gptr)sendbuff;
-    v4u_gptr d4 = (v4u_gptr)(reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes);
-    const size_t nVec = perRankBytes >> 4; // 16B chunks
-    const size_t gtid = (size_t)flatBlockId * (size_t)nthreads + (size_t)tid;
-    const size_t stride = (size_t)total * (size_t)nthreads;
-    for (size_t i = gtid; i < nVec; i += stride) {
-      d4[i] = s4[i];
-    }
-  }
+  ddaGridCopy16B<kUnroll>(sendbuff, reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes,
+                          perRankBytes, (size_t)flatBlockId * (size_t)nthreads + (size_t)tid,
+                          (size_t)total * (size_t)nthreads);
 
   // Phase 2: poll the same slices in that peer's slot and unpack.
-  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    if (!ddaLL128AgRecvSlices<1>(gatherSlot, dstBytes, perRankBytes, s, wstride, flag, lane, flagLane, params)) {
+  for (size_t s0 = gwarp; s0 < slicesTotal; s0 += pstride) {
+    bool done = true;
+    ddaLL128SlicePass<kUnroll>(s0, wstride, slicesTotal, [&](auto slices) {
+      done = ddaLL128RecvSlices<slices>(gatherSlot, dstBytes, perRankBytes, s0, wstride, flag, lane, flagLane, params);
+    });
+    if (!done) {
       break; // not return: every thread must reach the __syncthreads below
     }
   }

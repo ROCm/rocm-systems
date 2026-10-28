@@ -43,7 +43,9 @@ constexpr size_t ddaLL128A2ASlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
-template <typename T>
+// kUnroll: slices a warp moves per pass (1 or 4), each pass loading all of them before
+// the first wire store and polling them together.
+template <typename T, int kUnroll>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
@@ -79,19 +81,23 @@ __launch_bounds__(1024)
                                (uint64_t)peer * (uint64_t)slotWords + 2 * lane;
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perChunkBytes;
 
-  for (size_t s = gwarp; s < slicesTotal; s += wstride)
-    ddaLL128SendSlice(srcBytes + s * (size_t)kDdaLL128DataBytesPerSlice, ddaLL128SliceBytes(perChunkBytes, s),
-                      scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice, flag, lane, flagLane);
+  const size_t pstride = (size_t)kUnroll * wstride;
+  for (size_t s0 = gwarp; s0 < slicesTotal; s0 += pstride) {
+    ddaLL128SlicePass<kUnroll>(s0, wstride, slicesTotal, [&](auto slices) {
+      ddaLL128SendSlices<slices>(srcBytes, perChunkBytes, scatterSlot, s0, wstride, flag, lane, flagLane);
+    });
+  }
 
-  ddaGridCopy16B(reinterpret_cast<const int8_t*>(sendbuff) + (size_t)selfRank * perChunkBytes,
-                 reinterpret_cast<int8_t*>(recvbuff) + (size_t)selfRank * perChunkBytes, perChunkBytes,
-                 (size_t)flatBlockId * (size_t)nthreads + (size_t)tid, (size_t)total * (size_t)nthreads);
+  ddaGridCopy16B<kUnroll>(reinterpret_cast<const int8_t*>(sendbuff) + (size_t)selfRank * perChunkBytes,
+                          reinterpret_cast<int8_t*>(recvbuff) + (size_t)selfRank * perChunkBytes, perChunkBytes,
+                          (size_t)flatBlockId * (size_t)nthreads + (size_t)tid, (size_t)total * (size_t)nthreads);
 
-  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    if (!ddaLL128RecvSlice(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice,
-                           dstBytes + s * (size_t)kDdaLL128DataBytesPerSlice, ddaLL128SliceBytes(perChunkBytes, s),
-                           flag, lane, flagLane, params))
-      break; // aborted; the epoch update below still runs
+  for (size_t s0 = gwarp; s0 < slicesTotal; s0 += pstride) {
+    bool done = true;
+    ddaLL128SlicePass<kUnroll>(s0, wstride, slicesTotal, [&](auto slices) {
+      done = ddaLL128RecvSlices<slices>(gatherSlot, dstBytes, perChunkBytes, s0, wstride, flag, lane, flagLane, params);
+    });
+    if (!done) break; // aborted; the epoch update below still runs
   }
   ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag32);
 }
