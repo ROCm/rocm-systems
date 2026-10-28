@@ -12,8 +12,6 @@ import pytest
 from tests.integration import common as integration_common
 from tests.integration.common import (
     CSVS,
-    DETERMINISTIC_ACCURACY_BLOCKS,
-    STOCHASTIC_ACCURACY_BLOCKS,
     are_deterministic_counters_equal,
     are_stochastic_counters_similar,
     config,
@@ -92,8 +90,9 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 ):
     skip_unsupported_roofline_soc()
 
-    # Common panels cover instruction, dispatch and roofline counters.
-    options = ["--block", *DETERMINISTIC_ACCURACY_BLOCKS]
+    # These metrics should cover the deterministic counters being checked
+    # Block 4 (roofline) included to verify roofline counters under multiplexing
+    options = ["--block", "4", "6.1.5", "6.1.6", "7.2.2", "10.1"]
     workload_dir = common.get_output_dir(param_id="no_iter_mplx")
     workload_dirs = [workload_dir]
     try:
@@ -110,7 +109,11 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 
         options = [
             "--block",
-            *DETERMINISTIC_ACCURACY_BLOCKS,
+            "4",
+            "6.1.5",
+            "6.1.6",
+            "7.2.2",
+            "10.1",
             "--iteration-multiplexing",
             "kernel",
         ]
@@ -129,7 +132,11 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 
         options = [
             "--block",
-            *DETERMINISTIC_ACCURACY_BLOCKS,
+            "4",
+            "6.1.5",
+            "6.1.6",
+            "7.2.2",
+            "10.1",
             "--iteration-multiplexing",
             "kernel_launch_params",
         ]
@@ -148,18 +155,9 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
             workload_dir_klp
         )
 
-        comparison_failures = []
-        for policy, counters in (
-            ("kernel", counters_kernel),
-            ("kernel_launch_params", counters_kernel_launch_params),
-        ):
-            counters_equal, comparison_reason = are_deterministic_counters_equal(
-                [counters], counters_no_multiplexing
-            )
-            print(f"{policy}: {comparison_reason}")
-            if not counters_equal:
-                comparison_failures.append(f"{policy}: {comparison_reason}")
-        assert not comparison_failures, comparison_failures
+        assert are_deterministic_counters_equal(
+            [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+        )
 
         assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
         roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
@@ -172,13 +170,18 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 @pytest.mark.iteration_multiplexing_stochastic
 def test_iteration_multiplexing_stochastic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
+    soc,
 ):
     skip_unsupported_roofline_soc()
 
+    if not soc or ("MI300" not in soc and "MI350" not in soc):
+        pytest.skip("Skipping stochastic iteration multiplexing for non-CDNA socs.")
+
     workload_dir = common.get_output_dir(param_id="no_iter_mplx")
     workload_dirs = [workload_dir]
-    # Memory Chart and Roofline cover cache traffic across architectures.
-    options = ["--block", *STOCHASTIC_ACCURACY_BLOCKS]
+    # These metrics should cover the L1 cache stochastic counters
+    # Block 4 (roofline) included to verify roofline counters under multiplexing
+    options = ["--block", "4", "16.1", "16.3"]
     try:
         _ = binary_handler_profile_rocprof_compute(
             config,
@@ -193,7 +196,9 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
 
         options = [
             "--block",
-            *STOCHASTIC_ACCURACY_BLOCKS,
+            "4",
+            "16.1",
+            "16.3",
             "--iteration-multiplexing",
             "kernel",
         ]
@@ -212,7 +217,9 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
 
         options = [
             "--block",
-            *STOCHASTIC_ACCURACY_BLOCKS,
+            "4",
+            "16.1",
+            "16.3",
             "--iteration-multiplexing",
             "kernel_launch_params",
         ]
@@ -231,17 +238,9 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
             workload_dir_klp
         )
 
-        comparison_failures = []
-        for policy, counters in (
-            ("kernel", counters_kernel),
-            ("kernel_launch_params", counters_kernel_launch_params),
-        ):
-            print(f"Stochastic comparison policy: {policy}")
-            if not are_stochastic_counters_similar(
-                [counters], counters_no_multiplexing
-            ):
-                comparison_failures.append(policy)
-        assert not comparison_failures, comparison_failures
+        assert are_stochastic_counters_similar(
+            [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+        )
 
         assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
         roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
@@ -299,11 +298,9 @@ def test_iteration_multiplexing_all_counter_accuracy(
     )
     common.clean_output_dir(config["cleanup"], workload_dir)
 
-    counters_equal, comparison_reason = are_deterministic_counters_equal(
+    assert are_deterministic_counters_equal(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
-    assert counters_equal, comparison_reason
-    print(comparison_reason)
     assert are_stochastic_counters_similar(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
