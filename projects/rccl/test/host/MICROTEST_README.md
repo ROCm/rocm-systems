@@ -42,16 +42,14 @@ invented per binary. For a unit at `src/<dirs>/<stem>.cc`:
 | gtest suites | `<Stem>…Microtest` — every suite in the TU starts with `<Stem>` | `GinHostProxyAffinityMicrotest` |
 | CTest categories | `test/test_categories_micro_<stem>.yaml`, lowercase | `test/test_categories_micro_gin_host.yaml` |
 | JUnit XML | `host_tests_micro_<stem>.xml` (in `run_host_tests.sh`) | `host_tests_micro_gin_host.xml` |
-| Test-runner config | `unit_tests_micro_<stem>` (in `configs/ci-precheckin.json`) | `unit_tests_micro_gin_host` |
 
 Because every suite starts with the binary's `<Stem>`, the categories yaml needs
 exactly one pattern (`GinHost*`) and a new suite in the same TU is picked up
 without editing it — gtest's `*` does not cross the `.`, so a per-suite list
 silently drops any suite someone forgets to add.
 
-A new binary is named in four places: `rccl_add_micro_binary()` in
-`test/host/CMakeLists.txt`, the `binaries` array in `run_host_tests.sh`, the
-`test_configurations` + `test_suites` pair in `configs/ci-precheckin.json`, and
+A new binary is named in three places: `rccl_add_micro_binary()` in
+`test/host/CMakeLists.txt`, the `binaries` array in `run_host_tests.sh`, and
 the microtest list in `lib/test_executor.py` that llvm-cov reads as `--object`.
 
 ## Units under test
