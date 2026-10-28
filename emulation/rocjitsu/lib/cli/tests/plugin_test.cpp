@@ -20,16 +20,16 @@ const char *plugin_path() {
 
 TEST(CliPlugin, RetainedFlagPinsLibraryBeyondTreeLifetime) {
   util::StringDiagnostic diagnostic;
-  std::shared_ptr<util::cli::Flag> retained;
+  std::shared_ptr<rocjitsu::cli::Flag> retained;
   std::weak_ptr<void> library;
   {
-    util::cli::Command root{"tool"};
+    rocjitsu::cli::Command root{"tool"};
     auto loaded = load_plugin(plugin_path(), root, diagnostic.emitter());
     ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
     library = loaded.value();
     loaded.value().reset();
     const std::array<std::string_view, 5> args{"plugin", "inspect", "-f", "json", "input.bin"};
-    auto parsed = util::cli::parse(root, args, diagnostic.emitter());
+    auto parsed = rocjitsu::cli::parse(root, args, diagnostic.emitter());
     ASSERT_TRUE(parsed.succeeded()) << diagnostic.message();
     EXPECT_EQ(parsed.value().positional, std::vector<std::string>{"input.bin"});
     retained = parsed.value().command->find_flag("--format");
@@ -50,7 +50,7 @@ TEST(CliPlugin, RetainedFlagPinsLibraryBeyondTreeLifetime) {
 
 TEST(CliPlugin, MissingLibraryAndRegistrationCollisionFail) {
   util::StringDiagnostic diagnostic;
-  util::cli::Command root{"tool"};
+  rocjitsu::cli::Command root{"tool"};
   EXPECT_TRUE(load_plugin("/no/such/rocjitsu-cli-plugin.so", root, diagnostic.emitter()).failed());
   auto first = load_plugin(plugin_path(), root, diagnostic.emitter());
   ASSERT_TRUE(first.succeeded());

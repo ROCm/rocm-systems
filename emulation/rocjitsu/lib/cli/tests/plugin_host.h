@@ -8,7 +8,7 @@
 #include <dlfcn.h>
 
 inline util::FailureOr<std::shared_ptr<void>>
-load_plugin(const char *path, util::cli::Command &root, util::DiagnosticEmitter diagnostic) {
+load_plugin(const char *path, rocjitsu::cli::Command &root, util::DiagnosticEmitter diagnostic) {
   void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
   if (!handle)
     return diagnostic.emit() << "cannot load plugin '" << path << "': " << dlerror();
@@ -22,10 +22,10 @@ load_plugin(const char *path, util::cli::Command &root, util::DiagnosticEmitter 
 
   PluginHost host{
       &library,
-      [](void *context, util::cli::Flag *flag) {
+      [](void *context, rocjitsu::cli::Flag *flag) {
         auto pin = *static_cast<std::shared_ptr<void> *>(context);
-        return std::shared_ptr<util::cli::Flag>(
-            flag, [pin = std::move(pin)](util::cli::Flag *value) { delete value; });
+        return std::shared_ptr<rocjitsu::cli::Flag>(
+            flag, [pin = std::move(pin)](rocjitsu::cli::Flag *value) { delete value; });
       },
   };
   if (registration(root, host, diagnostic).failed())

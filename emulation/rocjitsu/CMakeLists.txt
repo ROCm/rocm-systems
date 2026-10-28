@@ -376,7 +376,7 @@ include(rj_host_cpu)
 
 # Libraries
 add_subdirectory(lib/util)
-add_subdirectory(lib/util/cli)
+add_subdirectory(lib/cli)
 add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
 add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "util/cli.h"
+#include "rocjitsu/cli.h"
 
 #include <gtest/gtest.h>
 
@@ -10,7 +10,7 @@
 #include <random>
 #include <type_traits>
 
-namespace util::cli {
+namespace rocjitsu::cli {
 namespace {
 
 class CliTest : public testing::Test {
@@ -106,8 +106,10 @@ TEST_F(CliTest, RegisteringSameAddressIsANoopButSameNameIsAnError) {
 TEST_F(CliTest, HelpSectionsPreserveOrderAndDoNotIntroduceScope) {
   auto help =
       std::make_shared<BoolFlag>(FlagInfo{"--help", {"-h"}, "Show help", ValueMode::Switch});
-  auto count = std::make_shared<IntFlag>(FlagInfo{"--count", {"-c"}, "Number of items"});
-  auto output = std::make_shared<StringFlag>(FlagInfo{"--output", {"-o"}, "Output file"});
+  auto count = std::make_shared<IntFlag>(
+      FlagInfo{"--count", {"-c"}, "Number of items", ValueMode::Required, "N"});
+  auto output = std::make_shared<StringFlag>(
+      FlagInfo{"--output", {"-o"}, "Output file", ValueMode::Required, "PATH"});
   auto child = root.add_command("child", diagnostic.emitter());
   ASSERT_TRUE(child.succeeded());
   ASSERT_TRUE(root.add_flag(help, diagnostic.emitter()).succeeded());
@@ -115,8 +117,8 @@ TEST_F(CliTest, HelpSectionsPreserveOrderAndDoNotIntroduceScope) {
   ASSERT_TRUE(root.add_flags("Empty", {}, diagnostic.emitter()).succeeded());
   EXPECT_EQ(format_help(root), "Usage: tool [options] <command> [--] [arguments...]\n"
                                "\nOptions:\n  --help, -h\n      Show help\n"
-                               "\nProcessing:\n  --count, -c VALUE\n      Number of items\n"
-                               "  --output, -o VALUE\n      Output file\n"
+                               "\nProcessing:\n  --count, -c N\n      Number of items\n"
+                               "  --output, -o PATH\n      Output file\n"
                                "\nCommands:\n  child\n");
   EXPECT_EQ(format_help(*child.value()), "Usage: tool child [options] [--] [arguments...]\n");
   auto result = run({"-c=3", "-o=out.txt", "child", "input"});
@@ -131,7 +133,8 @@ TEST_F(CliTest, HelpUsesCustomOrEmptyPositionalUsage) {
   auto launch = root.add_command("launch", diagnostic.emitter(), PositionalMode::AfterSeparator);
   ASSERT_TRUE(launch.succeeded());
   launch.value()->set_positional_usage("APP [ARGS...]");
-  auto config = std::make_shared<StringFlag>(FlagInfo{"--config", {}, "Config"});
+  auto config =
+      std::make_shared<StringFlag>(FlagInfo{"--config", {}, "Config", ValueMode::Required, "PATH"});
   ASSERT_TRUE(launch.value()->add_flag(config, diagnostic.emitter()).succeeded());
   auto status = root.add_command("status", diagnostic.emitter());
   ASSERT_TRUE(status.succeeded());
@@ -139,7 +142,7 @@ TEST_F(CliTest, HelpUsesCustomOrEmptyPositionalUsage) {
   EXPECT_EQ(format_help(root), "Usage: tool [options] <command> [--] INPUT...\n"
                                "\nCommands:\n  launch\n  status\n");
   EXPECT_EQ(format_help(*launch.value()), "Usage: tool launch [options] -- APP [ARGS...]\n"
-                                          "\nOptions:\n  --config VALUE\n      Config\n");
+                                          "\nOptions:\n  --config PATH\n      Config\n");
   EXPECT_EQ(format_help(*status.value()), "Usage: tool status [options]\n");
 }
 
@@ -500,4 +503,4 @@ TEST(CliValues, DeterministicRoundTripsAndMalformedArguments) {
 }
 
 } // namespace
-} // namespace util::cli
+} // namespace rocjitsu::cli

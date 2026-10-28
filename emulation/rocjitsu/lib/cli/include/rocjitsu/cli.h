@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace util::cli {
+namespace rocjitsu::cli {
 
 using util::DiagnosticEmitter;
 using util::FailureOr;
@@ -28,10 +28,16 @@ enum class ValueMode { Switch, Required };
 
 /// @brief Static metadata for one flag spelling and its help entry.
 struct FlagInfo {
+  /// @brief Primary spelling, such as --output.
   std::string name;
+  /// @brief Additional spellings that parse the same value.
   std::vector<std::string> aliases;
+  /// @brief Help text shown below this flag.
   std::string description;
+  /// @brief Whether this flag consumes a value.
   ValueMode value_mode = ValueMode::Required;
+  /// @brief Help placeholder for required values.
+  std::string value_placeholder = "VALUE";
 };
 
 /// @brief Base class for one registered flag and its strongly typed value.
@@ -121,6 +127,11 @@ struct FlagGroup {
   std::vector<std::shared_ptr<Flag>> flags;
 };
 
+/// @brief Where positional arguments are accepted for a command.
+///
+/// Anywhere accepts bare positional arguments after option parsing. AfterSeparator
+/// requires callers to pass -- before any positional argument; this is useful for
+/// launchers that forward arbitrary application argv.
 enum class PositionalMode { Anywhere, AfterSeparator };
 
 /// @brief A command scope containing child commands and flags.
@@ -139,24 +150,46 @@ public:
   const std::string &name() const { return name_; }
   std::string path() const;
   PositionalMode positional_mode() const { return positional_mode_; }
+  /// @brief Return the help-only positional usage suffix.
   const std::string &positional_usage() const { return positional_usage_; }
+  /// @brief Set the help-only positional usage suffix.
+  ///
+  /// This does not validate argument counts. An empty string suppresses the
+  /// positional suffix in formatted help.
   void set_positional_usage(std::string usage) { positional_usage_ = std::move(usage); }
+  /// @brief Add a child command before parsing seals the tree.
+  ///
+  /// The returned pointer is borrowed from this command and remains stable until
+  /// this command is destroyed.
   FailureOr<Command *> add_command(std::string name, DiagnosticEmitter diagnostic,
                                    PositionalMode positional_mode = PositionalMode::Anywhere);
   /// @brief Register one flag before parsing.
   ///
   /// Before parsing, the same object is a no-op; conflicting spellings diagnose.
   Result add_flag(std::shared_ptr<Flag> flag, DiagnosticEmitter diagnostic);
+  /// @brief Register a help section of flags before parsing.
+  ///
+  /// All flags still share the command's spelling namespace. The same flag
+  /// object can be registered repeatedly as a no-op; spelling conflicts fail the
+  /// whole batch without partially adding new flags.
   Result add_flags(std::string description, std::vector<std::shared_ptr<Flag>> flags,
                    DiagnosticEmitter diagnostic);
+  /// @brief Find a flag by primary spelling or alias.
+  ///
+  /// Returns a retaining handle to the registered flag, or null if no spelling
+  /// matches.
   std::shared_ptr<Flag> find_flag(std::string_view spelling) const;
+  /// @brief Find a child command by name, or null if absent.
   Command *find_command(std::string_view name);
+  /// @brief Find a child command by name, or null if absent.
   const Command *find_command(std::string_view name) const;
+  /// @brief Return retaining handles for every flag on this command.
   std::vector<std::shared_ptr<Flag>> flags() const;
   /// @brief Return registered help sections in registration order.
   ///
   /// This borrowed view can be invalidated by subsequent registration.
   std::span<const FlagGroup> groups() const { return groups_; }
+  /// @brief Return borrowed child-command pointers in registration order.
   std::vector<const Command *> commands() const;
 
 private:
@@ -172,9 +205,13 @@ private:
   std::vector<std::unique_ptr<Command>> commands_;
 };
 
+/// @brief Successful parse result.
 struct ParsedArguments {
+  /// @brief Borrowed selected command for caller dispatch.
   Command *command;
+  /// @brief Owned positional arguments that remain valid independently.
   std::vector<std::string> positional;
+  /// @brief Whether parsing encountered --.
   bool saw_separator = false;
 };
 
@@ -193,4 +230,4 @@ FailureOr<ParsedArguments> parse(Command &root, std::span<const std::string_view
 /// Pure formatting: no output streams or process control owned by the library.
 std::string format_help(const Command &command);
 
-} // namespace util::cli
+} // namespace rocjitsu::cli
