@@ -60,8 +60,9 @@ pub(crate) unsafe fn object<'a, T>(p: *const T) -> Result<&'a T, u64> {
 
 pub(crate) unsafe fn exclusive<'a, T>(p: *mut T) -> Result<&'a mut T, u64> {
     output_pointer(p)?;
-    // SAFETY: Callers use this helper only for destruction, for which the C
-    // contract excludes concurrent use of the whole public handle.
+    // SAFETY: Callers use this helper only for destruction after checking that
+    // no child can hold a shared borrow of this object. The C contract also
+    // excludes concurrent direct use of the public handle being destroyed.
     Ok(unsafe { &mut *p })
 }
 
