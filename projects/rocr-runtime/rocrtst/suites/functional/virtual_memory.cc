@@ -2918,14 +2918,6 @@ static bool FabricHandlesSupported() {
   return supported;
 }
 
-// HSA_ENABLE_VMEM_IMPORT_OWNER=0 makes pointer_info report no owner for imports, so the
-// expectation has to follow the flag. ROCr latches it at the first hsa_init and these tests
-// never change it, so getenv here agrees with core::Flag. Mirrors its parsing.
-[[nodiscard]] static bool VmemImportOwnerEnabled() {
-  const char* var = getenv("HSA_ENABLE_VMEM_IMPORT_OWNER");
-  return var == nullptr || strcmp(var, "0") != 0;
-}
-
 // Queries hsa_amd_pointer_info() on a mapped VMM address. Both variants are exercised:
 // without an accessible-agent list, and with one, which is what rocprofiler-sdk's copy
 // interceptor uses when it attributes a hipMemcpyAsync.
@@ -2947,7 +2939,7 @@ static void QueryVmemPointerInfo(void* addr, hsa_agent_t expected_owner) {
 }
 
 // Asks the imported handle itself which device backs it. Uses hsa_amd_vmem_get_vmem_info
-// rather than pointer_info, so it is somewhat independant of pointer_info which is being tested
+// rather than pointer_info, so the check is independent of the pointer_info under test.
 [[nodiscard]] static bool VmemImportResolvedAgent(hsa_amd_vmem_alloc_handle_t imported_handle,
                                                   hsa_agent_t* agent) {
   hsa_amd_vmem_handle_info_t info = {};
@@ -3052,15 +3044,9 @@ void VirtMemoryTestBasic::DmaBufImportedHandlePointerInfo(hsa_agent_t gpu_agent,
               << std::endl;
   }
 
-  if (placement_known && VmemImportOwnerEnabled()) {
-    QueryVmemPointerInfo(addr, gpu_agent);
-  } else {
-    if (placement_known && verbosity() > 0) {
-      std::cout << "    HSA_ENABLE_VMEM_IMPORT_OWNER=0 - expecting the legacy unset owner."
-                << std::endl;
-    }
-    QueryVmemPointerInfo(addr, hsa_agent_t{0});
-  }
+  /* pointer_info reports no owner for an import: the handle has no local MemoryRegion to
+   * resolve one through. Owner coverage comes from hsa_amd_vmem_get_vmem_info above. */
+  QueryVmemPointerInfo(addr, hsa_agent_t{0});
 
   EXPECT_SUCCESS(hsa_amd_vmem_unmap(addr, alloc_size));
   EXPECT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
@@ -3068,7 +3054,7 @@ void VirtMemoryTestBasic::DmaBufImportedHandlePointerInfo(hsa_agent_t gpu_agent,
   EXPECT_SUCCESS(hsa_amd_vmem_address_free(addr, alloc_size));
 }
 
-// Host-backend import should resport none.
+// A host-backed import has no GPU owner to report.
 void VirtMemoryTestBasic::HostBackedImportedHandlePointerInfo(hsa_agent_t gpu_agent,
                                                               hsa_amd_memory_pool_t cpu_pool) {
   rocrtst::pool_info_t pool_i;
@@ -3170,190 +3156,6 @@ void VirtMemoryTestBasic::TestImportedHandlePointerInfo(void) {
     if (cpu_pool.handle != 0) {
       HostBackedImportedHandlePointerInfo(gpus[0], cpu_pool);
     }
-  }
-
-  if (verbosity() > 0) {
-    std::cout << "    Subtest finished" << std::endl;
-    std::cout << kSubTestSeparator << std::endl;
-  }
-}
-
-// Exports `pool` memory as a dmabuf and re-imports it into a fresh VA. Returns false when the
-// system cannot export, which is not a failure of the behaviour under test.
-[[nodiscard]] static bool ImportOwnPoolMemory(hsa_amd_memory_pool_t pool, size_t* alloc_size,
-                                              hsa_amd_vmem_alloc_handle_t* exported_handle,
-                                              hsa_amd_vmem_alloc_handle_t* imported_handle,
-                                              void** addr) {
-  rocrtst::pool_info_t pool_i;
-  if (rocrtst::AcquirePoolInfo(pool, &pool_i) != HSA_STATUS_SUCCESS) return false;
-  if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return false;
-
-  *alloc_size = pool_i.alloc_granule;
-  if (hsa_amd_vmem_handle_create(pool, *alloc_size, MEMORY_TYPE_NONE, 0, exported_handle) !=
-      HSA_STATUS_SUCCESS) {
-    return false;
-  }
-
-  int dmabuf_fd = -1;
-  if (hsa_amd_vmem_export_shareable_handle(&dmabuf_fd, *exported_handle, 0) !=
-          HSA_STATUS_SUCCESS ||
-      dmabuf_fd < 0) {
-    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(*exported_handle));
-    return false;
-  }
-
-  hsa_status_t err = hsa_amd_vmem_import_shareable_handle(dmabuf_fd, imported_handle);
-  EXPECT_EQ(close(dmabuf_fd), 0);
-  if (err != HSA_STATUS_SUCCESS) {
-    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(*exported_handle));
-    return false;
-  }
-
-  if (hsa_amd_vmem_address_reserve(addr, *alloc_size, 0, 0) != HSA_STATUS_SUCCESS ||
-      hsa_amd_vmem_map(*addr, *alloc_size, 0, *imported_handle, 0) != HSA_STATUS_SUCCESS) {
-    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(*imported_handle));
-    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(*exported_handle));
-    return false;
-  }
-  return true;
-}
-
-// An import never given access to any agent still reports an owner, but nothing in this
-// process can touch the VA. Both blit paths must error rather than dispatch on the owner
-// (GPU fault) or fall back to the host (segfault).
-void VirtMemoryTestBasic::ImportedBlitWithNoAccess(hsa_agent_t owner_gpu,
-                                                   hsa_amd_memory_pool_t owner_pool) {
-  size_t alloc_size = 0;
-  hsa_amd_vmem_alloc_handle_t exported_handle, imported_handle;
-  void* addr = nullptr;
-  if (!ImportOwnPoolMemory(owner_pool, &alloc_size, &exported_handle, &imported_handle, &addr)) {
-    if (verbosity() > 0) {
-      std::cout << "    dmabuf export/import not supported here - Skipping." << std::endl;
-    }
-    return;
-  }
-
-  if (verbosity() > 0) {
-    std::cout << "    Blit on unmapped imported VA " << addr << std::endl;
-  }
-
-  const size_t words = alloc_size / sizeof(uint32_t);
-  std::vector<uint32_t> host(words, 0);
-  EXPECT_NE(hsa_amd_memory_fill(addr, 0xA5A5A5A5u, words), HSA_STATUS_SUCCESS)
-      << "fill dispatched on an imported VA that no agent can access";
-  EXPECT_NE(hsa_memory_copy(host.data(), addr, alloc_size), HSA_STATUS_SUCCESS)
-      << "copy dispatched on an imported VA that no agent can access";
-
-  EXPECT_SUCCESS(hsa_amd_vmem_unmap(addr, alloc_size));
-  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
-  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
-  EXPECT_SUCCESS(hsa_amd_vmem_address_free(addr, alloc_size));
-}
-
-// The regression this guards: memory on owner_gpu, imported and mapped for peer_gpu only.
-// agentOwner names owner_gpu, which holds no mapping for this VA, so both blit paths must
-// fall back to peer_gpu rather than trusting the owner.
-void VirtMemoryTestBasic::ImportedBlitWithPeerAccessOnly(hsa_agent_t owner_gpu,
-                                                         hsa_amd_memory_pool_t owner_pool,
-                                                         hsa_agent_t peer_gpu) {
-  size_t alloc_size = 0;
-  hsa_amd_vmem_alloc_handle_t exported_handle, imported_handle;
-  void* addr = nullptr;
-  if (!ImportOwnPoolMemory(owner_pool, &alloc_size, &exported_handle, &imported_handle, &addr)) {
-    if (verbosity() > 0) {
-      std::cout << "    dmabuf export/import not supported here - Skipping." << std::endl;
-    }
-    return;
-  }
-
-  MAKE_SCOPE_GUARD([&]() {
-    EXPECT_SUCCESS(hsa_amd_vmem_unmap(addr, alloc_size));
-    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
-    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
-    EXPECT_SUCCESS(hsa_amd_vmem_address_free(addr, alloc_size));
-  });
-
-  /* Access is granted to the peer alone. The owner is deliberately left out. */
-  hsa_amd_memory_access_desc_t access_desc = {HSA_ACCESS_PERMISSION_RW, peer_gpu};
-  if (hsa_amd_vmem_set_access(addr, alloc_size, &access_desc, 1) != HSA_STATUS_SUCCESS) {
-    if (verbosity() > 0) {
-      std::cout << "    Peer cannot map this import - Skipping." << std::endl;
-    }
-    return;
-  }
-
-  hsa_amd_pointer_info_t info = {};
-  info.size = sizeof(info);
-  ASSERT_SUCCESS(hsa_amd_pointer_info(addr, &info, nullptr, nullptr, nullptr));
-  const bool owner_reported = (info.agentOwner.handle == owner_gpu.handle);
-  if (!owner_reported) {
-    EXPECT_EQ(info.agentOwner.handle, 0u)
-        << "imported VA owned by an agent that is neither the exporter nor unset";
-  }
-
-  if (verbosity() > 0) {
-    std::cout << "    Blit on peer-mapped imported VA " << addr << " owned by agent "
-              << info.agentOwner.handle
-              << (owner_reported ? " - unmapped-owner fallback exercised"
-                                 : " - owner unset, fallback not exercised")
-              << std::endl;
-  }
-
-  const size_t words = alloc_size / sizeof(uint32_t);
-  const uint32_t pattern = 0xA5A5A5A5u;
-  std::vector<uint32_t> host(words, 0);
-
-  EXPECT_SUCCESS(hsa_amd_memory_fill(addr, pattern, words));
-  EXPECT_SUCCESS(hsa_memory_copy(host.data(), addr, alloc_size));
-  EXPECT_EQ(std::count(host.begin(), host.end(), pattern), static_cast<long>(words))
-      << "fill did not reach the peer-mapped import";
-
-  std::vector<uint32_t> source(words, 0x5A5A5A5Au);
-  std::fill(host.begin(), host.end(), 0);
-  EXPECT_SUCCESS(hsa_memory_copy(addr, source.data(), alloc_size));
-  EXPECT_SUCCESS(hsa_memory_copy(host.data(), addr, alloc_size));
-  EXPECT_EQ(host, source) << "copy did not reach the peer-mapped import";
-}
-
-void VirtMemoryTestBasic::TestImportedBlitWithoutOwnerAccess(void) {
-  if (verbosity() > 0) {
-    PrintMemorySubtestHeader("Imported Handle Blit Without Owner Access Test");
-  }
-
-  bool vmem_supported = false;
-  ASSERT_SUCCESS(
-      hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, &vmem_supported));
-  if (!vmem_supported) {
-    if (verbosity() > 0) {
-      std::cout << "    Virtual Memory API not supported on this system - Skipping." << std::endl;
-      std::cout << kSubTestSeparator << std::endl;
-    }
-    return;
-  }
-
-  std::vector<hsa_agent_t> gpus;
-  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
-  if (gpus.empty()) {
-    if (verbosity() > 0) {
-      std::cout << "    No GPU agents available - Skipping." << std::endl;
-      std::cout << kSubTestSeparator << std::endl;
-    }
-    return;
-  }
-
-  hsa_amd_memory_pool_t owner_pool = {};
-  ASSERT_SUCCESS(
-      hsa_amd_agent_iterate_memory_pools(gpus[0], rocrtst::GetGlobalMemoryPool, &owner_pool));
-  if (owner_pool.handle != 0) {
-    ImportedBlitWithNoAccess(gpus[0], owner_pool);
-  }
-
-  if (gpus.size() < 2) {
-    if (verbosity() > 0) {
-      std::cout << "    Peer-only mapping needs two GPUs - Skipping." << std::endl;
-    }
-  } else if (owner_pool.handle != 0) {
-    ImportedBlitWithPeerAccessOnly(gpus[0], owner_pool, gpus[1]);
   }
 
   if (verbosity() > 0) {

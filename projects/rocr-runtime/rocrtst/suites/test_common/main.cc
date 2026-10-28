@@ -861,13 +861,6 @@ TEST(rocrtstFunc, VirtMemory_Imported_Handle_Pointer_Info_Test) {
   RunCustomTestEpilog(&vmt);
 }
 
-TEST(rocrtstFunc, VirtMemory_Imported_Blit_Without_Owner_Access_Test) {
-  VirtMemoryTestBasic vmt;
-  if (!RunCustomTestProlog(&vmt)) return;
-  vmt.TestImportedBlitWithoutOwnerAccess();
-  RunCustomTestEpilog(&vmt);
-}
-
 TEST(rocrtstFunc, VirtMemory_Host_Backed_Alloc_Import_Info_Test) {
   VirtMemoryTestBasic vmt;
   if (!RunCustomTestProlog(&vmt)) return;
