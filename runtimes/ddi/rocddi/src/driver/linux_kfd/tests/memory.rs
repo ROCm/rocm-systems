@@ -2134,13 +2134,13 @@ fn local_allocation_properties_reach_kfd_exactly() {
 }
 
 #[test]
-fn failed_public_vram_cpu_mapping_releases_the_buffer_before_its_reservation() {
+fn failed_public_vram_cpu_mapping_releases_the_buffer() {
     let fixture = Fixture::with_flags(
         [Reply::Allocate(17, None), Reply::Free(None)],
         uapi::VRAM | uapi::WRITABLE | uapi::NO_SUBSTITUTE | uapi::PUBLIC,
     );
-    // /dev/null cannot provide a render mapping. The real mmap error must
-    // leave cleanup with the native owner before any GPU MAP is attempted.
+    // /dev/null cannot provide a render mapping. The native buffer is freed
+    // before any GPU MAP, and the failed file mmap leaves its VA reservation.
     let result = KfdAllocation::create(
         fixture.vm.clone(),
         desc(),
