@@ -3,14 +3,14 @@
 
 //! Linux KFD signal-event interoperability.
 
-use crate::device::Device;
 use crate::device::gpu::GpuDevice;
 use crate::device::gpu::queue::QueueErrorEvent;
-use crate::driver;
+use crate::device::{Device, DeviceResources};
+use crate::driver::{self, DeviceDriverState, Driver};
 use crate::memory::Allocation;
 use crate::memory::device::{DeviceAccess, MemoryKind};
 use crate::memory::host::host_page_size;
-use crate::memory::storage::Owned;
+use crate::memory::storage::{Owned, TryPush};
 use crate::session::DriverContextLifetime;
 use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -393,6 +393,39 @@ impl SignalEventService {
         }
     }
 
+    /// Install the one KFD page on every GPU this connection can discover.
+    /// A later frontend may activate a different GPU after the first page
+    /// offer, when KFD no longer permits its mapping set to grow.
+    fn event_page_peers(device: &Device) -> Result<Vec<Device>, Error> {
+        let (driver, _) = device.driver_state.linux_kfd()?;
+        let mut peers = Vec::new();
+        driver.enumerate(&mut |endpoint| {
+            if endpoint.gpu().is_none() || endpoint.id == device.endpoint().id {
+                return Ok(());
+            }
+            // A peer unavailable to this frontend must not prevent creation
+            // on the requested GPU. Its later activation will report the
+            // missing page mapping through compatible_mappings.
+            let Ok(state) = driver.activate(&endpoint) else {
+                return Ok(());
+            };
+            let driver_state = DeviceDriverState::LinuxKfd {
+                driver: driver.clone(),
+                state,
+            };
+            let Ok(resources) = DeviceResources::for_activated(&endpoint, &driver_state) else {
+                return Ok(());
+            };
+            peers.try_push(Device {
+                driver_state,
+                endpoint,
+                resources,
+            })?;
+            Ok(())
+        })?;
+        Ok(peers)
+    }
+
     fn prepare_page(&mut self, device: &Device, peers: &[&Device]) -> Result<(), Error> {
         let page_size = host_page_size()?;
         let size = SIGNAL_EVENT_PAGE_BYTES
@@ -448,8 +481,9 @@ impl SignalEventService {
         Ok((host, mappings))
     }
 
-    /// Creates an event for `device`. `peers` are every other GPU that must
-    /// access the first page; KFD cannot add them after that page is offered.
+    /// Creates an event for `device`. rocddi discovers every GPU for the
+    /// process KFD connection before the first page is offered, because KFD
+    /// cannot add mappings to an installed signal page.
     /// `addressing` specifies whether the frontend requires equal CPU and GPU
     /// addresses or can publish the distinct GPU mailbox address returned here.
     ///
@@ -459,7 +493,6 @@ impl SignalEventService {
     pub fn create(
         &mut self,
         device: &Device,
-        peers: &[&Device],
         addressing: SignalEventAddressing,
     ) -> Result<(SignalEvent, SignalEventMailbox), Error> {
         self.ensure_process()?;
@@ -472,20 +505,22 @@ impl SignalEventService {
         let existing = process
             .as_ref()
             .map(|guard| {
-                guard.compatible_mappings(
-                    std::iter::once(device.endpoint().id)
-                        .chain(peers.iter().map(|peer| peer.endpoint().id)),
-                    require_identity,
-                )
+                guard.compatible_mappings(std::iter::once(device.endpoint().id), require_identity)
             })
             .transpose()?
             .flatten();
+        let peer_devices = if existing.is_some() {
+            Vec::new()
+        } else {
+            Self::event_page_peers(device)?
+        };
+        let peers = peer_devices.iter().collect::<Vec<_>>();
         let (host, address, install, mappings) = if let Some((host, address)) = existing {
             (host, address, false, Vec::new())
         } else {
             if self.page.is_some() && !self.confirmed {
                 let usable = self.page.as_ref().is_some_and(|page| {
-                    Self::page_mappings(page, device, peers, require_identity).is_ok()
+                    Self::page_mappings(page, device, &peers, require_identity).is_ok()
                 });
                 if !usable && self.page.as_ref().is_some_and(|page| page.attempted) {
                     return Err(Error::Operation {
@@ -498,13 +533,13 @@ impl SignalEventService {
                 }
             }
             if self.page.is_none() {
-                self.prepare_page(device, peers)?;
+                self.prepare_page(device, &peers)?;
             }
             let page = self.page.as_ref().ok_or(Error::Operation {
                 kind: ErrorKind::Internal,
                 detail: "KFD signal page preparation lost its owner",
             })?;
-            let (host, mappings) = Self::page_mappings(page, device, peers, require_identity)?;
+            let (host, mappings) = Self::page_mappings(page, device, &peers, require_identity)?;
             let address = mappings[0].1;
             (host, address, !self.confirmed, mappings)
         };
