@@ -3899,7 +3899,6 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
         if (status == 1) {
           gpu++;
           net_offset = 2 * gpu - 1;
-          if (gpu > NCCL_TOPO_MAX_NODES) goto end;
         } else if (status == 2 || status == 3) {
           net_offset++;
           net_count++;
