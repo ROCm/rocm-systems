@@ -286,17 +286,11 @@ public:
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     [[nodiscard]] std::vector<proc_info_t> get_gpu_process_list(processor_handle h) const
     {
-        std::uint32_t count = 0;
-        check_status(m_amdsmi.get_gpu_process_list(h, &count, nullptr),
-                     "amdsmi_get_gpu_process_list (count)");
-        if(count == 0)
-        {
-            return {};
-        }
-        std::vector<proc_info_t> procs(count);
-        check_status(m_amdsmi.get_gpu_process_list(h, &count, procs.data()),
-                     "amdsmi_get_gpu_process_list (data)");
-        return procs;
+        return fetch_counted<proc_info_t>(
+            [this, h](std::uint32_t* count, proc_info_t* out) {
+                return m_amdsmi.get_gpu_process_list(h, count, out);
+            },
+            "amdsmi_get_gpu_process_list");
     }
 #endif
 
@@ -328,6 +322,24 @@ public:
 private:
     Wrapper m_amdsmi{};
 
+    /// Two-phase AMD SMI query: ask for the count, then fill a buffer of that size.
+    /// @p query is invoked as query(std::uint32_t* count, Elem* out).
+    template <typename Elem, typename QueryFn>
+    [[nodiscard]] static std::vector<Elem> fetch_counted(QueryFn query, const char* name)
+    {
+        std::uint32_t count = 0;
+        check_status(query(&count, static_cast<Elem*>(nullptr)),
+                     (std::string(name) + " (count)").c_str());
+        if(count == 0)
+        {
+            return {};
+        }
+        std::vector<Elem> result(count);
+        check_status(query(&count, result.data()),
+                     (std::string(name) + " (data)").c_str());
+        return result;
+    }
+
     static void check_status(status_t status, const char* func)
     {
         if(status == STATUS_SUCCESS)
@@ -344,18 +356,11 @@ private:
     {
         std::vector<processor_handle> result;
 
-        std::uint32_t socket_count = 0;
-        check_status(m_amdsmi.get_socket_handles(&socket_count, nullptr),
-                     "amdsmi_get_socket_handles (count)");
-
-        if(socket_count == 0)
-        {
-            return result;
-        }
-
-        std::vector<socket_handle> sockets(socket_count);
-        check_status(m_amdsmi.get_socket_handles(&socket_count, sockets.data()),
-                     "amdsmi_get_socket_handles (data)");
+        auto const sockets = fetch_counted<socket_handle>(
+            [this](std::uint32_t* count, socket_handle* out) {
+                return m_amdsmi.get_socket_handles(count, out);
+            },
+            "amdsmi_get_socket_handles");
 
         for(auto const socket : sockets)
         {
