@@ -55,6 +55,8 @@ pub(crate) struct DriverQueue<D: Driver, Q: UserQueueResource<DeviceState = D::D
     driver: Shared<D>,
     /// Transport addresses cached at queue creation.
     info: QueueTransport,
+    /// Native teardown completed and cannot still depend on this driver.
+    released: bool,
 }
 
 impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<D, Q> {
@@ -64,6 +66,7 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
             inner,
             driver,
             info,
+            released: false,
         }
     }
 
@@ -121,7 +124,9 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     #[allow(unsafe_code)]
     pub(crate) unsafe fn destroy(&mut self) -> Result<(), Error> {
         // SAFETY: The caller retired every producer and transport mapping.
-        unsafe { self.inner.destroy() }
+        unsafe { self.inner.destroy()? };
+        self.released = true;
+        Ok(())
     }
 
     /// # Safety
@@ -134,7 +139,19 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     ) -> Result<(), Error> {
         // SAFETY: The caller retired producers and retained dependencies until
         // the native queue is conclusively removed.
-        unsafe { self.inner.destroy_with_retained_transport(callback) }
+        unsafe { self.inner.destroy_with_retained_transport(callback)? };
+        self.released = true;
+        Ok(())
+    }
+}
+
+impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> Drop for DriverQueue<D, Q> {
+    fn drop(&mut self) {
+        if !self.released {
+            // The native queue may still hold this session after its own Drop
+            // quarantines backing. Keep the creating driver alive as well.
+            std::mem::forget(self.driver.clone());
+        }
     }
 }
 
@@ -796,6 +813,31 @@ mod queue_resource_tests {
         drop(queue);
         assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
         assert!(driver_dropped.load(Ordering::Relaxed));
+        Ok(())
+    }
+
+    #[test]
+    fn failed_queue_drop_keeps_its_creating_driver_live() -> Result<(), Error> {
+        let driver_dropped = Arc::new(AtomicBool::new(false));
+        let queue_drops = Arc::new(AtomicUsize::new(0));
+        let driver = Shared::new(FakeDriver {
+            dropped: driver_dropped.clone(),
+            queue_drops: queue_drops.clone(),
+        })?;
+        let inner = Owned::new(FakeQueue {
+            info: transport(),
+            driver_dropped: driver_dropped.clone(),
+            queue_drops: queue_drops.clone(),
+            fail_destroy: true,
+            released: false,
+        })?;
+        let mut queue = DriverQueue::new(driver.clone(), inner);
+        drop(driver);
+        // SAFETY: This fake never published transport to a producer.
+        assert!(unsafe { queue.destroy() }.is_err());
+        drop(queue);
+        assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
+        assert!(!driver_dropped.load(Ordering::Relaxed));
         Ok(())
     }
 }
