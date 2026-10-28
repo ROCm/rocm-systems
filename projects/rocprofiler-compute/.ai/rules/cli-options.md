@@ -69,6 +69,8 @@ To pass several values, list them after the flag, separated by spaces:
 --example-ids 0 1 2
 ```
 
+Don't split values on commas, so that a value can contain a comma.
+
 Don't repeat the flag: `-b 2 -b 5` keeps only `5`. Use `-b 2 5` instead.
 
 The exception is analyze mode with several workloads. Repeat `-p` once per
