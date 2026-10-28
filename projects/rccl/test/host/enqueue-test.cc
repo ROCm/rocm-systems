@@ -22,11 +22,13 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/enqueue_test_deps.h"
+#include "fakes/strongstream_stubs.h"
 
 // alloc.h first, so its macros are visible to be #undef'd before enqueue.cc's
 // transitive includes see them.
@@ -4137,4 +4139,115 @@ TEST_F(EnqueueMicrotest, HostStreamPlanCallback_AbortOrRevokeReturns_DestroyStil
   abortFlag = 1;
   hostStreamPlanCallback(&eager);
   EXPECT_EQ(2, g_planCallbackEntered);
+}
+
+TEST_F(EnqueueMicrotest, PersistentDestructor_LiveRef_ReclaimsAndOrphanDoesNotEnqueueAgain) {
+  ncclComm comm{};
+  ncclKernelPlan plan{};
+  ncclPersistentPlanRef ref{};
+  ref.comm = &comm;
+  ref.planHead = &plan;
+  ref.state = ncclPersistentPlanRefLive;
+  ref.refCount = 2;
+  comm.persistentPlanRefs = &ref;
+
+  persistentDestructor(&ref);
+  EXPECT_EQ(ncclPersistentPlanRefReleased, ref.state);
+  EXPECT_EQ(1, ref.refCount);
+  ncclCommCallback* cb = ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false);
+  ASSERT_NE(nullptr, cb);
+  EXPECT_EQ(&plan.reclaimer, cb);
+  EXPECT_EQ(nullptr, cb->next);
+
+  ncclCommOrphanPersistentPlans(&comm);
+  EXPECT_EQ(nullptr, ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false));
+}
+
+TEST_F(EnqueueMicrotest, PersistentDestructor_OrphanedRef_StillReclaims) {
+  ncclComm comm{};
+  ncclKernelPlan plan{};
+  ncclPersistentPlanRef ref{};
+  ref.comm = &comm;
+  ref.planHead = &plan;
+  ref.state = ncclPersistentPlanRefLive;
+  ref.refCount = 2;
+  comm.persistentPlanRefs = &ref;
+
+  ncclCommOrphanPersistentPlans(&comm);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, ref.state);
+  EXPECT_EQ(nullptr, ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false));
+
+  persistentDestructor(&ref);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, ref.state);
+  EXPECT_EQ(1, ref.refCount);
+  ncclCommCallback* cb = ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false);
+  ASSERT_NE(nullptr, cb);
+  EXPECT_EQ(&plan.reclaimer, cb);
+}
+
+TEST_F(EnqueueMicrotest, AddPersistentPlanRef_DropsNonLiveRefsAndKeepsLiveOnes) {
+  ncclComm comm{};
+  auto* stale = static_cast<ncclPersistentPlanRef*>(calloc(1, sizeof(ncclPersistentPlanRef)));
+  auto* live = static_cast<ncclPersistentPlanRef*>(calloc(1, sizeof(ncclPersistentPlanRef)));
+  ASSERT_NE(nullptr, stale);
+  ASSERT_NE(nullptr, live);
+  stale->state = ncclPersistentPlanRefReleased;
+  stale->refCount = 2;
+  live->state = ncclPersistentPlanRefLive;
+  live->refCount = 2;
+  live->next = stale;
+  comm.persistentPlanRefs = live;
+
+  ncclPersistentPlanRef* registered = nullptr;
+  g_cudaGraphAddDestructor = [&](ncclCudaGraph, cudaHostFn_t, void* arg) {
+    registered = static_cast<ncclPersistentPlanRef*>(arg);
+    return ncclSuccess;
+  };
+
+  ncclKernelPlan plan{};
+  ASSERT_EQ(ncclSuccess, addPersistentPlanRef(&comm, ncclCudaGraph{}, &plan));
+  ASSERT_EQ(registered, comm.persistentPlanRefs);
+  EXPECT_EQ(live, registered->next);
+  EXPECT_EQ(nullptr, live->next);
+  EXPECT_EQ(1, stale->refCount);
+  EXPECT_EQ(2, live->refCount);
+  EXPECT_EQ(2, registered->refCount);
+  EXPECT_EQ(ncclPersistentPlanRefLive, registered->state);
+
+  ncclPersistentPlanRefDrop(stale);
+  ncclPersistentPlanRefDrop(live);
+  ncclPersistentPlanRefDrop(live);
+  ncclPersistentPlanRefDrop(registered);
+  ncclPersistentPlanRefDrop(registered);
+}
+
+TEST_F(EnqueueMicrotest, PersistentDestructor_LastHeldGraph_WaitsUntilCleanupFinishes) {
+  ncclComm comm{};
+  ncclDeferredCleanup* deferred = ncclDeferredCleanupCreate();
+  ASSERT_NE(nullptr, deferred);
+  deferred->destructorsLeft = 1;
+  comm.deferredCleanup = deferred;
+
+  ncclKernelPlan plan{};
+  ncclPersistentPlanRef ref{};
+  ref.comm = &comm;
+  ref.planHead = &plan;
+  ref.state = ncclPersistentPlanRefLive;
+  ref.refCount = 2;
+
+  std::thread finisher([deferred] {
+    for (;;) {
+      pthread_mutex_lock(&deferred->mu);
+      int waiters = deferred->waiters;
+      pthread_mutex_unlock(&deferred->mu);
+      if (waiters == 1) break;
+    }
+    ncclDeferredCleanupFinish(deferred);
+  });
+  persistentDestructor(&ref);
+  finisher.join();
+
+  EXPECT_EQ(ncclPersistentPlanRefReleased, ref.state);
+  ncclCommCallback* cb = ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false);
+  EXPECT_EQ(&plan.reclaimer, cb);
 }

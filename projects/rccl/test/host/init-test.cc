@@ -6292,6 +6292,20 @@ TEST_F(InitMicrotest, CommRevokeAsync_ValidComm_StopsProxyAndLowersEveryAbortFla
   EXPECT_EQ(0u, c.childAbortFlagDev());
 }
 
+TEST_F(InitMicrotest, CommRevokeAsync_HeldGraph_LeavesAbortFlagsRaised) {
+  Teardown_AllowStreamCaptureExchange();
+  Teardown_LifecycleComm c;
+  ASSERT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  c.get()->localPersistentRefs = 1;
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunRevokeAsync(c.get()));
+  EXPECT_EQ(1u, c.abortFlag());
+  EXPECT_EQ(1u, c.abortFlagDev());
+  EXPECT_EQ(1u, c.childAbortFlag());
+  EXPECT_EQ(1u, c.childAbortFlagDev());
+}
+
 TEST_F(InitMicrotest, CommRevokeAsync_StreamSyncFails_LeavesAbortFlagsRaisedAndRecordsAsyncError) {
   Teardown_LifecycleComm c;
   ASSERT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));

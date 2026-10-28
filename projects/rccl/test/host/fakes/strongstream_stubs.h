@@ -21,6 +21,7 @@ extern std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cu
 // enqueue-test.cc install hooks.
 extern std::function<ncclResult_t(struct ncclCudaGraph, hipStream_t, hipEvent_t)> g_ncclStreamAdvanceToEvent;
 extern std::function<ncclResult_t(struct ncclCudaGraph, hipEvent_t, hipStream_t)> g_ncclCudaGraphRecordEvent;
+extern std::function<ncclResult_t(struct ncclCudaGraph, cudaHostFn_t, void*)> g_cudaGraphAddDestructor;
 
 extern ncclResult_t g_ncclStrongStreamResult;
 
