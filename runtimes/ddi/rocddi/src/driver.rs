@@ -43,6 +43,7 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::profiling::{
     ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, PcSamplingRequest,
+    SpmDestinationFailure, SpmDestinationReport,
 };
 use crate::device::gpu::queue::{QueueRequest, QueueScratch, QueueTransport};
 use crate::memory::storage::{Owned, Shared};
@@ -506,9 +507,7 @@ pub(crate) trait GpuInstrumentationOperations: GpuDriver {
         &self,
         device: &Self::DeviceState,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error>;
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure>;
 }
