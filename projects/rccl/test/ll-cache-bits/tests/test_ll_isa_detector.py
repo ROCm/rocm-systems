@@ -78,6 +78,30 @@ def test_flags_compared_to_different_values_is_not_a_poll():
     assert polls(text) == []
 
 
+def test_eq_compares_and_sys_scope():
+    # gfx1250 shape: flags checked with v_cmp_eq, load at system scope.
+    text = """\
+0000 <f>:
+	global_load_b128 v[2:5], v[8:9], off scope:SCOPE_SYS
+	s_wait_loadcnt 0x0
+	v_cmp_eq_u32_e32 vcc_lo, s10, v3
+	v_cmp_eq_u32_e64 s0, s10, v5
+"""
+    assert [p.modifiers for p in polls(text)] == [["scope:SCOPE_SYS"]]
+
+
+def test_unpolled_proto_ll_lists_proto_ll_functions_without_a_poll():
+    text = GFX942_POLL.format(mods=" nt") + """\
+0001 <_Z6runLLA7ProtoLLLi0EE>:
+	global_load_dwordx4 v[0:3], v[8:9], off nt
+0002 <_Z6runLL128A10ProtoLL128Li0EE>:
+0003 <other>:
+"""
+    lines = text.splitlines()
+    unmatched = ll_isa.unpolled_proto_ll(lines, polls(text))
+    assert unmatched == ["_Z6runLLA7ProtoLLLi0EE"]
+
+
 def test_compare_after_next_load_belongs_to_that_load():
     text = """\
 0000 <f>:

@@ -35,8 +35,8 @@ change in code shape can't make the guard pass by finding nothing.
 | `tests/test_ll_poll_cache_bits.py` | the guard, run against a built `librccl.so` |
 | `tests/test_ll_isa_detector.py` | detector unit tests on hand-written ISA (no ROCm needed) |
 
-Arches with an expectation: **gfx942, gfx950**. Other arches in the library
-are reported as skipped, not passed.
+Arches with an expectation: **gfx942, gfx950, gfx1250**. Other arches in the
+library are reported as skipped, not passed.
 
 ## Running locally
 
@@ -44,8 +44,8 @@ Needs a built RCCL and the ROCm LLVM tools. No GPU.
 
 ```bash
 cd projects/rccl/test/ll-cache-bits
-python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
-./venv/bin/python -m pytest -v -rs
+python3 -m pip install -r requirements.txt
+python3 -m pytest -v -rs
 ```
 
 | Variable | Default | Description |
@@ -53,7 +53,7 @@ python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
 | `RCCL_LIB` | `$RCCL_BUILD/librccl.so` | library to inspect |
 | `RCCL_BUILD` | `<rccl>/build/release`, else `build/debug` | RCCL build dir |
 | `ROCM_PATH` | `/opt/rocm` | ROCm install root |
-| `RCCL_LL_GUARD_REQUIRED` | unset | `1`: fail instead of skip if the library, tools or a checked arch are missing |
+| `RCCL_LL_GUARD_REQUIRED` | unset | `1`: fail instead of skip if the library, tools or all checked arches are missing |
 
 The whole suite skips if the library or tools are missing.
 
@@ -61,6 +61,7 @@ The whole suite skips if the library or tools are missing.
 
 - The TheRock RCCL build job (`.github/workflows/therock-rccl-ci-linux.yml`)
   runs the full suite on the built `librccl.so` with `RCCL_LL_GUARD_REQUIRED=1`.
+  That job runs nightly and on manual dispatch, not per PR.
 - `test/host/run_host_tests.sh guards` runs the detector tests (`-m detector`).
 
 ## When it fails
