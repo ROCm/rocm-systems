@@ -154,26 +154,11 @@ load_config_from_string_for_node_or_throw(const std::string &json, const std::st
   return require_config_value(std::move(result), diagnostic);
 }
 
-config::ExecutionThreadSettings
-load_execution_thread_settings_from_string_or_throw(const std::string &json,
-                                                    const std::string &schema) {
-  util::StringDiagnostic diagnostic;
-  return require_config_value(
-      config::load_execution_thread_settings_from_string(json, schema, diagnostic.emitter()),
-      diagnostic);
-}
-
 config::ExecutionThreadSettings load_execution_thread_settings_from_string_for_node_or_throw(
     const std::string &json, const std::string &schema, std::string_view node_id) {
   util::StringDiagnostic diagnostic;
   return require_config_value(config::load_execution_thread_settings_from_string_for_node(
                                   json, schema, node_id, diagnostic.emitter()),
-                              diagnostic);
-}
-
-config::DbtGuestConfig load_dbt_guest_config_from_file_or_throw(const std::string &path) {
-  util::StringDiagnostic diagnostic;
-  return require_config_value(config::load_dbt_guest_config_from_file(path, diagnostic.emitter()),
                               diagnostic);
 }
 
@@ -347,6 +332,93 @@ TEST(ConfigExpressionTest, ComponentRangeOverflowReturnsThroughBothLoaders) {
   }
 }
 
+TEST(ConfigLoaderTest, ThreadSettingsRejectInvalidMetadata) {
+  const struct {
+    const char *json;
+    const char *message;
+  } cases[] = {
+      {R"({"topology":{}})", "Thread allocation requires vm.arch and topology"},
+      {R"({"vm":{},"topology":{}})", "Thread allocation requires vm.arch and topology"},
+      {R"({"vm":{"arch":"cdna3"}})", "Thread allocation requires vm.arch and topology"},
+      {R"({"vm":{"arch":"invalid"},"topology":{}})", "Invalid vm.arch for thread allocation"},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.json);
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    EXPECT_TRUE(
+        config::load_execution_thread_settings_from_string(test.json, kEmbeddedSchema, emit_error)
+            .failed());
+    EXPECT_EQ(messages, (std::vector<std::string>{test.message}));
+    messages.clear();
+    auto file = write_temp_config(test.json);
+    EXPECT_TRUE(
+        config::load_execution_thread_settings(file.path(), kEmbeddedSchema, emit_error).failed());
+    EXPECT_EQ(messages, (std::vector<std::string>{test.message}));
+  }
+}
+
+TEST(ConfigLoaderTest, ThreadSettingsRejectTopologyCapacityOverflowBeforeConstruction) {
+  const char *children[] = {
+      // Multiplied component copies exceed uint32 before entering the child.
+      R"([{"name":"part[0:65536]","children":[{"name":"cu[0:65536]","type":"compute_unit"}]}])",
+      // Each subtree fits, but their accumulated XCD count overflows.
+      R"([{"name":"part[0:65535]","children":[{"name":"xcd[0:65535]","type":"xcd"}]},
+          {"name":"xcd[0:131071]","type":"xcd"}])",
+      // Shader-engine CU demand must be checked before accumulating it.
+      R"([{"name":"cp","type":"command_processor"},
+          {"name":"se[0:65535]","type":"shader_engine","children":[
+            {"name":"cu[0:65535]","type":"compute_unit"}]},
+          {"name":"se","type":"shader_engine","children":[
+            {"name":"cu[0:131071]","type":"compute_unit"}]}])",
+      // Individual dispatch demands fit, but the shared pool demand overflows.
+      R"([{"name":"a[0:65536]","children":[{"name":"cp","type":"command_processor"},
+            {"name":"cu[0:32769]","type":"compute_unit"}]},
+          {"name":"b[0:65536]","children":[{"name":"cp","type":"command_processor"},
+            {"name":"cu[0:32769]","type":"compute_unit"}]}])",
+  };
+  for (const char *components : children) {
+    SCOPED_TRACE(components);
+    const auto json = std::string(R"({"vm":{"arch":"cdna3"},"topology":{
+      "root":{"name":"soc","type":"soc","children":)") +
+                      components + "}}}";
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    EXPECT_TRUE(
+        config::load_execution_thread_settings_from_string(json, kEmbeddedSchema, emit_error)
+            .failed());
+    const std::vector<std::string> expected{"Topology execution capacity exceeds uint32 range"};
+    EXPECT_EQ(messages, expected);
+    messages.clear();
+    // No resources or simulator components may be built for these dimensions.
+    EXPECT_TRUE(config::load_config_from_string(json, kEmbeddedSchema, emit_error, 1).failed());
+    EXPECT_EQ(messages, expected);
+    messages.clear();
+    auto file = write_temp_config(json);
+    EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, emit_error).failed());
+    EXPECT_EQ(messages, expected);
+  }
+}
+
+TEST(ConfigLoaderTest, ThreadSettingsRejectTotalXcdOverflow) {
+  const char *json = R"({"vm":{"arch":"cdna3","gpu":{"num_gpus":2,"device":{
+    "gpu_id":1250,"unique_id":1250,"num_sdma_engines":0}}},"topology":{
+    "root":{"name":"soc","type":"soc","children":[
+      {"name":"part[0:65536]","children":[{"name":"xcd[0:32768]","type":"xcd"}]}]}}})";
+  std::vector<std::string> messages;
+  auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+  util::DiagnosticEmitter emit_error(sink);
+  EXPECT_TRUE(config::load_execution_thread_settings_from_string(json, kEmbeddedSchema, emit_error)
+                  .failed());
+  const std::vector<std::string> expected{"Total XCD count exceeds uint32 range"};
+  EXPECT_EQ(messages, expected);
+  messages.clear();
+  EXPECT_TRUE(config::load_config_from_string(json, kEmbeddedSchema, emit_error, 1).failed());
+  EXPECT_EQ(messages, expected);
+}
+
 TEST(ConfigExpressionTest, ComponentRangesPreserveHalfOpenAndEmptySemantics) {
   const std::string json = R"json({"vm":{"arch":"cdna3"},"topology":{
     "root":{"name":"soc","type":"soc","children":[
@@ -422,26 +494,85 @@ std::string system_graph_thread_test_config() {
 }
 
 TEST(SystemGraphTest, ValidatesAndSelectsUnevenNodesWithoutBuilding) {
+  util::StringDiagnostic diagnostic;
   const auto graph = load_system_graph_from_string_or_throw(
       system_graph_test_config(kSystemGraphManifest), rocjitsu::kEmbeddedSchema);
   ASSERT_TRUE(graph.explicit_manifest);
   ASSERT_EQ(graph.nodes.size(), 2u);
   EXPECT_EQ(graph.links.size(), 4u);
   EXPECT_EQ(graph.coherence_domains.size(), 1u);
-  const auto tray0 = graph.local_gpus("tray0");
+  auto maybe_projection1 = graph.local_gpus(diagnostic.emitter(), "tray0");
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  const auto tray0 = maybe_projection1.value();
   ASSERT_EQ(tray0.size(), 1u);
   EXPECT_EQ(tray0[0].id, "g2");
   EXPECT_EQ(tray0[0].device.gpu_id, 202u);
-  const auto tray7 = graph.local_gpus("tray7");
+  auto maybe_projection2 = graph.local_gpus(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  const auto tray7 = maybe_projection2.value();
   ASSERT_EQ(tray7.size(), 2u);
   EXPECT_EQ(tray7[0].id, "g5");
   EXPECT_EQ(tray7[1].id, "g9");
   EXPECT_EQ(tray7[1].device.location_id, 1280u);
-  EXPECT_THROW(graph.local_gpus(), std::invalid_argument);
-  EXPECT_THROW(graph.local_gpus("missing"), std::invalid_argument);
+}
+
+TEST(SystemGraphTest, SelectionAndProjectionsReportOneFailure) {
+  config::SystemGraph graph;
+  graph.nodes.push_back({"tray0", {}});
+  graph.nodes.push_back({"tray7", {}});
+  for (std::string_view node_id : {std::string_view{}, std::string_view{"missing"}}) {
+    const std::string expected =
+        node_id.empty() ? "requires a local node ID" : "unknown local node ID";
+    for (int operation = 0; operation != 3; ++operation) {
+      SCOPED_TRACE(operation);
+      SCOPED_TRACE(node_id);
+      std::vector<std::string> messages;
+      auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+      util::DiagnosticEmitter emit_error(sink);
+      if (operation == 0)
+        EXPECT_TRUE(graph.select_node(emit_error, node_id).failed());
+      else if (operation == 1)
+        EXPECT_TRUE(graph.local_gpus(emit_error, node_id).failed());
+      else
+        EXPECT_TRUE(graph.local_peer_routes(emit_error, node_id).failed());
+      ASSERT_EQ(messages.size(), 1u);
+      EXPECT_THAT(messages.front(), testing::HasSubstr(expected));
+    }
+  }
+  util::StringDiagnostic diagnostic;
+  const auto selected = graph.select_node(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(selected.succeeded()) << diagnostic.message();
+  EXPECT_EQ(selected.value(), &graph.nodes[1]);
+  EXPECT_TRUE(diagnostic.message().empty());
+
+  config::SystemGraph empty;
+  EXPECT_TRUE(empty.select_node(diagnostic.emitter()).failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("requires a local node ID"));
+}
+
+TEST(SystemGraphTest, MissingSimulationConfigReportsOneFailure) {
+  std::vector<std::string> messages;
+  auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+  const auto graph = config::system_graph_from_fb(nullptr, util::DiagnosticEmitter(sink));
+  EXPECT_TRUE(graph.failed());
+  ASSERT_EQ(messages.size(), 1u);
+  EXPECT_THAT(messages.front(), testing::HasSubstr("missing simulation config"));
+}
+
+TEST(SystemGraphTest, DeviceIdentityRequiresSelectedManifestNode) {
+  const auto file = write_temp_config(system_graph_test_config(kSystemGraphManifest));
+  std::vector<std::string> messages;
+  auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+  const auto identity = config::load_device_identity(file.path(), rocjitsu::kEmbeddedSchema,
+                                                     util::DiagnosticEmitter(sink));
+  EXPECT_TRUE(identity.failed());
+  ASSERT_EQ(messages.size(), 1u);
+  EXPECT_THAT(messages.front(),
+              testing::HasSubstr("system device identity requires a selected local node"));
 }
 
 TEST(SystemGraphTest, InfinityFabricProjectsOnlyLocalGpuRoutes) {
+  util::StringDiagnostic diagnostic;
   std::string manifest = local_switch_manifest();
   for (const char *endpoint : {"e5", "e9"}) {
     const std::string scale_up =
@@ -453,8 +584,12 @@ TEST(SystemGraphTest, InfinityFabricProjectsOnlyLocalGpuRoutes) {
   const auto graph = load_system_graph_from_string_or_throw(system_graph_test_config(manifest),
                                                             rocjitsu::kEmbeddedSchema);
   EXPECT_EQ(graph.links.size(), 3u);
-  EXPECT_TRUE(graph.local_peer_routes("tray0").routes().empty());
-  const auto projection = graph.local_peer_routes("tray7");
+  auto maybe_projection1 = graph.local_peer_routes(diagnostic.emitter(), "tray0");
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection1.value().routes().empty());
+  auto maybe_projection2 = graph.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  const auto projection = maybe_projection2.value();
   ASSERT_EQ(projection.routes().size(), 1u);
   EXPECT_EQ(projection.routes()[0].hop_classes,
             (std::vector<config::SystemLinkClass>{config::SystemLinkClass::InfinityFabric,
@@ -467,7 +602,9 @@ TEST(SystemGraphTest, InfinityFabricProjectsOnlyLocalGpuRoutes) {
                                    R"({"src":"e5","dst":"sw","link_class":"infinity_fabric"})"));
   const auto mixed = load_system_graph_from_string_or_throw(
       system_graph_test_config(mixed_manifest), rocjitsu::kEmbeddedSchema);
-  const auto mixed_routes = mixed.local_peer_routes("tray7");
+  auto maybe_projection3 = mixed.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection3.succeeded()) << diagnostic.message();
+  const auto mixed_routes = maybe_projection3.value();
   ASSERT_EQ(mixed_routes.routes().size(), 1u);
   EXPECT_EQ(mixed_routes.routes()[0].endpoints, (std::vector<std::string>{"e5", "sw", "e9"}));
   EXPECT_EQ(mixed_routes.routes()[0].hop_classes,
@@ -478,15 +615,25 @@ TEST(SystemGraphTest, InfinityFabricProjectsOnlyLocalGpuRoutes) {
   ASSERT_TRUE(replace_exactly_once(network_as_fabric,
                                    R"({"src":"n0","dst":"n7","link_class":"net"})",
                                    R"({"src":"n0","dst":"n7","link_class":"infinity_fabric"})"));
-  EXPECT_THROW(load_system_graph_from_string_or_throw(system_graph_test_config(network_as_fabric),
-                                                      rocjitsu::kEmbeddedSchema),
-               std::invalid_argument);
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_system_graph_from_string(system_graph_test_config(network_as_fabric),
+                                                        rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_FALSE(messages.front().empty());
+  }
 }
 
 TEST(SystemGraphTest, PeerRouteProjectionRequiresExplicitLocalSwitchPath) {
+  util::StringDiagnostic diagnostic;
   const auto shared = load_system_graph_from_string_or_throw(
       system_graph_test_config(kSystemGraphManifest), rocjitsu::kEmbeddedSchema);
-  EXPECT_TRUE(shared.local_peer_routes("tray7").routes().empty());
+  auto maybe_projection1 = shared.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection1.value().routes().empty());
 
   std::string remote_branch = local_switch_manifest();
   ASSERT_TRUE(replace_exactly_once(remote_branch, R"({"id":"sw","kind":"switch"},)",
@@ -499,19 +646,27 @@ TEST(SystemGraphTest, PeerRouteProjectionRequiresExplicitLocalSwitchPath) {
     {"src":"e2","dst":"sw2","link_class":"scale_up"},)"));
   const auto tainted = load_system_graph_from_string_or_throw(
       system_graph_test_config(remote_branch), rocjitsu::kEmbeddedSchema);
-  EXPECT_TRUE(tainted.local_peer_routes("tray7").routes().empty());
+  auto maybe_projection2 = tainted.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection2.value().routes().empty());
 
   const auto legacy = load_system_graph_or_throw(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
                                                  rocjitsu::kEmbeddedSchema);
   ASSERT_EQ(legacy.links.size(), 6u);
-  EXPECT_TRUE(legacy.local_peer_routes().routes().empty());
+  auto maybe_projection3 = legacy.local_peer_routes(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection3.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection3.value().routes().empty());
 
   config::SystemPeerRouteProjection projection;
   {
     const auto graph = load_system_graph_from_string_or_throw(
         system_graph_test_config(local_switch_manifest()), rocjitsu::kEmbeddedSchema);
-    projection = graph.local_peer_routes("tray7");
-    EXPECT_TRUE(graph.local_peer_routes("tray0").routes().empty());
+    auto maybe_projection4 = graph.local_peer_routes(diagnostic.emitter(), "tray7");
+    ASSERT_TRUE(maybe_projection4.succeeded()) << diagnostic.message();
+    projection = maybe_projection4.value();
+    auto maybe_projection5 = graph.local_peer_routes(diagnostic.emitter(), "tray0");
+    ASSERT_TRUE(maybe_projection5.succeeded()) << diagnostic.message();
+    EXPECT_TRUE(maybe_projection5.value().routes().empty());
   }
   EXPECT_EQ(projection.node_id(), "tray7");
   ASSERT_EQ(projection.routes().size(), 1u);
@@ -524,12 +679,15 @@ TEST(SystemGraphTest, PeerRouteProjectionRequiresExplicitLocalSwitchPath) {
 }
 
 TEST(SystemGraphTest, PeerRouteProjectionOmitsAbsentAndAmbiguousPaths) {
+  util::StringDiagnostic diagnostic;
   std::string absent = local_switch_manifest();
   ASSERT_TRUE(
       replace_exactly_once(absent, R"({"src":"e9","dst":"sw","link_class":"scale_up"},)", ""));
   const auto no_path = load_system_graph_from_string_or_throw(system_graph_test_config(absent),
                                                               rocjitsu::kEmbeddedSchema);
-  EXPECT_TRUE(no_path.local_peer_routes("tray7").routes().empty());
+  auto maybe_projection1 = no_path.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection1.value().routes().empty());
 
   std::string alternate = local_switch_manifest();
   ASSERT_TRUE(replace_exactly_once(alternate, R"({"id":"sw","kind":"switch"},)",
@@ -543,10 +701,13 @@ TEST(SystemGraphTest, PeerRouteProjectionOmitsAbsentAndAmbiguousPaths) {
     {"src":"sw3","dst":"e9","link_class":"scale_up"},)"));
   const auto two_paths = load_system_graph_from_string_or_throw(system_graph_test_config(alternate),
                                                                 rocjitsu::kEmbeddedSchema);
-  EXPECT_TRUE(two_paths.local_peer_routes("tray7").routes().empty());
+  auto maybe_projection2 = two_paths.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection2.value().routes().empty());
 }
 
 TEST(SystemGraphTest, PeerRouteProjectionNeverUsesGpuTransit) {
+  util::StringDiagnostic diagnostic;
   constexpr std::string_view manifest = R"({
     "nodes":[{"id":"local","gpus":[
       {"id":"a","gpu_id":101,"unique_id":1001,"location_id":768,"drm_render_minor":128},
@@ -565,7 +726,9 @@ TEST(SystemGraphTest, PeerRouteProjectionNeverUsesGpuTransit) {
   })";
   const auto graph = load_system_graph_from_string_or_throw(system_graph_test_config(manifest),
                                                             rocjitsu::kEmbeddedSchema);
-  const auto routes = graph.local_peer_routes();
+  auto maybe_projection1 = graph.local_peer_routes(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  const auto routes = maybe_projection1.value();
   ASSERT_EQ(routes.routes().size(), 2u);
   EXPECT_EQ(routes.routes()[0].endpoints, (std::vector<std::string>{"ea", "eb"}));
   EXPECT_EQ(routes.routes()[1].endpoints, (std::vector<std::string>{"eb", "ec"}));
@@ -574,6 +737,7 @@ TEST(SystemGraphTest, PeerRouteProjectionNeverUsesGpuTransit) {
 }
 
 TEST(SystemGraphTest, PeerRouteProjectionBoundsSynchronousHopDepth) {
+  util::StringDiagnostic diagnostic;
   const auto switch_chain = [](size_t endpoint_count) {
     std::string manifest = R"({
       "nodes":[{"id":"local","gpus":[
@@ -603,7 +767,9 @@ TEST(SystemGraphTest, PeerRouteProjectionBoundsSynchronousHopDepth) {
   const auto at_limit = load_system_graph_from_string_or_throw(
       system_graph_test_config(switch_chain(config::kMaxPeerRouteEndpoints)),
       rocjitsu::kEmbeddedSchema);
-  const auto allowed = at_limit.local_peer_routes();
+  auto maybe_projection1 = at_limit.local_peer_routes(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  const auto allowed = maybe_projection1.value();
   ASSERT_EQ(allowed.routes().size(), 1u);
   ASSERT_EQ(allowed.routes()[0].endpoints.size(), config::kMaxPeerRouteEndpoints);
   EXPECT_EQ(allowed.routes()[0].endpoints.front(), "ea");
@@ -612,34 +778,94 @@ TEST(SystemGraphTest, PeerRouteProjectionBoundsSynchronousHopDepth) {
   const auto over_limit = load_system_graph_from_string_or_throw(
       system_graph_test_config(switch_chain(config::kMaxPeerRouteEndpoints + 1)),
       rocjitsu::kEmbeddedSchema);
-  EXPECT_TRUE(over_limit.local_peer_routes().routes().empty());
+  auto maybe_projection2 = over_limit.local_peer_routes(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection2.value().routes().empty());
 }
 
 TEST(SystemGraphTest, RejectsInvalidIdentityAndReferences) {
   struct InvalidCase {
     std::string_view from;
     std::string_view to;
+    std::string_view diagnostic;
   };
   const std::array cases = {
-      InvalidCase{R"({"id":"tray7","gpus":)", R"({"id":"tray0","gpus":)"},
-      InvalidCase{R"({"id":"g9","gpu_id":)", R"({"id":"g5","gpu_id":)"},
-      InvalidCase{R"("gpu_id":909)", R"("gpu_id":505)"},
-      InvalidCase{R"("unique_id":3009)", R"("unique_id":3005)"},
-      InvalidCase{R"("unique_id":3002)", R"("unique_id":3005)"},
-      InvalidCase{R"("location_id":1280)", R"("location_id":1024)"},
-      InvalidCase{R"("drm_render_minor":130)", R"("drm_render_minor":129)"},
-      InvalidCase{R"({"src":"e9","dst":"sw")", R"({"src":"missing","dst":"sw")"},
-      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":["g5","missing"])"},
-      InvalidCase{R"({"id":"g2","gpu_id":)", R"({"gpu_id":)"},
-      InvalidCase{R"({"id":"g2","gpu_id":)", R"({"id":"g2","profile":"other","gpu_id":)"},
+      InvalidCase{R"({"id":"tray7","gpus":)", R"({"id":"tray0","gpus":)",
+                  "duplicate system node id"},
+      InvalidCase{R"({"id":"tray7","gpus":)", R"({"id":"","gpus":)",
+                  "system.nodes[].id must be nonempty"},
+      InvalidCase{R"({"id":"g9","gpu_id":)", R"({"id":"g5","gpu_id":)",
+                  "duplicate system GPU instance id"},
+      InvalidCase{R"("gpu_id":909)", R"("gpu_id":505)", "missing or duplicate KFD GPU ID"},
+      InvalidCase{R"("gpu_id":909)", R"("gpu_id":0)", "missing or duplicate KFD GPU ID"},
+      InvalidCase{R"("unique_id":3009)", R"("unique_id":3005)", "duplicate system GPU unique ID"},
+      InvalidCase{R"("unique_id":3002)", R"("unique_id":3005)", "duplicate system GPU unique ID"},
+      InvalidCase{R"("unique_id":3009)", R"("unique_id":0)",
+                  "system GPU instance has no unique ID"},
+      InvalidCase{R"("location_id":1280)", R"("location_id":1024)",
+                  "missing or duplicate PCI location"},
+      InvalidCase{R"("location_id":1280)", R"("location_id":0)",
+                  "missing or duplicate PCI location"},
+      InvalidCase{R"("drm_render_minor":130)", R"("drm_render_minor":129)",
+                  "invalid or duplicate DRM render minor"},
+      InvalidCase{R"("drm_render_minor":130)", R"("drm_render_minor":127)",
+                  "invalid or duplicate DRM render minor"},
+      InvalidCase{R"({"src":"e9","dst":"sw")", R"({"src":"missing","dst":"sw")",
+                  "invalid system link"},
+      InvalidCase{R"({"src":"e9","dst":"sw")", R"({"src":"e9","dst":"e9")", "invalid system link"},
+      InvalidCase{R"({"src":"e9","dst":"sw")", R"({"src":"e5","dst":"sw")",
+                  "duplicate system link"},
+      InvalidCase{R"({"src":"e9","dst":"sw")", R"({"src":"","dst":"sw")",
+                  "system.links[].src must be nonempty"},
+      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":["g5","missing"])",
+                  "unknown or repeated coherence-domain GPU"},
+      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":["g5","g5"])",
+                  "unknown or repeated coherence-domain GPU"},
+      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":["g5","g2"])",
+                  "coherence domain spans system nodes"},
+      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":[])", "coherence domain has no GPUs"},
+      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":["g5",""])",
+                  "coherence domain GPU must be nonempty"},
+      InvalidCase{R"({"id":"g2","gpu_id":)", R"({"gpu_id":)",
+                  "system.nodes[].gpus[].id must be nonempty"},
+      InvalidCase{R"({"id":"g2","gpu_id":)", R"({"id":"g2","profile":"other","gpu_id":)",
+                  "unsupported GPU profile"},
+      InvalidCase{R"({"id":"sw","kind":"switch"})", R"({"id":"e2","kind":"switch"})",
+                  "duplicate system endpoint id"},
+      InvalidCase{R"({"id":"sw","kind":"switch"})", R"({"id":"","kind":"switch"})",
+                  "system.endpoints[].id must be nonempty"},
+      InvalidCase{R"({"id":"sw","kind":"switch"})", R"({"id":"sw","kind":"switch","node":"tray0"})",
+                  "switch endpoint cannot name a GPU or node"},
+      InvalidCase{R"("kind":"gpu","gpu":"g2")", R"("kind":"gpu","gpu":"missing")",
+                  "invalid GPU endpoint"},
+      InvalidCase{R"("kind":"gpu","gpu":"g2")", R"("kind":"gpu","gpu":"")",
+                  "GPU endpoint gpu must be nonempty"},
+      InvalidCase{R"("kind":"network","node":"tray0")", R"("kind":"network","node":"missing")",
+                  "invalid network endpoint"},
+      InvalidCase{R"("kind":"network","node":"tray0")", R"("kind":"network","node":"")",
+                  "network endpoint node must be nonempty"},
+      InvalidCase{R"("src":"n0","dst":"n7","link_class":"net")",
+                  R"("src":"n0","dst":"n7","link_class":"scale_up")",
+                  "scale-up link has a network endpoint"},
+      InvalidCase{R"("src":"n0","dst":"n7","link_class":"net")",
+                  R"("src":"n0","dst":"sw","link_class":"net")",
+                  "NET link must join different system nodes"},
+      InvalidCase{R"("id":"local7","gpus")", R"("id":"","gpus")",
+                  "system.coherence_domains[].id must be nonempty"},
   };
-  for (const auto &[from, to] : cases) {
+  for (const auto &[from, to, expected] : cases) {
+    SCOPED_TRACE(from);
+    SCOPED_TRACE(to);
     std::string manifest(kSystemGraphManifest);
-    ASSERT_TRUE(replace_exactly_once(manifest, from, to)) << from;
-    EXPECT_THROW(load_system_graph_from_string_or_throw(system_graph_test_config(manifest),
-                                                        rocjitsu::kEmbeddedSchema),
-                 std::invalid_argument)
-        << from;
+    ASSERT_TRUE(replace_exactly_once(manifest, from, to));
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    const auto result = config::load_system_graph_from_string(system_graph_test_config(manifest),
+                                                              rocjitsu::kEmbeddedSchema,
+                                                              util::DiagnosticEmitter(sink));
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(), testing::HasSubstr(expected));
   }
 }
 
@@ -647,27 +873,66 @@ TEST(SystemGraphTest, RejectsAmbiguousLegacyReplicationAndUnselectedConstruction
   std::string json = system_graph_test_config(kSystemGraphManifest);
   EXPECT_TRUE(
       replace_exactly_once(json, R"("gpu":{"device":)", R"("gpu":{"num_gpus":2,"device":)"));
-  EXPECT_THROW(load_system_graph_from_string_or_throw(json, rocjitsu::kEmbeddedSchema),
-               std::invalid_argument);
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result =
+        config::load_system_graph_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_FALSE(messages.front().empty());
+  }
 
   json = system_graph_test_config(kSystemGraphManifest);
-  EXPECT_THROW(load_config_from_string_or_throw(json, rocjitsu::kEmbeddedSchema),
-               std::invalid_argument);
-  EXPECT_THROW(load_execution_thread_settings_from_string_or_throw(json, rocjitsu::kEmbeddedSchema),
-               std::invalid_argument);
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_FALSE(messages.front().empty());
+  }
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_execution_thread_settings_from_string(
+        json, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_FALSE(messages.front().empty());
+  }
 
   json = system_graph_test_config(kSystemGraphManifest);
   EXPECT_TRUE(
       replace_exactly_once(json, R"("system":)", R"("dbt_guest":{"enabled":true},"system":)"));
-  const auto file = write_temp_config(json);
-  EXPECT_THROW(load_dbt_guest_config_from_file_or_throw(file.path()), std::invalid_argument);
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result =
+        config::load_system_graph_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_FALSE(messages.front().empty());
+  }
 }
 
 TEST(SystemGraphTest, RejectsManifestWithNonGpuTopologyRoot) {
   std::string json = system_graph_test_config(kSystemGraphManifest);
   ASSERT_TRUE(replace_exactly_once(json, R"("type":"soc")", R"("type":"composite")"));
-  EXPECT_THROW(load_config_from_string_for_node_or_throw(json, rocjitsu::kEmbeddedSchema, "tray7"),
-               std::invalid_argument);
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_config_from_string_for_node(json, rocjitsu::kEmbeddedSchema, "tray7",
+                                                           emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_FALSE(messages.front().empty());
+  }
 }
 
 TEST(SystemGraphTest, KeepsLegacyUnknownFieldsButRejectsManifestTypos) {
@@ -678,17 +943,27 @@ TEST(SystemGraphTest, KeepsLegacyUnknownFieldsButRejectsManifestTypos) {
   std::string manifest(kSystemGraphManifest);
   ASSERT_TRUE(replace_exactly_once(manifest, R"({"id":"sw","kind":"switch"})",
                                    R"({"id":"sw","kind":"switch","typo":1})"));
-  EXPECT_THROW(load_system_graph_from_string_or_throw(system_graph_test_config(manifest),
-                                                      rocjitsu::kEmbeddedSchema),
-               std::runtime_error);
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_system_graph_from_string(system_graph_test_config(manifest),
+                                                        rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_FALSE(messages.front().empty());
+  }
 }
 
 TEST(SystemGraphTest, ExpandsLegacyFourGpuIdentity) {
+  util::StringDiagnostic diagnostic;
   const auto graph = load_system_graph_or_throw(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
                                                 rocjitsu::kEmbeddedSchema);
   EXPECT_FALSE(graph.explicit_manifest);
   ASSERT_EQ(graph.nodes.size(), 1u);
-  const auto gpus = graph.local_gpus();
+  auto maybe_projection1 = graph.local_gpus(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  const auto gpus = maybe_projection1.value();
   ASSERT_EQ(gpus.size(), 4u);
   EXPECT_EQ(gpus.front().device.gpu_id, 1250u);
   EXPECT_EQ(gpus.back().device.gpu_id, 1253u);
@@ -698,10 +973,13 @@ TEST(SystemGraphTest, ExpandsLegacyFourGpuIdentity) {
 }
 
 TEST(SystemGraphTest, LegacyAndNetFixturesDoNotProjectLocalPeerRoutes) {
+  util::StringDiagnostic diagnostic;
   const auto legacy = load_system_graph_or_throw(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
                                                  rocjitsu::kEmbeddedSchema);
   EXPECT_FALSE(legacy.explicit_manifest);
-  EXPECT_TRUE(legacy.local_peer_routes().routes().empty());
+  auto maybe_projection1 = legacy.local_peer_routes(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection1.value().routes().empty());
 
   const auto two_node = load_system_graph_or_throw(
       CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_2node_net.json", rocjitsu::kEmbeddedSchema);
@@ -709,8 +987,12 @@ TEST(SystemGraphTest, LegacyAndNetFixturesDoNotProjectLocalPeerRoutes) {
   ASSERT_EQ(two_node.nodes.size(), 2u);
   ASSERT_EQ(two_node.links.size(), 1u);
   EXPECT_EQ(two_node.links[0].link_class, config::SystemLinkClass::Net);
-  EXPECT_TRUE(two_node.local_peer_routes("node0").routes().empty());
-  EXPECT_TRUE(two_node.local_peer_routes("node1").routes().empty());
+  auto maybe_projection2 = two_node.local_peer_routes(diagnostic.emitter(), "node0");
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection2.value().routes().empty());
+  auto maybe_projection3 = two_node.local_peer_routes(diagnostic.emitter(), "node1");
+  ASSERT_TRUE(maybe_projection3.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection3.value().routes().empty());
 }
 
 TEST(SystemGraphTest, ProjectsGfx1250TwoNodeNetFixture) {
@@ -733,7 +1015,15 @@ TEST(SystemGraphTest, ProjectsGfx1250TwoNodeNetFixture) {
   EXPECT_EQ(second.global_to_local_ordinals.at("g1"), 0u);
   EXPECT_FALSE(first.global_to_local_ordinals.contains("g1"));
   EXPECT_FALSE(second.global_to_local_ordinals.contains("g0"));
-  EXPECT_THROW(load_config_or_throw(path, rocjitsu::kEmbeddedSchema), std::invalid_argument);
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_config(path, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_FALSE(messages.front().empty());
+  }
 }
 
 TEST(SystemGraphTest, ProjectsOnlySelectedNodeBeforeThreadAllocation) {
@@ -765,9 +1055,13 @@ TEST(SystemGraphTest, ProjectsOnlySelectedNodeBeforeThreadAllocation) {
   const auto settings = load_execution_thread_settings_from_string_for_node_or_throw(
       json, rocjitsu::kEmbeddedSchema, "tray7");
   EXPECT_EQ(settings.resolve(8).dispatch, (std::vector<uint32_t>{2, 2}));
-  EXPECT_THROW(
-      load_config_from_string_for_node_or_throw(json, rocjitsu::kEmbeddedSchema, "missing", 8),
-      std::invalid_argument);
+  std::vector<std::string> messages;
+  auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+  const auto missing = config::load_config_from_string_for_node(
+      json, rocjitsu::kEmbeddedSchema, "missing", util::DiagnosticEmitter(sink), 8);
+  EXPECT_TRUE(missing.failed());
+  ASSERT_EQ(messages.size(), 1u);
+  EXPECT_THAT(messages.front(), testing::HasSubstr("unknown local node ID"));
 }
 
 TEST(SystemGraphTest, ValidationUsesSelectedManifestNode) {
@@ -785,15 +1079,29 @@ TEST(SystemGraphTest, RequiresArgumentAndConfigSelectorsToAgree) {
   EXPECT_EQ(
       load_config_from_string_or_throw(selected.value(), rocjitsu::kEmbeddedSchema).local_node_id,
       "tray0");
-  EXPECT_THROW(load_config_from_string_for_node_or_throw(selected.value(),
-                                                         rocjitsu::kEmbeddedSchema, "tray7"),
-               std::invalid_argument);
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_config_from_string_for_node(
+        selected.value(), rocjitsu::kEmbeddedSchema, "tray7", emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_FALSE(messages.front().empty());
+  }
 
   std::string typo = selected.value();
   ASSERT_TRUE(replace_exactly_once(typo, R"({"id":"e2","kind":"gpu","gpu":"g2"})",
                                    R"({"id":"e2","kind":"gpu","gpu":"g2","typo":1})"));
-  EXPECT_THROW(load_config_from_string_or_throw(typo, rocjitsu::kEmbeddedSchema),
-               std::runtime_error);
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_config_from_string(typo, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_FALSE(messages.front().empty());
+  }
 }
 
 TEST(SystemGraphTest, PublishesOnlySelectedLocalKfdNodes) {
@@ -2820,6 +3128,32 @@ TEST(EffectiveConfigTest, EscapesLocalNodeIdAndRejectsUnknownNode) {
   auto missing = config::json_with_local_node(json, "missing", diagnostic.emitter());
   EXPECT_TRUE(missing.failed());
   EXPECT_THAT(diagnostic.message(), testing::HasSubstr("unknown local node ID"));
+}
+
+TEST(EffectiveConfigTest, GraphFailureDoesNotPublishLaunchCopy) {
+  for (bool invalid_graph : {false, true}) {
+    SCOPED_TRACE(invalid_graph);
+    std::string json = system_graph_test_config(kSystemGraphManifest);
+    if (invalid_graph)
+      ASSERT_TRUE(
+          replace_exactly_once(json, R"({"id":"tray7","gpus":)", R"({"id":"tray0","gpus":)"));
+    const auto source = write_temp_config(json);
+    const test::ScopedTempDirectory runtime("rocjitsu-graph-launch-failure-");
+    test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    const auto result = config::write_effective_config(source.path(), {.local_node = "missing"},
+                                                       getpid(), util::DiagnosticEmitter(sink));
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(), testing::HasSubstr(invalid_graph ? "duplicate system node id"
+                                                                   : "unknown local node ID"));
+    EXPECT_TRUE(std::filesystem::is_empty(runtime.path()));
+    util::StringDiagnostic diagnostic;
+    const auto original = config::read_config_file(source.path(), diagnostic.emitter());
+    ASSERT_TRUE(original.succeeded()) << diagnostic.message();
+    EXPECT_EQ(original.value(), json);
+  }
 }
 
 TEST(EffectiveConfigTest, RejectsConflictingNodeSelectorInLaunchCopy) {

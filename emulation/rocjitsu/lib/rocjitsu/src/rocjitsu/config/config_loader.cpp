@@ -1053,35 +1053,41 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
   auto type = [](const fb::ComponentDef *c) -> std::string_view {
     return c->type() ? c->type()->string_view() : "composite";
   };
-  auto count = [emit_error](const fb::ComponentDef *c) -> util::FailureOr<uint64_t> {
+  auto checked_capacity = [emit_error](uint64_t n, uint32_t &capacity) -> util::Result {
+    if (n > std::numeric_limits<uint32_t>::max())
+      return emit_error.emit() << "Topology execution capacity exceeds uint32 range";
+    capacity = static_cast<uint32_t>(n);
+    return util::Result::success();
+  };
+  auto count = [emit_error,
+                checked_capacity](const fb::ComponentDef *c) -> util::FailureOr<uint32_t> {
     auto names = expand_range(c->name() ? c->name()->str() : "", emit_error);
     if (names.failed())
       return util::Result::failure();
-    return names.value().size();
-  };
-  auto checked = [](uint64_t n) {
-    if (n > std::numeric_limits<uint32_t>::max())
-      throw std::invalid_argument("Topology execution capacity exceeds uint32 range");
-    return static_cast<uint32_t>(n);
+    uint32_t capacity;
+    if (checked_capacity(names.value().size(), capacity).failed())
+      return util::Result::failure();
+    return capacity;
   };
   ExecutionTopology result;
-  auto visit = [&](auto &&self, const fb::ComponentDef *node, uint64_t copies) -> util::Result {
+  auto visit = [&](auto &&self, const fb::ComponentDef *node, uint32_t copies) -> util::Result {
     if (!copies)
       return util::Result::success();
-    if (type(node) == "xcd")
-      result.xcds = checked(result.xcds + copies);
+    if (type(node) == "xcd" &&
+        checked_capacity(uint64_t{result.xcds} + copies, result.xcds).failed())
+      return util::Result::failure();
     if (!node->children())
       return util::Result::success();
     bool has_cp = false, has_se = false;
-    uint64_t direct_cus = 0, se_cus = 0;
+    uint32_t direct_cus = 0, se_cus = 0;
     for (auto *child : *node->children()) {
       auto child_count = count(child);
       if (child_count.failed())
         return util::Result::failure();
       const uint64_t n = child_count.value();
       has_cp |= type(child) == "command_processor" && n != 0;
-      if (type(child) == "compute_unit")
-        direct_cus += n;
+      if (type(child) == "compute_unit" && checked_capacity(direct_cus + n, direct_cus).failed())
+        return util::Result::failure();
       if (type(child) == "shader_engine" && n) {
         has_se = true;
         if (child->children())
@@ -1090,10 +1096,13 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
               auto cu_count = count(cu);
               if (cu_count.failed())
                 return util::Result::failure();
-              se_cus += n * cu_count.value();
+              if (checked_capacity(se_cus + n * cu_count.value(), se_cus).failed())
+                return util::Result::failure();
             }
       }
-      if (self(self, child, checked(copies * n)).failed())
+      uint32_t child_copies;
+      if (checked_capacity(copies * n, child_copies).failed() ||
+          self(self, child, child_copies).failed())
         return util::Result::failure();
     }
     // Match do_wire_cps(): sibling CPs share the same CUs. Each XCD caller can
@@ -1101,8 +1110,10 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
     // This is maximum demand; fewer engine partitions can leave workers idle.
     if (has_cp) {
       const uint64_t cus = has_se ? se_cus : direct_cus;
-      if (cus)
-        result.dispatch_capacity = checked(result.dispatch_capacity + copies * (cus - 1));
+      if (cus &&
+          checked_capacity(result.dispatch_capacity + copies * (cus - 1), result.dispatch_capacity)
+              .failed())
+        return util::Result::failure();
     }
     return util::Result::success();
   };
@@ -1114,13 +1125,15 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
 /// Resolve a requested selector against the launch copy as well as the caller.
 /// Keeping the two in agreement prevents a daemon or interposer from silently
 /// building a different node than a direct C API caller requested.
-const SystemNode &selected_node(const fb::SimulationConfig *config, const SystemGraph &graph,
-                                std::string_view requested_node) {
+util::FailureOr<const SystemNode *> selected_node(const fb::SimulationConfig *config,
+                                                  const SystemGraph &graph,
+                                                  std::string_view requested_node,
+                                                  util::DiagnosticEmitter emit_error) {
   const std::string_view configured_node =
       config->local_node() ? config->local_node()->string_view() : std::string_view{};
   if (!requested_node.empty() && !configured_node.empty() && requested_node != configured_node)
-    throw std::invalid_argument("local node argument disagrees with config.local_node");
-  return graph.select_node(requested_node.empty() ? configured_node : requested_node);
+    return emit_error.emit() << "local node argument disagrees with config.local_node";
+  return graph.select_node(emit_error, requested_node.empty() ? configured_node : requested_node);
 }
 
 util::FailureOr<ExecutionThreadSettings>
@@ -1134,16 +1147,16 @@ execution_thread_settings(const fb::SimulationConfig *config, uint32_t gpus,
           : 0,
       config->async_helper_threads()};
   if (!config->vm() || !config->vm()->arch() || !config->topology())
-    throw std::invalid_argument("Thread allocation requires vm.arch and topology");
+    return emit_error.emit() << "Thread allocation requires vm.arch and topology";
   settings.arch = parse_arch(config->vm()->arch()->str());
   if (settings.arch == ROCJITSU_CODE_ARCH_INVALID)
-    throw std::invalid_argument("Invalid vm.arch for thread allocation");
+    return emit_error.emit() << "Invalid vm.arch for thread allocation";
   auto topology = execution_topology(config->topology()->root(), emit_error);
   if (topology.failed())
     return util::Result::failure();
   const auto &dimensions = topology.value();
   if (uint64_t{dimensions.xcds} * gpus > std::numeric_limits<uint32_t>::max())
-    throw std::invalid_argument("Total XCD count exceeds uint32 range");
+    return emit_error.emit() << "Total XCD count exceeds uint32 range";
   settings.xcds = dimensions.xcds * gpus;
   if (config->thread_allocations())
     for (const auto *choice : *config->thread_allocations())
@@ -1174,7 +1187,10 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
   if (system_graph.failed())
     return util::Result::failure();
   result.system_graph = std::move(system_graph.value());
-  const SystemNode &node = selected_node(fb_config, result.system_graph, node_id);
+  auto selection = selected_node(fb_config, result.system_graph, node_id, emit_error);
+  if (selection.failed())
+    return util::Result::failure();
+  const SystemNode &node = *selection.value();
   result.local_node_id = node.id;
   for (uint32_t ordinal = 0; ordinal < node.gpus.size(); ++ordinal)
     result.global_to_local_ordinals.emplace(node.gpus[ordinal].id, ordinal);
@@ -1276,7 +1292,7 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
     return util::Result::failure();
   result.build_result = std::move(primary_build.value());
   if (manifest && result.soc() == nullptr)
-    throw std::invalid_argument("system topology root must be an SoC");
+    return emit_error.emit() << "system topology root must be an SoC";
   // The CWSR capacity uses device fields for LDS and wave slots, while wave
   // admission uses each CU's configured limits. Reject a producer that could
   // exceed its advertised save area (or the LDS field in the save record).
@@ -1461,7 +1477,7 @@ util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &js
       json.value(), schema_text, emit_error,
       [emit_error](const fb::SimulationConfig *config) -> util::FailureOr<DeviceIdentityConfig> {
         if (config->system())
-          throw std::invalid_argument("system device identity requires a selected local node");
+          return emit_error.emit() << "system device identity requires a selected local node";
         DeviceIdentityConfig identity;
         if (config->vm() == nullptr || config->vm()->gpu() == nullptr)
           return identity;
@@ -1513,7 +1529,10 @@ util::FailureOr<ExecutionThreadSettings> load_execution_thread_settings_from_str
         auto graph = system_graph_from_fb(config, emit_error);
         if (graph.failed())
           return util::Result::failure();
-        const SystemNode &node = selected_node(config, graph.value(), node_id);
+        auto selection = selected_node(config, graph.value(), node_id, emit_error);
+        if (selection.failed())
+          return util::Result::failure();
+        const SystemNode &node = *selection.value();
         return execution_thread_settings(config, static_cast<uint32_t>(node.gpus.size()),
                                          emit_error);
       });

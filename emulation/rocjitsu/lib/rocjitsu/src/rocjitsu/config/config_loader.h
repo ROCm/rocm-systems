@@ -101,25 +101,28 @@ struct ExecutionThreadSettings {
 
 /// @brief Read only a config's thread requests and topology dimensions.
 /// @details Allocates no simulator components or worker threads. File-reading,
-/// parsing, and component-range failures emit a diagnostic and return failure.
+/// parsing, component-range, and invalid allocation metadata failures emit a
+/// diagnostic and return failure.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
-/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic.
-/// @throws std::invalid_argument when required allocation metadata is invalid.
+/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic,
+/// including invalid allocation metadata, system-graph validation, or node selection.
+/// @note Allocation and library exceptions may still propagate.
 util::FailureOr<ExecutionThreadSettings>
 load_execution_thread_settings(const std::string &json_path, const std::string &schema_text,
                                util::DiagnosticEmitter emit_error);
 
 /// @brief Read thread requests and topology dimensions from config JSON text.
 /// @details Same as the path overload, for a config a launch has already rewritten
-/// in memory and does not need to place on disk. Parsing and component-range
-/// failures emit a diagnostic and return failure.
+/// in memory and does not need to place on disk. Parsing, component-range, and
+/// invalid allocation metadata failures emit a diagnostic and return failure.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
-/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic.
-/// @throws std::invalid_argument when required allocation metadata is invalid.
+/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic,
+/// including invalid allocation metadata, system-graph validation, or node selection.
+/// @note Allocation and library exceptions may still propagate.
 util::FailureOr<ExecutionThreadSettings>
 load_execution_thread_settings_from_string(const std::string &json, const std::string &schema_text,
                                            util::DiagnosticEmitter emit_error);
@@ -286,7 +289,9 @@ struct DeviceIdentityConfig {
 /// for a large part is gigabytes of register files. A front end that only needs
 /// to know which GPU to present should not pay for a machine it never runs.
 /// File-reading, parsing, and device conversion failures emit a diagnostic
-/// and return failure. Other validation and allocation exceptions propagate.
+/// and return failure. Explicit system manifests are rejected with a diagnostic
+/// because this entry point does not select a local node. Other validation and
+/// allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -312,7 +317,8 @@ simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 /// @param schema_text FlatBuffers schema text.
 /// @param emit_error Destination for failure diagnostics.
 /// @returns Success, or failure with a diagnostic for file-reading, parsing,
-/// KFD/DBT device conversion, component-range, or link-expression errors. Other
+/// KFD/DBT device conversion, system-graph validation, node selection, component-range,
+/// or link-expression errors. Other
 /// validation and allocation exceptions propagate.
 util::Result validate_config(const std::string &json_path, const std::string &schema_text,
                              util::DiagnosticEmitter emit_error);
