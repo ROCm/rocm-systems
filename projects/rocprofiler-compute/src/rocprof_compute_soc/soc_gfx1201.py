@@ -29,7 +29,6 @@ class gfx1201_soc(OmniSoC_Base):
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx1201")
-        self.set_compatible_profilers(["rocprofv3", "rocprofiler-sdk"])
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1201"))
 
         # Navi48 dGPU: 4 MCD chiplets × 8 GL2C banks = 32 banks.

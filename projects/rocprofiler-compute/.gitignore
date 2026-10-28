@@ -32,3 +32,5 @@ _toc.yml
 
 # Backup directories
 .backups/
+/scripts/.metric_health_sites.env
+/validation-artifacts/
