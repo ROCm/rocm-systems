@@ -151,6 +151,25 @@ static __global__ void Delay(uint32_t interval, const uint32_t ticks_per_ms) {
   }
 }
 
+// Spins until the host stores a nonzero value to `release`, or until `timeout_ticks` elapse, with
+// the same coherence requirement on `release` as WaitForHostRelease. The timeout means a host that
+// never reaches the release - because an API under test blocked, or a check threw first - fails
+// the test instead of hanging the GPU. Derive `timeout_ticks` from SpinTicksPerUs().
+[[maybe_unused]] static __global__ void WaitForHostReleaseWithTimeout(volatile int* release,
+                                                                     long long timeout_ticks) {
+#if HT_AMD
+  const long long start = wall_clock64();
+  while (*release == 0) {
+    if (wall_clock64() - start > timeout_ticks) return;
+  }
+#else
+  const long long start = clock64();
+  while (*release == 0) {
+    if (clock64() - start > timeout_ticks) return;
+  }
+#endif
+}
+
 template <typename T>
 __global__ void Iota(T* const out, size_t pitch, size_t w, size_t h, size_t d) {
   const auto x = blockIdx.x * blockDim.x + threadIdx.x;

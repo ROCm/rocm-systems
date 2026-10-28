@@ -848,9 +848,12 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(hipGraphCreate(&graph, 0));
 
-    void* delay_args[] = {&release};
+    constexpr int kWatchdogSeconds = 10;
+    long long timeout_ticks =
+        static_cast<long long>(kWatchdogSeconds) * 1000000 * SpinTicksPerUs();
+    void* delay_args[] = {&release, &timeout_ticks};
     hipKernelNodeParams delay_params{};
-    delay_params.func = reinterpret_cast<void*>(WaitForHostRelease);
+    delay_params.func = reinterpret_cast<void*>(WaitForHostReleaseWithTimeout);
     delay_params.gridDim = dim3(1);
     delay_params.blockDim = dim3(1);
     delay_params.kernelParams = delay_args;
