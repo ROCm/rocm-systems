@@ -3,12 +3,16 @@
 
 import argparse
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
+
+# A --specs-correction pair starts with a spec name and ":"
+SPEC_PAIR_RE = re.compile(r"\s*[A-Za-z_]\w*\s*:")
 
 # Deprecated options by argparse dest: the option and what to use instead
 DEPRECATED_OPTIONS: Dict[str, Tuple[str, str]] = {
@@ -56,10 +60,8 @@ def non_negative_int(value: str) -> int:
 
 
 def spec_correction_pair(value: str) -> str:
-    if "," in value:
-        raise argparse.ArgumentTypeError(
-            f"separate name:value pairs with spaces, got {value!r}"
-        )
+    if not SPEC_PAIR_RE.match(value):
+        raise argparse.ArgumentTypeError(f"expected name:value, got {value!r}")
     return value
 
 
