@@ -7346,7 +7346,7 @@ class CodeGenerator:
             L.append('    value = wf.cu().trap_memory_address() >> 8;')
             L.append('    break;')
             L.append('  }')
-            L.append('  case 0x83: {')
+            L.append('  case 0x83: { // MSG_RTN_GET_REALTIME')
             L.append('    value = wf.realtime_timestamp();')
             L.append('    break;')
             L.append('  }')

@@ -344,7 +344,7 @@ void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     value = wf.cu().trap_memory_address() >> 8;
     break;
   }
-  case 0x83: {
+  case 0x83: { // MSG_RTN_GET_REALTIME
     value = wf.realtime_timestamp();
     break;
   }
@@ -378,7 +378,7 @@ void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
     value = wf.cu().trap_memory_address() >> 8;
     break;
   }
-  case 0x83: {
+  case 0x83: { // MSG_RTN_GET_REALTIME
     value = wf.realtime_timestamp();
     break;
   }
