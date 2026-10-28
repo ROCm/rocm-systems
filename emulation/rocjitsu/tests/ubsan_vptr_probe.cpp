@@ -1,12 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-struct Base {
+class Base {
+public:
   virtual ~Base() = default;
   int value = 0;
 };
 
-struct Derived : Base {};
+class Derived : public Base {};
 
 int main(int argc, char **) {
   Base base;
