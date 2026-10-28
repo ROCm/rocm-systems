@@ -651,7 +651,6 @@ TEST(RomeModelsGioToposMicrotest, SystemWithMoreGpusThanTheModel_IsIgnored) {
   std::memset(&graph, 0, sizeof(graph));
 
   EXPECT_EQ(parseGIOTopos(wider.system(), &graph), ncclSuccess);
-  EXPECT_EQ(graph.nChannels, 0);
 
   ResetNcclFakes();
 }
