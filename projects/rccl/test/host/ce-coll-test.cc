@@ -175,12 +175,27 @@ TEST_F(CeCollMicrotest, EnsureStaging_PublishesTheRegisteredWindowOnce) {
 }
 
 TEST_F(CeCollMicrotest, EnsureStaging_CeAllReduceDisabled_LeavesStagingUnset) {
+  // Staging is shared by CE AllReduce and CE ReduceScatter; both params must be off.
   g_rcclParamCeAllReduce = 0;
+  g_rcclParamCeReduceScatter = 0;
 
   EXPECT_EQ(ncclSuccess, ncclCeEnsureAllReduceStaging(comm_.get()));
 
   EXPECT_EQ(nullptr, comm_->ceColl.ceARTmpBuf);
   EXPECT_EQ(0, alloc_.calls);
+}
+
+TEST_F(CeCollMicrotest, EnsureStaging_CeReduceScatterEnabled_AllocatesWhenAllReduceDisabled) {
+  registerResult_ = ncclSuccess;
+  expectedRegistrations_ = 1;
+  g_rcclParamCeAllReduce = 0;
+  g_rcclParamCeReduceScatter = 1;
+
+  EXPECT_EQ(ncclSuccess, ncclCeEnsureAllReduceStaging(comm_.get()));
+
+  EXPECT_EQ(1, alloc_.calls);
+  EXPECT_EQ(&devrWin_, comm_->ceColl.ceARTmpWin);
+  EXPECT_EQ(&staging_, comm_->ceColl.ceARTmpBuf);
 }
 
 TEST_F(CeCollMicrotest, EnsureStaging_RegistrationFails_FreesTheBufferAndReturnsTheError) {
