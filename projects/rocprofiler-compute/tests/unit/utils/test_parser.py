@@ -1112,14 +1112,6 @@ class TestCorrectSysInfo:
         assert sys_info["gpu_model"].item() == "MI350"
         assert sys_info["total_l2_chan"].item() == "128"
 
-    def test_fragment_without_separator_is_ignored(self, monkeypatch) -> None:
-        """A fragment with no ':' is skipped; valid pairs still apply."""
-        mspec = make_mi350_machine_specs(monkeypatch)
-        sys_info = correct_sys_info(mspec, ["num_xcd:4", "garbage"])
-
-        assert sys_info["num_xcd"].item() == "4"
-        assert sys_info["cu_per_gpu"].item() == "256"
-
     def test_value_keeps_everything_after_the_first_colon(self, monkeypatch) -> None:
         """Only the first ':' separates name from value."""
         sys_info = correct_sys_info(

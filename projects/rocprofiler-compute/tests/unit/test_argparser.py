@@ -190,16 +190,23 @@ def test_profile_kernel_iteration_range():
 # =============================================================================
 
 
-def test_analyze_specs_correction_takes_space_separated_pairs():
-    args = build_args(["analyze", "--specs-correction", "num_xcd:4", "cu_per_gpu:64"])
-    assert args.specs_correction == ["num_xcd:4", "cu_per_gpu:64"]
+@pytest.mark.parametrize(
+    "values",
+    [
+        ["num_xcd:4", "cu_per_gpu:64"],
+        ["sbios:American Megatrends International, LLC.X"],
+    ],
+)
+def test_analyze_specs_correction_takes_space_separated_pairs(values):
+    args = build_args(["analyze", "--specs-correction", *values])
+    assert args.specs_correction == values
 
 
-def test_analyze_specs_correction_rejects_commas(capsys):
+def test_analyze_specs_correction_rejects_value_without_name(capsys):
     with pytest.raises(SystemExit) as exc:
-        build_args(["analyze", "--specs-correction", "num_xcd:4,cu_per_gpu:64"])
+        build_args(["analyze", "--specs-correction", "num_xcd", "4"])
     assert exc.value.code == 2
-    assert "separate name:value pairs with spaces" in capsys.readouterr().err
+    assert "expected name:value, got 'num_xcd'" in capsys.readouterr().err
 
 
 # =============================================================================

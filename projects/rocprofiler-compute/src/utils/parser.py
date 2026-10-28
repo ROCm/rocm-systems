@@ -721,9 +721,8 @@ def correct_sys_info(mspec: MachineSpecs, specs_correction: list[str]) -> pd.Dat
     # Parse key:value pairs
     pairs: dict[str, str] = {}
     for pair in specs_correction:
-        if ":" in pair:
-            key, value = pair.split(":", 1)
-            pairs[key.strip()] = value.strip()
+        key, value = pair.split(":", 1)
+        pairs[key.strip()] = value.strip()
 
     # Apply corrections
     for key, value in pairs.items():
