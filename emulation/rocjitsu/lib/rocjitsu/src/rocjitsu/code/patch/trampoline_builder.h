@@ -131,9 +131,12 @@ struct TrampolinePlan {
   bool preserve_scc = true;      ///< Preserve SCC across target materialization.
   uint16_t scc_temp = 0;         ///< Dead SGPR holding saved SCC across the call.
 
-  // Special-state preservation: set by the orchestrator when the probe body
-  // clobbers the register; plan_probe_call allocates a dead SGPR temp for each
-  // and records it in special_state_saves (one plan/emit loop, not a branch each).
+  /// @brief Caller-requested special-state preservation across the probe call.
+  ///
+  /// plan_probe_call() allocates a dead SGPR temp for each saved register (a pair
+  /// for EXEC/VCC, one SGPR for M0) and records it in special_state_saves. EXEC is
+  /// also saved for a full-mask window: spills, argument writes, or force_full_exec.
+  /// @see Instrumentor::patch_with_debug_summaries() for the caller's policy.
   bool preserve_exec = false;
   bool preserve_vcc = false;
   bool preserve_m0 = false;
@@ -194,28 +197,25 @@ public:
   /// `special_state_saves`, `builder_clobbers`, and `before_word_count`, then
   /// returns true. (`preserve_scc`/`preserve_*` are inputs, read but not written.)
   ///
-  /// Policy:
+  /// Resource constraints:
   ///   - Link pair is read off @p abi; one that fails is_valid_probe_abi()
   ///     fails here. If either lane of the pair is live at the
   ///     anchor, fail. Extending the supported conventions is deferred.
   ///   - Target-address pair is a dead, even-aligned SGPR pair (excluding the
   ///     link pair). It is consumed by s_swappc before the probe body runs, so it
   ///     may overlap @p probe_body_clobbers.
-  ///   - SCC is preserved with one dead SGPR temp. The temp lives across the call
+  ///   - When plan.preserve_scc is set, SCC gets one dead SGPR temp across the call
   ///     (saved before materialization, restored after), so it must avoid both
   ///     the live set and @p probe_body_clobbers. Extending this is deferred.
   ///   - `plan.entry_storage_base`, when set, is excluded from every dead-register
   ///     choice below. It is the one reserved pair liveness cannot see: the
   ///     prologue writes it in the cave, so it reads dead at every anchor.
-  ///   - EXEC/VCC/M0 are preserved when the corresponding plan.preserve_* flag is
-  ///     set. The orchestrator sets preserve_exec/preserve_vcc unconditionally as a
-  ///     conservative policy (the summary detects the special-state writes the
-  ///     decoder exposes as operands, but always saving keeps correctness
-  ///     independent of per-opcode implicit-def coverage) and gates preserve_m0 on
-  ///     the probe's clobbers; EXEC is additionally preserved here when the site
-  ///     spills (forced to -1 around the store/load). Each preserved register gets
-  ///     its own dead SGPR temp (a pair for EXEC/VCC, single for M0) recorded in
-  ///     plan.special_state_saves, drawn from the same dead pool as the SCC temp.
+  ///   - EXEC/VCC/M0 are preserved when the corresponding plan.preserve_* input
+  ///     is set. EXEC is additionally preserved whenever the site needs a
+  ///     full-mask window for spills, argument writes, or plan.force_full_exec.
+  ///     Each saved register gets its own dead SGPR temp (a pair for EXEC/VCC,
+  ///     single for M0) recorded in plan.special_state_saves, drawn from the same
+  ///     dead pool as the SCC temp.
   ///
   /// Returns false and writes a diagnostic naming the unavailable resource to
   /// @p error_out (if non-null) when @p abi is unusable, the link pair is live,
@@ -247,8 +247,8 @@ public:
   /// Returns std::nullopt and writes a diagnostic to @p error_out (if non-null)
   /// when the plan is not a probe call, the synthesized envelope size disagrees
   /// with the planned before_word_count (plan/emit drift), a spill or boundary-wait
-  /// builder rejects the architecture or register class, or build() reports a
-  /// branch-range failure.
+  /// builder rejects the architecture or register class, build() reports a
+  /// branch-range failure, or a delegated vector builder rejects an argument operand.
   [[nodiscard]] static std::optional<TrampolineBytes>
   emit_probe_call(const TrampolinePlan &plan, std::string *error_out = nullptr);
 };

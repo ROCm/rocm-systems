@@ -10,6 +10,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
@@ -372,9 +373,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     reserved.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
   }
 
-  // Special-state temps: one dead SGPR (pair for the wave64 EXEC/VCC masks,
-  // single for M0) per register the probe clobbers. Shared reserve path so EXEC,
-  // VCC, and M0 differ only by their row below, not by a branch each.
+  // Allocate a dead SGPR temp per register that must be preserved: a pair for
+  // EXEC/VCC, one for M0. The preserve_* inputs request saves; a full-mask window
+  // additionally requires EXEC. Shared reserve path so EXEC, VCC, and M0 differ
+  // only by their row below, not by a branch each.
   std::vector<SpecialStateSlot> special_saves;
   auto reserve_special = [&](bool requested, uint16_t operand, uint8_t width,
                              const char *name) -> bool {
@@ -590,6 +592,32 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   for (size_t i = 0; i < plan.probe_args.size(); ++i) {
     const ProbeArgValue &arg = plan.probe_args[i];
     const uint16_t vdst = static_cast<uint16_t>(plan.arg_vgpr_base + i);
+    // TODO: Accept a DiagnosticEmitter in emit_probe_call and remove this adapter.
+    auto report_builder_error = [&](std::string_view message) {
+      if (error_out == nullptr)
+        return;
+      std::string_view source;
+      switch (arg.source) {
+      case ProbeArgSource::Immediate:
+        source = "Immediate";
+        break;
+      case ProbeArgSource::AnchorExecLo:
+        source = "AnchorExecLo";
+        break;
+      case ProbeArgSource::AnchorExecHi:
+        source = "AnchorExecHi";
+        break;
+      case ProbeArgSource::LogBufferPtrLo:
+        source = "LogBufferPtrLo";
+        break;
+      case ProbeArgSource::LogBufferPtrHi:
+        source = "LogBufferPtrHi";
+        break;
+      }
+      *error_out = "probe-call emission: argument " + std::to_string(i) + " (" +
+                   std::string(source) + "): " + std::string(message);
+    };
+    const util::DiagnosticEmitter error(report_builder_error);
     // Screened again here rather than inherited from planning: emit_probe_call is
     // callable on a plan this builder did not produce.
     if (!is_declared_probe_arg_source(arg.source)) {
@@ -608,26 +636,49 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     // reserves the temp, and the guard above fails closed if it is somehow absent.
     switch (arg.source) {
     case ProbeArgSource::Immediate: {
-      const auto words = build_v_mov_b32_imm(vdst, arg.immediate, plan.arch);
+      const util::FailureOr<std::array<uint32_t, 2>> maybe_words =
+          build_v_mov_b32_imm(vdst, arg.immediate, plan.arch, &error);
+      if (maybe_words.failed())
+        return std::nullopt;
+      const auto &words = maybe_words.value();
       env.insert(env.end(), words.begin(), words.end());
       break;
     }
-    case ProbeArgSource::AnchorExecLo:
-      env.push_back(build_v_mov_b32_src(vdst, exec_temp, plan.arch));
+    case ProbeArgSource::AnchorExecLo: {
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(vdst, exec_temp, plan.arch, &error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
       break;
-    case ProbeArgSource::AnchorExecHi:
-      env.push_back(build_v_mov_b32_src(vdst, static_cast<uint16_t>(exec_temp + 1), plan.arch));
+    }
+    case ProbeArgSource::AnchorExecHi: {
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(vdst, static_cast<uint16_t>(exec_temp + 1), plan.arch, &error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
       break;
+    }
     // The pair is read, never written, so it needs no save/restore here: the
     // prologue defined it at kernel entry and planning kept the envelope and the
     // probe body off it.
-    case ProbeArgSource::LogBufferPtrLo:
-      env.push_back(build_v_mov_b32_src(vdst, *plan.entry_storage_base, plan.arch));
+    case ProbeArgSource::LogBufferPtrLo: {
+      const util::FailureOr<uint32_t> word =
+          build_v_mov_b32_src(vdst, *plan.entry_storage_base, plan.arch, &error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
       break;
-    case ProbeArgSource::LogBufferPtrHi:
-      env.push_back(build_v_mov_b32_src(vdst, static_cast<uint16_t>(*plan.entry_storage_base + 1),
-                                        plan.arch));
+    }
+    case ProbeArgSource::LogBufferPtrHi: {
+      const util::FailureOr<uint32_t> word = build_v_mov_b32_src(
+          vdst, static_cast<uint16_t>(*plan.entry_storage_base + 1), plan.arch, &error);
+      if (word.failed())
+        return std::nullopt;
+      env.push_back(word.value());
       break;
+    }
     }
   }
 

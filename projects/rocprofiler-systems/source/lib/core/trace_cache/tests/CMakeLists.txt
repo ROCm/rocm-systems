@@ -12,6 +12,7 @@ set(trace_cache_tests_sources
     test_flush_worker.cpp
     test_kfd_args.cpp
     test_metadata_registry_json.cpp
+    test_metadata_registry.cpp
     test_rocpd_pmc_name_contract.cpp
     test_rocpd_processor.cpp
     test_rocpd_xcp_output.cpp

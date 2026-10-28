@@ -679,11 +679,13 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
             Ok(descriptor) => descriptor,
             Err(error) => return map_error(error),
         };
-        let memory =
-            match linux_interop::import_virtual_memory(&runtime.session, descriptor.as_fd()) {
-                Ok(memory) => memory,
-                Err(error) => return map_error(error),
-            };
+        let Some(session) = runtime.session() else {
+            return ERROR;
+        };
+        let memory = match linux_interop::import_virtual_memory(session, descriptor.as_fd()) {
+            Ok(memory) => memory,
+            Err(error) => return map_error(error),
+        };
         let pool = match memory.info().placement {
             Some(VirtualMemoryPlacement::System) => HsaState::cpu_pool(0, CpuPoolKind::Fine),
             Some(VirtualMemoryPlacement::Device(id)) => runtime

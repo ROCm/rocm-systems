@@ -37,8 +37,8 @@ void expect_declared_footprint(rj_code_arch_t arch) {
   ProbeCallable callable;
   callable.symbol = "rj_log_record_probe";
   callable.arch = arch;
-  callable.body_words = build_log_record_probe_body(arch, kRecordType, kSlotCount);
-  ASSERT_FALSE(callable.body_words.empty());
+  ASSERT_NO_FATAL_FAILURE(
+      build_log_record_probe_body(arch, kRecordType, kSlotCount, callable.body_words));
   callable.abi =
       *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, kLogRecordProbeArgDwords);
   std::string err;
@@ -71,8 +71,8 @@ constexpr uint32_t kSWaitAluSaSdst = 0xbf88fffe; // s_wait_alu 0xfffe on gfx1200
 
 TEST(LogRecordProbe, Rdna4WaitsAfterEachSaluWriteLlvmFlags) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
-  const std::vector<uint32_t> body = build_log_record_probe_body(kArch, kRecordType, kSlotCount);
-  ASSERT_FALSE(body.empty());
+  std::vector<uint32_t> body;
+  ASSERT_NO_FATAL_FAILURE(build_log_record_probe_body(kArch, kRecordType, kSlotCount, body));
   EXPECT_EQ(std::ranges::count(body, kSWaitAluSaSdst), 4);
 
   // The wait must be the word after @p inst, or after its literal when it has one.
@@ -94,8 +94,8 @@ TEST(LogRecordProbe, Rdna4WaitsAfterEachSaluWriteLlvmFlags) {
 
 TEST(LogRecordProbe, CdnaBodiesCarryNoRdna4Wait) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    const std::vector<uint32_t> body = build_log_record_probe_body(arch, kRecordType, kSlotCount);
-    ASSERT_FALSE(body.empty());
+    std::vector<uint32_t> body;
+    ASSERT_NO_FATAL_FAILURE(build_log_record_probe_body(arch, kRecordType, kSlotCount, body));
     EXPECT_EQ(std::ranges::count(body, kSWaitAluSaSdst), 0);
   }
 }
