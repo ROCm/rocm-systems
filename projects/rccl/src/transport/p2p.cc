@@ -1526,9 +1526,11 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
                                                      (void*)&ipcExpInfo[segment].ipcDesc.cuDesc, ncclCuMemHandleType),
                       ret, fail);
+          imported[segment] = true;
         }
       }
-      imported[segment] = true;
+      // A same-process handle is borrowed from the requester, which keeps its own reference, so it is never
+      // marked imported and fail: does not release it.
       CUCHECKGOTO(cuMemMap((CUdeviceptr)((char*)regAddr + offset), ipcExpInfo[segment].size, /* offset */ 0,
                            segmentHandles[segment], /* flags */ 0),
                   ret, fail);

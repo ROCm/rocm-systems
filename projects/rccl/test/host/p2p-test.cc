@@ -6431,10 +6431,11 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CrossProcessNonPosix_ImportsFrom
     ASSERT_NE(QueueHead(conn_), nullptr);
 }
 
-// A cuMem register whose per-segment map fails takes the fail-cleanup path:
-// every segment mapped/imported before the failure is unmapped and released,
-// no record is left on the queue, respBuff is NULL, and *done is still latched.
-TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_ReleasesImportedHandlesAndRecordsNothing)
+// A same-process cuMem register whose per-segment map fails takes the
+// fail-cleanup path: the segment mapped before the failure is unmapped, the
+// borrowed handles are left to their owner, no record is left on the queue,
+// respBuff is NULL, and *done is still latched.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_UnmapsWithoutReleasingBorrowedHandlesAndRecordsNothing)
 {
     conn_.sameProcess = 1;   // same-process: handle copied in, no import seam
 
@@ -6454,6 +6455,11 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_ReleasesImportedHa
                     hipMemGenericAllocationHandle_t, unsigned long long) -> hipError_t {
             return (++mapCalls == 1) ? hipSuccess : hipErrorInvalidValue;
         });
+    int unmapCalls = 0;
+    ScopedHook unmap(g_hipMemUnmap, [&unmapCalls](void*, size_t) -> hipError_t {
+        ++unmapCalls;
+        return hipSuccess;
+    });
     int releaseCalls = 0;
     ScopedHook release(g_hipMemRelease,
         [&releaseCalls](hipMemGenericAllocationHandle_t) -> hipError_t {
@@ -6470,9 +6476,9 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_ReleasesImportedHa
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(resp, nullptr);                    // no address handed back
     EXPECT_EQ(done, 1);
-    // Both segments were marked imported (handle copied in) before the map of
-    // the second failed; cleanup releases each imported handle.
-    EXPECT_EQ(releaseCalls, kNumSegments);
+    EXPECT_EQ(unmapCalls, 1);                    // only the first segment was mapped
+    // The requester already dropped its retain and still owns the handles.
+    EXPECT_EQ(releaseCalls, 0);
     EXPECT_EQ(QueueHead(conn_), nullptr);        // nothing recorded
 }
 
@@ -6614,15 +6620,23 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_ImpInfoAllocFails_Propagates)
 
 // A cuMem register whose record bookkeeping allocation fails after the
 // request offset was applied to regAddr unwinds from the reserved base: every
-// segment is unmapped at base + its running offset, each handle released, and
-// the VA reservation freed at base.
-TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemRecordAllocFails_UnwindsFromReservedBase)
-{
-    conn_.sameProcess = 1;
-
+// segment is unmapped at base + its running offset and the VA reservation is
+// freed at base. Only handles the proxy imported itself (cross-process) are
+// released; same-process handles are borrowed from the requester.
+class P2pProxyRegisterCuMemUnwindTest : public P2pProxyRegisterMicrotest {
+protected:
     // Three segments keeps the per-segment callocs (bool[3], handle[3]) from
     // matching sizeof(proxyMemHandle), which is the allocation starved below.
-    constexpr int       kNumSegments = 3;
+    static constexpr int kNumSegments = 3;
+
+    void RunRecordAllocFails(int sameProcess, int expectedReleases);
+};
+
+void P2pProxyRegisterCuMemUnwindTest::RunRecordAllocFails(int sameProcess, int expectedReleases)
+{
+    conn_.sameProcess = sameProcess;
+    ScopedCuMemHandleType handleType(hipMemHandleTypeWin32);  // cross-process: import from cuDesc, no fd
+
     constexpr uintptr_t kBase        = 0x600000;
     constexpr uintptr_t kOffset      = 0x80;
     constexpr size_t    kSegSize     = 0x1000;
@@ -6631,6 +6645,13 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemRecordAllocFails_UnwindsFro
     for (auto& seg : req) seg.size = kSegSize;
     req[0].offset = kOffset;
 
+    int importCalls = 0;
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [&importCalls](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) -> hipError_t {
+            ++importCalls;
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
     ScopedHook reserve(g_hipMemAddressReserve,
         [](void** ptr, std::size_t, std::size_t, void*, unsigned long long) -> hipError_t {
             if (ptr) *ptr = reinterpret_cast<void*>(kBase);
@@ -6681,10 +6702,21 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemRecordAllocFails_UnwindsFro
     for (int segment = 0; segment < kNumSegments; segment++) {
         EXPECT_EQ(unmapped[segment], reinterpret_cast<void*>(kBase + segment * kSegSize));
     }
-    EXPECT_EQ(releaseCalls, kNumSegments);
+    EXPECT_EQ(importCalls, sameProcess ? 0 : kNumSegments);
+    EXPECT_EQ(releaseCalls, expectedReleases);
     EXPECT_EQ(addrFreeCalls, 1);
     EXPECT_EQ(freedAddr, reinterpret_cast<void*>(kBase));
     EXPECT_EQ(freedSize, kSegSize * kNumSegments);
+}
+
+TEST_F(P2pProxyRegisterCuMemUnwindTest, SameProcess_RecordAllocFails_UnwindsFromReservedBaseWithoutReleasingBorrowedHandles)
+{
+    RunRecordAllocFails(/*sameProcess=*/1, /*expectedReleases=*/0);
+}
+
+TEST_F(P2pProxyRegisterCuMemUnwindTest, CrossProcess_RecordAllocFails_UnwindsFromReservedBaseAndReleasesImportedHandles)
+{
+    RunRecordAllocFails(/*sameProcess=*/0, /*expectedReleases=*/kNumSegments);
 }
 
 #endif  // ROCM_VERSION >= 70000
