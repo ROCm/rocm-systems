@@ -1146,7 +1146,6 @@ fn read_node(
         pci: Some(pci),
         kind: EndpointKind::Gpu {
             info: GpuInfo {
-                native_gpu_id: gpu_id,
                 gfx_major: gfx / 10000,
                 gfx_minor: (gfx / 100) % 100,
                 gfx_stepping: gfx % 100,
