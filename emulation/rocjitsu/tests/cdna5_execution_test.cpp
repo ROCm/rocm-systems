@@ -15,6 +15,7 @@
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "util/host_target.h"
 
+#include <array>
 #include <cfenv>
 #include <span>
 
@@ -921,6 +922,51 @@ TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
   }
 }
+
+constexpr std::array<uint64_t, 16> kF64IdentityInputs = {
+    0x0000000000000000ULL, 0x8000000000000000ULL, 0x0000000000000001ULL, 0x8000000000000001ULL,
+    0x000fffffffffffffULL, 0x0010000000000000ULL, 0x3ff0000000000000ULL, 0xbff0000000000000ULL,
+    0x7fefffffffffffffULL, 0xffefffffffffffffULL, 0x7ff0000000000000ULL, 0xfff0000000000000ULL,
+    0x7ff0000000000001ULL, 0xfff0000000000001ULL, 0x7ff8000000001234ULL, 0xfff8000000001234ULL,
+};
+
+TEST(FpModePolicyTest, F64FinishWithoutModifiersPreservesBitsAndHostEnvironment) {
+  HostFenvGuard environment_guard;
+  ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
+  for (int host_rounding : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(host_rounding), 0);
+    for (int flags : {0, FE_INVALID | FE_INEXACT}) {
+      ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+      ASSERT_EQ(std::feraiseexcept(flags), 0);
+      const int expected_flags = std::fetestexcept(FE_ALL_EXCEPT);
+      for (uint32_t guest_rounding = 0; guest_rounding < 4; ++guest_rounding)
+        for (bool clamp_nan_to_zero : {false, true})
+          for (uint64_t input : kF64IdentityInputs) {
+            const auto result =
+                amdgpu::fp_mode::finish_f64(input, guest_rounding, 0, false, clamp_nan_to_zero);
+            EXPECT_EQ(result, input);
+            EXPECT_EQ(std::fegetround(), host_rounding);
+            EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), expected_flags);
+          }
+    }
+  }
+}
+
+#if RJ_HOST_ARCH_X86
+TEST(FpModePolicyTest, F64FinishWithoutModifiersPreservesFtzDaz) {
+  HostMxcsrGuard environment_guard;
+  constexpr uint32_t kFlushMask = (1u << 6) | (1u << 15);
+  const uint32_t original = _mm_getcsr();
+  for (uint32_t flush : {0u, 1u << 6, 1u << 15, kFlushMask}) {
+    _mm_setcsr((original & ~kFlushMask) | flush);
+    const uint32_t expected_mxcsr = _mm_getcsr();
+    for (uint64_t input : kF64IdentityInputs) {
+      EXPECT_EQ(amdgpu::fp_mode::finish_f64(input, 0, 0, false, true), input);
+      EXPECT_EQ(_mm_getcsr(), expected_mxcsr);
+    }
+  }
+}
+#endif
 
 TEST(FpModePolicyTest, F32ToBf16FmaRestoresAmbientHostEnvironment) {
   HostFenvGuard environment_guard;
