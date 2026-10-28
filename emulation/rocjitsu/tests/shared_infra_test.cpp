@@ -2951,6 +2951,42 @@ TEST_P(CuFactoryTest, LdsContentsSurviveWorkgroupAllocationReuse) {
   EXPECT_EQ(cu->lds().read32(512), 0x87654321u);
 }
 
+TEST_P(CuFactoryTest, ReleasedLdsIsReusableWithoutOverwritingNeighborsOrClearingClusterPins) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = GetParam();
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 102;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *resident = cu->dispatch_wf(0, 0, 102, 32);
+  ASSERT_NE(resident, nullptr);
+  const auto first = cu->allocate_lds(256);
+  const auto middle = cu->allocate_lds(32 * 1024);
+  const auto last = cu->allocate_lds(256);
+  cu->lds().write32(first, 0x12345678);
+  cu->lds().write32(middle, 0x5a5a5a5a);
+  cu->lds().write32(last, 0xabcdef01);
+  cu->release_lds(middle, 32 * 1024);
+  ASSERT_TRUE(cu->can_accept_workgroup(1, 32 * 1024));
+  EXPECT_EQ(cu->allocate_lds(32 * 1024), middle);
+  EXPECT_EQ(cu->lds().read32(first), 0x12345678u);
+  EXPECT_EQ(cu->lds().read32(middle), 0x5a5a5a5au);
+  EXPECT_EQ(cu->lds().read32(last), 0xabcdef01u);
+
+  cu->pin_lds_until_cluster_retired(1);
+  cu->free_wavefront_resources(*resident);
+  cu->maybe_reset_lds_alloc();
+  EXPECT_FALSE(cu->can_allocate_lds(64 * 1024));
+  cu->unpin_lds_for_cluster(1);
+  cu->maybe_reset_lds_alloc();
+  EXPECT_EQ(cu->allocate_lds(64 * 1024), 0u);
+  EXPECT_EQ(cu->lds().read32(last), 0xabcdef01u);
+}
+
 TEST(CuFactoryTest, CdnaAccVgprsDoNotAliasNextWaveSlot) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {

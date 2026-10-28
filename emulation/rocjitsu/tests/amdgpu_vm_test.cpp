@@ -353,6 +353,12 @@ TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFai
     amdgpu::CommandProcessorPlacementTestAccess::retire(*f.cp(), entry, 0);
     EXPECT_EQ(f.cu()->num_wfs(), 0u);
 
+    // Failed setup must return only its reservation while another WG is resident.
+    auto *resident = f.cu()->dispatch_wf(99, 0, f.cu()->config().sgprs_per_wf, 24);
+    ASSERT_NE(resident, nullptr);
+    const auto resident_lds = f.cu()->allocate_lds(256);
+    f.cu()->lds().write32(resident_lds, 0x12345678);
+
     // Missing launch metadata fails after all waves have been reserved. None
     // may escape to observers or keep resources needed by the following group.
     entry.dispatch_id = 2;
@@ -362,8 +368,11 @@ TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFai
     EXPECT_EQ(amdgpu::CommandProcessorPlacementTestAccess::place(*f.cp(), entry),
               (std::pair{0u, amdgpu::VmAccessOutcome::Malformed}));
     EXPECT_EQ(observed->workgroups, 1u);
-    EXPECT_EQ(f.cu()->num_wfs(), 0u);
-    EXPECT_TRUE(f.cu()->can_accept_workgroup(waves, 64 * 1024));
+    EXPECT_EQ(f.cu()->num_wfs(), 1u);
+    EXPECT_TRUE(f.cu()->can_accept_workgroup(waves, 64 * 1024 - 256));
+    EXPECT_FALSE(f.cu()->can_accept_workgroup(waves, 64 * 1024));
+    EXPECT_FALSE(resident->is_halted());
+    EXPECT_EQ(f.cu()->lds().read32(resident_lds), 0x12345678u);
 
     entry.dispatch_id = 3;
     entry.kernel_code_properties = 0;
@@ -372,7 +381,10 @@ TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFai
               (std::pair{1u, amdgpu::VmAccessOutcome::Complete}));
     EXPECT_EQ(observed->workgroups, 2u);
     EXPECT_EQ(observed->wave_callbacks, observed->group_waves);
+    EXPECT_EQ(observed->group_waves.front()->lds_base(), resident_lds + 256);
     amdgpu::CommandProcessorPlacementTestAccess::retire(*f.cp(), entry, 0);
+    f.cu()->free_wavefront_resources(*resident);
+    f.cu()->maybe_reset_lds_alloc();
     EXPECT_EQ(f.cu()->num_wfs(), 0u);
   }
 }
@@ -6934,6 +6946,28 @@ TEST(ClusterDispatchTest, AccountsForPerWorkgroupLdsAlignmentWhenPlanningCluster
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u)
       << "a faulted dispatch retains its packet until queue teardown";
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+  EXPECT_FALSE(f.cu()->has_active_wfs());
+}
+
+TEST(ClusterDispatchTest, PlansSeparateWorkgroupReservationsInFragmentedLds) {
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 2, /*lds_size_kb=*/1));
+  for (uint32_t base = 0; base < 1024; base += 256)
+    ASSERT_EQ(f.cu()->allocate_lds(256), base);
+  f.cu()->release_lds(0, 256);
+  f.cu()->release_lds(512, 256);
+  ASSERT_FALSE(f.cu()->can_allocate_lds(512));
+  ASSERT_TRUE(f.cu()->can_allocate_lds(256, 2));
+
+  const uint32_t code[] = {0xBFB00000u}; // s_endpgm
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch_clustered(ko, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/32, /*kernarg_addr=*/0,
+                           /*group_segment_size=*/256);
+  EXPECT_NO_THROW(f.engine->run());
+  EXPECT_FALSE(f.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
   EXPECT_FALSE(f.cu()->has_active_wfs());
 }
 

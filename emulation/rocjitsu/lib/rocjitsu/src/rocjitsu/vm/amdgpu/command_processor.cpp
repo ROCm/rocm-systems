@@ -283,7 +283,7 @@ std::optional<AqlPacketDiagnostic> validate_cluster_shape(const DispatchEntry &d
 
 uint32_t aligned_lds_bytes_per_workgroup(const DispatchEntry &entry) {
   // Match ComputeUnitCore::allocate_lds()/can_accept_workgroup() granularity for all dispatches.
-  return util::align_up(entry.group_segment_fixed_size, 256u);
+  return util::align_up(entry.group_segment_fixed_size, LdsAllocator::kAlignment);
 }
 
 bool any_active_wavefronts(const std::vector<ComputeUnitCore *> &cus) {
@@ -314,9 +314,9 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
       uint64_t reserved_lds = static_cast<uint64_t>(lds_bytes_per_wg) * reserved_wgs;
       if (reserved_wfs > kU32Max || reserved_lds > kU32Max)
         continue;
-      if (!cu->can_accept_workgroup(static_cast<uint32_t>(reserved_wfs),
-                                    static_cast<uint32_t>(reserved_lds),
-                                    entry.scratch_wave_limit_per_se))
+      if (!cu->can_accept_workgroup(static_cast<uint32_t>(reserved_wfs), 0,
+                                    entry.scratch_wave_limit_per_se) ||
+          !cu->can_allocate_lds(lds_bytes_per_wg, reserved_wgs))
         continue;
 
       plan.push_back({local_wg_id, local_wg_id + entry.workgroup_id_offset, cu});
@@ -2146,11 +2146,11 @@ void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, ui
                                                   uint32_t lds_base) {
   if (!entry.has_workgroup_clusters())
     return;
-  std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
   uint32_t cluster_base_wg_id =
       entry.cluster_base_local_wg_id(local_wg_id) + entry.workgroup_id_offset;
   uint64_t cluster_key = wg_key(entry.dispatch_id, cluster_base_wg_id);
   cu->pin_lds_until_cluster_retired(cluster_key);
+  std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
   ClusterWorkgroupPlacement placement{};
   placement.cu = cu;
   placement.lds_base = lds_base;
@@ -2327,8 +2327,8 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
 
 // The waves halted (and freed) before their pin was released, so reclaim each
 // peer CU's LDS once the whole cluster is done. Keep CU callbacks outside
-// cluster_placements_mutex_. maybe_reset_lds_alloc() now checks the atomic
-// activity count and LDS pin flag without taking the wave-state lock.
+// cluster_placements_mutex_. The CU protects its activity, pins, and allocator
+// under the wave-state lock.
 void CommandProcessor::release_cluster_lds_pins(
     const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin) {
   for (const auto &[cu, cluster_key] : unpin) {
@@ -2465,7 +2465,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // begin_workgroup() has not run, there is no active_wgs_ entry / cluster pin to
     // unwind either. Also reclaim the placement's LDS/WGP reservation symmetrically
     // with how it was reserved:
-    //   - CU / cluster mode: return the latest CU-local LDS reservation, including
+    //   - CU / cluster mode: return this placement's CU-local LDS reservation, including
     //     when earlier workgroups remain resident. maybe_reset_lds_alloc() also
     //     resets the allocator once the whole CU is idle and unpinned.
     //   - WGP mode: allocate_workgroup() reserved SPI-side state (wgp.next_lds_alloc,
@@ -2493,9 +2493,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
           if (spi->release_wgp_workgroup(entry.dispatch_id, global_wg_id))
             break;
       } else {
-        // Admission owns the latest CU-local LDS reservation. Return it on
-        // backpressure too, even when another workgroup is still resident.
-        cu->with_wave_state_locked([&] { cu->next_lds_alloc_ = lds_base; });
+        cu->release_lds(lds_base, entry.group_segment_fixed_size);
       }
       cu->maybe_reset_lds_alloc();
     };

@@ -1656,6 +1656,115 @@ TEST_F(GpuDeviceMes, RemoveAndReaddSaveAndRestoreAnUnfinishedWave) {
   }
 }
 
+TEST_F(GpuDeviceMes, ReaddRetriesProducerReadWithoutLeakingLdsWhileAnotherQueueIsResident) {
+  constexpr uint64_t kContext = 0x20000;
+  constexpr uint64_t kContextPhysical = 0x300000;
+  constexpr uint32_t kContextSize = 0x20000;
+  constexpr uint32_t kControlStack = 0x1000;
+  constexpr uint32_t kRestoredLdsBytes = 32 * 1024;
+  constexpr uint32_t kResidentLdsBytes = 256;
+  configure_compute_unit(2);
+
+  for (const bool fail_producer_read : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << "fail_producer_read=" << fail_producer_read);
+    store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+    store_dword(kSchedulerMqdPhysical + 175 * 4, kControlStack);
+    store_dword(kSchedulerMqdPhysical + 177 * 4, kContextSize);
+    submit_default_compute_queue();
+    for (uint64_t offset = 0; offset < kContextSize; offset += 0x1000)
+      store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * sizeof(uint64_t),
+                       (kContextPhysical + offset) | kGfx12SystemLeafPteFlags);
+    const auto address_space = soc_.mes_engine().process_address_space_for_test(3);
+    ASSERT_TRUE(address_space);
+    ASSERT_TRUE(soc_.gpu_vm().invalidate(*address_space));
+    auto *wave = compute_unit_->dispatch_wf(0, kDefaultComputeRingGpu + 0x80, 106, 64);
+    ASSERT_NE(wave, nullptr);
+    wave->set_address_space(*address_space);
+    wave->set_process_id(3);
+    wave->set_queue_id(uint32_t{1} << 31);
+    wave->set_debug_halted(true);
+    wave->set_status_halt(true);
+    wave->debug_write_sgpr(0, 0x12345678);
+    wave->set_lds_base(compute_unit_->allocate_lds(kRestoredLdsBytes));
+    wave->set_lds_size(kRestoredLdsBytes);
+    const std::vector<uint8_t> expected_lds(kRestoredLdsBytes, 0x5a);
+    wave->lds().write(wave->lds_base(), expected_lds.data(), expected_lds.size());
+
+    constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+    store_dword(kRemove, 0x00040031);
+    store_dword(kRemove + 4, kDefaultComputeDoorbell / sizeof(uint32_t));
+    store_qword(kRemove + 6 * 4, kApiStatusGpu);
+    store_qword(kRemove + 8 * 4, 2);
+    auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+    ring_doorbell(0x60, doorbell);
+    ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+    ASSERT_FALSE(compute_unit_->has_active_wfs());
+
+    // Keep a different queue resident so failure cleanup cannot reclaim LDS
+    // merely by resetting an idle CU. Its data must survive both ADD attempts.
+    auto *resident = compute_unit_->dispatch_wf(77, kSecondComputeRingGpu, 106, 64);
+    ASSERT_NE(resident, nullptr);
+    resident->set_process_id(99);
+    resident->set_queue_id(77);
+    resident->set_debug_halted(true);
+    resident->debug_write_sgpr(0, 0x76543210);
+    resident->set_lds_base(compute_unit_->allocate_lds(kResidentLdsBytes));
+    resident->set_lds_size(kResidentLdsBytes);
+    const std::vector<uint8_t> expected_resident_lds(kResidentLdsBytes, 0xa5);
+    resident->lds().write(resident->lds_base(), expected_resident_lds.data(),
+                          expected_resident_lds.size());
+    ASSERT_TRUE(compute_unit_->can_accept_workgroup(1, kRestoredLdsBytes));
+
+    for (uint64_t word = 0; word < 64; ++word)
+      store_dword(kRingPhysical + 128 * 4 + word * 4,
+                  transport_.dword_at(kRingPhysical + word * 4));
+    store_qword(kRingPhysical + 128 * 4 + 40 * 4, 3);
+    if (fail_producer_read)
+      transport_.fail_next_read(kDefaultComputeSecondPagePhysical + 0xff8,
+                                simdojo::DmaAccessOutcome::Unavailable);
+    doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+    ring_doorbell(0x60, doorbell);
+    if (fail_producer_read) {
+      EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+      EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
+      EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+      EXPECT_FALSE(command_processor_.has_registered_queues());
+      EXPECT_FALSE(compute_unit_->has_active_wfs_for_process(3));
+      // 32 KiB fits alongside 256 bytes on this 64 KiB CU. A leaked first
+      // reservation prevents the identical ADD from admitting its workgroup.
+      EXPECT_TRUE(compute_unit_->can_accept_workgroup(1, kRestoredLdsBytes));
+      EXPECT_FALSE(resident->is_halted());
+      device_.drain_doorbell_inbox_for_test();
+    }
+    ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 3u);
+    EXPECT_EQ(soc_.mes_engine().active_queues(), 1u);
+    EXPECT_EQ(soc_.queue_registry().active_queues(), 1u);
+    EXPECT_TRUE(command_processor_.has_registered_queues());
+    EXPECT_TRUE(compute_unit_->has_active_wfs_for_process(3));
+    EXPECT_FALSE(resident->is_halted());
+    EXPECT_EQ(resident->debug_read_sgpr(0), 0x76543210u);
+    std::vector<uint8_t> resident_lds(kResidentLdsBytes);
+    const auto &resident_memory = resident->lds();
+    resident_memory.read(resident->lds_base(), resident_lds.data(), resident_lds.size());
+    EXPECT_EQ(resident_lds, expected_resident_lds);
+    for (uint32_t slot = 0; slot < compute_unit_->num_wf_slots(); ++slot) {
+      auto *restored = compute_unit_->wf(slot);
+      if (!restored || restored->is_halted() || restored->process_id() != 3)
+        continue;
+      EXPECT_EQ(restored->debug_read_sgpr(0), 0x12345678u);
+      std::vector<uint8_t> restored_lds(kRestoredLdsBytes);
+      const auto &restored_memory = restored->lds();
+      restored_memory.read(restored->lds_base(), restored_lds.data(), restored_lds.size());
+      EXPECT_EQ(restored_lds, expected_lds);
+      compute_unit_->free_wavefront_resources(*restored);
+    }
+    compute_unit_->free_wavefront_resources(*resident);
+    compute_unit_->maybe_reset_lds_alloc();
+    device_.reset(simdojo::ResetKind::FunctionLevel);
+    configure_gart();
+  }
+}
+
 TEST_F(GpuDeviceMes, ReaddRebuildsBarriersAndContinuesOnlyUnissuedWorkgroups) {
   constexpr uint64_t kKernel = kDefaultComputeRingGpu + 0x80;
   constexpr uint64_t kContext = 0x20000, kContextPhysical = 0x300000;

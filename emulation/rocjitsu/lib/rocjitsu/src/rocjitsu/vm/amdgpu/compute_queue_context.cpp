@@ -454,11 +454,8 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
 
   // Keep all affected CUs stable until resource admission and rollback finish.
   std::vector<std::unique_lock<std::recursive_mutex>> wave_locks;
-  std::vector<uint32_t> lds_cursors;
-  for (auto *cu : cus_) {
+  for (auto *cu : cus_)
     wave_locks.emplace_back(cu->wave_state_mutex_);
-    lds_cursors.push_back(cu->next_lds_alloc_);
-  }
   std::vector<std::pair<ComputeUnitCore *, Wavefront *>> reserved;
   std::vector<uint32_t> lds_bases;
   std::vector<ComputeUnitCore *> group_cus;
@@ -466,8 +463,8 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
   const auto rollback = [&] {
     for (const auto &[cu, wave] : reserved)
       cu->free_wavefront_resources(*wave);
-    for (size_t i = 0; i < cus_.size(); ++i)
-      cus_[i]->next_lds_alloc_ = lds_cursors[i];
+    for (size_t i = 0; i < lds_bases.size(); ++i)
+      group_cus[i]->release_lds(lds_bases[i], saved.groups[i].lds_bytes);
   };
   for (size_t i = 0; i < saved.groups.size(); ++i) {
     const auto &group = saved.groups[i];
@@ -574,19 +571,30 @@ void CommandProcessor::release_queue_context(const QueueIdentity &identity) {
   std::lock_guard lock(hw_queue_mutex_);
   for (auto *cu : cus_)
     cu->with_wave_state_locked([&] {
-      std::vector<std::pair<uint32_t, uint32_t>> groups;
+      struct Group {
+        uint32_t dispatch;
+        uint32_t wg;
+        uint32_t lds_base;
+        uint32_t lds_size;
+      };
+      std::vector<Group> groups;
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
         if (wave && !wave->is_halted() && wave->queue_id() == identity.queue_id &&
             wave->process_id() == identity.process_id &&
             wave->address_space() == identity.address_space)
-          groups.emplace_back(wave->dispatch_id(), wave->wg_id());
+          groups.push_back(
+              {wave->dispatch_id(), wave->wg_id(), wave->lds_base(), wave->lds_size()});
       }
-      std::ranges::sort(groups);
-      const auto duplicates = std::ranges::unique(groups);
+      const auto key = [](const Group &group) { return wg_key(group.dispatch, group.wg); };
+      std::ranges::sort(groups, {}, key);
+      const auto duplicates = std::ranges::unique(groups, {}, key);
       groups.erase(duplicates.begin(), duplicates.end());
-      for (const auto &[dispatch, wg] : groups)
-        cu->abort_workgroup(dispatch, wg);
+      for (const auto &group : groups) {
+        // Return the allocation before abort_workgroup can reset an idle CU.
+        cu->release_lds(group.lds_base, group.lds_size);
+        cu->abort_workgroup(group.dispatch, group.wg);
+      }
     });
 }
 
