@@ -25,20 +25,19 @@ def git_env(extra_env):
 
 
 def git_enforces_ownership():
-    """True when git refuses a repository it believes someone else owns.
+    """True when git refuses this checkout while it believes someone else owns it.
 
     Not every git does: one older than the ownership check ignores the
-    variable, and one whose system or global config says safe.directory = *
-    (as on GitHub's hosted runners) trusts every directory. Where git trusts
-    everything, the stamp reading the repository is correct and the test has
-    nothing to prove.
+    variable, and one whose config trusts the checkout (safe.directory = * as
+    on GitHub's hosted runners, or safe.directory = <this checkout> as the
+    stamp's comment advises) reads it anyway. Where git trusts the checkout,
+    the stamp reading it is correct and the test has nothing to prove. The
+    probe therefore runs in the checkout itself, the repository the stamp reads.
     """
-    with tempfile.TemporaryDirectory() as tmp:
-        env = git_env(ASSUME_OTHER_OWNER)
-        subprocess.run(["git", "init", "-q", tmp], check=True, env=env)
-        proc = subprocess.run(["git", "rev-parse", "--git-dir"], cwd=tmp,
-                              check=False, capture_output=True, env=env)
-        return proc.returncode != 0
+    proc = subprocess.run(["git", "rev-parse", "--git-dir"], cwd=PLAYBACK,
+                          check=False, capture_output=True,
+                          env=git_env(ASSUME_OTHER_OWNER))
+    return proc.returncode != 0
 
 
 class VersionStampTest(unittest.TestCase):
