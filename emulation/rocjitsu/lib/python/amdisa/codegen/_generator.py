@@ -1519,6 +1519,25 @@ class CodeGenerator:
             f'{_b(caps.reads_value)}, {_b(caps.writable)}, {_b(caps.is_vgpr)});'
         )
 
+    @staticmethod
+    def _wave_mask_stmts(operands: list[Operand], wave32_capable: bool) -> list[str]:
+        """C++ statements marking the field-bearing wave-mask operands.
+
+        A wave mask (MR ISA ``FMT_NUM_M64``) is one SGPR in Wave32 and a pair
+        in Wave64, and the decoder sizes it for Wave64. Only Wave32-capable
+        profiles mark it, since only there does a consumer narrow it. Emit after
+        every ctor-body reassignment: ``operator=`` resets the flag. A fieldless
+        wave mask is VCC or EXEC except under SDWA ``sd=1``, which marks its
+        own destination.
+        """
+        if not wave32_capable:
+            return []
+        return [
+            f'{opnd.name}.set_wave_mask();'
+            for opnd in operands
+            if opnd.wave_mask and not opnd.fieldless
+        ]
+
     def _has_machine_inst_struct(self, struct_name: str) -> bool:
         return struct_name in {
             f'{enc.fmt_enc_name}MachineInst' for enc in self.isa_spec.inst_encodings
@@ -2601,6 +2620,10 @@ class CodeGenerator:
                                                    : Operand(x_bits, OperandType::OPR_VGPR, vsrcx2);
                 srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
                                                    : Operand(y_bits, OperandType::OPR_VGPR, vsrcy2);
+                if (opx_ == kVopdCndmaskB32)
+                  srcx2_.set_wave_mask();
+                if (opy_ == kVopdCndmaskB32)
+                  srcy2_.set_wave_mask();
               } else {
             ''')
             vopd3_constructor_branch = vopd3_constructor_branch.replace(
@@ -12715,6 +12738,14 @@ class CodeGenerator:
                                             f'Operand({_sdwa_dst_opnd.size}, '
                                             'OperandType::OPR_SREG, sw->sdst);'
                                         )
+                                        if (
+                                            _sdwa_dst_opnd.wave_mask
+                                            and profile.wave_size == 32
+                                        ):
+                                            _sdwa_dst_binding += (
+                                                f' if (sw->sd) '
+                                                f'{_sdwa_dst_opnd.name}.set_wave_mask();'
+                                            )
                                         fieldless_caps_guards[_sdwa_dst_opnd.name] = (
                                             'reinterpret_cast<const OpEncoding*>'
                                             '(inst)->src0 == amdgpu::SRC_SDWA'
@@ -12794,6 +12825,9 @@ class CodeGenerator:
                                 caps_stmt = f'if (!({guard})) {caps_stmt}'
                             ctor_body_parts.append(caps_stmt)
 
+                    ctor_body_parts.extend(
+                        self._wave_mask_stmts(inst.operands, profile.wave_size == 32)
+                    )
                     ctor_body_parts.extend(vgpr_msb_role_body)
                     if (
                         self.isa_spec.arch_name
