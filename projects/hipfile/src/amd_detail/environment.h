@@ -87,13 +87,6 @@ public:
     /// true or false.
     static std::optional<bool> unsupported_file_systems();
 
-    /// @brief Control the size of the host bounce buffer used for async fallback I/O operations
-    ///
-    /// The default value is 1 MiB.
-    static constexpr const char *const ASYNC_BUFFER_SIZE{"HIPFILE_ASYNC_BUFFER_SIZE"};
-
-    static std::optional<size_t> async_buffer_size();
-
     /// @brief Get the value of HIPFILE_DEVICE_STREAM_POOL_SIZE from the environment
     ///
     /// An optional unsigned int value if HIPFILE_DEVICE_STREAM_POOL_SIZE was set,

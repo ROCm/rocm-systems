@@ -43,10 +43,6 @@ public:
     /// permitted (default)
     virtual bool unsupportedFileSystems() const noexcept;
 
-    /// @brief Gets the size of the async buffer used for I/O operations
-    /// @return the size of the async buffer in bytes
-    virtual size_t asyncBufferSize() const noexcept;
-
     /// @brief Gets the size of the device stream pool
     /// @return the size of the device stream pool in bytes
     virtual size_t deviceStreamPoolSize() const noexcept;

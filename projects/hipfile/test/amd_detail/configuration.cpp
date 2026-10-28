@@ -59,12 +59,6 @@ struct HipFileConfiguration : public Test {
             .WillOnce(Return(const_cast<char *>(hipfile_unsupported_file_systems)));
     }
 
-    void expect_configuration_async_buffer_size(const char *hipfile_async_buffer_size)
-    {
-        EXPECT_CALL(msys, getenv(StrEq(hipFile::Environment::ASYNC_BUFFER_SIZE)))
-            .WillOnce(Return(const_cast<char *>(hipfile_async_buffer_size)));
-    }
-
     void expect_configuration_device_stream_pool_size(const char *hipfile_device_stream_pool_size)
     {
         EXPECT_CALL(msys, getenv(StrEq(hipFile::Environment::DEVICE_STREAM_POOL_SIZE)))
@@ -247,30 +241,6 @@ TEST_F(HipFileConfiguration, UnsupportedFilesystemsDisabledIfEnvironmentVariable
 {
     expect_configuration_unsupported_file_systems("false");
     ASSERT_FALSE(Configuration().unsupportedFileSystems());
-}
-
-TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsNotSet)
-{
-    expect_configuration_async_buffer_size(nullptr);
-    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
-}
-
-TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsInvalid)
-{
-    expect_configuration_async_buffer_size("not-a-number");
-    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
-}
-
-TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsSet)
-{
-    expect_configuration_async_buffer_size("2097152");
-    ASSERT_EQ(2097152, Configuration().asyncBufferSize());
-}
-
-TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsZero)
-{
-    expect_configuration_async_buffer_size("0");
-    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
 }
 
 TEST_F(HipFileConfiguration, DeviceStreamPoolSizeEnvironmentVariableIsNotSet)
