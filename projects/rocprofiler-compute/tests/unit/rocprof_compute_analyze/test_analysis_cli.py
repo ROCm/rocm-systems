@@ -336,6 +336,20 @@ def test_list_operators_omits_other_backend_kernel_lines(capsys):
     assert "torch_gemm_kernel" not in captured.out
 
 
+def test_list_operators_user_keeps_nested_torch_and_drops_outside_relu(capsys):
+    cli = cli_analysis.__new__(cli_analysis)
+    workload = schema.Workload()
+    workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu()
+    cli._runs = {"/workload": workload}
+    kernel_top = pd.DataFrame({"Kernel_Name": ["addmm_kernel", "relu_kernel"]})
+    cli.list_operators("/workload", kernel_top, ["user"])
+    captured = capsys.readouterr()
+    assert "User Operator Call Tree:" in captured.out
+    assert "region1" in captured.out
+    assert "aten::addmm" in captured.out
+    assert "aten::relu" not in captured.out
+
+
 def test_pre_processing_lists_operators_for_every_path(monkeypatch):
     args = argparse.Namespace(
         path=[["/w1"], ["/w2"]],
