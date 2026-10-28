@@ -3145,7 +3145,7 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));
-#if CUDA_VERSION >= CUDA_11000
+#if CUDA_VERSION >= CUDA_11030
     case hipDeviceAttributeGPUDirectRDMASupported:
       cdattr = cudaDevAttrGPUDirectRDMASupported;
       break;
@@ -3155,7 +3155,7 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeGPUDirectRDMAWritesOrdering:
       cdattr = cudaDevAttrGPUDirectRDMAWritesOrdering;
       break;
-#endif  // CUDA_VERSION >= CUDA_11000
+#endif  // CUDA_VERSION >= CUDA_11030
 #if CUDA_VERSION >= CUDA_12040
     case hipDeviceAttributeHandleTypeFabricSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
@@ -3878,7 +3878,7 @@ inline static hipError_t hipDeviceFlushGPUDirectRDMAWrites(
     return hipErrorInvalidValue;
   }
 
-#if CUDA_VERSION >= CUDA_11000
+#if CUDA_VERSION >= CUDA_11030
   enum cudaFlushGPUDirectRDMAWritesScope cudaScope;
   switch (scope) {
     case hipFlushGPUDirectRDMAWritesToOwner:
@@ -3899,7 +3899,7 @@ inline static hipError_t hipDeviceFlushGPUDirectRDMAWrites(
     return hipErrorInvalidValue;
   }
   return hipErrorNotSupported;
-#endif  // CUDA_VERSION >= CUDA_11000
+#endif  // CUDA_VERSION >= CUDA_11030
 }
 
 inline static hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* config) {
