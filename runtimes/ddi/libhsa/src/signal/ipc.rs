@@ -91,6 +91,7 @@ impl SignalState {
         host_page_size: usize,
         value: SignalValue,
     ) -> Result<HsaSignal, Status> {
+        reserve_wait_signal_slots(1)?;
         let allocation = {
             let (gpu, peers) = gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
             let peers = peers.iter().map(|peer| &peer.device).collect::<Vec<_>>();
@@ -121,6 +122,7 @@ impl SignalState {
         match self.owned_ipc_signals.entry(host) {
             Entry::Vacant(entry) => {
                 entry.insert(OwnedIpcSignal { allocation });
+                publish_wait_signal(host);
             }
             Entry::Occupied(_) => return Err(OUT_OF_RESOURCES),
         }
@@ -136,6 +138,7 @@ impl SignalState {
         gpus: &[crate::runtime::Gpu],
         words: [u32; 8],
     ) -> Result<HsaSignal, Status> {
+        reserve_wait_signal_slots(1)?;
         if let Some((address, imported)) = self
             .imported_ipc_signals
             .iter_mut()
@@ -150,6 +153,7 @@ impl SignalState {
                     record.revive();
                 }
             }
+            publish_wait_signal(address);
             return Ok(HsaSignal {
                 handle: address as u64,
             });
@@ -191,6 +195,7 @@ impl SignalState {
                     ipc_handle: words,
                     references: 1,
                 });
+                publish_wait_signal(host);
             }
             Entry::Occupied(_) => return Err(OUT_OF_RESOURCES),
         }
