@@ -6472,6 +6472,42 @@ TEST(CommandProcessorAqlTest, BlockingBarriersRetireBeforeUnsupportedSuccessorFa
   }
 }
 
+TEST(CommandProcessorAqlTest, UnsupportedSuccessorDoesNotStrandResidentDispatch) {
+  // Without a blocking barrier, the CP fetches the unsupported packet and faults
+  // the queue before the resident wave runs. That fetch fault cancels no work, so
+  // the kernel must still retire and publish its completion.
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", 1));
+  auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+  auto *observed = lifecycle.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(lifecycle)));
+  f.soc_ptr->set_plugin_group(group);
+  const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint64_t kCompletionSignal = 0x7000;
+  init_completion_signal(f.mem(), kCompletionSignal);
+
+  hsa_kernel_dispatch_packet_t unsupported{};
+  unsupported.header = HSA_PACKET_TYPE_AGENT_DISPATCH;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(make_dispatch_packet(kernel, kCompletionSignal));
+  ASSERT_TRUE(f.engine->step());
+  ASSERT_TRUE(f.cu()->has_active_wfs());
+  ASSERT_EQ(observed->halts, 0u);
+  queue.submit(unsupported);
+  f.engine->run();
+
+  EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(observed->halts, 1u);
+  EXPECT_EQ(observed->cancellations, 0u);
+  EXPECT_EQ(observed->completed_workgroups, 1u);
+  EXPECT_EQ(observed->completed_dispatches, 1u);
+  EXPECT_EQ(completion_signal_value(f.mem(), kCompletionSignal), 0)
+      << "a queue fault that cancelled no work suppressed the dispatch's completion";
+}
+
 TEST(CommandProcessorAqlTest, Pm4IbRetiresBeforeUnsupportedSuccessorFaultsQueue) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 8));

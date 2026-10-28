@@ -2707,10 +2707,10 @@ bool CommandProcessor::fault_queue_local(uint32_t queue_id, uint32_t process_id,
     if (entry.grid_completion)
       entry.grid_completion->mark_faulted();
   }
-  // Faulted queues cannot retire synchronization markers. Cancel every
-  // outstanding dispatch, including earlier admitted kernels, so none can
-  // halt normally while its dispatch completion is permanently suppressed.
-  // This also releases cluster pins, SPI reservations and blocked vendor PM4.
+  // A dispatch fault ends the queue. Cancel every outstanding entry, including
+  // earlier admitted kernels and trailing barriers, so no remaining work can
+  // publish completion for the failed queue. This also releases cluster pins,
+  // SPI reservations and blocked vendor PM4.
   fail_pm4_queue(state, state.dispatches);
   for (const DispatchEntry &entry : state.entries)
     dispatch_launch_metadata_.erase(entry.dispatch_id);
