@@ -28,6 +28,7 @@ constexpr duration_source_t k_region{ "rocpd_region", "R", nullptr, 1 };
 constexpr duration_source_t k_kernel{ "rocpd_kernel_dispatch", "K", "agent_id", 2 };
 constexpr duration_source_t k_allocate{ "rocpd_memory_allocate", "MA", "agent_id", 3 };
 constexpr duration_source_t k_copy{ "rocpd_memory_copy", "MC", "dst_agent_id", 4 };
+constexpr duration_source_t k_hip{ "rocpd_hip_event", "HE", "agent_id", 5 };
 
 std::string
 interval_select(const duration_source_t& source,
@@ -139,6 +140,7 @@ duration_source_sql(const reader_catalog_t&                         catalog,
         case reader_types::track_kind_t::kernel_dispatch_agent_queue:
         case reader_types::track_kind_t::memory_allocate_agent_queue:
         case reader_types::track_kind_t::memory_copy_agent_queue:
+        case reader_types::track_kind_t::hip_event_agent_queue:
         {
             if(!track->node_info) return {};
             const duration_source_t& source =
@@ -147,6 +149,8 @@ duration_source_sql(const reader_catalog_t&                         catalog,
                 : track->category ==
                         reader_types::track_kind_t::memory_allocate_agent_queue
                     ? k_allocate
+                : track->category == reader_types::track_kind_t::hip_event_agent_queue
+                    ? k_hip
                     : k_copy;
             sql = interval_select(
                 source,
@@ -158,8 +162,12 @@ duration_source_sql(const reader_catalog_t&                         catalog,
         case reader_types::track_kind_t::stream:
         {
             if(!track->node_info) return {};
-            for(const duration_source_t& source : { k_kernel, k_allocate, k_copy })
+            for(const duration_source_t& source : { k_kernel, k_allocate, k_copy, k_hip })
             {
+                if(source.table == k_hip.table && !statements.hip_event_table_present())
+                {
+                    continue;
+                }
                 append_union(sql,
                              interval_select(source,
                                              uuid,

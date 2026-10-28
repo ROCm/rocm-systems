@@ -125,6 +125,7 @@ private:
             case event_type_t::memory_copy: return track_kind_t::memory_copy_agent_queue;
             case event_type_t::memory_allocate:
                 return track_kind_t::memory_allocate_agent_queue;
+            case event_type_t::hip_event: return track_kind_t::hip_event_agent_queue;
             case event_type_t::region:
             case event_type_t::sample:
             case event_type_t::pmc_event: break;
@@ -144,7 +145,8 @@ using reader_types::event_type_t;
 constexpr std::array event_types{ event_type_t::region,
                                   event_type_t::kernel_dispatch,
                                   event_type_t::memory_allocate,
-                                  event_type_t::memory_copy };
+                                  event_type_t::memory_copy,
+                                  event_type_t::hip_event };
 
 struct time_range
 {
@@ -184,6 +186,8 @@ statements_for(const data_storage::schema_v3::read_statements& stmts,
         return stmts.memory_allocate_statements();
     if(type == reader_types::event_type_t::memory_copy)
         return stmts.memory_copy_statements();
+    if(type == reader_types::event_type_t::hip_event)
+        return stmts.hip_event_statements();
     return stmts.region_statements();
 }
 
@@ -198,6 +202,8 @@ serves_events_of(reader_types::track_kind_t kind, event_type_t type)
             return type == event_type_t::memory_allocate;
         case reader_types::track_kind_t::memory_copy_agent_queue:
             return type == event_type_t::memory_copy;
+        case reader_types::track_kind_t::hip_event_agent_queue:
+            return type == event_type_t::hip_event;
         case reader_types::track_kind_t::stream: return type != event_type_t::region;
         case reader_types::track_kind_t::thread:
         case reader_types::track_kind_t::thread_sample:
@@ -238,6 +244,10 @@ count_events(const data_storage::schema_v3::read_statements& stmts,
         case event_type_t::memory_allocate:
             return run_count(stmts.memory_alloc_count(),
                              stmts.memory_alloc_count_time_filtered(),
+                             range);
+        case event_type_t::hip_event:
+            return run_count(stmts.hip_event_count(),
+                             stmts.hip_event_count_time_filtered(),
                              range);
         default: return 0;
     }
@@ -453,6 +463,7 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
         case reader_types::track_kind_t::kernel_dispatch_agent_queue:
         case reader_types::track_kind_t::memory_allocate_agent_queue:
         case reader_types::track_kind_t::memory_copy_agent_queue:
+        case reader_types::track_kind_t::hip_event_agent_queue:
         case reader_types::track_kind_t::stream:
             return get_category_track_events(track, filter);
         case reader_types::track_kind_t::thread:
@@ -482,6 +493,9 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
     timeline_event_builder build_event{ *m_catalog };
 
     for_each_selected_type(filter, [&](event_type_t type) {
+        // HIP events belong on their agent/queue track and on the stream,
+        // the same split the data-model uses. They are not host-thread rows.
+        if(type == event_type_t::hip_event) return;
         const auto append =
             [&](const data_storage::schema_v3::timeline_event_result& row) {
                 all_events.push_back(build_event(row, type));
@@ -757,6 +771,9 @@ reader_t::impl::resolve_event_metadata(const reader_types::timeline_event_t& eve
             break;
         case reader_types::event_type_t::memory_allocate:
             results = m_read_statements->memory_alloc_event_id()(db_id).to_vector();
+            break;
+        case reader_types::event_type_t::hip_event:
+            results = m_read_statements->hip_event_event_id()(db_id).to_vector();
             break;
         default: return std::nullopt;
     }
@@ -1206,6 +1223,9 @@ reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& even
         case reader_types::event_type_t::memory_allocate:
             statement = &stmts.memory_allocate;
             break;
+        case reader_types::event_type_t::hip_event:
+            statement = &stmts.hip_event;
+            break;
         default: return {};
     }
 
@@ -1265,6 +1285,7 @@ reader_t::impl::get_data_time_range()
     process_range(m_read_statements->kernel_dispatch_time_range());
     process_range(m_read_statements->memory_copy_time_range());
     process_range(m_read_statements->memory_alloc_time_range());
+    process_range(m_read_statements->hip_event_time_range());
 
     reader_types::time_window_t window;
     if(global_min != std::numeric_limits<size_t>::max())

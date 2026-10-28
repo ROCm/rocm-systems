@@ -34,7 +34,8 @@ enum class event_type_t
     memory_copy,
     memory_allocate,
     sample,
-    pmc_event
+    pmc_event,
+    hip_event
 };
 
 struct time_window_t
@@ -295,10 +296,11 @@ enum class track_kind_t
     memory_allocate_agent_queue,  ///< Memory allocations, by (nid,agent_id,queue_id).
     memory_copy_agent_queue,      ///< Memory copies, by (nid,dst_agent_id,queue_id).
     // One merged track per (nid,pid,stream_id), combining kernel-dispatch +
-    // memory-allocate + memory-copy events on that stream -- matches optiq's
-    // actual behavior (a single kRocProfVisDmStreamTrack per stream, not one
-    // per event type; confirmed against a real roc_optiq_track_info cache).
+    // memory-allocate + memory-copy + hip-event rows on that stream -- matches
+    // optiq's actual behavior (a single kRocProfVisDmStreamTrack per stream,
+    // not one per event type).
     stream,
+    hip_event_agent_queue,  ///< HIP events, by (nid,agent_id,queue_id).
 };
 
 struct value_range_t

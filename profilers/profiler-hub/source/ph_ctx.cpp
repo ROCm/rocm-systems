@@ -36,6 +36,8 @@ to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
             return PH_TRACK_CATEGORY_MEMORY_ALLOCATE_AGENT_QUEUE;
         case track_kind_t::memory_copy_agent_queue:
             return PH_TRACK_CATEGORY_MEMORY_COPY_AGENT_QUEUE;
+        case track_kind_t::hip_event_agent_queue:
+            return PH_TRACK_CATEGORY_HIP_EVENT_AGENT_QUEUE;
         case track_kind_t::stream: return PH_TRACK_CATEGORY_STREAM;
     }
     return PH_TRACK_CATEGORY_THREAD;
@@ -73,6 +75,7 @@ to_reader_event_type(ph_event_type_t type)
         case PH_EVENT_TYPE_KERNEL_DISPATCH: return event_type_t::kernel_dispatch;
         case PH_EVENT_TYPE_MEMORY_COPY: return event_type_t::memory_copy;
         case PH_EVENT_TYPE_MEMORY_ALLOCATE: return event_type_t::memory_allocate;
+        case PH_EVENT_TYPE_HIP_EVENT: return event_type_t::hip_event;
     }
     return std::nullopt;
 }
@@ -87,6 +90,7 @@ to_c_event_type(profiler_hub::reader_types::event_type_t type)
         case event_type_t::kernel_dispatch: return PH_EVENT_TYPE_KERNEL_DISPATCH;
         case event_type_t::memory_copy: return PH_EVENT_TYPE_MEMORY_COPY;
         case event_type_t::memory_allocate: return PH_EVENT_TYPE_MEMORY_ALLOCATE;
+        case event_type_t::hip_event: return PH_EVENT_TYPE_HIP_EVENT;
         case event_type_t::sample:
         case event_type_t::pmc_event: break;
     }
@@ -108,6 +112,8 @@ track_holds_event(const profiler_hub::reader_types::track_info_ptr_t& track,
             return type == event_type_t::memory_allocate;
         case track_kind_t::memory_copy_agent_queue:
             return type == event_type_t::memory_copy;
+        case track_kind_t::hip_event_agent_queue:
+            return type == event_type_t::hip_event;
         case track_kind_t::stream: return type != event_type_t::region;
         case track_kind_t::thread:
         case track_kind_t::thread_sample: return true;

@@ -33,6 +33,7 @@ constexpr table_role_t k_roles[] = {
     { "rocpd_kernel_dispatch", 20, row_kind_t::interval },
     { "rocpd_memory_allocate", 20, row_kind_t::interval },
     { "rocpd_memory_copy", 20, row_kind_t::interval },
+    { "rocpd_hip_event", 20, row_kind_t::interval },
     { "rocpd_region", 20, row_kind_t::interval },
     { "rocpd_sample", 30, row_kind_t::sample },
     { "rocpd_event", 40, row_kind_t::event },
@@ -141,8 +142,8 @@ private:
                                             const std::unordered_set<std::string>& tables)
     {
         const char* sources[] = { "rocpd_kernel_dispatch", "rocpd_memory_allocate",
-                                  "rocpd_memory_copy",      "rocpd_region",
-                                  "rocpd_sample" };
+                                  "rocpd_memory_copy",      "rocpd_hip_event",
+                                  "rocpd_region",           "rocpd_sample" };
         std::vector<std::string> refs;
         for(const char* source : sources)
         {

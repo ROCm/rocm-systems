@@ -71,7 +71,8 @@ is_duration_event_type(ph_event_type_t type)
         case PH_EVENT_TYPE_REGION:
         case PH_EVENT_TYPE_KERNEL_DISPATCH:
         case PH_EVENT_TYPE_MEMORY_COPY:
-        case PH_EVENT_TYPE_MEMORY_ALLOCATE: return true;
+        case PH_EVENT_TYPE_MEMORY_ALLOCATE:
+        case PH_EVENT_TYPE_HIP_EVENT: return true;
     }
     return false;
 }
@@ -600,7 +601,8 @@ known_event_type(uint32_t type)
 {
     return type == PH_EVENT_TYPE_REGION || type == PH_EVENT_TYPE_REGION_SAMPLE ||
            type == PH_EVENT_TYPE_KERNEL_DISPATCH || type == PH_EVENT_TYPE_MEMORY_COPY ||
-           type == PH_EVENT_TYPE_MEMORY_ALLOCATE || type == PH_EVENT_TYPE_PMC_COUNTER ||
+           type == PH_EVENT_TYPE_MEMORY_ALLOCATE || type == PH_EVENT_TYPE_HIP_EVENT ||
+           type == PH_EVENT_TYPE_PMC_COUNTER ||
            type == PH_EVENT_TYPE_PMC_SAMPLE || type == PH_EVENT_TYPE_MEMORY_ACTIVITY;
 }
 

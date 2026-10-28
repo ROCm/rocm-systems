@@ -439,6 +439,7 @@ struct read_statements
     : m_backend{ std::move(backend) }
     , m_uuid{ std::move(uuid) }
     {
+        m_hip_event_table = table_present("rocpd_hip_event_" + m_uuid);
         initialize_string_statement();
         initialize_node_info_statement();
         initialize_process_info_statement();
@@ -454,6 +455,7 @@ struct read_statements
         initialize_kernel_dispatch_timeline_event_statements();
         initialize_memory_allocate_timeline_event_statements();
         initialize_memory_copy_timeline_event_statements();
+        initialize_hip_event_timeline_event_statements();
         initialize_id_span_statements();
 
         initialize_detail_statements();
@@ -507,6 +509,8 @@ struct read_statements
     }
 
     [[nodiscard]] const std::string& trace_uuid() const { return m_uuid; }
+
+    [[nodiscard]] bool hip_event_table_present() const { return m_hip_event_table; }
 
     [[nodiscard]] std::vector<interval_result> query_intervals(
         const std::string& sql) const
@@ -628,12 +632,15 @@ struct read_statements
         track_agent_queue_count_statement_func_t kernel_dispatch_agent_queue;
         track_agent_queue_count_statement_func_t memory_allocate_agent_queue;
         track_agent_queue_count_statement_func_t memory_copy_agent_queue;
+        track_agent_queue_count_statement_func_t hip_event_agent_queue;
         track_stream_count_statement_func_t      kernel_dispatch_stream;
         track_stream_count_statement_func_t      memory_allocate_stream;
         track_stream_count_statement_func_t      memory_copy_stream;
+        track_stream_count_statement_func_t      hip_event_stream;
         stream_hardware_link_statement_func_t    kernel_dispatch_stream_hardware;
         stream_hardware_link_statement_func_t    memory_allocate_stream_hardware;
         stream_hardware_link_statement_func_t    memory_copy_stream_hardware;
+        stream_hardware_link_statement_func_t    hip_event_stream_hardware;
     };
 
     // Bind (nid, agent_id, pmc_id).
@@ -739,6 +746,11 @@ struct read_statements
         return m_memory_copy_statements;
     }
 
+    [[nodiscard]] const timeline_event_statement_set& hip_event_statements() const
+    {
+        return m_hip_event_statements;
+    }
+
     // Detail query accessors
     [[nodiscard]] const region_detail_func_t& region_detail() const
     {
@@ -775,6 +787,10 @@ struct read_statements
     {
         return m_memory_alloc_event_id;
     }
+    [[nodiscard]] const event_id_func_t& hip_event_event_id() const
+    {
+        return m_hip_event_event_id;
+    }
 
     // Correlated event accessors
     struct correlated_event_statement_set
@@ -783,6 +799,7 @@ struct read_statements
         correlated_event_func_t kernel_dispatch;
         correlated_event_func_t memory_copy;
         correlated_event_func_t memory_allocate;
+        correlated_event_func_t hip_event;
     };
 
     [[nodiscard]] const correlated_event_statement_set& correlated_event_statements()
@@ -851,6 +868,10 @@ struct read_statements
     {
         return m_memory_alloc_count;
     }
+    [[nodiscard]] const count_func_t& hip_event_count() const
+    {
+        return m_hip_event_count;
+    }
     [[nodiscard]] const count_time_filtered_func_t& region_count_time_filtered() const
     {
         return m_region_count_time_filtered;
@@ -870,6 +891,10 @@ struct read_statements
     {
         return m_memory_alloc_count_time_filtered;
     }
+    [[nodiscard]] const count_time_filtered_func_t& hip_event_count_time_filtered() const
+    {
+        return m_hip_event_count_time_filtered;
+    }
     [[nodiscard]] const time_range_func_t& region_time_range() const
     {
         return m_region_time_range;
@@ -885,6 +910,10 @@ struct read_statements
     [[nodiscard]] const time_range_func_t& memory_alloc_time_range() const
     {
         return m_memory_alloc_time_range;
+    }
+    [[nodiscard]] const time_range_func_t& hip_event_time_range() const
+    {
+        return m_hip_event_time_range;
     }
 
 private:
@@ -1210,6 +1239,14 @@ private:
                 &track_agent_queue_count_result::count,
                 &track_agent_queue_count_result::min_start,
                 &track_agent_queue_count_result::max_end);
+        m_track_category_statements.hip_event_agent_queue =
+            m_hip_event_table ? make_agent_queue_stmt("rocpd_hip_event")
+                              : no_rows(&track_agent_queue_count_result::nid,
+                                        &track_agent_queue_count_result::agent_id,
+                                        &track_agent_queue_count_result::queue_id,
+                                        &track_agent_queue_count_result::count,
+                                        &track_agent_queue_count_result::min_start,
+                                        &track_agent_queue_count_result::max_end);
 
         m_track_category_statements.kernel_dispatch_stream =
             make_stream_stmt("rocpd_kernel_dispatch");
@@ -1217,6 +1254,14 @@ private:
             make_stream_stmt("rocpd_memory_allocate");
         m_track_category_statements.memory_copy_stream =
             make_stream_stmt("rocpd_memory_copy");
+        m_track_category_statements.hip_event_stream =
+            m_hip_event_table ? make_stream_stmt("rocpd_hip_event")
+                              : no_rows(&track_stream_count_result::nid,
+                                        &track_stream_count_result::pid,
+                                        &track_stream_count_result::stream_id,
+                                        &track_stream_count_result::count,
+                                        &track_stream_count_result::min_start,
+                                        &track_stream_count_result::max_end);
 
         auto make_stream_hardware_stmt = [&](auto build_query) {
             return m_backend->create_read_statement_executor<stream_hardware_link_result>(
@@ -1255,6 +1300,20 @@ private:
                     .group_by("nid", "pid", "stream_id", "dst_agent_id", "queue_id")
                     .get_query_string();
             });
+        m_track_category_statements.hip_event_stream_hardware =
+            m_hip_event_table
+                ? make_stream_hardware_stmt([&] {
+                      return queries::select::table_select_query{}
+                          .select("nid", "pid", "stream_id", "agent_id", "queue_id")
+                          .from(fmt::format("rocpd_hip_event_{}", m_uuid))
+                          .group_by("nid", "pid", "stream_id", "agent_id", "queue_id")
+                          .get_query_string();
+                  })
+                : no_rows(&stream_hardware_link_result::nid,
+                          &stream_hardware_link_result::pid,
+                          &stream_hardware_link_result::stream_id,
+                          &stream_hardware_link_result::agent_id,
+                          &stream_hardware_link_result::queue_id);
     }
 
     bool table_present(const std::string& name)
@@ -1271,6 +1330,29 @@ private:
                     &present_row::one)()
                 .to_vector();
         return !rows.empty();
+    }
+
+    // A prepared statement whose executor binds N values. WHERE 0 returns no
+    // rows, and each AND ? keeps sqlite3_bind from returning SQLITE_RANGE.
+    [[nodiscard]] static std::string no_row_sql(size_t binds)
+    {
+        std::string sql = "SELECT NULL WHERE 0";
+        for(size_t index = 0; index < binds; ++index) sql += " AND ?";
+        return sql;
+    }
+
+    template <typename Row, typename... Members>
+    auto no_rows(Members Row::*... members)
+    {
+        return m_backend->create_read_statement_executor<Row>(no_row_sql(0),
+                                                              members...);
+    }
+
+    template <typename Row, typename... BindTypes, typename... Members>
+    auto no_rows(bind_types<BindTypes...>, Members Row::*... members)
+    {
+        return m_backend->create_read_statement_executor<Row, bind_types<BindTypes...>>(
+            no_row_sql(sizeof...(BindTypes)), members...);
     }
 
     bool table_has_row(const std::string& name)
@@ -1716,6 +1798,10 @@ private:
         m_kernel_dispatch_statements.id_span = make_span("rocpd_kernel_dispatch");
         m_memory_allocate_statements.id_span = make_span("rocpd_memory_allocate");
         m_memory_copy_statements.id_span     = make_span("rocpd_memory_copy");
+        if(m_hip_event_table)
+        {
+            m_hip_event_statements.id_span = make_span("rocpd_hip_event");
+        }
     }
 
     void initialize_region_timeline_event_statements()
@@ -1859,6 +1945,83 @@ private:
             "MC.region_name_id",
             "",
             "MC.dst_agent_id, MC.queue_id, MC.stream_id");
+    }
+
+    void install_empty_hip_timeline()
+    {
+        auto& out              = m_hip_event_statements;
+        out.base               = make_timeline_statement<bind_types<>>(no_row_sql(0));
+        out.time_filtered      = make_timeline_statement<bind_types<size_t, size_t>>(
+            no_row_sql(2));
+        out.track_filtered =
+            make_timeline_statement<bind_types<size_t, size_t, size_t, size_t>>(
+                no_row_sql(4));
+        out.track_and_time_filtered = make_timeline_statement<bind_types<
+            size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t>>(no_row_sql(8));
+        out.by_id = make_timeline_statement<bind_types<size_t>>(no_row_sql(1));
+        out.id_span = no_rows(&id_span_result::min_id, &id_span_result::max_id);
+        out.agent_queue_filtered =
+            make_timeline_statement<bind_types<size_t, size_t, size_t>>(no_row_sql(3));
+        out.agent_queue_unrecorded_filtered =
+            make_timeline_statement<bind_types<size_t, size_t, size_t>>(no_row_sql(3));
+        out.stream_filtered =
+            make_timeline_statement<bind_types<size_t, size_t, size_t>>(no_row_sql(3));
+        out.agent_queue_time_filtered =
+            make_timeline_statement<bind_types<size_t, size_t, size_t, size_t, size_t>>(
+                no_row_sql(5));
+        out.agent_queue_unrecorded_time_filtered =
+            make_timeline_statement<bind_types<size_t, size_t, size_t, size_t, size_t>>(
+                no_row_sql(5));
+        out.stream_time_filtered =
+            make_timeline_statement<bind_types<size_t, size_t, size_t, size_t, size_t>>(
+                no_row_sql(5));
+        out.track_range_filtered =
+            no_rows(bind_types<size_t, size_t, size_t, size_t, size_t>{},
+                    &event_range_result::id,
+                    &event_range_result::start_timestamp,
+                    &event_range_result::end_timestamp,
+                    &event_range_result::display_name_id,
+                    &event_range_result::agent_id,
+                    &event_range_result::queue_id,
+                    &event_range_result::stream_id);
+    }
+
+    void initialize_hip_event_timeline_event_statements()
+    {
+        if(!m_hip_event_table)
+        {
+            install_empty_hip_timeline();
+            return;
+        }
+        queries::select::table_select_query query;
+        auto&                               base = query
+                         .select("HE.id",
+                                 "HE.start",
+                                 "HE.end",
+                                 "HE.name_id",
+                                 "E.category_id",
+                                 "HE.nid",
+                                 "HE.pid",
+                                 "HE.tid",
+                                 "S.track_id",
+                                 "HE.agent_id",
+                                 "HE.queue_id",
+                                 "HE.stream_id")
+                         .from(fmt::format("rocpd_hip_event_{}", m_uuid), "HE")
+                         .inner_join("rocpd_event", "E", "HE.event_id = E.id")
+                         .left_join("rocpd_sample", "S", "S.event_id = HE.event_id");
+
+        initialize_timeline_event_variants(
+            base, "HE", m_hip_event_statements, std::string("agent_id"));
+        m_hip_event_statements.by_id = make_timeline_statement<bind_types<size_t>>(
+            std::string("SELECT HE.id, HE.start, HE.end, HE.name_id, E.category_id, "
+                        "HE.nid, HE.pid, HE.tid, S.track_id, HE.agent_id, HE.queue_id, "
+                        "HE.stream_id FROM rocpd_hip_event_") +
+            m_uuid +
+            " HE INNER JOIN rocpd_event E ON HE.event_id = E.id "
+            "LEFT JOIN rocpd_sample S ON S.event_id = HE.event_id WHERE HE.id = ?");
+        m_hip_event_statements.track_range_filtered = make_track_range_statement(
+            "rocpd_hip_event", "HE", "HE.name_id", "", "HE.agent_id, HE.queue_id, HE.stream_id");
     }
 
     void initialize_detail_statements()
@@ -2063,6 +2226,17 @@ private:
         m_kernel_dispatch_event_id = make_event_id_stmt("rocpd_kernel_dispatch");
         m_memory_copy_event_id     = make_event_id_stmt("rocpd_memory_copy");
         m_memory_alloc_event_id    = make_event_id_stmt("rocpd_memory_allocate");
+        m_hip_event_event_id       = m_hip_event_table
+                                         ? make_event_id_stmt("rocpd_hip_event")
+                                         : no_rows(bind_types<size_t>{},
+                                                   &event_id_result::event_id,
+                                                   &event_id_result::category_id,
+                                                   &event_id_result::stack_id,
+                                                   &event_id_result::parent_stack_id,
+                                                   &event_id_result::correlation_id,
+                                                   &event_id_result::call_stack,
+                                                   &event_id_result::line_info,
+                                                   &event_id_result::event_extdata);
     }
 
     void initialize_correlated_event_statements()
@@ -2204,6 +2378,32 @@ private:
                                "R",
                                "R.name_id",
                                no_location));
+
+        // A HIP event reaches the host regions on its stack, matching the
+        // data-model flow query.
+        m_correlated_event_statements.hip_event =
+            m_hip_event_table
+                ? prepare(target_arm(region_kind,
+                                     "rocpd_hip_event",
+                                     "H",
+                                     "rocpd_region",
+                                     "R",
+                                     "R.name_id",
+                                     no_location))
+                : no_rows(bind_types<size_t>{},
+                          &correlated_event_row::kind,
+                          &correlated_event_row::id,
+                          &correlated_event_row::start_timestamp,
+                          &correlated_event_row::end_timestamp,
+                          &correlated_event_row::display_name_id,
+                          &correlated_event_row::category_id,
+                          &correlated_event_row::nid,
+                          &correlated_event_row::pid,
+                          &correlated_event_row::tid,
+                          &correlated_event_row::track_id,
+                          &correlated_event_row::agent_id,
+                          &correlated_event_row::queue_id,
+                          &correlated_event_row::stream_id);
     }
 
     void initialize_count_statements()
@@ -2227,6 +2427,9 @@ private:
         m_kernel_dispatch_count = make_count_stmt("rocpd_kernel_dispatch");
         m_memory_copy_count     = make_count_stmt("rocpd_memory_copy");
         m_memory_alloc_count    = make_count_stmt("rocpd_memory_allocate");
+        m_hip_event_count       = m_hip_event_table
+                                      ? make_count_stmt("rocpd_hip_event")
+                                      : no_rows(&count_result::count);
 
         m_region_count_time_filtered = make_count_time_filtered_stmt("rocpd_region");
         m_kernel_dispatch_count_time_filtered =
@@ -2235,6 +2438,9 @@ private:
             make_count_time_filtered_stmt("rocpd_memory_copy");
         m_memory_alloc_count_time_filtered =
             make_count_time_filtered_stmt("rocpd_memory_allocate");
+        m_hip_event_count_time_filtered =
+            m_hip_event_table ? make_count_time_filtered_stmt("rocpd_hip_event")
+                              : no_rows(bind_types<size_t, size_t>{}, &count_result::count);
     }
 
     void initialize_time_range_statements()
@@ -2249,10 +2455,15 @@ private:
         m_kernel_dispatch_time_range = make_time_range_stmt("rocpd_kernel_dispatch");
         m_memory_copy_time_range     = make_time_range_stmt("rocpd_memory_copy");
         m_memory_alloc_time_range    = make_time_range_stmt("rocpd_memory_allocate");
+        m_hip_event_time_range       = m_hip_event_table
+                                           ? make_time_range_stmt("rocpd_hip_event")
+                                           : no_rows(&time_range_result::min_start,
+                                                     &time_range_result::max_end);
     }
 
     std::shared_ptr<sqlite_backend> m_backend;
     std::string                     m_uuid;
+    bool                            m_hip_event_table{ false };
 
     string_statement_func_t             m_string_statement;
     node_info_statement_func_t          m_node_info_statement;
@@ -2269,6 +2480,7 @@ private:
     timeline_event_statement_set m_kernel_dispatch_statements;
     timeline_event_statement_set m_memory_allocate_statements;
     timeline_event_statement_set m_memory_copy_statements;
+    timeline_event_statement_set m_hip_event_statements;
 
     // Detail query members
     region_detail_func_t          m_region_detail;
@@ -2282,6 +2494,7 @@ private:
     event_id_func_t m_kernel_dispatch_event_id;
     event_id_func_t m_memory_copy_event_id;
     event_id_func_t m_memory_alloc_event_id;
+    event_id_func_t m_hip_event_event_id;
 
     // Correlated events
     correlated_event_statement_set m_correlated_event_statements;
@@ -2302,16 +2515,19 @@ private:
     count_func_t m_kernel_dispatch_count;
     count_func_t m_memory_copy_count;
     count_func_t m_memory_alloc_count;
+    count_func_t m_hip_event_count;
 
     count_time_filtered_func_t m_region_count_time_filtered;
     count_time_filtered_func_t m_kernel_dispatch_count_time_filtered;
     count_time_filtered_func_t m_memory_copy_count_time_filtered;
     count_time_filtered_func_t m_memory_alloc_count_time_filtered;
+    count_time_filtered_func_t m_hip_event_count_time_filtered;
 
     // Time range statements
     time_range_func_t m_region_time_range;
     time_range_func_t m_kernel_dispatch_time_range;
     time_range_func_t m_memory_copy_time_range;
     time_range_func_t m_memory_alloc_time_range;
+    time_range_func_t m_hip_event_time_range;
 };
 }  // namespace profiler_hub::data_storage::schema_v3

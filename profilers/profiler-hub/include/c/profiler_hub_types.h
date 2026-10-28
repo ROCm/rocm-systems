@@ -87,7 +87,9 @@ extern "C"
         PH_TRACK_CATEGORY_MEMORY_ALLOCATE_AGENT_QUEUE, /**< By (nid,agent_id,queue_id). */
         PH_TRACK_CATEGORY_MEMORY_COPY_AGENT_QUEUE,     /**< By (nid,agent_id,queue_id). */
         PH_TRACK_CATEGORY_STREAM, /**< Merged kernel-dispatch/memory-allocate/
-                                       memory-copy, by (nid,pid,stream_id). */
+                                       memory-copy/hip-event, by (nid,pid,stream_id). */
+        PH_TRACK_CATEGORY_HIP_EVENT_AGENT_QUEUE, /**< HIP events, by
+                                                      (nid,agent_id,queue_id). */
     } ph_track_category_t;
 
     /** @brief A min/max pair that may be absent. */
@@ -391,6 +393,7 @@ extern "C"
         PH_EVENT_TYPE_PMC_SAMPLE,
         /** Memory-activity counter. Used only by ph_event_query_read(). */
         PH_EVENT_TYPE_MEMORY_ACTIVITY,
+        PH_EVENT_TYPE_HIP_EVENT, /**< HIP event barrier. */
     } ph_event_type_t;
 
     /** @brief A single duration event (region/kernel dispatch/memory

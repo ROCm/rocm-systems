@@ -95,7 +95,7 @@ private:
     struct event_depth_index
     {
         std::once_flag                                        once;
-        std::array<std::unordered_map<uint64_t, uint32_t>, 4> by_type;
+        std::array<std::unordered_map<uint64_t, uint32_t>, 5> by_type;
     };
 
     std::mutex           m_cache_mutex;

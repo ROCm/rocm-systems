@@ -50,6 +50,7 @@ event_type_index(ph_event_type_t type)
         case PH_EVENT_TYPE_KERNEL_DISPATCH: return 1;
         case PH_EVENT_TYPE_MEMORY_COPY: return 2;
         case PH_EVENT_TYPE_MEMORY_ALLOCATE: return 3;
+        case PH_EVENT_TYPE_HIP_EVENT: return 4;
     }
     return std::nullopt;
 }
@@ -65,6 +66,7 @@ to_ph_event_type(reader_types::event_type_t type)
         case reader_types::event_type_t::memory_copy: return PH_EVENT_TYPE_MEMORY_COPY;
         case reader_types::event_type_t::memory_allocate:
             return PH_EVENT_TYPE_MEMORY_ALLOCATE;
+        case reader_types::event_type_t::hip_event: return PH_EVENT_TYPE_HIP_EVENT;
         case reader_types::event_type_t::sample:
         case reader_types::event_type_t::pmc_event: break;
     }

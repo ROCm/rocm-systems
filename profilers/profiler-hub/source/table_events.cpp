@@ -86,6 +86,7 @@ reader_event_type(uint32_t event_type)
         case PH_EVENT_TYPE_KERNEL_DISPATCH: return event_type_t::kernel_dispatch;
         case PH_EVENT_TYPE_MEMORY_COPY: return event_type_t::memory_copy;
         case PH_EVENT_TYPE_MEMORY_ALLOCATE: return event_type_t::memory_allocate;
+        case PH_EVENT_TYPE_HIP_EVENT: return event_type_t::hip_event;
         default: return std::nullopt;
     }
 }
@@ -101,6 +102,8 @@ serves(track_kind_t kind, event_type_t type)
             return type == event_type_t::memory_allocate;
         case track_kind_t::memory_copy_agent_queue:
             return type == event_type_t::memory_copy;
+        case track_kind_t::hip_event_agent_queue:
+            return type == event_type_t::hip_event;
         case track_kind_t::stream: return type != event_type_t::region;
         case track_kind_t::thread:
         case track_kind_t::thread_sample: return true;
@@ -160,12 +163,24 @@ source_for(event_type_t type)
                                      "MA.size, MA.address, NULL",
                                      "agent_id",
                                      true };
+    static const table_source hip{ "rocpd_hip_event",
+                                   "HE",
+                                   "HE.name_id",
+                                   "NULL",
+                                   "HE.agent_id",
+                                   "NULL",
+                                   "HE.agent_id, HE.queue_id, HE.stream_id",
+                                   "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "
+                                   "HE.hip_event_handle, HE.source_queue_id, NULL",
+                                   "agent_id",
+                                   true };
     switch(type)
     {
         case event_type_t::region: return &region;
         case event_type_t::kernel_dispatch: return &kernel;
         case event_type_t::memory_copy: return &copy;
         case event_type_t::memory_allocate: return &alloc;
+        case event_type_t::hip_event: return &hip;
         case event_type_t::sample:
         case event_type_t::pmc_event: break;
     }
@@ -800,6 +815,12 @@ reader_t::impl::read_table_events(const resolved_event_query& query,
 
     const table_source* source = source_for(type.value());
     if(source == nullptr) return 0;
+    if(type.value() == event_type_t::hip_event &&
+       !sqlite_table_present(*m_backend,
+                             std::string(source->table) + "_" + m_backend->get_uuid()))
+    {
+        return 0;
+    }
 
     const std::string text_filter = string_clause(*source, type.value(), query);
     if(query.has_string_filter && text_filter.empty()) return 0;
@@ -937,6 +958,12 @@ reader_t::impl::table_event_id_span(uint32_t  event_type,
     if(!type.has_value()) return false;
     const table_source* source = source_for(type.value());
     if(source == nullptr) return false;
+    if(type.value() == event_type_t::hip_event &&
+       !sqlite_table_present(*m_backend,
+                             std::string(source->table) + "_" + m_backend->get_uuid()))
+    {
+        return false;
+    }
 
     const std::string sql = std::string("SELECT MIN(id), MAX(id) FROM ") + source->table +
                             "_" + m_backend->get_uuid();

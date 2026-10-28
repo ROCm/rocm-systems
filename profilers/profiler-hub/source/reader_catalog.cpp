@@ -666,6 +666,9 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
     add_agent_queue_tracks(reader_types::track_kind_t::memory_copy_agent_queue,
                            "Memory Copy",
                            category_statements.memory_copy_agent_queue().to_vector());
+    add_agent_queue_tracks(reader_types::track_kind_t::hip_event_agent_queue,
+                           "Hip Event",
+                           category_statements.hip_event_agent_queue().to_vector());
 
     std::map<std::tuple<size_t, size_t, size_t>, track_range_stats_t> stream_stats;
     auto accumulate_stream = [&](const auto& rows) {
@@ -679,6 +682,7 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
     accumulate_stream(category_statements.kernel_dispatch_stream().to_vector());
     accumulate_stream(category_statements.memory_allocate_stream().to_vector());
     accumulate_stream(category_statements.memory_copy_stream().to_vector());
+    accumulate_stream(category_statements.hip_event_stream().to_vector());
 
     for(const auto& [key, stats] : stream_stats)
     {
@@ -705,7 +709,8 @@ is_agent_queue_track(reader_types::track_kind_t category)
     {
         case track_kind_t::kernel_dispatch_agent_queue:
         case track_kind_t::memory_allocate_agent_queue:
-        case track_kind_t::memory_copy_agent_queue: return true;
+        case track_kind_t::memory_copy_agent_queue:
+        case track_kind_t::hip_event_agent_queue: return true;
         case track_kind_t::thread:
         case track_kind_t::thread_sample:
         case track_kind_t::pmc_agent:
@@ -790,6 +795,8 @@ reader_catalog_t::build_stream_hardware_links(
               category_statements.memory_allocate_stream_hardware().to_vector());
     add_links(reader_types::track_kind_t::memory_copy_agent_queue,
               category_statements.memory_copy_stream_hardware().to_vector());
+    add_links(reader_types::track_kind_t::hip_event_agent_queue,
+              category_statements.hip_event_stream_hardware().to_vector());
 }
 
 std::unordered_map<topology_key_t, track_range_stats_t, topology_key_hash_t>
