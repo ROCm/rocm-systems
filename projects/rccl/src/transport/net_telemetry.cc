@@ -21,6 +21,9 @@
 #include <net/if.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <linux/dcbnl.h>
 #include <pthread.h>
 
 /* RCCL_TEL_STATIC_ASSERT comes from net_telemetry.h. */
@@ -301,6 +304,20 @@ static int           rcclTelemetryNumSamples = 0;
 static int           rcclTelemetrySamplesTruncated = 0;
 /* Port speed in Gb/s per device, read at registration; 0 = unknown. */
 static double        rcclTelemetryLinkGbps[RCCL_TELEMETRY_MAX_DEVS];
+/* PFC setup of each device as an unprivileged DCB read sees it, and the
+ * traffic class / SL RCCL's data QPs send with. The report needs both to tell
+ * which priority RCCL's packets ride and whether PFC protects it. */
+#define RCCL_TEL_MAX_DCB_APPS 256   /* mlx5 in DSCP trust lists all 64 DSCPs, plus others */
+typedef struct {
+  int dcb;                       /* 1 read, 0 not supported by the driver, -1 failed */
+  int pfc_en;                    /* bit p set: PFC on priority p */
+  int napp;
+  int app_truncated;             /* the NIC had more app entries than fit */
+  struct dcb_app app[RCCL_TEL_MAX_DCB_APPS];
+  int tc_sl;                     /* (tc << 8 | sl) + 1 of the first sender data QP; 0 = none yet */
+  int tc_mixed;                  /* sender data QPs on this device disagree */
+} RcclTelQos;
+static RcclTelQos    rcclTelemetryQos[RCCL_TELEMETRY_MAX_DEVS];
 static int           rcclTelemetrySampleIntervalMs = 0;
 static pthread_t     rcclTelemetrySamplerThread;
 static int           rcclTelemetrySamplerRunning = 0;
@@ -1162,6 +1179,9 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device, const ch
   rcclTelemetryGetDriverName(dev->roce_device, driver_name, sizeof(driver_name));
   dev->hw_config = rcclTelemetryResolveHw(driver_name);
   rcclTelemetryLinkGbps[idx] = rcclTelemetryReadLinkGbps(dev->roce_device);
+  rcclTelemetryQos[idx].dcb = rcclTelemetryReadDcb(dev->eth_device, &rcclTelemetryQos[idx].pfc_en,
+                                                    rcclTelemetryQos[idx].app, &rcclTelemetryQos[idx].napp,
+                                                    &rcclTelemetryQos[idx].app_truncated);
 
   /* No baseline yet — it is captured on first use (see snap_taken). Until then
    * every HW counter and delta reads as -1/N/A rather than as a value that
@@ -1190,6 +1210,97 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device, const ch
   }
 
   return idx;
+}
+
+/* IEEE DCB settings of a netdev, read the way `dcb pfc/app show` does: one
+ * RTM_GETDCB request, which needs no privilege. Drivers without DCB ops (ionic)
+ * answer EOPNOTSUPP; that is recorded, not treated as "PFC off". */
+int rcclTelemetryReadDcb(const char* eth_device, int* pfc_en, struct dcb_app* app, int* napp, int* truncated) {
+  *pfc_en = 0;
+  *napp = 0;
+  *truncated = 0;
+  if (eth_device[0] == '\0' || strlen(eth_device) >= IFNAMSIZ) return -1;
+  int fd = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
+  if (fd < 0) return -1;
+  struct timeval tv = {1, 0};
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  struct {
+    struct nlmsghdr nh;
+    struct dcbmsg dm;
+    char attrs[RTA_SPACE(IFNAMSIZ)];
+  } req;
+  memset(&req, 0, sizeof(req));
+  struct rtattr* ifn = (struct rtattr*)((char*)&req + NLMSG_LENGTH(sizeof(struct dcbmsg)));
+  ifn->rta_type = DCB_ATTR_IFNAME;
+  ifn->rta_len = RTA_LENGTH(strlen(eth_device) + 1);
+  memcpy(RTA_DATA(ifn), eth_device, strlen(eth_device) + 1);
+  req.nh.nlmsg_len = NLMSG_LENGTH(sizeof(struct dcbmsg)) + RTA_ALIGN(ifn->rta_len);
+  req.nh.nlmsg_type = RTM_GETDCB;
+  req.nh.nlmsg_flags = NLM_F_REQUEST;
+  req.nh.nlmsg_seq = 1;
+  req.dm.dcb_family = AF_UNSPEC;
+  req.dm.cmd = DCB_CMD_IEEE_GET;
+  char buf[16384];
+  ssize_t n = -1;
+  if (send(fd, &req, req.nh.nlmsg_len, 0) >= 0) n = recv(fd, buf, sizeof(buf), 0);
+  close(fd);
+  if (n < (ssize_t)sizeof(struct nlmsghdr)) return -1;
+  struct nlmsghdr* nh = (struct nlmsghdr*)buf;
+  if (!NLMSG_OK(nh, (unsigned)n)) return -1;
+  if (nh->nlmsg_type == NLMSG_ERROR) {
+    if (nh->nlmsg_len < NLMSG_LENGTH(sizeof(struct nlmsgerr))) return -1;
+    struct nlmsgerr* e = (struct nlmsgerr*)NLMSG_DATA(nh);
+    return e->error == -EOPNOTSUPP ? 0 : -1;
+  }
+  if (nh->nlmsg_type != RTM_GETDCB) return -1;
+  int len = (int)nh->nlmsg_len - NLMSG_LENGTH(sizeof(struct dcbmsg));
+  int havePfc = 0;
+  for (struct rtattr* a = (struct rtattr*)((char*)NLMSG_DATA(nh) + NLMSG_ALIGN(sizeof(struct dcbmsg)));
+       RTA_OK(a, len); a = RTA_NEXT(a, len)) {
+    if ((a->rta_type & NLA_TYPE_MASK) != DCB_ATTR_IEEE) continue;
+    int l2 = RTA_PAYLOAD(a);
+    for (struct rtattr* b = (struct rtattr*)RTA_DATA(a); RTA_OK(b, l2); b = RTA_NEXT(b, l2)) {
+      int t = b->rta_type & NLA_TYPE_MASK;
+      if (t == DCB_ATTR_IEEE_PFC && RTA_PAYLOAD(b) >= sizeof(struct ieee_pfc)) {
+        *pfc_en = ((struct ieee_pfc*)RTA_DATA(b))->pfc_en;
+        havePfc = 1;
+      } else if (t == DCB_ATTR_IEEE_APP_TABLE) {
+        int l3 = RTA_PAYLOAD(b);
+        for (struct rtattr* c = (struct rtattr*)RTA_DATA(b); RTA_OK(c, l3); c = RTA_NEXT(c, l3)) {
+          if ((c->rta_type & NLA_TYPE_MASK) != DCB_ATTR_IEEE_APP || RTA_PAYLOAD(c) < sizeof(struct dcb_app)) continue;
+          if (*napp < RCCL_TEL_MAX_DCB_APPS)
+            app[(*napp)++] = *(struct dcb_app*)RTA_DATA(c);
+          else
+            *truncated = 1;
+        }
+      }
+    }
+  }
+  /* A driver with DCB ops but no IEEE PFC getter cannot say what PFC does. */
+  return havePfc ? 1 : 0;
+}
+
+void rcclTelemetryNoteTrafficClass(int device_id, int tc, int sl) {
+  /* tc < 0: InfiniBand link layer, no traffic class. */
+  if (device_id < 0 || device_id >= RCCL_TELEMETRY_MAX_DEVS || tc < 0 || sl < 0) return;
+  RcclTelQos* q = &rcclTelemetryQos[device_id];
+  /* One word, so racing connection setups agree on which QP was first. */
+  int want = (((tc & 0xff) << 8) | (sl & 0xff)) + 1, cur = 0;
+  if (!__atomic_compare_exchange_n(&q->tc_sl, &cur, want, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED) &&
+      cur != want)
+    __atomic_store_n(&q->tc_mixed, 1, __ATOMIC_RELAXED);
+}
+
+void rcclTelemetryGetTrafficClass(int device_id, int* tc, int* sl, int* mixed) {
+  *tc = *sl = -1;
+  *mixed = 0;
+  if (device_id < 0 || device_id >= RCCL_TELEMETRY_MAX_DEVS) return;
+  int v = __atomic_load_n(&rcclTelemetryQos[device_id].tc_sl, __ATOMIC_RELAXED);
+  if (v) {
+    *tc = (v - 1) >> 8;
+    *sl = (v - 1) & 0xff;
+  }
+  *mixed = __atomic_load_n(&rcclTelemetryQos[device_id].tc_mixed, __ATOMIC_RELAXED);
 }
 
 /* Map a RoCE device to its netdev name via sysfs. Internal: the only caller is
@@ -1948,6 +2059,24 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     fprintf(fp, "      \"hw_type\": \"%s\",\n",
             dev->hw_config ? ((const RcclHwConfig*)dev->hw_config)->name : "unsupported");
     fprintf(fp, "      \"link_gbps\": %g,\n", rcclTelemetryLinkGbps[d]);
+    {
+      const RcclTelQos* q = &rcclTelemetryQos[d];
+      static const char* const sel[] = {"0", "ethertype", "stream", "dgram", "any", "dscp"};
+      int tc, sl, mixed;
+      rcclTelemetryGetTrafficClass(d, &tc, &sl, &mixed);
+      fprintf(fp, "      \"qos\": {\"dcb\": \"%s\", \"traffic_class\": %d, \"sl\": %d, \"traffic_class_mixed\": %s",
+              q->dcb == 1 ? "ok" : q->dcb == 0 ? "unsupported" : "error", tc, sl, mixed ? "true" : "false");
+      if (q->dcb == 1) {
+        fprintf(fp, ", \"pfc_enabled\": [");
+        for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) fprintf(fp, "%s%d", p ? ", " : "", (q->pfc_en >> p) & 1);
+        fprintf(fp, "], \"app\": [");
+        for (int i = 0; i < q->napp; i++)
+          fprintf(fp, "%s{\"selector\": \"%s\", \"protocol\": %u, \"priority\": %u}", i ? ", " : "",
+                  q->app[i].selector <= 5 ? sel[q->app[i].selector] : "other", q->app[i].protocol, q->app[i].priority);
+        fprintf(fp, "]%s", q->app_truncated ? ", \"app_truncated\": true" : "");
+      }
+      fprintf(fp, "},\n");
+    }
     fprintf(fp, "      \"tx_bytes\": %lu,\n", (unsigned long)dev->tx_bytes);
     fprintf(fp, "      \"rx_bytes\": %lu,\n", (unsigned long)dev->rx_bytes);
     fprintf(fp, "      \"num_cq_errors\": %lu,\n", (unsigned long)dev->num_cq_errors);

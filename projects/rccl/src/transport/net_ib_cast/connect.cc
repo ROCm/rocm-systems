@@ -1120,6 +1120,12 @@ static ncclResult_t IbCastSenderQpsToRts(ncclIbSendComm* comm, struct ncclIbConn
     rtrAttr->localGid = commDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = commDev->base.gidInfo.localGidIndex;
     NCCLCHECK(IbCastQpRtr(localQp));
+    // Data flows on the sender's QPs, so their traffic class is the one that
+    // decides RCCL's PFC priority. Only known now, from the receiver's metadata.
+    // rtrAttr->tc is a uint8_t, so InfiniBand's "no traffic class" is decided here.
+    if (localQp->isDataQp && rcclTelemetryOn())
+      rcclTelemetryNoteTrafficClass(commDev->base.ibDevN,
+                                    rtrAttr->linkLayer == IBV_LINK_LAYER_ETHERNET ? rtrAttr->tc : -1, rtrAttr->sl);
     struct ncclIbQpRtsAttr* rtsAttr = &localQp->rtsAttr;
     rtsAttr->timeout = ncclParamIbCastTimeout();
     rtsAttr->retryCnt = ncclParamIbCastRetryCnt();

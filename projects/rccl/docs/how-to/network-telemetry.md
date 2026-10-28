@@ -91,6 +91,22 @@ After the run, inspect any `rccl_telemetry_*.json` in the output directory.
 }
 ```
 
+Each device also carries `qos`: what RCCL needs to know which PFC priority its
+traffic rides.
+
+```
+"qos": {"dcb": "ok",                  // or "unsupported" (e.g. ionic), "error"
+        "traffic_class": 0, "sl": 0,  // what RCCL's sender data QPs use; -1 if none, or InfiniBand
+        "traffic_class_mixed": false, // data QPs on this device used different values
+        "pfc_enabled": [0, 0, 0, 1, 0, 0, 0, 0],   // only when dcb is "ok"
+        "app": [{"selector": "dgram", "protocol": 4791, "priority": 3},
+                {"selector": "dscp", "protocol": 26, "priority": 3}]}
+```
+
+`pfc_enabled` and `app` come from one unprivileged IEEE DCB read of the netdev
+at registration, the same request `dcb pfc show` and `dcb app show` make. Up
+to 256 app entries are kept; `"app_truncated": true` says some were not.
+
 The top level also carries `clock` (`"CLOCK_MONOTONIC"`, the clock of every
 `ts_us`), `histogram_bucket_interval_ns`, `histogram_max_buckets` and, when the
 sampler ran, `sample_interval_ms`, so an offline tool can interpret the file

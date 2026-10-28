@@ -60,6 +60,7 @@
  */
 
 #include "net_telemetry.h"
+#include <linux/dcbnl.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -985,6 +986,63 @@ static void testCounterDelta(void) {
   CHECK_EQ(rcclTelemetryCounterDelta(5, ((int64_t)1 << 48) + 10), -1);
 }
 
+/* ---- Traffic class and DCB settings ---------------------------------- */
+
+static void testTrafficClassNote(void) {
+  std::printf("testTrafficClassNote\n");
+  int tc, sl, mixed;
+  rcclTelemetryGetTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 1, &tc, &sl, &mixed);
+  CHECK_EQ(tc, -1);                                   /* nothing recorded yet */
+  rcclTelemetryNoteTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 1, 104, 3);
+  rcclTelemetryNoteTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 1, 104, 3);
+  rcclTelemetryGetTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 1, &tc, &sl, &mixed);
+  CHECK_EQ(tc, 104);
+  CHECK_EQ(sl, 3);
+  CHECK_EQ(mixed, 0);
+  rcclTelemetryNoteTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 1, 0, 0);            /* a QP that disagrees */
+  rcclTelemetryGetTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 1, &tc, &sl, &mixed);
+  CHECK_EQ(tc, 104);                                  /* the first stays */
+  CHECK_EQ(mixed, 1);
+  rcclTelemetryNoteTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 4, -1, 0);   /* InfiniBand: no traffic class */
+  rcclTelemetryGetTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 4, &tc, &sl, &mixed);
+  CHECK_EQ(tc, -1);
+  rcclTelemetryNoteTrafficClass(-1, 1, 1);            /* out of range: ignored */
+  rcclTelemetryNoteTrafficClass(RCCL_TELEMETRY_MAX_DEVS, 1, 1);
+}
+
+/* Connection setups race to record the first QP: all must agree on one. */
+static void testTrafficClassNoteConcurrent(void) {
+  std::printf("testTrafficClassNoteConcurrent\n");
+  std::vector<std::thread> ts;
+  for (int t = 0; t < 8; t++)
+    ts.emplace_back([t] {
+      for (int i = 0; i < 1000; i++) {
+        rcclTelemetryNoteTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 2, 104, 0);              /* all agree */
+        rcclTelemetryNoteTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 3, (t & 1) ? 104 : 96, 0);  /* two values */
+      }
+    });
+  for (auto& t : ts) t.join();
+  int tc, sl, mixed;
+  rcclTelemetryGetTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 2, &tc, &sl, &mixed);
+  CHECK_EQ(tc, 104);
+  CHECK_EQ(mixed, 0);
+  rcclTelemetryGetTrafficClass(RCCL_TELEMETRY_MAX_DEVS - 3, &tc, &sl, &mixed);
+  CHECK(tc == 104 || tc == 96);
+  CHECK_EQ(mixed, 1);
+}
+
+static void testReadDcb(void) {
+  std::printf("testReadDcb\n");
+  int pfc, napp, trunc;
+  struct dcb_app app[256];
+  CHECK_EQ(rcclTelemetryReadDcb("", &pfc, app, &napp, &trunc), -1);
+  CHECK_EQ(rcclTelemetryReadDcb("this-name-is-far-too-long-for-ifnamsiz", &pfc, app, &napp, &trunc), -1);
+  /* lo has no DCB: "unsupported", never "read". -1 only where netlink is blocked. */
+  int r = rcclTelemetryReadDcb("lo", &pfc, app, &napp, &trunc);
+  CHECK(r == 0 || r == -1);
+  CHECK_EQ(napp, 0);
+}
+
 /* ---- One slot per shared QP ----------------------------------------- */
 
 /* A QP-sharing secondary maps qps[q] to shared QP q % primaryNqps. */
@@ -1198,6 +1256,9 @@ int main(void) {
   testEthtoolFallbackOrder();
   testCounterDelta();
   testSetupQpsSharedKeys();
+  testTrafficClassNote();
+  testTrafficClassNoteConcurrent();
+  testReadDcb();
   testSampledColRetry();
   testThor2SysfsNames(); /* flushes: keep last */
 
