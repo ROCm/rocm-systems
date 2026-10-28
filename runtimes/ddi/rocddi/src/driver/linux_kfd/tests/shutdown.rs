@@ -32,6 +32,7 @@ fn scripted_driver() -> LinuxKfdDriver {
         hardware_destroy_uncertain: AtomicBool::new(false),
         memory_destroy_uncertain: AtomicBool::new(false),
         observed: Mutex::new(ObservedEvents::new().unwrap()),
+        host_aliases: Mutex::new(Vec::new()),
         lost: AtomicBool::new(false),
     })
     .unwrap();

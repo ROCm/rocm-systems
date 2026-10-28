@@ -348,6 +348,7 @@ impl Fixture {
                 hardware_destroy_uncertain: AtomicBool::new(false),
                 memory_destroy_uncertain: AtomicBool::new(false),
                 observed: Mutex::new(ObservedEvents::new().unwrap()),
+                host_aliases: Mutex::new(Vec::new()),
                 lost: AtomicBool::new(false),
             })
             .unwrap(),
@@ -618,6 +619,68 @@ fn ais_rejects_non_vram_backing_without_a_native_transfer() {
     );
     allocation.free().unwrap();
     drop(allocation);
+    fixture.exhausted();
+}
+
+#[test]
+fn bo_backed_host_alias_reuses_mapping_and_blocks_source_release() {
+    let fixture = Fixture::with_devices(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::Unmap(0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        &[42],
+        backing_file(desc().size),
+    );
+    let mut source = fixture
+        .allocate(MemoryKind::System, DeviceAccess::READ | DeviceAccess::WRITE)
+        .unwrap();
+    source.set_host_alias_identity([7, 11]).unwrap();
+    let host = source.host_address().unwrap();
+    let mut backing = None;
+    let mut alias = KfdHostAlias::try_create(
+        &fixture.vm,
+        &[],
+        host + 17,
+        31,
+        HostMappingPolicy::Fine,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        &mut backing,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        alias.cached_info().device_address,
+        source.device_address(&fixture.vm).unwrap() + 17
+    );
+    assert_eq!(alias.cached_info().physical_backing_id, [7, 11]);
+    assert_eq!(source.free().unwrap_err().kind(), ErrorKind::Busy);
+    assert_eq!(
+        source.set_access(&[&fixture.vm]).unwrap_err().kind(),
+        ErrorKind::Busy
+    );
+    alias.free();
+    source.set_access(&[&fixture.vm]).unwrap();
+    let mut backing = None;
+    let mut next_alias = KfdHostAlias::try_create(
+        &fixture.vm,
+        &[],
+        host + 17,
+        31,
+        HostMappingPolicy::Fine,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        &mut backing,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(next_alias.cached_info().physical_backing_id, [7, 11]);
+    next_alias.free();
+    source.free().unwrap();
+    drop(alias);
+    drop(source);
     fixture.exhausted();
 }
 
@@ -1559,6 +1622,23 @@ fn dma_buf_import_maps_the_full_backing_and_exposes_the_logical_subrange() {
     assert_eq!(dma_buf.info().source_offset, 65536);
     assert_eq!(dma_buf.info().physical_backing_id, identity);
     drop(dma_buf);
+    let mut backing = None;
+    let mut alias = KfdHostAlias::try_create(
+        &fixture.vm,
+        &[],
+        info.host_address.unwrap() + 17,
+        31,
+        HostMappingPolicy::Coarse,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        &mut backing,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(alias.source_offset(), 65536 + 17);
+    assert_eq!(alias.cached_info().native_size, 2 * 65536);
+    assert_eq!(alias.cached_info().physical_backing_id, identity);
+    assert_eq!(allocation.free().unwrap_err().kind(), ErrorKind::Busy);
+    alias.free();
     allocation.free().unwrap();
     drop(allocation);
     fixture.exhausted();
@@ -2726,6 +2806,7 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
         hardware_destroy_uncertain: AtomicBool::new(false),
         memory_destroy_uncertain: AtomicBool::new(false),
         observed: Mutex::new(ObservedEvents::new().unwrap()),
+        host_aliases: Mutex::new(Vec::new()),
         lost: AtomicBool::new(false),
     }));
     assert_eq!(

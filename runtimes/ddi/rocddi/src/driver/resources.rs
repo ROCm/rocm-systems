@@ -237,6 +237,24 @@ impl AllocationState {
         }
     }
 
+    pub(crate) fn host_alias_source_offset(&self) -> Option<u64> {
+        match self {
+            Self::LinuxKfd(allocation) => allocation.driver_state().host_alias_source_offset(),
+            #[cfg(test)]
+            Self::Test(_) => None,
+        }
+    }
+
+    pub(crate) fn set_host_alias_identity(&self, identity: [u64; 2]) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(allocation) => {
+                allocation.driver_state().set_host_alias_identity(identity)
+            }
+            #[cfg(test)]
+            Self::Test(_) => unsupported_memory(),
+        }
+    }
+
     pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
         match self {
             Self::LinuxKfd(allocation) => allocation.driver_state().remaining_backing_byte_length(),

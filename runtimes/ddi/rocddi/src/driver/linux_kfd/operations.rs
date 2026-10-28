@@ -590,7 +590,8 @@ impl AllocationOperations for LinuxKfdDriver {
             permissions,
             backing,
         } = request;
-        let desc = checked_allocation_desc(size, alignment)?;
+        let desc = checked_host_registration_desc(size, alignment)?;
+        let mut backing = backing;
         if self.lifetime == DriverContextLifetime::Session {
             if policy == HostMappingPolicy::Extended
                 && std::iter::once(device)
@@ -621,6 +622,17 @@ impl AllocationOperations for LinuxKfdDriver {
                 )
             }
         } else {
+            if let Some(alias) = memory::KfdHostAlias::try_create(
+                &device.vm,
+                peers,
+                address,
+                size,
+                policy,
+                permissions,
+                &mut backing,
+            )? {
+                return LinuxAllocation::from_host_alias(alias);
+            }
             // SAFETY: Raw callers retain these pages through cleanup; owned
             // registrations transfer a lease into the native allocation.
             let pages = unsafe { memory::BorrowedHostPages::new(address, policy) };
@@ -649,6 +661,19 @@ fn checked_allocation_desc(size: u64, alignment: u64) -> Result<AllocationDesc, 
         return Err(error(
             ErrorKind::InvalidArgument,
             "invalid native allocation extent or alignment",
+        ));
+    }
+    Ok(desc)
+}
+
+fn checked_host_registration_desc(size: u64, alignment: u64) -> Result<AllocationDesc, Error> {
+    let desc = AllocationDesc { size, alignment };
+    let page =
+        os_memory::page_size().map_err(|source| native_error("native page size", source))? as u64;
+    if size == 0 || size > isize::MAX as u64 || !alignment.is_power_of_two() || alignment < page {
+        return Err(error(
+            ErrorKind::InvalidArgument,
+            "invalid host registration extent or alignment",
         ));
     }
     Ok(desc)
@@ -806,5 +831,19 @@ impl KernelQueueResource for KfdKernelQueue {
 
     fn destroy(&mut self) -> Result<(), Error> {
         KfdKernelQueue::destroy(self)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod registration_extent_tests {
+    use super::{checked_allocation_desc, checked_host_registration_desc, os_memory};
+
+    #[test]
+    fn host_registration_accepts_an_exact_subpage_length() {
+        let page = os_memory::page_size().unwrap() as u64;
+        assert!(checked_host_registration_desc(1, page).is_ok());
+        assert!(checked_allocation_desc(1, page).is_err());
+        assert!(checked_host_registration_desc(0, page).is_err());
     }
 }
