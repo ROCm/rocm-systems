@@ -38,7 +38,6 @@ namespace dda::common {
 // peer columns are rotated (peer = self+x+1) so the grid does not hammer one
 // destination at a time; the self copy is spread over the whole grid; slots are carved
 // from the shared bank layout (ddaBankSize), so the per-chunk cap is the slot size.
-// The user buffers take cached access, as this kernel's own helpers did.
 
 constexpr size_t ddaLL128A2ASlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 1);
