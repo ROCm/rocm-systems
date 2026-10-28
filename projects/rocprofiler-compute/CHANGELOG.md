@@ -90,6 +90,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
 * Fixed dispatch IDs not always following kernel launch order.
 
+* Fixed `--list-operators` and `--operator` using only the first workload's `trace_ml_api` when several `--path` directories are given.
+
 * Fixed the Memory Chart tables printing without their titles or panel heading when analyzing more than one workload (baseline comparison).
 
 * Fixed JAX and PyTorch PC sampling finalization failures when GPU code object addresses are reused.

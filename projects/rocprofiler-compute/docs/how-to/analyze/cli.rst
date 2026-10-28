@@ -845,7 +845,8 @@ PyTorch operator analysis
 These options work only with the default ``--output-format stdout``. If you
 combine ``--list-operators`` with ``--operator``, rocprof-compute
 lists operators for the chosen ``--list-operators`` values and ignores the
-``--operator`` filter.
+``--operator`` filter. ``--list-operators`` and ``--operator`` apply to
+all workload paths provided.
 
 
 List all operators
