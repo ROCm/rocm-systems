@@ -42,16 +42,14 @@ invented per binary. For a unit at `src/<dirs>/<stem>.cc`:
 | gtest suites | `<Stem>…Microtest` — every suite in the TU starts with `<Stem>` | `GinHostProxyAffinityMicrotest` |
 | CTest categories | `test/test_categories_micro_<stem>.yaml`, lowercase | `test/test_categories_micro_gin_host.yaml` |
 | JUnit XML | `host_tests_micro_<stem>.xml` (in `run_host_tests.sh`) | `host_tests_micro_gin_host.xml` |
-| Test-runner config | `unit_tests_micro_<stem>` (in `configs/ci-precheckin.json`) | `unit_tests_micro_gin_host` |
 
 Because every suite starts with the binary's `<Stem>`, the categories yaml needs
 exactly one pattern (`GinHost*`) and a new suite in the same TU is picked up
 without editing it — gtest's `*` does not cross the `.`, so a per-suite list
 silently drops any suite someone forgets to add.
 
-A new binary is named in four places: `rccl_add_micro_binary()` in
-`test/host/CMakeLists.txt`, the `binaries` array in `run_host_tests.sh`, the
-`test_configurations` + `test_suites` pair in `configs/ci-precheckin.json`, and
+A new binary is named in three places: `rccl_add_micro_binary()` in
+`test/host/CMakeLists.txt`, the `binaries` array in `run_host_tests.sh`, and
 the microtest list in `lib/test_executor.py` that llvm-cov reads as `--object`.
 
 ## Units under test
@@ -62,6 +60,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicro`** — one unit per test TU:
   - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2p*`,
     `FreshRegistration*`, `ConnStepAcquireMicrotest.*`.
+  - `transport/coll_net.cc` (`COLL_NET_CC_PATH`, from `coll-net-test.cc`); suites `CollNet*`,
+    driven through a fake `ncclCollNet_t`.
   - `register/register.cc`, `register/coll_reg.cc` and `register/sendrecv_reg.cc`
     (`REGISTER_CC_PATH`, `COLL_REG_CC_PATH`, `SENDRECV_REG_CC_PATH`, from `register-test.cc`,
     `coll-reg-test.cc` and `sendrecv-reg-test.cc`); suites `Register*`. Their calls into `p2p.cc`,
@@ -705,6 +705,7 @@ symbol.
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | externals `src/bootstrap.cc` reaches (`rccl-UnitTestsMicroBootstrap`, which compiles it) | `fakes/bootstrap_micro_fakes.cc` |
 | `src/ce_coll.cc` (targets that do not compile the real file) | `fakes/ce_fakes.cc` |
+| `src/channel.cc` (targets that do not compile the real file) | `fakes/channel_fakes.{h,cc}` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/debug.cc` (`ncclDebugLog` recorder for binaries that cannot link `nccl_fakes.cc`, which owns it everywhere else) | `fakes/debug_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
