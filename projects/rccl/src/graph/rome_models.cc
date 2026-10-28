@@ -3940,7 +3940,11 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
             }
             memcpy(&graph->intraNets[ngpus * nChannels * 2], nets, ngpus * 2 * sizeof(int));
             graph->nIntraChannels++;
-            if (nets[0] - 'N' >= nnets || nets[ngpus * 2 - 1] - 'N' >= nnets) goto newchannel;
+            // A slot the ring did not name is still 0 here, which reads as a negative
+            // NET id. Without the lower bound it passes the limit and lands in inter[],
+            // where multi-node init then fails in ncclTopoIdToNetDev.
+            if (nets[0] - 'N' < 0 || nets[0] - 'N' >= nnets ||
+                nets[ngpus * 2 - 1] - 'N' < 0 || nets[ngpus * 2 - 1] - 'N' >= nnets) goto newchannel;
             graph->inter[nChannels * 2] = nets[0] - 'N';
             graph->inter[nChannels * 2 + 1] = nets[ngpus * 2 - 1] - 'N';
           } else if (nnets) {

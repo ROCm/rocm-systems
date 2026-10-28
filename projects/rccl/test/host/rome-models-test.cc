@@ -476,6 +476,27 @@ TEST_F(RomeModelsParseGraphMicrotest, NetSlotsTheRingDidNotName_AreNotCarriedOve
   }
 }
 
+TEST_F(RomeModelsParseGraphMicrotest, ChannelWithUnnamedEndNets_IsIgnored) {
+  system()->nodes[NET].count = 2;
+  system()->nodes[NET].nodes[0].id = 50;
+  system()->nodes[NET].nodes[1].id = 51;
+
+  // The second segment names its NETs between the GPUs rather than at the ends,
+  // so both end slots stay absent. An absent slot reads as a negative NET id, and
+  // only a check for that can stop it reaching inter[] -- the limit on its own
+  // sees a number below nnets and lets it through.
+  ASSERT_EQ(parseGraph("N0 0 1 2 3 N1|0 N0 1 2 N1 3", system(), graph(), nullptr, nullptr, 0),
+            ncclSuccess);
+
+  ASSERT_EQ(graph()->nChannels, 1);
+  EXPECT_EQ(graph()->inter[0], 0);
+  EXPECT_EQ(graph()->inter[1], 1);
+  // The ignored channel must not have left a NET id behind. ncclTopoIdToNetDev
+  // fails multi-node init on one of these.
+  EXPECT_GE(graph()->inter[2], 0);
+  EXPECT_GE(graph()->inter[3], 0);
+}
+
 // A channel naming every GPU the array can hold, so the NET slot index derived
 // from the GPU count (2 * gpu - 1) sits at the very end of nets[].
 std::string WidestChannelThenNets(const char* trailingNets) {
