@@ -40,6 +40,7 @@ public:
   }
 
   /// Element i in insertion order; 0 is the oldest retained element.
+  /// Entries start at index 0 while filling; once full, head_ is the oldest entry.
   const T &operator[](size_t i) const { return data_[data_.size() < N ? i : (head_ + i) % N]; }
   size_t size() const { return data_.size(); }
 
