@@ -903,7 +903,7 @@ impl Kfd {
         // KFD encodes the mapping type in bits 63:62. This is an opaque mmap
         // token, not a nonnegative render-file position. Preserve all bits when
         // passing it through the signed off_t parameter in the libc ABI.
-        mapping.map_file_read_write(
+        mapping.map_kfd_file_in_place(
             self.file
                 .as_ref()
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?,
@@ -914,7 +914,7 @@ impl Kfd {
 
     pub(super) fn map_mmio(&self, mapping: &mut Reservation, offset: u64) -> io::Result<()> {
         self.check_process()?;
-        mapping.map_file_read_write(
+        mapping.map_kfd_file_in_place(
             self.file
                 .as_ref()
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?,
