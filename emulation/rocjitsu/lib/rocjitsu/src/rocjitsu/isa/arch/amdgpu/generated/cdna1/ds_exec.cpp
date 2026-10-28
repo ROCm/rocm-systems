@@ -386,7 +386,8 @@ void DsWriteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -421,9 +422,18 @@ void DsWrite2B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const auto addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const auto data0_0 = maybe_data0_0.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const auto data1_0 = maybe_data1_0.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -459,9 +469,18 @@ void DsWrite2st64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const auto addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const auto data0_0 = maybe_data0_0.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const auto data1_0 = maybe_data1_0.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -661,7 +680,8 @@ void DsWriteAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -1417,7 +1437,10 @@ void DsRead2B32Ds::execute_impl(amdgpu::Wavefront &wf) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const auto addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -1456,7 +1479,10 @@ void DsRead2st64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const auto addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -1928,7 +1954,8 @@ void DsWriteB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -1965,11 +1992,26 @@ void DsWrite2B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
-  auto data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const auto addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const auto data0_0 = maybe_data0_0.value();
+  auto maybe_data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
+  if (maybe_data0_1.failed())
+    return;
+  const auto data0_1 = maybe_data0_1.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const auto data1_0 = maybe_data1_0.value();
+  auto maybe_data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  if (maybe_data1_1.failed())
+    return;
+  const auto data1_1 = maybe_data1_1.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2009,11 +2051,26 @@ void DsWrite2st64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
-  auto data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const auto addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const auto data0_0 = maybe_data0_0.value();
+  auto maybe_data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
+  if (maybe_data0_1.failed())
+    return;
+  const auto data0_1 = maybe_data0_1.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const auto data1_0 = maybe_data1_0.value();
+  auto maybe_data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  if (maybe_data1_1.failed())
+    return;
+  const auto data1_1 = maybe_data1_1.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3003,7 +3060,10 @@ void DsRead2B64Ds::execute_impl(amdgpu::Wavefront &wf) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const auto addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -3042,7 +3102,10 @@ void DsRead2st64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const auto addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -3326,7 +3389,8 @@ void DsWriteB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -3363,7 +3427,8 @@ void DsWriteB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }

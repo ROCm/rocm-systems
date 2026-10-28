@@ -1230,8 +1230,9 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
-  /// @param failure_detail Receives `UnimplementedInst::what()` when that legacy
-  /// exception is translated; otherwise the pointed-to string is unchanged.
+  /// @param failure_detail Receives the reported register-access diagnostic or
+  /// `UnimplementedInst::what()` when that legacy exception is translated.
+  /// Otherwise the pointed-to string is unchanged.
   /// @returns Failure for an unimplemented instruction stub or a reported operand
   /// failure. The wavefront retains the reason for caller-owned diagnostics.
   /// Each call clears the previous error; a failed call does not halt the wavefront.
@@ -1255,6 +1256,8 @@ public:
       if (failure_detail)
         *failure_detail = error.what();
     }
+    if (failure_detail && wf.instruction_execution_error_detail())
+      *failure_detail = wf.instruction_execution_error_detail();
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
   }
 

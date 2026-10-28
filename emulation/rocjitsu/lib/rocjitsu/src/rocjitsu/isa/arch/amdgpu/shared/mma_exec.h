@@ -1239,13 +1239,15 @@ void convert_packed_matrix_region(const RegisterAccess::VgprReadRegion &source,
                                   uint32_t elements_per_word, Convert convert) {
   const size_t elements_per_reg = static_cast<size_t>(source.wf_size()) * elements_per_word;
   size_t converted = 0;
-  source.for_each([&](std::span<const uint32_t> lanes) {
+  auto converted_region = source.for_each([&](std::span<const uint32_t> lanes) {
     if (converted == element_count)
       return;
     const size_t count = std::min(elements_per_reg, element_count - converted);
     convert(lanes.data(), destination + converted, count);
     converted += count;
   });
+  if (converted_region.failed())
+    return;
   assert(converted == element_count && "packed conversion exceeds matrix read region");
 }
 
@@ -1256,7 +1258,8 @@ void copy_matrix_region_words(const RegisterAccess::VgprReadRegion &source,
   assert(word_count <= Capacity && "matrix read region exceeds snapshot capacity");
   if (word_count > Capacity)
     std::abort();
-  source.copy_to({destination, word_count});
+  if (source.copy_to({destination, word_count}).failed())
+    return;
 }
 
 inline void convert_f16_matrix_region(const RegisterAccess::VgprReadRegion &source,
@@ -2881,7 +2884,8 @@ RJ_NOINLINE inline void exec_swmmac_16x16x64_16bit_fast_body(
   }
   if (reads.acc)
     copy_matrix_region_words(*reads.acc, c_words);
-  index_read.copy_to({index_words, WF});
+  if (index_read.copy_to({index_words, WF}).failed())
+    return;
 
   alignas(64) float a_matrix[SPEC_M * COMPRESSED_K];
   alignas(64) float b_matrix[SPEC_K * SPEC_N];
@@ -3046,7 +3050,8 @@ RJ_NOINLINE inline void exec_swmmac_16x16x128_8bit_fast_body(
     convert_f8_matrix_region<false, false>(reads.b, b_physical, SPEC_N * SPEC_K);
   if (reads.acc)
     copy_matrix_region_words(*reads.acc, c_words);
-  index_read.copy_to({index_words, 2 * WF});
+  if (index_read.copy_to({index_words, 2 * WF}).failed())
+    return;
 
   alignas(64) float a_matrix[SPEC_M * COMPRESSED_K];
   alignas(64) float b_matrix[SPEC_K * SPEC_N];
