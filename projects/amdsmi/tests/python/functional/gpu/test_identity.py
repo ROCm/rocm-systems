@@ -57,7 +57,31 @@ class TestGpuIdentity(unittest.TestCase):
 
     def test_get_gpu_device_uuid(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_device_uuid=amdsmi.amdsmi_get_gpu_device_uuid)
+        # Devices with no real ASIC serial (e.g. gfx1151/WSL) now correctly
+        # refuse to synthesize a placeholder UUID, so NOT_SUPPORTED is expected
+        # alongside SUCCESS here.
+        accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+        with self.common.status_sweep():
+            for i, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(i)
+                msg = f"\t### amdsmi_get_gpu_device_uuid(gpu={i}):"
+                with self.common.expect_status(msg, accept):
+                    amdsmi.amdsmi_get_gpu_device_uuid(gpu)
+                self.common.print("")
+
+        # Invalid gpu handle: kept on the check_ret path since it raises
+        # AmdSmiParameterException, which expect_status cannot classify
+        # (no get_error_code()).
+        raise_exception = None
+        msg = "\t### amdsmi_get_gpu_device_uuid(gpu=invalid):"
+        try:
+            amdsmi.amdsmi_get_gpu_device_uuid(self.common.bad_gpu)
+            self.common.check_ret("", "", self.common.FAIL)
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+            if self.common.check_ret(msg, e, self.common.FAIL):
+                raise_exception = e
+        if raise_exception:
+            raise raise_exception
         return
 
     def test_get_gpu_device_cuid(self):
