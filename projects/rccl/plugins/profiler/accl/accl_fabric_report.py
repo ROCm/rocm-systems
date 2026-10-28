@@ -55,6 +55,7 @@ SCALAR_KEYS = ("tx_bytes", "rx_bytes", "nic_tx_bytes", "nic_rx_bytes", "nic_tx_p
 LOSS_FABRIC = ("oos_drop_count", "seq_err_naks_rcvd", "local_ack_timeout_err")
 LOSS_HOST = ("out_of_buffer", "rnr_retry_err")
 INF = math.inf
+PAUSE_QUANTA_BITS = 65535 * 512   # longest pause one PFC frame can ask for, in bit times
 COVERAGE = "telemetry samples do not cover all of these collectives"
 # Collectives closer together than this run as one busy stretch.
 MERGE_GAP_US = 1000.0
@@ -192,6 +193,7 @@ class Device:
     hw_type: str
     link_gbps: float = 0.0
     series: SeriesMap = field(default_factory=SeriesMap)
+    qos: Dict = field(default_factory=dict)   # DCB settings + RCCL's traffic class (telemetry "qos")
 
 
 @dataclass
@@ -264,7 +266,7 @@ def load_telemetry(path: str, wanted: Optional[Dict[Tuple[str, int], set]] = Non
             m = meta.get(dev_id, {})
             tel.devices[dev_id] = Device(dev_id, m.get("roce_device") or samples[0].get("roce_device", ""),
                                          m.get("hw_type", ""), float(m.get("link_gbps") or 0),
-                                         SeriesMap(cols))
+                                         SeriesMap(cols), m.get("qos") or {})
         by_dev.clear()
         out[(tel.host, tel.pid)] = tel
     return out
@@ -392,11 +394,16 @@ def refresh_us(dev: Device, interval_us: float) -> float:
 class Lane:
     """The PFC priority RCCL's traffic uses, and how that was decided."""
     prio: Optional[int]
-    source: str                     # given | traffic | most-paused | none
+    source: str                     # given | config | traffic | unknown | none
     share: float = 0.0              # share of the used NICs' bytes on that priority
     other_pause: Dict[int, float] = field(default_factory=dict)  # pause on other priorities
     all_zero: bool = False          # PFC counters exist and never moved, any priority
-    no_pfc: bool = False            # the NICs have PFC counters, but none for this priority
+    no_pfc: bool = False            # PFC is not enabled on this priority (config or missing counters)
+    why: str = ""                   # how the priority was decided, or why it could not be
+    sent_with: str = ""             # traffic class / SL RCCL's QPs used, from telemetry
+    pfc_config: Optional[List[int]] = None   # priorities with PFC on, from the NIC settings
+    seen_pause: List[int] = field(default_factory=list)   # priorities that paused at all
+    warnings: List[str] = field(default_factory=list)
 
 
 def _sum_prio(tels, used, key, p):
@@ -407,6 +414,47 @@ def _sum_prio(tels, used, key, p):
             if s:
                 seen, tot = True, tot + s.total()
     return tot, seen
+
+
+RCCL_UDP_PORT = 4791   # RoCE v2
+
+
+# NICs on which a DCB app entry for RoCE's UDP port was seen to set the
+# priority (Thor2: DSCP-0 traffic went on the port entry's priority). mlx5
+# ignores such entries; on others it is unverified.
+UDP_PORT_ENTRY_HONOURED = {"thor2"}
+
+
+def config_prio(q: Dict, hw_type: str = "") -> Tuple[Optional[int], str]:
+    """RCCL's priority from the NIC's DCB app table and RCCL's traffic class, or
+    None with the reason it cannot be told. Never a guess: an entry for RoCE's
+    UDP port or for RCCL's DSCP decides it, nothing else does."""
+    if not q:
+        return None, "no NIC settings recorded (older telemetry)"
+    if q.get("dcb") != "ok":
+        return None, ("the NIC driver does not expose its DCB settings" if q.get("dcb") == "unsupported"
+                      else "reading the NIC's DCB settings failed")
+    tc = q.get("traffic_class", -1)
+    if tc is None or tc < 0:
+        return None, "RCCL's traffic class was not recorded"
+    dscp = tc >> 2
+    apps = q.get("app", [])
+    udp = {a["priority"] for a in apps if a.get("selector") == "dgram" and a.get("protocol") == RCCL_UDP_PORT
+           and hw_type in UDP_PORT_ENTRY_HONOURED}
+    ds = {a["priority"] for a in apps if a.get("selector") == "dscp" and a.get("protocol") == dscp}
+    if len(udp | ds) > 1:
+        parts = ([f"RoCE's UDP port to {sorted(udp)}"] if udp else []) + ([f"DSCP {dscp} to {sorted(ds)}"] if ds else [])
+        return None, f"the NIC maps {' and '.join(parts)}; which one applies is up to the NIC"
+    if udp:
+        return next(iter(udp)), f"NIC maps RoCE (UDP {RCCL_UDP_PORT}) to it"
+    if ds:
+        return next(iter(ds)), f"NIC maps RCCL's DSCP {dscp} (traffic class {tc}) to it"
+    if q.get("app_truncated"):
+        return None, f"the NIC's app table was too long to record and RCCL's DSCP {dscp} was not in the part kept"
+    if any(a.get("selector") == "dscp" for a in apps):
+        return None, f"RCCL's DSCP {dscp} is not in the NIC's DSCP map, so a driver default applies"
+    return None, (f"the NIC has no DCB app entry for RCCL's DSCP {dscp}, so the VLAN priority "
+                  f"(SL {q.get('sl', '?')}) or a driver default applies")
 
 
 def pick_lane(tels: Dict[Tuple[str, int], Telemetry], used: Dict[Tuple[str, int], List[int]],
@@ -422,20 +470,52 @@ def pick_lane(tels: Dict[Tuple[str, int], Telemetry], used: Dict[Tuple[str, int]
         pause.append(tot)
         seen_p.append(sp)
         seen = seen or sp
+    devs = [tels[k].devices[d] for k, ds in used.items() for d in ds if d in tels[k].devices]
+    # A NIC a process only received on has no sender QP, so no traffic class.
+    devs = [d for d in devs if d.qos.get("traffic_class", -1) >= 0] or devs
+    qos = [d.qos for d in devs]
+    cfg = {config_prio(d.qos, d.hw_type) for d in devs} or {(None, "no NIC settings recorded")}
+    cfg_prio = {p for p, _ in cfg}
+    traffic = max(range(NUM_PFC_PRIO), key=lambda p: nbytes[p]) if any(nbytes) else None
+    warnings = []
+    if any(q.get("traffic_class_mixed") for q in qos):
+        warnings.append("RCCL's data QPs on one NIC used different traffic classes")
     if override is not None:
-        prio, source = override, "given"
-    elif any(nbytes):
-        prio, source = max(range(NUM_PFC_PRIO), key=lambda p: nbytes[p]), "traffic"
-    elif any(pause):
-        prio, source = max(range(NUM_PFC_PRIO), key=lambda p: pause[p]), "most-paused"
-    elif seen:
-        prio, source = None, "none"
+        prio, source, why = override, "given", "--pfc-prio"
+    elif len(cfg_prio) == 1 and None not in cfg_prio:
+        prio, source, why = cfg_prio.pop(), "config", next(iter(cfg))[1]
+        # Byte counters include other traffic (storage, CNPs), so the busiest
+        # priority need not be RCCL's. Only a configured priority that carried
+        # almost nothing is overruled.
+        if traffic is not None and traffic != prio:
+            if nbytes[prio] < 0.01 * sum(nbytes):
+                warnings.append(f"the NIC settings put RCCL on priority {prio}, but it carried almost no "
+                                f"bytes and priority {traffic} carried most; using priority {traffic}")
+                prio, source, why = traffic, "traffic", "per-priority byte counters"
+            else:
+                warnings.append(f"priority {traffic} carried more bytes than RCCL's priority {prio}: "
+                                "other traffic shares these NICs")
+    elif traffic is not None:
+        prio, source, why = traffic, "traffic", "per-priority byte counters"
     else:
-        return Lane(None, "none")
+        reasons = sorted({w for p, w in cfg if p is None})
+        if len(cfg_prio - {None}) > 1:
+            reasons.append(f"NICs disagree: {sorted(cfg_prio - {None})}")
+        prio, source = None, ("unknown" if seen else "none")
+        why = "; ".join(reasons) + ("; and these NICs have no per-priority byte counters" if not any(nbytes) else "")
     share = nbytes[prio] / sum(nbytes) if prio is not None and sum(nbytes) else 0.0
-    other = {p: v for p, v in enumerate(pause) if v and p != prio}
-    return Lane(prio, source, share, other, all_zero=seen and not any(pause),
-                no_pfc=prio is not None and seen and not seen_p[prio])
+    # With RCCL's priority unknown, no pause can be called "not RCCL's".
+    other = {p: v for p, v in enumerate(pause) if v and p != prio} if prio is not None else {}
+    seen_pause = [p for p, v in enumerate(pause) if v]
+    pfc_cfg = [q["pfc_enabled"][prio] for q in qos
+               if prio is not None and q.get("dcb") == "ok" and len(q.get("pfc_enabled", [])) > prio]
+    no_pfc = prio is not None and ((bool(pfc_cfg) and not any(pfc_cfg)) or (seen and not seen_p[prio]))
+    tcs = sorted({(q.get("traffic_class"), q.get("sl")) for q in qos if q.get("traffic_class", -1) >= 0})
+    sent_with = ", ".join(f"traffic class {t} (DSCP {t >> 2}), SL {l}" for t, l in tcs)
+    pfcs = {tuple(p for p, on in enumerate(q["pfc_enabled"]) if on) for q in qos if q.get("dcb") == "ok"}
+    return Lane(prio, source, share, other, all_zero=seen and not any(pause), no_pfc=no_pfc,
+                why=why, warnings=warnings, sent_with=sent_with, seen_pause=seen_pause,
+                pfc_config=list(pfcs.pop()) if len(pfcs) == 1 else None)
 
 
 def pause_unit(dev: Device, prio: int) -> Optional[str]:
@@ -462,7 +542,6 @@ def pause_unit(dev: Device, prio: int) -> Optional[str]:
 @dataclass
 class Thresholds:
     pause_pct: float = 5.0      # % of wall time paused
-    pause_fps: float = 100.0    # pause frames per second, when only frames are counted
     ecn_pct: float = 1.0        # % of received packets ECN-marked
     cnp_ps: float = 100.0       # CNPs sent + received per second
     link_busy_pct: float = 80.0  # link use that counts as busy
@@ -479,7 +558,9 @@ class Finding:
 @dataclass
 class NicStats:
     roce: str
-    unit: Optional[str]              # "%" or "/s" for the pause columns
+    unit: Optional[str]              # "%" for the pause columns, None without pause counters
+    frames_only: bool = False        # pause is bounded from pause frames, not measured
+    tx_paused: bool = False          # this NIC provably paused the switch at least once
     rx_pause: Optional[Tuple[float, float]] = None   # (lb, ub) in unit
     tx_pause: Optional[Tuple[float, float]] = None
     loss: Optional[Tuple[float, float]] = None       # fabric-loss events (lb, ub)
@@ -576,6 +657,8 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
                 gr.nics.append(_nic_stats(tel.devices[dev_id], g, spans, busy, interval,
                                           lane, thr, tels, key[0], gr))
             gr.verdict = _rank_verdict(gr)
+            if lane.prio is None and lane.source == "unknown" and gr.verdict.startswith("CLEAN"):
+                gr.verdict = gr.verdict.replace("CLEAN (", "CLEAN (pause not judged; ", 1)
             results.append(gr)
     tag_echo(results)
     return results
@@ -586,24 +669,38 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
     pad = refresh_us(dev, interval)
     pad = pad if pad > 1.5 * interval else 0.0
     unit = pause_unit(dev, lane.prio) if lane.prio is not None else None
-    ns = NicStats(roce=dev.roce or f"dev{dev.device_id}",
-                  unit={"time": "%", "frames": "/s"}.get(unit))
+    ns = NicStats(roce=dev.roce or f"dev{dev.device_id}", unit="%" if unit else None,
+                  frames_only=unit == "frames")
     busy_s = busy / 1e6
 
     # PFC pause on RCCL's priority
     if unit is not None and busy > 0:
         k = "pause_us" if unit == "time" else "frames"
-        limit = thr.pause_pct if unit == "time" else thr.pause_fps
+        # A pause frame stops the link for at most its quanta: 16 bits of 512 bit
+        # times. Frames therefore bound pause time from above, never from below;
+        # measured on AINIC, one frame stood for anywhere from 3 to 53 us.
+        max_us = PAUSE_QUANTA_BITS / (dev.link_gbps * 1e3) if dev.link_gbps else INF
         for direction, name, what in (("rx", "FABRIC-CONGESTION", "switch paused our transmit"),
                                       ("tx", "HOST-BACKPRESSURE", "our NIC paused the switch")):
             b = bound(s.get(f"pfc_{direction}_{k}[{lane.prio}]"), spans, pad, unit == "time")
             if b is None:
                 continue
-            r = _rate(b, busy, ns.unit)
+            if unit == "time":
+                r = _rate(b, busy, "%")
+                detail = f"{what} {_fmt_range(r, '%')} of the time"
+            else:
+                ub = 0.0 if b.ub == 0 else (INF if INF in (b.ub, max_us) else min(100.0, 100.0 * b.ub * max_us / busy))
+                r = (0.0, ub)
+                fps = _rate(b, busy, "/s")
+                most = "an unknown share (link speed unknown)" if ub == INF else f"{ub:.1f}%"
+                detail = (f"{what}: {_fmt_range(fps, '/s')} pause frames, so at most {most} of the "
+                          "time (frames do not give the length)")
             setattr(ns, f"{direction}_pause", r)
-            lvl = _level(r[0], r[1], limit)
+            if direction == "tx":
+                ns.tx_paused = b.lb > 0      # a counted frame or pause time proves it
+            lvl = _level(r[0], r[1], thr.pause_pct)
             if lvl:
-                ns.findings.append(Finding(name, lvl, f"{what} {_fmt_range(r, ns.unit)}"))
+                ns.findings.append(Finding(name, lvl, detail))
 
     # Loss and receiver-not-ready events: any is worth reporting.
     for attr, keys, name, what in (("loss", LOSS_FABRIC, "FABRIC-LOSS", "drops/NAKs/timeouts"),
@@ -732,10 +829,10 @@ def _rank_verdict(gr: GroupResult) -> str:
     return f"CLEAN (accl: {gr.accl_class})"
 
 
-def _pushback(gs: List[GroupResult]) -> List[Tuple[int, str, Optional[str], Tuple[float, float]]]:
+def _pushback(gs: List[GroupResult]) -> List[Tuple[int, str, Optional[str], Tuple[float, float], bool]]:
     """NICs that sent any pause frames, proven or possible, whatever the threshold:
     one receiver that pushes back can stall many senders."""
-    return [(g.rank, g.host.split(".")[0], ns.unit, ns.tx_pause) for g in gs for ns in g.nics
+    return [(g.rank, g.host.split(".")[0], ns.unit, ns.tx_pause, ns.tx_paused) for g in gs for ns in g.nics
             if ns.tx_pause and (ns.tx_pause[1] == INF or ns.tx_pause[1] > 0)]
 
 
@@ -750,7 +847,7 @@ def tag_echo(results: List[GroupResult]):
     """Mark rx pause on a rank as a possible echo when some NIC of the same
     collective and size pushed back."""
     for gs in _by_size(results).values():
-        pushers = {r for r, _, _, _ in _pushback(gs)}
+        pushers = {r for r, *_ in _pushback(gs)}
         if not pushers:
             continue
         for g in gs:
@@ -764,8 +861,8 @@ def _echo_summary(gs, cong, fmt, thr: "Thresholds") -> str:
     roughly x - y is left for the fabric. A rule of thumb: who sends to whom is
     not known, and hosts' clocks are only lined up by collective and size."""
     push = _pushback(gs)
-    proven = [p for p in push if p[3][0] > 0]
-    who = fmt(sorted({(r, h) for r, h, _, _ in (proven or push)}))
+    proven = [p for p in push if p[4]]
+    who = fmt(sorted({(r, h) for r, h, *_ in (proven or push)}))
     verb = "paused the switch" if proven else "may have paused the switch"
     senders = [ns for g in gs for ns in g.nics
                if ns.rx_pause and any(f.name == "FABRIC-CONGESTION" and f.level == "yes" for f in ns.findings)]
@@ -780,13 +877,19 @@ def _echo_summary(gs, cong, fmt, thr: "Thresholds") -> str:
     if unit is None or y == INF:
         return (f"HOST{'' if proven else '?'}: {who} {verb}; {sender} may be backpressure from it "
                 "(amounts not comparable)")
-    limit = thr.pause_pct if unit == "%" else thr.pause_fps
+    limit = thr.pause_pct
     if x - y >= limit:
         return (f"FABRIC+HOST{'' if proven else '?'}: switch paused senders at least {_fmt_num(x, unit)}; {who} {verb} "
                 f"(at most {_fmt_num(y, unit)}), which explains at most that much, so roughly "
                 f"{_fmt_num(x - y, unit)} or more is the fabric")
-    return (f"HOST{'' if proven else '?'}: {who} {verb} (up to {_fmt_num(y, unit)}); {sender} "
-            "are likely backpressure from it")
+    if 2 * y >= x:   # the receiver can explain most of it
+        return (f"HOST{'' if proven else '?'}: {who} {verb} (up to {_fmt_num(y, unit)}); {sender} "
+                "are likely backpressure from it")
+    # The receiver's pause is too short to explain most of the senders', and what
+    # is left for the fabric is under the threshold: neither side is shown.
+    return (f"INCONCLUSIVE: {sender}; {who} {verb} (at most {_fmt_num(y, unit)}), so at most that much "
+            f"is backpressure. The fabric's part is at least {_fmt_num(x - y, unit)}, which alone is under "
+            f"the {_fmt_num(limit, unit)} threshold, so neither side is shown")
 
 
 def job_summary(results: List[GroupResult], lane: Lane, thr: Optional["Thresholds"] = None
@@ -831,8 +934,8 @@ def job_summary(results: List[GroupResult], lane: Lane, thr: Optional["Threshold
                 msg += f" (no PFC on priority {lane.prio}: congestion shows only as loss or CNPs)"
             elif lane.all_zero:
                 msg += " (PFC counters zero on every priority: no pauses, or PFC is disabled)"
-        if lane.source == "most-paused" and (cong or bp):
-            msg += f" [priority {lane.prio} unconfirmed, see header]"
+        if lane.prio is None and lane.source == "unknown" and msg.startswith("CLEAN"):
+            msg = msg.split(" (")[0] + " apart from pause, which is not judged: RCCL's priority is unknown"
         out[k] = msg
     return out
 
@@ -847,6 +950,13 @@ def _fmt_secs(sec: float) -> str:
 
 def _fmt_num(v: float, unit: Optional[str]) -> str:
     return f"{v:.1f}%" if unit == "%" else f"{v:.0f}{unit or ''}"
+
+
+def _fmt_bound(r: Optional[Tuple[float, float]]) -> str:
+    """A frames-only pause share: an upper bound, never a measured value."""
+    if r is None:
+        return "-"
+    return "0%" if r[1] == 0 else ("0-?%" if r[1] == INF else f"0-{r[1]:.1f}%")
 
 
 def _fmt_range(r: Optional[Tuple[float, float]], unit: str) -> str:
@@ -889,27 +999,34 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
     hosts = {r.host for r in results}
     ranks = {(r.host, r.rank) for r in results}
     print(f"ACCL fabric report: {len(ranks)} rank(s) on {len(hosts)} host(s)")
-    if lane.prio is None:
-        print("PFC: no pause counters for RCCL's priority" +
-              (" (all PFC counters stayed zero)" if lane.all_zero else ""))
-    elif lane.source == "given":
-        print(f"PFC priority: {lane.prio} (--pfc-prio)")
+    if lane.sent_with:
+        print(f"RCCL sends with {lane.sent_with}")
+    if lane.pfc_config is not None:
+        print(f"PFC enabled on priorities {lane.pfc_config or 'none'} (NIC settings)")
+    if lane.prio is None and lane.source == "unknown":
+        print(f"PFC priority: UNKNOWN, so pause is not judged: {lane.why}.")
+        print("  Pass --pfc-prio N once you know which priority RCCL's traffic class maps to.")
+        if lane.seen_pause:
+            print("  Pause was seen on priorities " + ", ".join(map(str, lane.seen_pause)) +
+                  "; whether any is RCCL's is not known.")
+    elif lane.prio is None:
+        print("PFC: these NICs report no PFC counters")
     elif lane.source == "traffic":
         print(f"PFC priority: {lane.prio} (carries {100 * lane.share:.0f}% of the job's NIC bytes)")
     else:
-        print(f"PFC priority: {lane.prio} UNCONFIRMED: no per-priority byte counters, so this is "
-              "the most-paused priority, which may not be RCCL's. Pass --pfc-prio.")
+        print(f"PFC priority: {lane.prio} ({lane.why})")
+    for w in lane.warnings:
+        print(f"  WARNING: {w}")
     if lane.other_pause:
         print("  Pause on other priorities (does not slow RCCL's): " +
               ", ".join(f"prio {p}" for p in sorted(lane.other_pause)))
     if lane.no_pfc:
-        print(f"  These NICs have no PFC pause counters for priority {lane.prio}: PFC is not enabled on it,")
-        print("  so RCCL's traffic is lossy. Congestion shows as loss and CNPs, never as pause.")
+        print(f"  PFC is not enabled on priority {lane.prio}, so RCCL's traffic is lossy: congestion shows as")
+        print("  loss and CNPs, never as pause.")
     elif lane.all_zero:
         print("  Every PFC counter stayed zero: either nothing paused or PFC is disabled, so a")
         print("  CLEAN result cannot rule out a lossy fabric on its own; check the loss columns.")
-    print(f"Thresholds: pause {thr.pause_pct:g}% of wall time (or {thr.pause_fps:g} frames/s where the NIC "
-          f"counts frames only), ECN {thr.ecn_pct:g}% of packets or {thr.cnp_ps:g} CNPs/s, link busy {thr.link_busy_pct:g}% "
+    print(f"Thresholds: pause {thr.pause_pct:g}% of wall time, ECN {thr.ecn_pct:g}% of packets or {thr.cnp_ps:g} CNPs/s, link busy {thr.link_busy_pct:g}% "
           f"with >= {thr.link_other_pct:g}% non-RCCL traffic")
     print("  rxPause = switch paused our transmit   txPause = our NIC paused the switch")
     print("  a-b = at least a, at most b (counters are sampled, not continuous)\n")
@@ -928,12 +1045,14 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
             continue
         for i, n in enumerate(nics):
             lead = first if i == 0 else " " * len(first)
+            rxp, txp = (_fmt_bound(n.rx_pause), _fmt_bound(n.tx_pause)) if n.frames_only else \
+                (_fmt_range(n.rx_pause, n.unit or ''), _fmt_range(n.tx_pause, n.unit or ''))
             p50 = fmt_quantile(hist_quantile(n.cmpl_hist, 0.5, HIST_NS))
             p99 = fmt_quantile(hist_quantile(n.cmpl_hist, 0.99, HIST_NS))
             link = "stale" if n.nic_stale else ("-" if n.link_pct is None else f"{n.link_pct:.0f}")
             bpc = accl_report.fmt_size(int(n.sw_tx_per_coll)) + ("*" if g.overlap_pct > 10 else "")
-            print(f"{lead} {n.roce[:10]:<10} {_fmt_range(n.rx_pause, n.unit or ''):>10} "
-                  f"{_fmt_range(n.tx_pause, n.unit or ''):>10} {_fmt_range(n.loss, ''):>6} "
+            print(f"{lead} {n.roce[:10]:<10} {rxp:>10} "
+                  f"{txp:>10} {_fmt_range(n.loss, ''):>6} "
                   f"{_fmt_range(n.rnr, ''):>5} {_fmt_range(n.ecn_pct, '%'):>9} {_fmt_range(n.cnp_ps, '/s'):>11} "
                   f"{link:>5} {'-' if n.rccl_pct is None else f'{n.rccl_pct:.0f}':>5} {bpc:>8} "
                   f"{p50 + '/' + p99:>13}  {g.verdict if i == 0 else ''}")
@@ -968,9 +1087,10 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
         notes.append(f"Collectives less than {MERGE_GAP_US / 1000:g} ms apart are compared with the counters "
                      f"as one busy stretch; the gaps inside are {share:.2f}% of that time. Pause time in "
                      "them is left out of the lower bounds; pause frames in them are counted.")
-    if any(n.unit == "/s" for g in results for n in g.nics):
-        notes.append("Pause in /s: these NICs count pause frames but their pause-time counters never "
-                     "move, so pause is pause frames per second, a rate of stop messages, not time.")
+    if any(n.frames_only for g in results for n in g.nics):
+        notes.append("Pause on NICs that count only pause frames is an upper bound (0-x%): frames x the "
+                     "longest pause one frame can ask for at the link speed (84 us at 400 Gb/s). It rules "
+                     "pause out when x is small, but cannot prove it: on AINIC one frame stood for 3 to 53 us.")
     if notes:
         print("\nNotes:")
         for n in notes:
@@ -1240,9 +1360,6 @@ def main():
             d = Thresholds()
             p.add_argument("--threshold-pct", type=float, default=d.pause_pct,
                            help="pause share of wall time that counts (default %(default)s)")
-            p.add_argument("--threshold-fps", type=float, default=d.pause_fps,
-                           help="pause frames per second that count, on NICs that count frames "
-                                "only (default %(default)s)")
             p.add_argument("--threshold-ecn-pct", type=float, default=d.ecn_pct,
                            help="ECN-marked share of received packets that counts (default %(default)s)")
             p.add_argument("--threshold-cnps", type=float, default=d.cnp_ps,
@@ -1258,7 +1375,7 @@ def main():
 
     recs, tels, used, lane, warnings = load(args)
     if args.cmd == "report":
-        thr = Thresholds(args.threshold_pct, args.threshold_fps, args.threshold_ecn_pct, args.threshold_cnps,
+        thr = Thresholds(args.threshold_pct, args.threshold_ecn_pct, args.threshold_cnps,
                          args.link_busy_pct, args.link_other_pct)
         results = analyze(recs, tels, lane, thr)
         resets = sum(s.resets for t in tels.values() for d in t.devices.values() for s in d.series.built())

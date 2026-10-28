@@ -43,9 +43,9 @@ def cum(rate, t):
 
 
 def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, prio=PRIO,
-              rx_pause=None, tx_pause=None, rx_frames=None, ecn=None, oos=None, rnr=None,
+              rx_pause=None, tx_pause=None, rx_frames=None, tx_frames=None, ecn=None, oos=None, rnr=None,
               other_bpus=0.0, link_gbps=400, prio_bytes=True, time_counters=True,
-              refresh_us=None, pause_prio=None, no_pfc_prio=None, cnp=None):
+              refresh_us=None, pause_prio=None, no_pfc_prio=None, cnp=None, qos=None, hw_type="x"):
     """One telemetry file. Rates are {(a, b): per-us}; pause rates are a fraction
     of time. RCCL sends RCCL_BPUS; `other_bpus` is someone else's traffic on the
     same port. `refresh_us` makes the NIC's ethtool counters step that often."""
@@ -55,14 +55,15 @@ def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, pri
     while t <= t1:
         tn = t if refresh_us is None else (t // refresh_us) * refresh_us   # NIC-side value time
         z = [0] * 8
-        rxp, txp, rxf, pb = list(z), list(z), list(z), list(z)
+        rxp, txp, rxf, txf, pb = list(z), list(z), list(z), list(z), list(z)
         rxp[pp] = int(cum(rx_pause, tn))
         txp[pp] = int(cum(tx_pause, tn))
         rxf[pp] = int(cum(rx_frames, tn))
+        txf[pp] = int(cum(tx_frames, tn))
         nic = (RCCL_BPUS + other_bpus) * tn
         pb[prio] = int(nic)
         if no_pfc_prio is not None:       # the NIC has no PFC counters for this priority
-            for a in (rxp, txp, rxf):
+            for a in (rxp, txp, rxf, txf):
                 a[no_pfc_prio] = -1
         s = {"ts_us": t, "device_id": 0, "roce_device": roce,
              "tx_bytes": RCCL_BPUS * t, "rx_bytes": RCCL_BPUS * t,
@@ -72,7 +73,7 @@ def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, pri
              "oos_drop_count": int(cum(oos, t)), "seq_err_naks_rcvd": 0, "local_ack_timeout_err": -1,
              "out_of_buffer": -1, "rnr_retry_err": int(cum(rnr, t)),
              "pfc_rx_pause_us": rxp if time_counters else z, "pfc_tx_pause_us": txp if time_counters else z,
-             "pfc_rx_frames": rxf, "pfc_tx_frames": [-1 if no_pfc_prio == i else 0 for i in range(8)]}
+             "pfc_rx_frames": rxf, "pfc_tx_frames": txf}
         if prio_bytes:
             s["prio_tx_bytes"] = pb
             s["prio_rx_bytes"] = pb
@@ -81,7 +82,8 @@ def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, pri
     return {"host_name": host, "process_id": str(pid), "clock": "CLOCK_MONOTONIC",
             "histogram_bucket_interval_ns": 30000, "histogram_max_buckets": 5,
             "sample_interval_ms": step // 1000,
-            "devices": [{"device_id": 0, "roce_device": roce, "hw_type": "x", "link_gbps": link_gbps}],
+            "devices": [{"device_id": 0, "roce_device": roce, "hw_type": hw_type, "link_gbps": link_gbps,
+                         **({"qos": qos} if qos is not None else {})}],
             "hw_samples": samples}
 
 
@@ -252,7 +254,7 @@ class VerdictTest(unittest.TestCase):
         r = one(no_pfc_prio=PRIO)
         self.assertEqual((r.lane.prio, r.lane.no_pfc), (PRIO, True))
         self.assertIn(f"no PFC on priority {PRIO}", next(iter(r.summary.values())))
-        self.assertIn("PFC is not enabled on it", r.cli("report"))
+        self.assertIn(f"PFC is not enabled on priority {PRIO}", r.cli("report"))
 
     # --- the four false reports found in review --------------------------------
 
@@ -262,11 +264,19 @@ class VerdictTest(unittest.TestCase):
         self.assertIn(0, r.lane.other_pause)
         self.assertTrue(r.rank(0).verdict.startswith("CLEAN"))
 
-    def test_lane_unconfirmed_without_priority_bytes(self):
-        r = one(rx_pause={BUSY: 0.10}, prio_bytes=False)
-        self.assertEqual(r.lane.source, "most-paused")
-        self.assertIn("unconfirmed", next(iter(r.summary.values())))
-        self.assertIn("UNCONFIRMED", r.cli("report"))
+    def test_lane_unknown_without_priority_bytes_or_settings(self):
+        # AINIC: no per-priority byte counters, DCB settings not readable. Pause is
+        # seen, but on a priority that may not be RCCL's, so it is not judged.
+        r = one(rx_pause={BUSY: 0.10}, prio_bytes=False, qos={"dcb": "unsupported", "traffic_class": 0, "sl": 0})
+        self.assertEqual((r.lane.prio, r.lane.source), (None, "unknown"))
+        self.assertNotIn("FABRIC", r.rank(0).verdict)
+        self.assertIn("not judged", next(iter(r.summary.values())))
+        out = r.cli("report")
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("does not expose its DCB settings", out)
+        self.assertEqual(r.lane.other_pause, {})          # cannot be called "not RCCL's"
+        self.assertIn("Pause was seen on priorities 3; whether any is RCCL's is not known", out)
+        self.assertTrue(r.rank(0).verdict.startswith("CLEAN (pause not judged;"), r.rank(0).verdict)
 
     def test_receiver_backpressure_is_not_blamed_on_fabric(self):
         r = Run([(0, "hostA", 1, iterations(0, "hostA", 1), telemetry("hostA", 1, rx_pause={BUSY: 0.10})),
@@ -288,6 +298,13 @@ class VerdictTest(unittest.TestCase):
         s = next(iter(self.pair(0.10, 0.04).summary.values()))
         self.assertTrue(s.startswith("FABRIC+HOST"), s)
         self.assertNotIn("no NIC pushed back", s)
+
+    def test_small_pushback_does_not_become_host(self):
+        # AINIC, 64M: senders 5.4%, receiver at most 1.2%. The receiver cannot
+        # explain most of it, and the 4.2% left is under the threshold.
+        s = next(iter(self.pair(0.054, 0.012).summary.values()))
+        self.assertTrue(s.startswith("INCONCLUSIVE: rx pauses on 1 rank(s)"), s)
+        self.assertIn("which alone is under the 5.0% threshold", s)
 
     def test_fabric_beyond_what_pushback_explains(self):
         s = next(iter(self.pair(0.20, 0.04).summary.values()))
@@ -357,20 +374,90 @@ class VerdictTest(unittest.TestCase):
         self.assertAlmostEqual(g.nics[0].cnp_ps[0], 300, delta=30)
         self.assertTrue(one(cnp={BUSY: 20e-6}).rank(0).verdict.startswith("CLEAN"))
 
-    def test_frames_only_nic_uses_frames(self):
-        r = one(rx_frames={BUSY: 500e-6}, time_counters=False, roce="bnxt_re0")
-        g = r.rank(0)
-        self.assertEqual(g.nics[0].unit, "/s")
-        self.assertAlmostEqual(g.nics[0].rx_pause[0], 500, delta=10)
-        self.assertEqual(g.verdict, "FABRIC-CONGESTION")
+    def test_frames_only_nic_bounds_pause_from_above(self):
+        # 400 Gb/s: one frame pauses at most 65535 * 512 bit times = 83.9 us.
+        few = one(rx_frames={BUSY: 500e-6}, time_counters=False, roce="bnxt_re0").rank(0)
+        self.assertTrue(few.nics[0].frames_only)
+        self.assertEqual(few.nics[0].rx_pause[0], 0.0)
+        self.assertAlmostEqual(few.nics[0].rx_pause[1], 4.2, delta=0.2)
+        self.assertTrue(few.verdict.startswith("CLEAN"))          # at most 4.2%: ruled out
+        self.assertEqual(fr._fmt_bound(few.nics[0].rx_pause), "0-4.2%")
+        self.assertEqual(fr._fmt_bound((0.0, 0.4)), "0-0.4%")     # never a midpoint
+        many = one(rx_frames={BUSY: 5000e-6}, time_counters=False, roce="bnxt_re0").rank(0)
+        self.assertAlmostEqual(many.nics[0].rx_pause[1], 42, delta=2)
+        self.assertEqual(many.verdict, "INCONCLUSIVE (possible FABRIC-CONGESTION)")  # never proven
+
+    def test_counted_frames_prove_pushback(self):
+        # Receiver counts only frames: its share is a bound, but a frame proves it paused.
+        r = Run([(0, "hostA", 1, iterations(0, "hostA", 1), telemetry("hostA", 1, rx_pause={BUSY: 0.08})),
+                 (1, "hostB", 2, iterations(1, "hostB", 2),
+                  telemetry("hostB", 2, tx_frames={BUSY: 500e-6}, time_counters=False))])
+        s = next(iter(r.summary.values()))
+        self.assertIn("rank 1 (hostB) paused the switch", s)
+        self.assertNotIn("may have paused", s)
 
     def test_mixed_nics_keep_their_own_unit(self):
         r = Run([(0, "hostA", 1, iterations(0, "hostA", 1), telemetry("hostA", 1, rx_pause={BUSY: 0.1})),
                  (1, "hostB", 2, iterations(1, "hostB", 2),
-                  telemetry("hostB", 2, rx_frames={BUSY: 500e-6}, time_counters=False))])
-        self.assertEqual(r.rank(0).nics[0].unit, "%")
-        self.assertEqual(r.rank(1).nics[0].unit, "/s")
-        self.assertEqual(r.rank(1).verdict, "FABRIC-CONGESTION")
+                  telemetry("hostB", 2, rx_frames={BUSY: 5000e-6}, time_counters=False))])
+        self.assertFalse(r.rank(0).nics[0].frames_only)
+        self.assertEqual(r.rank(0).verdict, "FABRIC-CONGESTION")
+        self.assertTrue(r.rank(1).nics[0].frames_only)
+        self.assertIn("possible FABRIC-CONGESTION", r.rank(1).verdict)
+
+    # --- RCCL's priority from the NIC's DCB settings ------------------------
+
+    @staticmethod
+    def _qos(app, pfc_on, tc=0):
+        return {"dcb": "ok", "traffic_class": tc, "sl": 0, "traffic_class_mixed": False,
+                "pfc_enabled": [1 if p in pfc_on else 0 for p in range(8)], "app": app}
+
+    def test_priority_from_roce_port_entry(self):
+        # Thor2 on ruby: dgram-port-prio 4791:3, PFC on 3. No byte counters needed.
+        q = self._qos([{"selector": "dgram", "protocol": 4791, "priority": 3}], {3})
+        r = one(rx_pause={BUSY: 0.10}, prio_bytes=False, qos=q, hw_type="thor2")
+        self.assertEqual((r.lane.prio, r.lane.source, r.lane.no_pfc), (3, "config", False))
+        self.assertEqual(r.rank(0).verdict, "FABRIC-CONGESTION")
+        self.assertIn("NIC maps RoCE (UDP 4791)", r.cli("report"))
+
+    def test_priority_from_dscp_map_with_pfc_off(self):
+        # mlx5 on OCI: DSCP 0 -> priority 1, PFC only on 0 and 5.
+        q = self._qos([{"selector": "dscp", "protocol": 0, "priority": 1},
+                       {"selector": "dscp", "protocol": 26, "priority": 5}], {0, 5})
+        r = one(prio=1, qos=q)
+        self.assertEqual((r.lane.prio, r.lane.source, r.lane.no_pfc), (1, "config", True))
+        out = r.cli("report")
+        self.assertIn("PFC enabled on priorities [0, 5] (NIC settings)", out)
+        self.assertIn("PFC is not enabled on priority 1", out)
+
+    def test_roce_port_entry_alone_is_not_trusted_on_mlx5(self):
+        q = self._qos([{"selector": "dgram", "protocol": 4791, "priority": 3}], {3})
+        r = one(rx_pause={BUSY: 0.10}, prio_bytes=False, qos=q, hw_type="mlx5")
+        self.assertEqual(r.lane.prio, None)
+        self.assertIn("SL 0", r.lane.why)
+
+    def test_settings_that_carried_nothing_lose_to_bytes(self):
+        q = self._qos([{"selector": "dscp", "protocol": 0, "priority": 3}], {3})
+        r = one(prio=1, qos=q)                     # every byte on 1, none on 3
+        self.assertEqual((r.lane.prio, r.lane.source), (1, "traffic"))
+        self.assertTrue(any("carried almost no bytes" in w for w in r.lane.warnings))
+
+    def test_other_traffic_does_not_overrule_settings(self):
+        # RCCL on 3 per settings, storage heavier on 0: settings stand, with a note.
+        q = self._qos([{"selector": "dscp", "protocol": 0, "priority": 3}], {3})
+        tel = telemetry("hostA", 1, qos=q)
+        for smp in tel["hw_samples"]:
+            b = smp["prio_tx_bytes"][3]
+            smp["prio_tx_bytes"][0] = smp["prio_rx_bytes"][0] = 3 * b
+        r = one(tel=tel)
+        self.assertEqual((r.lane.prio, r.lane.source), (3, "config"))
+        self.assertTrue(any("other traffic shares these NICs" in w for w in r.lane.warnings))
+
+    def test_dscp_missing_from_map_is_not_guessed(self):
+        q = self._qos([{"selector": "dscp", "protocol": 26, "priority": 3}], {3})
+        r = one(rx_pause={BUSY: 0.10}, prio_bytes=False, qos=q)
+        self.assertEqual(r.lane.prio, None)
+        self.assertIn("DSCP 0 is not in the NIC's DSCP map", r.lane.why)
 
     def test_slow_refresh_widens_windows(self):
         tel = telemetry("hostA", 1, refresh_us=100_000)

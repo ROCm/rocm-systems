@@ -475,6 +475,10 @@ extern int             rcclTelemetryNumDevs;
  */
 int rcclTelemetryRegisterDevice(int device_id, const char* roce_device, const char* transport);
 
+/* Traffic class and SL a sender data QP on this device sends with, once the
+ * QP is at RTR (the values come from the peer's connection metadata). */
+void rcclTelemetryNoteTrafficClass(int device_id, int tc, int sl);
+
 /* ------------------------------------------------------------------ */
 /* Hot-path telemetry inline functions                                 */
 /*                                                                     */
@@ -1130,6 +1134,14 @@ typedef struct {
  * fallback is preferred. */
 void rcclTelemetryEthtoolResolve(const char* names, size_t nameStride, const uint64_t* values, unsigned n,
                                  RcclEthtoolWantedEx* wanted, int nwanted);
+
+struct dcb_app;
+/* IEEE DCB read of a netdev: 1 read, 0 the driver has no DCB/PFC support,
+ * -1 failed. Fills the PFC-enabled bitmap and up to 256 app-table entries;
+ * *truncated is set if the NIC had more. */
+int rcclTelemetryReadDcb(const char* eth_device, int* pfc_en, struct dcb_app* app, int* napp, int* truncated);
+/* Traffic class / SL recorded for a device, -1 if none; mixed if QPs disagreed. */
+void rcclTelemetryGetTrafficClass(int device_id, int* tc, int* sl, int* mixed);
 
 /* Root of the sysfs/debugfs tree telemetry reads, "/sys" outside tests. */
 extern const char* rcclTelemetrySysRoot;

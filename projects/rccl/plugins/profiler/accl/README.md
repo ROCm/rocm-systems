@@ -238,17 +238,10 @@ Verdicts, checked in this order:
 | `NO-PFC-DATA (...)` | the NIC exposed no PFC pause time |
 | `NO-DATA` | no telemetry for that process |
 
-Some NIC firmware never moves its pause-time counters (Thor2 on MI355X nodes
-reports 0 us however many pause frames arrive). When the pause-time counters
-stay flat for the whole job but pause frames were counted, the report says so,
-switches the two columns to `rxPF/s` / `txPF/s` (pause frames per second of
-wall time) and uses `--threshold-fps` (default 100) instead of
-`--threshold-pct`. Frames say *that* the link was paused and how often, not for
-how long, so this threshold is a heuristic.
-
-PFC works per priority, and only the priority RCCL's traffic uses matters. By
-default the report uses the priority with the most pause time on the NICs the
-job drove; pass `--pfc-prio N` when you know it.
+On NICs that count only pause frames (Thor2), pause is an upper bound
+`0-x%`: frames × the longest pause one frame can ask for. See
+`docs/how-to/fabric-telemetry-profiler.md` for this and for how the report
+finds RCCL's PFC priority from the NIC's DCB settings.
 
 A row marked `[low confidence]` ran for less than five sample intervals (or
 outside the sampled range), so its share is mostly interpolation. Lower

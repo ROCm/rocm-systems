@@ -99,10 +99,9 @@ Useful `report` options:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--pfc-prio N` | the priority carrying most of the job's bytes | PFC priority RCCL traffic uses |
+| `--pfc-prio N` | from the NIC settings or per-priority bytes | PFC priority RCCL traffic uses; needed on NICs that expose neither (AINIC) |
 | `--warmup N` | `5` | Skip collectives with sequence number below N |
 | `--threshold-pct` | `5` | Pause share of wall time that counts |
-| `--threshold-fps` | `100` | Pause frames per second that count, on NICs that count frames only |
 | `--threshold-ecn-pct` | `1` | Share of received packets ECN-marked that counts |
 | `--threshold-cnps` | `100` | CNPs sent plus received per second that count |
 | `--link-busy-pct` | `80` | Link use that counts as busy |
@@ -111,7 +110,41 @@ Useful `report` options:
 
 ## Read the report
 
-The header says which PFC priority was used and why, and the thresholds.
+The header says which traffic class RCCL sent with, which priorities have PFC
+enabled, which PFC priority RCCL's traffic rides and how that was found, and
+the thresholds.
+
+### How the report finds RCCL's PFC priority
+
+PFC works per priority, so the report first needs the priority RCCL's packets
+use. It never guesses. In this order:
+
+1. `--pfc-prio N`, if you pass it.
+2. The NIC's DCB settings, which telemetry reads at startup the way
+   `dcb pfc show` and `dcb app show` do, with no root needed. An app entry for
+   RCCL's DSCP (traffic class ÷ 4) names the priority; so does one for RoCE's
+   UDP port 4791 on Thor2, the only NIC where that was seen to apply. The same
+   settings say whether PFC is enabled on it.
+3. Per-priority byte counters: the priority that carried the job's bytes.
+   These include other traffic, so they overrule the settings only when the
+   configured priority carried almost nothing. Either way a disagreement is
+   printed as a warning.
+
+If none of these work, the priority is UNKNOWN. Pause is then not judged, and
+the header says why and asks for `--pfc-prio`.
+
+What this gives on the NICs tested:
+
+| NIC | DCB settings readable | Per-priority bytes | RCCL's priority found from |
+|---|---|---|---|
+| mlx5 | yes | yes | settings in DSCP trust mode (as on OCI); bytes in PCP trust, where the app table is empty |
+| Broadcom Thor2 | yes | yes | settings (RoCE UDP port entry), checked against bytes |
+| AMD AINIC (`ionic`) | no (driver does not support it; `nicctl` needs root) | no | `--pfc-prio` only |
+
+On AINIC, find the priority once per cluster from the administrator, or by
+experiment. Send an incast with `ib_write_bw --tclass=<RCCL's traffic class>`
+and see which `frames_rx_pri_N` counter moves. If none moves, RCCL's traffic
+class is not on a PFC priority.
 
 Then there is one row per rank and (collective, message size):
 
@@ -168,10 +201,15 @@ hundred per second per NIC, and at 0 when the fabric was quiet.
 ### NICs that count only pause frames
 
 Some firmware never moves its pause-time counters. Broadcom Thor2 on MI355X
-nodes reports 0 µs of pause however many pause frames arrive. The report
-detects this, shows pause as frames per second (`/s`) instead of a percent,
-and uses `--threshold-fps`. Frames say *that* the link was paused and how
-often, not for how long, so treat this threshold as a rule of thumb.
+nodes reports 0 µs of pause however many pause frames arrive. Frames cannot
+be turned into time: on AINIC, which counts both, one frame stood for anywhere
+from 3 µs to 53 µs. They can only bound it. One frame pauses the link for at
+most 65535 × 512 bit times, which is 84 µs at 400 Gb/s. So on these NICs pause
+is shown as `0-x%`, with x = frames × that maximum, and:
+
+- if x is under the threshold, pause is ruled out;
+- if x is over it, the finding is only "possible". Frames prove the link was
+  paused, not for how long.
 
 ## Limitations
 
