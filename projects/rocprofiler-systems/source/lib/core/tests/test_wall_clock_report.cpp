@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/delimit.hpp"
 #include "core/wall_clock_report.hpp"
 
 #include <nlohmann/json.hpp>
@@ -13,7 +14,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -148,13 +148,7 @@ parse_row(const std::string& line, report_row& row)
 std::vector<std::string>
 text_lines(const wall_clock_report& report)
 {
-    std::istringstream       input{ report.text() };
-    std::vector<std::string> lines;
-    for(std::string line; std::getline(input, line);)
-    {
-        lines.push_back(line);
-    }
-    return lines;
+    return rocprofsys::delimit(report.text(), "\n");
 }
 
 std::vector<report_row>
@@ -198,6 +192,20 @@ make_report(const intervals& input, wall_clock_settings settings = {})
         report.add_gpu_activity(activity);
     }
     return report;
+}
+
+[[nodiscard]] nlohmann::json
+wall_clock_json(const wall_clock_report& report)
+{
+    return nlohmann::json::parse(report.json())
+        .at("rocprofiler-systems")
+        .at("wall_clock");
+}
+
+[[nodiscard]] nlohmann::json
+first_graph_row(const wall_clock_report& report)
+{
+    return wall_clock_json(report).at("ranks").at(0).at("graph").at(0);
 }
 
 /// A launch at the start of the timeline and the kernel it started, after it returned.
@@ -402,10 +410,8 @@ TEST(wall_clock_report, collapsed_threads_share_one_tree_without_thread_number)
     EXPECT_EQ(rows[0].thread, "");
     EXPECT_EQ(rows[0].count, 2U);
 
-    auto const  json = nlohmann::json::parse(report.json());
-    auto const& wall = json.at("rocprofiler-systems").at("wall_clock");
-    EXPECT_EQ(wall.at("thread_count"), 2);
-    EXPECT_EQ(wall.at("ranks").at(0).at("graph").at(0).at("prefix"), ">>> work");
+    EXPECT_EQ(wall_clock_json(report).at("thread_count"), 2);
+    EXPECT_EQ(first_graph_row(report).at("prefix"), ">>> work");
 }
 
 TEST(wall_clock_report, has_timemory_table_layout)
@@ -450,8 +456,7 @@ TEST(wall_clock_report, json_graph_has_the_rows_the_timemory_validator_reads)
     intervals input;
     add_launch_with_kernel(input);
 
-    auto const  json = nlohmann::json::parse(make_report(input).json());
-    auto const& wall = json.at("rocprofiler-systems").at("wall_clock");
+    auto const wall = wall_clock_json(make_report(input));
     EXPECT_EQ(wall.at("unit_repr"), "s");
     EXPECT_EQ(wall.at("unit_value"), 1'000'000'000);
     auto const& graph = wall.at("ranks").at(0).at("graph");
@@ -471,15 +476,7 @@ TEST(wall_clock_report, json_replaces_invalid_utf8_in_labels)
     intervals const input{ .regions      = { interval("caf\xE9", span(k_start, k_ms)) },
                            .gpu_activity = {} };
 
-    auto const json = nlohmann::json::parse(make_report(input).json());
-    EXPECT_EQ(json.at("rocprofiler-systems")
-                  .at("wall_clock")
-                  .at("ranks")
-                  .at(0)
-                  .at("graph")
-                  .at(0)
-                  .at("prefix"),
-              "|0>>> caf\xEF\xBF\xBD");
+    EXPECT_EQ(first_graph_row(make_report(input)).at("prefix"), "|0>>> caf\xEF\xBF\xBD");
 }
 
 /// Three calls of 1, 2 and 3 ms that merge into one row.
@@ -498,33 +495,16 @@ merged_calls()
 nlohmann::json
 merged_calls_row(wall_clock_settings settings = {})
 {
-    return nlohmann::json::parse(make_report(merged_calls(), settings).json())
-        .at("rocprofiler-systems")
-        .at("wall_clock")
-        .at("ranks")
-        .at(0)
-        .at("graph")
-        .at(0);
+    return first_graph_row(make_report(merged_calls(), settings));
 }
 
-nlohmann::json
-merged_calls_stats()
+TEST(wall_clock_report, json_stats_of_the_merged_calls)
 {
-    return merged_calls_row().at("stats");
-}
-
-TEST(wall_clock_report, json_stats_total_and_extremes_of_the_merged_calls)
-{
-    auto const stats = merged_calls_stats();
+    auto const stats = merged_calls_row().at("stats");
     EXPECT_EQ(stats.at("count"), 3);
     EXPECT_NEAR(stats.at("sum").get<double>(), 0.006, 1e-12);
     EXPECT_NEAR(stats.at("min").get<double>(), 0.001, 1e-12);
     EXPECT_NEAR(stats.at("max").get<double>(), 0.003, 1e-12);
-}
-
-TEST(wall_clock_report, json_stats_spread_of_the_merged_calls)
-{
-    auto const stats = merged_calls_stats();
     EXPECT_NEAR(stats.at("mean").get<double>(), 0.002, 1e-12);
     EXPECT_NEAR(stats.at("sqr").get<double>(), 14e-6, 1e-15);
     EXPECT_NEAR(stats.at("stddev").get<double>(), 0.001, 1e-12);  // sample (n-1)
@@ -577,14 +557,7 @@ TEST(wall_clock_report, text_label_is_cut_to_max_width_and_json_keeps_it)
         auto const rows = parse_rows(report);
         ASSERT_EQ(rows.size(), 1U);
         EXPECT_EQ(rows[0].name, name);
-        auto const json = nlohmann::json::parse(report.json());
-        EXPECT_EQ(json.at("rocprofiler-systems")
-                      .at("wall_clock")
-                      .at("ranks")
-                      .at(0)
-                      .at("graph")
-                      .at(0)
-                      .at("prefix"),
+        EXPECT_EQ(first_graph_row(report).at("prefix"),
                   "|0>>> abcdefghijklmnopqrstuvwxyz0123");
     }
 }
@@ -608,11 +581,10 @@ TEST(wall_clock_report, timing_units_scale_json_display_and_stats_but_not_raw_va
     EXPECT_NEAR(row.at("stats").at("sqr").get<double>(), 14.0, 1e-9);
     EXPECT_NEAR(row.at("stats").at("stddev").get<double>(), 1.0, 1e-9);
 
-    auto const document = nlohmann::json::parse(
-        make_report(merged_calls(), { .unit = k_milliseconds }).json());
-    EXPECT_EQ(document.at("rocprofiler-systems").at("wall_clock").at("unit_repr"), "ms");
-    EXPECT_EQ(document.at("rocprofiler-systems").at("wall_clock").at("unit_value"),
-              1'000'000);
+    auto const wall =
+        wall_clock_json(make_report(merged_calls(), { .unit = k_milliseconds }));
+    EXPECT_EQ(wall.at("unit_repr"), "ms");
+    EXPECT_EQ(wall.at("unit_value"), 1'000'000);
 }
 
 TEST(wall_clock_report, timing_precision_sets_the_decimals_of_value_columns)

@@ -3031,6 +3031,7 @@ def assert_timemory(subtests, tests_dir, request):
         fail_regex: list[str] | None = None,
         skip_on_fail: bool = False,
         fail_message: str | None = None,
+        root: str = "timemory",
     ) -> None:
         with subtests.test(subtest_name):
             timemory_file = result.output_dir / file_name
@@ -3045,6 +3046,7 @@ def assert_timemory(subtests, tests_dir, request):
                 depths=depths,
                 print_output=print_output,
                 timeout=timeout,
+                root=root,
             )
             output = f"Command: {validation.command}\n\n{validation.message}"
             if not validation.is_valid:
