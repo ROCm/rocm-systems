@@ -3012,7 +3012,6 @@ _HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc'}
 _ALLOC_FREE_APIS: Dict[str, str] = {
     'hipFree':              'ptr',
     'hipFreeAsync':         'dev_ptr',
-    'hipHostFree':          'ptr',
     'hipIpcCloseMemHandle': 'devPtr',
 }
 
