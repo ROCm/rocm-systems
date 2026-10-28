@@ -1771,7 +1771,7 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_DisjointCommsAreUnioned) {
   auto collBlob = BuildRasCollComms({MakeCommSpec(0x1000, 2, {{0, 0}})});
   SetData(coll, collBlob);
   auto msgBlob = BuildRasCollComms({MakeCommSpec(0x2000, 2, {{0, 0}})});
-  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
   EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
   ASSERT_EQ(2, merged->nComms);
@@ -1807,7 +1807,7 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_AllocationFailurePreservesExistingPay
   auto collBlob = BuildRasCollComms({MakeCommSpec(0x3100, 1, {{0, 0}})});
   SetData(coll, collBlob);
   auto msgBlob = BuildRasCollComms({MakeCommSpec(0x3200, 1, {{0, 0}})});
-  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
   char* originalData = coll->data;
 
   g_failAllocationCall = 1;
@@ -1832,7 +1832,7 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_MissingRankEntryClearedWhenFilledByPe
   SetData(coll, collBlob);
 
   auto msgBlob = BuildRasCollComms({MakeCommSpec(0x4000, 2, {{1, 0}})});  // Peer supplies the missing rank.
-  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
   EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
   ASSERT_EQ(1, merged->nComms);
@@ -1851,7 +1851,7 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_HashCollisionSizeMismatchOrdersBySize
   // Same commId but a different commNRanks -- a "hash collision"; production keeps both
   // rather than crashing, ordered by size.
   auto msgBlob = BuildRasCollComms({MakeCommSpec(0x5000, /*commNRanks*/ 4, {{0, 0}})});
-  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
   EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
   EXPECT_EQ(2, merged->nComms);  // Kept as two separate entries rather than merged.
@@ -1867,7 +1867,7 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_CommOnlyInMsgIsCopiedWithShiftedPeerI
   auto collBlob = BuildRasCollComms({});  // Nothing local yet.
   SetData(coll, collBlob);
   auto msgBlob = BuildRasCollComms({MakeCommSpec(0x6000, 1, {{0, 0}})});
-  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
   EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
   ASSERT_EQ(1, merged->nComms);
@@ -1890,7 +1890,7 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_PartiallyFilledMissingRanksAreCarried
 
   // The peer only supplies rank 1, leaving rank 2 still missing.
   auto msgBlob = BuildRasCollComms({MakeCommSpec(0x7000, 3, {{1, 0}})});
-  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
   EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
   ASSERT_EQ(1, merged->nComms);
@@ -1910,8 +1910,8 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_DuplicateRankIsLoggedAndSkipped) {
   // happen" overlap that production logs and skips rather than crashing on.
   auto collBlob = BuildRasCollComms({MakeCommSpec(0x8000, 2, {{0, 3}})});
   SetData(coll, collBlob);
-  auto msgBlob = BuildRasCollComms({MakeCommSpec(0x8000, 2, {{0, 7}})});
-  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  auto msgBlob = BuildRasCollComms({MakeCommSpec(0x8000, 2, {{0, 0}})});
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
   EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
   ASSERT_EQ(1, merged->nComms);
@@ -1936,7 +1936,7 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_RankCountOverflowClampsToCommNRanks) 
   auto collBlob = BuildRasCollComms({MakeCommSpec(0x9000, /*commNRanks*/ 2, {{0, 0}, {1, 0}})});
   SetData(coll, collBlob);
   auto msgBlob = BuildRasCollComms({MakeCommSpec(0x9000, 2, {{2, 0}})});
-  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
   EXPECT_EQ(ncclSuccess, DeliverResp(msg, respConn));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
   ASSERT_EQ(1, merged->nComms);
@@ -1954,7 +1954,7 @@ void ExpectCommsPayloadRejected(const std::function<void(struct rasCollComms*)>&
   SetData(coll, BuildRasCollComms({MakeCommSpec(0x9000, 2, {{0, 0}})}));
   auto msgBlob = BuildRasCollComms({MakeCommSpec(0x9000, 2, {{1, 0}})});
   tamper(reinterpret_cast<struct rasCollComms*>(msgBlob.data()));
-  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
 
   EXPECT_EQ(ncclRemoteError, DeliverResp(msg, respConn));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);
@@ -1997,6 +1997,18 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsCommCountBeyondMessage) {
 TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsCommSizeSmallerThanItsRankCounts) {
   ExpectCommsPayloadRejected([](struct rasCollComms* data) { data->comms[0].commNRanks = 0; });
 }
+
+// peerIdx indexes arrays sized from the collective's peer count (client_support.cc sizes peerNvmlDevs and
+// peerIdxConv that way), so a value at or beyond the peers the message carries is an out-of-bounds access
+// at the root and has to be rejected here.  The message built by the helper carries one peer.
+TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsRankPeerIdxBeyondTheMessagePeerCount) {
+  ExpectCommsPayloadRejected([](struct rasCollComms* data) { data->comms[0].ranks[0].peerIdx = 1; });
+}
+
+TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsNegativeRankPeerIdx) {
+  ExpectCommsPayloadRejected([](struct rasCollComms* data) { data->comms[0].ranks[0].peerIdx = -1; });
+}
+
 
 // Runs rasCollCommsMerge directly so that each side's nData can be shrunk independently of its buffer.
 ncclResult_t RunCommsMergeWithSizes(std::vector<char> collBlob, int collDataSize, std::vector<char> msgBlob,
@@ -2052,7 +2064,7 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_UnfilledMissingRankRetainsMetadata) {
   collSpec.missingAddrs = {MakeAddr(52)};
   SetData(coll, BuildRasCollComms({collSpec}));
   auto msgBlob = BuildRasCollComms({MakeCommSpec(0xA100, 4, {{1, 0}})});
-  auto* msg = MakeCollRespMsg(root, 5, 0, {}, msgBlob);
+  auto* msg = MakeCollRespMsg(root, 5, 0, {MakeAddr(200)}, msgBlob);
 
   ASSERT_EQ(ncclSuccess, rasCollCommsMerge(coll, msg));
   auto* merged = reinterpret_cast<struct rasCollComms*>(coll->data);

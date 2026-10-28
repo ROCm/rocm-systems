@@ -829,8 +829,10 @@ fail:
 
 // Verifies that the peer-supplied comm records of a RAS_COLL_COMMS payload stay within the nData bytes the
 // peer actually sent.  The merge below sizes its copies from these counts, so a count that is negative or
-// that overruns the payload has to be rejected before it is used.
-static ncclResult_t rasCollCommsCheck(const struct rasCollComms* data, int nData) {
+// that overruns the payload has to be rejected before it is used.  nPeers is the peer count the same message
+// carries; the ranks' peerIdx values index that array (after the merge shifts them by coll->nPeers), and the
+// client code indexes arrays of that size with them, so they are range-checked here as well.
+static ncclResult_t rasCollCommsCheck(const struct rasCollComms* data, int nData, int nPeers) {
   int offset = offsetof(struct rasCollComms, comms);
 
   if (nData < offset || data->nComms < 0) return ncclRemoteError;
@@ -849,6 +851,11 @@ static ncclResult_t rasCollCommsCheck(const struct rasCollComms* data, int nData
     commBytes = (int64_t)sizeof(*comm) + (int64_t)comm->nRanks * sizeof(*comm->ranks) +
                 (int64_t)comm->nMissingRanks * sizeof(struct rasCollCommsMissingRank);
     if (commBytes > nData - offset) return ncclRemoteError;
+
+    // Only safe to walk the ranks now that commBytes has confirmed they are all within the payload.
+    for (int rankIdx = 0; rankIdx < comm->nRanks; rankIdx++)
+      if (comm->ranks[rankIdx].peerIdx < 0 || comm->ranks[rankIdx].peerIdx >= nPeers) return ncclRemoteError;
+
     offset += (int)commBytes;
   }
 
@@ -867,7 +874,7 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
   msgData = (struct rasCollComms*)(((char*)msg) + dataOffset);
   collData = (struct rasCollComms*)coll->data;
 
-  if (rasCollCommsCheck(msgData, msg->collResp.nData) != ncclSuccess) {
+  if (rasCollCommsCheck(msgData, msg->collResp.nData, msg->collResp.nPeers) != ncclSuccess) {
     WARN("RAS received a COLLRESP message with malformed communicator data (%d bytes)", msg->collResp.nData);
     return ncclRemoteError;
   }
