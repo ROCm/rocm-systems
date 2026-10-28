@@ -2,11 +2,8 @@
     global:
         torch_trace_collector_abi_revision;
         torch_trace_collector_install;
-        torch_trace_collector_uninstall;
-        torch_trace_collector_is_installed;
-        torch_trace_collector_push_user_scope;
-        torch_trace_collector_pop_user_scope;
-        torch_trace_collector_get_stats;
+        torch_trace_collector_push_launcher_tid;
+        torch_trace_collector_pop_launcher_tid;
     local:
         *;
 };
