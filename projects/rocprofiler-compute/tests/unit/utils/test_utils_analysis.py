@@ -1122,6 +1122,30 @@ def test_copy_matched_operator_subtree_keeps_ancestors_and_descendants():
     assert [child.name for child in copied_a.children[0].children] == ["C"]
 
 
+def test_copy_matched_user_region_keeps_nested_work_and_unions_relu():
+    addmm = leaf_operator(
+        "aten::addmm", "1", 50.0, kernel="addmm_kernel", backend="torch"
+    )
+    region1 = CallTreeNode(name="region1", backend="user")
+    region1.children = [addmm]
+    sibling = leaf_operator(
+        "aten::relu", "2", 10.0, kernel="relu_kernel", backend="torch"
+    )
+    forest = {"1": [region1, sibling]}
+
+    copied = copy_matched_operator_subtree(forest, [region1])
+    roots = copied["1"]
+    assert [root.name for root in roots] == ["region1"]
+    assert [child.name for child in roots[0].children] == ["aten::addmm"]
+    assert "addmm_kernel" in roots[0].children[0].kernels
+
+    unioned = copy_matched_operator_subtree(forest, [region1, sibling])
+    union_roots = unioned["1"]
+    assert [root.name for root in union_roots] == ["region1", "aten::relu"]
+    assert [child.name for child in union_roots[0].children] == ["aten::addmm"]
+    assert "relu_kernel" in union_roots[1].kernels
+
+
 def test_kernel_stats_length_mismatch_records_error():
     row = SimpleNamespace(
         Operator_Name="aten::addmm",

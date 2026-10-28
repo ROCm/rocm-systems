@@ -1063,6 +1063,16 @@ def _copy_backend_view(
     return copied_node
 
 
+def _copy_full_operator_subtree(node: CallTreeNode) -> CallTreeNode:
+    """Copy a node and every descendant, keeping kernels on each."""
+    copied_node = clone_call_tree_node(node)
+    copied_node.children = [
+        _copy_full_operator_subtree(child) for child in node.children
+    ]
+    rollup_node_stats(copied_node)
+    return copied_node
+
+
 def _copy_scoped_operator_node(
     node: CallTreeNode,
     matched_node_ids: set[int],
@@ -1070,6 +1080,8 @@ def _copy_scoped_operator_node(
 ) -> Optional[CallTreeNode]:
     """Copy one node, keeping match kernels and in-scope descendant kernels."""
     node_is_match = id(node) in matched_node_ids
+    if node_is_match and node.backend == "user":
+        return _copy_full_operator_subtree(node)
     descendant_backends = inherited_backends
     if node_is_match and node.backend is not None:
         descendant_backends = set(inherited_backends)
