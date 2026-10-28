@@ -72,9 +72,10 @@ mod logging;
 #[cfg(test)]
 pub(crate) use lifecycle::{HsaLifecycle, LIFECYCLE};
 pub(crate) use lifecycle::{
-    InFlightGeneration, InFlightToken, InFlightTracker, LifecycleTransition, ShutdownWork,
-    VM_FAULT_CONDVAR, boundary, close_public_raw_handles, enter_public_raw_handle, initialized_mut,
-    lock, map_error, wait_public_raw_handles_idle,
+    InFlightGeneration, InFlightToken, InFlightTracker, LIFECYCLE_CONDVAR, LifecycleCallScope,
+    LifecycleTransition, ShutdownWork, VM_FAULT_CONDVAR, begin_init_waiting, boundary,
+    close_public_raw_handles, enter_public_raw_handle, initialized_mut, lock, map_error,
+    wait_public_raw_handles_idle,
 };
 #[cfg(test)]
 use logging::logging_flag_enabled;
