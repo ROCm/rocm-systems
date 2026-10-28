@@ -508,8 +508,7 @@ int64_t Signal::UpdateValueWithoutRmw(ValueOp op, int64_t operand, int64_t expec
 hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initial_values,
                                  bool use_interrupt, const MemoryRegion* region,
                                  const std::vector<hsa_agent_t>& access_agents,
-                                 bool host_access_via_hdp,
-                                 SignalBatch** batch,
+                                 bool host_access_via_hdp, bool shadow_members, SignalBatch** batch,
                                  hsa_signal_t* signals) {
   const size_t arena_bytes = size_t(count) * sizeof(SharedSignal);
 
@@ -529,7 +528,7 @@ hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initi
 
   SignalBatch* new_batch = new SignalBatch(arena, count, host_access_via_hdp);
   arenaGuard.Dismiss();
-  if (host_access_via_hdp) {
+  if (shadow_members) {
     new_batch->shadow_members_.reset(new std::atomic<Signal*>[count]());
     new_batch->RegisterShadow();
   }
