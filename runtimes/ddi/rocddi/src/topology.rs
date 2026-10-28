@@ -379,8 +379,6 @@ mod target_profile_tests {
 )]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GpuInfo {
-    /// Native KFD GPU identity used to resolve imported allocation placement.
-    pub native_gpu_id: u32,
     /// Exact GFX major version.
     pub gfx_major: u32,
     /// Exact GFX minor version.
