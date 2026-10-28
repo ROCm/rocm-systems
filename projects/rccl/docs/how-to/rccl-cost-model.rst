@@ -140,8 +140,8 @@ A caller restricts the model to a subset of these families with a 64-bit candida
 mask constants name the useful subsets:
 
 *  ``NCCL_TUNING_MASK_GENERAL_KERNELS``: bits ``[0, 21)``
-*  ``NCCL_TUNING_MASK_SYM_KERNELS``: bits ``[21, 39)``
-*  ``NCCL_TUNING_MASK_CE``: bits ``[39, 41)``
+*  ``NCCL_TUNING_MASK_SYM_KERNELS``: bits ``[21, 40)``
+*  ``NCCL_TUNING_MASK_CE``: bits ``[40, 42)``
 *  ``NCCL_TUNING_MASK_ALL``: all of the above
 
 The mask is the single most useful thing to read out of the logs, because it tells you which
@@ -202,8 +202,8 @@ The fields worth reading first:
 
 *  ``.tuningMask`` is the candidate mask from :ref:`cost-model-id-space`, printed in hexadecimal.
    Compare it against all three bounded ranges, not against a single threshold: bits ``[0, 21)``
-   are general algorithm and protocol candidates (``0x1fffff``), bits ``[21, 39)`` are symmetric
-   kernels (``0x7fffe00000``), and bits 39 and 40 are copy engine methods (``0x18000000000``).
+   are general algorithm and protocol candidates (``0x1fffff``), bits ``[21, 40)`` are symmetric
+   kernels (``0xffffe00000``), and bits 40 and 41 are copy engine methods (``0x30000000000``).
    "At or above bit 21" is not enough to call a decision symmetric, because the copy engine bits
    are above 21 as well.
 
@@ -212,7 +212,7 @@ The fields worth reading first:
    differently: ``NCCL_ALGO``, ``NCCL_PROTO``, and ``NCCL_SYM_KERNEL`` are parsed once at
    communicator init and clear entries in ``tuningContext.enabled[id][func]``, which the model
    checks per candidate. Pinning one symmetric kernel with ``NCCL_SYM_KERNEL`` therefore still
-   logs the full symmetric mask ``0x7fffe00000``. A full mask is not evidence that the override
+   logs the full symmetric mask ``0xffffe00000``. A full mask is not evidence that the override
    was ignored. Read ``.forced`` on the "Best tuning" line for that.
 
 *  ``.id`` on the "Best tuning" line is the flat candidate ID of the winner. Map it into the three
@@ -360,7 +360,7 @@ Matching is a case-insensitive **name prefix**, not an exact comparison. A short
 selects a family:
 
 *  ``SYMK_LL`` selects three rows, not two: the AllGather ``SYMK_LL`` (bit 26) and ``SYMK_LLMC``
-   (bit 27), and also the ReduceScatter ``SYMK_LL`` (bit 33). A registry name is unique per
+   (bit 27), and also the ReduceScatter ``SYMK_LL`` (bit 34). A registry name is unique per
    collective but can repeat across collectives, and the prefix match does not look at the
    collective, so a name shared by two collectives selects both rows.
 *  ``SYMK_RailA2A`` selects both ``SYMK_RailA2A_LsaLD`` and ``SYMK_RailA2A_LsaLDMC``.
