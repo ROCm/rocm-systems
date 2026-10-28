@@ -2019,6 +2019,17 @@ TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsCommSizeSmallerThanItsRankCoun
   ExpectCommsPayloadRejected([](struct rasCollComms* data) { data->comms[0].commNRanks = 0; });
 }
 
+// Both counts are the peer's, so it can pick the pair whose sum overflows a signed int.  The record is
+// rejected either way -- the commBytes check that follows catches it -- so this is a sanitizer guard: built
+// with -fsanitize=signed-integer-overflow it traps on the unwidened addition and passes once it is widened.
+TEST_F(RasCollectivesMicrotest, CommsMerge_RejectsRankCountsWhoseSumOverflowsAnInt) {
+  ExpectCommsPayloadRejected([](struct rasCollComms* data) {
+    data->comms[0].commNRanks = INT32_MAX;
+    data->comms[0].nRanks = 0x40000000;
+    data->comms[0].nMissingRanks = 0x40000000;
+  });
+}
+
 // peerIdx indexes arrays sized from the collective's peer count (client_support.cc sizes peerNvmlDevs and
 // peerIdxConv that way), so a value at or beyond the peers the message carries is an out-of-bounds access
 // at the root and has to be rejected here.  The message built by the helper carries one peer.

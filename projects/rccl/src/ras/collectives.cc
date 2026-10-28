@@ -845,8 +845,10 @@ static ncclResult_t rasCollCommsCheck(const struct rasCollComms* data, int nData
     comm = (const struct rasCollComms::comm*)(((const char*)data) + offset);
     if (comm->nRanks < 0 || comm->nMissingRanks < 0) return ncclRemoteError;
     // commNRanks is what the merge clamps a rank count to, and it ends up in the merged buffer that the
-    // reporting code iterates, so hold the peer to the invariant the struct documents.
-    if (comm->commNRanks < comm->nRanks + comm->nMissingRanks) return ncclRemoteError;
+    // reporting code iterates, so hold the peer to the invariant the struct documents.  The sum is widened
+    // because both counts are the peer's and each can reach INT_MAX, which overflows an int addition before
+    // the commBytes check below gets a chance to reject them.
+    if (comm->commNRanks < (int64_t)comm->nRanks + comm->nMissingRanks) return ncclRemoteError;
 
     commBytes = (int64_t)sizeof(*comm) + (int64_t)comm->nRanks * sizeof(*comm->ranks) +
                 (int64_t)comm->nMissingRanks * sizeof(struct rasCollCommsMissingRank);
