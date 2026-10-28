@@ -129,17 +129,24 @@ impl DeviceEventSubscription {
     pub fn wait(&mut self, timeout: Duration) -> Result<Option<DeviceEvent>, Error> {
         let started = Instant::now();
         loop {
-            match self.poll() {
+            let buffer_full = match self.poll() {
                 Ok(Some(event)) => return Ok(Some(event)),
-                Ok(None) => {}
-                Err(error) if error.kind() == crate::ErrorKind::Busy => {}
+                Ok(None) => false,
+                Err(error) if error.kind() == crate::ErrorKind::Busy => true,
                 Err(error) => return Err(error),
-            }
+            };
             let remaining = timeout.saturating_sub(started.elapsed());
             if remaining.is_zero() {
                 return Ok(None);
             }
-            thread::sleep(remaining.min(Duration::from_millis(1)));
+            if buffer_full {
+                // Another subscriber must drain the retained buffer. Its
+                // signaled native event would cause a busy wait here.
+                thread::sleep(remaining.min(Duration::from_millis(1)));
+            } else {
+                self.inner
+                    .wait_native(remaining.min(Duration::from_millis(10)))?;
+            }
         }
     }
 }
