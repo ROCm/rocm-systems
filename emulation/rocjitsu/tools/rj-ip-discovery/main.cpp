@@ -10,7 +10,7 @@
 /// `/lib/firmware/amdgpu/ip_discovery.bin` in a guest and boot with
 /// `amdgpu.discovery=2`.
 
-#include "util/cli.h"
+#include "rocjitsu/cli.h"
 
 #include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
               << *generations.error() << "\n";
     return EXIT_FAILURE;
   }
-  using namespace util::cli;
+  using namespace rocjitsu::cli;
   Command command{"rj-ip-discovery"};
   auto help =
       std::make_shared<BoolFlag>(FlagInfo{"--help", {"-h"}, "Show help", ValueMode::Switch});

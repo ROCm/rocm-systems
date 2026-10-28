@@ -3,13 +3,13 @@
 
 #pragma once
 
+#include "rocjitsu/cli.h"
 #include "rocjitsu/code/rj_code.h"
-#include "util/cli.h"
 
 #include <optional>
 
 namespace rocjitsu::tools {
-namespace cli = ::util::cli;
+namespace cli = ::rocjitsu::cli;
 
 class DecodeTargetFlag final : public cli::Flag {
 public:

@@ -59,7 +59,7 @@
 #include <vector>
 
 using namespace rocjitsu;
-namespace ucli = util::cli;
+namespace ucli = rocjitsu::cli;
 
 namespace {
 

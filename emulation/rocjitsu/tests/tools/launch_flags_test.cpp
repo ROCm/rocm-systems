@@ -5,14 +5,12 @@
 #include <gtest/gtest.h>
 
 namespace rocjitsu::cli {
-namespace ucli = ::util::cli;
-
 TEST(LaunchFlags, OmissionExplicitZeroAndRepeatedOverrides) {
-  ucli::Command command{"rocjitsu", ucli::PositionalMode::AfterSeparator};
+  Command command{"rocjitsu", PositionalMode::AfterSeparator};
   LaunchFlags flags;
   util::StringDiagnostic diagnostic;
   ASSERT_TRUE(flags.register_flags(command, diagnostic.emitter()).succeeded());
-  ASSERT_TRUE(ucli::parse(command, {}, diagnostic.emitter()).succeeded());
+  ASSERT_TRUE(parse(command, {}, diagnostic.emitter()).succeeded());
   EXPECT_FALSE(flags.cpu_budget->value());
   EXPECT_FALSE(flags.wait->value());
   const std::vector<std::string_view> args{"--node=node-0",
@@ -26,7 +24,7 @@ TEST(LaunchFlags, OmissionExplicitZeroAndRepeatedOverrides) {
                                            "application",
                                            "--wait-checking=all",
                                            ""};
-  auto parsed = ucli::parse(command, args, diagnostic.emitter());
+  auto parsed = parse(command, args, diagnostic.emitter());
   ASSERT_TRUE(parsed.succeeded()) << diagnostic.message();
   EXPECT_EQ(flags.node->value(), "node-0");
   EXPECT_EQ(flags.vfio_socket->values(),
@@ -38,7 +36,7 @@ TEST(LaunchFlags, OmissionExplicitZeroAndRepeatedOverrides) {
 }
 
 TEST(LaunchFlags, GenericAndTypedUpdatesValidateTheSameStorage) {
-  ucli::Command command{"rocjitsu"};
+  Command command{"rocjitsu"};
   LaunchFlags flags;
   util::StringDiagnostic diagnostic;
   ASSERT_TRUE(flags.register_flags(command, diagnostic.emitter()).succeeded());
@@ -63,14 +61,14 @@ TEST(LaunchFlags, GenericAndTypedUpdatesValidateTheSameStorage) {
 }
 
 TEST(LaunchFlags, IndependentInvocationsAndHelpMetadata) {
-  ucli::Command command{"rocjitsu"};
+  Command command{"rocjitsu"};
   LaunchFlags flags;
   LaunchFlags other;
   util::StringDiagnostic diagnostic;
   ASSERT_TRUE(flags.register_flags(command, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(flags.wait->parse_and_set("off", diagnostic.emitter()).succeeded());
   EXPECT_FALSE(other.wait->value());
-  const auto help = ucli::format_help(command);
+  const auto help = format_help(command);
   EXPECT_NE(help.find("Simulation configuration:"), std::string::npos);
   EXPECT_NE(help.find("--vfio-ready-fd VALUE"), std::string::npos);
   EXPECT_EQ(command.find_flag("-v"), flags.version);

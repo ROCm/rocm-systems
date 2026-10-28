@@ -16,10 +16,10 @@
 /// property of linking against the same shared object rather than of two
 /// programs being kept in step.
 
+#include "rocjitsu/cli.h"
 #include "rocjitsu/code/dbt/gfx1250_b0_a0_cache.h"
 #include "rocjitsu/code/dbt/translation_store.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
-#include "util/cli.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -142,7 +142,7 @@ Outcome pretranslate_one(const char *path, rocjitsu::TranslationStore &store, bo
 } // namespace
 
 int main(int argc, char **argv) {
-  using namespace util::cli;
+  using namespace rocjitsu::cli;
   Command command{"rj_pretranslate"};
   auto root_flag = std::make_shared<StringFlag>(FlagInfo{
       "--store-root", {}, "Translation store directory (default: translator install prefix)"});

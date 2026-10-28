@@ -3,7 +3,7 @@
 
 #include "dbt_translate_cli.h"
 #include "cli_choices.h"
-#include "util/cli.h"
+#include "rocjitsu/cli.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -21,7 +21,7 @@
 
 using namespace rocjitsu;
 using namespace rocjitsu::tools;
-namespace cli = util::cli;
+namespace cli = rocjitsu::cli;
 
 namespace {
 

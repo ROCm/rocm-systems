@@ -47,7 +47,7 @@ target_link_libraries(
         util
         flatbuffers
         Threads::Threads
-        util_cli
+        rocjitsu_cli
         rocjitsu_cli_launch_preload
         rocjitsu_version
 )
@@ -82,7 +82,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(
         rocjitsu_launch_flags_test
-        PRIVATE util_cli flatbuffers GTest::gtest_main
+        PRIVATE rocjitsu_cli flatbuffers GTest::gtest_main
     )
     rj_configure_target(rocjitsu_launch_flags_test TOOL)
     include(GoogleTest)

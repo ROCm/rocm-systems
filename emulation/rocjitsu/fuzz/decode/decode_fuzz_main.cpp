@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "util/cli.h"
+#include "rocjitsu/cli.h"
 
 #include "decode_fuzz_core.h"
 
@@ -41,8 +41,8 @@ namespace {
 
 using Window = std::array<uint8_t, rocjitsu::decode_fuzz::kWindowSize>;
 
-void usage(std::ostream &out, const util::cli::Command &command) {
-  out << util::cli::format_help(command)
+void usage(std::ostream &out, const rocjitsu::cli::Command &command) {
+  out << rocjitsu::cli::format_help(command)
       << "\nModes:\n"
          "  rj_decode_fuzz --afl [--target TARGET]\n"
          "  rj_decode_fuzz --input FILE --json [--target TARGET]\n"
@@ -194,7 +194,7 @@ int run_afl(std::string_view target) {
 }
 
 int main(int argc, char **argv) {
-  using namespace util::cli;
+  using namespace rocjitsu::cli;
   Command command{"rj_decode_fuzz"};
   command.set_positional_usage("");
   auto afl_flag = std::make_shared<BoolFlag>(

@@ -28,7 +28,10 @@ target_include_directories(
     rocjitsu_translate_cli
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_link_libraries(rocjitsu_translate_cli PUBLIC rocjitsu_tooling util_cli)
+target_link_libraries(
+    rocjitsu_translate_cli
+    PUBLIC rocjitsu_tooling rocjitsu_cli
+)
 rj_configure_target(rocjitsu_translate_cli TOOL)
 
 add_executable(rj_dbt_translate rj_dbt_translate_main.cpp)
@@ -43,7 +46,7 @@ add_executable(
 target_link_libraries(
     rj_decode_benchmark
     PRIVATE
-        util_cli
+        rocjitsu_cli
         rocjitsu_analysis_internal
         rocjitsu_amdgpu_isa_model_registry
 )
@@ -62,7 +65,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(
         rocjitsu_benchmark_cli_test
-        PRIVATE util_cli GTest::gtest_main
+        PRIVATE rocjitsu_cli GTest::gtest_main
     )
     rj_configure_target(rocjitsu_benchmark_cli_test PRIVATE_INCLUDES WARNINGS)
     gtest_discover_tests(rocjitsu_benchmark_cli_test TEST_PREFIX "cli.")
@@ -98,7 +101,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(
         rj_pretranslate
         PRIVATE
-            util_cli
+            rocjitsu_cli
             rocjitsu_gfx1250_b0_to_a0
             Threads::Threads
             ${CMAKE_DL_LIBS}
