@@ -41,8 +41,7 @@ public:
     void handle(const in_time_sample& sample) override;
     void handle(const pmc_event_with_sample& sample) override;
     void handle(const backtrace_region_sample& sample) override;
-    void handle(const gpu_pmc_sample& sample) override;
-    void handle(const ainic_pmc_sample& sample) override;
+    void handle(const pmc_values_sample& sample) override;
     void handle(const cpu_pmc_sample& sample) override;
     void handle(const gpu_perf_counter_sample& sample) override;
     void handle(const hipfile_pmc_sample& sample) override;

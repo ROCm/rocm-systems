@@ -12,11 +12,10 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
-#include "library/pmc/collectors/gpu/sample.hpp"
+#include "library/pmc/collectors/gpu/counters.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
-#include "library/pmc/collectors/nic/sample.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/thread_info.hpp"
 
@@ -59,7 +58,6 @@ using rocprofsys::agent_manager;
 using rocprofsys::agent_type;
 using rocprofsys::function_args_t;
 using rocprofsys::get_args_string;
-using rocprofsys::trace_cache::ainic_pmc_sample;
 using rocprofsys::trace_cache::backtrace_region_sample;
 using rocprofsys::trace_cache::gpu_perf_counter_sample;
 using rocprofsys::trace_cache::in_time_sample;
@@ -68,6 +66,7 @@ using rocprofsys::trace_cache::kfd_sample;
 using rocprofsys::trace_cache::memory_copy_sample;
 using rocprofsys::trace_cache::metadata_registry;
 using rocprofsys::trace_cache::pmc_event_with_sample;
+using rocprofsys::trace_cache::pmc_values_sample;
 using rocprofsys::trace_cache::region_sample;
 using rocprofsys::trace_cache::rocpd_processor_t;
 using rocprofsys::trace_cache::scratch_memory_sample;
@@ -75,7 +74,6 @@ using rocprofsys::trace_cache::info::gpu_perf_counter_name_entry;
 using rocprofsys::trace_cache::info::pmc;
 using rocprofsys::trace_cache::info::track;
 using cpu_pmc_sample = rocprofsys::pmc::collectors::cpu::sample;
-using gpu_pmc_sample = rocprofsys::pmc::collectors::gpu::sample;
 using gpu_perf_counter_value =
     rocprofsys::pmc::collectors::gpu_perf_counter::counter_value;
 #if(ROCPROFILER_VERSION >= 600)
@@ -1198,7 +1196,7 @@ TEST_F(rocpd_write_read_test_interface, agents_round_trip_all_types)
                                    .product_name = "AI NIC" });
 }
 
-TEST_F(rocpd_write_read_test_interface, handle_ainic_pmc_sample_pathway)
+TEST_F(rocpd_write_read_test_interface, handle_pmc_values_sample_pathway)
 {
     // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
     static constexpr double k_rx_ucast_bytes   = 1048576.0;
@@ -1214,17 +1212,24 @@ TEST_F(rocpd_write_read_test_interface, handle_ainic_pmc_sample_pathway)
                 make_nic_metadata_pmc(k_nic_pmcs[k_nic_pmc_tx_ucast_bytes_idx]));
             add_process_scoped_track(metadata, "ainic_rx_rdma_ucast_bytes");
             add_process_scoped_track(metadata, "ainic_tx_rdma_ucast_bytes");
+            metadata->add_pmc_schema(
+                { .type             = agent_type::nic,
+                  .agent_type_index = 0,
+                  .event_category   = "amd_smi_nic",
+                  .series           = { { .perfetto_category = 0,
+                                          .perfetto_track    = "NIC [0] RX RDMA BYTES (S)",
+                                          .pmc_name          = "nic_rx_ucast_bytes",
+                                          .rocpd_track       = "ainic_rx_rdma_ucast_bytes",
+                                          .units             = "bytes" },
+                                        { .perfetto_category = 0,
+                                          .perfetto_track    = "NIC [0] TX RDMA BYTES (S)",
+                                          .pmc_name          = "nic_tx_ucast_bytes",
+                                          .rocpd_track       = "ainic_tx_rdma_ucast_bytes",
+                                          .units             = "bytes" } } });
         },
         [](rocpd_processor_t& processor) {
-            rocprofsys::pmc::collectors::nic::enabled_metrics enabled{};
-            enabled.bits.rx_rdma_ucast_bytes = 1;
-            enabled.bits.tx_rdma_ucast_bytes = 1;
-            rocprofsys::pmc::collectors::nic::metrics metrics{};
-            metrics.rx_rdma_ucast_bytes = static_cast<std::uint64_t>(k_rx_ucast_bytes);
-            metrics.tx_rdma_ucast_bytes = static_cast<std::uint64_t>(k_tx_ucast_bytes);
-            const ainic_pmc_sample sample{ enabled, 0, "NIC0", k_sample_timestamp,
-                                           metrics };
-            processor.handle(sample);
+            const std::array values{ k_rx_ucast_bytes, k_tx_ucast_bytes };
+            processor.handle(pmc_values_sample{ 0, k_sample_timestamp, values });
         });
 
     // Validate: profiler_hub::reader_t read-back matches inserted values.
@@ -1638,10 +1643,10 @@ TEST_F(rocpd_write_read_test_interface, flush_creates_nonempty_file)
 //  backtrace_region_sample  → handle_backtrace_region_pathway
 //  in_time_sample           → handle_in_time_sample_pathway
 //  pmc_event_with_sample    → handle_pmc_event_with_sample_pathway
-//  gpu_pmc_sample           → handle_gpu_pmc_sample_pathway
+//  pmc_values_sample (GPU)  → handle_gpu_pmc_values_pathway
 //  gpu_perf_counter_sample  → handle_gpu_perf_counter_sample_pathway,
 //                             handle_gpu_perf_counter_sample_empty_entries_noop
-//  ainic_pmc_sample         → handle_ainic_pmc_sample_pathway
+//  pmc_values_sample        → handle_pmc_values_sample_pathway
 //  cpu_pmc_sample           → handle_cpu_pmc_sample_pathway
 //  kfd_sample               → handle_kfd_sample_pathway
 //
@@ -1871,10 +1876,10 @@ TEST_F(rocpd_write_read_test_interface, handle_pmc_event_with_sample_pathway)
 }
 
 // ---------------------------------------------------------------------------
-// handle(gpu_pmc_sample): multiple scalar PMC inserts for GPU metrics
+// handle(pmc_values_sample) with the AMD SMI GPU schema: scalar PMC inserts
 // ---------------------------------------------------------------------------
 
-TEST_F(rocpd_write_read_test_interface, handle_gpu_pmc_sample_pathway)
+TEST_F(rocpd_write_read_test_interface, handle_gpu_pmc_values_pathway)
 {
     // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
     run_processor_and_open_reader(
@@ -1883,22 +1888,17 @@ TEST_F(rocpd_write_read_test_interface, handle_gpu_pmc_sample_pathway)
             seed_gpu_smi_pmc_row(metadata, "device_busy_gfx");
             seed_gpu_smi_pmc_row(metadata, "device_busy_umc");
             seed_gpu_smi_pmc_row(metadata, "device_temp");
+            namespace gpu = rocprofsys::pmc::collectors::gpu;
+            metadata->add_pmc_schema(gpu::make_schema(
+                0, gpu::collected_counters(gpu::metric_bit::k_gfx_activity |
+                                           gpu::metric_bit::k_umc_activity |
+                                           gpu::metric_bit::k_hotspot_temperature)));
         },
         [](rocpd_processor_t& processor) {
-            constexpr double        k_gfx_activity        = 85.0;
-            constexpr double        k_umc_activity        = 42.0;
-            constexpr double        k_hotspot_temperature = 72.0;
-            constexpr std::uint64_t k_timestamp           = 11000;
-            rocprofsys::pmc::collectors::gpu::enabled_metrics enabled{};
-            enabled.bits.gfx_activity        = 1;
-            enabled.bits.umc_activity        = 1;
-            enabled.bits.hotspot_temperature = 1;
-            rocprofsys::pmc::collectors::gpu::metrics metrics{};
-            metrics.gfx_activity        = k_gfx_activity;
-            metrics.umc_activity        = k_umc_activity;
-            metrics.hotspot_temperature = k_hotspot_temperature;
-            const gpu_pmc_sample sample{ enabled, 0, k_timestamp, metrics };
-            processor.handle(sample);
+            // Schema order: GFX busy, UMC busy, temperature (counters() order).
+            constexpr std::array    k_values{ 85.0, 42.0, 72.0 };
+            constexpr std::uint64_t k_timestamp = 11000;
+            processor.handle(pmc_values_sample{ 0, k_timestamp, k_values });
         });
 
     // Validate: profiler_hub::reader_t read-back matches inserted values.

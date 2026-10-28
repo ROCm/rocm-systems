@@ -9,7 +9,7 @@ endif()
 # PMC GPU Collector Sources
 set(pmc_gpu_sources
     ${CMAKE_CURRENT_LIST_DIR}/types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/sample.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/counters.hpp
     ${CMAKE_CURRENT_LIST_DIR}/device.hpp
     ${CMAKE_CURRENT_LIST_DIR}/collector.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu_traits.hpp
