@@ -1,166 +1,97 @@
-# Website build and test
+# Dashboard build and test
 
-The Rocjitsu simulation-performance dashboard lives in `emulation/rocjitsu/website/dashboard`. It is a standalone
-React + Vite source package. Real benchmark data belongs on the
-`gh-pages-rocjitsu` branch under `rocjitsu-dashboard/data/`; dummy data is retained only
-as test fixtures.
-Building and testing the website requires no Rocjitsu native build, ROCm
-installation, GPU, or benchmark service.
-
-## Prerequisites
-
-- Node.js matching `website/dashboard/package.json`: `^20.19.0 || ^22.13.0 || >=24.0.0`.
-- npm and network access to install the locked dependencies.
-- Chromium and its system libraries for Playwright browser tests. The install
-  command below downloads Chromium and may need administrator privileges to
-  install missing OS packages on Linux.
-
-## Install, build, and verify
-
-Run from the `rocm-systems` repository root:
+Run commands from `emulation/rocjitsu/website/dashboard`. The React/Vite app does not need a native Rocjitsu build, a GPU, a ROCm install, or a benchmark service. Node must satisfy `package.json`: `^20.19.0 || ^22.13.0 || >=24.0.0`.
 
 ```bash
-cd emulation/rocjitsu/website/dashboard
-node --version
-npm --version
 npm ci
 npm run test:e2e:install
-npm run verify
 ```
 
-`npm run verify` runs ESLint, a production build, Vitest unit tests, Playwright
-desktop and mobile browser tests, the chart interaction race test ten times
-sequentially, and the production-hosting smoke test. A successful run exits with
-status 0. Playwright builds the current
-source with dummy fixtures into `.test-dist/`, starts its own preview server at
-`http://127.0.0.1:4174`, and stops it when done. Keep port 4174 free. Browser tests
-leave the data-free production build in `dist/` untouched.
+When Chromium's system libraries are already present, `npx playwright install chromium` installs only the browser. Installation needs network access. The deterministic browser suites do not; the opt-in published-data smoke below does.
 
-`npm run test:e2e:production` (also included in `verify`) rebuilds and previews the production
-artifact on port 4175, loads the published GitHub Raw dataset, and verifies real
-browser-cache reuse without request interception. CI runs this live production
-smoke test after the fixture suite; it requires network access and valid
-published data.
-
-If port 4174 is occupied, select a free port without stopping other servers:
-`PLAYWRIGHT_PORT=4176 npm run verify` (or use the same variable with `npm run test:e2e`).
-
-Individual commands, all run from `website/dashboard/`:
+## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `npm run build` | Build into `dist/`, loading `rocjitsu-dashboard/data/` from `gh-pages-rocjitsu` |
-| `npm run dev:fixtures` | Serve the app with dummy fixture JSON at `/data/` |
-| `npm run dev:data -- <data-directory>` | Serve the app with a local data directory at `/data/` |
-| `npm run preview:data -- <data-directory>` | Mount local data at `/data/` while previewing `dist/` |
-| `npm run lint` | Check JavaScript and React source with ESLint |
-| `npm run test:unit` | Run data loader, selector, and utility tests without a browser |
-| `npm run test:e2e` | Run Chromium desktop behavior and mobile layout tests |
-| `npm run test:e2e:production` | Smoke test the production build, GitHub Raw hosting, and browser caching |
-| `npm run test:e2e:chart-race` | Run the chart interaction race test ten times sequentially |
-| `npm test` | Run the unit tests, the browser suites, and the ten-repeat chart race test |
-| `npm run verify` | Run lint, build, everything in `npm test`, and the production-hosting smoke test |
+| `npm run lint` | ESLint source, tests, and configuration |
+| `npm run test:unit` | Contract, loader, selectors, state, and page logic without a browser |
+| `npm run test:e2e -- --list` | List desktop and mobile cases. No server, build, or browser |
+| `npm run test:e2e:production -- --list` | List production-boundary cases. No build or browser |
+| `npm run test:e2e` | Desktop controls and phone-specific interactions |
+| `npm run test:e2e:production` | Rebuild data-free `dist/` and test the artifact, consumer, and invalid-data boundaries |
+| `npm run test:e2e:chart-interactions` | Repeat the grid point, timeframe, and scope interaction three times, serially |
+| `npm run test:e2e:chart-race` | Alias for `test:e2e:chart-interactions` |
+| `npm test` | Unit tests, then the fixture browser suite |
+| `npm run verify` | Lint, unit tests, fixture browsers, then the production suite |
+| `npm run build` | Write application assets to `dist/`. Does not publish benchmark JSON |
+| `npm run process:data -- <data-directory>` | Load/adapt, then print normalized data and the unchanged source envelopes |
+| `npm run process:data -- <data-directory> --output <new-file-outside-input>` | Write a local processed snapshot. Refuses overwrite and any output inside the input directory |
 
-Run the two browser commands one at a time. Both rebuild the shared `.test-dist/`
-fixture output before starting their server, so a concurrent run deletes files the other
-one is still copying and fails the build with `ENOENT`. Assigning a different
-`PLAYWRIGHT_PORT` avoids the port conflict but not this one, because the build directory
-is shared regardless of port.
+The fixture server writes `.test-dist/`. The production server writes `dist/`, so `verify` does not need a separate build. The three-repeat command reruns a case already in the fixture suite. Those extra repetitions are outside `verify`.
 
-If Chromium's system libraries are already installed, `npx playwright install chromium`
-installs just the browser without changing OS packages. Rerun browser installation
-after updating Playwright if its required browser version changes.
+## One build at a time
 
-## Dashboard-data Python tests
+Run build and browser gates one at a time in a worktree. Fixture end-to-end tests and the interaction probe share `.test-dist/`. Production build and production end-to-end tests share `dist/`. Different ports do not isolate those directories.
+
+Defaults are fixture port 4174 and production port 4175. To leave an occupied port in use:
+
+```bash
+PLAYWRIGHT_PORT=4184 PLAYWRIGHT_PRODUCTION_PORT=4185 npm run verify
+```
+
+For an acceptance run, clear `DASHBOARD_DATA_DIR`, `VITE_DASHBOARD_DATA_BASE_URL`, and `PLAYWRIGHT_REUSE_EXISTING_SERVER`. Reuse a server only for local fixture iteration, from this worktree, against current source. CI does not reuse a server. Fixture results go to `test-results/fixtures/`; production results go to `test-results/production/`. Failures keep traces. Default workers are two for fixtures and one for production. Retries are zero.
+
+## Published-data production smoke (opt in)
+
+```bash
+PLAYWRIGHT_PUBLISHED_DATA=1 npm run test:e2e:production -- tests/production/published-data.e2e.js
+```
+
+Clear the data/server overrides listed above first. The production Playwright config
+owns a fresh data-free build and preview; do not start another server. This test
+uses the default GitHub Raw `gh-pages-rocjitsu/rocjitsu-dashboard/data/` endpoint,
+without interception or fictional fallback. It waits for loading to settle and
+distinguishes three published states: index HTTP 404 requires the specific
+missing-data banner, disabled Download JSON, and no run requests; a valid empty
+`runFiles: []` index requires successful loading and an empty source JSON download,
+without data-error banners or run requests; a nonempty index requires successful
+run loads and a source download matching the index and run count. Unexpected
+alerts, uncaught browser errors, and JavaScript dialogs fail in every state.
+Malformed data, other HTTP errors, network/CORS failures, and incompatible runs
+are failures, not skips.
+
+The website workflow runs this command separately after `npm run verify`, with
+the opt-in flag scoped to that step. Ordinary production and fixture suites
+remain deterministic; the smoke is skipped unless explicitly enabled. Failure
+traces use the existing production diagnostics directory.
+
+This is partial consumer coverage: **the new build against currently published
+data**, not a deployed-consumer gate on benchmark publication. It neither tests
+nor rewrites publication storage. Legacy experimental data can fail until the
+maintainer's manual release cutover; do not treat a fictional intercepted control
+as a live-data pass or suppress a known incompatibility.
+
+## Benchmark preparation and publication tests
 
 Use a Python 3.12 environment with Node.js (as above), Bash, Git, jq, and coreutils
-(including `realpath`) on `PATH`. Publication tests use the real dashboard
-validator; no npm dependencies are required. From `emulation/rocjitsu/website/dashboard`:
+(including `realpath`) on `PATH`. Publication tests exercise workflow JSON/shell operations; no npm dependencies are required. From `emulation/rocjitsu/website/dashboard`:
 
 ```bash
 python -m pip install -r scripts/dashboard-data/requirements-test.txt
 python -m pytest scripts/dashboard-data/tests
 ```
 
-The `dashboard-data` CI job uses the same requirements file. These tests are
-separate from `npm run verify` and do not require the npm dependencies.
+The `dashboard-data` CI job (Verify benchmark preparation and publication) uses
+the same requirements file. The suite exercises benchmark preparation and the
+publication workflow shell, not the removed standalone publishers. Preparation
+build/install/native commands are intercepted; small real child processes cover
+exit-status reporting and owned-group cleanup on SIGINT/SIGTERM. Workflow contract
+tests keep only the benchmark job (120 minutes), performance step (60 minutes)
+and publisher job (30 minutes) limits in Actions, with no helper timers or separate
+diagnostic/upload/cleanup caps. CLI tests exercise explicit manifest parsing through
+Preparation inventory and alternative recipe selection; inventory tests cover path
+rejection. Workflow contracts verify generation and measurement consume the same `BENCHMARK_MANIFEST`.
+These tests stay under the dashboard
+and are separate from `npm run verify`; they do not require npm dependencies.
 
-## Run locally
-
-```bash
-# From emulation/rocjitsu/website/dashboard:
-npm run dev:fixtures -- --host 127.0.0.1
-npm run dev:data -- /absolute/path/to/staged/data --host 127.0.0.1
-```
-
-Use the URL printed by Vite. Fixture mode serves the static JSON in
-`tests/fixtures/data/` through the same application loader used by the normal
-dashboard. `dev:data` mounts any local data directory at `/data/`, the same URL
-used by fixture mode. The argument may be the data directory itself or a parent
-that contains `data/`. Unit tests validate the same fixture data in memory.
-Restart the development server after editing JSON. For a production-build
-preview of local data, build with a local URL before mounting the directory:
-
-```bash
-DASHBOARD_DATA_DIR=/absolute/path/to/staged/data npm run build
-npm run preview:data -- /absolute/path/to/staged/data --host 127.0.0.1
-```
-
-To inspect the production build against published data:
-
-```bash
-npm run build
-npm run preview -- --host 127.0.0.1
-```
-
-Production preview uses `http://127.0.0.1:4173`. If the published URL is invalid,
-unreachable, or contains no valid data, the application remains available and
-displays the same data-unavailable state as a missing local `data/` directory.
-The header's **Reload all data** action fetches a fresh index, then fetches
-every referenced run and catalog directly from the data source without using caches.
-After validation, those files become that browser's cache for later normal refreshes.
-Browser tests use port 4174 and fixtures instead. For local iteration, a fixture
-preview can be started with
-`npm run preview -- --mode fixtures --host 127.0.0.1 --port 4174` after a fixture
-build (`npm run build -- --mode fixtures`). Set
-`PLAYWRIGHT_REUSE_EXISTING_SERVER=1` to reuse that server for tests; CI ignores
-this option.
-
-## Production build
-
-`npm run build` produces only application files in `dist/`. The default build disables
-Vite's public-directory copying; dummy fixtures cannot enter `dist/` through it.
-The application fetches data over HTTPS from `rocjitsu-dashboard/data/` on the
-`gh-pages-rocjitsu` branch of the `ROCm/rocm-systems` repository. Publish
-validated JSON independently under that directory. It contains
-`metadata.json`, `index.json`, `test-catalogs/`, and `runs/`; a data-only update
-does not require rebuilding the application.
-
-The [rocjitsu-publish-website workflow](../../../../../.github/workflows/rocjitsu-publish-website.yml)
-verifies the dashboard and publishes `dist/` from `develop` to
-`gh-pages/rocjitsu-dashboard/`. It runs the same `npm run verify` suite as website
-CI (lint, build, unit, browser, chart-race, and production-hosting tests) before
-creating a publishing token. Benchmark data remains independently published on
-`gh-pages-rocjitsu`.
-
-```bash
-npm run validate:data -- /absolute/path/to/staged/data
-```
-
-Do not publish if validation fails. The browser uses the same validator and fails
-closed if invalid data bypasses this gate; it does not display a partial run history.
-Validation follows `index.json`, so it only checks the runs listed there and the
-catalogs those runs reference. Stage the directory with its updated index before
-validating; see [the data contract](website-data-contract.md) for what stays unchecked.
-
-To preview a build against the published data branch:
-
-```bash
-npm run build
-npm run preview -- --host 127.0.0.1
-```
-
-Dependencies, generated fixture data, production/test build output, coverage, and Playwright reports/results
-are ignored by Git. Keep the source, lockfile, tests, and test fixtures under version
-control. Parent-repository automation should use `emulation/rocjitsu/website/dashboard` as its
-working directory and its `package-lock.json` as the npm cache key.
+For deployment destinations and the separate data-publication workflow, see [website deployment versus data publication](architecture-and-publication.md#website-deployment-versus-data-publication).

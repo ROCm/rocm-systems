@@ -54,6 +54,7 @@ cases:
   Unit_HRR_Limits_ThreadCap: {}
   Unit_HRR_Limits_WallClockWatchdog: {}
   Unit_HRR_Playback_PlacementHeldRanges: {}
+  Unit_HRR_Playback_PlacementRangeChecked: {}
   Unit_HRR_Playback_PlacementPlan: {}
   Unit_HRR_Playback_ReplayedH2DDrainGraphGuard: {}
   Unit_HRR_Playback_VersionOption: {}
