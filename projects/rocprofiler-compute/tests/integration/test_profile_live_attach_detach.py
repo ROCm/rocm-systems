@@ -11,16 +11,18 @@ import common
 
 from tests.integration import common as integration_common
 from tests.integration.common import (
+    LIVE_ATTACH_SET,
     attach_detach_interval_msec_no_delay,
     config,
     num_kernels,
 )
 
 
-def test_live_attach_detach_block(
+def test_live_attach_detach_set(
     binary_handler_profile_rocprof_compute,
 ):
-    options = ["--block", "3"]
+    # Live attachment cannot replay the workload for additional counter passes.
+    options = ["--set", LIVE_ATTACH_SET]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,

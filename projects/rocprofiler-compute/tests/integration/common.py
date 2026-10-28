@@ -62,6 +62,7 @@ ROOF_ONLY_FILES = sorted([
 # These panels keep the same purpose across the supported GPU architectures.
 DETERMINISTIC_ACCURACY_BLOCKS = ("2", "4", "6")
 STOCHASTIC_ACCURACY_BLOCKS = ("3", "4")
+LIVE_ATTACH_SET = "launch_stats"
 DETERMINISTIC_COUNTER_PATTERNS = (
     r"SQ_INSTS_.*",
     r"SPI_CS(?:N|\d)_(?:NUM_THREADGROUPS|WAVE)(?:_sum)?$",
