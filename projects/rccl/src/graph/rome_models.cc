@@ -3817,6 +3817,17 @@ static struct rcclRomeModel romeTopoModels[] = {
 // This environment variable allows disabling of the reversal the graph parsing
 RCCL_PARAM(ModelReversalDisable, "MODEL_REVERSAL_DISABLE", 0);
 
+/* Accumulate one decimal digit into a number being parsed, refusing to overflow it.
+ */
+static ncclResult_t accumulateDigit(int* value, int digit, int max, const char* what) {
+  if (*value > (max - digit) / 10) {
+    WARN("%s; initialization will fail", what);
+    return ncclInvalidUsage;
+  }
+  *value = *value * 10 + digit;
+  return ncclSuccess;
+}
+
 /* Parse user defined rings. Format is like :
  * "0 1|1 0|0 1 2 3|3 2 1 0|N0 0 2 3 1 N1|1 3 2 0|0 1 2 3 4 5 6 7|N2 7 6 5 4 3 2 1 0 N1"
  * GPUs are numberd from 0 to ngpus, represening GPU-index for the current communicator
@@ -3863,11 +3874,8 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           status = 1;
           break;
         case 1:
-          if (gpus[gpu] > (INT_MAX - digit) / 10) {
-            WARN("GPU number too large in user-defined rings (NCCL_RINGS); initialization will fail");
-            return ncclInvalidUsage;
-          }
-          gpus[gpu] = gpus[gpu] * 10 + digit;
+          NCCLCHECK(accumulateDigit(&gpus[gpu], digit, INT_MAX,
+                                    "GPU number too large in user-defined rings (NCCL_RINGS)"));
           break;
         case 2:
           if (net_offset >= NCCL_TOPO_MAX_NODES * 2) {
@@ -3878,13 +3886,14 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           nets[net_offset] = digit + 'N';
           status = 3;
           break;
-        case 3:
-          if (nets[net_offset] - 'N' > (INT_MAX - 'N' - digit) / 10) {
-            WARN("NET number too large in user-defined rings (NCCL_RINGS); initialization will fail");
-            return ncclInvalidUsage;
-          }
-          nets[net_offset] = (nets[net_offset] - 'N') * 10 + digit + 'N';
+        case 3: {
+          // Held biased by 'N', so the number itself may only reach INT_MAX - 'N'.
+          int net = nets[net_offset] - 'N';
+          NCCLCHECK(accumulateDigit(&net, digit, INT_MAX - 'N',
+                                    "NET number too large in user-defined rings (NCCL_RINGS)"));
+          nets[net_offset] = net + 'N';
           break;
+        }
         }
       } else {
         if (status == 1) {
@@ -4037,11 +4046,8 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
         status = 1;
         break;
       case 1:
-        if (gpus[gpu] > (INT_MAX - digit) / 10) {
-          WARN("GPU number too large in user-defined trees (RCCL_TREES); initialization will fail");
-          return ncclInvalidUsage;
-        }
-        gpus[gpu] = gpus[gpu] * 10 + digit;
+        NCCLCHECK(accumulateDigit(&gpus[gpu], digit, INT_MAX,
+                                  "GPU number too large in user-defined trees (RCCL_TREES)"));
         break;
       }
     } else {
