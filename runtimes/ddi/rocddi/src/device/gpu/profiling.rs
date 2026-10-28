@@ -28,6 +28,28 @@ pub struct ClockCounters {
     pub gpu_frequency: u64,
 }
 
+/// Scalar progress reported by an SPM destination update, including on error.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SpmDestinationReport {
+    /// Timeout value returned by KFD.
+    pub timeout: u32,
+    /// Bytes copied before this result was returned.
+    pub bytes_copied: u32,
+    /// Whether KFD observed dropped samples.
+    pub data_loss: bool,
+}
+
+/// Native failure together with any scalar progress returned by KFD.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct SpmDestinationFailure {
+    /// Native or process-state failure.
+    pub error: Error,
+    /// Output values available even though the update failed.
+    pub report: SpmDestinationReport,
+}
+
 /// KFD PC sampling mechanism available on an activated GPU.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PcSamplingMethod {
@@ -262,16 +284,11 @@ impl GpuDevice<'_> {
     pub unsafe fn spm_set_destination(
         &self,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error> {
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure> {
         // SAFETY: The public caller retains both potentially reachable
         // destinations until a successful unset or conclusive teardown.
-        unsafe {
-            self.driver
-                .spm_set_destination(size, timeout, bytes_copied, destination, data_loss)
-        }
+        unsafe { self.driver.spm_set_destination(size, timeout, destination) }
     }
 }

@@ -17,7 +17,8 @@ use super::{
 };
 use crate::device::event::DeviceEvent;
 use crate::device::gpu::profiling::{
-    ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet,
+    ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, SpmDestinationFailure,
+    SpmDestinationReport,
 };
 use crate::memory::Allocation;
 use crate::memory::storage::Shared;
@@ -510,22 +511,13 @@ impl GpuDriverRef<'_> {
     pub(crate) unsafe fn spm_set_destination(
         &self,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error> {
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure> {
         match self {
             // SAFETY: The caller preserves previous and new destinations.
             Self::LinuxKfd { driver, state } => unsafe {
-                driver.spm_set_destination(
-                    state,
-                    size,
-                    timeout,
-                    bytes_copied,
-                    destination,
-                    data_loss,
-                )
+                driver.spm_set_destination(state, size, timeout, destination)
             },
         }
     }
