@@ -52,7 +52,9 @@ class EventRegistry {
   };
 
 public:
-  /// Allocate an event with a complete captured instruction and every counter obligation.
+  /// Allocate an event with its producing instruction and every counter obligation.
+  /// Throws std::logic_error before allocating if `instruction` is not a valid
+  /// InstructionSnapshot.
   EventId add(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
               std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
               IntervalSet ldsIntervals,

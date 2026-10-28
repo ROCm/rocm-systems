@@ -46,6 +46,7 @@ template <typename T, size_t N> struct RingBuffer {
 };
 
 /// Return the memory instruction recorded as the exact conflict.
+/// Throws std::out_of_range if the detector no longer holds the conflicting event.
 MarkedInstruction findConflict(const RaceViolation &, RaceDetector &);
 
 /// Format the instructions that one wave executed between a conflicting memory
@@ -58,15 +59,17 @@ MarkedInstruction findConflict(const RaceViolation &, RaceDetector &);
 /// conflict's PC and encoding, prints the conflict first with a "(before trace window)"
 /// note. Each trace row prints its own captured bytes. Calls `disassemble` only
 /// for printed rows. Repeated executions of identical bytes at the same PC are
-/// not distinguished.
+/// not distinguished. Every snapshot in `trace`, `conflict` and `read` must be
+/// valid (see InstructionSnapshot); otherwise formatTrace throws
+/// std::logic_error. Exceptions from `disassemble` propagate to the caller.
 std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<std::string(const InstructionSnapshot &)> &disassemble,
                         std::optional<MarkedInstruction> conflict, MarkedInstruction read);
 
 struct RaceWavefrontState : WavefrontState {
   /// The wave's most recently issued instructions, oldest first. Each entry owns
-  /// a copy of its encoding, so reports can disassemble it after the code is
-  /// rewritten or unmapped.
+  /// a valid copy of its encoding, so reports can disassemble it after the code
+  /// is rewritten or unmapped.
   RingBuffer<InstructionSnapshot, 256> trace;
   WaveRaceState *race_state = nullptr;
 };

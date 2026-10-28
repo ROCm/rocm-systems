@@ -47,6 +47,8 @@ public:
                size_t ldsSizeBytes);
 
   /// Allocate an event using the counter and ordering implied by its type.
+  /// Every allocateEventId overload throws std::logic_error before allocating if
+  /// `instruction` is not a valid InstructionSnapshot.
   EventId allocateEventId(WaveId wave, InstructionSnapshot instruction, MemoryEventType type,
                           std::vector<uint32_t> registers, uint64_t execMask) {
     return allocateEventId(wave, instruction, type, std::move(registers), execMask, 0xF, {},

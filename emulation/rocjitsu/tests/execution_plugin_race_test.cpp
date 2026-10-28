@@ -2658,6 +2658,25 @@ TEST(FormatTraceTest, MatchingIgnoresUnusedEncodingStorage) {
                     "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
 }
 
+TEST(FormatTraceTest, RejectsInvalidMarkedSnapshots) {
+  auto trace = make_trace({0x100, 0x104});
+  auto resolve = [](const InstructionSnapshot &) { return "s_nop 0"; };
+  const InstructionSnapshot invalid{.pc = 0x104};
+  EXPECT_THROW(formatTrace(trace, resolve, MarkedInstruction{trace[0], 1, -1}, {invalid, 0, 0}),
+               std::logic_error);
+  EXPECT_THROW(formatTrace(trace, resolve, MarkedInstruction{invalid, 1, -1}, {trace[1], 0, 0}),
+               std::logic_error);
+}
+
+TEST(FormatTraceTest, PropagatesDisassemblyFailures) {
+  auto trace = make_trace({0x100, 0x104});
+  auto fail = [](const InstructionSnapshot &) -> std::string {
+    throw std::logic_error("cannot disassemble");
+  };
+  EXPECT_THROW(formatTrace(trace, fail, MarkedInstruction{trace[0], 1, -1}, {trace[1], 0, 0}),
+               std::logic_error);
+}
+
 TEST(RaceDisassemblyTest, SnapshotsOwnShortLiteralAndMaximumWidthEncodings) {
   const struct {
     const char *arch;
