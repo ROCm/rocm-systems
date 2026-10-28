@@ -198,7 +198,7 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (!format.value())
     return util::Result::success();
-  if (!state.is_load &&
+  if (!gfx9 && !state.is_load &&
       !image_store_selectors_supported(state.decoded_buffer_format, descriptor_selectors))
     return fail(InstructionExecutionError::UnimplementedInstruction);
 
