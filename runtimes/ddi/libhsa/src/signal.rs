@@ -18,7 +18,7 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering, fence};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -56,6 +56,32 @@ const MAX_POOLED_SIGNAL_EVENTS: usize = 256;
 static HAS_FLUSH_BATCHES: AtomicBool = AtomicBool::new(false);
 /// Address ranges of live signal batches requiring HDP flushes.
 static FLUSH_BATCHES: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
+/// Public signal slots whose storage can be read without the lifecycle lock.
+/// Destruction takes the write lock through native release; blocked waits use
+/// their own per-slot async reference after leaving this short read section.
+static WAIT_SIGNAL_HANDLES: LazyLock<RwLock<HashMap<usize, u64>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+/// Distinguishes a recycled address from its earlier public signal lifetime.
+static NEXT_WAIT_SIGNAL_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Reserves registry space before a new signal can be published.
+fn reserve_wait_signal_slots(count: usize) -> Result<(), Status> {
+    WAIT_SIGNAL_HANDLES
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .try_reserve(count)
+        .map_err(|_| OUT_OF_RESOURCES)
+}
+
+/// Publishes a live slot after its backing has been initialized.
+fn publish_wait_signal(address: usize) {
+    let mut handles = WAIT_SIGNAL_HANDLES
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    handles
+        .entry(address)
+        .or_insert_with(|| NEXT_WAIT_SIGNAL_GENERATION.fetch_add(1, Ordering::Relaxed));
+}
 
 /// Locks the address ranges whose device writes require an HDP readback.
 fn flush_batches() -> MutexGuard<'static, Vec<(usize, usize)>> {
@@ -435,6 +461,10 @@ impl SignalState {
 
     /// Releases HSA signal records after workers and native queues have stopped.
     pub(crate) fn clear_storage(&mut self) {
+        let mut wait_handles = WAIT_SIGNAL_HANDLES
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        wait_handles.clear();
         self.signal_groups.clear();
         self.async_signal_refs.clear();
         self.imported_ipc_signals.clear();
@@ -464,10 +494,12 @@ impl HsaState {
 
     /// Allocates signal for runtime use.
     fn allocate_signal(&mut self, signal: AmdSignal) -> Result<HsaSignal, Status> {
+        reserve_wait_signal_slots(1)?;
         if let Some(address) = self.signal_state.recycled_signals.pop() {
             // SAFETY: The slot was invalidated after its final asynchronous
             // registration retired. Its slab remains mapped until shutdown.
             unsafe { (address as *mut AmdSignal).write(signal) };
+            publish_wait_signal(address);
             return Ok(HsaSignal {
                 handle: address as u64,
             });
@@ -479,7 +511,9 @@ impl HsaState {
             .last_mut()
             .ok_or(OUT_OF_RESOURCES)?;
         // SAFETY: The selected slab has one unused aligned slot.
-        Ok(unsafe { slab.allocate(signal) })
+        let handle = unsafe { slab.allocate(signal) };
+        publish_wait_signal(handle.handle as usize);
+        Ok(handle)
     }
 
     /// Creates signal batch and records its ownership.
@@ -569,6 +603,7 @@ impl HsaState {
             .batch_members
             .try_reserve(values.len())
             .map_err(|_| OUT_OF_RESOURCES)?;
+        reserve_wait_signal_slots(values.len())?;
         if interrupt {
             self.signal_state
                 .interrupt_signals
@@ -604,6 +639,7 @@ impl HsaState {
             self.signal_state
                 .batch_members
                 .insert(address, batch.handle);
+            publish_wait_signal(address);
             signals.push(HsaSignal {
                 handle: address as u64,
             });
@@ -807,6 +843,21 @@ impl SignalState {
 
     /// Destroys signal and releases its owned resources.
     pub(crate) fn destroy_signal(&mut self, signal: HsaSignal) -> Status {
+        // A fast completed wait holds the read lock across its atomic load.
+        // Keep it excluded until native storage release has either succeeded
+        // or been rolled back for a retry.
+        let mut wait_handles = WAIT_SIGNAL_HANDLES
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let status = self.destroy_signal_inner(signal);
+        if status == SUCCESS && !self.owns_signal(signal) {
+            wait_handles.remove(&(signal.handle as usize));
+        }
+        status
+    }
+
+    /// Retires public ownership while the wait registry excludes fast readers.
+    fn destroy_signal_inner(&mut self, signal: HsaSignal) -> Status {
         let address = signal.handle as usize;
         if !self.owns_signal(signal) {
             if self.async_signal_refs.get(&address).is_some_and(|record| {
