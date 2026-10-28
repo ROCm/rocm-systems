@@ -293,6 +293,26 @@ TEST(WaitcheckStream, UntrackedScalarMemoryDestinationsStopBeforeLosingDependenc
   }
 }
 
+TEST(WaitcheckStream, BranchStackInstructionsStopTheStream) {
+  // S_CBRANCH_I_FORK has no PC destination operand, so only its branch flag
+  // marks it as a control-flow transfer.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (uint32_t instruction : {
+             0xB86A0002u, // s_cbranch_i_fork vcc, 2
+             0x9480246Au, // s_cbranch_g_fork vcc, s[36:37]
+             0xBE802E22u, // s_cbranch_join s34
+         }) {
+      SCOPED_TRACE(testing::Message() << "arch=" << arch << " instruction=" << instruction);
+      const auto report = analyze({instruction}, arch);
+      ASSERT_TRUE(report.incomplete);
+      EXPECT_EQ(report.incomplete->offset, 0u);
+      EXPECT_EQ(report.instructions_analyzed, 0u);
+      EXPECT_NE(report.incomplete->reason.find("control flow"), std::string::npos)
+          << report.incomplete->reason;
+    }
+  }
+}
+
 TEST(WaitcheckStream, TrapTemporaryUsesAndOverwritesAreIncomplete) {
   for (uint32_t instruction : {0xbe84006cu, 0xbeec0004u}) {
     const auto report = analyze({instruction}, ROCJITSU_CODE_ARCH_CDNA3);

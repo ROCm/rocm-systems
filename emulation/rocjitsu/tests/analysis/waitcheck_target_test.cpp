@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -312,6 +313,7 @@ TEST(WaitcheckTarget, AtomicsDistinguishRegisterResultsFromMemoryDestinations) {
 }
 
 TEST(WaitcheckTarget, ImageAtomicsUseTheEncodedReturnControl) {
+  constexpr uint8_t kDeviceScope = 2;
   struct Case {
     rj_code_arch_t arch;
     uint32_t opcode;
@@ -323,13 +325,15 @@ TEST(WaitcheckTarget, ImageAtomicsUseTheEncodedReturnControl) {
                         Case{ROCJITSU_CODE_ARCH_RDNA3, 0xf0300100u, 14},
                         Case{ROCJITSU_CODE_ARCH_RDNA3_5, 0xf0300100u, 14},
                         Case{ROCJITSU_CODE_ARCH_RDNA4, 0xd0430000u, 0}}) {
-    for (bool returns : {false, true}) {
+    const bool split = c.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    for (uint8_t return_control = 0; return_control < (split ? 8 : 2); ++return_control) {
+      const uint8_t th = split ? return_control : 0;
+      const bool returns = split ? (th & amdgpu::GFX12_TH_ATOMIC_RETURN) != 0 : return_control != 0;
       SCOPED_TRACE(static_cast<int>(c.arch));
-      SCOPED_TRACE(returns);
-      const bool split = c.arch == ROCJITSU_CODE_ARCH_RDNA4;
-      const std::array<uint32_t, 3> words{c.opcode | (returns && !split ? 1u << c.glc_bit : 0u),
-                                          split ? (returns ? 0x00100000u : 0u) : 1u,
-                                          split ? 1u : 0u};
+      SCOPED_TRACE(return_control);
+      const std::array<uint32_t, 3> words{
+          c.opcode | (returns && !split ? 1u << c.glc_bit : 0u),
+          split ? (uint32_t{th} << 20) | (uint32_t{kDeviceScope} << 18) : 1u, split ? 1u : 0u};
       auto inst = decode(words, c.arch);
       ASSERT_NE(inst, nullptr);
       EXPECT_TRUE(inst->is_memory_wait_producer());
