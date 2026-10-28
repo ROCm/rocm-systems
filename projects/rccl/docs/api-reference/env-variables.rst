@@ -215,6 +215,36 @@ in the following table.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 
+    * - | ``NCCL_RMA_DISABLE``
+        | Disables the RMA proxy, the network path for one-sided RMA. The proxy
+          is never connected and windows are not registered with it.
+      - | ``0``: RMA proxy enabled (default).
+        | ``1``: RMA proxy disabled.
+
+    * - | ``NCCL_ENV_PLUGIN``
+        | Loads an external environment plugin that intercepts all RCCL parameter
+          lookups. See :ref:`using-rccl-env-plugin` for full details.
+      - | Path to a plugin ``.so`` file, a bare name expanded to
+          ``librccl-env-<name>.so``, or ``none`` to disable.
+        | Default: unset (tries ``librccl-env.so``, then reads from the process
+          environment).
+
+    * - | ``NCCL_ENV_JSON_FILE``
+        | Path to a JSON configuration file used by ``librccl-env-json.so``.
+          Has no effect unless ``NCCL_ENV_PLUGIN`` points to that plugin.
+      - | Path to a flat JSON file mapping variable names to string values.
+          Relative paths are resolved from the application's working directory.
+        | Default: unset (falls back to ``getenv()`` for all lookups).
+
+    * - | ``RCCL_HIERARCHICAL_LAZY_INIT``
+        | Controls when a communicator of eight or more nodes builds the
+          sub-communicators that hierarchical AllGather uses. Ignored when
+          ``RCCL_HIERARCHICAL_REDUCE_SCATTER=1``. All ranks in a communicator
+          must use the same value.
+      - | ``0``: Build them during communicator initialization (default).
+        | ``1``: Build them on the first AllGather eligible for hierarchical
+          AllGather, outside graph capture.
+
 Logging and debugging
 =====================
 
@@ -236,6 +266,7 @@ in the following table.
         | ``ERROR``: These messages report when a fatal condition has occurred in RCCL and the operation can't continue.
         | ``VERSION``: ``librccl`` version info is printed during the initialization phase.
         | ``WARN``: Prints warnings about unusual conditions that could lead to unexpected results.
+        | ``ATTN``: Prints ``WARN`` messages plus notices that need attention, such as a plugin named in ``NCCL_*_PLUGIN`` that could not be loaded or initialized. ``INFO`` also prints these notices.
         | ``INFO``: Prints standard logging messages about status and operations performed.
         | ``ABORT``: Unused.
         | ``TRACE``: Prints trace-level logging of function calls and parameters. Only active when ``librccl`` is built using ``ENABLE_TRACE``.
@@ -271,7 +302,7 @@ in the following table.
 
     * - | ``NCCL_DEBUG_TIMESTAMP_LEVELS``
         | The timestamp levels for ``NCCL_DEBUG``.
-      - | A set of ``NCCL_DEBUG`` levels can have a timestamp prepended set as a comma-separated list which can be inverted using the ``^`` prefix. The default set is ``WARN``.
+      - | A set of ``NCCL_DEBUG`` levels can have a timestamp prepended set as a comma-separated list which can be inverted using the ``^`` prefix. The default set is ``WARN`` and ``ATTN``.
 
     * - | ``NCCL_DEBUG_TIMESTAMP_FORMAT``
         | The timestamp format for ``NCCL_DEBUG``.
@@ -505,6 +536,55 @@ collected in the following table.
       - | ``0``: Use topology and architecture defaults (default).
         | ``1``: Force LL128 available.
 
+    * - | ``RCCL_DIRECT_ALLGATHER_DISABLE``
+        | Controls the direct AllGather algorithm. Because the algorithm builds a
+          full point-to-point mesh, its queue-pair footprint grows with the square
+          of the job size.
+      - | ``-1``: Automatic (default). Not selected on AINIC above 8 nodes.
+        | ``0``: Skips the automatic AINIC check. The size, architecture and
+          CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
+        | Any other value: Disabled.
+
+    * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
+        | Sets the smallest AllGather, in bytes per rank (``sendcount`` x type
+          size), that can select hierarchical AllGather, so that small startup
+          AllGathers such as PyTorch DDP's 8-byte one stay on the default path.
+          ``rccl-tests`` reports the total size, this value times the number of
+          ranks. All ranks in a communicator must use the same value.
+      - | Bytes per rank.
+        | Default: ``16``.
+        | ``0``: No lower bound.
+
+    * - | ``RCCL_HIERARCHICAL_REDUCE_SCATTER_MIN_BYTES_PER_RANK``
+        | Sets the smallest ReduceScatter, in bytes per rank (``recvcount`` x
+          type size), that can select hierarchical ReduceScatter.
+      - | Bytes per rank.
+        | Default: ``16``.
+        | ``0``: No lower bound.
+
+    * - | ``NCCL_TUNER_CONFIG_FILE``
+        | Specifies the CSV configuration file path for RCCL's built-in AMD CSV
+          tuner. If the variable names an existing file, RCCL uses that CSV to
+          override algorithm/protocol tuning decisions; otherwise RCCL falls back
+          to its ``rccl_tuner*.csv`` search path logic.
+      - | A filesystem path to an existing CSV tuner configuration file.
+        | If unset, empty, or pointing to a non-existent file, RCCL ignores the
+          variable and searches for ``rccl_tuner_<arch>.csv`` or
+          ``rccl_tuner.csv`` in its built-in tuner locations; if none is found,
+          the CSV tuner is not activated.
+
+    * - | ``RCCL_TUNER_EMBEDDED_CONFIG``
+        | Controls whether the built-in CSV tuner uses the tuning configurations
+          compiled into ``librccl.so`` from the source tree's ``tuner/*.csv``.
+          These are the stock defaults, so no file has to be staged on each node.
+          ``NCCL_TUNER_CONFIG_FILE`` and a CSV in ``<librccl.so dir>/tuner/`` or
+          ``${ROCM_PATH}/share/rccl/tuner/`` take precedence over them. To
+          disable the tuner entirely, embedded or not, use
+          ``NCCL_TUNER_PLUGIN=none``.
+      - | ``1``: Use the embedded configurations when no file is found (default).
+        | ``0``: Ignore the embedded configurations. File-based tuning is
+          unaffected.
+
 Network and topology
 ====================
 
@@ -552,6 +632,31 @@ in the following table.
         | Defines the Global ID index used in RoCE mode.
       - | Integer value. Default: ``-1``.
         | See the InfiniBand ``show_gids`` command for valid values.
+
+    * - | ``NCCL_IB_QUERY_PORT_SPEED``
+        | Controls whether RCCL queries the extended port speed
+          (``ibv_query_port`` active speed extension) for bandwidth reporting.
+          Disabling it falls back to the legacy ``active_speed``/
+          ``active_width`` computation and disables runtime speed-change
+          detection.
+      - | ``1``: Query the extended speed (default).
+        | ``0``: Use the legacy speed field only.
+
+    * - | ``NCCL_IB_SUBNET_AWARE_ROUTING``
+        | Enables subnet-aware device selection. When a peer's GID subnet does
+          not match the default device's RoCE ports, RCCL searches other locally
+          merged devices for one whose ports do match, so the connection uses a
+          device on the same subnet as the peer. Only meaningfully exercised on a
+          multi-subnet RoCE fabric (for example, behind an IB router); on a
+          single-subnet cluster the default device already matches and this is a
+          no-op.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_IB_SUBNET_PREFIX_LEN``
+        | Prefix length, in bits, used when comparing two GIDs' subnets for
+          ``NCCL_IB_SUBNET_AWARE_ROUTING``.
+      - | Integer value, bits. Default: ``24``.
 
     * - | ``NCCL_IB_ADDR_FAMILY``
         | Selects which IP address family RCCL uses when dynamically choosing an
@@ -992,6 +1097,21 @@ in the following table.
         | available NIC bandwidth and rank count.
       - | Integer value, ``1`` to ``MAXCHANNELS`` (default: unset/auto-tuned).
         | Values ``<= 0`` are ignored and a warning is logged.
+        | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
+        | with ``ncclInvalidArgument`` at communicator initialization.
+
+    * - | ``NCCL_P2P_MAX_PEERS``
+        | Limits the maximum number of peer ranks considered for P2P channel
+          allocation in a communicator. When unset, RCCL leaves ``maxP2pPeers``
+          undefined in config and uses the communicator size as the effective
+          limit. Read in two places: the per-peer channel tiling enabled by
+          ``RCCL_SATURATE_P2P_NCHANNELS`` (on by default for ``gfx1250`` only),
+          and the multi-node per-peer reduction (requires more than one node and
+          ``NCCL_NCHANNELS_PER_NET_PEER`` unset).
+      - | Integer value, ``1`` to the number of ranks.
+        | Default: unset (uses the communicator size).
+        | Values ``<= 0`` are ignored and a message is logged.
+        | Values greater than the communicator size are capped to it.
 
     * - | ``NCCL_RINGS``
         | Defines a user-specified custom ring topology for RCCL. When set,
@@ -1016,6 +1136,43 @@ in the following table.
       - | Ring topology/remapping specification string in the ``ringBase``
           format consumed by ``parseGraph`` via ``parseRome4P2H``.
         | Default: unset (uses built-in ``romeTopoModels[i].ringBase``).
+
+    * - | ``NCCL_GIN_PLUGIN``
+        | Selects external GIN (GPU-Initiated Networking) plugin candidates.
+          RCCL reads this as a comma-separated list, tries each token as a
+          plugin name, and if unset uses ``libnccl-gin.so`` as the default
+          external GIN plugin candidate before also considering NET-provided
+          GIN support and internal GIN plugins. See :ref:`using-rccl-gin-plugin`
+      - | Comma-separated list of plugin names/paths or short names.
+          A short name is resolved against the ``librccl-gin`` prefix, so
+          ``example`` loads ``librccl-gin-example.so``.
+        | ``none``: Suppresses the external plugin selection.
+        | A plugin reporting the proxy device type is superseded by the
+          built-in GIN proxy.
+
+    * - | ``NCCL_GIN_ENABLE``
+        | Enables GPU-Initiated Networking (GIN). When enabled, RCCL may use
+          a GIN backend if one initializes successfully.
+      - | ``1``: Register GIN backends (default).
+        | ``0``: Disable GIN; GIN reports as unsupported.
+
+    * - | ``NCCL_GIN_TYPE``
+        | Selects the GPU-Initiated Networking (GIN) backend. Unset or
+          ``-1`` leaves backend selection automatic. In RCCL on AMD, the
+          net_ib GDAKI path is disabled, so the built-in IB GIN path uses
+          PROXY instead.
+      - | Unset or ``-1``: Automatic backend selection (default).
+        | ``2``: PROXY.
+        | ``4``: ROCSHMEM_GDA plugin (when built and device probe succeeds).
+        | ``5``: ANVIL_SDMA plugin (when built and device probe succeeds).
+        | ``3`` (GDAKI): Upstream NCCL value, not supported on AMD net_ib.
+
+    * - | ``NCCL_RMA_PLUGIN``
+        | Selects external one-sided RMA plugins, which are also the backend
+          the built-in GIN proxy forwards to. See :ref:`using-rccl-rma-plugin`
+      - | Comma-separated list of paths or short names.
+          A short name is resolved against the ``librccl-rma`` prefix, so
+          ``example`` loads ``librccl-rma-example.so``.
 
     * - | ``RCCL_MODEL_MATCHING_DISABLE``
         | Skips all preset topology matching so RCCL uses its generic graph
@@ -1534,6 +1691,19 @@ variables are collected in the following table.
       - | ``0``: JSON output (default).
         | ``1``: Prometheus textfile output.
 
+    * - | ``NCCL_INSPECTOR_PROM_DUMP_STATS``
+        | Enables additional per-device ring-buffer counters in the Prometheus
+        | output. Only meaningful with ``NCCL_INSPECTOR_PROM_DUMP=1`` or
+        | ``NCCL_INSPECTOR_OTEL_VERBOSE=1``.
+      - | ``0``: Disabled (default).
+        | ``1``: Include per-device ring-buffer stats.
+
+    * - | ``NCCL_INSPECTOR_CLUSTER``
+        | A string label attached to every exported metric as the ``cluster``
+        | dimension. Useful for distinguishing runs in shared dashboards.
+      - | Any string value.
+        | Default: unset (no cluster label).
+
     * - | ``NCCL_INSPECTOR_DUMP_THREAD_ENABLE``
         | Enables the internal dump thread. When disabled, output is only
         | written at communicator teardown, regardless of the configured
@@ -1599,3 +1769,206 @@ variables are collected in the following table.
         | disabled, events are dropped once a pool is exhausted.
       - | ``0``: Fixed-size pools.
         | ``1``: Pools grow on demand (default).
+
+    * - | ``NCCL_INSPECTOR_OTEL_EXPORT``
+        | Exports metrics over OTLP/HTTP instead of writing them to files. The
+        | Inspector emits one format only, and this setting takes precedence
+        | over ``NCCL_INSPECTOR_PROM_DUMP``.
+      - | ``0``: Disabled; JSON or Prometheus files are written (default).
+        | ``1``: Enabled, posting OTLP/JSON to the endpoint below.
+
+    * - | ``NCCL_INSPECTOR_OTEL_VERBOSE``
+        | Selects per-collective metric points instead of aggregated ones. The
+        | per-collective form additionally reports
+        | ``nccl_collective_algobw_gbs`` and the per-device ring-buffer
+        | counters described under ``NCCL_INSPECTOR_PROM_DUMP_STATS``.
+      - | ``0``: Aggregated (default).
+        | ``1``: Per collective.
+
+    * - | ``OTEL_EXPORTER_OTLP_METRICS_ENDPOINT``
+        | Destination for the OTLP metric export. Also accepts
+        | ``OTEL_EXPORTER_OTLP_ENDPOINT``. ``/v1/metrics`` is appended to
+          whichever variable is used when its URL carries no path.
+      - | Plaintext ``http://`` URL. ``https://`` is unsupported and disables
+          export, so use a local collector when the telemetry is sensitive.
+        | Default: ``http://localhost:4318/v1/metrics``.
+
+    * - | ``OTEL_EXPORTER_OTLP_METRICS_HEADERS``
+        | Extra headers attached to every OTLP request. Also accepts
+        | ``OTEL_EXPORTER_OTLP_HEADERS``.
+      - | Comma-separated ``key=value`` list.
+        | Sent verbatim over the plaintext connection above, so do not put a
+          credential here unless the collector is local.
+
+Profiler plugin
+===============
+
+An external profiler plugin loaded through ``NCCL_PROFILER_PLUGIN`` receives the
+event types selected by ``NCCL_PROFILE_EVENT_MASK``. RCCL 2.31 raises the plugin
+interface to v7, which adds two things a plugin can consume:
+
+* **Per-kernel barrier phases.** Enabling ``ncclProfileKernelPhase`` reports an
+  ``initial_sync``, ``compute`` and ``final_sync`` span per kernel channel, each
+  timed by the GPU globaltimer. A phase is a child of a kernel-channel event, so
+  RCCL enables ``ncclProfileKernelCh`` implicitly whenever the phase bit is set.
+  Only symmetric kernels emit phases, which requires buffers registered as
+  symmetric windows. Regular collective and point-to-point kernels report
+  kernel-channel events without phases.
+* **Symmetric-kernel variant metadata.** Collective events carry the symmetric
+  kernel variant that ran and a flag marking whether the collective was served
+  symmetrically. The in-tree example surfaces these as the ``KernelVariant`` and
+  ``IsSymColl`` arguments of its ``COLL`` trace events.
+
+Both are v7-only: the v5 and v6 compatibility layers clear the phase bit, so a
+plugin must export ``ncclProfiler_v7`` to receive them.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_PROFILER_PLUGIN``
+        | Selects an external profiler plugin.
+      - | Path or short name.
+        | A short name is resolved against the ``librccl-profiler`` prefix, so
+          ``example`` loads ``librccl-profiler-example.so``.
+
+    * - | ``NCCL_PROFILE_EVENT_MASK``
+        | Bitmask of the event types the plugin is offered.
+      - | ``1``: Group
+        | ``2``: Collective
+        | ``4``: Point-to-point
+        | ``8``: Proxy op
+        | ``16``: Proxy step
+        | ``32``: Proxy control
+        | ``64``: Kernel channel
+        | ``128``: Net plugin
+        | ``256``: Group API
+        | ``512``: Collective API
+        | ``1024``: Point-to-point API
+        | ``2048``: Kernel launch
+        | ``4096``: CE collective
+        | ``8192``: CE synchronization
+        | ``16384``: CE batch
+        | ``32768``: Kernel phase (v7, symmetric kernels only; implies kernel
+          channel)
+        | ``65536``: RCCL proxy diagnostics
+        | Combine by adding, so ``32771`` selects group, collective and kernel
+          phase. Default: ``0``.
+
+Algorithm dispatch and tuning (gfx1250 / MI450)
+================================================
+
+The following variables control per-architecture algorithm and protocol dispatch,
+including the DDA fabric tiers, Copy Engine (CE) AllReduce, and the per-architecture
+threshold table introduced for gfx1250.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``RCCL_IGNORE_ARCH_TABLE``
+        | Controls whether the per-architecture dispatch table
+          (``rcclArchThresholds``) is used to set DDA, CE, and symmetric-kernel
+          thresholds, or whether pre-table compile-time constants are used instead.
+          When the table is active (``0``), each threshold variable below
+          (``RCCL_DDA_THRESHOLD``, ``RCCL_DDA_LL_THRESHOLD``, etc.) defaults to
+          ``-1`` (unset) and is resolved from the table at runtime; setting any of
+          those variables explicitly still overrides the table.
+      - | ``0``: Use the per-architecture table for threshold defaults (default).
+        | ``1``: Ignore the table; fall back to pre-table compile-time constants.
+          This matches the behavior before the arch table was introduced.
+
+    * - | ``RCCL_DDA_THRESHOLD``
+        | Upper bound in bytes for the DDA VMM/Simple tier per collective.
+          Messages above this size exit DDA and fall through to Ring, CE, or the
+          symmetric kernel. When set to ``-1`` (default), the value is resolved
+          from the per-architecture table (``ddaVmmMax`` field). Set
+          ``RCCL_IGNORE_ARCH_TABLE=0`` for the table to take effect.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Disable the DDA VMM tier for all collectives.
+        | ``N`` (bytes): Use ``N`` as the VMM tier ceiling for all collectives,
+          overriding the table. Pre-table default: ``134217728`` (128 MiB).
+
+    * - | ``RCCL_DDA_LL_THRESHOLD``
+        | Upper bound in bytes for the DDA LL (low-latency) tier. Messages at or
+          below this size use the LL protocol; larger messages move to LL128 or VMM.
+          When ``-1`` (default), resolved from ``ddaLLMax`` in the arch table.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Disable the DDA LL tier.
+        | ``N`` (bytes): Use ``N`` as the LL tier ceiling, overriding the table.
+          Pre-table default: ``65536`` (64 KiB).
+
+    * - | ``RCCL_DDA_LL128``
+        | Enables the DDA LL128 protocol tier. When ``-1`` (auto), LL128 is
+          enabled only for architectures whose per-arch table has a non-zero
+          ``ddaLL128Max`` entry (currently gfx1250 only). ``1`` forces the tier
+          on but still reads its ceiling from the arch table; ``0`` disables the
+          tier on all architectures.
+      - | ``-1``: Auto-enabled only when the arch table has non-zero LL128
+          thresholds (default).
+        | ``0``: Disabled on all architectures.
+        | ``1``: Force-enabled; ceiling is still read from the arch table.
+
+    * - | ``RCCL_DDA_LL128_THRESHOLD``
+        | Upper bound in bytes for the DDA LL128 tier. Messages above this size
+          move to VMM/Simple or Ring. When ``-1`` (default), resolved from
+          ``ddaLL128Max`` in the arch table. When set explicitly, it takes
+          precedence over ``RCCL_DDA_LL128=0``.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Disable the DDA LL128 tier.
+        | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the
+          table. Pre-table default: ``0`` (LL128 tier was off before the arch
+          table).
+
+    * - | ``RCCL_CE_ALLREDUCE``
+        | Enables the Copy Engine (CE) registered-window AllReduce path. When
+          ``-1`` (auto), CE AllReduce is on by default for gfx1250 communicators
+          that meet all eligibility criteria, and off for all other architectures.
+      - | ``-1``: Auto — enabled on gfx1250, disabled elsewhere (default).
+        | ``0``: Disabled on all architectures.
+        | ``1``: Force-enabled (subject to other eligibility checks such as
+          buffer registration and message size).
+
+    * - | ``RCCL_FORCE_CE_ALLREDUCE``
+        | Bypasses the ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``) requirement
+          for CE AllReduce, allowing CE to run without symmetric window
+          registration. Does not override the staging buffer size cap
+          (``RCCL_CE_AR_MAX_MSG_BYTES`` or the arch table ``ceNonRegMax[AR]``).
+          When ``-1`` (auto), follows the same gfx1250-default logic as
+          ``RCCL_CE_ALLREDUCE``.
+      - | ``-1``: Auto — same default as ``RCCL_CE_ALLREDUCE`` (default).
+        | ``0``: Disabled.
+        | ``1``: Force-enabled (CTA_POLICY check bypassed).
+
+    * - | ``RCCL_CE_AR_MAX_MSG_BYTES``
+        | Overrides the CE 2-shot AllReduce message size cap. When ``-1``
+          (default), the cap is read from ``ceNonRegMax[AllReduce]`` in the
+          per-arch table. This variable sizes the selector only; it does not
+          affect the staging buffer allocation (see ``RCCL_CE_AR_STAGING_BYTES``).
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce size cap.
+
+    * - | ``RCCL_CE_AR_REG_MAX_MSG_BYTES``
+        | Overrides the CE registered-window AllReduce message size cap. When
+          ``-1`` (default), the cap is read from ``ceRegMax[AllReduce]`` in the
+          per-arch table. This is the upper bound for the path where both send
+          and receive buffers are in symmetric windows.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``N`` (bytes): Use ``N`` as the registered AllReduce size cap.
+
+    * - | ``RCCL_CE_AR_STAGING_BYTES``
+        | Overrides the total allocation size of the CE AllReduce staging buffer
+          (``ceARTmpBuf``). When ``-1`` (default), the buffer is allocated at the
+          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
+          this reduces pipelining overhead for large messages but raises per-rank
+          GPU memory usage. The selector cap is controlled separately by
+          ``RCCL_CE_AR_MAX_MSG_BYTES``.
+      - | ``-1``: Use the compile-time default of 16 MiB (default).
+        | ``N`` (bytes): Set the per-slot payload capacity to ``N``;
+          ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
