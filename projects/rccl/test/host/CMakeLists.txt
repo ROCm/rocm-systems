@@ -1529,9 +1529,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
     # add_file_unique() renames this one. Re-check after any source-list reorder.
     RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc"
-    # plugin/rma.cc is the first rma.cc in SRC_FILES (src/CMakeLists.txt lists it
-    # before rma/rma.cc), so add_file_unique() keeps its name; rma/rma.cc is the
-    # one renamed to rma_tmp.cc above.
+    # Per the note above, plugin/rma.cc comes first and so keeps its own name.
     RMA_PLUGIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma.cc"
     # rma_ce.cc has no basename collision, so it keeps its own name.
     RMA_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc"

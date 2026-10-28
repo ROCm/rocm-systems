@@ -75,7 +75,6 @@ struct FakeRma {
   static int ndev;
   static void* lastCtx;      // the context init() handed out, or null once freed
   static void* finalizedCtx; // the pointer finalize() got; kNotCalled if never
-  static bool initNullFn;    // leave vtable.init null, as an unloaded slot would
 
   static void* kNotCalled() { return reinterpret_cast<void*>(~std::uintptr_t(0)); }
 
@@ -85,7 +84,6 @@ struct FakeRma {
     ndev = 1;
     lastCtx = nullptr;
     finalizedCtx = kNotCalled();
-    initNullFn = false;
   }
 
   static ncclResult_t Init(void** ctx, uint64_t /*commId*/, ncclDebugLogger_t) {
@@ -114,7 +112,7 @@ struct FakeRma {
   static ncclRma_t vtable() {
     ncclRma_t r{};
     r.name = "FakeRma";
-    r.init = initNullFn ? nullptr : &Init;
+    r.init = &Init;
     r.devices = &Devices;
     r.finalize = &Finalize;
     return r;
@@ -129,7 +127,6 @@ ncclResult_t FakeRma::devicesResult = ncclSuccess;
 int FakeRma::ndev = 1;
 void* FakeRma::lastCtx = nullptr;
 void* FakeRma::finalizedCtx = nullptr;
-bool FakeRma::initNullFn = false;
 
 class RmaPluginInitTest : public ::testing::Test {
  protected:
@@ -150,12 +147,16 @@ class RmaPluginInitTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    // Happy-path tests leave the context with the comm; free any leftover so a
-    // missed finalize cannot leak into later cases.
-    if (comm_->rmaContext) {
-      std::free(comm_->rmaContext);
-      comm_->rmaContext = nullptr;
+    // Reclaim the context only when the plugin never finalized it. Finalize()
+    // nulls FakeRma::lastCtx as it frees, so keying cleanup off lastCtx (not
+    // comm_->rmaContext) avoids a double-free if a regression finalizes the
+    // context yet leaves comm_->rmaContext dangling, and still frees a context
+    // that a regression cleared from the comm without finalizing.
+    if (FakeRma::lastCtx) {
+      std::free(FakeRma::lastCtx);
+      FakeRma::lastCtx = nullptr;
     }
+    comm_->rmaContext = nullptr;
     FakeRma::reset();
   }
 
@@ -190,8 +191,10 @@ TEST_F(RmaPluginInitTest, FinalizesWhenDevicesFailsAfterInit) {
   EXPECT_EQ(FakeRma::initCalls, 1);
   EXPECT_EQ(FakeRma::devicesCalls, 1);
   EXPECT_EQ(FakeRma::finalizeCalls, 1);
-  // finalize() was handed the context init() produced, and the comm no longer
-  // holds a dangling pointer to it.
+  // finalize() actually ran (finalizedCtx moved off its sentinel). Finalize()
+  // only nulls lastCtx when handed that exact pointer, so lastCtx == nullptr is
+  // the proof it freed the context init() produced; the comm no longer holds a
+  // dangling pointer to it either.
   EXPECT_NE(FakeRma::finalizedCtx, FakeRma::kNotCalled());
   EXPECT_EQ(comm_->rmaContext, nullptr);
   EXPECT_EQ(FakeRma::lastCtx, nullptr);
