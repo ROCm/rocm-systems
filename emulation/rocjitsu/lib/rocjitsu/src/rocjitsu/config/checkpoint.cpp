@@ -32,23 +32,28 @@ namespace {
 /// operands, so reading them back as TTMPs needs no per-architecture test.
 constexpr uint32_t kLegacyTtmpSgprBase = 108;
 
-flatbuffers::Offset<flatbuffers::Vector<uint8_t>>
+util::FailureOr<flatbuffers::Offset<flatbuffers::Vector<uint8_t>>>
 serialize_vgpr_block(flatbuffers::FlatBufferBuilder &builder, const amdgpu::ComputeUnitCore &cu,
-                     uint32_t base, uint32_t lane_count) {
+                     uint32_t base, uint32_t lane_count, util::DiagnosticEmitter emit_error) {
   if ((lane_count != 32 && lane_count != 64) || lane_count > cu.vgpr_storage_lane_count())
-    throw std::runtime_error("Invalid VGPR checkpoint lane count");
+    return emit_error.emit() << "Invalid VGPR checkpoint lane count";
   const size_t register_bytes = static_cast<size_t>(lane_count) * sizeof(uint32_t);
   const size_t block_bytes = static_cast<size_t>(cu.vgpr_allocation_block_size()) * register_bytes;
   uint8_t *serialized = nullptr;
   const auto offset = builder.CreateUninitializedVector<uint8_t>(block_bytes, &serialized);
   size_t offset_bytes = 0;
+  bool invalid_storage = false;
   cu.for_each_raw_vgpr(base, cu.vgpr_allocation_block_size(), [&](std::span<const uint32_t> lanes) {
-    if (lanes.size() < lane_count)
-      throw std::runtime_error("VGPR storage is narrower than the checkpoint wave");
+    if (lanes.size() < lane_count) {
+      invalid_storage = true;
+      return;
+    }
     std::ranges::copy_n(reinterpret_cast<const uint8_t *>(lanes.data()), register_bytes,
                         serialized + offset_bytes);
     offset_bytes += register_bytes;
   });
+  if (invalid_storage)
+    return emit_error.emit() << "VGPR storage is narrower than the checkpoint wave";
   return offset;
 }
 
@@ -207,11 +212,12 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
 
 } // namespace
 
-void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
-                     const simdojo::SimulationEngine::Config &engine_config,
-                     uint32_t cpu_dispatch_threads, uint32_t cpu_thread_budget,
-                     std::span<const ExecutionThreadChoice> thread_allocations,
-                     bool legacy_auto_dispatch, int32_t async_helper_threads) {
+util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
+                             const simdojo::SimulationEngine::Config &engine_config,
+                             uint32_t cpu_dispatch_threads, util::DiagnosticEmitter emit_error,
+                             uint32_t cpu_thread_budget,
+                             std::span<const ExecutionThreadChoice> thread_allocations,
+                             bool legacy_auto_dispatch, int32_t async_helper_threads) {
   flatbuffers::FlatBufferBuilder builder(1024 * 1024);
 
   // Serialize compute unit states across all XCDs and their shader engines.
@@ -221,8 +227,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
       for (uint32_t ci = 0; ci < se->num_compute_units(); ++ci) {
         auto *cu = se->compute_unit(ci);
         if (cu->gws_device().tracked_process_count() != 0)
-          throw std::runtime_error("Cannot checkpoint GWS resource state: the shared table "
-                                   "is not part of the checkpoint format");
+          return emit_error.emit() << "Cannot checkpoint GWS resource state: the shared table "
+                                      "is not part of the checkpoint format";
         std::vector<flatbuffers::Offset<fb::WavefrontState>> wf_offsets;
         for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
           const auto *w = cu->wf(i);
@@ -247,16 +253,19 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           // it would make an ordinary throttled queue unable to checkpoint, and
           // blame a debugger that is not attached.
           if (w->in_trap_handler() || w->debug_stopped())
-            throw std::runtime_error(
-                "Cannot checkpoint " + cu->name() + " wf" + std::to_string(w->wf_id()) +
-                ": the wave is in a trap handler or stopped for a debugger, and that state "
-                "is not part of the checkpoint format");
+            return emit_error.emit()
+                   << "Cannot checkpoint " << cu->name() << " wf" << w->wf_id()
+                   << ": the wave is in a trap handler or stopped for a debugger, and that state "
+                      "is not part of the checkpoint format";
 
           std::vector<uint32_t> sgprs(w->num_sgprs());
           cu->sgpr_file().copy_to(w->sgpr_alloc().base, w->num_sgprs(),
                                   std::as_writable_bytes(std::span(sgprs)));
           auto sgprs_vec = builder.CreateVector(sgprs);
-          auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base, w->wf_size());
+          util::FailureOr<flatbuffers::Offset<flatbuffers::Vector<uint8_t>>> vgprs_vec =
+              serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base, w->wf_size(), emit_error);
+          if (vgprs_vec.failed())
+            return util::Result::failure();
 
           // TTMPs are their own file, so they are not covered by sgprs_vec.
           std::array<uint32_t, 16> ttmps{};
@@ -274,7 +283,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
           auto wfs = fb::CreateWavefrontState(
               builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(), w->vcc(), w->m0(),
-              w->is_halted(), w->status_raw(), sgprs_vec, vgprs_vec, w->mode_raw(),
+              w->is_halted(), w->status_raw(), sgprs_vec, vgprs_vec.value(), w->mode_raw(),
               w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec, w->kernel_wave_size(),
               w->wf_size(), w->setreg_vgpr_msb_hazard());
           wf_offsets.push_back(wfs);
@@ -324,8 +333,15 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
   // Write to file.
   std::ofstream f(path, std::ios::binary);
   if (!f.is_open())
-    throw std::runtime_error("Cannot open checkpoint file for writing: " + path);
+    return emit_error.emit() << "Cannot open checkpoint file for writing: " << path;
   f.write(reinterpret_cast<const char *>(builder.GetBufferPointer()), builder.GetSize());
+  f.flush();
+  if (!f)
+    return emit_error.emit() << "Failed to write checkpoint file: " << path;
+  f.close();
+  if (!f)
+    return emit_error.emit() << "Failed to close checkpoint file: " << path;
+  return util::Result::success();
 }
 
 LoadedConfig restore_checkpoint(const std::string &path) {
