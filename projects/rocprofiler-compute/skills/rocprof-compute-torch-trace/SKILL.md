@@ -86,9 +86,10 @@ launch statistics, so it also shows which operators are worth opening.
 
 The Triton equivalent is `--list-operators triton`.
 
-`--list-operators user` lists each user-defined ROCTx region. Unlike
-framework-based selection, which drops non-matching child nodes,
-user-defined ROCTx region selection includes everything in that region.
+`--list-operators user` lists each user-defined ROCTx region. A framework
+match keeps that backend's in-scope descendants and drops children of
+other backends. A user-defined ROCTx region match keeps the full subtree,
+including nested framework work.
 
 ## 4. Filter to an operator
 

@@ -966,10 +966,10 @@ starts the next selector:
 User-defined ROCTx regions
 --------------------------
 
-``user`` selects a user-defined ROCTx region, not an ML API. Unlike
-framework-based selection, which drops non-matching child nodes, a matched
-user-defined ROCTx region keeps every nested operator and kernel. Work
-outside that region is ignored.
+``user`` selects a user-defined ROCTx region, not an ML API. A framework
+match keeps that backend's in-scope descendants and drops children of
+other backends. A user-defined ROCTx region match keeps the full subtree,
+including nested framework work. Work outside that region is ignored.
 
 ``--list-operators user`` and ``--operator user:PATTERN`` use that rule.
 A framework pattern given with ``user:`` adds those matching
