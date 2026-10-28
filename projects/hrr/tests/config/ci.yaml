@@ -24,7 +24,8 @@ paths:
     - .github/workflows/hrr-gpu.yml
   # A change under any of these also runs the capture-enabled build and the GPU
   # suite. hip_runtime_api.h is deliberately absent: almost every HIP API change
-  # touches it, and the API check job already checks HRR against it.
+  # touches it, and the script tests job (test_generated_files_current.py)
+  # already regenerates HRR from it and compares.
   # amdhip.def.in is absent for the same reason (cpu only).
   capture:
     - projects/clr/hipamd/src/hrr/
