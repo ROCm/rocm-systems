@@ -27,6 +27,7 @@ set(TEST_SRC
     hipClusterLaunch.cc
     cluster_class.cc
     cluster_split_barrier.cc
+    hipClusterStreamCapture.cc
 )
 
 # Append it to the list
