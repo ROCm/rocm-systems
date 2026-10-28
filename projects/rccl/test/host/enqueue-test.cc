@@ -2446,10 +2446,12 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceSt
                                                   : "recordOther");
     return hipSuccess;
   });
-  ScopedHook advance(g_ncclStreamAdvanceToEvent, [&](struct ncclCudaGraph graph, hipStream_t stream, hipEvent_t event) {
-    EXPECT_EQ(kAddonGraphId, graph.graphId);
+  ScopedHook advanceToEvent(g_ncclStreamAdvanceToEvent, [](struct ncclCudaGraph, hipStream_t, hipEvent_t) {
+    return ncclInternalError;
+  });
+  ScopedHook advance(g_ncclStreamAdvanceToStream, [&](hipStream_t stream, hipStream_t source) {
     EXPECT_EQ(kAddonDeviceStream, stream);
-    EXPECT_EQ(kAddonScratchEvent, event);
+    EXPECT_EQ(kAddonStream, source);
     calls.push_back("advance");
     return ncclSuccess;
   });
@@ -2466,9 +2468,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceSt
     return ncclSuccess;
   }));
 
-  EXPECT_EQ((std::vector<std::string>{"acquire", "wait", "launch", "recordDone", "recordScratch", "advance",
-                                      "release"}),
-            calls);
+  EXPECT_EQ((std::vector<std::string>{"acquire", "wait", "launch", "recordDone", "advance", "release"}), calls);
+  EXPECT_EQ(0, advanceToEvent.calls);
 }
 
 TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithoutStreamOrdering_WaitsOnAndRecordsTheSerialEvent) {
@@ -2545,8 +2546,7 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedLaunchFailed_StillReleasesTheDevice
                        return ncclSuccess;
                      });
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
-  ScopedHook advance(g_ncclStreamAdvanceToEvent,
-                     [](struct ncclCudaGraph, hipStream_t, hipEvent_t) { return ncclInternalError; });
+  ScopedHook advance(g_ncclStreamAdvanceToStream, [](hipStream_t, hipStream_t) { return ncclInternalError; });
   ScopedHook release(g_strongStreamRelease,
                      [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
 
@@ -2557,6 +2557,95 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedLaunchFailed_StillReleasesTheDevice
   EXPECT_EQ(0, record.calls);
   EXPECT_EQ(0, advance.calls);
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ===========================================================================
+// ncclLaunchFinish fast-forward of deviceStream under capture: a single user stream reads the
+// launch stream's frontier directly, several user streams go through finishedEvent.
+// ===========================================================================
+
+namespace {
+hipStream_t const kSecondUserStream = reinterpret_cast<hipStream_t>(0x2B5);
+
+struct CapturedLaunchFinish {
+  CapturingAddonComm ac{/*graphStreamOrdering=*/1};
+  std::unique_ptr<ncclKernelPlan> plan{new ncclKernelPlan{}};
+  ncclCudaStreamList streams[2] = {};
+  explicit CapturedLaunchFinish(int numStreams) {
+    struct ncclKernelPlanner* planner = &ac.c()->planner;
+    planner->capturingGraph = ncclCudaGraphNone(ac.c()->config.graphUsageMode);
+    planner->capturingGraph.graphId = kAddonGraphId;
+    streams[0].stream = kAddonStream;
+    if (numStreams == 2) {
+      streams[0].next = &streams[1];
+      streams[1].stream = kSecondUserStream;
+    }
+    planner->streams = &streams[0];
+    planner->numStreams = numStreams;
+    ncclIntruQueueEnqueue(&planner->planQueue, plan.get());
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, LaunchFinish_CapturedSingleStream_AdvancesDeviceStreamToTheLaunchStream) {
+  CapturedLaunchFinish lf(/*numStreams=*/1);
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t event, hipStream_t stream) {
+    EXPECT_EQ(kAddonScratchEvent, event);
+    EXPECT_EQ(kAddonStream, stream);
+    return hipSuccess;
+  });
+  ScopedHook acquired(g_ncclStrongStreamAcquiredWorkStream,
+                      [](struct ncclCudaGraph graph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                        EXPECT_EQ(kAddonGraphId, graph.graphId);
+                        *workStream = kAddonDeviceStream;
+                        return ncclSuccess;
+                      });
+  ScopedHook toStream(g_ncclStreamAdvanceToStream, [](hipStream_t stream, hipStream_t source) {
+    EXPECT_EQ(kAddonDeviceStream, stream);
+    EXPECT_EQ(kAddonStream, source);
+    return ncclSuccess;
+  });
+  ScopedHook toEvent(g_ncclStreamAdvanceToEvent,
+                     [](struct ncclCudaGraph, hipStream_t, hipEvent_t) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, ncclLaunchFinish(lf.ac.c()));
+
+  EXPECT_EQ(1, toStream.calls);
+  EXPECT_EQ(0, toEvent.calls);
+  EXPECT_EQ(1, release.calls);
+}
+
+TEST_F(EnqueueMicrotest, LaunchFinish_CapturedTwoStreams_AdvancesDeviceStreamToTheFinishedEvent) {
+  CapturedLaunchFinish lf(/*numStreams=*/2);
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  ScopedHook acquired(g_ncclStrongStreamAcquiredWorkStream,
+                      [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                        *workStream = kAddonDeviceStream;
+                        return ncclSuccess;
+                      });
+  ScopedHook toStream(g_ncclStreamAdvanceToStream, [](hipStream_t, hipStream_t) { return ncclInternalError; });
+  ScopedHook toEvent(g_ncclStreamAdvanceToEvent, [](struct ncclCudaGraph graph, hipStream_t stream, hipEvent_t event) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(kAddonDeviceStream, stream);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    return ncclSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t stream, hipEvent_t event, unsigned int) {
+    EXPECT_EQ(kSecondUserStream, stream);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    return hipSuccess;
+  });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, ncclLaunchFinish(lf.ac.c()));
+
+  EXPECT_EQ(0, toStream.calls);
+  EXPECT_EQ(1, toEvent.calls);
+  EXPECT_EQ(1, wait.calls);
+  EXPECT_EQ(1, release.calls);
 }
 
 // ===========================================================================
