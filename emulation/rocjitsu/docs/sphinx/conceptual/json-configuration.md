@@ -193,16 +193,20 @@ The `configs/` directory ships several ready-to-use topology files:
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone or PCI/VFIO simulation. |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs, multi-GPU daemon mode. |
+| `gfx1250_mi455x_4gpu_scaleup.json` | Functional four-GPU fixture with explicit local fabric routes; peer discovery remains off. |
+| `gfx1250_mi455x_kmd_2node_net.json` | Schematic two-node, one-GPU-per-node RCCL NET fixture. |
+| `gfx1250_mi455x_kmd_4node_2gpu_if.json` | Four-node, two-GPU-per-node mixed P2P/NET fixture; see the [same-host RCCL gate](https://rocm.github.io/rocm-systems/rocjitsu/same-host-pod-rccl-gate/#run-this-gate). |
 | `gfx1100_w7900.json` | Single RDNA3 GPU, standalone simulation. |
 | `gfx1151.json` | Single RDNA3.5 GPU, standalone simulation. |
 | `gfx1201_r9700.json` | Single RDNA4 GPU, standalone simulation. |
 
 
-Standalone configs (without `_kmd` in the name) are used with
-`RJ_VM_MODE_DEFAULT`, where the caller drives the simulation via
-`rj_vm_step` or `rj_vm_run`. KMD configs initialize the topology and
-simulated driver so that an unmodified ROCm runtime stack can issue
-ioctls through the interposer.
+The `_kmd` suffix identifies presets intended for KFD or daemon use; the VM
+mode, rather than the filename, determines whether the simulated driver is
+initialized. Use `RJ_VM_MODE_DEFAULT` for caller-driven `rj_vm_step` or
+`rj_vm_run`, and local or daemon mode for simulated KFD use. The explicit
+four-GPU scale-up schematic also supports local or daemon mode despite having
+no `_kmd` suffix.
 
 The gfx1250 standalone profile can also back the Linux VFIO-user server. That
 compute-only PCI profile requires an AMDGPU guest containing commit
