@@ -969,12 +969,12 @@ These options do not change the printed operator tree. Kernel IDs depend on
 User-defined regions
 --------------------
 
-``user`` is a range, not an ML API. Unlike framework-based selection, which
-drops non-matching child nodes, user region selection includes everything in
-that region. Work outside the range is ignored.
+``user`` selects a user-defined region, not an ML API. Unlike framework-based
+selection, which drops non-matching child nodes, a matched user region keeps
+every nested operator and kernel. Work outside that region is ignored.
 
-``--list-operators user`` and ``--operator user:PATTERN`` use that range
-rule. A framework pattern given with ``user:`` adds those matching
+``--list-operators user`` and ``--operator user:PATTERN`` use that rule.
+A framework pattern given with ``user:`` adds those matching
 operators; it does not cut work out of the user region.
 
 .. code-block:: shell-session
