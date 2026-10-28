@@ -29,7 +29,7 @@ def embed(tuner_dir, out_file):
             sys.exit(f"error: {csv_path}: filename contains a quote or backslash and cannot be embedded")
 
         try:
-            with open(csv_path, "r", encoding="utf-8") as f:
+            with open(csv_path, "r", encoding="utf-8", newline="") as f:
                 content = f.read()
         except UnicodeDecodeError as exc:
             sys.exit(f"error: {csv_path}: not valid UTF-8: {exc}")
@@ -68,14 +68,14 @@ static const RcclEmbeddedTunerConfig kRcclEmbeddedTunerConfigs[] = {{
     # Rewrite only on change so regeneration does not force a rebuild.
     old_header = ""
     if os.path.exists(out_file):
-        with open(out_file, "r", encoding="utf-8") as f:
+        with open(out_file, "r", encoding="utf-8", newline="") as f:
             old_header = f.read()
 
     if old_header != header:
         out_dir = os.path.dirname(out_file)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
-        with open(out_file, "w", encoding="utf-8") as f:
+        with open(out_file, "w", encoding="utf-8", newline="") as f:
             f.write(header)
 
 

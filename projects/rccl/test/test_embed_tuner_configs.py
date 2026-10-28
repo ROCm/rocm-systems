@@ -195,6 +195,29 @@ def test_multiline_csv_with_comments_embedded_verbatim(tmp_path):
     assert contents[0] == csv_content
 
 
+
+
+@pytest.mark.script
+def test_crlf_csv_embedded_verbatim(tmp_path):
+    """A CSV with CRLF line endings must be embedded byte-for-byte, not LF-normalised."""
+    crlf_content = b"# tuning for gfx950\r\nallreduce,0,65536,tree,ll,1,1,8,-1,-1\r\n"
+    csv_path = tmp_path / "rccl_tuner_gfx950.csv"
+    csv_path.write_bytes(crlf_content)
+    out = tmp_path / "out.h"
+
+    result = run(tmp_path, out)
+    assert result.returncode == 0, result.stderr
+
+    # Read the header as bytes then decode with surrogateescape so that CRLF bytes
+    # survive the comparison without Python's text-mode normalising them away.
+    raw_header = out.read_bytes().decode("utf-8", errors="surrogateescape")
+    contents = re.findall(r'R"RCCLCSV\((.*?)\)RCCLCSV"', raw_header, re.DOTALL)
+    assert len(contents) == 1, "expected exactly one raw string literal"
+    assert contents[0].encode("utf-8", errors="surrogateescape") == crlf_content, (
+        "CRLF endings were normalised during embedding"
+    )
+
+
 # ---------------------------------------------------------------------------
 # No-change guard
 # ---------------------------------------------------------------------------
