@@ -4,12 +4,12 @@
 """CPU regressions for integration counter comparisons and common selectors."""
 
 from argparse import Namespace
-from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
+from config import analysis_configs_dir
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from tests.integration.common import (
     DETERMINISTIC_ACCURACY_BLOCKS,
@@ -168,12 +168,16 @@ def test_missing_launch_configuration_does_not_pass(kind):
 
 
 @pytest.mark.parametrize(
-    ("gpu_arch", "gpu_series"),
+    ("gpu_arch", "gpu_series", "dispatch_counters"),
     [
-        ("gfx942", "MI300"),
-        ("gfx950", "MI350"),
-        ("gfx1151", "RDNA3.5"),
-        ("gfx1250", "GFX1250_SERIES"),
+        ("gfx942", "MI300", ("SPI_CSN_WAVE", "SPI_CSN_NUM_THREADGROUPS")),
+        ("gfx950", "MI350", ("SPI_CS0_WAVE", "SPI_CS0_NUM_THREADGROUPS")),
+        ("gfx1151", "RDNA3.5", ("SPI_CSN_WAVE",)),
+        (
+            "gfx1250",
+            "GFX1250_SERIES",
+            ("SPI_ALL_WAVE_sum", "SPI_RA_REQ_ALLOC_sum"),
+        ),
     ],
 )
 @pytest.mark.parametrize(
@@ -193,20 +197,16 @@ def test_missing_launch_configuration_does_not_pass(kind):
     ids=["deterministic", "stochastic"],
 )
 def test_accuracy_blocks_resolve_to_relevant_counters_on_each_architecture(
-    gpu_arch, gpu_series, blocks, counter_patterns, panel_titles
+    gpu_arch, gpu_series, dispatch_counters, blocks, counter_patterns, panel_titles
 ):
-    config_root = (
-        Path(__file__).resolve().parents[3]
-        / "src"
-        / "rocprof_compute_soc"
-        / "analysis_configs"
-    )
-    panels = load_panel_configs([str(config_root / canonical_config_arch(gpu_arch))])
+    panels = load_panel_configs([
+        str(analysis_configs_dir / canonical_config_arch(gpu_arch))
+    ])
     metric_list = build_metric_list(panels, None)
     assert tuple(metric_list[block] for block in blocks) == panel_titles
 
     args = Namespace(
-        config_dir=str(config_root),
+        config_dir=str(analysis_configs_dir),
         filter_blocks=list(blocks),
         set_selected=None,
         roof_only=False,
@@ -223,4 +223,4 @@ def test_accuracy_blocks_resolve_to_relevant_counters_on_each_architecture(
     assert counter_names.str.match("|".join(counter_patterns)).any()
     if blocks == DETERMINISTIC_ACCURACY_BLOCKS:
         assert counter_names.str.startswith("SQ_INSTS_").any()
-        assert counter_names.str.match(r"SPI_CS.*(?:WAVE|NUM_THREADGROUPS)").any()
+        assert set(dispatch_counters).issubset(requested_counters)
