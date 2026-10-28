@@ -231,6 +231,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed APU video engine (VCN) utilization reading 100 times too high**.  
   - On APUs such as Ryzen AI Max (Strix Halo), `amdsmi_get_gpu_metrics_info()` returned `apu_metrics.average_vcn_activity` in hundredths of a percent (6067 for 61 %), so Python reported it as N/A and `amd-smi metric --usage` left it out. It is now whole percent.
 
+- **Fixed `amd-smi list`/`amd-smi static` reporting a placeholder UUID instead of `N/A` on WSL APUs without an ASIC serial**.  
+  - On WSL2/DXG with APUs such as Ryzen AI Max (Strix Halo / gfx1151), HSA-KMT reports its "unavailable" sentinel for `UniqueID`, which was packed into a UUID-shaped string instead of surfacing `N/A`. `amdsmi_get_gpu_device_uuid()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` for that case.
+
 - **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
   - On MI450 the GPU connects to the CPU over xGMI, and the driver reports that link's traffic as a single counter. It was dropped instead of being stored as the first link, so `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`).
 
