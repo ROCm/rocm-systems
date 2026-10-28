@@ -22,6 +22,7 @@ use std::io;
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 mod host_alias;
 pub(super) use host_alias::KfdHostAlias;
@@ -738,6 +739,28 @@ pub(crate) struct KfdEventSubscription {
 }
 
 impl KfdEventSubscription {
+    /// Waits on the connection's two persistent exception events without
+    /// holding the observation lock needed by other subscribers.
+    pub(crate) fn wait_native(&self, timeout: Duration) -> Result<(), Error> {
+        self.owner
+            .kfd
+            .check_process()
+            .map_err(|source| native_error("KFD event wait", source))?;
+        let milliseconds =
+            timeout.as_millis() + u128::from(timeout.subsec_nanos() % 1_000_000 != 0);
+        let milliseconds =
+            u32::try_from(milliseconds.min(i32::MAX as u128)).unwrap_or(i32::MAX as u32);
+        match self.owner.kfd.wait_exception_events(
+            self.owner.hardware_event_id.load(Ordering::Acquire),
+            self.owner.memory_event_id.load(Ordering::Acquire),
+            milliseconds,
+        ) {
+            Ok(_) => Ok(()),
+            Err(source) if source.raw_os_error() == Some(errno::EINTR) => Ok(()),
+            Err(source) => Err(native_error("KFD event wait", source)),
+        }
+    }
+
     fn take_record(&self, records: &mut ObservedEvents) -> Option<DeviceEvent> {
         let seen = self.cursor.load(Ordering::Acquire);
         let record = *records.events.iter().find(|event| event.sequence > seen)?;

@@ -57,6 +57,7 @@ struct Fixture {
     hardware_reset_errno: Arc<AtomicU32>,
     fault_gpu_id: Arc<AtomicU32>,
     memory_wait_errno: Arc<AtomicU32>,
+    native_waits: Arc<AtomicUsize>,
     scratch_base: Arc<AtomicU64>,
     vm: Shared<DeviceVm>,
 }
@@ -160,6 +161,8 @@ impl Fixture {
         let reported_gpu_id = fault_gpu_id.clone();
         let memory_wait_errno = Arc::new(AtomicU32::new(0));
         let injected_memory_error = memory_wait_errno.clone();
+        let native_waits = Arc::new(AtomicUsize::new(0));
+        let observed_native_waits = native_waits.clone();
         let scratch_base = Arc::new(AtomicU64::new(0));
         let observed_scratch_base = scratch_base.clone();
         let kfd = shared(sys::Kfd::with_hook(
@@ -193,6 +196,13 @@ impl Fixture {
                         } else {
                             args.result = uapi::WAIT_TIMEOUT;
                         }
+                        return Ok(());
+                    }
+                    sys::Call::WaitExceptions(args, events) => {
+                        assert_eq!(args.count, 2);
+                        assert_eq!([events[0].event_id, events[1].event_id], [19, 20]);
+                        observed_native_waits.fetch_add(1, Ordering::Relaxed);
+                        args.result = uapi::WAIT_TIMEOUT;
                         return Ok(());
                     }
                     sys::Call::ResetEvent(args) if args.event_id == 19 => {
@@ -379,6 +389,7 @@ impl Fixture {
             hardware_reset_errno,
             fault_gpu_id,
             memory_wait_errno,
+            native_waits,
             scratch_base,
             vm,
         }
@@ -2322,6 +2333,18 @@ fn memory_fault_reaches_each_subscriber_without_inventing_device_loss() {
     assert!(fixture.vm.check().is_ok());
     assert!(!fixture.vm.has_latched_loss());
     fixture.lost.store(false, Ordering::Release);
+}
+
+#[test]
+fn event_subscription_wait_uses_native_exception_wait() {
+    let fixture = Fixture::new([]);
+    let mut subscription = fixture.vm.subscribe_events().unwrap();
+    assert_eq!(subscription.poll().unwrap(), None);
+    subscription
+        .wait_native(std::time::Duration::from_micros(100))
+        .unwrap();
+    assert_eq!(fixture.native_waits.load(Ordering::Relaxed), 1);
+    fixture.exhausted();
 }
 
 #[test]
