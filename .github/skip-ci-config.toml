@@ -36,12 +36,6 @@ common = [
     # workflow below runs on its own triggers and is never called by a TheRock
     # run, so editing one cannot affect a TheRock build.
     #
-    # These are listed explicitly rather than as "anything but therock-*"
-    # because TheRock matches with plain fnmatch and has no negation operator.
-    # A workflow added to an existing family here skips CI automatically; one
-    # starting a new family runs CI until it is added below, which is the
-    # fail-safe direction.
-    #
     # Per-project workflows:
     ".github/workflows/abi-compliance-*.yml",
     ".github/workflows/amdsmi-*.yml",
