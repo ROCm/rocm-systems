@@ -124,12 +124,6 @@ extern std::function<ncclResult_t(struct ncclMemManager*, void*, struct ncclMemU
 extern std::function<int64_t(const char* /*env*/, int64_t /*deftVal*/)>
     g_loadParam;
 
-// The two device ids and the isXGMI out-parameter; the topo system and the inter-GPU knobs are dropped.
-// maxInter is carried because init.cc:1834 passes an explicit 1 where graph.h:90 defaults to MAX_XGMI_INTER_GPUS.
-extern std::function<ncclResult_t(int /*dev1*/, int /*dev2*/, bool* /*isXGMI*/, int /*maxInter*/)>
-    g_ncclTopoGetLinkType;
-extern int g_ncclTopoGetLinkTypeCalls;
-
 // Controllable seams for the topology eligibility checks p2pCanConnect drives.
 // (rank1, rank2, p2p, read, intermediateRank, cudaP2p, isCrossClique) -- the
 // topo system pointer and comm are dropped; only the rank pair and out-params

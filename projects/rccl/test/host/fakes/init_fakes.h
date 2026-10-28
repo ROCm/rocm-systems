@@ -32,6 +32,7 @@
 #include "rocshmem_fakes.h"      // the rocSHMEM host API
 #endif
 #include "strongstream_stubs.h"  // src/misc/strongstream.cc
+#include "search_fakes.h"        // src/graph/search.cc own entry points
 #include "topo_stubs.h"          // src/graph/*.cc
 #include "transport_stubs.h"     // src/transport/*.cc + src/plugin/net.cc
 #include "tuning_fakes.h"        // src/graph/tuning.cc

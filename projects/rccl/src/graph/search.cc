@@ -12,6 +12,7 @@
 #include "topo.h"
 #include "transport.h"
 #include "xml.h"
+#include <limits.h>
 #include <math.h>
 #include <sys/time.h>
 #include "rome_models.h"
@@ -994,6 +995,10 @@ struct kvDict kvDictLinkType[] = {{"LOC", PATH_LOC}, {"NVL", PATH_NVL}, {"NVB", 
 ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, struct ncclTopoSystem* system,
                                        struct ncclTopoGraph* graph) {
   int ngpus = system->nodes[GPU].count;
+  if (c < 0 || c >= MAXCHANNELS) {
+    WARN("XML Import Channel : channel %d out of range (max %d).", c, MAXCHANNELS - 1);
+    return ncclInvalidUsage;
+  }
   int64_t* inter = graph->inter + 2 * c;
   int* intra = graph->intra + ngpus * c;
   int n = 0, g = 0;
@@ -1004,13 +1009,24 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
     NCCLCHECK(xmlGetAttrStr(sub, "dev", &str));
     dev = strtol(str, NULL, 16);
     if (strcmp(sub->name, "net") == 0) {
+      if (n >= 2) {
+        WARN("XML Import Channel : too many net subnodes in channel %d (max %d).", c, 2);
+        return ncclInvalidUsage;
+      }
       inter[n++] = dev;
     } else if (strcmp(sub->name, "gpu") == 0) {
       int rank = -1;
       int rankIndex = -1;
       NCCLCHECK(xmlGetAttrIndex(sub, "rank", &rankIndex));
       if (rankIndex != -1) {
-        rank = strtol(sub->attrs[rankIndex].value, NULL, 0);
+        long rankValue = strtol(sub->attrs[rankIndex].value, NULL, 0);
+        int rankGpuIndex = -1;
+        if (rankValue < 0 || rankValue > INT_MAX ||
+            ncclTopoRankToIndex(system, (int)rankValue, &rankGpuIndex, /*showWarn=*/false) != ncclSuccess) {
+          WARN("XML Import Channel : rank %ld not found in topology.", rankValue);
+          return ncclInvalidUsage;
+        }
+        rank = (int)rankValue;
       } else {
         for (int g = 0; g < ngpus; g++) {
           int systemId = NCCL_TOPO_ID_SYSTEM_ID(system->nodes[GPU].nodes[g].gpu.parent->id);
@@ -1019,8 +1035,13 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
         }
         if (rank == -1) {
           WARN("XML Import Channel : dev %ld not found.", dev);
-          return ncclSystemError;
+          // RCCL: upstream returns ncclSystemError here; bad user XML is invalid usage.
+          return ncclInvalidUsage;
         }
+      }
+      if (g >= ngpus) {
+        WARN("XML Import Channel : too many gpu subnodes in channel %d (max %d).", c, ngpus);
+        return ncclInvalidUsage;
       }
       intra[g++] = rank;
     }
@@ -1040,6 +1061,11 @@ ncclResult_t ncclTopoGetGraphFromXmlSub(struct ncclXmlNode* xmlGraph, struct ncc
 
   NCCLCHECK(xmlGetAttrInt(xmlGraph, "pattern", &graph->pattern));
   NCCLCHECK(xmlGetAttrInt(xmlGraph, "nchannels", &graph->nChannels));
+  if (graph->nChannels != xmlGraph->nSubs) {
+    WARN("XML Import Graph : nchannels %d does not match the %d channels present.",
+         graph->nChannels, xmlGraph->nSubs);
+    return ncclInvalidUsage;
+  }
   NCCLCHECK(xmlGetAttrFloat(xmlGraph, "speedintra", &graph->bwIntra));
   NCCLCHECK(xmlGetAttrFloat(xmlGraph, "speedinter", &graph->bwInter));
   const char* str;
@@ -1296,11 +1322,12 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
     INFO(NCCL_ENV, "NCCL_GRAPH_FILE set by environment to %s", str);
     struct ncclXml* xml;
     NCCLCHECK(xmlAlloc(&xml, NCCL_GRAPH_XML_MAX_NODES));
-    NCCLCHECK(ncclTopoGetXmlGraphFromFile(str, xml));
-    int nChannels;
-    NCCLCHECK(ncclTopoGetGraphFromXml(xml->nodes, system, graph, &nChannels));
-    INFO(NCCL_GRAPH, "Search %d : %d channels loaded from XML graph", graph->id, nChannels);
+    int nChannels = 0;
+    ncclResult_t xmlRes = ncclTopoGetXmlGraphFromFile(str, xml);
+    if (xmlRes == ncclSuccess) xmlRes = ncclTopoGetGraphFromXml(xml->nodes, system, graph, &nChannels);
     free(xml);
+    NCCLCHECK(xmlRes);
+    INFO(NCCL_GRAPH, "Search %d : %d channels loaded from XML graph", graph->id, nChannels);
     if (graph->nChannels > 0) return ncclSuccess;
   }
 

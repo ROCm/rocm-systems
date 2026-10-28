@@ -469,11 +469,21 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   defines the `amd_smi_*` wrappers this file compiles. See
   `test_categories_micro_amdsmi_wrap.yaml`.
 
-- **`rccl-UnitTestsMicroTopo`** — the real `src/graph` files, each `#include`d from its own
-  test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`), `paths.cc` (`Paths*`),
-  `search.cc` (`Search*`), `rome_models.cc` (`graph-rome-models-test.cc`, `GraphRomeModels*`),
+- **`rccl-UnitTestsMicroSearch`** — `src/graph/search.cc` (via `SEARCH_CC_PATH`, from
+  `search-test.cc`); suites `Search*`. Its own binary so search.cc is the only unit under
+  test in it: the rest of `src/graph` it searches over (`xml.cc`, `topo.cc`, `paths.cc`,
+  `rome_models.cc`) is linked real as a collaborator, and `topo.cc` comes in through
+  `topo_include.cc` rather than as a source file because `TopoSetNetDevsPolicy` can only
+  be defined from inside that TU. Shares `TopoScene.h` and `fakes/graph_fakes.cc` with
+  `rccl-UnitTestsMicroTopo`. See `test_categories_micro_search.yaml`.
+
+- **`rccl-UnitTestsMicroTopo`** — the rest of the real `src/graph` files, each `#include`d
+  from its own test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`),
+  `paths.cc` (`Paths*`), `rome_models.cc` (`graph-rome-models-test.cc`, `GraphRomeModels*`),
   `connect.cc` (`graph-connect-test.cc`, `GraphConnect*`), `rings.cc` (`Rings*`), `trees.cc`
-  (`Trees*`). Its own binary: `rccl-UnitTestsMicroGraph` links `tuning_fakes.cc`, which
+  (`Trees*`). `search.cc` is linked real here too, but only as a collaborator -- `paths.cc`
+  calls `ncclTopoGetNetDev` and `ncclTopoGetLinkType` -- and its tests live in
+  `rccl-UnitTestsMicroSearch`. Its own binary: `rccl-UnitTestsMicroGraph` links `tuning_fakes.cc`, which
   defines `connect.cc`'s params, and `os_fakes.cc`, whose CPU and sysfs seams these tests
   cannot drive. Topologies come from XML built in `TopoScene.h`; HIP and amd-smi come from
   `fakes/hip_fakes.cc` and `fakes/amdsmi_fakes.cc`, the other externals from
@@ -662,6 +672,13 @@ target instead produces the same symbol faked three times in three files, each
 slightly weaker than the others, which is what `rccl::Recorder` and `ncclGetEnv`
 had become before this map existed.
 
+`src/graph/search.cc` has two rows for the same reason as `src/rccl_wrap.cc` below:
+the targets that compile it (`rccl-UnitTestsMicroSearch`, which tests it, and
+`rccl-UnitTestsMicroTopo` / `rccl-UnitTestsMicroGraph`, which only need it to collaborate
+with `paths.cc`) take its dependencies from `topo_stubs.cc` or `graph_fakes.cc`, while
+every other target fakes its own entry points (`search_fakes.cc`). The two never define
+the same symbol, so no target needs an `RCCL_STUBS_OMIT_` macro for them.
+
 `src/rccl_wrap.cc` has two rows because it is both a unit under test
 (`rccl-UnitTestsMicro` compiles it and fakes its dependencies) and a
 dependency of another unit (`rccl-UnitTestsMicroEnqueue` doesn't compile it,
@@ -682,9 +699,10 @@ symbol.
 | externals `src/dev_runtime.cc` reaches (`rccl-UnitTestsMicro`, which compiles it) | `fakes/dev_runtime_micro_fakes.cc` |
 | externals the devcomm compat shims reach | `fakes/devcomm_fakes.cc` |
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
-| `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
+| `src/graph/*.cc` (topo, paths, connect, rome consensus) and `search.cc`'s *dependencies* | `fakes/topo_stubs.cc` |
+| `src/graph/search.cc`'s own entry points (targets that don't compile the real file, i.e. all but `rccl-UnitTestsMicroSearch`, `rccl-UnitTestsMicroTopo` and `rccl-UnitTestsMicroGraph`) | `fakes/search_fakes.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
-| everything `src/graph/*.cc` calls outside `src/graph` (`rccl-UnitTestsMicroTopo` only, which compiles the real graph files) | `fakes/graph_fakes.cc` |
+| everything `src/graph/*.cc` calls outside `src/graph` (`rccl-UnitTestsMicroTopo` and `rccl-UnitTestsMicroSearch`, which compile the real graph files) | `fakes/graph_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
@@ -1133,7 +1151,8 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
 ./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
-./build/rccl-UnitTestsMicroTopo               # src/graph/*.cc tests
+./build/rccl-UnitTestsMicroSearch             # src/graph/search.cc tests
+./build/rccl-UnitTestsMicroTopo               # the rest of src/graph/*.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
 ./build/rccl-UnitTestsMicroNcclDevice         # nccl_device requirement builders tests
