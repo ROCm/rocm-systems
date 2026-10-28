@@ -284,6 +284,16 @@ static GDAProvider gin_detect_provider(struct ibv_device_attr* attr) {
   return GDAProvider::UNSET;
 }
 
+// First active port of an opened device, or 0 if none. Shared by device
+// enumeration and open so both accept a NIC on the same criterion (don't assume
+// port 1 — a multi-port NIC may have port 1 down but another port up).
+static int gin_first_active_port(struct ibv_context* ctx, int phys_port_cnt, struct ibv_port_attr* out_attr) {
+  for (int p = 1; p <= phys_port_cnt; p++) {
+    if (gin_ibv_query_port(ctx, p, out_attr) == 0 && out_attr->state == IBV_PORT_ACTIVE) return p;
+  }
+  return 0;
+}
+
 static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
   struct ibv_device** dev_list = nullptr;
   int ndev = 0;
@@ -337,12 +347,10 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
       continue;
     }
 
-    // Check for active port
     struct ibv_port_attr port_attr;
-    int port = 1;
-    if (gin_ibv_query_port(ctx, port, &port_attr) != 0 || port_attr.state != IBV_PORT_ACTIVE) {
-      LOG_WARN("GIN QP factory: device %s port %d not active (state=%d), skipping", gin_ibv_get_device_name(dev_list[d]),
-               port, (int)port_attr.state);
+    int port = gin_first_active_port(ctx, dev_attr.phys_port_cnt, &port_attr);
+    if (port == 0) {
+      LOG_WARN("GIN QP factory: device %s has no active port, skipping", gin_ibv_get_device_name(dev_list[d]));
       gin_ibv_close_device(ctx);
       continue;
     }
@@ -1499,17 +1507,14 @@ static int gin_enumerate_devices(char* names, int max_count, int name_stride) {
       continue;
     }
 
-    for (int port = 1; port <= dev_attr.phys_port_cnt; port++) {
-      struct ibv_port_attr port_attr;
-      if (gin_ibv_query_port(ctx, port, &port_attr) == 0 && port_attr.state == IBV_PORT_ACTIVE) {
-        if (names && count < max_count) {
-          const char* devName = gin_ibv_get_device_name(dev_list[d]);
-          char* slot = names + (size_t)count * name_stride;
-          snprintf(slot, name_stride, "%s", devName ? devName : "");
-        }
-        count++;
-        break;
+    struct ibv_port_attr port_attr;
+    if (gin_first_active_port(ctx, dev_attr.phys_port_cnt, &port_attr) != 0) {
+      if (names && count < max_count) {
+        const char* devName = gin_ibv_get_device_name(dev_list[d]);
+        char* slot = names + (size_t)count * name_stride;
+        snprintf(slot, name_stride, "%s", devName ? devName : "");
       }
+      count++;
     }
     gin_ibv_close_device(ctx);
   }
