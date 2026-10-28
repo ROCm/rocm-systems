@@ -766,7 +766,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
         (ts->command().Callback() != nullptr || ts->command().GetBatchHead() != nullptr) &&
         !ts->command().CpuWaitRequested();
   }
-  bool use_irq = enqueHandler || gpu_.ForceIrq();
+  bool use_irq = enqueHandler || (gpu_.IsWddmAqlQueue() && gpu_.ForceIrq());
   // Check if the signal doesn't match the requested one.
   // Note: runtime needs the interrupts for the callbacks and the marker events, but it can reuse
   // the non-interrupt signals for the regular dispatches
