@@ -46,6 +46,7 @@ constexpr uint32_t kDfmt32 = 4;
 constexpr uint32_t kDfmt8888 = 10;
 constexpr uint32_t kNfmtUint = 4;
 constexpr uint32_t kNfmtUnorm = 0;
+constexpr uint32_t kR32Uint = 20;
 constexpr uint32_t kRgba32Uint = 61;
 
 struct Image {
@@ -78,7 +79,7 @@ std::array<uint32_t, 8> descriptor(const Image &image) {
 
 struct RdnaImageDescriptor {
   uint32_t type = amdgpu::kImage2d;
-  uint32_t format = 20;
+  uint32_t format = kR32Uint;
   uint32_t selectors = kXOne;
   uint32_t width = 3;
   uint32_t height = 2;
@@ -690,7 +691,7 @@ protected:
       cu_->write_sgpr(wf_->sgpr_alloc().base + kResourceBase + i, resource[i]);
   }
 
-  void bind_resource(uint32_t format = 20, uint32_t selectors = kXOne) {
+  void bind_resource(uint32_t format = kR32Uint, uint32_t selectors = kXOne) {
     bind_resource(RdnaImageDescriptor{.format = format, .selectors = selectors});
   }
 
@@ -906,7 +907,7 @@ TEST_P(RdnaDecodedImageAccessTest, UnmodeledStoreSelectorsReportUnimplemented) {
   }
 
   // The single-channel X001 layout remains supported.
-  bind_resource(20, kXOne);
+  bind_resource();
   auto decoded = decode(false);
   ASSERT_TRUE(decoded.succeeded());
   EXPECT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
