@@ -185,9 +185,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `rasTimeoutFactorNs`, and `rasTimeoutFactorSec` symbols so it can link beside
     `fakes/ras_param_fakes.cc` and the `ras-test.cc` timeout fake in the shared
     microtest binary.
-  - `transport/net_telemetry.cc` and `include/net_telemetry.h`
-    (`NET_TELEMETRY_CC_PATH`, from `net-telemetry-test.cc`); suites
-    `NetTelemetry*Microtest.*`.
   - `transport/net_socket.cc` and `transport/net_socket/common.cc`
     (`NET_SOCKET_CC_PATH`, `NET_SOCKET_COMMON_CC_PATH`, from
     `net-socket-test.cc`); suites `NetSocket*Microtest.*`. Three disabled tests
@@ -591,6 +588,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `net_ib/net_ib_gid_inspect.cc` (`NET_IB_GID_INSPECT_CC_PATH`, from
     `net_ib/net-ib-gid-inspect-test.cc`); suites
     `NetIbGidInspectMicrotest.*`.
+  - `net_telemetry.cc` and `src/include/net_telemetry.h`
+    (`NET_TELEMETRY_CC_PATH`, from `net-telemetry-test.cc`); suites
+    `NetTelemetry*Microtest.*`.
   - `nvls.cc` (`NVLS_CC_PATH`, from `nvls-test.cc`); suite `NvlsHipStubTest.*`.
     RCCL always compiles the NVLS stub branch (the multicast code needs
     `CUDART_VERSION >= 12010`), and the suite checks that the stubs leave NVLS off

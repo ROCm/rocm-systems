@@ -36,7 +36,7 @@
 
 #include <gtest/gtest.h>
 
-#include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../../common/ProcessIsolatedTestRunner.hpp"
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
 #include "fakes/libc_fakes.h"
