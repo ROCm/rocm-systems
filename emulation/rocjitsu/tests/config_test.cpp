@@ -3456,8 +3456,11 @@ TEST(CheckpointTest, InvalidExecutionThreadAllocationsReturnFailure) {
     EXPECT_EQ(diagnostic.message(), invalid.message);
 
     rj_vm_t *restored = source.get();
-    EXPECT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &restored),
-              ROCJITSU_STATUS_INVALID_FILE);
+    testing::internal::CaptureStderr();
+    const auto status = rj_vm_restore_checkpoint(file.path().c_str(), &restored);
+    const std::string warning = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(status, ROCJITSU_STATUS_INVALID_FILE);
+    EXPECT_THAT(warning, testing::HasSubstr(invalid.message));
     EXPECT_EQ(restored, source.get());
   }
 }
@@ -4901,7 +4904,11 @@ TEST(CApiTest, RejectsMalformedCheckpoints) {
   junk.write(std::string(512, static_cast<char>(0xA5)));
 
   rj_vm_t *restored = nullptr;
-  EXPECT_EQ(rj_vm_restore_checkpoint(junk.path().c_str(), &restored), ROCJITSU_STATUS_INVALID_FILE);
+  testing::internal::CaptureStderr();
+  const auto status = rj_vm_restore_checkpoint(junk.path().c_str(), &restored);
+  const std::string warning = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(status, ROCJITSU_STATUS_INVALID_FILE);
+  EXPECT_THAT(warning, testing::HasSubstr("Invalid checkpoint format: " + junk.path()));
   EXPECT_EQ(restored, nullptr);
 
   rj_vm_t *raw_source = nullptr;

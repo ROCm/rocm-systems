@@ -19,6 +19,7 @@
 namespace rocjitsu::test {
 
 /// Restore an expected-valid checkpoint, preserving the caller's output on failure.
+/// Call with ASSERT_TRUE so a failure stops the consuming test or fixture.
 [[nodiscard]] inline testing::AssertionResult
 restore_valid_checkpoint(const std::string &path, config::LoadedConfig &output) {
   util::StringDiagnostic diagnostic;

@@ -363,12 +363,16 @@ rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm) {
   if (!path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
+    util::StringDiagnostic diagnostic;
     util::FailureOr<config::LoadedConfig> loaded =
-        config::restore_checkpoint(path, util::DiagnosticEmitter{});
-    if (loaded.failed())
+        config::restore_checkpoint(path, diagnostic.emitter());
+    if (loaded.failed()) {
+      util::Logger::warn("rj_vm_restore_checkpoint failed: ", diagnostic.message());
       return ROCJITSU_STATUS_INVALID_FILE;
+    }
     return create_from_loaded(loaded.value(), RJ_VM_MODE_DEFAULT, vm);
-  } catch (const std::exception &) {
+  } catch (const std::exception &e) {
+    util::Logger::warn("rj_vm_restore_checkpoint failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
 }
