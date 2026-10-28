@@ -58,9 +58,10 @@ rocprofiler_add_integration_execute_test(
 
 # Validate replay structure: each dispatch replayed REPLAY_PASSES times, the shared sanity
 # counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, and the
-# kernels are present. A sanity counter the agent does not report, or that reads zero for
-# every dispatch (SQ_INSTS_VALU on gfx1201), is skipped rather than failed. No -x, so one
-# skipped or failing counter does not hide the remaining checks.
+# kernels are present. A sanity counter the agent does not report is skipped. A counter
+# that reads zero for every dispatch is skipped only on gfx1201 (SQ_INSTS_VALU); on other
+# targets, including gfx1250, that is a failure. No -x, so one skipped or failing counter
+# does not hide the remaining checks.
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-kernel-replay-validate BUNDLE_TESTS
     TEST_PATHS validate.py

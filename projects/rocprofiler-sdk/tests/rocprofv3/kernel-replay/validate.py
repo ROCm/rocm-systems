@@ -382,14 +382,52 @@ def _agent_counter_names(sdk):
     return names
 
 
+def _agent_names(sdk):
+    """agent handle -> name from the agents section (gfx942, gfx1201, a CPU model, ...)."""
+    names = {}
+    agents = sdk.get("agents") or []
+    entries = agents.values() if isinstance(agents, dict) else agents
+    for agent in entries:
+        aid = agent.get("id", {})
+        handle = aid.get("handle") if isinstance(aid, dict) else aid
+        name = agent.get("name")
+        if handle is not None and name:
+            names[int(handle)] = name
+    return names
+
+
+def _agents_are_gfx1201(sdk, agent_handles):
+    """True only when every replayed agent is named gfx1201.
+
+    An agent missing from the agents section is not treated as gfx1201, so the
+    zero-everywhere skip below cannot hide a regression when the architecture is unknown.
+    """
+    if not agent_handles:
+        return False
+    names = _agent_names(sdk)
+    archs = [names.get(handle) for handle in agent_handles]
+    if any(name is None for name in archs):
+        return False
+    return all(name == "gfx1201" for name in archs)
+
+
+def _counter_is_zero_everywhere(table, counter):
+    return all(
+        batch.get(counter, 0) == 0
+        for entry in table.values()
+        for batch in entry["passes"].values()
+    )
+
+
 def _unusable_common_counter_reason(sdk, table, counter):
     """Why a requested common counter cannot serve as a replay sanity check, or None.
 
     A counter qualifies only if every replayed agent reports it and it reads nonzero for at
-    least one dispatch. Some targets list a counter but never increment it (SQ_INSTS_VALU on
-    gfx1201, in every performance level), so a counter that is zero for every pass of every
-    dispatch is treated as unimplemented on that agent rather than as a replay defect. A
-    counter zero in only some passes or dispatches still qualifies and fails the checks.
+    least one dispatch. gfx1201 lists counters that never increment (SQ_INSTS_VALU in
+    every performance level), so on that target a counter that is zero for every pass of
+    every dispatch is treated as unimplemented rather than as a replay defect. On every
+    other target, including gfx942 and gfx1250, that same shape is a regression and still
+    fails. A counter zero in only some passes or dispatches always fails.
     """
     reported = _agent_counter_names(sdk)
     agents = {
@@ -398,12 +436,13 @@ def _unusable_common_counter_reason(sdk, table, counter):
     missing = sorted(a for a in agents if counter not in reported.get(a, set()))
     if missing:
         return f"{counter} is not reported by replayed agent(s) {missing}"
-    if all(
-        batch.get(counter, 0) == 0
-        for entry in table.values()
-        for batch in entry["passes"].values()
+    if _agents_are_gfx1201(sdk, agents) and _counter_is_zero_everywhere(
+        table, counter
     ):
-        return f"{counter} reads zero for every dispatch; not implemented on this agent"
+        return (
+            f"{counter} reads zero for every dispatch; not implemented on this "
+            "gfx1201 agent"
+        )
     return None
 
 
