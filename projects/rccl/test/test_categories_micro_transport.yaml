@@ -5,6 +5,7 @@ test_categories:
   quick: &micro_transport_quick
     description: "Smoke - host-only src/transport/ micro-tests, sub-second."
     test_patterns:
+      - "CollNet*"
       - "NetIb*"
       - "NetSocket*"
       - "NetTelemetry*"

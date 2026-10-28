@@ -14,8 +14,6 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
-      # transport/coll_net.cc
-      - "CollNet*"
       # transport/p2p.cc
       - "P2pMicrotest.*"
       - "P2pMicrotestIsolated.*"

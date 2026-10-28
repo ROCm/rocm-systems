@@ -60,14 +60,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicro`** — one unit per test TU:
   - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2p*`,
     `FreshRegistration*`, `ConnStepAcquireMicrotest.*`.
-  - `transport/coll_net.cc` (`COLL_NET_CC_PATH`, from `coll-net-test.cc`); suites `CollNet*`,
-    driven through a fake `ncclCollNet_t`.
   - `register/register.cc`, `register/coll_reg.cc` and `register/sendrecv_reg.cc`
     (`REGISTER_CC_PATH`, `COLL_REG_CC_PATH`, `SENDRECV_REG_CC_PATH`, from `register-test.cc`,
     `coll-reg-test.cc` and `sendrecv-reg-test.cc`); suites `Register*`. Their calls into `p2p.cc`,
-    compiled here for real, go through `fakes/transport_p2p_reg_seam.h`; CollNet registration calls
-    use `fakes/transport_collnet_reg_seam.h`. `fakes/register_seam.h` renames `register.cc`'s
-    definitions of the three names `nccl_fakes.cc` keeps as seams for `p2p-test.cc`.
+    compiled here for real, go through `fakes/transport_p2p_reg_seam.h`. `fakes/register_seam.h`
+    renames `register.cc`'s definitions of the three names `nccl_fakes.cc` keeps as seams for
+    `p2p-test.cc`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
@@ -549,6 +547,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `test_categories_micro_transport.yaml`. The target defines
   `ENABLE_FAULT_INJECTION` in both build modes so `net_ib_gid_inspect.cc` is
   present consistently.
+  - `coll_net.cc` (`COLL_NET_CC_PATH`, from `coll-net-test.cc`); suites `CollNet*`,
+    driven through a fake `ncclCollNet_t`. `RCCL_TRANSPORT_STUBS_OMIT_COLL_NET` drops
+    the stub copies of its entry points.
   - `net_ib/common.cc` and host helpers in `net_ib/common.h`
     (`NET_IB_COMMON_CC_PATH`, from `net_ib/common-test.cc`); suites
     `NetIbCommonMicrotest.*`.
@@ -597,8 +598,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     RCCL always compiles the NVLS stub branch (the multicast code needs
     `CUDART_VERSION >= 12010`), and the suite checks that the stubs leave NVLS off
     and never read `NCCL_NVLS_ENABLE`, so no value can turn it on.
-    `fakes/transport_stubs.cc` and `fakes/collective_stubs.cc` fake the `ncclNvls*`
-    symbols the real file defines, so this binary links neither.
+    `RCCL_TRANSPORT_STUBS_OMIT_NVLS` drops `fakes/transport_stubs.cc`'s copies of the
+    names `nvls.cc` defines (the `ncclNvls*` entry points and `ncclParamNvlsEnable`),
+    and the binary does not link `fakes/collective_stubs.cc`, which also fakes
+    `ncclNvlsBufferSetup` and `ncclNvlsTreeConnect`.
   - `rma_socket.cc` (`RMA_SOCKET_CC_PATH`, from `rma-socket-test.cc`);
     suites `RmaSocketMicrotest.*`.
   - `rma_socket_mem.cc` (`RMA_SOCKET_MEM_CC_PATH`, from
@@ -841,7 +844,6 @@ symbol.
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroNet`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/p2p.cc` registration entry points, macro-renamed in one unit via `fakes/transport_p2p_reg_seam.h` (`rccl-UnitTestsMicro`, which compiles the real file) | `fakes/transport_p2p_reg_fakes.cc` |
-| `src/transport/coll_net.cc` registration entry points, macro-renamed via `fakes/transport_collnet_reg_seam.h` when the real file shares the binary | `fakes/transport_stubs.cc` |
 | selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
 | libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`; `open`/`read`/`close` for `transport/net_socket.cc`; `clock_gettime` for `transport/net_ib/wqe_lat_mon.cc` and `transport/net_ib_cast/scheduler.cc`) | `fakes/libc_fakes.cc` |
