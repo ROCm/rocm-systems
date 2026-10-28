@@ -93,6 +93,8 @@ bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params
     return false;
   }
   const bool deviceMemory = (memType == Local) || (memType == Persistent);
+  const bool svm = (params != nullptr) && (params->owner_ != nullptr) &&
+                   (params->owner_->getSvmPtr() != nullptr);
 
   do {
     // Assume that allocations will be placed into visible heap when ReBar is enabled
@@ -104,7 +106,7 @@ bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params
     }
 
     if (amd::IS_HIP && dev().settings().apuSystem_ && deviceMemory &&
-        !dev().ApuPlaceDeviceMemory(size(), &memType, &apuReservation_)) {
+        !dev().ApuPlaceDeviceMemory(size(), &memType, &apuReservation_, svm)) {
       result = false;
       break;
     }

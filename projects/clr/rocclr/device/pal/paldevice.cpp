@@ -1997,13 +1997,15 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
 // running it out hangs the OS instead of failing allocations. So past the carve-out, borrow only up
 // to the borrow limit and fail the allocation otherwise.
 bool Device::ApuPlaceDeviceMemory(Pal::gpusize size, Resource::MemoryType* memType,
-                                  ApuReservation* reservation, bool releaseCache) const {
+                                  ApuReservation* reservation, bool svm, bool releaseCache) const {
+  // A small SVM buffer outside Local memory is suballocated from fine memory, in host RAM, and
+  // may create a whole chunk. This includes a device buffer retried as Persistent.
+  const bool fineChunk = svm && (size < settings().subAllocationMaxSize_);
   // REMOTE_ALLOC, set for tiny carve-outs too, makes Resource::create place it in host RAM
-  const bool hostOnly = settings().remoteAlloc_ || (*memType == Resource::RemoteUSWC);
-  // A small request in host RAM may create a whole host suballocation chunk
-  const Pal::gpusize hostSize = (size < settings().subAllocationMaxSize_)
-                                    ? std::max(size, settings().subAllocationChunkSize_)
-                                    : size;
+  const bool hostOnly = settings().remoteAlloc_ || (*memType == Resource::RemoteUSWC) ||
+                        (fineChunk && (*memType == Resource::Persistent));
+  const Pal::gpusize hostSize =
+      fineChunk ? std::max(size, settings().subAllocationChunkSize_) : size;
   // Reserves the memory against its pool until the allocation is accounted, so concurrent ones
   // can't overcommit. An allocation is accounted before its reservation ends under this lock, so
   // the counters read here never miss one. They include cached allocations, which hold their

@@ -735,8 +735,8 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     ApuReservation apuExtra;
     if ((apuReservation_.size > 0) && (createInfo.size > apuReservation_.size)) {
       MemoryType memType = memoryType();
-      if (!dev().ApuPlaceDeviceMemory(createInfo.size - apuReservation_.size, &memType, &apuExtra,
-                                      false)) {
+      if (!dev().ApuPlaceDeviceMemory(createInfo.size - apuReservation_.size, &memType,
+                                      &apuExtra)) {
         destroyImage();
         return false;
       }
@@ -2139,7 +2139,7 @@ static bool ApuReserveChunk(const Device& dev, Pal::gpusize chunkSize,
     return true;
   }
   Resource::MemoryType memType = Resource::Local;
-  if (!dev.ApuPlaceDeviceMemory(chunkSize, &memType, reservation, false)) {
+  if (!dev.ApuPlaceDeviceMemory(chunkSize, &memType, reservation, false, false)) {
     return false;
   }
   if (memType != Resource::Local) {

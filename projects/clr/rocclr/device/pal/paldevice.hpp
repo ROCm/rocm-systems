@@ -694,9 +694,11 @@ class Device : public NullDevice {
   Pal::gpusize GetMaxFrameBuffer() const { return maxFrameBufferAllocation_; }
 
   //! Moves device memory of an APU to host memory past the carve-out, within the borrow limit,
-  //! and reserves it until ApuReleaseReservation. False if it fits in neither.
+  //! and reserves it until ApuReleaseReservation. False if it fits in neither. svm is set for SVM
+  //! buffers, which the fine-memory suballocator may place in host memory.
   bool ApuPlaceDeviceMemory(Pal::gpusize size, Resource::MemoryType* memType,
-                            ApuReservation* reservation, bool releaseCache = true) const;
+                            ApuReservation* reservation, bool svm = false,
+                            bool releaseCache = true) const;
 
   //! Ends a reservation of ApuPlaceDeviceMemory, once the allocation is accounted or failed
   void ApuReleaseReservation(ApuReservation* reservation) const {
