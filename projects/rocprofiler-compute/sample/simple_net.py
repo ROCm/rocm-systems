@@ -7,7 +7,8 @@ Sample PyTorch workload for rocprof-compute --trace-ml-api torch.
     rocprof-compute profile --experimental --trace-ml-api torch --no-roof \
         -n simple_net -- python3 ./simple_net.py
 
-    --user-range         Wrap the run in a user ROCTX range. Requires ROCTX Python.
+    --user-range         Wrap the first Linear in a user ROCTX range.
+                         Requires ROCTX Python.
     --same-line-linear   Two Linear.forward calls from the same source line.
     --no-backward        Skip loss.backward(). Cannot combine with --backward-thread.
     --backward-thread    Run loss.backward() on a worker thread. Cannot combine
@@ -29,11 +30,12 @@ except ImportError:
 
 
 class SimpleNet(nn.Module):
-    def __init__(self, same_line_linear=False):
+    def __init__(self, same_line_linear=False, user_range=False):
         super().__init__()
         self.fc1 = nn.Linear(10, 20)
         self.fc2 = nn.Linear(20, 10)
         self.same_line_linear = same_line_linear
+        self.user_range = user_range
 
     def forward(self, x):
         if self.same_line_linear:
@@ -42,7 +44,14 @@ class SimpleNet(nn.Module):
             x = self.fc1(x); x = self.fc2(x)  # noqa: E702
             # fmt: on
             return x
-        x = self.fc1(x)
+        if self.user_range:
+            roctx.rangePush("Fc1_UserDefinedMarker")
+            try:
+                x = self.fc1(x)
+            finally:
+                roctx.rangePop()
+        else:
+            x = self.fc1(x)
         x = F.relu(x)
         x = self.fc2(x)
         return x
@@ -53,7 +62,7 @@ def parse_args(argv=None):
     parser.add_argument(
         "--user-range",
         action="store_true",
-        help="Wrap the run in a user ROCTX range",
+        help="Wrap the first Linear in a user ROCTX range",
     )
     parser.add_argument(
         "--same-line-linear",
@@ -102,23 +111,19 @@ def main(argv=None):
         print("GPU is required for this sample. Exiting.")
         sys.exit(1)
 
-    if args.user_range:
-        roctx.rangePush("TrainingLoop_UserDefinedMarker")
+    model = SimpleNet(
+        same_line_linear=args.same_line_linear,
+        user_range=args.user_range,
+    ).cuda()
+    x = torch.randn(5, 10).cuda()
 
-    try:
-        model = SimpleNet(same_line_linear=args.same_line_linear).cuda()
-        x = torch.randn(5, 10).cuda()
-
-        for _ in range(1):
-            output = model(x)
-            loss = output.sum()
-            if args.backward_thread:
-                backward_on_worker_thread(loss)
-            elif not args.no_backward:
-                loss.backward()
-    finally:
-        if args.user_range:
-            roctx.rangePop()
+    for _ in range(1):
+        output = model(x)
+        loss = output.sum()
+        if args.backward_thread:
+            backward_on_worker_thread(loss)
+        elif not args.no_backward:
+            loss.backward()
 
     print("Training completed")
 
