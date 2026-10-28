@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "hip_compat.h"
 #include "algorithms/dda/device/dda_kernel_params.h"
 #include "algorithms/dda/device/device_buffer.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
@@ -163,11 +164,13 @@ public:
   // epoch .. epoch + pieces + 1 (entry posts epoch, piece p posts epoch + 2 + p); epoch is the block's cell, advanced by
   // epochEnd, so it survives CUDA graph replays. Scratch accesses are system-scope: no fence besides orderDestWrites().
   __device__ __forceinline__ FlagType epochBegin() const { return epochCell()[blockIdx.x] + 1; }
+
   // Must be called by every thread of the block after its last use of the epoch flags.
   __device__ __forceinline__ void epochEnd(FlagType epoch, unsigned pieces) {
     __syncthreads();
     if (threadIdx.x == 0) epochCell()[blockIdx.x] = epoch + pieces + 1;
   }
+
   // Entry handshake: posts epoch to rank `to` and waits for rank `from` to post at least epoch.
   __device__ __forceinline__ void epochSignalWait(int to, int from, FlagType epoch) {
     orderDestWrites();
@@ -178,15 +181,16 @@ public:
       const FlagType* flag = epochFlagFrom(from);
       while (static_cast<int32_t>(__scoped_atomic_load_n(flag, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - epoch) < 0) {
       }
-      __atomic_thread_fence(__ATOMIC_ACQUIRE);
     }
     __syncthreads();
   }
+
   // Posts value to rank `to` once every store of the block has completed.
   __device__ __forceinline__ void epochPost(int to, FlagType value) {
     orderDestWrites();
     __syncthreads();
     if (threadIdx.x == 0) {
+      cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
       __scoped_atomic_store_n(peerFlags_[to] + getEpochFlagIdx(selfRank_, blockIdx.x), value, __ATOMIC_RELAXED,
                               __MEMORY_SCOPE_SYSTEM);
     }
@@ -196,12 +200,17 @@ public:
   __device__ __forceinline__ void epochPostPiece(int to, FlagType epoch, unsigned piece) {
     epochPost(to, epoch + 2 + piece);
   }
+
   __device__ __forceinline__ void epochWaitPiece(const FlagType* ready, FlagType epoch, unsigned piece) {
-    const FlagType want = epoch + 2 + piece;
-    while (static_cast<int32_t>(__scoped_atomic_load_n(ready, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - want) < 0) {
+    if (threadIdx.x == 0) {
+      const FlagType want = epoch + 2 + piece;
+      while (static_cast<int32_t>(__scoped_atomic_load_n(ready, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - want) < 0) {
+      }
+      cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
     }
-    __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    __syncthreads();
   }
+
   // The slot rank `from` posts to from this block index, in this rank's buffer. Every wave polls it.
   __device__ __forceinline__ const FlagType* epochFlagFrom(int from) const {
     return peerFlags_[selfRank_] + getEpochFlagIdx(from, blockIdx.x);
