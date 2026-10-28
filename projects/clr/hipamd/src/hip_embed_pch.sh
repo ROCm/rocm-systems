@@ -102,7 +102,13 @@ generate_pch() {
   fi
   resource_dir=$($LLVM_DIR/bin/clang -print-resource-dir)
   strip_build_paths() {
-    sed -e "/^# [0-9]/{s|\"$tmp/|\"|;s|\"$HIP_BUILD_INC_DIR/|\"|;s|\"$HIP_INC_DIR/|\"|;s|\"$HIP_AMD_INC_DIR/|\"|;s|\"$resource_dir/|\"|;}" "$1" >"$1.tmp" &&
+    local path escaped
+    local sed_args=()
+    for path in "$tmp" "$HIP_BUILD_INC_DIR" "$HIP_INC_DIR" "$HIP_AMD_INC_DIR" "$resource_dir"; do
+      escaped=$(printf '%s\n' "$path" | sed 's/[][\\.^$*|]/\\&/g')
+      sed_args+=(-e "/^# [0-9]/s|\"$escaped/|\"|")
+    done
+    sed "${sed_args[@]}" "$1" >"$1.tmp" &&
     mv "$1.tmp" "$1"
   }
 
