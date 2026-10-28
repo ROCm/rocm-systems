@@ -781,14 +781,14 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     }
 
     auto const _get_chain = [&_open_modes](const char* _name) {
-        auto _chain =
+        auto chain =
             rocprofsys::path::get_link_map(_name, std::vector<int>{ _open_modes }, true);
         if(_name == nullptr)
         {
             // dlopen(nullptr) names the exe with an empty first entry
-            _chain.insert(_chain.begin(), rocprofsys_get_exe_realpath());
+            chain.insert(chain.begin(), rocprofsys_get_exe_realpath());
         }
-        return _chain;
+        return chain;
     };
 
     auto const _full_chain = _get_chain(_lib);

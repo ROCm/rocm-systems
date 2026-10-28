@@ -219,23 +219,41 @@ TEST(decimal_width, counts_digits)
 
 TEST(split_key_value, splits_at_first_equals)
 {
-    auto const kv = split_key_value("KEY=a=b");
-    ASSERT_TRUE(kv.has_value());
-    EXPECT_EQ(kv->key, "KEY");
-    EXPECT_EQ(kv->value, "a=b");
+    auto const parsed = split_key_value("KEY=a=b");
+    if(parsed.has_value())
+    {
+        EXPECT_EQ(parsed->key, "KEY");
+        EXPECT_EQ(parsed->value, "a=b");
+    }
+    else
+    {
+        ASSERT_TRUE(parsed.has_value());
+    }
 }
 
 TEST(split_key_value, empty_value_and_empty_key)
 {
     auto const empty_value = split_key_value("KEY=");
-    ASSERT_TRUE(empty_value.has_value());
-    EXPECT_EQ(empty_value->key, "KEY");
-    EXPECT_TRUE(empty_value->value.empty());
+    if(empty_value.has_value())
+    {
+        EXPECT_EQ(empty_value->key, "KEY");
+        EXPECT_TRUE(empty_value->value.empty());
+    }
+    else
+    {
+        ASSERT_TRUE(empty_value.has_value());
+    }
 
     auto const empty_key = split_key_value("=v");
-    ASSERT_TRUE(empty_key.has_value());
-    EXPECT_TRUE(empty_key->key.empty());
-    EXPECT_EQ(empty_key->value, "v");
+    if(empty_key.has_value())
+    {
+        EXPECT_TRUE(empty_key->key.empty());
+        EXPECT_EQ(empty_key->value, "v");
+    }
+    else
+    {
+        ASSERT_TRUE(empty_key.has_value());
+    }
 }
 
 TEST(split_key_value, no_equals_yields_nullopt)

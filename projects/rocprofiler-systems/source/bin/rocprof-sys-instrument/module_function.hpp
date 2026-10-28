@@ -7,6 +7,7 @@
 #include "function_signature.hpp"
 #include "fwd.hpp"
 #include <cstdint>
+#include <iomanip>
 
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
@@ -23,7 +24,8 @@ struct module_function
     using str_msg_t         = std::tuple<int, string_t, string_t, string_t, string_t>;
     using str_msg_vec_t     = std::vector<str_msg_t>;
 
-    static constexpr size_t absolute_max_width = 80;
+    static constexpr size_t k_absolute_max_width   = 80;
+    static constexpr int    k_numeric_column_width = 14;
     static width_t&         get_width();
     static void             reset_width();
     static void             update_width(const module_function& rhs);
@@ -138,23 +140,23 @@ public:
     {
         std::stringstream ss;
 
-        auto const w0 = std::min<size_t>(get_width()[0], absolute_max_width);
-        auto const w1 = std::min<size_t>(get_width()[1], absolute_max_width);
-        auto const w2 = std::min<size_t>(get_width()[2], absolute_max_width);
+        auto const w0 = std::min<size_t>(get_width()[0], k_absolute_max_width);
+        auto const w1 = std::min<size_t>(get_width()[1], k_absolute_max_width);
+        auto const w2 = std::min<size_t>(get_width()[2], k_absolute_max_width);
 
         auto const _get_str = [](const std::string& _inc) {
-            if(_inc.length() > absolute_max_width)
+            if(_inc.length() > k_absolute_max_width)
             {
-                return _inc.substr(0, absolute_max_width - 3) + "...";
+                return _inc.substr(0, k_absolute_max_width - 3) + "...";
             }
             return _inc;
         };
 
-        auto const _addr = rocprofsys::utility::string::hex_padded(rhs.start_address, 0);
+        auto const addr = rocprofsys::utility::string::hex_padded(rhs.start_address, 0);
         // clang-format off
-        ss << std::setw(14) << _addr << " "
-           << std::setw(14) << rhs.address_range << " "
-           << std::setw(14) << rhs.num_instructions << " "
+        ss << std::setw(k_numeric_column_width) << addr << " "
+           << std::setw(k_numeric_column_width) << rhs.address_range << " "
+           << std::setw(k_numeric_column_width) << rhs.num_instructions << " "
            << std::setw(6) << std::setprecision(2) << std::fixed << (rhs.address_range / static_cast<double>(rhs.num_instructions)) << "  "
            << std::setw(7) << std::to_string(rhs.get_linkage()) << " "
            << std::setw(10) << std::to_string(rhs.get_visibility()) << " "
@@ -241,9 +243,9 @@ module_function::serialize(ArchiveT& ar, const unsigned)
                 ar.startNode();
                 for(auto&& iitr : itr)
                 {
-                    auto const _addr =
+                    auto const addr =
                         rocprofsys::utility::string::hex_padded(iitr.second, 0);
-                    ar(cereal::make_nvp(_addr.c_str(), iitr.first.format()));
+                    ar(cereal::make_nvp(addr.c_str(), iitr.first.format()));
                 }
                 ar.finishNode();
             }

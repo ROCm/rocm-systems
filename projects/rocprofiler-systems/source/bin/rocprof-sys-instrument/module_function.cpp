@@ -140,9 +140,9 @@ module_function::module_function(module_t* mod, procedure_t* proc)
 void
 module_function::write_header(std::ostream& os)
 {
-    auto const w0 = std::min<size_t>(get_width()[0], absolute_max_width);
-    auto const w1 = std::min<size_t>(get_width()[1], absolute_max_width);
-    auto const w2 = std::min<size_t>(get_width()[2], absolute_max_width);
+    auto const w0 = std::min<size_t>(get_width()[0], k_absolute_max_width);
+    auto const w1 = std::min<size_t>(get_width()[1], k_absolute_max_width);
+    auto const w2 = std::min<size_t>(get_width()[2], k_absolute_max_width);
 
     std::stringstream ss;
     ss << std::setw(14) << "StartAddress" << " " << std::setw(14) << "AddressRange" << " "

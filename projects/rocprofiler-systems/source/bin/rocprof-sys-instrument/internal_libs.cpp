@@ -28,8 +28,10 @@
 #include <algorithm>
 #include <dlfcn.h>
 #include <initializer_list>
+#include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -90,10 +92,10 @@ close_symtab_file(const std::string& _name)
 
 template <typename ContainerT>
 bool
-check_regex_restrictions(const ContainerT& _names, const regexvec_t& _regexes)
+check_regex_restrictions(const ContainerT& names, const regexvec_t& regexes)
 {
-    return std::ranges::any_of(_names, [&_regexes](const std::string& _name) {
-        return rocprofsys::utility::regex_match_any(_name, _regexes);
+    return std::ranges::any_of(names, [&regexes](const std::string& name) {
+        return rocprofsys::utility::regex_match_any(name, regexes);
     });
 }
 
@@ -102,13 +104,13 @@ get_linked_path(const char*        _name,
                 open_modes_vec_t&& _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) })
 {
     // the first link_map entry is the library that was opened itself
-    auto const _chain =
+    auto const chain =
         rocprofsys::path::get_link_map(_name, std::move(_open_modes), true);
-    if(_chain.empty())
+    if(chain.empty())
     {
         return std::nullopt;
     }
-    return rocprofsys::path::realpath(_chain.front());
+    return rocprofsys::path::realpath(chain.front());
 }
 
 std::set<std::string>

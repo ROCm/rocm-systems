@@ -698,11 +698,11 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
             {
                 return;
             }
-            auto _val = first->substr(std::string_view{ _env_var }.size() + 1);
+            auto val = first->substr(std::string_view{ _env_var }.size() + 1);
             *first =
                 (_mode == update_mode::prepend)
-                    ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, _val)
-                    : fmt::format("{}={}{}{}", _env_var, _val, _join_delim, _env_val_str);
+                    ? fmt::format("{}={}{}{}", _env_var, _env_val_str, _join_delim, val)
+                    : fmt::format("{}={}{}{}", _env_var, val, _join_delim, _env_val_str);
             return;
         }
 

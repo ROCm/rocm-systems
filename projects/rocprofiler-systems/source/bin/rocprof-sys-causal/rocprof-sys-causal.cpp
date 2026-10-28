@@ -127,7 +127,7 @@ main(int argc, char** argv)
 
             if(_pid == 0)
             {
-                auto const _prefix =
+                auto const prefix =
                     fmt::format("{:>{}}/{:<{}}: [{} -> {}] ", _n, width,
                                 _causal_env.size(), width, _main_pid, getpid());
 
@@ -140,11 +140,11 @@ main(int argc, char** argv)
                 if(_verbose >= 0)
                 {
                     utils::print_environment(_env, get_updated_envs(), _verbose >= 1,
-                                             _prefix);
+                                             prefix);
                 }
                 if(_verbose >= 1)
                 {
-                    utils::print_command(to_string_vec(_argv), _prefix);
+                    utils::print_command(to_string_vec(_argv), prefix);
                 }
                 _argv.emplace_back(nullptr);
                 auto envp_ptrs = utils::to_c_argv(_env);
