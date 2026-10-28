@@ -33,6 +33,7 @@ namespace RcclUnitTesting
     int  childTimeoutSec; // Parent wait per child reply in s (0=off) [UT_CHILD_TIMEOUT_S]
     bool useMultithreading; // Multi-thread single-process ranks   [UT_MULTITHREAD]
     bool commPool;       // Reuse child processes across configs    [UT_COMM_POOL]
+    bool commWarmAhead;  // Warm next sweep config's pool workers   [UT_COMM_WARMAHEAD]
 
     bool isGfx94;        // Detects if architecture is gfx94
     bool isGfx95;        // Detects if architecture is gfx95

@@ -365,6 +365,7 @@ namespace RcclUnitTesting
     childTimeoutSec = GetEnvVar("UT_CHILD_TIMEOUT_S", 900);
     useMultithreading = GetEnvVar("UT_MULTITHREAD", false);
     commPool          = GetEnvVar("UT_COMM_POOL", true);
+    commWarmAhead     = GetEnvVar("UT_COMM_WARMAHEAD", true);
 
     // Total number of reduction ops
     int numOps = ncclNumOps;
@@ -515,6 +516,7 @@ namespace RcclUnitTesting
         std::make_tuple("UT_CHILD_TIMEOUT_S"  , childTimeoutSec, "Parent wait limit per child reply in s (0=off)"),
         std::make_tuple("UT_MULTITHREAD"      , useMultithreading, "Multi-thread single-process ranks"),
         std::make_tuple("UT_COMM_POOL"        , commPool      , "Reuse child processes across configs"),
+        std::make_tuple("UT_COMM_WARMAHEAD"   , commWarmAhead , "Load device code on next sweep config's pool workers early"),
         std::make_tuple("UT_DEVICE_DATA"      , -1            , "Build/validate test data on GPU (0=host path; default on)"),
         std::make_tuple("UT_DEVICE_DATA_MIN_ELEMS", -1        , "Min elements for the device-data path (default 1Mi)"),
         std::make_tuple("UT_DEVICE_DATA_FAULT", -1            , "Negative control: corrupt one expected (FP8 verifiable: output) element (default off)"),

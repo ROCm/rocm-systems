@@ -338,6 +338,7 @@ namespace RcclUnitTesting
     }
 
     this->poolChildren.clear();
+    this->poolWorkerState.clear();
     this->childList.clear();
     this->configUsedPool = false;
     this->childFailed = false;
@@ -346,6 +347,87 @@ namespace RcclUnitTesting
     this->rankToChildMap.clear();
     this->rankToDeviceMap.clear();
     return reason;
+  }
+
+  bool TestBed::PoolWorkersFor(std::vector<std::vector<int>> const& deviceIdsPerChild,
+                               std::vector<int>& workers) const
+  {
+    // Map each child onto a distinct pool worker by representative device.
+    workers.clear();
+    std::set<int> usedWorkers;
+    for (auto const& deviceIds : deviceIdsPerChild)
+    {
+      int const worker = deviceIds.empty() ? -1 : deviceIds[0];
+      if (worker < 0 || worker >= (int)this->poolChildren.size() ||
+          this->poolChildren[worker] == nullptr || usedWorkers.count(worker))
+      {
+        return false;  // out-of-range, missing worker, or collision (multi-rank-per-GPU)
+      }
+      usedWorkers.insert(worker);
+      workers.push_back(worker);
+    }
+    return true;
+  }
+
+  void TestBed::WarmPoolWorkers(std::vector<std::vector<int>> const& deviceIdsPerChild)
+  {
+    if (!this->poolMode || !ev.commWarmAhead) return;
+    std::vector<int> workers;
+    if (!PoolWorkersFor(deviceIdsPerChild, workers)) return;
+
+    int const cmd = TestBedChild::CHILD_WARMUP;
+    for (int const worker : workers)
+    {
+      if (this->poolWorkerState[worker] != PoolWorkerState::Cold) continue;
+      // A failed write leaves the worker Cold; InitComms then reports the dead pipe.
+      if (RcclUnitTesting::safe_pipe_write(this->poolChildren[worker]->parentWriteFd, &cmd, sizeof(cmd)) ==
+          static_cast<ssize_t>(sizeof(cmd)))
+      {
+        this->poolWorkerState[worker] = PoolWorkerState::Warming;
+        if (ev.verbose) TEST_INFO("Warming pool worker %d", worker);
+      }
+    }
+  }
+
+  bool TestBed::FinishWarmup(int const worker)
+  {
+    TestBedChild* const child = this->poolChildren[worker];
+    this->poolWorkerState[worker] = PoolWorkerState::Warm;
+
+    int const timeoutSec = ChildReplyTimeoutSec();
+    int const pollTimeoutMs = timeoutSec > 0
+      ? static_cast<int>(std::min<long long>(timeoutSec * 1000LL, INT_MAX)) : -1;
+    pollfd fd = {child->parentReadFd, POLLIN, 0};
+    int pollResult;
+    do
+    {
+      pollResult = poll(&fd, 1, pollTimeoutMs);
+    } while (pollResult < 0 && errno == EINTR);
+
+    std::string problem;
+    int response = TEST_FAIL;
+    if (pollResult == 0)
+      problem = "did not reply within " + std::to_string(timeoutSec) + " s (UT_CHILD_TIMEOUT_S)";
+    else if (RcclUnitTesting::safe_pipe_read(child->parentReadFd, &response, sizeof(response)) !=
+             static_cast<ssize_t>(sizeof(response)))
+      problem = "pipe closed";
+    else if (response != TEST_SUCCESS)
+      problem = "reported failure";
+    if (problem.empty()) return true;
+
+    std::string const reason = "Pool worker " + std::to_string(worker) + " (pid " +
+                               std::to_string(child->pid) + ") warm-up " + problem;
+    TEST_ERROR("%s; removing it from the pool", reason.c_str());
+    ADD_FAILURE() << reason;
+    if (child->pid > 0)
+    {
+      kill(child->pid, SIGKILL);
+      while (waitpid(child->pid, nullptr, 0) == -1 && errno == EINTR) {}
+    }
+    child->ClosePipes();
+    delete child;
+    this->poolChildren[worker] = nullptr;
+    return false;
   }
 
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
@@ -416,6 +498,7 @@ namespace RcclUnitTesting
           poolSize = detectedGpus;
         }
         this->poolChildren.assign(poolSize, nullptr);
+        this->poolWorkerState.assign(poolSize, PoolWorkerState::Cold);
         for (int d = 0; d < poolSize; ++d)
         {
           this->poolChildren[d] = new TestBedChild(d, ev.verbose, ev.printValues, ev.useMultithreading);
@@ -431,32 +514,28 @@ namespace RcclUnitTesting
             FAIL() << "Unable to start pool child process " << d;
           }
         }
-        // Do NOT pre-warm workers: under the runner's --jobs N it storms
-        // ncclCommInitAll across all GPUs and fails intermittently.
+        // Do NOT pre-warm the whole pool here: under the runner's --jobs N it
+        // storms ncclCommInitAll across all GPUs and fails intermittently.
+        // Sweeps warm only the next configs' workers (WarmPoolWorkers).
       }
 
-
-      // Map this config's children onto distinct pool workers by representative device.
-      bool mappable = true;
-      std::vector<TestBedChild*> mapped(this->numActiveChildren, nullptr);
-      std::set<int> usedWorkers;
-      for (int c = 0; c < this->numActiveChildren && mappable; ++c)
+      std::vector<int> workers;
+      bool mappable = PoolWorkersFor(deviceIdsPerProcess, workers);
+      for (int const worker : workers)
       {
-        int const worker = deviceIdsPerProcess[c].empty() ? -1 : deviceIdsPerProcess[c][0];
-        if (worker < 0 || worker >= (int)this->poolChildren.size() ||
-            this->poolChildren[worker] == nullptr || usedWorkers.count(worker))
-        {
-          mappable = false;  // out-of-range, missing worker, or collision (multi-rank-per-GPU) -> fork-fresh
-          break;
-        }
-        usedWorkers.insert(worker);
-        mapped[c] = this->poolChildren[worker];
+        if (this->poolWorkerState[worker] == PoolWorkerState::Warming && !FinishWarmup(worker))
+          mappable = false;  // worker removed from the pool -> fork-fresh
       }
 
       if (mappable)
       {
         // Reuse: childList borrows the selected pool workers (pool retains ownership).
-        childList = mapped;
+        childList.clear();
+        for (int const worker : workers)
+        {
+          childList.push_back(this->poolChildren[worker]);
+          this->poolWorkerState[worker] = PoolWorkerState::Warm;
+        }
         this->configUsedPool = true;
       }
     }
@@ -1188,6 +1267,15 @@ namespace RcclUnitTesting
     if (this->poolChildren.empty())
       return;
 
+    // A warming worker writes its reply before it reads STOP; collect it so
+    // the reply does not hit a closed pipe.
+    for (int worker = 0; worker < (int)this->poolWorkerState.size(); ++worker)
+    {
+      if (this->poolChildren[worker] != nullptr &&
+          this->poolWorkerState[worker] == PoolWorkerState::Warming)
+        (void)FinishWarmup(worker);
+    }
+
     // Best-effort stop (avoid the ASSERT-based PIPE_WRITE during teardown), then reap.
     int const cmd = TestBedChild::CHILD_STOP;
     for (TestBedChild* c : this->poolChildren)
@@ -1227,6 +1315,7 @@ namespace RcclUnitTesting
       delete c;
     }
     this->poolChildren.clear();
+    this->poolWorkerState.clear();
     this->childList.clear();      // borrowed refs only; do not delete
     this->configUsedPool = false;
     this->numActiveChildren = 0;
@@ -1382,25 +1471,41 @@ namespace RcclUnitTesting
     int numSymmetricConfigsRun = 0;
     int numSymmetricConfigsSkipped = 0;
 
-    // Sweep over the number of ranks
+    // Sweep over the number of ranks: either single process all GPUs, or 1 process per GPU
+    struct RankConfig { int numGpus; int isMultiProcess; int ranksPerGpu; };
+    std::vector<RankConfig> rankConfigs;
     for (int numGpus : ev.GetNumGpusList())
     for (int isMultiProcess : ev.GetIsMultiProcessList())
-    for (int ranksPerGpu=1; ranksPerGpu <= ev.maxRanksPerGpu && isCorrect; ++ranksPerGpu)
+    for (int ranksPerGpu=1; ranksPerGpu <= ev.maxRanksPerGpu; ++ranksPerGpu)
     {
-      // Test either single process all GPUs, or 1 process per GPU
-      int const numChildren = isMultiProcess ? numGpus : 1;
-      int const numRanks    = numGpus*ranksPerGpu;
-      if(enableSweep == false && (numGpus < 8 || numRanks < 8)) {
+      if(enableSweep == false && (numGpus < 8 || numGpus*ranksPerGpu < 8)) {
         continue;
       }
-      const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
-      this->InitComms(this->GetDeviceIdsList(numChildren, numGpus, ranksPerGpu, gpuPriorityOrder),1,1,1,true,memAllocType);
+      rankConfigs.push_back({numGpus, isMultiProcess, ranksPerGpu});
+    }
+    const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
+    auto deviceIdsFor = [&](RankConfig const& rc) {
+      return this->GetDeviceIdsList(rc.isMultiProcess ? rc.numGpus : 1, rc.numGpus, rc.ranksPerGpu, gpuPriorityOrder);
+    };
+
+    for (size_t rcIdx = 0; rcIdx < rankConfigs.size() && isCorrect; ++rcIdx)
+    {
+      int const numGpus        = rankConfigs[rcIdx].numGpus;
+      int const isMultiProcess = rankConfigs[rcIdx].isMultiProcess;
+      int const ranksPerGpu    = rankConfigs[rcIdx].ranksPerGpu;
+      int const numRanks       = numGpus*ranksPerGpu;
+      this->InitComms(deviceIdsFor(rankConfigs[rcIdx]),1,1,1,true,memAllocType);
       if (testing::Test::HasFailure())
       {
         isCorrect = false;
         this->DestroyComms();
         continue;
       }
+
+      // Two configs ahead: the next one alone (often single-process on warm
+      // worker 0) is too short to hide a worker's ~2 s device-code load.
+      for (size_t ahead = rcIdx + 1; ahead < rankConfigs.size() && ahead <= rcIdx + 2; ++ahead)
+        this->WarmPoolWorkers(deviceIdsFor(rankConfigs[ahead]));
 
       // Symmetric sweeps only cover configurations where RCCL can select symmetric kernels
       if (memAllocType == MEM_ALLOC_SYMMETRIC_WIN)

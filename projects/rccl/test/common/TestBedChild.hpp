@@ -37,7 +37,8 @@ namespace RcclUnitTesting
       CHILD_REGISTER_MEM     = 12, // RegisterMem()
       CHILD_QUERY_SYMMETRIC  = 13, // QuerySymmetricSupport()
       CHILD_DEREGISTER_MEM   = 14, // DeregisterMem()
-      NUM_CHILD_COMMANDS     = 15
+      CHILD_WARMUP           = 15, // Warmup()
+      NUM_CHILD_COMMANDS     = 16
     };
 
     char const ChildCommandNames[NUM_CHILD_COMMANDS][20] =
@@ -56,7 +57,8 @@ namespace RcclUnitTesting
       "STOP",
       "REGISTER_MEM",
       "QUERY_SYMMETRIC",
-      "DEREGISTER_MEM"
+      "DEREGISTER_MEM",
+      "WARMUP"
     };
 
     // argv layout of an exec'd child worker (TestBed::InitChild builds it, main() parses it)
@@ -167,6 +169,10 @@ namespace RcclUnitTesting
 
     // Returns (as int) whether every local comm reports symmetric kernel support
     ErrCode QuerySymmetricSupport(std::vector<char>& retValBuf);
+
+    // Pool workers only (childId == pinned device): creates and destroys a 1-rank
+    // comm so RCCL's device code is loaded before the worker's first real config.
+    ErrCode Warmup();
 
   private:
     // Per-collective registration bodies for RegisterMem(): symmetric windows

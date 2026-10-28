@@ -37,6 +37,10 @@ namespace RcclUnitTesting
     // the pool-reset boundary (re-forks the pool with the current env).
     bool                       poolMode;              // reuse workers across configs (UT_COMM_POOL != 0)
     std::vector<TestBedChild*> poolChildren;          // persistent pool, index == pinned device id
+    // Cold: device code not loaded yet. Warming: a WARMUP reply is still unread,
+    // so nothing else may be sent to or read from that worker. Warm: loaded.
+    enum class PoolWorkerState { Cold, Warming, Warm };
+    std::vector<PoolWorkerState> poolWorkerState;     // parallel to poolChildren
     bool                       configUsedPool;        // last InitComms served from the pool (skip Finalize in DestroyComms)
     bool                       childFailed = false;   // a child reported failure since the last DestroyComms (abort, not finalize)
 
@@ -123,6 +127,11 @@ namespace RcclUnitTesting
 
     // Release the RCCL comms
     void DestroyComms();
+
+    // Pool mode (UT_COMM_WARMAHEAD): starts loading device code on the cold pool
+    // workers a later InitComms(deviceIdsPerChild) will use, without waiting.
+    // That InitComms collects the replies.
+    void WarmPoolWorkers(std::vector<std::vector<int>> const& deviceIdsPerChild);
 
     // Query whether every active rank's comm supports symmetric kernels (requires InitComms)
     void QuerySymmetricSupport(bool& isSupported);
@@ -226,6 +235,16 @@ namespace RcclUnitTesting
     // exit status; a hung child is killed immediately. Returns the report for
     // the test failure message.
     std::string AbandonChildren(int lostChildId, bool waitForExit = true);
+
+    // Fills workers with the pool worker serving each child of deviceIdsPerChild.
+    // False when some child has no distinct live worker (fork-fresh path).
+    bool PoolWorkersFor(std::vector<std::vector<int>> const& deviceIdsPerChild,
+                        std::vector<int>& workers) const;
+
+    // Reads the pending WARMUP reply of a Warming pool worker. A worker that
+    // fails, dies or times out is killed and removed from the pool, and the
+    // current test fails.
+    bool FinishWarmup(int worker);
 
     // Reads one acknowledgement from each listed child (a child may appear once
     // per command it was sent), then fails if any reported failure.

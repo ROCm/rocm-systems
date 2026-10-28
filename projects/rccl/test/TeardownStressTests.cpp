@@ -8,7 +8,9 @@
 #include <hip/hip_runtime.h>
 #include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -306,6 +308,116 @@ namespace RcclUnitTesting
     // InitComms silently falls back to fork-fresh workers if the pool cannot
     // serve the config, which would make this test cover the wrong path.
     EXPECT_TRUE(testBed.configUsedPool) << "Config was not served from the communicator pool";
+    testBed.Finalize();
+  }
+
+  namespace
+  {
+    // Creates the pool with a 1-process config, then starts warming the second
+    // worker of a 2-process config. Returns that worker, or -1 on failure.
+    int StartWarmingSecondWorker(TestBed& testBed, std::vector<std::vector<int>>& twoProcessIds)
+    {
+      bool isCorrect = true;
+      RunTeardownCycles(testBed, 1, /*useBlocking*/ true, /*iterations*/ 1, isCorrect);
+      if (!isCorrect || testBed.poolChildren.empty()) return -1;
+
+      twoProcessIds = TestBed::GetDeviceIdsList(2, 2, testBed.ev.GetGpuPriorityOrder());
+      int const worker = twoProcessIds[1][0];
+      EXPECT_EQ(testBed.poolWorkerState[worker], TestBed::PoolWorkerState::Cold);
+      testBed.WarmPoolWorkers(twoProcessIds);
+      EXPECT_EQ(testBed.poolWorkerState[worker], TestBed::PoolWorkerState::Warming);
+      return worker;
+    }
+
+    // Every reply is a TEST_SUCCESS int, so a reply the parent never read just
+    // shifts later acks by one; only the leftover bytes in the pipe show it.
+    bool HasUnreadReply(TestBedChild const* worker, int const waitMs)
+    {
+      pollfd fd = {worker->parentReadFd, POLLIN, 0};
+      return poll(&fd, 1, waitMs) > 0 && (fd.revents & POLLIN);
+    }
+
+    bool CanRunTwoProcessPool(TestBed& testBed, std::string& skipReason)
+    {
+      if (!testBed.poolMode || !testBed.ev.commWarmAhead)
+        skipReason = "Requires UT_COMM_POOL=1 and UT_COMM_WARMAHEAD=1";
+      else if (testBed.ev.maxGpus < 2)
+        skipReason = "Requires at least 2 GPUs";
+      else if (!(testBed.ev.processMask & (1 << 1)))
+        skipReason = "Requires multi-process mode (UT_PROCESS_MASK)";
+      else if (!float32Supported(testBed))
+        skipReason = "Requires ncclFloat32 (excluded by UT_DATATYPES)";
+      return skipReason.empty();
+    }
+  }
+
+  // The next InitComms that uses a warming worker collects its reply first.
+  TEST(Teardown, WarmedPoolWorkerIsReused)
+  {
+    TestBed testBed;
+    std::string skipReason;
+    if (!CanRunTwoProcessPool(testBed, skipReason)) GTEST_SKIP() << skipReason;
+
+    std::vector<std::vector<int>> twoProcessIds;
+    int const worker = StartWarmingSecondWorker(testBed, twoProcessIds);
+    ASSERT_GE(worker, 0);
+
+    bool isCorrect = true;
+    RunTeardownCycles(testBed, 2, /*useBlocking*/ true, /*iterations*/ 1, isCorrect);
+    EXPECT_TRUE(isCorrect);
+    EXPECT_TRUE(testBed.configUsedPool) << "Config was not served from the communicator pool";
+    EXPECT_EQ(testBed.poolWorkerState[worker], TestBed::PoolWorkerState::Warm);
+    for (auto const& deviceIds : twoProcessIds)
+      EXPECT_FALSE(HasUnreadReply(testBed.poolChildren[deviceIds[0]], /*waitMs*/ 1000))
+        << "Pool worker " << deviceIds[0] << " has a reply the parent never read";
+    testBed.Finalize();
+  }
+
+  // Finalize with a warm-up still running completes cleanly and reaps the pool.
+  TEST(Teardown, FinalizeCollectsPendingWarmup)
+  {
+    TestBed testBed;
+    std::string skipReason;
+    if (!CanRunTwoProcessPool(testBed, skipReason)) GTEST_SKIP() << skipReason;
+
+    std::vector<std::vector<int>> twoProcessIds;
+    ASSERT_GE(StartWarmingSecondWorker(testBed, twoProcessIds), 0);
+
+    testBed.Finalize();
+    EXPECT_TRUE(testBed.poolChildren.empty());
+    EXPECT_TRUE(testBed.poolWorkerState.empty());
+  }
+
+  // A worker lost during warm-up fails the test, leaves the pool, and the
+  // config still runs on freshly forked workers.
+  TEST(Teardown, LostWarmupWorkerFallsBackToFreshWorkers)
+  {
+    TestBed testBed;
+    std::string skipReason;
+    if (!CanRunTwoProcessPool(testBed, skipReason)) GTEST_SKIP() << skipReason;
+
+    std::vector<std::vector<int>> twoProcessIds;
+    int const worker = StartWarmingSecondWorker(testBed, twoProcessIds);
+    ASSERT_GE(worker, 0);
+    pid_t const workerPid = testBed.poolChildren[worker]->pid;
+    ASSERT_EQ(kill(workerPid, SIGKILL), 0);
+
+    ::testing::TestPartResultArray failures;
+    {
+      ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+      testBed.InitComms(twoProcessIds);
+    }
+    EXPECT_EQ(failures.size(), 1);
+    EXPECT_TRUE(AnyFailureMentions(failures, "warm-up"));
+    EXPECT_EQ(testBed.poolChildren[worker], nullptr);
+    EXPECT_FALSE(testBed.configUsedPool);
+    EXPECT_EQ(testBed.numActiveChildren, 2);
+    errno = 0;
+    EXPECT_EQ(waitpid(workerPid, nullptr, WNOHANG), -1);
+    EXPECT_EQ(errno, ECHILD);
+
+    testBed.DestroyComms();
     testBed.Finalize();
   }
 }

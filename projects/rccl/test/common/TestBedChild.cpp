@@ -172,6 +172,7 @@ namespace RcclUnitTesting
       case CHILD_DESTROY_COMMS   : status = DestroyCommsCommand();  break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
       case CHILD_QUERY_SYMMETRIC : status = QuerySymmetricSupport(retValBuf); break;
+      case CHILD_WARMUP          : status = Warmup();               break;
       case CHILD_STOP            : goto stop;
       default:
         TEST_ERROR("Child %d received unknown command ID: %d", this->childId, command);
@@ -248,6 +249,20 @@ namespace RcclUnitTesting
     }
     retValBuf.resize(sizeof(supported));
     memcpy(retValBuf.data(), &supported, sizeof(supported));
+    return TEST_SUCCESS;
+  }
+
+  ErrCode TestBedChild::Warmup()
+  {
+    if (!this->comms.empty())
+    {
+      TEST_ERROR("Child %d: Warmup requires a worker without live comms", this->childId);
+      return TEST_FAIL;
+    }
+    int device = this->childId;
+    ncclComm_t comm = nullptr;
+    CHILD_NCCL_CALL(ncclCommInitAll(&comm, 1, &device), "ncclCommInitAll Warmup");
+    CHILD_NCCL_CALL(ncclCommDestroy(comm), "ncclCommDestroy Warmup");
     return TEST_SUCCESS;
   }
 
