@@ -73,8 +73,8 @@ class Var {
 
   void ResizeDVar(size_t size) { dMem_.resize(size); }
 
-  //! Drop the per-device memory objects. Used after a device reset has purged
-  //! them; AllocateManagedVarPtr() repopulates via its dMem_.empty() path.
+  //! Drops the per-device memory objects; AllocateManagedVarPtr() repopulates
+  //! them on the next allocation.
   void ClearDeviceVars() { dMem_.clear(); }
 
   FatBinaryInfo** ModuleInfo() { return modules_; }
