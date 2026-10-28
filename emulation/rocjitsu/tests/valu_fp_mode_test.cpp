@@ -34,7 +34,6 @@
 #include <memory>
 #include <optional>
 #include <ostream>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -6584,16 +6583,18 @@ void check_float_compare_swap_policy(std::initializer_list<FloatCompareSwapCase>
   }
 }
 
-TEST(FpModePolicyTest, ScalarAtomicRejectsUnsupportedOperations) {
+#ifndef NDEBUG
+TEST(FpModePolicyTest, ScalarAtomicAssertsUnsupportedOperations) {
   const auto invalid = static_cast<amdgpu::fp_mode::ScalarAtomicOp>(0xff);
-  EXPECT_THROW(amdgpu::fp_mode::atomic_scalar<uint32_t>(invalid, 0x3f800000, 0x40000000, 0, 3,
+  EXPECT_DEATH(amdgpu::fp_mode::atomic_scalar<uint32_t>(invalid, 0x3f800000, 0x40000000, 0, 3,
                                                         /*legacy_minmax=*/true),
-               std::invalid_argument);
-  EXPECT_THROW(amdgpu::fp_mode::atomic_scalar<uint64_t>(invalid, 0x3ff0000000000000,
+               "unsupported scalar floating-point atomic operation");
+  EXPECT_DEATH(amdgpu::fp_mode::atomic_scalar<uint64_t>(invalid, 0x3ff0000000000000,
                                                         0x4000000000000000, 0, 3,
                                                         /*legacy_minmax=*/true),
-               std::invalid_argument);
+               "unsupported scalar floating-point atomic operation");
 }
+#endif
 
 TEST(FpModePolicyTest, FloatCompareSwapFlushesOnlyTheComparison) {
   check_float_compare_swap_policy<uint32_t>({
