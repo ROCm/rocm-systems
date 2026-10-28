@@ -21,7 +21,10 @@ use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+mod host_alias;
+pub(super) use host_alias::KfdHostAlias;
 
 /// Process-local set of activated device VMs and their shared loss events.
 ///
@@ -621,6 +624,8 @@ struct LossEvent {
     memory_destroy_uncertain: AtomicBool,
     /// Serialized retained records and subscriber cursors.
     observed: Mutex<ObservedEvents>,
+    /// Live BO-backed CPU mappings available for safe registration reuse.
+    host_aliases: Mutex<Vec<Shared<host_alias::HostAliasRecord>>>,
     /// Sticky terminal connection-loss flag.
     lost: AtomicBool,
 }
@@ -849,6 +854,7 @@ impl LossEvent {
             hardware_destroy_uncertain: AtomicBool::new(false),
             memory_destroy_uncertain: AtomicBool::new(false),
             observed: Mutex::new(observed),
+            host_aliases: Mutex::new(Vec::new()),
             lost: AtomicBool::new(false),
         })?;
         let mut args = uapi::CreateEvent::default();
@@ -1159,6 +1165,9 @@ pub(crate) struct KfdAllocation {
     origin_gpu_id: u32,
     /// KFD placement and permission flags.
     native_flags: u32,
+    /// GPU permissions established for this owner, including imports whose
+    /// backing flags do not encode the importing VM's access.
+    access_permissions: DeviceAccess,
     /// Native identity of the physical backing for import checks.
     physical_backing_id: [u64; 2],
     /// Driver metadata retained from a DMA-BUF import.
@@ -1173,6 +1182,11 @@ pub(crate) struct KfdAllocation {
     freeing: bool,
     /// Native outcome is ambiguous, so backing cannot be reused safely.
     uncertain: bool,
+    /// Published CPU mapping that must outlive any borrowed registrations.
+    host_alias_record: Option<Shared<host_alias::HostAliasRecord>>,
+    /// Provider and exported identities retained across access-set changes.
+    host_alias_frontend_id: OnceLock<[u64; 2]>,
+    host_alias_exported_id: OnceLock<[u64; 2]>,
 }
 
 fn allocation_source(kind: BufferKind, size: usize) -> Result<(Option<usize>, usize, u64), Error> {
@@ -1352,6 +1366,7 @@ impl KfdAllocation {
             logical_size: desc.size,
             origin_gpu_id,
             native_flags: 0,
+            access_permissions: permissions,
             physical_backing_id: [0; 2],
             metadata: Vec::new(),
             scratch_range: None,
@@ -1359,6 +1374,9 @@ impl KfdAllocation {
             access_change: None,
             freeing: false,
             uncertain: false,
+            host_alias_record: None,
+            host_alias_frontend_id: OnceLock::new(),
+            host_alias_exported_id: OnceLock::new(),
         })?;
         let mut args = uapi::AllocMemory {
             va: allocation.address()? as u64,
@@ -1454,6 +1472,7 @@ impl KfdAllocation {
         allocation.mapping = GpuMapping::Mapping(0);
         allocation.finish_map()?;
         allocation.vm.check()?;
+        allocation.publish_host_alias()?;
         Ok(allocation)
     }
 
@@ -1519,6 +1538,7 @@ impl KfdAllocation {
             logical_size: desc.size,
             origin_gpu_id,
             native_flags: 0,
+            access_permissions: DeviceAccess::READ | DeviceAccess::WRITE,
             physical_backing_id: [0; 2],
             metadata: Vec::new(),
             scratch_range: Some((address, desc.size)),
@@ -1526,6 +1546,9 @@ impl KfdAllocation {
             access_change: None,
             freeing: false,
             uncertain: false,
+            host_alias_record: None,
+            host_alias_frontend_id: OnceLock::new(),
+            host_alias_exported_id: OnceLock::new(),
         });
         let mut args = uapi::AllocMemory {
             va: address,
@@ -1667,6 +1690,7 @@ impl KfdAllocation {
             logical_size: byte_length,
             origin_gpu_id: native_info.gpu_id,
             native_flags: native_info.flags,
+            access_permissions: permissions,
             physical_backing_id: file_info.physical_id,
             metadata: details.metadata,
             scratch_range: None,
@@ -1674,6 +1698,9 @@ impl KfdAllocation {
             access_change: None,
             freeing: false,
             uncertain: false,
+            host_alias_record: None,
+            host_alias_frontend_id: OnceLock::new(),
+            host_alias_exported_id: OnceLock::new(),
         })?;
         let mut args = uapi::ImportDmaBuf {
             va: allocation.address()? as u64,
@@ -1714,6 +1741,7 @@ impl KfdAllocation {
         allocation.mapping = GpuMapping::Mapping(0);
         allocation.finish_map()?;
         allocation.vm.check()?;
+        allocation.publish_host_alias()?;
         Ok(allocation)
     }
 
@@ -1827,6 +1855,7 @@ impl KfdAllocation {
             logical_size: native_info.size,
             origin_gpu_id: native_info.gpu_id,
             native_flags: native_info.flags,
+            access_permissions: DeviceAccess::READ | DeviceAccess::WRITE,
             physical_backing_id: file_info.physical_id,
             metadata: details.metadata,
             scratch_range: None,
@@ -1834,6 +1863,9 @@ impl KfdAllocation {
             access_change: None,
             freeing: false,
             uncertain: false,
+            host_alias_record: None,
+            host_alias_frontend_id: OnceLock::new(),
+            host_alias_exported_id: OnceLock::new(),
         })?;
         let mut args = uapi::ImportDmaBuf {
             va: allocation.address()? as u64,
@@ -1878,6 +1910,7 @@ impl KfdAllocation {
         allocation.mapping = GpuMapping::Mapping(0);
         allocation.finish_map()?;
         allocation.vm.check()?;
+        allocation.publish_host_alias()?;
         Ok(allocation)
     }
 
@@ -1973,6 +2006,7 @@ impl KfdAllocation {
             logical_size,
             origin_gpu_id: words[7],
             native_flags: 0,
+            access_permissions: DeviceAccess::READ | DeviceAccess::WRITE,
             physical_backing_id: [0; 2],
             metadata: Vec::new(),
             scratch_range: None,
@@ -1980,6 +2014,9 @@ impl KfdAllocation {
             access_change: None,
             freeing: false,
             uncertain: false,
+            host_alias_record: None,
+            host_alias_frontend_id: OnceLock::new(),
+            host_alias_exported_id: OnceLock::new(),
         })?;
         let mut args = uapi::IpcImportHandle {
             va_addr: allocation.address()? as u64,
@@ -2020,6 +2057,7 @@ impl KfdAllocation {
             allocation.finish_map()?;
         }
         allocation.vm.check()?;
+        allocation.publish_host_alias()?;
         Ok(allocation)
     }
 
@@ -2268,6 +2306,10 @@ impl KfdAllocation {
             .count();
         self.gpu_ids.try_reserve(additions)?;
         self.peers.try_reserve(additions)?;
+        // The access set in a published alias record is immutable. Retire it
+        // before changing KFD mappings, and refuse changes while aliases use
+        // the old set.
+        self.begin_host_alias_cleanup()?;
         self.finish_access_change()?;
         for device in devices {
             if self.gpu_ids.iter().any(|id| *id == device.gpu_id) {
@@ -2299,7 +2341,8 @@ impl KfdAllocation {
             });
             self.finish_access_change()?;
         }
-        self.vm.check()
+        self.vm.check()?;
+        self.publish_host_alias()
     }
 
     fn transfer(&mut self) -> Result<(), Error> {
@@ -2540,6 +2583,10 @@ impl KfdAllocation {
                 "re-exported DMA-BUF changed physical identity",
             ));
         }
+        if let Some(source) = &self.host_alias_record {
+            source.note_export(file_info.physical_id);
+            let _ = self.host_alias_exported_id.set(file_info.physical_id);
+        }
         Ok(DmaBuf::new(
             file.into(),
             DmaBufInfo {
@@ -2612,6 +2659,7 @@ impl KfdAllocation {
             .kfd
             .check_process()
             .map_err(|source| native_error("KFD allocation free", source))?;
+        self.begin_host_alias_cleanup()?;
         self.freeing = true;
         if self.uncertain {
             return Err(error(
@@ -2676,6 +2724,7 @@ impl KfdAllocation {
 impl Drop for KfdAllocation {
     fn drop(&mut self) {
         if let Err(error) = self.free() {
+            self.abandon_host_alias();
             crate::memory::device::record_rollback(error, self.remaining_backing_byte_length());
             if self.handle.is_some() || self.uncertain {
                 if let Some(backing) = self.backing.take() {
@@ -2726,6 +2775,7 @@ pub(super) fn queue_fixture_with_range(
         hardware_destroy_uncertain: AtomicBool::new(false),
         memory_destroy_uncertain: AtomicBool::new(false),
         observed: Mutex::new(ObservedEvents::new().unwrap()),
+        host_aliases: Mutex::new(Vec::new()),
         lost: AtomicBool::new(false),
     })
     .unwrap();

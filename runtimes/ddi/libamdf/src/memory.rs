@@ -148,6 +148,49 @@ fn release_gpu(
 }
 
 impl Memory {
+    /// A native BUSY without errno means the allocation and public handle are
+    /// still live, so the caller may end its borrows and retry destruction.
+    fn release_native_for_destroy(&mut self) -> Result<amdf_memory_release_info_t, u64> {
+        let Backing::Gpu(allocation) = &mut self.backing else {
+            return Ok(self.release_native());
+        };
+        match allocation.free() {
+            Ok(()) => {
+                self.backing = Backing::Registered;
+                Ok(amdf_memory_release_info_t::default())
+            }
+            Err(error)
+                if error.kind() == rocddi::ErrorKind::Busy
+                    && error.native_error_code().is_none() =>
+            {
+                Err(BUSY)
+            }
+            Err(error) => {
+                let device = self
+                    .access
+                    .first()
+                    .map_or(std::ptr::null_mut(), |access| access.device);
+                let status = if device.is_null() {
+                    native(&error)
+                } else {
+                    // SAFETY: The allocation borrows this admitted device.
+                    unsafe { (*device).native_error_status(&error) }
+                };
+                let abandoned_byte_length = if self.allocated_backing {
+                    allocation.remaining_backing_byte_length()
+                } else {
+                    0
+                };
+                let owner = std::mem::replace(&mut self.backing, Backing::Registered);
+                std::mem::forget(owner);
+                Ok(amdf_memory_release_info_t {
+                    status,
+                    abandoned_byte_length,
+                })
+            }
+        }
+    }
+
     fn release_native(&mut self) -> amdf_memory_release_info_t {
         let device = self
             .access
@@ -216,9 +259,9 @@ impl Drop for PendingGpu {
     }
 }
 
-/// Recognizes the exact provider-owned host range before asking KFD to create
-/// a USERPTR BO. KFD cannot register every GPU BO host VMA as a second USERPTR
-/// allocation. This cold list is scoped to one instance and retains no backing.
+/// Resolves a same-instance provider view to its public physical identity and
+/// full native extent. Its child borrow stabilizes those facts through the
+/// view's lifetime. rocddi separately reuses BO mappings across frontends.
 unsafe fn find_host_alias(
     instance: &Instance,
     address: usize,
@@ -1270,7 +1313,7 @@ pub(crate) unsafe extern "C" fn create(
                         // host pages until native destruction succeeds. An
                         // uncertain native result retains that owner.
                         unsafe {
-                            device.native.register_host_with_peers(
+                            device.native.register_host_range_with_peers(
                                 peer_devices.as_slice(),
                                 address,
                                 memory::device::HostMappingPolicy::Fine,
@@ -1280,13 +1323,16 @@ pub(crate) unsafe extern "C" fn create(
                             )
                         }
                     } else {
-                        device.native.allocate_with_peers(
-                            peer_devices.as_slice(),
-                            kind,
-                            native_length,
-                            alignment.max(page),
-                            permissions,
-                        )
+                        device
+                            .native
+                            .allocate_with_peers(
+                                peer_devices.as_slice(),
+                                kind,
+                                native_length,
+                                alignment.max(page),
+                                permissions,
+                            )
+                            .map(|allocation| (allocation, 0))
                     }
                 });
             if native_allocation.is_err() {
@@ -1303,15 +1349,32 @@ pub(crate) unsafe extern "C" fn create(
                     }
                 }
             }
-            let native_allocation =
+            let (native_allocation, registration_offset) =
                 native_allocation.map_err(|e| device.native_error_status(&e))?;
+            if registered {
+                source_byte_offset = native_allocation
+                    .host_alias_source_offset()
+                    .unwrap_or(0)
+                    .checked_add(registration_offset)
+                    .ok_or(RANGE)?;
+                native_length = native_allocation.info().native_size;
+            }
             let native_allocation = PendingGpu::new(
                 native_allocation,
                 std::ptr::from_ref(device).cast_mut(),
                 !registered,
                 out_release_info,
             );
+            if !registered && !local {
+                native_allocation
+                    .allocation()?
+                    .set_host_alias_identity(physical_backing_id.words)
+                    .map_err(|error| device.native_error_status(&error))?;
+            }
             let addresses = native_allocation.allocation()?.info();
+            if registered && addresses.physical_backing_id != [0; 2] {
+                physical_backing_id.words = addresses.physical_backing_id;
+            }
             if profile.guaranteed_flags & AMDF_MEMORY_FLAG_SHAREABLE != 0 {
                 let dma_buf = linux_interop::export_dma_buf(native_allocation.allocation()?)
                     .map_err(|error| device.native_error_status(&error))?;
@@ -1323,7 +1386,9 @@ pub(crate) unsafe extern "C" fn create(
                 let address = native_allocation
                     .allocation()?
                     .device_address(&access_device.native)
-                    .map_err(|error| access_device.native_error_status(&error))?;
+                    .map_err(|error| access_device.native_error_status(&error))?
+                    .checked_add(registration_offset)
+                    .ok_or(RANGE)?;
                 access_records
                     .try_push(Access {
                         device: requested.device.cast(),
@@ -1347,7 +1412,7 @@ pub(crate) unsafe extern "C" fn create(
             }
             (
                 Backing::Gpu(native_allocation.into_inner()?),
-                addresses.host_address,
+                registered_address.or(addresses.host_address),
                 if local && visible {
                     match device.native.endpoint().host_local_cacheability {
                         Some(memory::device::HostCacheability::WriteBack) => {
@@ -1727,7 +1792,20 @@ pub(crate) unsafe extern "C" fn destroy(
                 return Err(BUSY);
             }
             memory.freeing = true;
-            let release = memory.release_native();
+            let release = match memory.release_native_for_destroy() {
+                Ok(release) => release,
+                Err(status) => {
+                    memory.freeing = false;
+                    publish_release(
+                        out_release_info,
+                        amdf_memory_release_info_t {
+                            status,
+                            ..Default::default()
+                        },
+                    );
+                    return Err(status);
+                }
+            };
             publish_release(out_release_info, release);
             // The ABI consumes the public memory handle even when a native
             // release fails. Dropping the internal owner finishes safe cleanup
