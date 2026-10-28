@@ -26,7 +26,7 @@ bool Comgr::LoadLib() {
 #endif
   cep_.handle = Os::loadLibrary(comgr_lib_name);
   if (nullptr == cep_.handle) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Failed to load COMGR library.");
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Failed to load COMGR library %s.", comgr_lib_name);
     return false;
   }
 #endif
