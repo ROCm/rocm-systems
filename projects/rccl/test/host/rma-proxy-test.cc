@@ -88,17 +88,6 @@ int64_t ncclParamIbDataDirect() { return 1; }
 ncclResult_t ncclTopoGetLocalRmaDevs(struct ncclComm*, int*, int*) { return ncclInternalError; }
 // src/rma/rma_proxy_progress.cc. Only the proxy thread calls it; never started here.
 ncclResult_t ncclRmaProxyProgress(ncclRma_t*, void*) { return ncclInternalError; }
-// libhsa-runtime64, reached from rma_proxy.cc's file-static getDmaBufFd via the
-// HSACHECK macro (src/include/rocmwrap.h) -- a required HSA entry point, called
-// directly rather than through a pfn gate. Host tests link no ROCr, and no RCCL
-// TU defines it, so there is no owning fakes file. It must be defined even
-// though no test reaches it: at -O0 (the host-test default, and what CI builds)
-// the dead static survives and the reference is emitted. A Release build
-// discards it via --gc-sections, which is why this only shows up in Debug.
-extern "C" hsa_status_t hsa_status_string(hsa_status_t, const char** status_string) {
-    if (status_string != nullptr) *status_string = "fake HSA status (host microtest)";
-    return HSA_STATUS_SUCCESS;
-}
 // Defined by src/init.cc. Not a hook: allocMemCPUAccessible() is a header-static
 // template, so this global is the only way to steer it. NULL is production's
 // default (NCCL_GDRCOPY_ENABLE defaults to 0) and selects host-NUMA memory.
