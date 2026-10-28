@@ -796,7 +796,6 @@ template <typename Bits>
 Bits apply_fp_atomic(const VectorMemState &state, Bits old_bits, Bits source_bits,
                      Bits compare_bits, uint32_t denorm_mode, bool local = false) {
   const auto operation = scalar_fp_atomic_operation(state.atomic_op);
-  // Callers select this evaluator with the same mapping.
   assert(operation && "unsupported floating-point atomic operation");
   return fp_mode::atomic_scalar(*operation, old_bits, source_bits, compare_bits, denorm_mode,
                                 state.atomic_legacy_minmax, local || state.atomic_source_nan_first);

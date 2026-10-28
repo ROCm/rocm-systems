@@ -44,8 +44,6 @@ public:
   ///        for Wave32. Used to tell a full-EXEC write from a partial half-write
   ///        (e.g. `s_mov_b32 exec_lo` is the whole mask on Wave32 but only half
   ///        on Wave64).
-  /// @pre wave_size is 32 or 64. Callers must select the wave size before
-  ///      constructing this internal analysis.
   /// @param extra_edges Scoped call/return edges folded into the CFG for this
   ///        kernel, matching LivenessAnalysis. EXEC state then flows from a call
   ///        site into the callee and from a return into the continuation, so the

@@ -640,7 +640,6 @@ inline uint16_t packed_mul_bf16(float a, float b, bool fp16_ovfl) {
 enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
 
 /// @brief Execute scalar floating atomics with explicit ISA policy and bit-preserving selection.
-/// @pre operation is a ScalarAtomicOp enumerator.
 /// @details FCMPSWAP flushes only comparison inputs and selects the original source or memory
 /// bits. RDNA3/3.5 ISA 13.2 and CDNA2 ISA 9.5.2 / CDNA3/4 ISA 9.2.2 instead specify flushing
 /// the CompareStore result. Captures on gfx1010/gfx1030/gfx1100 LDS (F32/F64) and gfx1100

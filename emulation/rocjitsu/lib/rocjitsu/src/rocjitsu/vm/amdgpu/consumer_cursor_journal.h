@@ -20,7 +20,6 @@ namespace rocjitsu::amdgpu {
 /// replacement address-space root.
 class ConsumerCursorJournal {
 public:
-  /// @pre width is sizeof(uint32_t) or sizeof(uint64_t), as selected by the queue format.
   explicit ConsumerCursorJournal(uint64_t address,
                                  std::optional<uint64_t> initial_cursor = std::nullopt,
                                  uint32_t width = sizeof(uint64_t));

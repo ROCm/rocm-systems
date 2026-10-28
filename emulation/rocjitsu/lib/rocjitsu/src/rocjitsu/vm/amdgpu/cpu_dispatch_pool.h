@@ -68,7 +68,6 @@ public:
     return run(tasks, threads, results);
   }
 
-  /// @pre For nonempty tasks, results.size() equals tasks.size().
   FunctionalQuantumResult run(std::span<ComputeUnitCore *> tasks, uint32_t threads,
                               std::span<FunctionalQuantumResult> results) {
     if (tasks.empty())
