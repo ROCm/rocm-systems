@@ -287,6 +287,7 @@ if(BUILD_TESTS)
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
     CpuAffinityTests.cpp
+    TopoCpuArchTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     IbvSymbolsEnvTests.cpp
