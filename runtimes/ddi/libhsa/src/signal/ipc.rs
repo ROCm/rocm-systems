@@ -121,6 +121,7 @@ impl SignalState {
         }
         match self.owned_ipc_signals.entry(host) {
             Entry::Vacant(entry) => {
+                register_ipc_signal(host)?;
                 entry.insert(OwnedIpcSignal { allocation });
                 publish_wait_signal(host);
             }
@@ -190,6 +191,7 @@ impl SignalState {
             .map_err(|_| OUT_OF_RESOURCES)?;
         match self.imported_ipc_signals.entry(host) {
             Entry::Vacant(entry) => {
+                register_ipc_signal(host)?;
                 entry.insert(ImportedIpcSignal {
                     allocation,
                     ipc_handle: words,
