@@ -30,6 +30,11 @@ ASSERT_HOOK_MATCHES_PROD(g_useAinic, rcclUseAinic);
 ASSERT_HOOK_MATCHES_PROD(g_pxnDisable, ncclPxnDisable);
 ASSERT_HOOK_MATCHES_PROD(g_ncclProxyStop, ncclProxyStop);
 ASSERT_HOOK_MATCHES_PROD(g_ncclTransportP2pSetup, ncclTransportP2pSetup);
+ASSERT_HOOK_MATCHES_PROD(g_ncclTransportP2pConnect, ncclTransportP2pConnect);
+ASSERT_HOOK_MATCHES_PROD(g_ncclTransportInitRankMap, ncclTransportInitRankMap);
+ASSERT_HOOK_MATCHES_PROD(g_ncclTransportCollNetSetup, ncclTransportCollNetSetup);
+ASSERT_HOOK_MATCHES_PROD(g_ncclTransportCollNetCheck, ncclTransportCollNetCheck);
+ASSERT_HOOK_MATCHES_PROD(g_ncclTransportCollNetFree, ncclTransportCollNetFree);
 ASSERT_HOOK_MATCHES_PROD(g_ncclNetDeregBuffer, ncclNetDeregBuffer);
 ASSERT_HOOK_MATCHES_PROD(g_ncclCollnetDeregBuffer, ncclCollnetDeregBuffer);
 ASSERT_HOOK_MATCHES_PROD(g_ncclNvlsUbDeregister, ncclNvlsUbDeregister);
@@ -48,6 +53,10 @@ struct ncclTopoGraph;
 // src/transport/nvls.cc:159. Referenced by init.cc but not declared inside it, so the redirected
 // NCCL_PARAM does not cover it.
 int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
+
+// src/transport/net.cc; coll_net.cc reads them too. test/host/CMakeLists.txt pins the defaults.
+int64_t ncclParamGdrCopySyncEnable() { return g_loadParam("GDRCOPY_SYNC_ENABLE", 1); }
+int64_t ncclParamGdrCopyFlushEnable() { return g_loadParam("GDRCOPY_FLUSH_ENABLE", 0); }
 
 // src/plugin/net.cc: initTransportsRank's GDR probe. Omitted for rccl-UnitTestsMicroPlugin, which compiles net.cc.
 int g_gdrSupportValue = 0;
@@ -87,6 +96,34 @@ static ncclResult_t DefaultTransportP2pSetup(struct ncclComm*, struct ncclTopoGr
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
     g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
+
+static ncclResult_t DefaultTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int) {
+  FailLoudUnfaked("transport_stubs", "ncclTransportP2pConnect");
+}
+std::function<ncclResult_t(struct ncclComm*, int, int, int*, int, int*, int)> g_ncclTransportP2pConnect =
+    DefaultTransportP2pConnect;
+
+static ncclResult_t DefaultTransportInitRankMap(struct ncclComm*, int, const int*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*, int, const int*)> g_ncclTransportInitRankMap =
+    DefaultTransportInitRankMap;
+
+static bool DefaultTransportCollNetSetup(struct ncclComm*, struct ncclTopoGraph*, struct ncclChannel*, int, int, int,
+                                         int, struct ncclConnect*) {
+  FailLoudUnfaked("transport_stubs", "ncclTransportCollNetSetup");
+}
+std::function<bool(struct ncclComm*, struct ncclTopoGraph*, struct ncclChannel*, int, int, int, int,
+                   struct ncclConnect*)>
+    g_ncclTransportCollNetSetup = DefaultTransportCollNetSetup;
+
+static ncclResult_t DefaultTransportCollNetCheck(struct ncclComm*, int) {
+  FailLoudUnfaked("transport_stubs", "ncclTransportCollNetCheck");
+}
+std::function<ncclResult_t(struct ncclComm*, int)> g_ncclTransportCollNetCheck = DefaultTransportCollNetCheck;
+
+static ncclResult_t DefaultTransportCollNetFree(struct ncclComm*) {
+  FailLoudUnfaked("transport_stubs", "ncclTransportCollNetFree");
+}
+std::function<ncclResult_t(struct ncclComm*)> g_ncclTransportCollNetFree = DefaultTransportCollNetFree;
 
 // src/transport.cc's table. ncclTopoComputePaths asks P2P, then SHM, whether a peer is reachable, through
 // g_transportCanConnect; by default both say yes.
@@ -248,6 +285,11 @@ void ResetTransportStubs() {
   g_ncclNvlsTuningResult = ncclSuccess;
   g_ncclNvlsTuningCalls = 0;
   g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
+  g_ncclTransportP2pConnect = DefaultTransportP2pConnect;
+  g_ncclTransportInitRankMap = DefaultTransportInitRankMap;
+  g_ncclTransportCollNetSetup = DefaultTransportCollNetSetup;
+  g_ncclTransportCollNetCheck = DefaultTransportCollNetCheck;
+  g_ncclTransportCollNetFree = DefaultTransportCollNetFree;
   g_ncclNetDeregBuffer = DefaultNetDeregBuffer;
   g_ncclCollnetDeregBuffer = DefaultCollnetDeregBuffer;
   g_ncclNvlsUbDeregister = DefaultNvlsUbDeregister;
@@ -300,11 +342,26 @@ ncclResult_t ncclTransportPatConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm) { ::abort(); }
 #endif
-ncclResult_t ncclTransportInitRankMap(struct ncclComm* comm, int, const int*) { return ncclSuccess; }
+ncclResult_t ncclTransportInitRankMap(struct ncclComm* comm, int nHeads, const int* heads) {
+  return g_ncclTransportInitRankMap(comm, nHeads, heads);
+}
 ncclResult_t ncclTuningInit(struct ncclComm* comm) { return ncclSuccess; }
 // ncclTreeBasePostset (src/graph/connect.cc): topo_stubs.cc, next to ncclTopoPreset/ncclTopoPostset.
 ncclResult_t ncclTransportCheckP2pType(struct ncclComm*, bool*, bool*, bool*) { ::abort(); }
-ncclResult_t ncclTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int) { ::abort(); }
+ncclResult_t ncclTransportP2pConnect(struct ncclComm* comm, int channelId, int nrecv, int* peerRecv, int nsend,
+                                     int* peerSend, int connIndex) {
+  return g_ncclTransportP2pConnect(comm, channelId, nrecv, peerRecv, nsend, peerSend, connIndex);
+}
+bool ncclTransportCollNetSetup(struct ncclComm* comm, struct ncclTopoGraph* collNetGraph, struct ncclChannel* channel,
+                               int masterRank, int masterPeer, int collNetGraphChannelId, int type,
+                               ncclConnect* connect) {
+  return g_ncclTransportCollNetSetup(comm, collNetGraph, channel, masterRank, masterPeer, collNetGraphChannelId, type,
+                                     connect);
+}
+ncclResult_t ncclTransportCollNetCheck(struct ncclComm* comm, int collNetSetupFail) {
+  return g_ncclTransportCollNetCheck(comm, collNetSetupFail);
+}
+ncclResult_t ncclTransportCollNetFree(struct ncclComm* comm) { return g_ncclTransportCollNetFree(comm); }
 ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex,
                                    bool* needsProxy) {
   return g_ncclTransportP2pSetup(comm, graph, connIndex, needsProxy);
