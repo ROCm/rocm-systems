@@ -1,5 +1,5 @@
-grbm.cp_busy:
-  name: CP Busy
+grbm.cp_util:
+  name: CP Utilization
   formula: 100 * SUM(GRBM_CP_BUSY) / SUM(GRBM_GUI_ACTIVE)
   unit: Percent
   description: >-

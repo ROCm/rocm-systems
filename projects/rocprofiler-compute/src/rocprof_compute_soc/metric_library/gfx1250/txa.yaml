@@ -120,14 +120,6 @@ txa.gl0_atomics_bw:
   formula: SUM(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: Total GL0 atomics bandwidth from WGP.
-txa.gl0_cache_bw:
-  name: GL0 Cache Bandwidth
-  formula: SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
-  unit: GB/s
-  description: >-
-    Total GL0 cache data bandwidth combining load, store, and atomic traffic.
-  peak: $max_sclk / 1000 * 256 * $cu_per_gpu
-  peak_empirical: $L0Bw_empirical_peak
 txa.gl0_load_bw:
   name: GL0 Load Bandwidth
   formula: SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)

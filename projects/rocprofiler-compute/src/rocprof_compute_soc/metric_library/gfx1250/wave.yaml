@@ -8,6 +8,11 @@ wave.dispatched_wavefronts:
   formula: AVG(SQG_WAVES_sum)
   unit: Wavefronts
   description: Total wavefronts dispatched.
+wave.life:
+  name: Wavefront Life
+  formula: SUM(SQG_WAVE_CYCLES_sum) / SUM(SQG_WAVES_sum)
+  unit: Cycles
+  description: Average wavefront lifetime in cycles.
 wave.occupancy:
   name: Wavefront Occupancy
   formula: SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -21,8 +26,3 @@ wave.occupancy_pct:
   description: >-
     Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of
     the maximum wavefronts per WGP.
-wave.wavefront_life:
-  name: Wavefront Life
-  formula: SUM(SQG_WAVE_CYCLES_sum) / SUM(SQG_WAVES_sum)
-  unit: Cycles
-  description: Average wavefront lifetime in cycles.

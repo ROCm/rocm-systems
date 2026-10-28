@@ -156,3 +156,9 @@ spi.wavefront_dispatch_rate:
   formula: SUM(SPI_ALL_WAVE_sum) / SUM(SPI_BUSY_sum)
   unit: Wavefronts per Cycle
   description: Average wavefronts launched per busy cycle.
+spi.workgroup_manager_util:
+  name: Workgroup Manager Utilization
+  formula: 100 * SUM(GRBM_SPI_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles the SPI is dispatching workgroups.

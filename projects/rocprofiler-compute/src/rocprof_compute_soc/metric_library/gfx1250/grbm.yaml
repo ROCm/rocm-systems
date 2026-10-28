@@ -35,12 +35,6 @@ grbm.sdma_util:
   unit: Percent
   description: >-
     Percentage of GPU-active cycles SDMA is performing data copy operations.
-grbm.spi_util:
-  name: GRBM SPI Utilization
-  formula: 100 * SUM(GRBM_SPI_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
-  unit: Percent
-  description: >-
-    Percentage of GPU-active cycles the SPI is dispatching workgroups.
 grbm.utcl1_util:
   name: UTCL1 Utilization
   formula: 100 * SUM(GRBM_UTCL1_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)

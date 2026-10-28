@@ -15,7 +15,7 @@ gl0.busy:
     Each Workgroup Processor has its own GL0/TCP instance. Low utilization may indicate
     compute-bound workloads with minimal memory traffic or idle shader engines.
 gl0.bw:
-  name: GL0 Cache Bandwidth (TCP Cache)
+  name: GL0 Cache Bandwidth
   formula: 64 * SUM(TCP_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-

@@ -1,11 +1,3 @@
-spi.busy:
-  name: SPI Busy
-  formula: 100 * SUM(GRBM_SPI_BUSY) / SUM(GRBM_GUI_ACTIVE)
-  unit: Percent
-  description: >-
-    Percentage of GPU active cycles where the Shader Processor Input is busy dispatching
-    wavefronts. High SPI busy indicates active workload dispatch. Low values may suggest
-    insufficient parallelism or dispatch bottlenecks limiting GPU utilization.
 spi.compute_wave_dispatches:
   name: Compute Wave Dispatches
   formula: SUM(SPI_CSN_WAVE) / SUM($denom)
@@ -22,3 +14,11 @@ spi.wave_dispatch_rate:
     Average wavefronts dispatched per GPU active cycle. Values greater than one indicate
     parallel dispatch across multiple shader engines. Low dispatch rates may indicate
     workload submission bottlenecks or insufficient parallelism in the application.
+spi.workgroup_manager_util:
+  name: Workgroup Manager Utilization
+  formula: 100 * SUM(GRBM_SPI_BUSY) / SUM(GRBM_GUI_ACTIVE)
+  unit: Percent
+  description: >-
+    Percentage of GPU active cycles where the Shader Processor Input is busy dispatching
+    wavefronts. High SPI busy indicates active workload dispatch. Low values may suggest
+    insufficient parallelism or dispatch bottlenecks limiting GPU utilization.

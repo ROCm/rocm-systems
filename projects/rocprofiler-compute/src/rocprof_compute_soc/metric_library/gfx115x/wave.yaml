@@ -3,8 +3,8 @@ wave.dispatched_threads:
   formula: AVG(SQ_ITEMS_sum)
   unit: Threads
   description: ''
-wave.dispatched_waves:
-  name: Dispatched Waves
+wave.dispatched_wavefronts:
+  name: WGP Dispatched Wavefronts
   formula: AVG(SQ_WAVES_sum)
   unit: Wavefronts
   description: ''
@@ -18,7 +18,7 @@ wave.issue_wait:
     flow, or pipeline stalls preventing instruction dispatch.
   peak: 100
 wave.life:
-  name: Wave Life
+  name: Wavefront Life
   formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_WAVES_sum)
   unit: Cycles
   description: >-
