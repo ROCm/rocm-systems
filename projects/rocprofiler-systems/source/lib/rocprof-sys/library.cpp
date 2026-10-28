@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <fmt/format.h>
@@ -335,13 +334,9 @@ using fini_bundle_t = fini_bundle<main_bundle_t>::base_type;
 void
 drop_wall_clock_from_timemory_components()
 {
-    // The names the wall_clock component answers to
-    constexpr std::array k_wall_clock_names{ std::string_view{ "wall_clock" },
-                                             std::string_view{ "real_clock" },
-                                             std::string_view{ "virtual_clock" } };
-    auto       kept    = rocprofsys::delimit(tim::settings::global_components(), ",; ");
-    auto const removed = std::erase_if(kept, [&](const std::string& name) {
-        return std::ranges::find(k_wall_clock_names, name) != k_wall_clock_names.end();
+    auto       kept    = rocprofsys::delimit(tim::settings::global_components());
+    auto const removed = std::erase_if(kept, [](const std::string& name) {
+        return tim::runtime::enumerate(name) == TIMEMORY_WALL_CLOCK;
     });
     if(removed == 0)
     {

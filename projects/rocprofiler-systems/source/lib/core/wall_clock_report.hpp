@@ -23,10 +23,13 @@ struct wall_clock_unit
     std::chrono::nanoseconds length;
 };
 
-inline constexpr wall_clock_unit k_wall_clock_seconds{ "s", std::chrono::seconds{ 1 } };
+inline constexpr wall_clock_unit k_wall_clock_seconds{ .name = "s",
+                                                       .length =
+                                                           std::chrono::seconds{ 1 } };
 inline constexpr std::int32_t    k_wall_clock_max_width = 120;
 inline constexpr std::int16_t    k_wall_clock_precision = 6;
 
+/// Looks up a ROCPROFSYS_TIMING_UNITS value by the names timemory accepts, in any case.
 [[nodiscard("an unknown unit must be reported")]] std::optional<wall_clock_unit>
 find_wall_clock_unit(std::string_view name);
 
