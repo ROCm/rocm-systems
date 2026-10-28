@@ -4606,9 +4606,8 @@ static bool memcpy3d_is_host_array(const hipMemcpy3DParms& p) {
 // counts an event failure under --continue-on-error) instead of passing. An
 // array-to-host copy with a D2H check counts as a failed check.
 static hipError_t refuse_host_array_copy(PlaybackContext& ctx, const char* api,
-                                         const hipMemcpy3DParms& p, int32_t recorded_ret,
-                                         uint64_t hash_lo, uint64_t hash_hi) {
-    if (recorded_ret != 0) return hipSuccess;  // it failed at capture too
+                                         const hipMemcpy3DParms& p, uint64_t hash_lo,
+                                         uint64_t hash_hi) {
     if (p.kind == hipMemcpyDeviceToHost && ctx.validate_d2h && (hash_lo || hash_hi)) {
         ctx.d2h_attempted++;
         ctx.note_d2h_fail(hrr_dispatch_seq);
@@ -4631,7 +4630,7 @@ static hipError_t replay_memcpy3d(PlaybackContext& ctx, const uint8_t* pl, bool 
     if (!hrr_translate_memcpy3d_arrays(ctx, spt ? "hipMemcpy3D_spt" : "hipMemcpy3D", parms))
         return hipErrorInvalidValue;
     if (memcpy3d_is_host_array(parms))
-        return refuse_host_array_copy(ctx, spt ? "hipMemcpy3D_spt" : "hipMemcpy3D", parms, a->ret,
+        return refuse_host_array_copy(ctx, spt ? "hipMemcpy3D_spt" : "hipMemcpy3D", parms,
                                       a->d2h_hash_lo, a->d2h_hash_hi);
 
     if (parms.kind == hipMemcpyHostToDevice) {
@@ -4688,7 +4687,7 @@ static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl,
         return hipErrorInvalidValue;
     if (memcpy3d_is_host_array(parms))
         return refuse_host_array_copy(ctx, spt ? "hipMemcpy3DAsync_spt" : "hipMemcpy3DAsync",
-                                      parms, a->ret, a->d2h_hash_lo, a->d2h_hash_hi);
+                                      parms, a->d2h_hash_lo, a->d2h_hash_hi);
     hipStream_t stream = memcpy3d_async_stream(ctx, a->stream, spt);
 
     if (parms.kind == hipMemcpyHostToDevice) {

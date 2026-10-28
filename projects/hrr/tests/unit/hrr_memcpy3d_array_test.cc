@@ -37,11 +37,12 @@ struct Spelling {
   const char* api;
   size_t parms_offset;
   size_t hashes_offset;  // blob_hash_lo, blob_hash_hi, d2h_hash_lo, d2h_hash_hi
+  size_t ret_offset;
 };
 
 // The four spellings differ only in their record type.
 #define HRR_SPELLING(ID, API, T)                                                  \
-  { ID, API, offsetof(T, parms_bytes), offsetof(T, blob_hash_lo) }
+  { ID, API, offsetof(T, parms_bytes), offsetof(T, blob_hash_lo), offsetof(T, ret) }
 const Spelling kSpellings[] = {
     HRR_SPELLING(HRR_API_HIPMEMCPY3D, "hipMemcpy3D", hrr_args_hipMemcpy3D),
     HRR_SPELLING(HRR_API_HIPMEMCPY3DASYNC, "hipMemcpy3DAsync", hrr_args_hipMemcpy3DAsync),
@@ -174,6 +175,13 @@ TEST_CASE("Unit_HRR_Memcpy3DArray_HostCopiesAreNotIssued", "[hrr]") {
       (void)hrr_test::capture_stderr([&] { r = hrr_test::dispatch(ctx, s.id, rec.data()); });
       CHECK(r == hipErrorNotSupported);
       CHECK(ctx.unreplayable_apis.count(s.api) == 1);
+    }
+    {  // a record with a failed return, which capture no longer writes, is refused too
+      auto rec = make_record(s, hipMemcpyHostToDevice, 0, kRecordedSrc, 1);
+      const int32_t failed_ret = hipErrorInvalidValue;
+      std::memcpy(rec.data() + s.ret_offset, &failed_ret, sizeof(failed_ret));
+      (void)hrr_test::capture_stderr([&] { r = hrr_test::dispatch(ctx, s.id, rec.data()); });
+      CHECK(r == hipErrorNotSupported);
     }
     const size_t failed = ctx.d2h_fail.load();
     {  // array to host, no D2H check
