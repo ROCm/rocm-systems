@@ -913,7 +913,16 @@ load_environment_buffer(const char* environment_buffer)
         const char* value = position;
         position += strlen(value) + 1;
 
-        LOG(INFO) << "Attachment adding environment variable: " << name << "=" << value;
+        if(std::string_view{ name } == "ROCPROF_EXTRA_COUNTERS_CONTENTS")
+        {
+            LOG(INFO) << "Attachment adding environment variable: " << name << " ("
+                      << strlen(value) << " bytes, redacted)";
+        }
+        else
+        {
+            LOG(INFO) << "Attachment adding environment variable: " << name << "="
+                      << value;
+        }
         setenv(name, value, 1);
     }
 }

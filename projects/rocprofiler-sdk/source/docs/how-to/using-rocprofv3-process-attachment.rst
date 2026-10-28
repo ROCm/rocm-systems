@@ -136,6 +136,12 @@ The following example attaches the profiler to a process with PID "12345", colle
 
    rocprofv3 --pid 12345 --pmc SQ_WAVES GRBM_COUNT --output-format csv
 
+When ``-E`` or ``--extra-counters`` is used in attachment mode, the attaching
+process must be able to read the definition file. ``rocprofv3`` passes only the
+path while starting the attachment helper; the helper then reads the file and
+transfers its contents directly to the target. The target process does not need
+the path to be visible or readable in its mount namespace.
+
 Reattaching to the same process
 --------------------------------
 

@@ -28,6 +28,7 @@ The target process is simulated with a fake procfs tree (PROC_DIR) whose <pid>/r
 fake filesystem, so no real process is inspected or attached to.
 """
 
+import errno
 import glob
 import os
 import re
@@ -144,6 +145,8 @@ def target(rocprof_attach, monkeypatch, tmp_path):
     monkeypatch.setattr(rocprof_attach, "PROC_DIR", str(tmp_path / "proc"))
     monkeypatch.delenv("ROCP_TOOL_LIBRARIES", raising=False)
     monkeypatch.delenv("ROCPROF_ATTACH_TOOL_LIBRARY", raising=False)
+    monkeypatch.delenv(rocprof_attach.EXTRA_COUNTERS_FILE_ENV, raising=False)
+    monkeypatch.delenv(rocprof_attach.EXTRA_COUNTERS_CONTENTS_ENV, raising=False)
     return FakeTarget(tmp_path)
 
 
@@ -539,6 +542,75 @@ def test_attach_library_not_inspectable(rocprof_attach, target, capsys, state):
 # ------------------------------------------------------------------------------------------------
 # environment and user tool libraries
 # ------------------------------------------------------------------------------------------------
+
+
+def test_large_extra_counter_file_is_materialized_for_older_target_tool(
+    rocprof_attach, target, fake_rocattach, monkeypatch, tmp_path, capsys
+):
+    target.run_sdk(OTHER_LIBDIR, version="1.4.1")
+    target.add_thread(PID + 1, "rocp-bg-attach")
+    definitions_file = tmp_path / "large extra counters.yaml"
+    contents = "# extra counters\n" + ("x" * (256 * 1024))
+    definitions_file.write_text(contents)
+    monkeypatch.setenv(rocprof_attach.EXTRA_COUNTERS_FILE_ENV, str(definitions_file))
+    monkeypatch.setenv(
+        rocprof_attach.EXTRA_COUNTERS_CONTENTS_ENV, "stale inline contents"
+    )
+
+    result = _main(rocprof_attach, "--attach-children=false")
+
+    assert result == 0
+    assert os.environ[rocprof_attach.EXTRA_COUNTERS_FILE_ENV] == ""
+    assert os.environ[rocprof_attach.EXTRA_COUNTERS_CONTENTS_ENV] == contents
+    assert (
+        os.environ["ROCPROF_ATTACH_TOOL_LIBRARY"]
+        == f"{OTHER_LIBDIR}/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+    assert fake_rocattach.rocattach_attach.calls == [(PID,)]
+    assert fake_rocattach.rocattach_detach.calls == [(PID,)]
+    _output(capsys)
+
+
+def test_missing_extra_counter_file_fails_before_rocattach(
+    rocprof_attach, target, fake_rocattach, monkeypatch, tmp_path, capsys
+):
+    missing_file = tmp_path / "missing.yaml"
+    monkeypatch.setenv(rocprof_attach.EXTRA_COUNTERS_FILE_ENV, str(missing_file))
+
+    result = _main(rocprof_attach, "--attach-children=false")
+
+    assert result == 1
+    assert not fake_rocattach.loaded_paths
+    _, err = capsys.readouterr()
+    assert "failed to read extra counter definition file" in err
+    assert str(missing_file) in err
+    assert os.strerror(errno.ENOENT) in err
+
+
+def test_unreadable_extra_counter_file_fails_before_rocattach(
+    rocprof_attach, target, fake_rocattach, monkeypatch, tmp_path, capsys
+):
+    definitions_file = tmp_path / "unreadable.yaml"
+    definitions_file.touch()
+    monkeypatch.setenv(rocprof_attach.EXTRA_COUNTERS_FILE_ENV, str(definitions_file))
+
+    def permission_denied(*args, **kwargs):
+        raise PermissionError(
+            errno.EACCES,
+            os.strerror(errno.EACCES),
+            str(definitions_file),
+        )
+
+    monkeypatch.setattr("builtins.open", permission_denied)
+
+    result = _main(rocprof_attach, "--attach-children=false")
+
+    assert result == 1
+    assert not fake_rocattach.loaded_paths
+    _, err = capsys.readouterr()
+    assert "failed to read extra counter definition file" in err
+    assert str(definitions_file) in err
+    assert os.strerror(errno.EACCES) in err
 
 
 def test_user_tool_library_is_used_verbatim(

@@ -28,6 +28,7 @@
 
 #include <cerrno>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -36,6 +37,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 namespace
 {
@@ -105,6 +107,26 @@ verify_loaded_library(const char* symbol_name, const fs::path& expected_library)
     return true;
 }
 
+std::vector<char>
+make_extra_counters_environment_buffer()
+{
+    constexpr auto name = std::string_view{ "ROCPROF_EXTRA_COUNTERS_CONTENTS" };
+    constexpr auto value =
+        std::string_view{ "rocprofiler-register-sensitive-extra-counter-contents" };
+
+    auto       buffer        = std::vector<char>(sizeof(uint32_t), '\0');
+    const auto append_string = [&buffer](std::string_view input) {
+        buffer.insert(buffer.end(), input.begin(), input.end());
+        buffer.emplace_back('\0');
+    };
+    append_string(name);
+    append_string(value);
+
+    constexpr uint32_t pair_count = 1;
+    std::memcpy(buffer.data(), &pair_count, sizeof(pair_count));
+    return buffer;
+}
+
 int
 run_child(std::string_view mode,
           const fs::path&  register_library,
@@ -144,7 +166,8 @@ run_child(std::string_view mode,
         }
 
         // the SDK fixture has no rocprofiler_attach, so only the core selection matters
-        register_attach(nullptr, "runtime-soname-unused-tool");
+        const auto environment_buffer = make_extra_counters_environment_buffer();
+        register_attach(environment_buffer.data(), "runtime-soname-unused-tool");
         if(!verify_loaded_library("rocprofiler_set_api_table", expected_sdk_library))
             return 1;
     }

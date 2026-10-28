@@ -28,6 +28,7 @@ import re
 import argparse
 import textwrap
 import subprocess
+import stat
 
 # version info for rocprofiler-sdk / rocprofv3
 CONST_VERSION_INFO = {
@@ -112,6 +113,41 @@ def warning(msg, *args):
     msg = patch_message(msg, *args)
     sys.stderr.write(f"[rocprofv3] Warning: {msg}\n")
     sys.stderr.flush()
+
+
+def resolve_extra_counters_file(path):
+    """Return a validated absolute path without loading the file contents."""
+    path = os.path.abspath(path)
+
+    try:
+        file_info = os.stat(path)
+    except OSError as error:
+        fatal_error(
+            "Failed to access extra counter definition file '{}': {}",
+            path,
+            error.strerror or str(error),
+        )
+
+    if not stat.S_ISREG(file_info.st_mode):
+        fatal_error(
+            "Extra counter definition file '{}' is not a regular file",
+            path,
+        )
+
+    try:
+        with open(path, "rb"):
+            pass
+    except OSError as error:
+        fatal_error(
+            "Failed to open extra counter definition file '{}': {}",
+            path,
+            error.strerror or str(error),
+        )
+
+    if file_info.st_size == 0:
+        warning("Extra counter file '{}' was empty.", path)
+
+    return path
 
 
 def warn_deprecated_output_formats(output_formats):
@@ -1625,6 +1661,7 @@ def run(app_args, args, **kwargs):
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
+    deferred_attach_args = None
 
     # Validate custom MPI environment variables
     # If one custom variable is specified, both must be provided
@@ -2205,8 +2242,10 @@ def run(app_args, args, **kwargs):
             "--fallback-tool-library",
             ROCPROF_ATTACH_TOOL_LIBRARY,
         ]
+        # Defer execution until all profiling options have been added to app_env. In
+        # particular, the extra-counter file path is configured below this block.
         if app_args:
-            exit_code = subprocess.check_call(attach_args, env=app_env)
+            deferred_attach_args = attach_args
         else:
             app_args = attach_args
 
@@ -2233,11 +2272,9 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_AGENT_INDEX", args.agent_index)
 
     if args.extra_counters is not None:
-        with open(args.extra_counters, "r") as e_file:
-            e_file_contents = e_file.read()
-            if not e_file_contents.strip():
-                warning("Extra counter file '{}' was empty.", args.extra_counters)
-            update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
+        extra_counters_file = resolve_extra_counters_file(args.extra_counters)
+        app_env.pop("ROCPROF_EXTRA_COUNTERS_CONTENTS", None)
+        update_env("ROCPROF_EXTRA_COUNTERS_FILE", extra_counters_file, overwrite=True)
 
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
@@ -2525,6 +2562,9 @@ def run(app_args, args, **kwargs):
 
     if args.log_level in ("info", "trace", "env", "config"):
         log_config(app_env)
+
+    if deferred_attach_args is not None:
+        subprocess.check_call(deferred_attach_args, env=app_env)
 
     if use_execv:
         if args.echo:

@@ -26,6 +26,7 @@
 #include "att_no_intercept.hpp"
 #include "config.hpp"
 #include "execution_profile.hpp"
+#include "extra_counters.hpp"
 #include "graph_stack.hpp"
 #include "helper.hpp"
 #include "kernel_iteration_filter.hpp"
@@ -2885,20 +2886,26 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
     auto original_config = tool::get_config();
 
     // reset config for attach (i.e. re-parse environment variables)
-    tool::get_config() = tool::config{};
+    auto refreshed_config = tool::config{};
+    if(!tool::reuse_extra_counters_snapshot(refreshed_config.extra_counters_file,
+                                            refreshed_config.extra_counters_contents,
+                                            original_config.extra_counters_file,
+                                            original_config.extra_counters_contents))
+        refreshed_config.load_extra_counters();
 
     // re-parsing restores options that tool_init turned off, so turn them off again before the
     // comparison
-    apply_core_capability_gates(tool::get_config());
+    apply_core_capability_gates(refreshed_config);
 
     // ensure the config has not changed which services were requested.
     // NOTE: this is a temporary restriction
-    ROCP_FATAL_IF(!tool::is_attach_invariant(tool::get_config(), original_config))
+    ROCP_FATAL_IF(!tool::is_attach_invariant(refreshed_config, original_config))
         << "configuration mismatch between initial tool load and attach. rocprofv3 does not "
            "support changing the set of enabled tracing services between initial load and attach. "
            "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
            "<output_file> -d <output_directory> ...]` to attach to a new process.";
 
+    tool::get_config() = std::move(refreshed_config);
     assign_attach_output_session_suffix();
 
     pid_t instrumented_pid = getpid();   // The process being profiled
@@ -5103,10 +5110,13 @@ rocprofiler_configure(uint32_t                 version,
         return compose_tmp_file_name(tool::get_config(), type);
     };
 
-    if(!tool::get_config().extra_counters_contents.empty())
+    auto& tool_config = tool::get_config();
+    tool_config.load_extra_counters();
+
+    if(!tool_config.extra_counters_contents.empty())
     {
-        std::string contents(tool::get_config().extra_counters_contents);
-        size_t      length = contents.size();
+        const auto& contents = tool_config.extra_counters_contents;
+        auto        length   = contents.size();
         ROCPROFILER_CALL(rocprofiler_load_counter_definition(
                              contents.c_str(), length, ROCPROFILER_COUNTER_FLAG_APPEND_DEFINITION),
                          "Loading extra counters");

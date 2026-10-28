@@ -106,6 +106,8 @@ struct config : output_config
 
     config();
 
+    void load_extra_counters();
+
     ~config()                 = default;
     config(const config&)     = default;
     config(config&&) noexcept = default;
@@ -187,6 +189,7 @@ struct config : output_config
     std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
     std::string pc_sampling_method      = get_env("ROCPROF_PC_SAMPLING_METHOD", "none");
     std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
+    std::string extra_counters_file     = get_env("ROCPROF_EXTRA_COUNTERS_FILE", "");
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
     std::string att_library_path        = get_env("ROCPROF_ATT_LIBRARY_PATH", "");
     std::string att_gpu_index           = get_env("ROCPROF_ATT_PARAM_GPU_INDEX", "");
@@ -332,6 +335,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(spm_sample_interval);
     CFG_SERIALIZE_MEMBER(spm_sample_interval_unit);
     CFG_SERIALIZE_MEMBER(spm_sample_interval_unit_value);
+    CFG_SERIALIZE_MEMBER(extra_counters_file);
     CFG_SERIALIZE_MEMBER(extra_counters_contents);
     CFG_SERIALIZE_MEMBER(kernel_filter_include);
     CFG_SERIALIZE_MEMBER(kernel_filter_exclude);

@@ -48,6 +48,8 @@ ATTACH_THREAD_NAME = "rocp-bg-attach"
 
 TOOL_SUBDIR = "rocprofiler-sdk"
 TOOL_BASENAME = "librocprofiler-sdk-tool.so"
+EXTRA_COUNTERS_FILE_ENV = "ROCPROF_EXTRA_COUNTERS_FILE"
+EXTRA_COUNTERS_CONTENTS_ENV = "ROCPROF_EXTRA_COUNTERS_CONTENTS"
 
 _SDK_LIBRARY_RE = re.compile(
     r"^(?P<name>librocprofiler-sdk(?:-attach|-tool)?)\.so(?P<suffix>(?:\.\d+)*)$"
@@ -226,6 +228,38 @@ def _contains_bytes(fname, needle, chunk_size=1 << 20):
             if needle in tail + chunk:
                 return True
             tail = chunk[-overlap:]
+
+
+def materialize_extra_counters():
+    """Replace an extra-counter file path with contents for target injection.
+
+    rocprofv3 starts this helper with only the small path in its environment. Reading the
+    file here avoids execve's environment-string limit, and forwarding the contents avoids
+    requiring the target process to see or have permission to read the attaching process's
+    path. The empty FILE value deliberately clears a path retained in the target environment
+    by an earlier attachment.
+    """
+    path = os.environ.get(EXTRA_COUNTERS_FILE_ENV)
+    if not path:
+        return
+
+    try:
+        with open(path, "r") as ifs:
+            contents = ifs.read()
+    except (OSError, UnicodeError) as error:
+        detail = getattr(error, "strerror", None) or str(error)
+        raise AttachError(
+            f"failed to read extra counter definition file '{path}': {detail}"
+        ) from error
+
+    try:
+        # Set contents first so a failure cannot leave this process with only a cleared path.
+        os.environ[EXTRA_COUNTERS_CONTENTS_ENV] = contents
+        os.environ[EXTRA_COUNTERS_FILE_ENV] = ""
+    except (OSError, ValueError) as error:
+        raise AttachError(
+            f"failed to prepare extra counter definition file '{path}' for attachment: {error}"
+        ) from error
 
 
 def has_attach_thread(pid):
@@ -590,6 +624,8 @@ def attach(
 
     if pid is None:
         raise RuntimeError("rocprof-attach called with no PID specified")
+
+    materialize_extra_counters()
 
     user_tool_libraries = os.environ.pop("ROCP_TOOL_LIBRARIES", None)
     if user_tool_libraries is not None:
