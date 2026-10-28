@@ -11,9 +11,9 @@ from membw_analysis.engine import run_membw_analysis
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.ml_api_selectors import OPERATOR_LABELS, OPERATOR_SELECTORS
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     CallTreeNode,
@@ -25,29 +25,22 @@ from utils.utils_analysis import (
 )
 from utils.utils_common import validate_roofline_csv
 
-_ML_API_LABELS = {
-    "torch": "PyTorch",
-    "triton": "Triton",
-    "user": "User",
-}
-_OPERATOR_BACKENDS = KNOWN_ML_API_BACKENDS + ("user",)
-
 
 def _labels_for_backends(backends: list[str]) -> str:
     """Join backend display names."""
     if not backends:
         return "ML API"
-    return ", ".join(_ML_API_LABELS.get(backend, backend) for backend in backends)
+    return ", ".join(OPERATOR_LABELS.get(backend, backend) for backend in backends)
 
 
 def _restrict_patterns_to_operator_backends(
     selections: dict[str, list[str]],
 ) -> dict[str, list[str]]:
-    """Restrict pattern lists to keys in _OPERATOR_BACKENDS."""
+    """Restrict pattern lists to keys in OPERATOR_SELECTORS."""
     return {
         backend: list(patterns)
         for backend, patterns in selections.items()
-        if backend in _OPERATOR_BACKENDS
+        if backend in OPERATOR_SELECTORS
     }
 
 
@@ -445,7 +438,7 @@ class cli_analysis(OmniAnalyze_Base):
             for root in roots:
                 _assign_kernel_ids_from_top(root, name_to_id)
         framework_labels = (
-            [_ML_API_LABELS.get(backend, backend) for backend in backends]
+            [OPERATOR_LABELS.get(backend, backend) for backend in backends]
             if backends
             else ["ML API"]
         )

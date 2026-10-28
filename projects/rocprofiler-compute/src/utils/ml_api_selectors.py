@@ -7,7 +7,12 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 
-_OPERATOR_BACKENDS: Tuple[str, ...] = KNOWN_ML_API_BACKENDS + ("user",)
+OPERATOR_SELECTORS: Tuple[str, ...] = KNOWN_ML_API_BACKENDS + ("user",)
+OPERATOR_LABELS = {
+    "torch": "PyTorch",
+    "triton": "Triton",
+    "user": "User",
+}
 UNSCOPED_OPERATOR_KEY = "all_supported_backends"
 
 
@@ -69,10 +74,10 @@ def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
         return None
     tokens = split_selector_tokens(raw)
     for name in tokens:
-        if name not in _OPERATOR_BACKENDS:
+        if name not in OPERATOR_SELECTORS:
             raise ValueError(
                 f"Unknown --list-operators value {name!r}. "
-                f"Values: {', '.join(_OPERATOR_BACKENDS)}."
+                f"Values: {', '.join(OPERATOR_SELECTORS)}."
             )
     return _unique_keep_order(tokens)
 
@@ -96,10 +101,10 @@ def _patterns_by_backend(token: str) -> Dict[str, List[str]]:
             continue
         if ":" in selector_token:
             prefix, rest = selector_token.split(":", 1)
-            if prefix not in _OPERATOR_BACKENDS:
+            if prefix not in OPERATOR_SELECTORS:
                 raise ValueError(
                     f"Unknown --operator prefix {prefix!r}. "
-                    f"Values: {', '.join(_OPERATOR_BACKENDS)}."
+                    f"Values: {', '.join(OPERATOR_SELECTORS)}."
                 )
             _save(prefix, rest.strip() or "**")
             continue
