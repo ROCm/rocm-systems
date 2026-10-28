@@ -342,10 +342,6 @@ def main():
         print(f"ERROR: videodecodeperf not built: {PERF_EXE}", file=sys.stderr)
         print("       Build it first: cmake --build build (or test/build_samples.sh)", file=sys.stderr)
         return 1
-    if not baseline_path.is_file():
-        print(f"ERROR: baseline not found: {baseline_path}", file=sys.stderr)
-        print("       Download it from SharePoint and set ROCDECODE_PERF_DIR to its parent.", file=sys.stderr)
-        return 1
 
     label, detail = detect_gpu(args.device)
     if label is None:
@@ -355,21 +351,27 @@ def main():
     baseline = {}
     col = None
     measure_only = False
-    try:
-        baseline, col = load_baseline(baseline_path, label)
-    except ValueError as e:
-        # Invalid baseline (e.g. no table with a 'File' column) — fatal.
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-    except KeyError as e:
-        # No baseline column for this GPU — switch to measure-only mode.
-        # All streams are still measured and saved to CSV so the results can
-        # serve as a future baseline.
+    if not baseline_path.is_file():
+        # No baseline file — switch to measure-only mode so streams are still
+        # measured and saved to CSV (the CSV can serve as a future baseline).
         measure_only = True
-        print(f"WARNING: {e}", file=sys.stderr)
+        print(f"WARNING: baseline not found: {baseline_path}", file=sys.stderr)
+    else:
+        try:
+            baseline, col = load_baseline(baseline_path, label)
+        except ValueError as e:
+            # Invalid baseline (e.g. no table with a 'File' column) — fatal.
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+        except KeyError as e:
+            # No baseline column for this GPU — switch to measure-only mode.
+            # All streams are still measured and saved to CSV so the results can
+            # serve as a future baseline.
+            measure_only = True
+            print(f"WARNING: {e}", file=sys.stderr)
     print(f"GPU: {label}  ({detail})")
     if measure_only:
-        print(f"No baseline column for '{label}' — running in measure-only mode")
+        print("No baseline available — running in measure-only mode")
         print("All streams will be measured and saved; no regression comparison.")
     else:
         print(f"Baseline column: {col}  ({len(baseline)} streams)  tolerance: {tol}%")
