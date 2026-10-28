@@ -280,7 +280,7 @@ impl DeviceDriverState {
                 Ok(EventSubscription::LinuxKfd(state.subscribe_events()?))
             }
             #[cfg(test)]
-            Self::Test { state, .. } => Ok(EventSubscription::Test(state.subscribe_events()?)),
+            Self::Test { state, .. } => Ok(EventSubscription::Test(state.subscribe_events())),
         }
     }
 

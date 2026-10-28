@@ -11,54 +11,122 @@ use crate::memory::{AllocationInfo, DeviceAccess, HostRegistration, MemoryKind};
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, EndpointKind};
 use crate::{Error, ErrorKind};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 /// Test-only event stream shared by activated endpoints of one driver.
 struct TestEvents {
-    /// Events retained for independent subscriber cursors.
-    records: Mutex<Vec<DeviceEvent>>,
+    /// Events and waiters protected by the same lock as publication.
+    state: Mutex<TestEventState>,
     /// Wakes subscribers after a new record is published.
     changed: Condvar,
+    /// Lets a test publisher wait until a subscriber has entered its wait.
+    wait_started: Condvar,
+}
+
+/// Mutable event records and waiter count for one test driver.
+struct TestEventState {
+    /// Records retained until delivery or as the latest of their kind.
+    records: Vec<(u64, DeviceEvent)>,
+    /// Last sequence assigned to a published event.
+    sequence: u64,
+    /// Independent positions of active subscribers.
+    cursors: Vec<Arc<AtomicU64>>,
+    /// Subscribers currently waiting for a new record.
+    waiters: usize,
+}
+
+impl TestEventState {
+    /// Mirrors KFD retention: undelivered records and the latest of each kind.
+    fn prune(&mut self) {
+        let delivered = self
+            .cursors
+            .iter()
+            .map(|cursor| cursor.load(Ordering::Acquire))
+            .min()
+            .unwrap_or(self.sequence);
+        let latest_memory = self.records.iter().rev().find_map(|(sequence, event)| {
+            matches!(event, DeviceEvent::GpuMemoryFault(_)).then_some(*sequence)
+        });
+        let latest_hardware = self.records.iter().rev().find_map(|(sequence, event)| {
+            matches!(event, DeviceEvent::GpuHardwareException(_)).then_some(*sequence)
+        });
+        self.records.retain(|(sequence, _)| {
+            *sequence > delivered
+                || Some(*sequence) == latest_memory
+                || Some(*sequence) == latest_hardware
+        });
+    }
+
+    fn has_next(&self, cursor: u64) -> bool {
+        self.records.iter().any(|(sequence, _)| *sequence > cursor)
+    }
 }
 
 /// One independent cursor over a test driver's event stream.
 pub(crate) struct TestEventSubscription {
     /// Keeps the test event stream live after its device handle is dropped.
     events: Arc<TestEvents>,
-    /// Index of the next record to deliver.
-    cursor: usize,
+    /// Last delivered sequence, shared with pruning.
+    cursor: Arc<AtomicU64>,
 }
 
 impl TestEventSubscription {
     /// Reads one retained event for this subscriber.
     pub(crate) fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
-        let records = self.events.records.lock().map_err(|_| Error::Operation {
+        let mut state = self.events.state.lock().map_err(|_| Error::Operation {
             kind: ErrorKind::Internal,
             detail: "test event stream lock poisoned",
         })?;
-        let event = records.get(self.cursor).copied();
-        if event.is_some() {
-            self.cursor += 1;
+        let event = state
+            .records
+            .iter()
+            .find(|(sequence, _)| *sequence > self.cursor.load(Ordering::Acquire))
+            .copied();
+        if let Some((sequence, _)) = event {
+            self.cursor.store(sequence, Ordering::Release);
         }
-        Ok(event)
+        state.prune();
+        Ok(event.map(|(_, event)| event))
     }
 
     /// Waits until a new test record is ready or the timeout expires.
     pub(crate) fn wait_native(&self, timeout: std::time::Duration) -> Result<(), Error> {
-        let records = self.events.records.lock().map_err(|_| Error::Operation {
+        let mut state = self.events.state.lock().map_err(|_| Error::Operation {
             kind: ErrorKind::Internal,
             detail: "test event stream lock poisoned",
         })?;
-        let _guard = self
+        if state.has_next(self.cursor.load(Ordering::Acquire)) {
+            return Ok(());
+        }
+        state.waiters += 1;
+        self.events.wait_started.notify_all();
+        let (mut state, _) = self
             .events
             .changed
-            .wait_timeout_while(records, timeout, |records| records.len() == self.cursor)
+            .wait_timeout_while(state, timeout, |state| {
+                !state.has_next(self.cursor.load(Ordering::Acquire))
+            })
             .map_err(|_| Error::Operation {
                 kind: ErrorKind::Internal,
                 detail: "test event wait lock poisoned",
             })?;
+        state.waiters -= 1;
         Ok(())
+    }
+}
+
+impl Drop for TestEventSubscription {
+    fn drop(&mut self) {
+        let mut state = self
+            .events
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state
+            .cursors
+            .retain(|cursor| !Arc::ptr_eq(cursor, &self.cursor));
+        state.prune();
     }
 }
 
@@ -86,20 +154,22 @@ pub(crate) struct TestDevice {
 
 impl TestDevice {
     /// Subscribes to events emitted by the owning test driver.
-    pub(crate) fn subscribe_events(&self) -> Result<TestEventSubscription, Error> {
-        let cursor = self
+    pub(crate) fn subscribe_events(&self) -> TestEventSubscription {
+        let mut state = self
             .events
-            .records
+            .state
             .lock()
-            .map_err(|_| Error::Operation {
-                kind: ErrorKind::Internal,
-                detail: "test event stream lock poisoned",
-            })?
-            .len();
-        Ok(TestEventSubscription {
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let first = state
+            .records
+            .first()
+            .map_or(state.sequence, |(sequence, _)| sequence - 1);
+        let cursor = Arc::new(AtomicU64::new(first));
+        state.cursors.push(cursor.clone());
+        TestEventSubscription {
             events: self.events.clone(),
             cursor,
-        })
+        }
     }
 }
 
@@ -140,25 +210,53 @@ impl TestDriver {
             enumerations: Arc::new(AtomicUsize::new(0)),
             opens: Arc::new(AtomicUsize::new(0)),
             events: Arc::new(TestEvents {
-                records: Mutex::new(Vec::new()),
+                state: Mutex::new(TestEventState {
+                    records: Vec::new(),
+                    sequence: 0,
+                    cursors: Vec::new(),
+                    waiters: 0,
+                }),
                 changed: Condvar::new(),
+                wait_started: Condvar::new(),
             }),
         }
     }
 
     /// Emits a device event to every active test subscription.
     pub(crate) fn publish_event(&self, event: DeviceEvent) -> Result<(), Error> {
-        let mut records = self.events.records.lock().map_err(|_| Error::Operation {
+        let mut state = self.events.state.lock().map_err(|_| Error::Operation {
             kind: ErrorKind::Internal,
             detail: "test event stream lock poisoned",
         })?;
-        records.try_reserve(1).map_err(|_| Error::Capacity {
+        state.records.try_reserve(1).map_err(|_| Error::Capacity {
             resource: "test event stream",
         })?;
-        records.push(event);
-        drop(records);
+        state.sequence = state.sequence.checked_add(1).ok_or(Error::Capacity {
+            resource: "test event sequence",
+        })?;
+        let sequence = state.sequence;
+        state.records.push((sequence, event));
+        state.prune();
+        drop(state);
         self.events.changed.notify_all();
         Ok(())
+    }
+
+    /// Waits until a subscriber is blocked in the test event wait path.
+    pub(crate) fn wait_for_subscriber(&self, timeout: std::time::Duration) -> Result<bool, Error> {
+        let state = self.events.state.lock().map_err(|_| Error::Operation {
+            kind: ErrorKind::Internal,
+            detail: "test event stream lock poisoned",
+        })?;
+        let (state, _) = self
+            .events
+            .wait_started
+            .wait_timeout_while(state, timeout, |state| state.waiters == 0)
+            .map_err(|_| Error::Operation {
+                kind: ErrorKind::Internal,
+                detail: "test event wait-start lock poisoned",
+            })?;
+        Ok(state.waiters != 0)
     }
 
     pub(crate) fn with_host_registration(mut self) -> Self {
