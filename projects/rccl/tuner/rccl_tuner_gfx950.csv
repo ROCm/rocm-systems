@@ -5,3 +5,9 @@ allreduce,1048576,2097000,ring,ll,56,1,8,-1,-1
 allreduce,33554432,54525951,ring,ll128,64,2,16,-1,-1
 allreduce,54525952,117440511,tree,simple,64,2,16,-1,-1
 allreduce,117440512,234881024,ring,simple,48,2,16,-1,-1
+broadcast,524288,1048575,ring,ll,112,1,8,-1,-1
+broadcast,1048576,2097151,ring,ll,112,1,8,-1,-1
+broadcast,2097152,8388607,ring,ll,-1,1,8,-1,-1
+reduce,524288,1048575,ring,ll,112,1,8,-1,-1
+reduce,1048576,2097151,ring,ll,112,1,8,-1,-1
+reduce,2097152,8388607,ring,ll,-1,1,8,-1,-1
