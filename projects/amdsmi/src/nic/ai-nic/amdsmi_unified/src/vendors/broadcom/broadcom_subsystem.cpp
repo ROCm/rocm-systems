@@ -25,8 +25,7 @@ constexpr std::array<const char*, 2> kBroadcomRdmaAuxDrivers = {"bnxt_re.rdma", 
 
 NicVendor SmiNicSubsystemBroadcom::vendor() const { return NicVendor::Broadcom; }
 
-bool SmiNicSubsystemBroadcom::is_driver_loaded(const std::string& bdf,
-                                               DriverType driver_type) const {
+bool SmiNicSubsystemBroadcom::driver_loaded(const std::string& bdf, DriverType driver_type) const {
   switch (driver_type) {
     case DriverType::Main:
       return std::any_of(
@@ -80,7 +79,7 @@ void SmiNicSubsystemBroadcom::discover(
     }
 
     std::string bdf;
-    if (!was_bdf_resolved(device_symlink, bdf)) {
+    if (!resolve_bdf(device_symlink, bdf)) {
       continue;
     }
 

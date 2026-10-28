@@ -49,8 +49,7 @@ bool SmiNicSubsystemPensando::is_pci_bridge_class(const std::string& sysfs_bus_p
   return ((pci_class >> PCI_CLASS_SHIFT) == PCI_CLASS_PCI_BRIDGE);
 }
 
-bool SmiNicSubsystemPensando::is_driver_loaded(const std::string& bdf,
-                                               DriverType driver_type) const {
+bool SmiNicSubsystemPensando::driver_loaded(const std::string& bdf, DriverType driver_type) const {
   switch (driver_type) {
     case DriverType::Main:
       return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/pci/drivers/ionic", bdf,
@@ -130,12 +129,12 @@ void SmiNicSubsystemPensando::discover_ports(
 
     if (fs::exists(device_symlink, ec) && fs::is_symlink(device_symlink, ec)) {
       std::string port_bdf;
-      if (was_bdf_resolved(device_symlink, port_bdf)) {
+      if (resolve_bdf(device_symlink, port_bdf)) {
         std::string port_sysfs_bus_path = pci_path + "/" + port_bdf;
         auto [port_vendor_id, port_device_id] = read_pci_ids(port_sysfs_bus_path);
 
         if ((port_vendor_id == VENDOR_ID) && (port_device_id == PORT_ID)) {
-          if (is_downstream_port(port_bdf, bridge_bdf, pci_path)) {
+          if (downstream_port(port_bdf, bridge_bdf, pci_path)) {
             SmiNicPort port(iface_name, port_bdf, sysfs_class_path, port_sysfs_bus_path, transport,
                             &kPensandoStatTable);
             port.discover_infiniband();
@@ -162,16 +161,16 @@ void SmiNicSubsystemPensando::discover_mgmt_function(SmiNic& nic, const std::str
     auto [vendor_id, device_id] = read_pci_ids(it->path().string());
 
     if ((vendor_id == VENDOR_ID) && (device_id == MGMT_ID) &&
-        is_downstream_port(bdf, bridge_bdf, pci_path)) {
+        downstream_port(bdf, bridge_bdf, pci_path)) {
       nic.set_mgmt_bdf(bdf);
       return;
     }
   }
 }
 
-bool SmiNicSubsystemPensando::is_downstream_port(const std::string& port_bdf,
-                                                 const std::string& bridge_bdf,
-                                                 const std::string& pci_path) const {
+bool SmiNicSubsystemPensando::downstream_port(const std::string& port_bdf,
+                                              const std::string& bridge_bdf,
+                                              const std::string& pci_path) const {
   std::error_code ec;
   std::string port_path = pci_path + "/" + port_bdf;
 

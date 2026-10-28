@@ -35,7 +35,7 @@ uint32_t SmiNicUALoE::capabilities() const {
 
 NicVendor SmiNicSubsystemUALoE::vendor() const { return NicVendor::AMD; }
 
-bool SmiNicSubsystemUALoE::is_driver_loaded(const std::string& bdf, DriverType driver_type) const {
+bool SmiNicSubsystemUALoE::driver_loaded(const std::string& bdf, DriverType driver_type) const {
   // A fabric endpoint carries no RDMA auxiliary device, so only Main resolves.
   if (driver_type != DriverType::Main) {
     return false;

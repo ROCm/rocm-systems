@@ -32,10 +32,10 @@ class SmiNicSystem {
   // is_ainic_only=true drops non-AINIC NICs (product() != NicProduct::AINIC). UALoE endpoints carry
   // NicProduct::AINIC, so they stay.
   void discover_nics(bool is_ainic_only = false);
-  bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const;
+  bool driver_loaded(const std::string& bdf, DriverType driver_type) const;
 
   std::vector<std::string> list_bdfs();
-  bool has_interface(const std::string& iface) const;
+  bool interface_exists(const std::string& iface) const;
   const std::vector<const SmiNic*>& get_nics() const;
   const SmiNic* get_nic_by_interface(const std::string& iface) const;
   const SmiNic* get_nic_by_bdf(const std::string& bdf) const;
