@@ -17,6 +17,14 @@ from the rocDecode project root (the directory containing `build/`, `samples/`, 
 
 IMPORTANT: Run each command as a SEPARATE Bash tool call. Do not chain commands with && or |.
 
+The skill accepts optional arguments:
+- `quick` — fast one-stream-per-subfolder check (≤4K only), e.g. `/perf-check quick`
+- `--gpu <name>` — specify the GPU name for baseline lookup (e.g. `/perf-check --gpu Navi31`)
+- Both can be combined: `/perf-check quick --gpu Navi31`
+
+Parse the arguments and pass `--quick` and/or `--gpu <name>` to `perf_regression.py`
+in Step 3.
+
 First determine the OS and follow the matching section below. Under Git Bash on Windows,
 `uname -s` returns `MINGW64_NT-...`; on Linux it returns `Linux`.
 
@@ -56,11 +64,12 @@ first if you have not built and installed the library this session.
 
 Run: `test/perf_regression.py`
 
-If the skill was invoked with a `quick` argument (e.g. `/perf-check quick`), run the fast
-variant instead — `test/perf_regression.py --quick` — which measures one stream per leaf
-subfolder capped at ≤4K (the 8K streams dominate runtime, so they are skipped) instead of
-every stream. Use it for a fast sanity check; use the full run before finalizing. Each run
-prints its own elapsed time.
+Add `--quick` if the skill was invoked with `quick`, and `--gpu <name>` if a GPU name was
+provided (e.g. `test/perf_regression.py --quick --gpu Navi31`).
+
+`--quick` measures one stream per leaf subfolder capped at ≤4K (the 8K streams dominate
+runtime, so they are skipped). Use it for a fast sanity check; use the full run before
+finalizing. Each run prints its own elapsed time.
 
 Streams within tolerance pass on a single run; streams that appear to regress are
 re-measured (3-run average) to rule out noise before being reported.
@@ -131,8 +140,8 @@ stale directory first. On Windows `rm -rf` may be blocked by permissions; use
 
 Run: `python test/perf_regression.py`
 
-If the skill was invoked with a `quick` argument (e.g. `/perf-check quick`), run the fast
-variant instead — `python test/perf_regression.py --quick`.
+Add `--quick` if the skill was invoked with `quick`, and `--gpu <name>` if a GPU name was
+provided (e.g. `python test/perf_regression.py --quick --gpu Navi31`).
 
 Report the final summary box from perf_regression.py to the user, and list any streams
 marked REGRESSED (with their measured vs. baseline FPS and delta%).
