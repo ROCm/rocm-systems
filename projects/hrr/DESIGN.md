@@ -189,7 +189,7 @@ capture.hrr/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     active             names this process instance: present while its capture is on (see Transport)
     blobs/<2hex>/      content-addressed host buffers keyed by FNV-1a-128 hash
-    code_objects/      .hsaco ELFs (unused in current fat-binary path)
+    code_objects/      .hsaco ELFs: loaded modules and the code object HIP takes from each fat binary
     regions/*.hrrr     external region annotations (optional; written by producers
                        outside the runtime, never by capture — see below)
   pid-<pid>.prev-<n>/  an earlier process's archive with the same pid, moved
