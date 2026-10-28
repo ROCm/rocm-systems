@@ -52,7 +52,7 @@ def resolve_profile_selection(raw: Optional[List[str]]) -> List[str]:
         if name == "user":
             raise ValueError(
                 "user is not a --trace-ml-api value. "
-                "User-defined regions are included with every --trace-ml-api run."
+                "User-defined ROCTx regions are included with every --trace-ml-api run."
             )
         if name not in KNOWN_ML_API_BACKENDS:
             raise ValueError(
