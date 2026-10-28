@@ -884,20 +884,6 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
       debug_enabled_contexts_.insert(process_context);
     else
       debug_enabled_contexts_.erase(process_context);
-    if (flush) {
-      for (auto queue = mapped_queues_.begin(); queue != mapped_queues_.end();) {
-        if (queue->active || queue->process_context_address != process_context) {
-          ++queue;
-          continue;
-        }
-        if (queue->queue_handle &&
-            !queue_registry_.unregister_queue(queue->queue_handle, QueueCloseMode::ForceCancel))
-          return VmAccessOutcome::Unavailable;
-        const uint32_t process_id = queue->process_id;
-        queue = mapped_queues_.erase(queue);
-        release_unused_address_space(process_id);
-      }
-    }
   } else if (opcode == kMesApiRemoveQueue) {
     const uint64_t doorbell_offset =
         static_cast<uint64_t>(dword(frame, kRemoveQueueDoorbellDword)) * sizeof(uint32_t);
