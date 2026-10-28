@@ -20,8 +20,8 @@ its arch. It needs a built RCCL and the ROCm LLVM tools, but no GPU.
   RCCL_LIB    path to librccl.so  (default: $RCCL_BUILD/librccl.so)
   RCCL_BUILD  RCCL build dir      (default: <rccl>/build/{release,debug})
   ROCM_PATH   ROCm install root   (default: /opt/rocm)
-  RCCL_LL_GUARD_REQUIRED=1  fail instead of skip when the library, tools or a
-                            checked arch are missing (for CI)
+  RCCL_LL_GUARD_REQUIRED=1  fail instead of skip when the library, tools or
+                            all checked arches are missing (for CI)
 """
 
 import functools
@@ -52,14 +52,16 @@ REQUIRED = os.environ.get("RCCL_LL_GUARD_REQUIRED") == "1"
 # ---------------------------------------------------------------------------
 # Modifiers every LL poll load must carry, per arch, as printed by
 # llvm-objdump. Each is the disassembler's spelling of the load's cache bits.
-# Seeded from librccl.so built at origin/develop; extend this table (after
-# checking the arch's ISA guide) when RCCL starts building for a new arch.
+# Extend this table (after checking the arch's ISA guide) when RCCL starts
+# building for a new arch.
 # ---------------------------------------------------------------------------
 EXPECTED_POLL_MODIFIERS = {
     # CDNA3 / CDNA4: NT=1 -- non-temporal, so the poll never re-hits a stale
     # cached line.
     "gfx942": {"nt"},
     "gfx950": {"nt"},
+    # gfx1250: system scope (RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h).
+    "gfx1250": {"scope:SCOPE_SYS"},
 }
 
 MAX_REPORTED = 10
@@ -138,14 +140,10 @@ def test_ll_poll_loads_keep_cache_bits(arch, targets, disassemble):
     lines = disassemble(arch)
     polls = list(ll_isa.find_polls(lines))
 
-    # A guard that finds nothing passes vacuously. Every Primitives<ProtoLL>
-    # instantiation receives through the poll loop, so each must show at
-    # least one; if not, the detector no longer matches what the compiler
-    # emits and must be updated before this test means anything.
-    polled = {p.func for p in polls}
-    unmatched = [f for f in ll_isa.functions(lines)
-                 if ll_isa.PROTO_LL_RE.search(f) and f not in polled]
-    assert polls and not unmatched, (
+    # A guard that finds nothing passes vacuously.
+    unmatched = ll_isa.unpolled_proto_ll(lines, polls)
+    assert polls, f"{arch}: found no LL flag-poll loads; update ll_isa.py."
+    assert not unmatched, (
         f"{arch}: found no LL flag-poll load in {len(unmatched)} ProtoLL "
         f"function(s), e.g. {unmatched[:3]}. The poll's instruction shape "
         "changed (or it was split into narrower loads); update ll_isa.py."

@@ -18,8 +18,8 @@ lost its bits is still found (and then reported):
 
   * a 128-bit vector load into v[N:N+3], followed (before the next 128-bit
     load) by
-  * v_cmp_ne_u32 of BOTH v[N+1] (flag1) and v[N+3] (flag2) against the same
-    register (the expected flag).
+  * v_cmp_ne_u32 or v_cmp_eq_u32 of BOTH v[N+1] (flag1) and v[N+3] (flag2)
+    against the same register (the expected flag).
 """
 
 import collections
@@ -34,8 +34,8 @@ LOAD128_RE = re.compile(
     r"^\s*(?P<op>(?:global|flat|buffer)_load_(?:dwordx4|b128))\s+"
     r"v\[(?P<lo>\d+):(?P<hi>\d+)\]"
 )
-CMP_NE_RE = re.compile(
-    r"^\s*v_cmp_ne_u32\w*\s+[^,]+,\s*(?P<a>[vs]\d+),\s*(?P<b>[vs]\d+)"
+CMP_RE = re.compile(
+    r"^\s*v_cmp_(?:ne|eq)_u32\w*\s+[^,]+,\s*(?P<a>[vs]\d+),\s*(?P<b>[vs]\d+)"
 )
 # Instructions to scan after a load for its flag compares.
 POLL_WINDOW = 16
@@ -81,7 +81,7 @@ def find_polls(lines):
         for nxt in lines[i + 1:i + 1 + POLL_WINDOW]:
             if FUNC_RE.match(nxt) or LOAD128_RE.match(nxt):
                 break
-            c = CMP_NE_RE.match(nxt)
+            c = CMP_RE.match(nxt)
             if not c:
                 continue
             a, b = c.group("a"), c.group("b")
@@ -97,6 +97,16 @@ def find_polls(lines):
 def functions(lines):
     """Return the names of all functions in disassembly `lines`."""
     return [m.group(1) for m in map(FUNC_RE.match, lines) if m]
+
+
+def unpolled_proto_ll(lines, polls):
+    """Return the ProtoLL functions in `lines` that hold none of `polls`.
+
+    Every Primitives<ProtoLL> instantiation receives through the poll loop, so
+    any hit means the detector no longer matches what the compiler emits."""
+    polled = {p.func for p in polls}
+    return [f for f in functions(lines)
+            if PROTO_LL_RE.search(f) and f not in polled]
 
 
 class Toolchain:
@@ -152,7 +162,7 @@ class Toolchain:
                 and CANDIDATE_RE.search(parts[2])]
         if not syms:
             return []
-        # The symbol list overflows the command line; pass it in a response file.
+        # The symbol list overflows the command line; use a response file.
         rsp = os.path.join(workdir, "symbols.rsp")
         with open(rsp, "w") as f:
             f.write("--disassemble-symbols=" + ",".join(syms))
