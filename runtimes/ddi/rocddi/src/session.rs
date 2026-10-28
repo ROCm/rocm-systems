@@ -741,6 +741,53 @@ mod tests {
         )
     }
 
+    #[test]
+    fn test_driver_events_route_through_independent_public_subscriptions() {
+        use crate::device::event::{
+            DeviceEvent, GpuHardwareException, GpuResetCause, GpuResetScope, subscribe,
+        };
+
+        let id = [0x51; 16];
+        let driver = Shared::new(TestDriver::new(
+            id,
+            EndpointKind::Npu,
+            DriverContextLifetime::Session,
+        ))
+        .unwrap();
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(driver.clone())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let device = session
+            .activate(&session.open_endpoint(id).unwrap())
+            .unwrap();
+        let mut first = subscribe(&device).unwrap();
+        let mut second = subscribe(&device).unwrap();
+        assert_eq!(first.poll().unwrap(), None);
+
+        let event = DeviceEvent::GpuHardwareException(GpuHardwareException {
+            endpoint_id: Some(id),
+            scope: GpuResetScope::WholeGpu,
+            memory_lost: false,
+            cause: GpuResetCause::Hang,
+        });
+        driver.publish_event(event).unwrap();
+        assert_eq!(
+            first.wait(std::time::Duration::from_millis(5)).unwrap(),
+            Some(event)
+        );
+        assert_eq!(first.poll().unwrap(), None);
+        assert_eq!(second.poll().unwrap(), Some(event));
+        assert_eq!(second.poll().unwrap(), None);
+
+        drop(first);
+        drop(second);
+        drop(device);
+        drop(driver);
+        session.destroy().unwrap();
+    }
+
     struct TestDriverProbe {
         shutdowns: std::sync::Arc<std::sync::atomic::AtomicUsize>,
         fail_shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
