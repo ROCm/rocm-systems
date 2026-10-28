@@ -274,20 +274,13 @@ impl DeviceDriverState {
         }
     }
     /// Subscribes to the activated driver's retained system notifications.
-    #[allow(
-        clippy::unnecessary_wraps,
-        reason = "other driver variants may not support events"
-    )]
     pub(crate) fn subscribe_events(&self) -> Result<EventSubscription, Error> {
         match self {
             Self::LinuxKfd { state, .. } => {
                 Ok(EventSubscription::LinuxKfd(state.subscribe_events()?))
             }
             #[cfg(test)]
-            Self::Test { .. } => Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "driver does not expose system events",
-            }),
+            Self::Test { state, .. } => Ok(EventSubscription::Test(state.subscribe_events()?)),
         }
     }
 
@@ -346,6 +339,9 @@ impl DeviceDriverState {
 pub(crate) enum EventSubscription {
     /// Linux KFD observer retained by the generic device event handle.
     LinuxKfd(KfdEventSubscription),
+    /// Test-driver observer used to exercise backend-neutral event routing.
+    #[cfg(test)]
+    Test(test_driver::TestEventSubscription),
 }
 
 impl EventSubscription {
@@ -353,6 +349,8 @@ impl EventSubscription {
     pub(crate) fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
         match self {
             Self::LinuxKfd(subscription) => subscription.poll(),
+            #[cfg(test)]
+            Self::Test(subscription) => subscription.poll(),
         }
     }
 
@@ -360,6 +358,8 @@ impl EventSubscription {
     pub(crate) fn wait_native(&self, timeout: std::time::Duration) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(subscription) => subscription.wait_native(timeout),
+            #[cfg(test)]
+            Self::Test(subscription) => subscription.wait_native(timeout),
         }
     }
 }

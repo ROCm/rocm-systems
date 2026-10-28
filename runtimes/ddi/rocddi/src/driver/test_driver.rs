@@ -4,14 +4,63 @@
 //! Minimal non-GPU driver used to exercise heterogeneous session routing.
 
 use super::{AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector};
+use crate::device::event::DeviceEvent;
 use crate::memory::host::HostBackingLease;
 use crate::memory::storage::Owned;
 use crate::memory::{AllocationInfo, DeviceAccess, HostRegistration, MemoryKind};
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, EndpointKind};
 use crate::{Error, ErrorKind};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+
+/// Test-only event stream shared by activated endpoints of one driver.
+struct TestEvents {
+    /// Events retained for independent subscriber cursors.
+    records: Mutex<Vec<DeviceEvent>>,
+    /// Wakes subscribers after a new record is published.
+    changed: Condvar,
+}
+
+/// One independent cursor over a test driver's event stream.
+pub(crate) struct TestEventSubscription {
+    /// Keeps the test event stream live after its device handle is dropped.
+    events: Arc<TestEvents>,
+    /// Index of the next record to deliver.
+    cursor: usize,
+}
+
+impl TestEventSubscription {
+    /// Reads one retained event for this subscriber.
+    pub(crate) fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
+        let records = self.events.records.lock().map_err(|_| Error::Operation {
+            kind: ErrorKind::Internal,
+            detail: "test event stream lock poisoned",
+        })?;
+        let event = records.get(self.cursor).copied();
+        if event.is_some() {
+            self.cursor += 1;
+        }
+        Ok(event)
+    }
+
+    /// Waits until a new test record is ready or the timeout expires.
+    pub(crate) fn wait_native(&self, timeout: std::time::Duration) -> Result<(), Error> {
+        let records = self.events.records.lock().map_err(|_| Error::Operation {
+            kind: ErrorKind::Internal,
+            detail: "test event stream lock poisoned",
+        })?;
+        let _guard = self
+            .events
+            .changed
+            .wait_timeout_while(records, timeout, |records| records.len() == self.cursor)
+            .map_err(|_| Error::Operation {
+                kind: ErrorKind::Internal,
+                detail: "test event wait lock poisoned",
+            })?;
+        Ok(())
+    }
+}
 
 /// Test driver instance with only the common driver contract.
 pub(crate) struct TestDriver {
@@ -24,12 +73,34 @@ pub(crate) struct TestDriver {
     pub(crate) fail_shutdown: Arc<AtomicBool>,
     pub(crate) enumerations: Arc<AtomicUsize>,
     pub(crate) opens: Arc<AtomicUsize>,
+    /// Event stream available from every activated test endpoint.
+    events: Arc<TestEvents>,
 }
 
 /// Activated test endpoint. It intentionally has no GPU resource capabilities.
 #[derive(Clone)]
 pub(crate) struct TestDevice {
     id: [u8; 16],
+    events: Arc<TestEvents>,
+}
+
+impl TestDevice {
+    /// Subscribes to events emitted by the owning test driver.
+    pub(crate) fn subscribe_events(&self) -> Result<TestEventSubscription, Error> {
+        let cursor = self
+            .events
+            .records
+            .lock()
+            .map_err(|_| Error::Operation {
+                kind: ErrorKind::Internal,
+                detail: "test event stream lock poisoned",
+            })?
+            .len();
+        Ok(TestEventSubscription {
+            events: self.events.clone(),
+            cursor,
+        })
+    }
 }
 
 /// Numeric-only allocation used to test backing lifetimes across drivers.
@@ -68,7 +139,26 @@ impl TestDriver {
             fail_shutdown: Arc::new(AtomicBool::new(false)),
             enumerations: Arc::new(AtomicUsize::new(0)),
             opens: Arc::new(AtomicUsize::new(0)),
+            events: Arc::new(TestEvents {
+                records: Mutex::new(Vec::new()),
+                changed: Condvar::new(),
+            }),
         }
+    }
+
+    /// Emits a device event to every active test subscription.
+    pub(crate) fn publish_event(&self, event: DeviceEvent) -> Result<(), Error> {
+        let mut records = self.events.records.lock().map_err(|_| Error::Operation {
+            kind: ErrorKind::Internal,
+            detail: "test event stream lock poisoned",
+        })?;
+        records.try_reserve(1).map_err(|_| Error::Capacity {
+            resource: "test event stream",
+        })?;
+        records.push(event);
+        drop(records);
+        self.events.changed.notify_all();
+        Ok(())
     }
 
     pub(crate) fn with_host_registration(mut self) -> Self {
@@ -178,7 +268,10 @@ impl Driver for TestDriver {
                 detail: "foreign test endpoint",
             });
         }
-        Ok(TestDevice { id: self.id })
+        Ok(TestDevice {
+            id: self.id,
+            events: self.events.clone(),
+        })
     }
 }
 
