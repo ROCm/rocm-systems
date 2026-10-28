@@ -635,6 +635,95 @@ INSTANTIATE_TEST_SUITE_P(
             "InterleavedEngine", {0xc003a700u, 1u, 1u, 1u, 1u}, "interleaved dispatch requires"}),
     [](const auto &info) { return info.param.name; });
 
+class Pm4EffectFailureTest : public Pm4PacketProcessorTest,
+                             public ::testing::WithParamInterface<RejectedPm4Packet> {};
+
+TEST_P(Pm4EffectFailureTest, StopsBeforeDependentEffectsAndRetirement) {
+  const auto &packet = GetParam();
+  auto words = packet.words;
+  words.insert(words.end(), {0xc0033700u, 5u << 8, kOutput + 4, 0u, 99u});
+  submit(words, true);
+  memory->store<uint32_t>(kOutput, 0x12345678);
+  uint32_t cancellations = 0;
+  context.fault_queue = [&] {
+    ++cancellations;
+    queue.faulted = true;
+    status = Pm4TestStatus::Faulted;
+  };
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  service();
+  const auto diagnostic = testing::internal::GetCapturedStderr();
+  const std::string reason = std::string("PM4 queue failed: ") + packet.reason;
+  const auto reason_offset = diagnostic.find(reason);
+  EXPECT_NE(reason_offset, std::string::npos) << diagnostic;
+  if (reason_offset != std::string::npos)
+    EXPECT_EQ(diagnostic.find(reason, reason_offset + 1), std::string::npos) << diagnostic;
+  EXPECT_EQ(cancellations, 1u);
+  EXPECT_FALSE(queue.command_retry_pending);
+  EXPECT_FALSE(completed);
+  EXPECT_TRUE(dispatches.empty());
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0x12345678u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput + 4), 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    FailedReads, Pm4EffectFailureTest,
+    ::testing::Values(RejectedPm4Packet{"CopySource",
+                                        {0xc0044000u, 0x101u, 0x4000u, 0u, 0x800u, 0u},
+                                        "PM4 COPY_DATA read failed"},
+                      RejectedPm4Packet{"DmaSource",
+                                        {0xc0055000u, 0u, 0x4000u, 0u, 0x800u, 0u, 4u},
+                                        "PM4 DMA copy failed"},
+                      RejectedPm4Packet{"WaitSource",
+                                        {0xc0053c00u, 0x13u, 0x4000u, 0u, 1u, ~0u, 0u},
+                                        "PM4 WAIT_REG_MEM read failed"},
+                      RejectedPm4Packet{"IndirectArguments",
+                                        {0xc0021600u, 0x4000u, 0u, 1u},
+                                        "PM4 DISPATCH_INDIRECT read failed"}),
+    [](const auto &info) { return info.param.name; });
+
+TEST_F(Pm4PacketProcessorTest, ShadowLoadFailureRetainsOnlyEarlierRanges) {
+  const std::array words{0xc0055f00u, 0x3ffcu,     0u,      0u,      1u, 1u,
+                         1u,          0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+  memory->store<uint32_t>(0x3ffc, 0x12345678);
+  queue.commands.sh_registers[1] = 0xabcdef;
+  submit(words, true);
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  EXPECT_EQ(queue.commands.sh_registers[0], 0x12345678u);
+  EXPECT_EQ(queue.commands.sh_registers[1], 0xabcdefu);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+  EXPECT_FALSE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, FaultedHeaderFetchDoesNotExecuteOrRetire) {
+  const std::array words{0xffff1000u};
+  submit(words, true);
+  queue.commands.submissions.front().buffers.front().ring_base = 0x4000;
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  EXPECT_FALSE(queue.command_retry_pending);
+  EXPECT_EQ(queue.commands.submissions.front().buffers.front().address, 0u);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+  EXPECT_FALSE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, FaultedPayloadFetchDoesNotDispatchOrAdvance) {
+  const std::array words{0xc0031500u, 2u, 3u, 4u, 1u};
+  submit(words, true);
+  auto &ib = queue.commands.submissions.front().buffers.front();
+  ib.ring_base = 0x3ffc;
+  memory->store<uint32_t>(ib.ring_base, words[0]);
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  EXPECT_FALSE(queue.command_retry_pending);
+  EXPECT_TRUE(dispatches.empty());
+  EXPECT_EQ(ib.address, 0u);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+  EXPECT_FALSE(completed);
+}
+
 TEST_F(Pm4PacketProcessorTest, AdmissionCancellationRunsOnceOutsideExceptionContainment) {
   const std::array words{0xc0001500u, 0u}; // DISPATCH_DIRECT requires four payload words.
   submit(words, true);

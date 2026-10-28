@@ -15,10 +15,10 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <exception>
 #include <format>
 #include <limits>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -61,8 +61,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
   }
   if (!queue.dispatches.entries.empty())
     return;
-  // Returned admission failures cancel outside exception containment, just as
-  // the former catch handler did. Allocations and effects still need the catch.
+  // Returned failures cancel outside exception containment, just as
+  // the former catch handler did. Allocations and callbacks still need the catch.
   const auto execute_packets = [&]() -> util::Result {
     const auto fail = [](std::string_view message) {
       util::Logger::warn("PM4 queue failed: ", message);
@@ -133,7 +133,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         return util::Result::success();
       }
       if (outcome != VmAccessOutcome::Complete)
-        throw std::runtime_error("unmapped PM4 command buffer");
+        return fail("unmapped PM4 command buffer");
       const uint32_t type = header >> 30;
       const uint32_t count = type == 2 || header == 0xffff1000 ? 1 : ((header >> 16) & 0x3fff) + 2;
       if (count > ib.dwords || (type != 2 && type != 3))
@@ -147,7 +147,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           return util::Result::success();
         }
         if (outcome != VmAccessOutcome::Complete)
-          throw std::runtime_error("unmapped PM4 packet payload");
+          return fail("unmapped PM4 packet payload");
       }
       ib.address += count * 4;
       ib.dwords -= count;
@@ -239,7 +239,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         uint32_t value = 0;
         if (access->read(address(0), {reinterpret_cast<std::byte *>(&value), sizeof(value)}) !=
             VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 COND_EXEC read failed");
+          return fail("PM4 COND_EXEC read failed");
         if (!value)
           skip_commands(words[3]);
         break;
@@ -262,7 +262,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           uint64_t value = 0;
           if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), bytes}) !=
               VmAccessOutcome::Complete)
-            throw std::runtime_error("PM4 SET_PREDICATION read failed");
+            return fail("PM4 SET_PREDICATION read failed");
           state.predicate_pass = (value != 0) == bool(words[0] & (1u << 8));
         }
         break;
@@ -283,7 +283,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         context.flush_caches();
         if (access->write(address(1), {reinterpret_cast<const std::byte *>(words.data() + 3),
                                        (words.size() - 3) * 4}) != VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 WRITE_DATA failed");
+          return fail("PM4 WRITE_DATA failed");
         break;
       }
       case Pm4Opcode::AtomicMem: {
@@ -321,7 +321,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const auto outcome = width == 8 ? mutate.template operator()<uint64_t>()
                                         : mutate.template operator()<uint32_t>();
         if (outcome != VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 ATOMIC_MEM access failed");
+          return fail("PM4 ATOMIC_MEM access failed");
         break;
       }
       case Pm4Opcode::ReleaseMem: {
@@ -337,7 +337,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const size_t bytes = selection == 0 ? 0 : selection == 1 ? 4 : 8;
         if (bytes && access->write(address(2), {reinterpret_cast<const std::byte *>(&value),
                                                 bytes}) != VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 RELEASE_MEM failed");
+          return fail("PM4 RELEASE_MEM failed");
         break;
       }
       case Pm4Opcode::CopyData: {
@@ -372,13 +372,13 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         else if (source == 1 || source == 2) {
           if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), bytes}) !=
               VmAccessOutcome::Complete)
-            throw std::runtime_error("PM4 COPY_DATA read failed");
+            return fail("PM4 COPY_DATA read failed");
         } else {
           return fail("unsupported COPY_DATA source");
         }
         if (access->write(address(3), {reinterpret_cast<const std::byte *>(&value), bytes}) !=
             VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 COPY_DATA write failed");
+          return fail("PM4 COPY_DATA write failed");
         break;
       }
       case Pm4Opcode::WaitRegMem: {
@@ -410,7 +410,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
             return util::Result::success();
           }
           if (loaded != VmAccessOutcome::Complete)
-            throw std::runtime_error("PM4 WAIT_REG_MEM read failed");
+            return fail("PM4 WAIT_REG_MEM read failed");
         } else {
           return fail("unsupported WAIT_REG_MEM register space or operation");
         }
@@ -476,7 +476,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           if (access->read(address(0) + uint64_t{first} * 4,
                            {reinterpret_cast<std::byte *>(registers.data() + first), count * 4}) !=
               VmAccessOutcome::Complete)
-            throw std::runtime_error("PM4 shadow register load read failed");
+            return fail("PM4 shadow register load read failed");
         }
         break;
       }
@@ -497,7 +497,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         context.flush_caches();
         if (access->read(address(0), {reinterpret_cast<std::byte *>(registers.data() + first),
                                       count * 4}) != VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 register load read failed");
+          return fail("PM4 register load read failed");
         break;
       }
       case Pm4Opcode::SetShReg:
@@ -658,7 +658,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           constexpr std::array<uint64_t, 2> values{kSampleValid, kSampleValid};
           if (access->write(address(1), std::as_bytes(std::span{values})) !=
               VmAccessOutcome::Complete)
-            throw std::runtime_error("PM4 streamout query write failed");
+            return fail("PM4 streamout query write failed");
           break;
         }
         if (submission.graphics_engine && event == 56) {
@@ -692,12 +692,12 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         std::array<uint64_t, 2> values{};
         if (access->read(address(0) + 16 + 16 * words[2],
                          std::as_writable_bytes(std::span{values})) != VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 streamout query read failed");
+          return fail("PM4 streamout query read failed");
         for (auto &value : values)
           value |= uint64_t{1} << 63;
         if (access->write(address(3), std::as_bytes(std::span{values})) !=
             VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 streamout query write failed");
+          return fail("PM4 streamout query write failed");
         break;
       }
       case Pm4Opcode::DmaData: {
@@ -717,12 +717,12 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
             data[i] = words[1] >> ((i % 4) * 8);
           if (access->write(address(3), std::as_bytes(std::span(data))) !=
               VmAccessOutcome::Complete)
-            throw std::runtime_error("PM4 DMA fill failed");
+            return fail("PM4 DMA fill failed");
         } else if (src_select == 0 || src_select == 3) {
           std::vector<std::byte> data(bytes);
           if (access->read(address(1), data) != VmAccessOutcome::Complete ||
               access->write(address(3), data) != VmAccessOutcome::Complete)
-            throw std::runtime_error("PM4 DMA copy failed");
+            return fail("PM4 DMA copy failed");
         } else {
           return fail("unsupported PM4 DMA source");
         }
@@ -759,7 +759,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         util::StringDiagnostic diagnostic;
         if (context.dispatch({words[0], words[1], words[2], words[3]}, diagnostic.emitter())
                 .failed())
-          throw std::runtime_error(diagnostic.message());
+          return fail(diagnostic.message());
         break;
       }
       case Pm4Opcode::DispatchIndirectInterleaved:
@@ -780,10 +780,10 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         std::array<uint32_t, 4> dimensions{0, 0, 0, words.back()};
         if (access->read(arguments, {reinterpret_cast<std::byte *>(dimensions.data()), 12}) !=
             VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 DISPATCH_INDIRECT read failed");
+          return fail("PM4 DISPATCH_INDIRECT read failed");
         util::StringDiagnostic diagnostic;
         if (context.dispatch(dimensions, diagnostic.emitter()).failed())
-          throw std::runtime_error(diagnostic.message());
+          return fail(diagnostic.message());
         break;
       }
       default:
