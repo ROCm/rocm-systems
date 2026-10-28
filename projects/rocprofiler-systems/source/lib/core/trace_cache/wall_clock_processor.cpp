@@ -98,20 +98,13 @@ wall_clock_processor_t::handle(const region_sample& sample)
 void
 wall_clock_processor_t::handle(const kernel_dispatch_sample& sample)
 {
-    auto name = m_kernel_names.find(sample.kernel_id);
-    if(name == m_kernel_names.end())
+    auto const symbol = m_metadata->get_kernel_symbol(sample.kernel_id);
+    if(!symbol.has_value())
     {
-        auto const symbol = m_metadata->get_kernel_symbol(sample.kernel_id);
-        if(!symbol.has_value())
-        {
-            throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
-        }
-        name = m_kernel_names
-                   .emplace(sample.kernel_id,
-                            rocprofsys::utility::demangle(symbol->kernel_name))
-                   .first;
+        throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
     }
-    auto interval = make_interval(sample, name->second);
+    auto interval =
+        make_interval(sample, rocprofsys::utility::demangle(symbol->kernel_name));
     if(interval.has_value())
     {
         m_report.add_gpu_activity(std::move(*interval));
