@@ -296,6 +296,110 @@ TEST(VmFixtureSetupTest, ReportsMalformedConfigAndLeavesFixtureEmpty) {
       "Failed to parse JSON config");
 }
 
+TEST(CommandProcessorTest, OrdinaryScratchLaunchDoesNotWaitForAnUnrelatedCu) {
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 2, 2));
+  const std::array<uint8_t, 4096> scratch{};
+  f.mem()->load_image(scratch.data(), scratch.size(), 0x10000);
+  amdgpu::DispatchEntry entry{};
+  entry.kind = amdgpu::DispatchPacketKind::Kernel;
+  entry.dispatch_id = 1;
+  entry.address_space = f.soc_ptr->internal_address_space();
+  entry.kernel_entry_pc = 0x8000;
+  entry.total_wgs = entry.grid_wgs_x = 1;
+  entry.grid_yz_valid = true;
+  entry.kernel_wave_size = 32;
+  entry.wfs_per_workgroup = 1;
+  entry.workgroup_size_x = entry.grid_size_x = 32;
+  entry.private_segment_fixed_size = 8;
+  entry.scratch_backing_addr = 0x10000;
+  entry.scratch_wave_bytes = 256;
+  entry.enabled_cus = std::vector<amdgpu::ComputeUnitCore *>{f.cu(0)};
+
+  // Another CU may be executing under its wave-state lock. Ordinary scratch
+  // setup on the selected CU must not depend on that unrelated execution.
+  std::promise<void> locked, release;
+  auto released = release.get_future();
+  auto blocker = std::async(std::launch::async, [&] {
+    f.cu(1)->with_wave_state_locked([&] {
+      locked.set_value();
+      released.wait();
+    });
+  });
+  locked.get_future().wait();
+  auto launch = std::async(std::launch::async, [&] {
+    return amdgpu::CommandProcessorPlacementTestAccess::place(*f.cp(), entry);
+  });
+  const auto ready = launch.wait_for(std::chrono::seconds(2));
+  // Release before any fatal assertion so a failed test cannot strand workers.
+  release.set_value();
+  blocker.get();
+  const auto result = launch.get();
+  EXPECT_EQ(ready, std::future_status::ready);
+  ASSERT_EQ(result, (std::pair{1u, amdgpu::VmAccessOutcome::Complete}));
+  EXPECT_EQ(f.cu(0)->wf(0)->scratch_base(), entry.scratch_backing_addr);
+  amdgpu::CommandProcessorPlacementTestAccess::retire(*f.cp(), entry, 0);
+}
+
+TEST(CommandProcessorTest, RestoreScratchConflictReleasesEarlierReservationsBeforeRetry) {
+  constexpr uint64_t kScratch = 0x10000;
+  constexpr uint64_t kStride = 256;
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 2));
+  const std::array<uint8_t, 4096> backing{};
+  f.mem()->load_image(backing.data(), backing.size(), kScratch);
+  test::AqlQueue queue(f.mem(), f.cp());
+  const auto space = f.cp()->queue_address_space_for_test(1, 0);
+  ASSERT_TRUE(space);
+  const amdgpu::QueueIdentity identity{.address_space = space, .process_id = 0, .queue_id = 1};
+  amdgpu::DispatchEntry entry{};
+  entry.kind = amdgpu::DispatchPacketKind::Kernel;
+  entry.dispatch_id = entry.queue_id = 1;
+  entry.address_space = space;
+  entry.kernel_entry_pc = 0x8000;
+  entry.total_wgs = entry.grid_wgs_x = 1;
+  entry.grid_yz_valid = true;
+  entry.kernel_wave_size = 32;
+  entry.wfs_per_workgroup = 2;
+  entry.workgroup_size_x = entry.grid_size_x = 64;
+  entry.group_segment_fixed_size = 256;
+  entry.private_segment_fixed_size = 8;
+  entry.scratch_backing_addr = kScratch;
+  entry.scratch_wave_bytes = kStride;
+  ASSERT_EQ(amdgpu::CommandProcessorPlacementTestAccess::place(*f.cp(), entry),
+            (std::pair{1u, amdgpu::VmAccessOutcome::Complete}));
+  ASSERT_EQ(f.cp()->suspend_queue_context(identity), amdgpu::VmAccessOutcome::Complete);
+  std::vector<uint8_t> context;
+  ASSERT_EQ(f.cp()->save_queue_context(identity, context), amdgpu::VmAccessOutcome::Complete);
+  f.cp()->release_queue_context(identity);
+  ASSERT_FALSE(f.cu()->has_active_wfs());
+
+  // Another allocation occupies only the second saved range. Restore must
+  // release its first reservation as well as both execution slots on failure.
+  auto &reservations = *f.soc_ptr->scratch_reservations();
+  auto occupied = reservations.try_reserve(space, kScratch + kStride, kStride);
+  ASSERT_TRUE(occupied);
+  EXPECT_EQ(f.cp()->restore_queue_context(identity, context), amdgpu::VmAccessOutcome::Unavailable);
+  EXPECT_FALSE(f.cu()->has_active_wfs());
+  EXPECT_TRUE(f.cu()->can_allocate_lds(64 * 1024));
+  EXPECT_TRUE(reservations.try_reserve(space, kScratch, kStride));
+  EXPECT_FALSE(reservations.try_reserve(space, kScratch + kStride, kStride));
+
+  occupied.reset();
+  ASSERT_EQ(f.cp()->restore_queue_context(identity, context), amdgpu::VmAccessOutcome::Complete);
+  for (uint32_t slot = 0; slot < 2; ++slot) {
+    const auto *wave = f.cu()->wf(slot);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_FALSE(wave->is_halted());
+    EXPECT_TRUE(wave->debug_suspended());
+    ASSERT_TRUE(wave->scratch_lease());
+    EXPECT_EQ(wave->scratch_lease()->base(), kScratch + slot * kStride);
+    EXPECT_EQ(wave->scratch_lease()->size(), kStride);
+  }
+  f.cp()->release_queue_context(identity);
+  EXPECT_TRUE(reservations.try_reserve(space, kScratch, 2 * kStride));
+}
+
 TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFailedSetup) {
   class WorkgroupWavesPlugin final : public ExecutionPlugin {
   public:

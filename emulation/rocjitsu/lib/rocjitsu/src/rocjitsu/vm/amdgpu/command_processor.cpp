@@ -714,10 +714,17 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     uint32_t waves_per_wg = (wg_total_size + wf->wf_size() - 1) / wf->wf_size();
     uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
     uint64_t scratch_slot = global_wave_idx;
+    std::shared_ptr<uint32_t> pm4_slot;
+    std::shared_ptr<ScratchReservation> scratch;
+    const auto reserve_slot = [&](uint64_t slot) {
+      if (slot > (std::numeric_limits<uint64_t>::max() - scratch_pool) / per_wave_size)
+        return std::shared_ptr<ScratchReservation>{};
+      return scratch_reservations_->try_reserve(
+          pkt.address_space, scratch_pool + slot * per_wave_size, per_wave_size, pm4_slot);
+    };
     if (pkt.pm4_abi) {
-      auto lease = pkt.pm4_scratch_pool->acquire();
-      scratch_slot = *lease;
-      wf->set_scratch_lease(std::move(lease));
+      pm4_slot = pkt.pm4_scratch_pool->acquire();
+      scratch_slot = *pm4_slot;
     } else if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5 || pkt.queue_ptr != 0) {
       const uint32_t shader_engine_count =
           std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
@@ -736,59 +743,38 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
           (static_cast<uint64_t>(scratch_xcc_id_) * shader_engine_count + shader_engine_id) *
               scratch_wave_stride_per_se +
           scoreboard_id;
-      // Restored waves keep their scratch even after moving to another CU.
-      // Derive occupancy from live waves rather than reserving their old
-      // execution slots or maintaining a second allocation table.
-      std::vector<std::pair<uint64_t, uint64_t>> occupied;
-      for (auto *owner : cus_)
-        owner->with_wave_state_locked([&] {
-          for (uint32_t slot = 0; slot < owner->num_wf_slots(); ++slot) {
-            const auto *other = owner->wf(slot);
-            if (!other || other == wf || other->is_halted() ||
-                other->address_space() != wf->address_space() ||
-                other->process_id() != wf->process_id() || other->scratch_base() == 0 ||
-                other->scratch_lane_size() == 0)
-              continue;
-            occupied.emplace_back(other->scratch_base(),
-                                  uint64_t{other->scratch_lane_size()} * other->wf_size());
-          }
-        });
-      const auto available = [&](uint64_t slot) {
-        if (slot > (std::numeric_limits<uint64_t>::max() - scratch_pool) / per_wave_size)
-          return false;
-        const uint64_t base = scratch_pool + slot * per_wave_size;
-        return std::ranges::none_of(occupied, [&](const auto &region) {
-          return base <= region.first ? region.first - base < per_wave_size
-                                      : base - region.first < region.second;
-        });
-      };
-      if (!available(scratch_slot)) {
+      // The preferred region may still belong to a restored wave, independently
+      // of its current CU. Reserve against the shared address-space registry.
+      scratch = reserve_slot(scratch_slot);
+      if (!scratch) {
         const uint32_t slots_per_se =
             std::min(pkt.scratch_wave_limit_per_se, scratch_wave_stride_per_se);
-        bool found = false;
-        for (uint32_t se = 0; se < shader_engine_count && !found; ++se)
+        for (uint32_t se = 0; se < shader_engine_count && !scratch; ++se)
           for (uint32_t id = 0; id < slots_per_se; ++id) {
             const uint64_t candidate = (uint64_t{scratch_xcc_id_} * shader_engine_count + se) *
                                            scratch_wave_stride_per_se +
                                        id;
-            if (!available(candidate))
+            scratch = reserve_slot(candidate);
+            if (!scratch)
               continue;
             scratch_slot = candidate;
             wf->set_shader_engine_id(se);
             wf->set_scratch_scoreboard_id(id);
-            found = true;
             break;
           }
-        if (!found)
+        if (!scratch)
           return VmAccessOutcome::Unavailable;
       }
     } else {
       // Legacy CWSR records use the dispatch-wide logical scratch slot.
       wf->set_scratch_scoreboard_id(static_cast<uint32_t>(global_wave_idx));
     }
-    if (scratch_slot > (std::numeric_limits<uint64_t>::max() - scratch_pool) / per_wave_size)
-      return VmAccessOutcome::Malformed;
-    uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
+    if (!scratch)
+      scratch = reserve_slot(scratch_slot);
+    if (!scratch)
+      return VmAccessOutcome::Unavailable;
+    wf->set_scratch_lease(std::move(scratch));
+    const uint64_t wave_scratch = wf->scratch_lease()->base();
     std::optional<GpuVmAccess> fallback_scratch_access;
     const GpuVmAccess *scratch_access = pkt.execution_access.get();
     if (scratch_access == nullptr) {

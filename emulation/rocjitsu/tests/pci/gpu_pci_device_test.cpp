@@ -1965,6 +1965,10 @@ TEST_F(GpuDeviceMes, ReaddRebuildsBarriersAndContinuesOnlyUnissuedWorkgroups) {
     wave->set_lds_size(256);
     wave->set_scratch_base(kScratch + slot * kScratchStride);
     wave->set_scratch_lane_size(8);
+    auto scratch = soc_.scratch_reservations()->try_reserve(*address_space, wave->scratch_base(),
+                                                            kScratchStride);
+    ASSERT_TRUE(scratch);
+    wave->set_scratch_lease(std::move(scratch));
     store_vram_qword(kScratchPhysical + slot * kScratchStride, 0x12345678 + slot);
     wave->debug_write_sgpr(32, 0x1234 + slot);
     wave->debug_write_sgpr(33, 0x5678 + slot);
@@ -2092,6 +2096,24 @@ TEST_F(GpuDeviceMes, ReaddRebuildsBarriersAndContinuesOnlyUnissuedWorkgroups) {
   EXPECT_EQ(vram_dword_at(kSignalPhysical + 8), 1u);
   for (uint32_t slot = 0; slot < 2; ++slot)
     second_compute_unit_->wf(slot + 2)->set_debug_suspended(false);
+  // Retire the restored waves first, keeping the newer waves that moved to
+  // alternate scratch regions resident. Those regions still need protection.
+  for (uint32_t slot = 0; slot < 2; ++slot)
+    compute_unit_->wf(slot)->set_debug_suspended(true);
+  for (unsigned step = 0; step < 4; ++step)
+    second_compute_unit_->step();
+  ASSERT_FALSE(second_compute_unit_->has_active_wfs());
+  command_processor_.step();
+  EXPECT_EQ(command_processor_.dispatched_workgroups() - issued, 2u);
+  for (uint32_t slot = 0; slot < 2; ++slot) {
+    const auto *wave = second_compute_unit_->wf(slot);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_FALSE(wave->is_halted());
+    EXPECT_LT(wave->scratch_base(), kScratch + 2 * kScratchStride);
+    EXPECT_NE(wave->scratch_base(), compute_unit_->wf(0)->scratch_base());
+    EXPECT_NE(wave->scratch_base(), compute_unit_->wf(1)->scratch_base());
+    compute_unit_->wf(slot)->set_debug_suspended(false);
+  }
   for (unsigned step = 0; step < 8; ++step) {
     compute_unit_->step();
     second_compute_unit_->step();
@@ -2144,6 +2166,10 @@ TEST_F(GpuDeviceMes, RemoveAndReaddMatchesEveryWaveBeforeRestoringState) {
       wave->set_debug_wave_id(use_wave_ids ? 100 + index : 0);
       wave->set_scratch_base(kScratch + index * 256);
       wave->set_scratch_lane_size(8);
+      auto scratch =
+          soc_.scratch_reservations()->try_reserve(*address_space, wave->scratch_base(), 256);
+      ASSERT_TRUE(scratch);
+      wave->set_scratch_lease(std::move(scratch));
       wave->set_exec(1);
       store_vram_qword(kScratchPhysical + index * 256, 0xabcdef00 + index);
       wave->set_debug_halted(true);
@@ -2182,6 +2208,9 @@ TEST_F(GpuDeviceMes, RemoveAndReaddMatchesEveryWaveBeforeRestoringState) {
       for (size_t word = 0; word < load.size(); ++word)
         store_dword(kDefaultComputeRingPhysical + 0x100 + index * 0x10 + word * 4, load[word]);
       states[index].sgprs[0] = 0x2000 + index;
+      // Editing the architectural pointer must not move or resize its backing allocation.
+      states[index].flat_scratch += 4;
+      store_vram_qword(kScratchPhysical + index * 256 + 4, 0xabcdef00 + index);
       states[index].wave_stopped = false;
       // Stable wave IDs take precedence over debugger-edited dispatch metadata.
       if (use_wave_ids && !duplicate_identity)
@@ -2237,7 +2266,10 @@ TEST_F(GpuDeviceMes, RemoveAndReaddMatchesEveryWaveBeforeRestoringState) {
         EXPECT_FALSE(wave->debug_halted());
         EXPECT_EQ(wave->pc, 0x10100u + index * 0x10);
         EXPECT_EQ(wave->debug_read_sgpr(0), 0x2000u + index);
-        EXPECT_EQ(wave->scratch_base(), kScratch + index * 256);
+        EXPECT_EQ(wave->scratch_base(), kScratch + index * 256 + 4);
+        ASSERT_TRUE(wave->scratch_lease());
+        EXPECT_EQ(wave->scratch_lease()->base(), kScratch + index * 256);
+        EXPECT_EQ(wave->scratch_lease()->size(), 256u);
       }
       compute_unit_->step();
       for (uint32_t index = 0; index < waves.size(); ++index) {

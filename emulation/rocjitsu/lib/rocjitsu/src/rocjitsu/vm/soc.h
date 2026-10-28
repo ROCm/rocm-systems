@@ -16,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/mes_engine.h"
+#include "rocjitsu/vm/amdgpu/scratch_reservations.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_scheduler.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -245,6 +246,11 @@ public:
   /// so the whole SoC shares one store rather than one per XCD (see GwsDevice).
   const std::shared_ptr<amdgpu::GwsDevice> &gws_device() const { return gws_device_; }
 
+  /// @brief Scratch backing reservations shared across this device's command processors.
+  const std::shared_ptr<amdgpu::ScratchReservations> &scratch_reservations() const {
+    return scratch_reservations_;
+  }
+
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
@@ -301,6 +307,8 @@ private:
   amdgpu::GpuVm gpu_vm_;
   /// Device-global GWS store shared by every CU of every XCD (see gws_device()).
   std::shared_ptr<amdgpu::GwsDevice> gws_device_ = std::make_shared<amdgpu::GwsDevice>();
+  std::shared_ptr<amdgpu::ScratchReservations> scratch_reservations_ =
+      std::make_shared<amdgpu::ScratchReservations>();
   std::shared_ptr<amdgpu::GpuMemoryPhysicalAccess> internal_memory_access_;
   amdgpu::AddressSpaceHandle internal_address_space_;
   amdgpu::SdmaQueueScheduler sdma_queue_scheduler_;

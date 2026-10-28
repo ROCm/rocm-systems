@@ -30,6 +30,9 @@ struct CommandProcessor::QueueContext {
     uint32_t packet = 0;
     uint32_t wave_in_group = 0;
     uint32_t scratch_lane_size = 0;
+    // Allocation ownership is separate from the debugger-editable FLAT_SCRATCH pointer.
+    uint64_t scratch_backing_base = 0;
+    uint64_t scratch_backing_bytes = 0;
     uint64_t debug_id = 0;
     uint64_t code_bias = 0;
     std::array<uint32_t, 3> coordinates{};
@@ -59,7 +62,7 @@ namespace {
 // The field visitors below are shared by writing and reading. Host pointers,
 // callbacks, and address-space leases never enter the saved image.
 constexpr uint64_t kQueueContextPayloadMagic = 0x3158544350434a52ULL; // "RJCPCTX1"
-constexpr uint64_t kQueueContextVersion = 2;
+constexpr uint64_t kQueueContextVersion = 3;
 
 class ContextWriter {
 public:
@@ -198,12 +201,13 @@ template <typename Archive, typename Group> bool group_fields(Archive &a, Group 
 
 template <typename Archive, typename Wave> bool wave_fields(Archive &a, Wave &w) {
   return a(w.group, w.sgprs, w.vgprs, w.width, w.packet, w.wave_in_group, w.scratch_lane_size,
-           w.debug_id, w.code_bias, w.coordinates, w.state, w.sleep_cycles, w.sched_mode,
-           w.vgpr_msb_hazard, w.runtime_suspended, w.barrier.named_barrier_id, w.barrier.complete,
-           w.barrier.waiting_bit, w.stop.trapsts, w.stop.mode_raw, w.stop.gfx12_trap_ctrl_raw,
-           w.stop.trap_id, w.stop.debug_halted, w.stop.single_step, w.stop.fatal_exception_pending,
-           w.stop.fatal_exception_cwsr_valid, w.queue_exceptions, w.runtime_exceptions,
-           w.trap_saved_status, w.trap_saved_exec, w.interrupt_sent, w.self_halted);
+           w.scratch_backing_base, w.scratch_backing_bytes, w.debug_id, w.code_bias, w.coordinates,
+           w.state, w.sleep_cycles, w.sched_mode, w.vgpr_msb_hazard, w.runtime_suspended,
+           w.barrier.named_barrier_id, w.barrier.complete, w.barrier.waiting_bit, w.stop.trapsts,
+           w.stop.mode_raw, w.stop.gfx12_trap_ctrl_raw, w.stop.trap_id, w.stop.debug_halted,
+           w.stop.single_step, w.stop.fatal_exception_pending, w.stop.fatal_exception_cwsr_valid,
+           w.queue_exceptions, w.runtime_exceptions, w.trap_saved_status, w.trap_saved_exec,
+           w.interrupt_sent, w.self_halted);
 }
 
 bool supported_dispatch(const DispatchEntry &entry) {
@@ -357,6 +361,12 @@ VmAccessOutcome CommandProcessor::save_queue_context(const QueueIdentity &identi
         w.packet = wave->queue_packet_id();
         w.wave_in_group = wave->wave_in_group();
         w.scratch_lane_size = wave->scratch_lane_size();
+        if (const auto &scratch = wave->scratch_lease()) {
+          w.scratch_backing_base = scratch->base();
+          w.scratch_backing_bytes = scratch->size();
+        } else if (w.scratch_lane_size != 0) {
+          return VmAccessOutcome::Faulted;
+        }
         w.debug_id = wave->debug_wave_id();
         w.code_bias = wave->code_load_bias();
         w.coordinates = wave->wg_coord();
@@ -475,6 +485,11 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
     QueueContext::Wave wave;
     if (!wave_fields(reader, wave) || wave.group >= saved.groups.size())
       return VmAccessOutcome::Malformed;
+    if ((wave.scratch_lane_size != 0) != (wave.scratch_backing_bytes != 0) ||
+        wave.scratch_backing_bytes < uint64_t{wave.scratch_lane_size} * wave.width ||
+        (wave.scratch_backing_bytes != 0 &&
+         wave.scratch_backing_bytes - 1 > UINT64_MAX - wave.scratch_backing_base))
+      return VmAccessOutcome::Malformed;
     if (wave.sgprs == 0 || wave.vgprs == 0 || (wave.width != 32 && wave.width != 64) ||
         !std::ranges::any_of(cus_,
                              [&](const auto *cu) {
@@ -553,6 +568,15 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
       wave->set_debug_suspended(true);
       waves[index] = wave;
       reserved.emplace_back(cu, wave);
+      if (w.scratch_backing_bytes != 0) {
+        auto scratch = scratch_reservations_->try_reserve(
+            identity.address_space, w.scratch_backing_base, w.scratch_backing_bytes);
+        if (!scratch) {
+          rollback();
+          return VmAccessOutcome::Unavailable;
+        }
+        wave->set_scratch_lease(std::move(scratch));
+      }
     }
   }
   for (auto &[old_id, new_id] : dispatch_ids)

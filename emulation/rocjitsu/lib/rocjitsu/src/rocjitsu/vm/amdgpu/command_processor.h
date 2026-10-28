@@ -33,6 +33,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
+#include "rocjitsu/vm/amdgpu/scratch_reservations.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
@@ -114,6 +115,11 @@ public:
   /// not participate in numeric VMID routing.
   void set_gpu_vm(GpuVm *gpu_vm, AddressSpaceHandle default_address_space = {});
   [[nodiscard]] AddressSpaceHandle default_address_space() const { return default_address_space_; }
+
+  /// @brief Wire the device-wide scratch owner during topology setup, before admitting waves.
+  void set_scratch_reservations(std::shared_ptr<ScratchReservations> reservations) {
+    scratch_reservations_ = std::move(reservations);
+  }
 
   /// @brief Replace the GWS store across this CP's drained compute units.
   /// @details The caller serializes topology changes. Preflights every CU and
@@ -1057,6 +1063,8 @@ private:
   std::chrono::milliseconds runtime_exception_ack_timeout_ = kRuntimeExceptionAckTimeout;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
+  std::shared_ptr<ScratchReservations> scratch_reservations_ =
+      std::make_shared<ScratchReservations>();
   uint32_t scratch_wave_divisor_ = 1;
   uint32_t scratch_shader_engine_count_ = 1;
   uint32_t scratch_waves_per_se_ = 1;

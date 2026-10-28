@@ -32,6 +32,7 @@ class ExecutionPluginGroup;
 namespace amdgpu {
 
 struct Pm4FailureState;
+class ScratchReservation;
 
 // Forward declaration - wavefront accesses registers through its CU.
 class ComputeUnitCore;
@@ -293,8 +294,11 @@ public:
   }
   /// @brief Report a failed shader to its PM4 queue; returns false for an AQL wave.
   bool fail_pm4_submission();
-  /// @brief Retain a PM4 scratch slot until this wave retires.
-  void set_scratch_lease(std::shared_ptr<uint32_t> lease) { scratch_lease_ = std::move(lease); }
+  /// @brief Retain the scratch backing reservation until this wave retires, including pauses.
+  void set_scratch_lease(std::shared_ptr<ScratchReservation> lease) {
+    scratch_lease_ = std::move(lease);
+  }
+  const std::shared_ptr<ScratchReservation> &scratch_lease() const { return scratch_lease_; }
 
   /// @brief Return the per-WG LDS base offset assigned at dispatch.
   uint32_t lds_base() const { return lds_base_; }
@@ -1126,7 +1130,7 @@ protected:
 
   bool use_system_clock_ = false;                ///< PM4 shader timestamps use host monotonic time.
   std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
-  std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
+  std::shared_ptr<ScratchReservation> scratch_lease_; ///< Resident scratch backing reservation.
   uint32_t queue_id_ = 0;    ///< Frontend queue ID that launched this wave (debugger correlation).
   uint32_t doorbell_id_ = 0; ///< Queue doorbell ID captured at dispatch.
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;

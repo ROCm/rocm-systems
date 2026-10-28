@@ -69,8 +69,10 @@ void SoC::add_xcd(amdgpu::Xcd *xcd) {
     xcd->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
     xcd->l2_cache()->set_gpu_vm(&gpu_vm_);
   }
-  if (amdgpu::CommandProcessor *cp = xcd->command_processor())
+  if (amdgpu::CommandProcessor *cp = xcd->command_processor()) {
     cp->set_gpu_vm(&gpu_vm_, internal_address_space_);
+    cp->set_scratch_reservations(scratch_reservations_);
+  }
   // GWS is device-global: share one store across every XCD so a dispatch that
   // fans out across XCDs still rendezvouses (see GwsDevice). Supersedes the XCD's
   // standalone default store. The XCD's CUs are already attached by this point.
@@ -228,10 +230,11 @@ SoC::SoC(std::string name, const Config &config)
   // GWS is device-global: share one store across every XCD (see GwsDevice). The
   // XCDs above were pushed directly rather than through add_xcd, so wire here.
   wire_gws_to_xcds();
-  if (config.scratch_slots_per_cu != 0)
-    for_each_cp([&](amdgpu::CommandProcessor *cp) {
+  for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    cp->set_scratch_reservations(scratch_reservations_);
+    if (config.scratch_slots_per_cu != 0)
       cp->set_scratch_slots_per_cu(config.scratch_slots_per_cu);
-    });
+  });
 }
 
 void SoC::set_arch(rj_code_arch_t arch) {

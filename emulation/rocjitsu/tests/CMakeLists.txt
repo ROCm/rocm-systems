@@ -400,6 +400,7 @@ add_executable(
     flat_lds_transfer_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp
+    scratch_reservations_test.cpp
     lds_counter_test.cpp
     l2_cache_test.cpp
     l2_maintenance_mutex_test.cpp
