@@ -126,13 +126,26 @@ struct NoteHeader {
 
 constexpr uint64_t AlignNote(uint64_t size) { return (size + 3) & ~uint64_t(3); }
 
-//! @returns The section headers of @p image once the image is validated against @p size.
-const Elf64_Shdr* SectionHeaders(const void* image, size_t size) {
+//! A @p T copied from @p offset in @p image: code objects sit at any offset in a bundle or a
+//! file, so their headers can't be read through typed pointers
+template <typename T> T ReadAt(const void* image, uint64_t offset) {
+  T value;
+  std::memcpy(&value, static_cast<const char*>(image) + offset, sizeof(value));
+  return value;
+}
+
+//! Reads the ELF header of @p image once the image is validated against @p size.
+bool ReadElfHeader(const void* image, size_t size, Elf64_Ehdr& ehdr) {
   if (size == kUnknownSize || ElfImageSize(image, size) == 0) {
-    return nullptr;
+    return false;
   }
-  const auto* ehdr = static_cast<const Elf64_Ehdr*>(image);
-  return reinterpret_cast<const Elf64_Shdr*>(static_cast<const char*>(image) + ehdr->e_shoff);
+  ehdr = ReadAt<Elf64_Ehdr>(image, 0);
+  return true;
+}
+
+//! Section header @p index of a validated image
+Elf64_Shdr ReadSection(const void* image, const Elf64_Ehdr& ehdr, uint64_t index) {
+  return ReadAt<Elf64_Shdr>(image, ehdr.e_shoff + index * sizeof(Elf64_Shdr));
 }
 
 }  // namespace
@@ -164,50 +177,48 @@ uint64_t ElfImageSize(const void* image, size_t bound) {
     return true;
   };
 
-  auto ehdr = static_cast<const Elf64_Ehdr*>(image);
+  const auto ehdr = ReadAt<Elf64_Ehdr>(image, 0);
   uint64_t totalSize = sizeof(Elf64_Ehdr);
 
-  // Validate and bound the section-header table before any dereference.
-  if (ehdr->e_shnum != 0) {
-    if (ehdr->e_shentsize != sizeof(Elf64_Shdr) || ehdr->e_shoff >= limit) {
+  // Validate and bound the section-header table before any read.
+  if (ehdr.e_shnum != 0) {
+    if (ehdr.e_shentsize != sizeof(Elf64_Shdr) || ehdr.e_shoff >= limit) {
       return 0;
     }
-    const uint64_t shtab = static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr);
+    const uint64_t shtab = static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr);
     uint64_t shtabEnd = 0;
-    if (!checkedEnd(ehdr->e_shoff, shtab, shtabEnd) || shtabEnd > limit) {
+    if (!checkedEnd(ehdr.e_shoff, shtab, shtabEnd) || shtabEnd > limit) {
       return 0;
     }
     if (shtabEnd > totalSize) totalSize = shtabEnd;
 
-    auto shdr =
-        reinterpret_cast<const Elf64_Shdr*>(static_cast<const char*>(image) + ehdr->e_shoff);
-    for (uint64_t i = 0; i < ehdr->e_shnum; ++i) {
-      if (SHT_NOBITS == shdr[i].sh_type) continue;
+    for (uint64_t i = 0; i < ehdr.e_shnum; ++i) {
+      const Elf64_Shdr shdr = ReadSection(image, ehdr, i);
+      if (SHT_NOBITS == shdr.sh_type) continue;
       uint64_t end = 0;
-      if (!checkedEnd(shdr[i].sh_offset, shdr[i].sh_size, end)) return 0;
+      if (!checkedEnd(shdr.sh_offset, shdr.sh_size, end)) return 0;
       if (end > limit) return 0;
       if (end > totalSize) totalSize = end;
     }
   }
 
-  // Validate and bound the program-header table before any dereference.
-  if (ehdr->e_phnum != 0) {
-    if (ehdr->e_phentsize != sizeof(Elf64_Phdr) || ehdr->e_phoff >= limit) {
+  // Validate and bound the program-header table before any read.
+  if (ehdr.e_phnum != 0) {
+    if (ehdr.e_phentsize != sizeof(Elf64_Phdr) || ehdr.e_phoff >= limit) {
       return 0;
     }
-    const uint64_t phtab = static_cast<uint64_t>(ehdr->e_phnum) * sizeof(Elf64_Phdr);
+    const uint64_t phtab = static_cast<uint64_t>(ehdr.e_phnum) * sizeof(Elf64_Phdr);
     uint64_t phtabEnd = 0;
-    if (!checkedEnd(ehdr->e_phoff, phtab, phtabEnd) || phtabEnd > limit) {
+    if (!checkedEnd(ehdr.e_phoff, phtab, phtabEnd) || phtabEnd > limit) {
       return 0;
     }
     if (phtabEnd > totalSize) totalSize = phtabEnd;
 
-    auto phdr =
-        reinterpret_cast<const Elf64_Phdr*>(static_cast<const char*>(image) + ehdr->e_phoff);
-    for (uint64_t i = 0; i < ehdr->e_phnum; ++i) {
-      if (PT_NULL == phdr[i].p_type) continue;
+    for (uint64_t i = 0; i < ehdr.e_phnum; ++i) {
+      const auto phdr = ReadAt<Elf64_Phdr>(image, ehdr.e_phoff + i * sizeof(Elf64_Phdr));
+      if (PT_NULL == phdr.p_type) continue;
       uint64_t end = 0;
-      if (!checkedEnd(phdr[i].p_offset, phdr[i].p_filesz, end)) return 0;
+      if (!checkedEnd(phdr.p_offset, phdr.p_filesz, end)) return 0;
       if (end > limit) return 0;
       if (end > totalSize) totalSize = end;
     }
@@ -289,19 +300,19 @@ bool GetIsaFromHeader(uint32_t elfClass, uint16_t machine, uint32_t osAbi, uint3
 // ================================================================================================
 bool ForEachNote(const void* image, size_t size, const char* name, uint32_t type,
                  const std::function<bool(const char*, uint32_t)>& fn) {
-  const Elf64_Shdr* shdr = SectionHeaders(image, size);
-  if (shdr == nullptr) {
+  Elf64_Ehdr ehdr;
+  if (!ReadElfHeader(image, size, ehdr)) {
     return false;
   }
   const std::string_view wanted(name);
-  const uint16_t numSections = static_cast<const Elf64_Ehdr*>(image)->e_shnum;
-  for (uint16_t s = 0; s < numSections; ++s) {
-    if (shdr[s].sh_type != SHT_NOTE) {
+  for (uint16_t s = 0; s < ehdr.e_shnum; ++s) {
+    const Elf64_Shdr shdr = ReadSection(image, ehdr, s);
+    if (shdr.sh_type != SHT_NOTE) {
       continue;
     }
     // ElfImageSize checked that the section lies inside the image
-    const char* data = static_cast<const char*>(image) + shdr[s].sh_offset;
-    const uint64_t dataSize = shdr[s].sh_size;
+    const char* data = static_cast<const char*>(image) + shdr.sh_offset;
+    const uint64_t dataSize = shdr.sh_size;
     uint64_t offset = 0;
     while (offset < dataSize) {
       if (dataSize - offset < sizeof(NoteHeader)) {
@@ -335,32 +346,32 @@ bool ForEachNote(const void* image, size_t size, const char* name, uint32_t type
 // ================================================================================================
 bool DynamicSymbolNames(const void* image, size_t size, std::vector<std::string>& funcs,
                         std::vector<std::string>& vars) {
-  const Elf64_Shdr* shdr = SectionHeaders(image, size);
-  if (shdr == nullptr) {
+  Elf64_Ehdr ehdr;
+  if (!ReadElfHeader(image, size, ehdr)) {
     return false;
   }
-  const uint16_t numSections = static_cast<const Elf64_Ehdr*>(image)->e_shnum;
-  const Elf64_Shdr* dynsym = nullptr;
-  for (uint16_t s = 0; s < numSections && dynsym == nullptr; ++s) {
-    if (shdr[s].sh_type == SHT_DYNSYM) {
-      dynsym = &shdr[s];
-    }
+  Elf64_Shdr dynsym{};
+  bool found = false;
+  for (uint16_t s = 0; s < ehdr.e_shnum && !found; ++s) {
+    dynsym = ReadSection(image, ehdr, s);
+    found = (dynsym.sh_type == SHT_DYNSYM);
   }
-  if (dynsym == nullptr) {
+  if (!found) {
     return true;
   }
-  if (dynsym->sh_entsize != sizeof(Elf64_Sym) || dynsym->sh_link >= numSections ||
-      shdr[dynsym->sh_link].sh_type != SHT_STRTAB) {
+  if (dynsym.sh_entsize != sizeof(Elf64_Sym) || dynsym.sh_link >= ehdr.e_shnum) {
+    return false;
+  }
+  const Elf64_Shdr strtab = ReadSection(image, ehdr, dynsym.sh_link);
+  if (strtab.sh_type != SHT_STRTAB) {
     return false;
   }
   // ElfImageSize checked that both sections lie inside the image
   const char* base = static_cast<const char*>(image);
-  const Elf64_Shdr& strtab = shdr[dynsym->sh_link];
   const char* strings = base + strtab.sh_offset;
-  const uint64_t count = dynsym->sh_size / sizeof(Elf64_Sym);
+  const uint64_t count = dynsym.sh_size / sizeof(Elf64_Sym);
   for (uint64_t i = 0; i < count; ++i) {
-    Elf64_Sym sym;
-    std::memcpy(&sym, base + dynsym->sh_offset + i * sizeof(Elf64_Sym), sizeof(sym));
+    const auto sym = ReadAt<Elf64_Sym>(image, dynsym.sh_offset + i * sizeof(Elf64_Sym));
     const unsigned type = ELF_ST_TYPE(sym.st_info);
     if ((type != STT_FUNC && type != STT_OBJECT) || sym.st_name == 0) {
       continue;

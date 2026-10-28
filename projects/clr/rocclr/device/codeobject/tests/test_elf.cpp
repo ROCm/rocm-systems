@@ -471,6 +471,38 @@ TEST_CASE("Truncated ELFs never parse", "[elf]") {
   }
 }
 
+TEST_CASE("Code objects parse at any offset in their buffer", "[elf]") {
+  // Bundle entries and files put a code object at any offset; a vector's data is aligned, so
+  // copy each image to every offset up to 7. Run under -fsanitize=alignment to catch typed
+  // reads of the headers.
+  const std::vector<char> elf = MakeElf(kSyms, /*loadSegment=*/true);
+  const std::vector<char> noteElf =
+      MakeNoteElf({Note("AMDGPU", kAmdgpuMetadataNoteType, "desc")});
+  for (size_t offset = 1; offset < 8; ++offset) {
+    INFO("offset " << offset);
+    std::vector<char> buffer(offset + elf.size());
+    std::memcpy(buffer.data() + offset, elf.data(), elf.size());
+    const char* image = buffer.data() + offset;
+    CHECK(ElfImageSize(image, elf.size()) == elf.size());
+    CHECK(ElfImageSize(image, kUnknownSize) == elf.size());
+    std::vector<std::string> funcs;
+    std::vector<std::string> vars;
+    REQUIRE(DynamicSymbolNames(image, elf.size(), funcs, vars));
+    CHECK(funcs == std::vector<std::string>{"kernel_a", "kernel_b"});
+    CHECK(vars == std::vector<std::string>{"global_x", "kernel_a.kd"});
+
+    std::vector<char> noteBuffer(offset + noteElf.size());
+    std::memcpy(noteBuffer.data() + offset, noteElf.data(), noteElf.size());
+    std::vector<std::string> descs;
+    REQUIRE(ForEachNote(noteBuffer.data() + offset, noteElf.size(), kAmdgpuNoteName,
+                        kAmdgpuMetadataNoteType, [&](const char* desc, uint32_t size) {
+                          descs.emplace_back(desc, size);
+                          return true;
+                        }));
+    CHECK(descs == std::vector<std::string>{"desc"});
+  }
+}
+
 TEST_CASE("The ISA is named from the ELF header like the loader names it", "[elf][isa]") {
   auto isa = [](uint32_t abiVersion, uint32_t eFlags, uint32_t osAbi = ELF::ELFOSABI_AMDGPU_HSA,
                 uint16_t machine = ELF::EM_AMDGPU, uint32_t elfClass = ELFCLASS64) {

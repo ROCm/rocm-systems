@@ -23,6 +23,8 @@ add_executable(gen_blit_cl
   gen_blit_cl.cpp
   ${ROCCLR_SRC_DIR}/device/blitcl.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocblitcl.cpp)
+# The standard set on rocclr doesn't apply here, and MSVC defaults to C++14
+target_compile_features(gen_blit_cl PRIVATE cxx_std_17)
 
 # One code object per target, with the options roc::Device uses by default for it:
 #   TAG  TARGET  CODE_OBJECT_VERSION  WAVE64  WGP_MODE  KERNARG_PRELOAD  GWS_INIT  IMAGES

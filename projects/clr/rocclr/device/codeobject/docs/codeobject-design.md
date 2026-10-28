@@ -22,7 +22,8 @@ beyond `amd::Isa`); the callers are `hipamd/src/hip_fatbin.cpp`, `device/devprog
   kernels in 155 installed code objects are identical before and after (section 10).
 - **Measured** (gfx1100, release, three alternating rounds, pinned; before → after): device init
   65 → 31 ms, RSS after init 50 → 16 MB, rocBLAS 555-kernel code object cold load 145 → 67 ms
-  and warm load 102 → 48 ms, first device-to-device copy 34 → 17-24 ms.
+  and warm load 102 → 48 ms, first device-to-device copy 34 → 17-24 ms. In llama-bench, heap
+  allocations fall by 36% (1.59 M) and the peak heap by 25 MB (section 2).
 
 ---
 
@@ -39,6 +40,29 @@ beyond `amd::Isa`); the callers are `hipamd/src/hip_fatbin.cpp`, `device/devprog
 Interpreting the metadata (which key means what) was always the runtime's job: CLR maps every
 key through its own `kArgFieldMapV3` / `kKernelFieldMapV3` tables. comgr only turned msgpack
 into nodes. The fields and their meaning are unchanged; only the decoding moved.
+
+Heap allocations, valgrind DHAT, llama-bench (Qwen2.5 0.5B Q4_K_M, 512-token prompt, 3
+repetitions, HIP graphs off), gfx1100, Debug builds of CLR before and after this change with the
+same ROCr, rocBLAS and hipBLASLt:
+
+| | Before | After | Change |
+|---|---|---|---|
+| Whole process | 4.447 M · 621.9 MB | 2.858 M · 514.2 MB | −1.59 M (−35.7%) · −107.7 MB |
+| Peak heap | 180.5 MB | 155.1 MB | −25.3 MB (−14%) |
+| comgr / LLVM called by CLR | 1.595 M · 116.2 MB | 0 | all of it |
+| First-launch code object load | 1,197,473 | 48,089 | −96% |
+| `hipModuleLoadData`, per call | 198,009 | 24,788 | −87.5% |
+| Null-stream queue creation (blit program), under the first `hipMemset` | 42,527 | 1,835 | −95.7% |
+| The 169 `hipMemset` calls themselves | 512 | 512 | unchanged |
+| Per dispatch | 2.0 | 2.0 | unchanged |
+
+CLR's own paths allocate 5,183 more blocks (+8.4 MB) for the work that moved out of comgr: the
+decompressed bundle buffer, metadata map entries and `.dynsym` names. For the 7.7 MB compressed
+bundle in this run comgr allocated three copies (`set_data`, the unbundle output, `get_data`);
+`DecompressBundle` allocates one. CLR makes no comgr call in this run (no `dlopen` of comgr, no
+binding to an `amd_comgr_*` symbol). comgr and LLVM are still mapped because hipBLASLt's
+`librocroller` lists `libamd_comgr` as `NEEDED`; their 7,039 allocations are the libraries'
+static constructors.
 
 ---
 
@@ -190,7 +214,9 @@ enqueue scheduler) used to be compiled from OpenCL C through comgr on the first 
 
 comgr is loaded on first use (`Comgr::Load`) and resolves 22 entry points; if it can't be
 loaded, they return `AMD_COMGR_STATUS_ERROR`, and OpenCL compile, link and build report
-`CL_COMPILER_NOT_AVAILABLE` or `CL_LINKER_NOT_AVAILABLE`. Device init no longer loads it: the
+`CL_COMPILER_NOT_AVAILABLE` or `CL_LINKER_NOT_AVAILABLE`; `CL_DEVICE_COMPILER_AVAILABLE` and
+`CL_DEVICE_LINKER_AVAILABLE` load it when queried and report `CL_FALSE` if it can't be loaded,
+so the queries and the builds agree. Device init no longer loads it: the
 register limits, trap handler and image support that `roc::Device` read from comgr's ISA
 metadata are columns of the `amd::Isa` table. The CLR profiler demangles kernel names with
 `Os::CxaDemangle`, like the rest of CLR.
@@ -201,7 +227,7 @@ metadata are columns of the `amd::Isa` table. The CLR profiler demangles kernel 
 
 | Layer | Where | Needs | What |
 |---|---|---|---|
-| Offline unit tests | `codeobject/tests` (`codeobject_test`, `-DCODEOBJECT_BUILD_TESTS=ON`, Catch2 via FetchContent) | nothing for the format tests; comgr for the ISA check | 52 cases: bundle selection by `e_flags` including `amdgpu12.50` ids, generic targets, xnack/sramecc, SPIR-V, bounds, malformed headers; target-id compatibility; `TargetToGeneric`; CCOB v1-v3 x zlib/zstd and malformed sizes; ELF size, notes, `.dynsym`; the mach table against `amd::Isa`; note merging; msgpack in every width; truncation at every byte; the `amd::Isa` ISA columns against comgr's ISA metadata |
+| Offline unit tests | `codeobject/tests` (`codeobject_test`, `-DCODEOBJECT_BUILD_TESTS=ON`, Catch2 via FetchContent) | nothing for the format tests; comgr for the ISA check | 53 cases: bundle selection by `e_flags` including `amdgpu12.50` ids, generic targets, xnack/sramecc, SPIR-V, bounds, malformed headers; target-id compatibility; `TargetToGeneric`; CCOB v1-v3 x zlib/zstd and malformed sizes; ELF size, notes, `.dynsym`, also at every odd offset in the buffer (the readers copy headers instead of using typed pointers; checked with `-fsanitize=alignment`); the mach table against `amd::Isa`; note merging; msgpack in every width; truncation at every byte; the `amd::Isa` ISA columns against comgr's ISA metadata |
 | GPU tests | hip-tests `unit/module/hipCodeObjectMetadata.cc` in `ModuleTest` | a GPU, hipcc | 7 cases: uncompressed and compressed (v2, v3) fat binaries, generic-only, native next to generic, raw ELF, two notes linked from separately assembled objects, each from a file and from memory; a CCOB patched to version 4. Checks names, argument offsets and sizes, LDS, launch bounds, scratch, argument values, buffered printf |
 | Fuzzing | `codeobject/tests/fuzz_codeobject.cpp` (`codeobject_fuzz`) | clang | bundle lookup, CCOB, ELF size, notes, `.dynsym`, msgpack |
 | Comparison | `co_compare` (CRUX tools) | a second runtime | names, parameters and attributes of every kernel in the installed Tensile libraries and hip-tests code objects: 9,773 kernels, no differences |
