@@ -8,7 +8,7 @@ include(GoogleTest)
 set(tool_dir ${CMAKE_CURRENT_SOURCE_DIR}/../../rocprofiler-sdk-tool)
 
 set(tool_test_sources finalization_gate.cpp kernel_filter_range.cpp
-                      kernel_iteration_filter.cpp)
+                      kernel_iteration_filter.cpp tmp_file_buffer.cpp)
 
 # compile the GPU-independent tool logic directly into the test so it can be exercised
 # without loading the tool runtime (which requires a GPU)
@@ -22,7 +22,10 @@ target_include_directories(tool-tests PRIVATE ${tool_dir})
 target_link_libraries(
     tool-tests
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
-            rocprofiler-sdk::rocprofiler-sdk-common-library GTest::gtest
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-output-library
+            rocprofiler-sdk::rocprofiler-sdk-cereal
+            GTest::gtest
             GTest::gtest_main)
 
 rocprofiler_add_unit_test(

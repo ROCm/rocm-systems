@@ -54,6 +54,15 @@ compose_tmp_file_name(const output_config& cfg, domain_type buffer_type);
 tmp_file_name_callback_t&
 get_tmp_file_name_callback();
 
+bool
+is_fork_output_suspended() noexcept;
+
+void
+suspend_fork_output() noexcept;
+
+void
+resume_fork_output() noexcept;
+
 // fork() handling for file buffers. Before fork() every file buffer is locked with its pending
 // output flushed, so no half-written data or held lock is copied into the child. After fork() the
 // parent unlocks them and the child drops the records it inherited from the parent before
@@ -201,6 +210,10 @@ template <typename Tp>
 void
 write_ring_buffer(Tp _v, domain_type type)
 {
+    // A later pthread_atfork prepare handler may emit a trace while the file-buffer registry is
+    // locked. Drop output from the forking thread until parent/child handlers release those locks.
+    if(is_fork_output_suspended()) return;
+
     auto* filebuf = get_tmp_file_buffer<Tp>(type);
 
     if(!filebuf)

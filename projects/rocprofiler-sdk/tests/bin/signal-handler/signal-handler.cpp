@@ -248,6 +248,26 @@ mode_fork_after_work()
 }
 
 int
+mode_fork_prepare_marker()
+{
+    fprintf(stderr, "Mode: fork-prepare-marker, PID=%d\n", getpid());
+
+    auto child = fork();
+    if(child == 0)
+    {
+        emit_roctx_marker(
+            "exit_marker child fork-prepare-marker ppid:%d pid:%d", getppid(), getpid());
+        exit(0);
+    }
+    if(child < 0) throw std::runtime_error{"fork failed"};
+
+    waitpid(child, nullptr, 0);
+    emit_roctx_marker("exit_marker parent fork-prepare-marker ppid:%d pid:%d", getppid(), getpid());
+    fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
+    return 0;
+}
+
+int
 mode_good_fork()
 {
     fprintf(stderr, "Mode: good/fork, PID=%d\n", getpid());
@@ -553,7 +573,8 @@ main(int argc, char** argv)
         if(std::strcmp(argv[i], "--single-process") == 0 || std::strcmp(argv[i], "--fork") == 0 ||
            std::strcmp(argv[i], "--fork-exec") == 0 || std::strcmp(argv[i], "--spawn") == 0 ||
            std::strcmp(argv[i], "--lingering-child") == 0 ||
-           std::strcmp(argv[i], "--fork-after-work") == 0)
+           std::strcmp(argv[i], "--fork-after-work") == 0 ||
+           std::strcmp(argv[i], "--fork-prepare-marker") == 0)
         {
             mode = argv[i];
         }
@@ -576,6 +597,7 @@ main(int argc, char** argv)
     // Normal-exit regression mode (no signal); independent of app_handles_signals.
     if(std::strcmp(mode, "--lingering-child") == 0) return mode_lingering_child();
     if(std::strcmp(mode, "--fork-after-work") == 0) return mode_fork_after_work();
+    if(std::strcmp(mode, "--fork-prepare-marker") == 0) return mode_fork_prepare_marker();
 
     if(app_handles_signals)
     {

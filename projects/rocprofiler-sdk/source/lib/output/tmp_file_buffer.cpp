@@ -36,6 +36,13 @@ namespace tool
 {
 namespace fs = common::filesystem;
 
+namespace
+{
+// Constant-initialized: querying this from a pthread_atfork prepare handler must not run a TLS
+// initializer while the file-buffer registry is locked.
+thread_local bool fork_output_suspended = false;
+}  // namespace
+
 std::string
 compose_tmp_file_name(const output_config& cfg, domain_type buffer_type)
 {
@@ -45,6 +52,24 @@ compose_tmp_file_name(const output_config& cfg, domain_type buffer_type)
         fmt::format("{}-{}.dat", "%ppid%-%pid%", get_domain_trace_file_name(buffer_type));
 
     return rocprofiler::tool::format_path(filename.string());
+}
+
+bool
+is_fork_output_suspended() noexcept
+{
+    return fork_output_suspended;
+}
+
+void
+suspend_fork_output() noexcept
+{
+    fork_output_suspended = true;
+}
+
+void
+resume_fork_output() noexcept
+{
+    fork_output_suspended = false;
 }
 
 namespace

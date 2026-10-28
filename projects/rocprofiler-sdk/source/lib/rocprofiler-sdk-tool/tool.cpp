@@ -3988,6 +3988,24 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     // activity before a plain fork.
     static std::once_flag fork_handlers_once;
     std::call_once(fork_handlers_once, []() {
+        if(tool::get_env("ROCPROF_INTERNAL_TEST_ATFORK_PREPARE_WRITE", false))
+        {
+            // Register before rocprofv3's handler so this runs afterward (prepare handlers run in
+            // reverse registration order), exactly like an earlier application handler.
+            const int test_status = pthread_atfork(
+                []() {
+                    auto record      = rocprofiler_buffer_tracing_marker_api_record_t{};
+                    record.size      = sizeof(record);
+                    record.kind      = ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API;
+                    record.operation = ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA;
+                    tool::write_ring_buffer(record, domain_type::MARKER);
+                },
+                nullptr,
+                nullptr);
+            ROCP_FATAL_IF(test_status != 0)
+                << "failed to register test fork handler: " << strerror(test_status);
+        }
+
         const int status = pthread_atfork(
             []() {
                 // Move records currently held by rocprofiler-sdk into the file buffers so a
@@ -4003,9 +4021,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                             << " before fork: " << rocprofiler_get_status_string(status);
                     }
                 }
+                tool::suspend_fork_output();
                 tool::prepare_fork_file_buffers();
             },
-            []() { tool::parent_fork_file_buffers(); },
+            []() {
+                tool::parent_fork_file_buffers();
+                tool::resume_fork_output();
+            },
             []() {
                 common::reset_tid_after_fork();
                 if(tool_metadata)
@@ -4015,6 +4037,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                     rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
                 }
                 tool::child_fork_file_buffers();
+                tool::resume_fork_output();
             });
         ROCP_FATAL_IF(status != 0)
             << "failed to register rocprofv3 fork handlers: " << strerror(status);
