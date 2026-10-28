@@ -5,11 +5,17 @@ Full documentation for AMD Debugger API is available at
 
 ## rocm-dbgapi-0.82.1 for ROCm-X
 ### Added
+- A CMake based GoogleTest and GMock unit test suite under `test/`, controlled
+  by the new `ENABLE_TESTS` and `ENABLE_UNIT_TESTS` options (both off by
+  default). Building the suite requires GoogleTest and GMock, provided by
+  either a `GTest::*` providing parent project or a system install. Pass
+  `-DENABLE_TESTS=ON` to opt in. See `test/README.md` for details.
+
 - Support for the following architectures:
  - `gfx1170`
  - `gfx1171`
  - `gfx1172`
- - `gfx10-7-generic`
+ - `gfx11-7-generic`
 
 ## rocm-dbgapi-0.82.0
 ### Added

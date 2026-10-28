@@ -38,32 +38,6 @@ const char *class_prefix(RegClass cls) {
   }
 }
 
-// M0 displaces the encoded SGPR index at runtime, so the operand names one
-// register and the hardware reads another. `LivenessAnalysis` tracks the
-// indirect *VGPR* forms (global_vgpr_usage_is_complete()) but has no scalar
-// equivalent, so this scan stands in for one.
-//
-// Prefix rather than an enumeration: it covers the load, the store
-// (s_movreld_*, whose indirect def is likewise absent from the clobber summary)
-// and the RDNA s_movrelsd_2_b32 pair form. Enumerating exact mnemonics is how
-// the scalar family slipped past the v_movrel* gate to begin with.
-//
-// Named for what it matches, not for the property it stands in for: any other
-// scalar indirection would need its own scan. Decoded instruction metadata is
-// the mechanism that would subsume both, per the TODO in
-// may_access_vgprs_indirectly().
-[[nodiscard]] bool accesses_sgprs_indirectly_via_movrel(const std::vector<BasicBlock *> &scope) {
-  for (BasicBlock *block : scope) {
-    if (block == nullptr)
-      continue;
-    for (const Instruction &inst : block->instructions()) {
-      if (inst.mnemonic().starts_with("s_movrel"))
-        return true;
-    }
-  }
-  return false;
-}
-
 } // namespace
 
 std::string format_register_set(const RegisterSet &regs) {
@@ -176,7 +150,12 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
   // so the decoded operands no longer name every register the body reads. That
   // loses live-ins rather than inventing them -- the direction that lets a bad
   // probe through.
-  if (!liveness.global_vgpr_usage_is_complete()) {
+  auto maybe_complete = liveness.global_vgpr_usage_is_complete();
+  if (maybe_complete.failed()) {
+    report(error_out, "probe liveness is unavailable");
+    return std::nullopt;
+  }
+  if (!maybe_complete.value()) {
     report(error_out, "probe body has relative or GPR-indexed VGPR access, so its register reads "
                       "cannot be enumerated");
     return std::nullopt;
@@ -190,7 +169,12 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
   // What the convention supplies is a genuine live-in -- the closing
   // s_setpc_b64 reads the link pair and nothing writes it -- but the trampoline
   // produces it, so it is not a dependence on kernel-entry state.
-  const RegisterSet live_in = liveness.block_liveness(*entry).live_in;
+  auto maybe_block = liveness.block_liveness(*entry);
+  if (maybe_block.failed()) {
+    report(error_out, "probe liveness is unavailable");
+    return std::nullopt;
+  }
+  const RegisterSet live_in = maybe_block.value()->live_in;
   return live_in - supplied_registers(abi);
 }
 

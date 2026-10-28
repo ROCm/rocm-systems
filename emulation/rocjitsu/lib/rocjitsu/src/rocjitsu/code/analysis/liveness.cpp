@@ -19,7 +19,6 @@
 #include <cstring>
 #include <deque>
 #include <limits>
-#include <stdexcept>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
@@ -100,8 +99,8 @@ void dfs_reverse_post_order(const BasicBlock &start,
   // TODO: Move indirect-access properties into decoded instruction metadata so
   // future ISA variants cannot bypass this completeness gate. The scalar
   // s_movrel* family displaces an SGPR index through M0 the same way and has no
-  // equivalent gate here, so consumers needing one scan mnemonics themselves
-  // (code/patch/probe_live_in.cpp).
+  // equivalent gate here; consumers needing one call
+  // accesses_sgprs_indirectly_via_movrel().
   if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
     return true;
   }
@@ -200,6 +199,18 @@ uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks) {
   return bound;
 }
 
+bool accesses_sgprs_indirectly_via_movrel(KernelBlockScope blocks) {
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.mnemonic().starts_with("s_movrel"))
+        return true;
+    }
+  }
+  return false;
+}
+
 LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<ExecMaskAnalysis> exec,
                                    LivenessAnalysisOptions options,
                                    std::span<const ScopedCfgEdge> extra_edges) {
@@ -250,19 +261,20 @@ LivenessAnalysis::~LivenessAnalysis() = default;
 LivenessAnalysis::LivenessAnalysis(LivenessAnalysis &&) noexcept = default;
 LivenessAnalysis &LivenessAnalysis::operator=(LivenessAnalysis &&) noexcept = default;
 
-void LivenessAnalysis::require_available() const {
-  if (!available_)
-    throw std::logic_error("liveness query from a rule marked liveness-free");
+Result LivenessAnalysis::require_available() const {
+  return available_ ? Result::success() : Result::failure();
 }
 
-void LivenessAnalysis::ensure_analyzed() const {
-  require_available();
+Result LivenessAnalysis::ensure_analyzed() const {
+  if (require_available().failed())
+    return Result::failure();
   if (analyzed_)
-    return;
+    return Result::success();
 
   analyze(KernelBlockScope(deferred_blocks_), deferred_restrict_live_before_to_instructions_,
           deferred_live_before_instructions_, deferred_extra_edges_);
   analyzed_ = true;
+  return Result::success();
 }
 
 void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
@@ -433,50 +445,59 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
   }
 }
 
-const BlockLiveness &LivenessAnalysis::block_liveness(const BasicBlock &block) const {
-  ensure_analyzed();
+FailureOr<const BlockLiveness *> LivenessAnalysis::block_liveness(const BasicBlock &block) const {
+  if (ensure_analyzed().failed())
+    return Result::failure();
   auto it = block_index_.find(&block);
-  if (it == block_index_.end())
-    throw std::out_of_range("block_liveness: block was not part of this analysis");
-  return liveness_.at(it->second);
+  assert(it != block_index_.end() && "block_liveness: block was not part of this analysis");
+  // analyze() indexes the constructor's blocks into the equally sized liveness_ vector.
+  return &liveness_[it->second];
 }
 
-bool LivenessAnalysis::has_live_before(const Instruction &inst) const {
-  ensure_analyzed();
+FailureOr<bool> LivenessAnalysis::has_live_before(const Instruction &inst) const {
+  if (ensure_analyzed().failed())
+    return Result::failure();
   return live_before_.contains(&inst);
 }
 
-const RegisterSet &LivenessAnalysis::live_before(const Instruction &inst) const {
-  ensure_analyzed();
+FailureOr<const RegisterSet *> LivenessAnalysis::live_before(const Instruction &inst) const {
+  if (ensure_analyzed().failed())
+    return Result::failure();
   auto it = live_before_.find(&inst);
-  return it != live_before_.end() ? it->second : empty_;
+  return it != live_before_.end() ? &it->second : &empty_;
 }
 
-bool LivenessAnalysis::is_live_before(const Instruction &inst, RegisterRef ref) const {
-  return live_before(inst).contains(ref);
+FailureOr<bool> LivenessAnalysis::is_live_before(const Instruction &inst, RegisterRef ref) const {
+  auto maybe_live = live_before(inst);
+  if (maybe_live.failed())
+    return Result::failure();
+  return maybe_live.value()->contains(ref);
 }
 
-std::optional<uint8_t> LivenessAnalysis::vgpr_msb_bank_before(const Instruction &inst,
-                                                              amdgpu::VgprMsbRole role) const {
-  require_available();
+FailureOr<std::optional<uint8_t>>
+LivenessAnalysis::vgpr_msb_bank_before(const Instruction &inst, amdgpu::VgprMsbRole role) const {
+  if (require_available().failed())
+    return Result::failure();
   if (gfx1250_vgpr_msb_ == nullptr)
-    return std::nullopt;
+    return std::optional<uint8_t>{};
   return gfx1250_vgpr_msb_->bank_before(inst, role);
 }
 
-bool LivenessAnalysis::global_vgpr_usage_is_complete() const {
-  require_available();
+FailureOr<bool> LivenessAnalysis::global_vgpr_usage_is_complete() const {
+  if (require_available().failed())
+    return Result::failure();
   return global_vgpr_usage_is_complete_;
 }
 
-std::optional<uint16_t>
+FailureOr<std::optional<uint16_t>>
 LivenessAnalysis::find_globally_unused_vgpr_run(const Instruction *inst, uint16_t count,
                                                 uint16_t search_start, uint16_t base_alignment,
                                                 uint16_t available_count) const {
-  require_available();
+  if (require_available().failed())
+    return Result::failure();
   if (inst == nullptr || !global_vgpr_usage_is_complete_ ||
       !scoped_blocks_.contains(inst->parent()) || !run_width_is_nameable(count)) {
-    return std::nullopt;
+    return std::optional<uint16_t>{};
   }
   // min_free_vgpr_ is an allocation floor, not a dataflow fact; max_free_vgpr_
   // is the destination-encoding ceiling. The caller's available_count narrows
@@ -489,13 +510,15 @@ LivenessAnalysis::find_globally_unused_vgpr_run(const Instruction *inst, uint16_
                                  limit);
 }
 
-std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst, uint16_t count,
-                                                        uint16_t search_start,
-                                                        uint16_t base_alignment) const {
-  ensure_analyzed();
+FailureOr<std::optional<uint16_t>> LivenessAnalysis::find_free_run(const Instruction *inst,
+                                                                   uint16_t count,
+                                                                   uint16_t search_start,
+                                                                   uint16_t base_alignment) const {
+  if (ensure_analyzed().failed())
+    return Result::failure();
   auto live_it = live_before_.find(inst);
   if (live_it == live_before_.end() || !run_width_is_nameable(count))
-    return std::nullopt;
+    return std::optional<uint16_t>{};
 
   const auto first_candidate =
       static_cast<uint16_t>(std::max<size_t>(search_start, min_free_vgpr_));
@@ -503,23 +526,25 @@ std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst,
                                  first_candidate, base_alignment, max_free_vgpr_);
 }
 
-std::optional<uint16_t> LivenessAnalysis::find_free_sgpr_pair(const Instruction *inst,
-                                                              uint16_t search_start) const {
-  ensure_analyzed();
+FailureOr<std::optional<uint16_t>>
+LivenessAnalysis::find_free_sgpr_pair(const Instruction *inst, uint16_t search_start) const {
+  if (ensure_analyzed().failed())
+    return Result::failure();
   auto live_it = live_before_.find(inst);
   if (live_it == live_before_.end())
-    return std::nullopt;
+    return std::optional<uint16_t>{};
 
   return rocjitsu::find_free_sgpr_pair(live_it->second, REGISTER_SET_ALLOCATABLE_SGPRS,
                                        search_start);
 }
 
-std::optional<uint16_t> LivenessAnalysis::find_free_sgpr(const Instruction *inst,
-                                                         uint16_t search_start) const {
-  ensure_analyzed();
+FailureOr<std::optional<uint16_t>> LivenessAnalysis::find_free_sgpr(const Instruction *inst,
+                                                                    uint16_t search_start) const {
+  if (ensure_analyzed().failed())
+    return Result::failure();
   auto live_it = live_before_.find(inst);
   if (live_it == live_before_.end())
-    return std::nullopt;
+    return std::optional<uint16_t>{};
 
   // Only normal SGPRs that are valid across supported families are candidates
   // for temporary allocation, which is what REGISTER_SET_ALLOCATABLE_SGPRS

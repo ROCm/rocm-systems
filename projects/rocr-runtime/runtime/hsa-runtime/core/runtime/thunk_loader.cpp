@@ -325,6 +325,10 @@ HSAKMT_STATUS SetPersistingCacheSizeNotSupported(HSAuint32, HSAuint64) {
       HSAKMT_PFN(hsaKmtGetClockCounters) = (HSAKMT_DEF(hsaKmtGetClockCounters)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetClockCounters");
       if (HSAKMT_PFN(hsaKmtGetClockCounters) == nullptr) goto LOAD_ERROR;
 
+      // Optional. An older libhsakmt has no precise entry; GetClockCounters
+      // falls back to the single-sample query when this stays null.
+      HSAKMT_PFN(hsaKmtGetClockCountersPrecise) = (HSAKMT_DEF(hsaKmtGetClockCountersPrecise)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetClockCountersPrecise");
+
       HSAKMT_PFN(hsaKmtPmcGetCounterProperties) = (HSAKMT_DEF(hsaKmtPmcGetCounterProperties)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtPmcGetCounterProperties");
       if (HSAKMT_PFN(hsaKmtPmcGetCounterProperties) == nullptr) goto LOAD_ERROR;
 
@@ -480,11 +484,16 @@ HSAKMT_STATUS SetPersistingCacheSizeNotSupported(HSAuint32, HSAuint64) {
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtHandleImport");
       if (HSAKMT_PFN(hsaKmtHandleImport) == nullptr) goto LOAD_ERROR;
 
-      // Optional, and the same deal: a missing export costs the stub, not the
-      // table load. Import and destroy are taken as a pair, because a thunk
-      // offering one without the other offers a semaphore this process could
-      // never give back - so if either is missing both become the stub and the
-      // import is refused before it happens rather than after.
+      // Optional, but left null when missing rather than stubbed: KfdDriver
+      // checks it before each call.
+      HSAKMT_PFN(hsaKmtQueryDmaBufInfo) = (HSAKMT_DEF(hsaKmtQueryDmaBufInfo)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueryDmaBufInfo");
+
+      // Optional, and the same deal as hsaKmtSetSigbusDelay: a missing export
+      // costs the stub, not the table load. Import and destroy are taken as a
+      // pair, because a thunk offering one without the other offers a semaphore
+      // this process could never give back - so if either is missing both
+      // become the stub and the import is refused before it happens rather
+      // than after.
       HSAKMT_PFN(hsaKmtImportExternalSemaphore) = (HSAKMT_DEF(hsaKmtImportExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtImportExternalSemaphore");
       HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDestroyExternalSemaphore");
       if (HSAKMT_PFN(hsaKmtImportExternalSemaphore) == nullptr ||
@@ -627,6 +636,7 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtDbgGetDeviceData) = (HSAKMT_DEF(hsaKmtDbgGetDeviceData)*)(&hsaKmtDbgGetDeviceData);
       HSAKMT_PFN(hsaKmtDbgGetQueueData) = (HSAKMT_DEF(hsaKmtDbgGetQueueData)*)(&hsaKmtDbgGetQueueData);
       HSAKMT_PFN(hsaKmtGetClockCounters) = (HSAKMT_DEF(hsaKmtGetClockCounters)*)(&hsaKmtGetClockCounters);
+      HSAKMT_PFN(hsaKmtGetClockCountersPrecise) = (HSAKMT_DEF(hsaKmtGetClockCountersPrecise)*)(&hsaKmtGetClockCountersPrecise);
       HSAKMT_PFN(hsaKmtPmcGetCounterProperties) = (HSAKMT_DEF(hsaKmtPmcGetCounterProperties)*)(&hsaKmtPmcGetCounterProperties);
       HSAKMT_PFN(hsaKmtPmcRegisterTrace) = (HSAKMT_DEF(hsaKmtPmcRegisterTrace)*)(&hsaKmtPmcRegisterTrace);
       HSAKMT_PFN(hsaKmtPmcUnregisterTrace) = (HSAKMT_DEF(hsaKmtPmcUnregisterTrace)*)(&hsaKmtPmcUnregisterTrace);
@@ -675,6 +685,12 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)(&hsaKmtModelEnabled);
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)(&hsaKmtAisReadWriteFile);
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)(&hsaKmtHandleImport);
+#if defined(_WIN32)
+      // The DXG thunk has no dmabuf notion; KfdDriver guards each call on a null pfn.
+      HSAKMT_PFN(hsaKmtQueryDmaBufInfo) = nullptr;
+#else
+      HSAKMT_PFN(hsaKmtQueryDmaBufInfo) = (HSAKMT_DEF(hsaKmtQueryDmaBufInfo)*)(&hsaKmtQueryDmaBufInfo);
+#endif
       HSAKMT_PFN(hsaKmtImportExternalSemaphore) = (HSAKMT_DEF(hsaKmtImportExternalSemaphore)*)(&hsaKmtImportExternalSemaphore);
       HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)*)(&hsaKmtDestroyExternalSemaphore);
       HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)*)(&hsaKmtQueueSignalExternalSemaphore);

@@ -314,8 +314,12 @@ struct GridCompletion {
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
+  /// Wrapped AQL ring slot exposed in saved wave context.
   uint32_t queue_packet_id = 0;
   AddressSpaceHandle address_space;
+  /// Immutable VM snapshot captured by the queue-service transaction that
+  /// admitted this dispatch. Every wave in the dispatch shares this snapshot.
+  std::shared_ptr<const GpuVmAccess> execution_access;
   InterruptSink interrupt_sink;
   uint32_t process_id = 0;
 
@@ -325,9 +329,12 @@ struct DispatchEntry {
     return !enabled_cus || std::ranges::find(*enabled_cus, cu) != enabled_cus->end();
   }
 
-  /// AQL ring packet id (queue read index at which this dispatch's packet was
-  /// fetched). Used only for rocm-dbgapi wave/dispatch correlation.
-  uint32_t aql_packet_id = 0;
+  /// Monotonic AQL packet index retained until this dispatch releases its ring slot.
+  uint64_t aql_packet_id = 0;
+  /// Admission-time slot address, retained across queue ring replacement.
+  uint64_t aql_packet_address = 0;
+  /// Whether retirement must invalidate an admitted AQL ring slot.
+  bool owns_aql_ring_slot = false;
 
   uint64_t kernel_entry_pc = 0;
   uint64_t code_load_bias = 0;
@@ -383,11 +390,13 @@ struct DispatchEntry {
   uint64_t scratch_backing_addr = 0;
   uint32_t private_segment_fixed_size = 0;
   /// Number of physical scratch scoreboard slots backed in each shader engine.
-  /// Unlimited for dispatches that do not use the gfx1250 runtime scratch ABI.
+  /// Unlimited for dispatches without runtime scratch occupancy metadata.
   uint32_t scratch_wave_limit_per_se = std::numeric_limits<uint32_t>::max();
   /// Number of wave slices between adjacent shader-engine scratch regions.
   /// Zero selects the model's full physical capacity for simulator-owned backing.
   uint32_t scratch_wave_stride_per_se = 0;
+  /// Per-wave byte stride provisioned by the runtime; zero selects synthetic sizing.
+  uint64_t scratch_wave_bytes = 0;
   uint32_t group_segment_fixed_size = 0;
   /// ROCr allocated primary scratch for this dispatch as a single-use block.
   bool scratch_use_once = false;
@@ -738,11 +747,17 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   /// A command-processor pass observed this queue while its debugger gate was closed.
   /// Cleared on resume after scheduling one pass to process the deferred work.
   bool debug_work_deferred = false;
-  /// CP-private monotonic fetch cursor: the next ring index to fetch. Normally
-  /// tracks read_ptr_va exactly, but stays ahead of it while the debugger holds
-  /// the queue's read_dispatch_id at a trapped dispatch (so packets are not
-  /// re-fetched). See fetch_from_queue and serialize_queue_debug_waves.
+  /// CP-private monotonic index of the next packet to fetch. The public read
+  /// cursor instead marks the oldest packet still owned by a live dispatch.
   uint64_t fetch_cursor = 0;
+  /// Retirement invalidates its ring slot before publishing the consumer cursor.
+  struct AqlSlotRelease {
+    GpuVmAccess access;
+    uint64_t address;
+    uint64_t next_consumer;
+    uint32_t header;
+  };
+  std::optional<AqlSlotRelease> aql_slot_release;
   /// Set on the replicas that xcd_fanout creates. A replica never reads the ring
   /// and never polls a doorbell; work reaches it as dispatch shards from the XCD
   /// that owns the queue.

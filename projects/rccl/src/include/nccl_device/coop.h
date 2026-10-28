@@ -399,8 +399,10 @@ NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopLanes coop, T value, int root, bool e
   return v;
 }
 
+// 16 slots, not 15: ncclCoopWarpSpan::id runs 0..15, matching
+// ncclCoopNamedBarrierSlots. Indexing by id needs the full range.
 NCCL_DEVICE_INLINE ulong2* ncclCoopBcast_WarpSpan_stash() {
-  __shared__ ulong2 stash[15];
+  __shared__ ulong2 stash[16];
   return stash;
 }
 

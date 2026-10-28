@@ -234,6 +234,8 @@ class ThunkLoader {
                                       bool suspend_queues);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetClockCounters))(HSAuint32 NodeId, \
                                       HsaClockCounters* Counters);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetClockCountersPrecise))(HSAuint32 NodeId, \
+                                      HsaClockCounters* Counters);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtPmcGetCounterProperties))(HSAuint32 NodeId, \
                                       HsaCounterProperties** CounterProperties);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtPmcRegisterTrace))(HSAuint32 NodeId, \
@@ -359,6 +361,8 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaHandleImportDesc* ImportDesc, \
                                       HsaHandleImportResult* ImportResult, \
                                       HsaHandleImportFlags* flags);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueryDmaBufInfo))(int DMABufFd, \
+                                      HsaDmaBufInfo* Info);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtImportExternalSemaphore))(HSAuint32 NodeId, \
                                       void* NtHandle, \
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type, \
@@ -543,6 +547,10 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtDbgGetDeviceData) * HSAKMT_PFN(hsaKmtDbgGetDeviceData) = nullptr;
     HSAKMT_DEF(hsaKmtDbgGetQueueData) * HSAKMT_PFN(hsaKmtDbgGetQueueData) = nullptr;
     HSAKMT_DEF(hsaKmtGetClockCounters) * HSAKMT_PFN(hsaKmtGetClockCounters) = nullptr;
+    /// Optional and, unlike the stubbed entry points, left null when the shared
+    /// thunk does not export it; AMD::KfdDriver then falls back to
+    /// hsaKmtGetClockCounters.
+    HSAKMT_DEF(hsaKmtGetClockCountersPrecise) * HSAKMT_PFN(hsaKmtGetClockCountersPrecise) = nullptr;
     HSAKMT_DEF(hsaKmtPmcGetCounterProperties) * HSAKMT_PFN(hsaKmtPmcGetCounterProperties) = nullptr;
     HSAKMT_DEF(hsaKmtPmcRegisterTrace) * HSAKMT_PFN(hsaKmtPmcRegisterTrace) = nullptr;
     HSAKMT_DEF(hsaKmtPmcUnregisterTrace) * HSAKMT_PFN(hsaKmtPmcUnregisterTrace) = nullptr;
@@ -603,6 +611,9 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtGetMemoryHandle) * HSAKMT_PFN(hsaKmtGetMemoryHandle) = nullptr;
 #endif
     HSAKMT_DEF(hsaKmtHandleImport) * HSAKMT_PFN(hsaKmtHandleImport) = nullptr;
+    /// Optional and left null when missing, as it always is on the DXG thunk;
+    /// AMD::KfdDriver checks it before each call.
+    HSAKMT_DEF(hsaKmtQueryDmaBufInfo) * HSAKMT_PFN(hsaKmtQueryDmaBufInfo) = nullptr;
     /// Optional, on the same terms as hsaKmtSetSigbusDelay above: a shared
     /// thunk that does not export one of these gets a stub returning
     /// HSAKMT_STATUS_NOT_SUPPORTED rather than a null pointer and a failed

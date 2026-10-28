@@ -16,6 +16,7 @@
 #include <format>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace rocjitsu::amdgpu {
 class ComputeUnitCore;
@@ -60,14 +61,25 @@ public:
   ~AsyncInstructionQueue() { assert(empty()); }
   bool empty() const { return count_ == 0; }
   size_t size() const { return count_; }
-  /// Transfer ownership only when a helper accepts the instruction.
-  bool submit(std::unique_ptr<Instruction> &inst, void *context, const Access &access) {
+  /// @brief The first helper failure and its originating guest instruction.
+  /// @details The issuer uses the PC and mnemonic to report the helper-thread
+  /// exception through the wave-owned instruction failure path.
+  struct Failure {
+    std::exception_ptr error;
+    uint64_t pc = 0;
+    std::string mnemonic;
+  };
+
+  /// @brief Submit an instruction together with its issuing guest PC.
+  /// @details Ownership transfers only when a helper accepts the instruction.
+  bool submit(std::unique_ptr<Instruction> &inst, void *context, const Access &access,
+              uint64_t pc) {
     if (count_ == entries_.size())
       return false;
     auto ticket = pool_.submit(*inst, context);
     if (!ticket)
       return false;
-    entries_[count_++] = {std::move(inst), ticket, access};
+    entries_[count_++] = {std::move(inst), ticket, access, pc};
     return true;
   }
   void poll() {
@@ -93,21 +105,22 @@ public:
     while (!empty())
       retire(0);
   }
-  std::exception_ptr take_error() { return std::exchange(error_, {}); }
+  std::optional<Failure> take_error() { return std::exchange(error_, {}); }
 
 private:
   struct Entry {
     std::unique_ptr<Instruction> inst;
     Pool::Ticket ticket;
     Access access;
+    uint64_t pc = 0;
   };
   void retire(size_t index) {
     auto &entry = entries_[index];
     auto error = pool_.finish(entry.ticket);
+    if (error && !error_)
+      error_ = Failure{error, entry.pc, std::string(entry.inst->mnemonic())};
     entry.inst.reset();
     ++async_execution::stats.retired_mma;
-    if (error && !error_)
-      error_ = error;
     for (size_t i = index + 1; i != count_; ++i)
       entries_[i - 1] = std::move(entries_[i]);
     entries_[--count_] = {};
@@ -115,7 +128,7 @@ private:
   Pool &pool_;
   std::array<Entry, async_execution::kMaxPendingMma> entries_{};
   size_t count_ = 0;
-  std::exception_ptr error_;
+  std::optional<Failure> error_;
 };
 
 /// @brief A bounded same-wave execution window.
@@ -128,6 +141,8 @@ public:
   AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf, bool has_accvgprs = false);
   bool pending() const { return arithmetic_ && !arithmetic_->empty(); }
   bool stopped() const { return stopped_; }
+  uint64_t failed_pc() const { return failed_pc_; }
+  std::string_view failed_mnemonic() const { return failed_mnemonic_; }
   void reserve_issuer(uint64_t pc) { issuer_pc_ = std::min(issuer_pc_, pc); }
   bool take_issuer(uint64_t pc) {
     if (issuer_pc_ != pc)
@@ -177,24 +192,10 @@ public:
       ++async_execution::stats.full;
       return false;
     }
-    if (active_memory_wait_check) {
-      // The upper footprint bank contains ACC registers, which are not memory
-      // destinations. High VGPRs are rejected by footprint() and run inline.
-      for (unsigned r = 0; r < async_execution::Access::kRegistersPerBank; ++r) {
-        if (access->reads[r])
-          active_memory_wait_check->access({RegClass::VGPR, static_cast<uint16_t>(r), 1},
-                                           wf_.exec(), MemoryWaitScoreboard::kFullDwordByteMask,
-                                           false);
-        if (access->writes[r])
-          active_memory_wait_check->access({RegClass::VGPR, static_cast<uint16_t>(r), 1},
-                                           wf_.exec(), MemoryWaitScoreboard::kFullDwordByteMask,
-                                           true);
-      }
-    }
     materialize();
     if (!arithmetic_)
       arithmetic_.emplace(pool_);
-    if (arithmetic_->submit(inst, &wf_, *access)) {
+    if (arithmetic_->submit(inst, &wf_, *access, wf_.pc)) {
       ++async_execution::stats.mma;
       started();
       return true;
@@ -231,8 +232,13 @@ private:
   }
   void materialize();
   void check_errors() {
-    auto error = arithmetic_ ? arithmetic_->take_error() : std::exception_ptr{};
-    if (error) {
+    auto failure = arithmetic_ ? arithmetic_->take_error() : std::nullopt;
+    if (failure) {
+      if (failed_mnemonic_.empty()) {
+        failed_pc_ = failure->pc;
+        failed_mnemonic_ = std::move(failure->mnemonic);
+      }
+      const std::exception_ptr error = failure->error;
       abandon();
       std::rethrow_exception(error);
     }
@@ -244,6 +250,8 @@ private:
   bool has_accvgprs_;
   bool stopped_ = false, started_ = false, materialized_ = false;
   uint64_t issuer_pc_ = ~uint64_t{0};
+  uint64_t failed_pc_ = 0;
+  std::string failed_mnemonic_;
 };
 
 // An issuer with no eligible instruction initializes only the optional's tag.

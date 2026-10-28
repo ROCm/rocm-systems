@@ -1926,7 +1926,8 @@ void* ncclProxyService(void* _args) {
   // RCCL: log the proxy listening socket address (diagnostic).
   {
     char line[SOCKET_NAME_MAXLEN + 1];
-    INFO(NCCL_INIT, "proxy listening socket at %s", ncclSocketToString(&proxyState->listenSock->addr, line));
+    INFO(NCCL_INIT, "proxy listening socket at %s",
+         ncclSocketToString(&proxyState->listenSock->addr, line, sizeof(line)));
   }
 
   while (stop == PROXY_RUNNING || npeers > 0) {
@@ -2262,6 +2263,7 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
     proxyState->profilerContext = comm->profilerContext;
     proxyState->directMode = comm->directMode;
     memcpy(proxyState->buffSizes, comm->buffSizes, sizeof(comm->buffSizes));
+    proxyState->p2pLl128BuffSize = comm->p2pLl128BuffSize;
     // [RCCL] Host side mirrors of device side NCCL_LL128_LINEELEMS & NCCL_LL128_DATAELEMS
     proxyState->ll128LineElems = comm->ll128LineElems;
     proxyState->ll128DataElems = comm->ll128DataElems;

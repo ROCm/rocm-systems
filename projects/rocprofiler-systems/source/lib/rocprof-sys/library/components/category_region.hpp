@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/clocks.hpp"
 #include "common/defines.h"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
@@ -10,12 +11,12 @@
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/causal/data.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "library/tracing/annotation.hpp"
 #include <cstdint>
 
 #include <charconv>
@@ -30,6 +31,7 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
 #include <tuple>
+#include <unistd.h>
 #include <vector>
 
 #include "logger/debug.hpp"
@@ -84,12 +86,9 @@ inline constexpr std::size_t delims_to_last_record = fields_per_record + 1;
 // Each renumbered idx field can grow by a few digits
 inline constexpr std::size_t renumber_growth_slack = 16;
 
-struct wall_clock_source
+struct timeline_clock_source
 {
-    timestamp_t now() const
-    {
-        return static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    }
+    [[nodiscard]] timestamp_t now() const { return clocks::timeline::now_ns(); }
 };
 
 struct trace_cache_region_sink
@@ -120,13 +119,16 @@ struct thread_metadata_source
         {
             constexpr size_t UNKNOWN_TIME = 0;
             thread_id                     = extended_info->index_data->system_value;
-            rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { .parent_process_id = getppid(),
-                  .process_id        = getpid(),
-                  .thread_id         = thread_id,
-                  .start             = UNKNOWN_TIME,
-                  .end               = UNKNOWN_TIME,
-                  .extdata           = "{}" });
+            rocprofsys::trace_cache::get_metadata_registry().ensure_thread(
+                thread_id, [thread_id] {
+                    return rocprofsys::trace_cache::info::thread{ .parent_process_id =
+                                                                      getppid(),
+                                                                  .process_id = getpid(),
+                                                                  .thread_id  = thread_id,
+                                                                  .start   = UNKNOWN_TIME,
+                                                                  .end     = UNKNOWN_TIME,
+                                                                  .extdata = "{}" };
+                });
         }
         return thread_id;
     }
@@ -134,7 +136,7 @@ struct thread_metadata_source
 
 struct real_region_policy
 {
-    using clock_type           = wall_clock_source;
+    using clock_type           = timeline_clock_source;
     using region_sink_type     = trace_cache_region_sink;
     using thread_metadata_type = thread_metadata_source;
 };
@@ -466,7 +468,7 @@ namespace tim::quirk
 struct causal : concepts::quirk_type
 {};
 
-struct perfetto : concepts::quirk_type
+struct cache_only : concepts::quirk_type
 {};
 
 struct timemory : concepts::quirk_type
@@ -618,9 +620,6 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
     constexpr bool _ct_use_timemory =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
 
-    constexpr bool _ct_use_perfetto =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::perfetto, type_list<OptsT...>>::value);
-
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
@@ -655,14 +654,6 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
         if(get_use_timemory())
         {
             tracing::push_timemory(CategoryT{}, name, std::forward<Args>(args)...);
-        }
-    }
-
-    if constexpr(_ct_use_perfetto)
-    {
-        if(get_use_perfetto())
-        {
-            tracing::push_perfetto(CategoryT{}, name.data(), std::forward<Args>(args)...);
         }
     }
 
@@ -722,9 +713,6 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     constexpr bool _ct_use_timemory =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
 
-    constexpr bool _ct_use_perfetto =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::perfetto, type_list<OptsT...>>::value);
-
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
@@ -741,15 +729,6 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         if constexpr(is_one_of<CategoryT, tracing_count_categories_t>::value)
         {
             ++tracing::pop_count();
-        }
-
-        if constexpr(_ct_use_perfetto)
-        {
-            if(get_use_perfetto())
-            {
-                tracing::pop_perfetto(CategoryT{}, name.data(),
-                                      std::forward<Args>(args)...);
-            }
         }
 
         if constexpr(_ct_use_timemory)
@@ -842,16 +821,7 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
-        if(config::get_perfetto_annotations())
-        {
-            std::int64_t _n = 0;
-            (tracing::add_perfetto_annotation(
-                 ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
-                 _args, _n++),
-             ...);
-        }
-    });
+    start<OptsT...>(_data.tool_id);
 
     if constexpr(sizeof...(Args) > 0)
     {
@@ -871,14 +841,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
         append_cache_args(_data.tool_id, region_cache::serialize_return_arg(_args...));
     }
 
-    stop<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
-        if(config::get_perfetto_annotations())
-        {
-            tracing::add_perfetto_annotation(
-                ctx, "return",
-                fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
-        }
-    });
+    stop<OptsT...>(_data.tool_id);
 }
 
 template <typename CategoryT>
@@ -887,16 +850,7 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
-        if(config::get_perfetto_annotations())
-        {
-            std::int64_t _n = 0;
-            (tracing::add_perfetto_annotation(
-                 ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
-                 _args, _n++),
-             ...);
-        }
-    });
+    start<OptsT...>(_name.data());
 
     if constexpr(sizeof...(Args) > 0)
     {
@@ -916,14 +870,7 @@ category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
         append_cache_args(_name.data(), region_cache::serialize_return_arg(_args...));
     }
 
-    stop<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
-        if(config::get_perfetto_annotations())
-        {
-            tracing::add_perfetto_annotation(
-                ctx, "return",
-                fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
-        }
-    });
+    stop<OptsT...>(_name.data());
 }
 
 template <typename CategoryT>

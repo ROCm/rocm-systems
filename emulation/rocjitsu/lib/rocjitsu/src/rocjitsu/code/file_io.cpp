@@ -4,10 +4,11 @@
 #include "rocjitsu/code/file_io.h"
 
 #include <cstddef>
+#include <filesystem>
 #include <fstream>
 #include <ios>
-#include <stdexcept>
 #include <string>
+#include <system_error>
 
 namespace rocjitsu::detail {
 
@@ -15,22 +16,26 @@ bool fits_in_bounds(uint64_t offset, uint64_t size, size_t limit) {
   return offset <= limit && size <= limit - offset;
 }
 
-std::vector<char> read_file_bytes(std::string_view path) {
+util::FailureOr<std::vector<char>> read_file_bytes(std::string_view path) {
   std::string path_str(path);
+  std::error_code error;
+  if (!std::filesystem::is_regular_file(path_str, error))
+    return util::Result::failure();
+
   std::ifstream file(path_str, std::ios::binary | std::ios::ate);
   if (!file)
-    throw std::runtime_error("failed to open " + path_str);
+    return util::Result::failure();
 
   std::ifstream::pos_type end = file.tellg();
   if (end < 0)
-    throw std::runtime_error("failed to size " + path_str);
+    return util::Result::failure();
 
   std::vector<char> bytes(static_cast<size_t>(end));
   file.seekg(0, std::ios::beg);
   if (!file)
-    throw std::runtime_error("failed to seek " + path_str);
+    return util::Result::failure();
   if (!bytes.empty() && !file.read(bytes.data(), static_cast<std::streamsize>(bytes.size())))
-    throw std::runtime_error("failed to read " + path_str);
+    return util::Result::failure();
 
   return bytes;
 }
