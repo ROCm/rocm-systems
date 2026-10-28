@@ -97,7 +97,10 @@ std::string ROCmLogging::Logger::getCurrentTime(void) {
   auto timer = std::chrono::system_clock::to_time_t(now);
 
   // convert to broken time
-  std::tm bt = *std::localtime(&timer);
+  std::tm bt{};
+  if (!localtime_r(&timer, &bt)) {
+    return "";
+  }
 
   std::ostringstream oss;
 
