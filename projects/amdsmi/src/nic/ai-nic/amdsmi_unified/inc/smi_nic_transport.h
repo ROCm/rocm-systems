@@ -39,8 +39,6 @@ struct Result {
   bool success;
   T value;         // valid only if success
   int error_code;  // errno; 0 on success
-
-  std::optional<T> as_optional() const { return success ? std::optional<T>(value) : std::nullopt; }
 };
 
 // Flow-control pause frame configuration. ethtool -a

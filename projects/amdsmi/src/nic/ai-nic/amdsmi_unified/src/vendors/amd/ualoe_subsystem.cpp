@@ -12,6 +12,8 @@
 
 namespace fs = std::filesystem;
 
+constexpr auto kIfoeDriverName = "ifoe";
+
 SmiNicUALoE::SmiNicUALoE(const std::string& bdf, const std::string& sysfs_bus_path)
     : SmiNic("", bdf, NicType::Fabric, "", sysfs_bus_path, NicVendor::AMD, NicProduct::AINIC) {}
 
@@ -40,7 +42,7 @@ bool SmiNicSubsystemUALoE::driver_loaded(const std::string& bdf, DriverType driv
   if (driver_type != DriverType::Main) {
     return false;
   }
-  return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/pci/drivers/ifoe", bdf,
+  return is_driver_bound_to_bdf(driver_sysfs_root_ + kPciDriversDir + kIfoeDriverName, bdf,
                                 /*is_canonical_match=*/false);
 }
 

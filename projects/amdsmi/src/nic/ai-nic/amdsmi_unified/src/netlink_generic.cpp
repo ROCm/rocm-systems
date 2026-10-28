@@ -10,6 +10,7 @@
 #include <netlink/errno.h>
 #include <netlink/genl/ctrl.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -27,6 +28,33 @@ namespace {
 constexpr size_t kQueryHeadTextLen = 64;
 constexpr int kNlBufferBytes = 32768;
 }  // namespace
+
+int nle_to_errno(int nl_error) {
+  switch (nl_error) {
+    case NLE_OPNOTSUPP:
+      return EOPNOTSUPP;
+    case NLE_OBJ_NOTFOUND:
+      return ENOENT;
+    case NLE_NOMEM:
+      return ENOMEM;
+    case NLE_PERM:
+      return EPERM;
+    case NLE_AGAIN:
+      return EAGAIN;
+    case NLE_BAD_SOCK:
+      return EBADF;
+    case NLE_NODEV:
+      return ENODEV;
+    case NLE_INVAL:
+      return EINVAL;
+    case NLE_BUSY:
+      return EBUSY;
+    case NLE_NOACCESS:
+      return EACCES;
+    default:
+      return EIO;
+  }
+}
 
 GenericNetlinkClient::GenericNetlinkClient() : socket_(), is_connected_(false) {}
 

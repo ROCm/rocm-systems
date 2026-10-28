@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "smi_nic_log.h"
+#include "smi_nic_text.h"
 
 namespace {
 
@@ -45,7 +46,8 @@ void log_read(const char* func, const std::string& path, SmiSysfsReader::SysfsSt
     const bool is_masked =
         std::any_of(std::begin(kMaskedAttrNames), std::end(kMaskedAttrNames),
                     [&attr_name](const char* name) { return (attr_name == name); });
-    msg += " value=" + (is_masked ? amd::smi::nic::log::mask_tail(content) : content);
+    const auto text = amd::smi::nic::text::printable_ascii(content);
+    msg += " value=" + (is_masked ? amd::smi::nic::log::mask_tail(text) : text);
   }
   amd::smi::nic::log::debug(func, msg);
 }
@@ -63,17 +65,13 @@ static SmiSysfsReader::SysfsStatus read_all_impl(const std::string& filepath,
     return SmiSysfsReader::SysfsStatus::FileNotFound;
   }
 
-  if (!SmiSysfsReader::exists(filepath)) {
-    return SmiSysfsReader::SysfsStatus::IOError;
-  }
-
   content.clear();
   while (std::getline(file, line)) {
     if (raw != nullptr) {
       *raw += (raw->empty() ? "" : " ") + line;
     }
     if (line.find(' ') != std::string::npos) {
-      content.push_back(line);
+      content.push_back(amd::smi::nic::text::printable_ascii(line));
       continue;
     }
     std::stringstream ss(line);
@@ -86,13 +84,13 @@ static SmiSysfsReader::SysfsStatus read_all_impl(const std::string& filepath,
         } else if (std::all_of(token.begin(), token.end(), ::isdigit)) {
           content.emplace_back(std::in_place_type<int>, std::stoi(token));
         } else {
-          content.push_back(token);
+          content.push_back(amd::smi::nic::text::printable_ascii(token));
         }
       } catch (const std::invalid_argument&) {
         return SmiSysfsReader::SysfsStatus::ParseError;
       } catch (const std::out_of_range&) {
         // Above INT_MAX: keep the text; parse_sysfs_uint reads it back as 64 bits.
-        content.emplace_back(token);
+        content.emplace_back(amd::smi::nic::text::printable_ascii(token));
       }
     }
   }
@@ -111,16 +109,12 @@ static SmiSysfsReader::SysfsStatus read_line_impl(const std::string& filepath,
     return SmiSysfsReader::SysfsStatus::FileNotFound;
   }
 
-  if (!SmiSysfsReader::exists(filepath)) {
-    return SmiSysfsReader::SysfsStatus::IOError;
-  }
-
   if (std::getline(file, line)) {
     if (raw != nullptr) {
       *raw = line;
     }
     if (line.find(' ') != std::string::npos) {
-      content = line;
+      content = amd::smi::nic::text::printable_ascii(line);
       return SmiSysfsReader::SysfsStatus::Success;
     }
     std::stringstream ss(line);
@@ -133,12 +127,12 @@ static SmiSysfsReader::SysfsStatus read_line_impl(const std::string& filepath,
         } else if (std::all_of(token.begin(), token.end(), ::isdigit)) {
           content = std::stoi(token);
         } else {
-          content = token;
+          content = amd::smi::nic::text::printable_ascii(token);
         }
         return SmiSysfsReader::SysfsStatus::Success;
       } catch (const std::out_of_range&) {
         // Above INT_MAX: keep the text; parse_sysfs_uint reads it back as 64 bits.
-        content = token;
+        content = amd::smi::nic::text::printable_ascii(token);
         return SmiSysfsReader::SysfsStatus::Success;
       } catch (...) {
         return SmiSysfsReader::SysfsStatus::ParseError;

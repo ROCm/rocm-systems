@@ -26,6 +26,7 @@
 #include "smi_nic_system.h"
 #include "smi_nic_telemetry.h"
 #include "smi_nic_testing.h"
+#include "smi_nic_text.h"
 #include "smi_sysfs.h"
 #include "vendors/vendor_registry.h"
 
@@ -276,8 +277,10 @@ smi_nic_status_t smi_get_nic_driver_info(smi_nic_ctx_t ctx, uint64_t device,
     return SMI_NIC_STATUS_ERROR;
   }
 
-  std::snprintf(info->name, SMI_NIC_MAX_STRING_LENGTH, "%s", drvinfo.driver);
-  std::snprintf(info->version, SMI_NIC_MAX_STRING_LENGTH, "%s", drvinfo.version);
+  std::snprintf(info->name, SMI_NIC_MAX_STRING_LENGTH, "%s",
+                amd::smi::nic::text::printable_field(drvinfo.driver).c_str());
+  std::snprintf(info->version, SMI_NIC_MAX_STRING_LENGTH, "%s",
+                amd::smi::nic::text::printable_field(drvinfo.version).c_str());
 
   return SMI_NIC_STATUS_SUCCESS;
 }
@@ -297,7 +300,7 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
     return SMI_NIC_STATUS_NOT_INIT;
   }
 
-  std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
+  std::unique_lock<std::mutex> lock(ctx->ctx_mutex);
   const SmiNic* nic = nic_system->get_nic_by_bdf(device);
   if (!nic) {
     return SMI_NIC_STATUS_NOT_FOUND;
@@ -331,15 +334,23 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
   // the fallback when VPD could not be opened at all, since the devlink round
   // trip costs ~1s per NIC and has never yet produced a serial in that case.
   std::string serial = nic->serial_number().value_or("");
+  auto devlink_bdf = std::string{};
   if (serial.empty() && nic->is_vpd_readable()) {
+    devlink_bdf = nic->telemetry_bdf();
+  }
+  // The devlink round trip can block on firmware, so it runs without the context lock; it uses a
+  // fresh socket and nothing the lock protects.
+  lock.unlock();
+  if (!devlink_bdf.empty()) {
     // The devlink client allocates netlink messages that throw; the serial is optional here.
     try {
       auto devlink = amd::nic::netlink::create_devlink_client();
-      auto dev_info = devlink->get_device_info(nic->telemetry_bdf());
+      auto dev_info = devlink->get_device_info(devlink_bdf);
       if (dev_info.success && (dev_info.value.board_serial_number[0] != '\0')) {
         serial = dev_info.value.board_serial_number;
       }
     } catch (...) {
+      // No serial from devlink: the field reads "N/A".
     }
   }
   std::snprintf(info->serial_number, SMI_NIC_MAX_STRING_LENGTH, "%s",
@@ -506,11 +517,8 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device,
       port_info->link_speed = port.link_speed().value_or(std::numeric_limits<uint32_t>::max());
 
       /**
-       * FEC stays on the direct ioctl (not the transport): the netlink
-       * ETHTOOL_A_FEC_ACTIVE attribute is a link-mode bit index, a different
-       * domain than ioctl active_fec's ETHTOOL_FEC_* bitmask that this field's
-       * API contract promises. The dead netlink FEC path was removed rather
-       * than left to report the wrong domain.
+       * FEC stays on the direct ioctl, not the transport: the netlink ETHTOOL_A_FEC_ACTIVE
+       * attribute is a link-mode bit index, not the ETHTOOL_FEC_* bitmask this field promises.
        */
       struct ethtool_fecparam fecparam_info{};
       fecparam_info.cmd = ETHTOOL_GFECPARAM;
@@ -891,7 +899,7 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_count(smi_nic_ctx_t ctx, uint6
 
   const auto& ibs = ports[port_index].infiniband();
   if (ib_index >= ibs.size()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+    return SMI_NIC_STATUS_NOT_FOUND;
   }
 
   const auto& ib_ports = ibs[ib_index].ports();

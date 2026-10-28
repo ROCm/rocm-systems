@@ -18,6 +18,9 @@
 #include <string>
 
 #include "smi_nic_log.h"
+#include "smi_nic_text.h"
+
+namespace text = amd::smi::nic::text;
 
 template int smi_ethtool_ioctl<ethtool_stats>(const std::string& device, ethtool_stats* data);
 template int smi_ethtool_ioctl<ethtool_gstrings>(const std::string& device, ethtool_gstrings* data);
@@ -37,12 +40,6 @@ constexpr size_t kOctetTextLen = 4;
 // "0x" plus 8 hex digits plus NUL
 constexpr size_t kCmdTextLen = 16;
 
-// ethtool fixed-size text fields are not guaranteed NUL-terminated.
-template <size_t N>
-std::string text_field(const char (&field)[N]) {
-  return std::string(field, strnlen(field, N));
-}
-
 }  // namespace
 
 std::string smi_ethtool_describe(const ethtool_stats& v) {
@@ -54,8 +51,10 @@ std::string smi_ethtool_describe(const ethtool_gstrings& v) {
 }
 
 std::string smi_ethtool_describe(const ethtool_drvinfo& v) {
-  return "driver=" + text_field(v.driver) + " version=" + text_field(v.version) +
-         " fw_version=" + text_field(v.fw_version) + " bus_info=" + text_field(v.bus_info);
+  return "driver=" + text::printable_field(v.driver) +
+         " version=" + text::printable_field(v.version) +
+         " fw_version=" + text::printable_field(v.fw_version) +
+         " bus_info=" + text::printable_field(v.bus_info);
 }
 
 std::string smi_ethtool_describe(const ethtool_pauseparam& v) {

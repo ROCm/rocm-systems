@@ -3,12 +3,11 @@
  * Copyright Advanced Micro Devices, Inc.
  *
  * Ethtool netlink client. Requires Linux kernel 5.6+ with ethtool netlink.
+ * netlink_ethtool_stub.cpp stands in when the UAPI headers lack it.
  */
 
 #ifndef AMDSMI_UNIFIED_NETLINK_ETHTOOL_H_
 #define AMDSMI_UNIFIED_NETLINK_ETHTOOL_H_
-
-#include <linux/ethtool_netlink.h>
 
 #include <cstdint>
 #include <string>
@@ -39,8 +38,6 @@ class EthtoolNetlinkClient {
 
   // Connects the socket and resolves the ethtool family. Returns 0 or -errno.
   int init();
-
-  bool is_initialized() const { return is_initialized_; }
 
   transport::Result<transport::LinkSettings> get_link_settings(const std::string& iface);
   transport::Result<transport::PauseParams> get_pause_params(const std::string& iface);
