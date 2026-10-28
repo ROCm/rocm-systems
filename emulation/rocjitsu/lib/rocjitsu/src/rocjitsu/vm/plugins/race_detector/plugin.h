@@ -10,20 +10,20 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <string>
-#include <string_view>
 #include <tuple>
 #include <unordered_map>
 
 namespace rocjitsu::plugins::race_detector {
 
-struct MarkedPc {
-  uint64_t pc;
+struct MarkedInstruction {
+  RecordedInstruction instruction;
   int wave;
   int lane; // -1 for scalar
 };
@@ -32,66 +32,42 @@ template <typename T, size_t N> struct RingBuffer {
   std::array<T, N> data{};
   size_t head = 0;
   size_t len = 0;
+  uint64_t next_sequence = 0;
 
   void push(T val) {
     data[head] = val;
     head = (head + 1) % N;
     if (len < N)
       ++len;
+    ++next_sequence;
   }
 
   T operator[](size_t i) const { return data[(head - len + i) % N]; }
   size_t size() const { return len; }
+  uint64_t sequence(size_t i) const { return next_sequence - len + i; }
 };
 
 /// Return the memory instruction recorded as the exact conflict.
-MarkedPc findConflict(const RaceViolation &, RaceDetector &);
+MarkedInstruction findConflict(const RaceViolation &, RaceDetector &);
 
 /// Format a trace with ==> markers and wave/lane annotations.
-std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
-                        const std::unordered_map<uint64_t, std::string> &disasm,
-                        std::optional<MarkedPc> conflict, MarkedPc read);
+std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
+                        const std::function<std::string(const InstructionSnapshot &)> &disassemble,
+                        std::optional<MarkedInstruction> conflict, MarkedInstruction read,
+                        size_t trace_context_instructions = 128);
 
-/// PC-to-disassembly cache, shared across all wavefronts in a dispatch.
-///
-/// Records disassembly on first encounter of each PC. An alternative would
-/// be lazy decode at race-report time (code bytes are in GPU memory), but
-/// this approach avoids needing access to the CU's decoder from the plugin.
-///
-/// Shared per-dispatch because all wavefronts execute the same kernel code.
-/// Per-wavefront caches caused cache thrashing under round-robin scheduling.
-///
-/// Keyed by absolute PC. This avoids assuming that a dispatch executes a single
-/// compact, monotonic text range; helper/trampoline code can be far away from
-/// the first PC observed for the dispatch.
-struct DisasmCache {
-  void record(uint64_t pc, const Instruction &inst) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (entries_.contains(pc))
-      return;
-    entries_.emplace(pc, inst.disassemble());
-  }
-
-  std::unordered_map<uint64_t, std::string> to_map() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return entries_;
-  }
-
-private:
-  mutable std::mutex mutex_;
-  std::unordered_map<uint64_t, std::string> entries_;
-};
+/// Explain the exact conflicting event and its synchronization state.
+std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
+                                  uint64_t access_pc, rj_code_arch_t arch);
 
 struct RaceWavefrontState : WavefrontState {
-  RingBuffer<uint64_t, 256> trace;
-  std::shared_ptr<DisasmCache> disasm;
+  RingBuffer<InstructionSnapshot, 256> trace;
   WaveRaceState *race_state = nullptr;
 };
 
 class RaceDetectorPlugin : public ExecutionPlugin {
 public:
-  /// @param config_json Plugin configuration object as a JSON string (unused;
-  ///        this plugin takes no configuration). May be null.
+  /// @param config_json Optional JSON object with trace_context_instructions (2..256).
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
@@ -151,10 +127,12 @@ private:
 
   std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
-  std::map<uint32_t, std::shared_ptr<DisasmCache>> dispatch_disasm_;
 
-  std::mutex report_mutex_;
+  mutable std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
+  size_t trace_context_instructions_ = 128;
+  uint64_t reports_emitted_ = 0;
+  uint64_t observations_suppressed_ = 0;
   std::unordered_map<uint32_t, KernelNames> dispatch_kernel_names_;
 };
 

@@ -2740,6 +2740,8 @@ class CodeGenerator:
                                               const util::DiagnosticEmitter &emit_error);
               void execute_impl(amdgpu::Wavefront &wf);
 
+              std::string disassemble() const override;
+
               private:
               enum class Format : uint8_t { VopdXy@VOPD3_FORMAT_ENUM@ };
 
@@ -3110,7 +3112,10 @@ class CodeGenerator:
             @VOPD_ISA_DIAGNOSTICS@
               mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
               mnemonic_ = mnemonic_storage_;
-              disassembly_ = format_slot(x_) + " :: " + format_slot(y_);
+            }
+
+            std::string Vopd::disassemble() const {
+              return format_slot(x_) + " :: " + format_slot(y_);
             }
 
             void Vopd::init_operands() {

@@ -67,12 +67,14 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <barrier>
 #include <bit>
 #include <cmath>
 #include <cstdint>
 #include <format>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -102,7 +104,7 @@ constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
 TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
   EXPECT_EQ(sizeof(Operand), 32u);
   EXPECT_EQ(sizeof(cdna5::Operand), 80u);
-  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 512u);
+  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 480u);
 }
 
 TEST(OperandLayoutTest, DecodedVectorRegistersExcludeScalarAndLiteralSelectors) {
@@ -1770,6 +1772,58 @@ make_vopdxy_pair(uint8_t opx, uint8_t opy, uint16_t srcx0 = vopd_src0_vgpr(1), u
           (static_cast<uint32_t>(vsrcy1) << 9) | (srcy0 & 0x1FFu),
       literal,
   };
+}
+
+TEST(InstructionDisassemblyTest, ConcurrentFormattingReturnsIndependentText) {
+  const struct {
+    rj_code_arch_t arch;
+    std::array<uint32_t, 3> words;
+    const char *expected;
+  } cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA4, {S_NOP, 0, 0}, "s_nop 0"},
+      {ROCJITSU_CODE_ARCH_RDNA3,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_RDNA3_5,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_RDNA4,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_CDNA5,
+       {0xCF455083u, 0x00000086u, 0x0A000001u},
+       "v_dual_lshlrev_b32 v1, 3, v0 :: v_dual_lshrrev_b32 v10, 6, v0"},
+  };
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(tc.arch);
+    auto decoder = Decoder::create(tc.arch);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words.data()));
+    ASSERT_NE(inst, nullptr);
+
+    constexpr size_t thread_count = 4;
+    std::barrier start(thread_count);
+    std::array<std::string, thread_count> text;
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < thread_count; ++i) {
+      threads.emplace_back([&, i] {
+        start.arrive_and_wait();
+        for (int repeat = 0; repeat < 32; ++repeat) {
+          text[i] = inst->disassemble();
+          EXPECT_EQ(text[i], tc.expected);
+        }
+      });
+    }
+    for (auto &thread : threads)
+      thread.join();
+
+    text[0].clear();
+    EXPECT_EQ(inst->disassemble(), tc.expected);
+    inst.reset();
+    decoder.reset();
+    for (size_t i = 1; i < thread_count; ++i)
+      EXPECT_EQ(text[i], tc.expected);
+  }
 }
 
 class RdnaVopdDecodeSmokeTest : public ::testing::TestWithParam<VopdDecodeCase> {};

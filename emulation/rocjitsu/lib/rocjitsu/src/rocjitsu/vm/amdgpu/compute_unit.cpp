@@ -152,6 +152,17 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
   }
 }
 
+std::string ComputeUnitCore::disassemble_instruction(std::span<const uint32_t> encoding,
+                                                     uint64_t pc) const {
+  Instruction::ScopedHeapAllocation heap_allocation;
+  util::StringDiagnostic error;
+  auto decoded = decoder_->decode_window(encoding, pc, error.emitter());
+  if (decoded.failed())
+    throw std::logic_error(std::format("cannot disassemble captured instruction at PC {:#x}: {}",
+                                       pc, error.message()));
+  return decoded.value()->disassemble();
+}
+
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                                  uint32_t vgpr_allocation_block_size)
@@ -1151,7 +1162,8 @@ void ComputeUnitCore::report_memory_wait(void *context,
   } else {
     util::Logger::warn(std::format(
         "memory-wait: {} wg={} wave={} pc={:#x}: {} of {} before memory result from pc={:#x} is "
-        "known ready ({}). A wait threshold <= {} is required; set top-level wait_checking "
+        "known ready ({}). A wait threshold <= {} is required immediately before this access; "
+        "set top-level wait_checking "
         "to \"off\" (rocjitsu --wait-checking=off) to disable wait checking.",
         cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc,
         hazard.write ? "overwrite" : "read", register_name, hazard.producer.pc, counter_name,

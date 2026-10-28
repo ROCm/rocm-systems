@@ -76,9 +76,9 @@ void WaveRaceState::registerEvent(
 void WaveRaceState::registerEvent(
     uint64_t pc, MemoryEventType type, std::vector<uint32_t> regIds, uint64_t execMask,
     uint8_t byteMask, std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
+    MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask, RecordedInstruction instruction) {
   registerEventWithIntervals(pc, type, std::move(regIds), execMask, byteMask, {},
-                             counterObligations, memoryOrder, lastRegisterByteMask);
+                             counterObligations, memoryOrder, lastRegisterByteMask, instruction);
 }
 
 void WaveRaceState::registerScalarLoad(
@@ -96,7 +96,7 @@ void WaveRaceState::registerScalarLoad(
 void WaveRaceState::registerScalarLoad(
     uint64_t pc, RegisterRef destination, uint64_t execMask,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder) {
+    MemoryOrderClass memoryOrder, RecordedInstruction instruction) {
   const size_t limit = destination.cls == RegClass::SGPR   ? sgprMemoryEvents.size()
                        : destination.cls == RegClass::TTMP ? ttmpMemoryEvents.size()
                                                            : 0;
@@ -104,7 +104,7 @@ void WaveRaceState::registerScalarLoad(
     return;
   if (limit == 0) {
     registerEvent(pc, MemoryEventType::GLOBAL_TO_SGPR, {}, execMask, 0xF, counterObligations,
-                  memoryOrder);
+                  memoryOrder, 0, instruction);
     return;
   }
   if (destination.index >= limit || destination.width > limit - destination.index)
@@ -118,14 +118,15 @@ void WaveRaceState::registerScalarLoad(
   registerEvent(pc,
                 destination.cls == RegClass::SGPR ? MemoryEventType::GLOBAL_TO_SGPR
                                                   : MemoryEventType::GLOBAL_TO_TTMP,
-                std::move(registers), execMask, 0xF, counterObligations, memoryOrder);
+                std::move(registers), execMask, 0xF, counterObligations, memoryOrder, 0,
+                instruction);
 }
 
 void WaveRaceState::registerEventWithIntervals(
     uint64_t pc, MemoryEventType type, std::vector<uint32_t> regIds, uint64_t execMask,
     uint8_t byteMask, IntervalSet ldsIntervals,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
+    MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask, RecordedInstruction instruction) {
   ProfileScope ps(*profiler_, "registerEvent");
   bool toSgpr = isToSgpr(type);
   bool toTtmp = isToTtmp(type);
@@ -142,7 +143,7 @@ void WaveRaceState::registerEventWithIntervals(
 
   auto eventId = detector->allocateEventId(waveId, pc, type, std::move(regIds), execMask, byteMask,
                                            std::move(ldsIntervals), counterObligations, memoryOrder,
-                                           lastRegisterByteMask);
+                                           lastRegisterByteMask, instruction);
   for (uint32_t reg : detector->events().registers(eventId)) {
     if (toSgpr) {
       sgprMemoryEvents[reg].push_back(eventId);
@@ -240,14 +241,15 @@ void WaveRaceState::registerLdsEvent(
     uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
     int waveSize, std::span<const uint32_t> laneBaseAddresses, int bytesPerLane, uint8_t byteMask,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder, uint64_t ldsLaneMask, int elementBytes) {
+    MemoryOrderClass memoryOrder, uint64_t ldsLaneMask, int elementBytes,
+    RecordedInstruction instruction) {
   IntervalSet intervals;
   forEachActiveLane(execMask & ldsLaneMask, waveSize, [&](int lane) {
     appendLdsInterval(intervals, laneBaseAddresses[lane], bytesPerLane, *detector, elementBytes);
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
-                             std::move(intervals), counterObligations, memoryOrder);
+                             std::move(intervals), counterObligations, memoryOrder, 0, instruction);
 }
 
 void WaveRaceState::registerLdsEvent(
@@ -255,7 +257,7 @@ void WaveRaceState::registerLdsEvent(
     int waveSize, std::span<const uint32_t> firstLaneBaseAddresses,
     std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane, uint8_t byteMask,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder, int elementBytes) {
+    MemoryOrderClass memoryOrder, int elementBytes, RecordedInstruction instruction) {
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
     for (const auto addresses : {firstLaneBaseAddresses, secondLaneBaseAddresses})
@@ -263,7 +265,7 @@ void WaveRaceState::registerLdsEvent(
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
-                             std::move(intervals), counterObligations, memoryOrder);
+                             std::move(intervals), counterObligations, memoryOrder, 0, instruction);
 }
 
 void WaveRaceState::registerDualOffsetLdsEvent(uint64_t pc, MemoryEventType type,

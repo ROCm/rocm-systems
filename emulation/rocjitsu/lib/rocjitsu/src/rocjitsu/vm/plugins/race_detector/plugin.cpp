@@ -15,11 +15,16 @@
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
+#include <flatbuffers/flexbuffers.h>
+#include <flatbuffers/idl.h>
+
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <format>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -29,6 +34,25 @@
 namespace rocjitsu::plugins::race_detector {
 
 namespace {
+
+InstructionSnapshot capture_instruction(uint64_t pc, const Instruction &inst) {
+  InstructionSnapshot snapshot{.pc = pc};
+  static_assert(InstructionSnapshot::kMaxWords * sizeof(uint32_t) ==
+                amdgpu::InstructionCache::kFetchBytes);
+  if (!inst.raw_encoding())
+    throw std::logic_error(
+        std::format("race detector instruction at PC {:#x} has no encoding", pc));
+  if (inst.size() <= 0 || inst.size() % sizeof(uint32_t) != 0 ||
+      static_cast<size_t>(inst.size()) > sizeof(snapshot.words))
+    throw std::logic_error(std::format(
+        "race detector instruction at PC {:#x} has invalid encoding size {}", pc, inst.size()));
+  snapshot.keep_in_trace =
+      inst.is_waitcnt() || inst.has_embedded_memory_wait() || inst.is_barrier() ||
+      (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL));
+  snapshot.word_count = static_cast<uint32_t>(inst.size()) / sizeof(uint32_t);
+  std::memcpy(snapshot.words.data(), inst.raw_encoding(), inst.size());
+  return snapshot;
+}
 
 void warn_cluster_peer_writes_ignored_once() {
   static std::once_flag warned;
@@ -121,120 +145,278 @@ routed_flat_issue_info(const amdgpu::MemoryAccessObservation &access,
 
 } // namespace
 
-// Declared in plugin.h (used by formatTrace tests in execution_plugin_test.cpp).
-MarkedPc findConflict(const RaceViolation &v, RaceDetector &detector) {
+MarkedInstruction findConflict(const RaceViolation &v, RaceDetector &detector) {
   EventId event_id = v.conflictingEvent;
   if (!detector.events().contains(event_id))
     throw std::out_of_range("race violation references an unavailable conflicting event");
-  return {detector.events().pc(event_id), detector.events().waveId(event_id).value, -1};
+  return {detector.events().instruction(event_id), detector.events().waveId(event_id).value, -1};
 }
 
-// Format a race trace showing the instruction stream between the memory
-// operation that wrote a register (conflict) and the instruction that read
-// it before the write completed (read). The trace is a rolling window of
-// recent PCs; disasm maps every PC seen in the kernel to its disassembly.
-//
-// Output uses ==> markers for the two involved instructions and annotates
-// each with wave/lane. Instructions before the first marker are trimmed.
-// When the conflict fell outside the trace window, its disassembly is still
-// shown (from the disasm map) with a "(before trace window)" note.
-std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
-                        const std::unordered_map<uint64_t, std::string> &disasm,
-                        std::optional<MarkedPc> conflict, MarkedPc read) {
-  auto isMarked = [&](uint64_t pc) { return pc == read.pc || (conflict && pc == conflict->pc); };
-
-  auto lookup = [&](uint64_t pc) -> const std::string & {
-    static const std::string empty;
-    auto it = disasm.find(pc);
-    return it != disasm.end() ? it->second : empty;
-  };
-
-  size_t n = trace.size();
-  size_t first = n;
-  bool conflict_found = false;
-  for (size_t i = 0; i < n; ++i) {
-    if (isMarked(trace[i])) {
-      first = i;
-      break;
-    }
-  }
-  if (conflict) {
+std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
+                        const std::function<std::string(const InstructionSnapshot &)> &disassemble,
+                        std::optional<MarkedInstruction> conflict, MarkedInstruction read,
+                        size_t trace_context_instructions) {
+  if (trace_context_instructions < 2 || trace_context_instructions > 256)
+    throw std::invalid_argument("race trace_context_instructions must be an integer from 2 to 256");
+  const size_t n = trace.size();
+  auto trace_index = [&](const MarkedInstruction &mark) -> std::optional<size_t> {
+    if (mark.wave != read.wave || mark.instruction.sequence == UINT64_MAX)
+      return std::nullopt;
     for (size_t i = 0; i < n; ++i)
-      if (trace[i] == conflict->pc) {
-        conflict_found = true;
-        break;
-      }
-  }
-
-  std::ostringstream oss;
-
-  if (conflict && !conflict_found) {
-    oss << "  ==>  0x" << std::hex << conflict->pc << std::dec << "  ";
-    auto &d = lookup(conflict->pc);
-    if (!d.empty())
-      oss << d << "  ";
-    oss << "(before trace window)";
-    oss << "  ; <-- wave " << conflict->wave;
-    if (conflict->lane >= 0)
-      oss << " lane " << conflict->lane;
-    oss << "\n       ... " << first << " instructions not recorded ...\n";
-  }
-
-  size_t last = n;
-  for (size_t i = first; i < n; ++i) {
-    if (trace[i] == read.pc) {
-      last = i + 1;
-      break;
-    }
-  }
-
-  constexpr size_t MAX_PRINT_SIZE = 32;
-  size_t span = (last > first) ? last - first : 0;
-
-  auto emit = [&](size_t i) {
-    uint64_t pc = trace[i];
-    bool is_conflict = conflict && pc == conflict->pc;
-    bool is_read = pc == read.pc;
-    oss << ((is_conflict || is_read) ? "  ==>  " : "       ");
-    oss << "0x" << std::hex << pc << std::dec << "  " << lookup(pc);
-    if (is_conflict) {
-      oss << "  ; <-- wave " << conflict->wave;
-      if (conflict->lane >= 0)
-        oss << " lane " << conflict->lane;
-    }
-    if (is_read) {
-      oss << "  ; <-- wave " << read.wave;
-      if (read.lane >= 0)
-        oss << " lane " << read.lane;
-    }
-    oss << "\n";
+      if (trace.sequence(i) == mark.instruction.sequence)
+        return i;
+    return std::nullopt;
   };
-
-  if (span <= MAX_PRINT_SIZE) {
-    for (size_t i = first; i < last; ++i)
-      emit(i);
-  } else {
-    size_t half = MAX_PRINT_SIZE / 2;
-    for (size_t i = first; i < first + half; ++i)
-      emit(i);
-    oss << "       ... " << (span - MAX_PRINT_SIZE) << " instructions elided ...\n";
-    for (size_t i = last - half; i < last; ++i)
-      emit(i);
+  const auto conflict_index = conflict ? trace_index(*conflict) : std::nullopt;
+  const auto read_index = trace_index(read);
+  if (conflict_index && read_index && *conflict_index > *read_index)
+    throw std::invalid_argument("race conflict follows the current access in the wave trace");
+  const size_t first = conflict ? conflict_index.value_or(0) : read_index.value_or(n);
+  const size_t last = read_index ? *read_index + 1 : n;
+  const size_t span = last > first ? last - first : 0;
+  auto nonsequential = [&](size_t i) {
+    if (i <= first || i >= last)
+      return false;
+    const auto previous = trace[i - 1];
+    return previous.word_count &&
+           (trace[i].pc < previous.pc ||
+            trace[i].pc - previous.pc != previous.word_count * sizeof(uint32_t));
+  };
+  std::array<bool, 256> shown{};
+  const size_t head = (trace_context_instructions + 1) / 2;
+  const size_t tail = trace_context_instructions / 2;
+  for (size_t i = first; i < last; ++i) {
+    shown[i] = span <= trace_context_instructions || i - first < head || last - i <= tail ||
+               trace[i].keep_in_trace;
+    if (nonsequential(i))
+      shown[i - 1] = shown[i] = true;
   }
+  std::ostringstream oss;
+  oss << "       PC  Instruction\n";
+  auto annotation = [&](const MarkedInstruction &mark) {
+    oss << "  ; <-- wave " << mark.wave;
+    if (mark.lane >= 0)
+      oss << " lane " << mark.lane;
+  };
+  auto external = [&](const MarkedInstruction &mark, std::string_view note) {
+    const auto &instruction = mark.instruction.snapshot;
+    oss << "  ==>  0x" << std::hex << instruction.pc << std::dec << "  " << disassemble(instruction)
+        << note;
+    annotation(mark);
+    oss << '\n';
+  };
+  if (conflict && !conflict_index) {
+    external(*conflict, conflict->wave == read.wave ? "  (before trace window)"
+                                                    : "  (outside this wave's trace)");
+    if (conflict->wave == read.wave) {
+      if (span && conflict->instruction.sequence != UINT64_MAX &&
+          trace.sequence(first) > conflict->instruction.sequence)
+        oss << "       ... " << trace.sequence(first) - conflict->instruction.sequence - 1
+            << " earlier instructions not recorded ...\n";
+      else
+        oss << "       ... earlier instructions not recorded ...\n";
+    } else
+      oss << "       Execution trace below is for wave " << read.wave << ".\n";
+  }
+  auto emit = [&](size_t i) {
+    const bool is_conflict = conflict_index && i == *conflict_index;
+    const bool is_read = read_index && i == *read_index;
+    const auto instruction = is_conflict ? conflict->instruction.snapshot
+                             : is_read   ? read.instruction.snapshot
+                                         : trace[i];
+    if (nonsequential(i)) {
+      const auto previous_pc = trace[i - 1].pc;
+      oss << "       --- "
+          << (instruction.pc < previous_pc   ? "jump backward"
+              : instruction.pc > previous_pc ? "jump forward"
+                                             : "same PC executed again")
+          << " ---\n";
+    }
+    oss << ((is_conflict || is_read) ? "  ==>  " : "       ") << "0x" << std::hex << instruction.pc
+        << std::dec << "  " << disassemble(instruction);
+    if (is_conflict)
+      annotation(*conflict);
+    if (is_read)
+      annotation(read);
+    oss << '\n';
+  };
+  for (size_t i = first; i < last;) {
+    if (shown[i]) {
+      emit(i++);
+    } else {
+      const size_t gap = i;
+      while (i < last && !shown[i])
+        ++i;
+      oss << "       ... " << i - gap << " instructions elided ...\n";
+    }
+  }
+  if (!read_index)
+    external(read, "  (outside recorded trace)");
   return oss.str();
 }
 
-RaceDetectorPlugin::RaceDetectorPlugin(const char * /*config_json*/) : ExecutionPlugin("race") {}
+namespace {
+
+std::string_view counter_name(amdgpu::WaitCounterType type) {
+  using enum amdgpu::WaitCounterType;
+  switch (type) {
+  case VMCNT:
+    return "vmcnt";
+  case LGKMCNT:
+    return "lgkmcnt";
+  case EXPCNT:
+    return "expcnt";
+  case VSCNT:
+    return "vscnt";
+  case LOADCNT:
+    return "loadcnt";
+  case STORECNT:
+    return "storecnt";
+  case DSCNT:
+    return "dscnt";
+  case KMCNT:
+    return "kmcnt";
+  case TENSORCNT:
+    return "tensorcnt";
+  case ASYNCCNT:
+    return "asynccnt";
+  }
+  throw std::logic_error("race event has an unknown completion counter");
+}
+
+std::string_view event_description(MemoryEventType type) {
+  using enum MemoryEventType;
+  switch (type) {
+  case GLOBAL_TO_VGPR:
+    return "load from global memory into VGPRs";
+  case VGPR_TO_GLOBAL:
+    return "store from VGPRs into global memory";
+  case LDS_TO_VGPR:
+    return "load from LDS into VGPRs";
+  case VGPR_TO_LDS:
+    return "store from VGPRs into LDS";
+  case GLOBAL_TO_LDS:
+    return "transfer from global memory into LDS";
+  case GLOBAL_TO_SGPR:
+    return "load from global memory into SGPRs";
+  case GLOBAL_TO_TTMP:
+    return "load from global memory into TTMPs";
+  case SCALAR_TO_GLOBAL:
+    return "store from scalar registers into global memory";
+  case N:
+    break;
+  }
+  throw std::logic_error("race event has an unknown memory operation");
+}
+
+size_t parse_trace_limit(const char *config_json) {
+  if (!config_json)
+    return 128;
+  flexbuffers::Builder builder;
+  flatbuffers::Parser parser;
+  if (!parser.ParseFlexBuffer(config_json, nullptr, &builder))
+    throw std::invalid_argument("race plugin configuration is not valid JSON");
+  const auto root = flexbuffers::GetRoot(builder.GetBuffer());
+  if (!root.IsMap())
+    throw std::invalid_argument("race plugin configuration must be an object");
+  const auto config = root.AsMap();
+  if (config.size() == 0)
+    return 128;
+  for (size_t i = 0; i < config.size(); ++i)
+    if (std::string_view(config.Keys()[i].AsKey()) != "trace_context_instructions")
+      throw std::invalid_argument("race plugin configuration has an unknown option");
+  const auto value = config["trace_context_instructions"];
+  if (!value.IsIntOrUint() || (value.IsInt() && value.AsInt64() < 2) || value.AsUInt64() > 256)
+    throw std::invalid_argument("race trace_context_instructions must be an integer from 2 to 256");
+  return static_cast<size_t>(value.AsUInt64());
+}
+
+} // namespace
+
+std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &events,
+                                  uint64_t access_pc, rj_code_arch_t arch) {
+  if (!events.contains(v.conflictingEvent))
+    throw std::out_of_range("race violation references an unavailable conflicting event");
+  const auto model = amdgpu::waitcnt_model(arch);
+  if (model.failed())
+    throw std::invalid_argument("race report has an unsupported architecture");
+  const auto event = v.conflictingEvent;
+  const int owner = events.waveId(event).value;
+  const auto type = events.type(event);
+  const bool conflicting_read =
+      v.space == RaceViolation::Space::LDS && type == MemoryEventType::LDS_TO_VGPR;
+  const char *hazard = !v.isWrite         ? "read-after-write (RAW)"
+                       : conflicting_read ? "write-after-read (WAR)"
+                                          : "write-after-write (WAW)";
+  std::ostringstream oss;
+  oss << "Race on ";
+  switch (v.space) {
+  case RaceViolation::Space::VGPR:
+    oss << "VGPR v" << v.index;
+    break;
+  case RaceViolation::Space::SGPR:
+    oss << "SGPR s" << v.index;
+    break;
+  case RaceViolation::Space::TTMP:
+    oss << "TTMP ttmp" << v.index;
+    break;
+  case RaceViolation::Space::LDS:
+    oss << "LDS byte " << v.index;
+    break;
+  }
+  oss << " [workgroup (" << v.workgroupId.x << ", " << v.workgroupId.y << ", " << v.workgroupId.z
+      << "), wave " << v.wave;
+  if (v.space != RaceViolation::Space::SGPR && v.space != RaceViolation::Space::TTMP)
+    oss << ", lane " << v.lane;
+  oss << "]: " << hazard << ".\n";
+  oss << "  Current access: " << (v.isWrite ? "write" : "read") << " at PC 0x" << std::hex
+      << access_pc << std::dec << ".\n";
+  oss << "  Conflict: " << event_description(type) << " at PC 0x" << std::hex << events.pc(event)
+      << std::dec << ", wave " << owner << ".\n";
+  if (events.status(event) == EventStatus::ACTIVE) {
+    oss << "  Completion for wave " << owner << " is not guaranteed; pending counters: ";
+    std::set<amdgpu::WaitCounterType> displayed;
+    for (const auto obligation : events.counterObligations(event)) {
+      const auto counter = obligation.wait_counter_type();
+      if (!events.hasPendingWaitCounter(event, counter))
+        continue;
+      const auto architectural_counter =
+          amdgpu::memory_wait_counter_type(amdgpu::canonical_wait_counter(counter, model.value()),
+                                           model.value())
+              .value_or(counter);
+      if (displayed.contains(architectural_counter))
+        continue;
+      if (!displayed.empty())
+        oss << ", ";
+      oss << counter_name(architectural_counter);
+      displayed.insert(architectural_counter);
+    }
+    oss << ".\n";
+  } else if (events.status(event) == EventStatus::WAVE_COMPLETE) {
+    oss << "  Completed for wave " << owner << ", but not synchronized with wave " << v.wave
+        << ".\n";
+  } else {
+    throw std::logic_error("race violation references a retired memory event");
+  }
+  if (owner != v.wave && events.status(event) == EventStatus::ACTIVE)
+    oss << "  Waves " << owner << " and " << v.wave << " have not synchronized this access.\n";
+  return oss.str();
+}
+
+RaceDetectorPlugin::RaceDetectorPlugin(const char *config_json)
+    : ExecutionPlugin("race"), trace_context_instructions_(parse_trace_limit(config_json)) {}
 
 RaceDetectorPlugin::~RaceDetectorPlugin() { sink().write(getSummary()); }
 
 std::string RaceDetectorPlugin::getSummary() const {
+  std::lock_guard<std::mutex> lock(report_mutex_);
   const char *banner = "\n========================================\n"
                        " ROCJITSU RACE DETECTION SUMMARY\n"
                        "========================================\n";
-  if (!observed_races_.empty()) {
-    return std::string(banner) + "  " + std::to_string(observed_races_.size()) +
-           " race(s) detected\n"
+  if (reports_emitted_) {
+    return std::string(banner) + "  " + std::to_string(reports_emitted_) +
+           " race report(s) emitted; " + std::to_string(observations_suppressed_) +
+           " observation(s) suppressed by PC deduplication\n"
            "========================================\n";
   }
   return std::string(banner) + "  No races detected.\n"
@@ -265,40 +447,41 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
-      if (observed_races_.count({dispatch_id, pc}))
+      if (observed_races_.count({dispatch_id, pc})) {
+        ++observations_suppressed_;
         return;
+      }
     }
 
     auto *ws = get_state(wf);
     assert(ws && ws->race_state && "no wavefront state for race");
     auto *detector = ws->race_state->getDetector();
-    MarkedPc conflict = findConflict(v, *detector);
+    MarkedInstruction conflict = findConflict(v, *detector);
 
     std::ostringstream oss;
-    if (v.space == RaceViolation::Space::VGPR)
-      oss << "Race on VGPR v" << v.index;
-    else if (v.space == RaceViolation::Space::SGPR)
-      oss << "Race on SGPR s" << v.index;
-    else if (v.space == RaceViolation::Space::TTMP)
-      oss << "Race on TTMP ttmp" << v.index;
-    else
-      oss << "Race on LDS byte " << v.index;
-    oss << " [workgroup (" << v.workgroupId.x << ", " << v.workgroupId.y << ", " << v.workgroupId.z
-        << "), wave " << v.wave;
-    if (v.space != RaceViolation::Space::SGPR && v.space != RaceViolation::Space::TTMP)
-      oss << ", lane " << v.lane;
-    oss << "]\n";
+    oss << formatRaceDescription(v, detector->events(), pc, wf->cu().arch());
 
-    MarkedPc access_mark{pc, v.wave, v.lane};
-    oss << formatTrace(ws->trace, ws->disasm->to_map(), conflict, access_mark);
+    if (!ws->trace.size() || ws->trace[ws->trace.size() - 1].pc != pc)
+      throw std::logic_error(
+          std::format("race detector has no current instruction at PC {:#x}", pc));
+    const RecordedInstruction current{ws->trace[ws->trace.size() - 1],
+                                      ws->trace.sequence(ws->trace.size() - 1)};
+    MarkedInstruction access_mark{current, v.wave, v.lane};
+    oss << formatTrace(
+        ws->trace,
+        [wf](const InstructionSnapshot &instruction) {
+          return wf->disassemble_instruction(instruction.encoding(), instruction.pc);
+        },
+        conflict, access_mark, trace_context_instructions_);
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
       bool is_new = !observed_races_.count({dispatch_id, pc}) &&
-                    !observed_races_.count({dispatch_id, conflict.pc});
+                    !observed_races_.count({dispatch_id, conflict.instruction.snapshot.pc});
       observed_races_.emplace(dispatch_id, pc);
       if (is_new) {
-        observed_races_.emplace(dispatch_id, conflict.pc);
+        ++reports_emitted_;
+        observed_races_.emplace(dispatch_id, conflict.instruction.snapshot.pc);
         const char *space = v.space == RaceViolation::Space::VGPR   ? "VGPR"
                             : v.space == RaceViolation::Space::SGPR ? "SGPR"
                             : v.space == RaceViolation::Space::TTMP ? "TTMP"
@@ -316,12 +499,14 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
             "conflict=unknown\n{}END_RACE\n",
             kernel_names.name, kernel_names.symbol, dispatch_id, space, access, v.index, v.wave,
             v.lane, v.workgroupId.x, v.workgroupId.y, v.workgroupId.z, oss.str()));
+      } else {
+        ++observations_suppressed_;
       }
     }
   };
 
   // Multi-XCD: workgroups from the same dispatch can arrive on different
-  // partition threads, so detectors_ and dispatch_disasm_ need protection.
+  // partition threads, so the detector map needs protection.
   std::lock_guard<std::mutex> lock(dispatch_mutex_);
   detectors_[key] = std::make_unique<RaceDetector>(
       static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
@@ -330,13 +515,9 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
       wavefronts.front()->lds().size_bytes());
 
   auto &det = *detectors_[key];
-  auto &dc = dispatch_disasm_[dispatch_id];
-  if (!dc)
-    dc = std::make_shared<DisasmCache>();
   for (uint32_t w = 0; w < num_waves; ++w) {
     auto state = std::make_unique<RaceWavefrontState>();
     state->race_state = &det.getWaveRaceState(static_cast<int>(w));
-    state->disasm = dc;
     wavefronts[w]->set_plugin_state(slot_index(), std::move(state));
   }
 }
@@ -349,6 +530,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   auto *rs = s->race_state;
   auto *detector = rs->getDetector();
   auto waveId = rs->getWaveId();
+  const RecordedInstruction instruction{capture_instruction(wf.pc, inst),
+                                        s->trace.size() && s->trace[s->trace.size() - 1].pc == wf.pc
+                                            ? s->trace.sequence(s->trace.size() - 1)
+                                            : UINT64_MAX};
   const auto *decoded = inst.amdgpu_memory_issue_info();
   assert(decoded && "memory instruction reached the race detector without issue metadata");
   if (!decoded)
@@ -415,11 +600,11 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
                            std::span<const uint32_t>(laneAddrs, wf.wf_size()),
                            std::span<const uint32_t>(secondLaneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder, d.elem_size);
+                           byte_mask, obligations, memoryOrder, d.elem_size, instruction);
     } else {
       rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
                            std::span<const uint32_t>(laneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder, ldsMask, d.elem_size);
+                           byte_mask, obligations, memoryOrder, ldsMask, d.elem_size, instruction);
     }
     // A mixed instruction has one counter entry, with all register lanes but
     // only the ordinary LDS lanes' intervals. Do not also register a global event.
@@ -452,7 +637,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       }
       rs->registerLdsEvent(wf.pc, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask, wf.wf_size(),
                            std::span<const uint32_t>(ldsAddrs, wf.wf_size()), perLaneBytes, 0xF,
-                           obligations, memoryOrder);
+                           obligations, memoryOrder, ~uint64_t{0}, 0, instruction);
     } else if (d.is_load) {
       auto destinations = validated_load_destinations(d, wf);
       if (!destinations)
@@ -467,10 +652,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       if (obligations.empty())
         return;
       rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), d.exec_mask,
-                        byte_mask, obligations, memoryOrder, last_byte_mask);
+                        byte_mask, obligations, memoryOrder, last_byte_mask, instruction);
     } else if (!obligations.empty()) {
       rs->registerEvent(wf.pc, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask, 0xF, obligations,
-                        memoryOrder);
+                        memoryOrder, 0, instruction);
     }
   }
 
@@ -478,14 +663,14 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
     if (d.is_load) {
       if (const auto reg = d.dst_register.register_ref()) {
-        rs->registerScalarLoad(wf.pc, *reg, wf.exec(), obligations, memoryOrder);
+        rs->registerScalarLoad(wf.pc, *reg, wf.exec(), obligations, memoryOrder, instruction);
       } else {
         rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_SGPR, {}, wf.exec(), 0xF, obligations,
-                          memoryOrder);
+                          memoryOrder, 0, instruction);
       }
     } else {
       rs->registerEvent(wf.pc, MemoryEventType::SCALAR_TO_GLOBAL, {}, wf.exec(), 0xF, obligations,
-                        memoryOrder);
+                        memoryOrder, 0, instruction);
     }
   }
 }
@@ -520,6 +705,7 @@ void RaceDetectorPlugin::onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf
 
 void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                                           amdgpu::Wavefront &wf) {
+  const auto instruction = capture_instruction(pc, inst);
   auto *s = get_state(wf);
   assert(s && s->race_state);
   if (supports_counter_capacity(wf.cu().arch())) {
@@ -537,8 +723,7 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
     if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg"))
       s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
   }
-  s->trace.push(pc);
-  s->disasm->record(pc, inst);
+  s->trace.push(instruction);
 }
 
 void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
