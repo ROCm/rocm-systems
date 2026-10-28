@@ -4976,22 +4976,19 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
 
 void CommandProcessor::flush_gpu_caches() {
   assert(!dispatch_workers_active_ && "cache maintenance must follow the CU worker join");
-  // Runtime wave-state snapshots can flush these caches after the workers join.
-  // They hold the CU wave-state lock, so per-CU maintenance must take it too.
+  // Runtime wave-state snapshots can flush these caches after the workers join,
+  // so each CU maintenance call takes that CU's lock.
   // Both L1 caches are write-through, so discard their clean snapshots around
   // direct backing writes. Flush dirty L2 data before the direct write so a
   // later L2 flush cannot overwrite it.
   for (auto *cu : cus_)
-    cu->with_cache_state_locked([&] { cu->l1_scalar().invalidate_all(); });
+    cu->invalidate_scalar_cache();
   for (auto *l2 : l2_caches_)
     l2->flush_all();
+  // A direct backing write may land on code, and the I$ is not coherent with
+  // data writes any more than the hardware one is.
   for (auto *cu : cus_)
-    cu->with_cache_state_locked([&] {
-      cu->l1_vector().invalidate_all();
-      // A direct backing write may land on code, and the I$ is not coherent with
-      // data writes any more than the hardware one is.
-      cu->instruction_cache().invalidate_all();
-    });
+    cu->invalidate_vector_and_instruction_caches();
 }
 
 } // namespace amdgpu

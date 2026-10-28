@@ -4368,7 +4368,7 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
   if (runtime_save) {
     gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
       for (auto *cu : cp->compute_units())
-        cu->with_wave_state_locked([&] { cu->flush_l1(process_id); });
+        cu->flush_l1(process_id);
     });
     for (uint32_t xcc = 0; xcc < gpu->soc->num_xcds(); ++xcc)
       if (gpu->soc->xcd(xcc)->l2_cache()->flush_all(process_id) !=

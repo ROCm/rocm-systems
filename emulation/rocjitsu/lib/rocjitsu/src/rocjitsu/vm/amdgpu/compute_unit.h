@@ -831,15 +831,23 @@ public:
     inst_cache_.invalidate_all();
   }
 
-  /// @brief Serialize cache maintenance without delivering CP notifications.
-  /// @details Uses the wave-state mutex to exclude execution and runtime
-  /// snapshots. The callback must only access caches; it must not change waves
-  /// or call the CP. Queue-wide callers must first join their CU workers.
-  /// Unlike with_wave_state_locked(), releasing this lock cannot re-enter the CP
-  /// while it holds references to admitted packets or completion entries.
-  template <typename F> decltype(auto) with_cache_state_locked(F &&fn) {
+  /// @brief Invalidate the scalar L1 cache under the CU mutex.
+  /// @details Like flush_l1(), this serializes with execution and runtime
+  /// snapshots without delivering CP notifications, so the CP may call it while
+  /// holding references to admitted packets or completion entries. Queue-wide
+  /// callers must first join their CU workers.
+  void invalidate_scalar_cache() {
     std::lock_guard lock(wave_state_mutex_);
-    return std::forward<F>(fn)();
+    l1_scalar_.invalidate_all();
+  }
+
+  /// @brief Invalidate the vector L1 and instruction caches under the CU mutex.
+  /// @details Has the same locking and notification contract as
+  /// invalidate_scalar_cache().
+  void invalidate_vector_and_instruction_caches() {
+    std::lock_guard lock(wave_state_mutex_);
+    l1_vector_.invalidate_all();
+    inst_cache_.invalidate_all();
   }
 
   /// @brief Set (or replace) the shared GPU memory pointer.
