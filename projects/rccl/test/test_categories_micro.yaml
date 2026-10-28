@@ -63,6 +63,8 @@ test_categories:
       - "RmaDebugLoggingTest.*"
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
+      # ce_coll.cc
+      - "HierCeAllGatherMicrotest.*"
       # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc

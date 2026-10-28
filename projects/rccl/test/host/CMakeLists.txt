@@ -70,6 +70,7 @@ function(rccl_define_micro_source_lists)
     gin-plugin-init-test.cc
     rma-test.cc
     rma-ce-test.cc
+    ce-coll-test.cc                     # src/ce_coll.cc hierarchical CE AllGather rail
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
     tuning-test.cc                       # src/tuning/tuning.cc
@@ -755,6 +756,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc"
     # rma_ce.cc has no basename collision, so it keeps its own name.
     RMA_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc"
+    CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
     GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
     DEVCOMM_V22902_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
