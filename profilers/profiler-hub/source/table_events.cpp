@@ -593,6 +593,13 @@ sample_table_sql(data_storage::sqlite_backend& backend,
     std::string where;
     add_and(where, time);
     add_and(where, tracks);
+    if(query.agent_id.has_value())
+    {
+        const char* column =
+            kind == sample_table_kind::counter ? "K.agent_id" : "PI.agent_id";
+        add_and(where,
+                id_or_unrecorded(column, static_cast<size_t>(*query.agent_id)));
+    }
     const char* id_column    = kind == sample_table_kind::pmc_sample ? "S.id" : "PE.id";
     const char* value_column = "PE.value";
     const char* start_column =
@@ -635,6 +642,11 @@ read_memory_activity_events(const reader_catalog_t&     catalog,
                        track->category == track_kind_t::pmc_memory;
             });
         if(found == catalog.tracks.end()) continue;
+        if(query.agent_id.has_value() &&
+           (*found)->agent_id != static_cast<size_t>(*query.agent_id))
+        {
+            continue;
+        }
         const std::vector<memory_activity_point_t>* points =
             catalog.memory_activity_points((*found)->id);
         if(points == nullptr) continue;
@@ -852,6 +864,18 @@ reader_t::impl::read_table_events(const resolved_event_query& query,
         add_and(where,
                 std::string(source->alias) +
                     ".tid = " + std::to_string(*query.thread_id));
+    }
+    if(query.agent_id.has_value())
+    {
+        // Regions have no agent column. A memory copy matches its destination
+        // agent, the same column used for agent-queue tracks.
+        if(source->agent_column == nullptr)
+        {
+            return 0;
+        }
+        add_and(where,
+                id_or_unrecorded(std::string(source->alias) + "." + source->agent_column,
+                                 static_cast<size_t>(*query.agent_id)));
     }
     if(type.value() == event_type_t::region)
     {
