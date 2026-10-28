@@ -104,6 +104,8 @@ struct Queue {
 struct Mapping {
     /// Queue borrowed by this public producer mapping.
     queue: *mut Queue,
+    /// A peer producer device borrowed until this mapping is unmapped.
+    producer_queues: Option<*const AtomicU64>,
     /// Cached transport addresses returned through the ABI.
     info: amdf_user_queue_mapping_info_t,
 }
@@ -614,12 +616,17 @@ pub(crate) unsafe extern "C" fn map(
         let slot = queue
             .host_allocator
             .with_scope(|| Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED))?;
-        let info = if host {
-            queue.host_mapping
-        } else if peer.is_none() {
-            queue.device_mapping.ok_or(UNSUPPORTED)?
-        } else {
-            let producer = peer.ok_or(INTERNAL)?;
+        let producer_queues = peer.map(|producer| &raw const producer.queues);
+        if let Some(counter) = producer_queues {
+            register(&*counter)?;
+        }
+        let info = (|| {
+            if host {
+                return Ok(queue.host_mapping);
+            }
+            let Some(producer) = peer else {
+                return queue.device_mapping.ok_or(UNSUPPORTED);
+            };
             let mut info = transport(
                 queue
                     .native
@@ -634,11 +641,26 @@ pub(crate) unsafe extern "C" fn map(
             info.queue_id = queue.info.queue_id;
             info.queue_reset_epoch = queue.info.reset_epoch;
             info.producer_reset_epoch = producer.current_reset_epoch();
-            info
+            Ok(info)
+        })();
+        let info = match info {
+            Ok(info) => info,
+            Err(status) => {
+                if let Some(counter) = producer_queues {
+                    unregister(&*counter);
+                }
+                return Err(status);
+            }
         };
-        register(&queue.mappings)?;
+        if let Err(status) = register(&queue.mappings) {
+            if let Some(counter) = producer_queues {
+                unregister(&*counter);
+            }
+            return Err(status);
+        }
         let owner = slot.write(Mapping {
             queue: pointer.cast(),
+            producer_queues,
             info,
         });
         out.write(owner.into_raw().cast());
@@ -662,6 +684,9 @@ pub(crate) unsafe extern "C" fn mapping_info(
 pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_user_queue_mapping_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let mapping = object(pointer.cast::<Mapping>())?;
+        if let Some(counter) = mapping.producer_queues {
+            unregister(&*counter);
+        }
         unregister(&(*mapping.queue).mappings);
         drop(Owned::from_raw(pointer.cast::<Mapping>()));
         Ok(())
