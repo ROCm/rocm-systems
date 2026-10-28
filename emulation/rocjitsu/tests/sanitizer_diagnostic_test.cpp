@@ -9,6 +9,8 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <format>
+#include <string>
 
 namespace {
 
@@ -57,7 +59,7 @@ TEST(NativeFailureDiagnosticTest, DoesNotCombineSeparateLinesIntoAnAssertionRepo
   EXPECT_TRUE(diagnostic.Matches(output));
 }
 
-TEST(SanitizerDiagnosticDeathTest, RejectsAssertionAbortAfterExpectedDiagnostic) {
+TEST(NativeFailureDiagnosticDeathTest, RejectsAssertionAbortAfterExpectedDiagnostic) {
   EXPECT_NONFATAL_FAILURE(
       expect_diagnosed_exit(
           std::format("rocjitsu: daemon connection lost\n"
@@ -79,7 +81,7 @@ TEST(SanitizerDiagnosticDeathTest, RejectsAssertionAbortAfterExpectedDiagnostic)
 
 // A sanitizer can exit with the same status as a fatal GPU failure. The report
 // in the child's captured output must still fail the death test.
-TEST(SanitizerFreeDiagnosticDeathTest, RejectsReportAfterAcceptedExit) {
+TEST(NativeFailureDiagnosticDeathTest, RejectsSanitizerReportAfterAcceptedExit) {
   EXPECT_NONFATAL_FAILURE(
       EXPECT_EXIT(exit_after_sanitizer_report(), ::testing::ExitedWithCode(EXIT_FAILURE),
                   rocjitsu::test::ExpectedFailureDiagnostic("rocjitsu: daemon connection lost")),
