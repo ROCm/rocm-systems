@@ -143,8 +143,8 @@ static __global__ void test_kernel(unsigned int* atomic_val, unsigned int* array
     // reach the atomicInc, but everyone will have only hit the atomic once.
     if (rank == (grid.size() - 1)) {
 #if HT_AMD
-      const long long start = clock_function();
-      while (clock_function() - start < static_cast<long long>(spin_ticks)) {
+      const long long start = wall_clock64();
+      while (wall_clock64() - start < static_cast<long long>(spin_ticks)) {
       }
 #else
       const long long start = clock64();
