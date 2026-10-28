@@ -150,7 +150,7 @@ def torch_trace_profiled_workload(
     torch_trace_workload_state,
     binary_handler_profile_rocprof_compute,
 ):
-    """Profile simple_net with --trace-ml-api torch and return the directory."""
+    """Profile simple_net with --trace-ml-api torch and --user-range."""
     require_torch(gpu=True)
     if not torch_trace_workload_state["profiled"]:
         workload_dir = common.get_output_dir(param_id="torch_trace")
@@ -160,6 +160,7 @@ def torch_trace_profiled_workload(
         profile_config["torch_test_app"] = [
             sys.executable,
             *config["torch_test_app"][1:],
+            "--user-range",
         ]
         returncode = binary_handler_profile_rocprof_compute(
             profile_config,
@@ -570,6 +571,47 @@ def test_torch_operator_with_dispatch_filter(
     assert miss_code != 0
 
 
+def test_list_and_filter_user_range_keeps_nested_addmm_drops_relu(
+    torch_trace_profiled_workload,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
+    list_code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-operators",
+        "user",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert list_code == 0
+    listed = capsys.readouterr()
+    listed_out = listed.out + listed.err
+    assert "User Operator Call Tree:" in listed_out
+    assert "Fc1_UserDefinedMarker" in listed_out
+    assert "nn.Module.Linear.forward" in listed_out
+    assert ADDMM_MARKER.search(listed_out)
+    assert "aten::relu" not in listed_out
+
+    filter_code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--operator",
+        "user:*UserDefined*",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert filter_code == 0
+    filtered = capsys.readouterr()
+    filtered_out = filtered.out + filtered.err
+    assert "Matched User Operators:" in filtered_out
+    assert "Fc1_UserDefinedMarker" in filtered_out
+    assert "nn.Module.Linear.forward" in filtered_out
+    assert ADDMM_MARKER.search(filtered_out)
+    assert "aten::relu" not in filtered_out
+    assert "operator filter selected" in filtered_out
+
+
 def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
     binary_handler_profile_rocprof_compute,
 ):
@@ -605,7 +647,7 @@ def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
                 for row in csv.DictReader(f):
                     functions.append(row["Function"])
                     thread_ids.add(row["Thread_Id"])
-        assert any(fn == "TrainingLoop_UserDefinedMarker" for fn in functions)
+        assert any(fn == "Fc1_UserDefinedMarker" for fn in functions)
         assert any("torch.Tensor.backward" in fn for fn in functions)
         assert len(thread_ids) >= 2
         assert any(re.search(r"\|ltid=\d+\|", fn) for fn in functions)
