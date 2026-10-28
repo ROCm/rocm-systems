@@ -1,10 +1,16 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Minimal non-GPU driver used to exercise heterogeneous session routing.
+//! Minimal driver used to exercise heterogeneous session, event, and GPU queue
+//! routing without relying on KFD hardware.
 
-use super::{AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector};
+use super::{
+    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, UserQueueResource,
+};
 use crate::device::event::DeviceEvent;
+use crate::device::gpu::queue::{
+    QueueAccessWidth, QueueParameters, QueuePriority, QueueRequest, QueueScratch, QueueTransport,
+};
 use crate::memory::host::HostBackingLease;
 use crate::memory::storage::Owned;
 use crate::memory::{AllocationInfo, DeviceAccess, HostRegistration, MemoryKind};
@@ -130,7 +136,7 @@ impl Drop for TestEventSubscription {
     }
 }
 
-/// Test driver instance with only the common driver contract.
+/// Test driver instance with common routing and a numeric-only GPU queue.
 pub(crate) struct TestDriver {
     instance: super::DriverInstanceId,
     id: [u8; 16],
@@ -141,11 +147,16 @@ pub(crate) struct TestDriver {
     pub(crate) fail_shutdown: Arc<AtomicBool>,
     pub(crate) enumerations: Arc<AtomicUsize>,
     pub(crate) opens: Arc<AtomicUsize>,
+    /// Injects one failed native queue retirement without consuming its owner.
+    pub(crate) fail_queue_destroy: Arc<AtomicBool>,
+    /// Counts conclusively retired native queues.
+    pub(crate) queue_destroys: Arc<AtomicUsize>,
     /// Event stream available from every activated test endpoint.
     events: Arc<TestEvents>,
 }
 
-/// Activated test endpoint. It intentionally has no GPU resource capabilities.
+/// Activated test endpoint. GPU queue transport is numeric-only and cannot be
+/// dereferenced or rung by a test producer.
 #[derive(Clone)]
 pub(crate) struct TestDevice {
     id: [u8; 16],
@@ -183,6 +194,100 @@ pub(crate) struct TestAllocation {
     backing: Option<HostBackingLease>,
 }
 
+/// Numeric-only transport used to test public queue routing and retirement.
+pub(crate) struct TestQueue {
+    id: [u8; 16],
+    info: QueueTransport,
+    fail_destroy: Arc<AtomicBool>,
+    destroys: Arc<AtomicUsize>,
+    released: bool,
+}
+
+impl CachedInfo for TestQueue {
+    type Info = QueueTransport;
+
+    fn cached_info(&self) -> QueueTransport {
+        self.info
+    }
+}
+
+#[allow(unsafe_code)]
+impl UserQueueResource for TestQueue {
+    type DeviceState = TestDevice;
+
+    fn check(&self) -> Result<(), Error> {
+        if self.released {
+            Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "test queue has been retired",
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    fn progress(&self) -> Result<(u64, u64), Error> {
+        self.check()?;
+        Ok((0, 0))
+    }
+
+    fn inactivate(&mut self) -> Result<(), Error> {
+        self.check()
+    }
+
+    fn set_priority(&mut self, _: QueuePriority) -> Result<(), Error> {
+        self.check()
+    }
+
+    fn set_cu_mask(&mut self, _: &[u32]) -> Result<(), Error> {
+        self.check()
+    }
+
+    unsafe fn set_scratch(&mut self, _: QueueScratch) -> Result<(), Error> {
+        Err(Error::Operation {
+            kind: ErrorKind::Unsupported,
+            detail: "test queue has no scratch",
+        })
+    }
+
+    unsafe fn destroy(&mut self) -> Result<(), Error> {
+        self.check()?;
+        if self.fail_destroy.swap(false, Ordering::AcqRel) {
+            return Err(Error::Operation {
+                kind: ErrorKind::Driver,
+                detail: "injected test queue retirement failure",
+            });
+        }
+        self.released = true;
+        self.destroys.fetch_add(1, Ordering::Release);
+        Ok(())
+    }
+
+    unsafe fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(),
+    ) -> Result<(), Error> {
+        // SAFETY: The test queue has no native producer or external mapping.
+        unsafe { self.destroy()? };
+        callback();
+        Ok(())
+    }
+
+    fn map_device(&self, device: &TestDevice) -> Result<QueueTransport, Error> {
+        self.check()?;
+        if self.id != device.id {
+            return Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "test queue has no mapping on this device",
+            });
+        }
+        Ok(QueueTransport {
+            doorbell_device_address: Some(0x8000),
+            ..self.info
+        })
+    }
+}
+
 impl CachedInfo for TestAllocation {
     type Info = AllocationInfo;
 
@@ -209,6 +314,8 @@ impl TestDriver {
             fail_shutdown: Arc::new(AtomicBool::new(false)),
             enumerations: Arc::new(AtomicUsize::new(0)),
             opens: Arc::new(AtomicUsize::new(0)),
+            fail_queue_destroy: Arc::new(AtomicBool::new(false)),
+            queue_destroys: Arc::new(AtomicUsize::new(0)),
             events: Arc::new(TestEvents {
                 state: Mutex::new(TestEventState {
                     records: Vec::new(),
@@ -262,6 +369,53 @@ impl TestDriver {
     pub(crate) fn with_host_registration(mut self) -> Self {
         self.host_registration = true;
         self
+    }
+
+    /// Creates a fake SDMA transport without publishing any accessible pages.
+    pub(crate) fn create_user_queue(
+        &self,
+        device: &TestDevice,
+        request: QueueRequest,
+    ) -> Result<Owned<TestQueue>, Error> {
+        if device.id != self.id || !matches!(self.kind, EndpointKind::Gpu { .. }) {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "test endpoint is not this driver's GPU",
+            });
+        }
+        if !matches!(request.parameters, QueueParameters::Sdma)
+            || request.ring_size_bytes < 4096
+            || !request.ring_size_bytes.is_power_of_two()
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "test GPU only supports power-of-two SDMA queues",
+            });
+        }
+        Ok(Owned::new(TestQueue {
+            id: self.id,
+            info: QueueTransport {
+                ring_host_address: 0x1000,
+                ring_device_address: 0x2000,
+                ring_size_bytes: request.ring_size_bytes,
+                aql_control: None,
+                sdma_engine_id: None,
+                read_index_host_address: 0x3000,
+                read_index_device_address: 0x4000,
+                write_index_host_address: 0x5000,
+                write_index_device_address: 0x6000,
+                read_index_width: QueueAccessWidth::Bits64,
+                write_index_width: QueueAccessWidth::Bits64,
+                index_unit_bytes: 1,
+                read_index_wraps: false,
+                doorbell_host_address: 0x7000,
+                doorbell_device_address: request.device_producer.then_some(0x8000),
+                doorbell_width: QueueAccessWidth::Bits64,
+            },
+            fail_destroy: self.fail_queue_destroy.clone(),
+            destroys: self.queue_destroys.clone(),
+            released: false,
+        })?)
     }
 
     fn endpoint(&self) -> Endpoint {
