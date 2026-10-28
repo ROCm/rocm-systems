@@ -4,8 +4,10 @@
 /// @file wave_debug_test.cpp
 /// @brief Wave-level KFD debugger groundwork, exercised through the compute unit.
 
+#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -47,11 +49,12 @@ struct WaveDebugFixture {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit WaveDebugFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit WaveDebugFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4,
+                            uint32_t num_wf_slots = 1)
       : gpu_mem("wave_debug_mem"), l2("wave_debug_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
-    cfg.num_wf_slots = 1;
+    cfg.num_wf_slots = num_wf_slots;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
@@ -65,6 +68,111 @@ struct WaveDebugFixture {
     return wf;
   }
 };
+
+TEST(WaveDebugTest, DebuggerReadsPreservePhysicalStorageBoundsAtNonzeroOffsets) {
+  const auto check = []<GpuIsa Isa>(rj_code_arch_t arch) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 2);
+    using ComputeUnit = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
+    const auto *cu = dynamic_cast<const ComputeUnit *>(fx.cu.get());
+    ASSERT_NE(cu, nullptr);
+    auto *first_wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(first_wave, nullptr);
+    auto *wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_GT(wave->sgpr_alloc().base, first_wave->sgpr_alloc().base);
+    ASSERT_GT(wave->vgpr_alloc().base, first_wave->vgpr_alloc().base);
+    const auto last_sgpr = wave->num_sgprs() - 1;
+    const auto last_vgpr = wave->num_vgprs() - 1;
+    const auto last_lane = wave->wf_size() - 1;
+    fx.cu->write_sgpr(wave->sgpr_alloc().base + last_sgpr, 42);
+    fx.cu->write_vgpr(wave->vgpr_alloc().base + last_vgpr, last_lane, 43);
+    fx.cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, 44);
+
+    EXPECT_EQ(wave->debug_read_sgpr(last_sgpr), 42u);
+    EXPECT_EQ(wave->debug_read_vgpr(last_vgpr, last_lane), 43u);
+
+    const auto second_wave_sgpr =
+        wave->sgpr_alloc().base - first_wave->sgpr_alloc().base + last_sgpr;
+    const auto second_wave_vgpr =
+        wave->vgpr_alloc().base - first_wave->vgpr_alloc().base + last_vgpr;
+    EXPECT_EQ(first_wave->debug_read_sgpr(second_wave_sgpr), 42u);
+    EXPECT_EQ(first_wave->debug_read_vgpr(second_wave_vgpr, last_lane), 43u);
+
+    const auto sgpr_end = fx.cu->sgpr_file().total_regs() - wave->sgpr_alloc().base;
+    const auto vgpr_end = cu->vgpr_file().total_regs() - wave->vgpr_alloc().base;
+    EXPECT_EQ(wave->debug_read_sgpr(sgpr_end), 0u);
+    EXPECT_EQ(wave->debug_read_sgpr(sgpr_end + 1), 0u);
+    EXPECT_EQ(wave->debug_read_vgpr(vgpr_end, 0), 0u);
+    EXPECT_EQ(wave->debug_read_vgpr(vgpr_end + 1, 0), 0u);
+    EXPECT_EQ(wave->debug_read_vgpr(1, 0), 44u);
+    EXPECT_EQ(wave->debug_read_vgpr(0, fx.cu->vgpr_storage_lane_count()), 0u);
+  };
+  check.operator()<cdna4::Isa>(ROCJITSU_CODE_ARCH_CDNA4);
+  check.operator()<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4);
+}
+
+TEST(WaveDebugTest, DebuggerReadsPreserveSmallAllocationStorage) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 2);
+    auto *first_wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(first_wave, nullptr);
+    auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_EQ(wave->num_sgprs(), 16u);
+    ASSERT_EQ(wave->num_vgprs(), 4u);
+    ASSERT_GT(wave->sgpr_alloc().base, first_wave->sgpr_alloc().base);
+    ASSERT_GT(wave->vgpr_alloc().base, first_wave->vgpr_alloc().base);
+    const auto sbase = wave->sgpr_alloc().base;
+    const auto vbase = wave->vgpr_alloc().base;
+    const auto last_lane = fx.cu->vgpr_storage_lane_count() - 1;
+    fx.cu->write_sgpr(sbase + 32, 42);
+    fx.cu->write_sgpr(sbase + 33, 43);
+    fx.cu->write_vgpr(vbase + 8, last_lane, 44);
+
+    EXPECT_EQ(fx.cu->read_sgpr(sbase + 32), 42u);
+    EXPECT_EQ(fx.cu->read_sgpr(sbase + 33), 43u);
+    EXPECT_EQ(fx.cu->read_vgpr(vbase + 8, last_lane), 44u);
+    EXPECT_EQ(wave->debug_read_sgpr(32), 42u);
+    EXPECT_EQ(wave->debug_read_sgpr(33), 43u);
+    EXPECT_EQ(wave->debug_read_vgpr(8, last_lane), 44u);
+  }
+}
+
+TEST(WaveDebugTest, DebuggerReadsPreserveStoredLanesForWave32) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4, 32);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 32u);
+  ASSERT_EQ(fx.cu->vgpr_storage_lane_count(), 64u);
+  const auto vbase = wave->vgpr_alloc().base;
+  fx.cu->write_vgpr(vbase, 32, 42);
+  fx.cu->write_vgpr(vbase, 63, 43);
+  fx.cu->write_vgpr(vbase + 1, 0, 44);
+
+  EXPECT_EQ(fx.cu->read_vgpr(vbase, 32), 42u);
+  EXPECT_EQ(fx.cu->read_vgpr(vbase, 63), 43u);
+  EXPECT_EQ(wave->debug_read_vgpr(0, 32), 42u);
+  EXPECT_EQ(wave->debug_read_vgpr(0, 63), 43u);
+  EXPECT_EQ(wave->debug_read_vgpr(1, 0), 44u);
+  EXPECT_EQ(wave->debug_read_vgpr(0, fx.cu->vgpr_storage_lane_count()), 0u);
+}
+
+TEST(WaveDebugTest, DebuggerReadsPreservePhysicalLaneBoundsForGfx1250) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4, 32);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 32u);
+  ASSERT_EQ(fx.cu->vgpr_storage_lane_count(), 32u);
+  const auto vbase = wave->vgpr_alloc().base;
+  fx.cu->write_vgpr(vbase, 31, 43);
+  fx.cu->write_vgpr(vbase + 1, 0, 44);
+
+  EXPECT_EQ(wave->debug_read_vgpr(0, 31), 43u);
+  EXPECT_EQ(wave->debug_read_vgpr(1, 0), 44u);
+  EXPECT_EQ(wave->debug_read_vgpr(0, fx.cu->vgpr_storage_lane_count()), 0u);
+}
 
 TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
   WaveDebugFixture fx;

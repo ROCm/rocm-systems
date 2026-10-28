@@ -1163,9 +1163,19 @@ public:
   /// @details This deliberately bypasses plugin observation and is reserved
   /// for VM storage operations. Instruction code receives
   /// `InstructionComputeUnitView`, which does not expose this API.
+  /// @pre @p reg_idx identifies an existing physical VGPR and @p lane is less
+  /// than vgpr_storage_lane_count().
+  /// @see read_vgpr_storage_bounded() for reads with bounds checks.
   uint32_t read_vgpr_storage(uint32_t reg_idx, uint32_t lane) const {
     return reinterpret_cast<const uint32_t *>(raw_vgpr_data(reg_idx))[lane];
   }
+
+  /// @brief Read physical VGPR storage without producing an observation callback.
+  /// @details Suitable for debugger and VM inspection; checks physical-register
+  /// and lane bounds before reading storage.
+  /// @returns Lane value, or zero outside the physical register or lane bounds.
+  /// @see read_vgpr_storage() for unchecked reads requiring valid indices.
+  virtual uint32_t read_vgpr_storage_bounded(uint32_t reg_idx, uint32_t lane) const = 0;
 
   /// @brief Number of physical VGPR registers in one allocation block.
   uint32_t vgpr_allocation_block_size() const { return vgpr_allocation_block_size_; }
@@ -1925,6 +1935,12 @@ public:
     if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX)
       return 0;
     notify_vgpr_read_by_reg(reg_idx, uint64_t{1} << lane);
+    return vgpr_file_[reg_idx][lane];
+  }
+
+  uint32_t read_vgpr_storage_bounded(uint32_t reg_idx, uint32_t lane) const override {
+    if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX)
+      return 0;
     return vgpr_file_[reg_idx][lane];
   }
 
