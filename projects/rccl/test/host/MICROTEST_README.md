@@ -781,7 +781,7 @@ symbol.
 | file-static RMA helpers in `src/include/gdrwrap.h` | `fakes/gdrwrap_fakes.{h,cc}` via `fakes/gdrwrap_seam.h` / `fakes/gdrwrap_seam_undef.h` |
 | HSA runtime diagnostics | `fakes/hsa_fakes.cc` |
 | `src/misc/ibvwrap.cc` (verbs wrappers) | `fakes/ibvwrap_fakes.cc` |
-| libibverbs provider ops behind the `ibvwrap.h` inline post/poll wrappers | `fakes/ibv_ops_fakes.{h,cc}` |
+| libibverbs provider ops behind the `ibvwrap.h` inline post/poll wrappers | `IbVerbsScene.h` (one fake device per test) |
 | `src/misc/ionicdvwrap.cc` | `fakes/ionicdvwrap_fakes.cc` |
 | ibverbs provider dv libraries (`libionic.so`, `libmlx5.so`) | `fakes/dv_provider_fake.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |

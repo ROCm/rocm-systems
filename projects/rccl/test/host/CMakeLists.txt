@@ -1047,13 +1047,13 @@ function(rccl_define_micro_source_lists)
     transport/rma-socket-mem-test.cc
     transport/rma-socket-progress-recver-test.cc
     transport/rma-socket-setup-test.cc
+    fakes/comm_fakes.cc                  # allocTracker, ncclGdrCopy
     fakes/env_fakes.cc
     fakes/gdr_peermem_fakes.cc
     fakes/gdr_probe_fakes.cc
     fakes/gdrwrap_fakes.cc
     fakes/hip_fakes.cc
     fakes/hsa_fakes.cc
-    fakes/ibv_ops_fakes.cc
     fakes/ibvwrap_fakes.cc
     fakes/mlx5dvwrap_fakes.cc
     fakes/nccl_fakes.cc
