@@ -14,7 +14,13 @@ FetchContent_Declare(
   GIT_TAG        v3.6.0
   GIT_SHALLOW    TRUE
 )
+# Static Catch2: BUILD_SHARED_LIBS is on for the runtime libraries, and a Catch2 DLL is not found
+# next to the test on Windows. This only shadows the cache variable in this directory.
+set(BUILD_SHARED_LIBS OFF)
 FetchContent_MakeAvailable(Catch2)
+# Build Catch2 with the tests' standard: MSVC defaults to C++14, which leaves out Catch2's
+# std::string_view support that the tests use.
+set_target_properties(Catch2 Catch2WithMain PROPERTIES CXX_STANDARD 17)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)
 
