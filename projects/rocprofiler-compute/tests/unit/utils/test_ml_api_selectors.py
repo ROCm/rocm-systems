@@ -10,6 +10,7 @@ from utils.ml_api_selectors import (
     UNSCOPED_OPERATOR_KEY,
     check_list_operators_against_traced_frameworks,
     operator_patterns_for_traced_frameworks,
+    resolve_list_selectors,
     resolve_operator_patterns,
     resolve_profile_selection,
 )
@@ -37,14 +38,13 @@ def test_double_colon_stays_in_the_operator_pattern():
 
 
 def test_operator_space_separated_patterns_keep_prefix():
-    expected = {
+    assert resolve_operator_patterns(["torch:*conv*", "*relu*", "triton:*matmul*"]) == {
         "torch": ["*conv*", "*relu*"],
         "triton": ["*matmul*"],
     }
-    assert (
-        resolve_operator_patterns(["torch:*conv*", "*relu*", "triton:*matmul*"])
-        == expected
-    )
+
+
+def test_operator_comma_joined_token_is_one_glob():
     assert resolve_operator_patterns(["torch:*conv*,*relu*,triton:*matmul*"]) == {
         "torch": ["*conv*,*relu*,triton:*matmul*"]
     }
@@ -60,7 +60,19 @@ def test_operator_rejects_unknown_prefix():
     with pytest.raises(ValueError, match="all_supported_backends"):
         resolve_operator_patterns(["all_supported_backends:*relu*"])
     with pytest.raises(ValueError, match="toch"):
-        resolve_operator_patterns(["toch:*relu* torch:*relu*"])
+        resolve_operator_patterns(["toch:*relu*", "torch:*relu*"])
+    with pytest.raises(ValueError, match="jax"):
+        resolve_operator_patterns(["torch:*relu*", "jax:*foo*"])
+
+
+def test_comma_joined_profile_token_is_unknown():
+    with pytest.raises(ValueError, match="torch,triton"):
+        resolve_profile_selection(["torch,triton"])
+
+
+def test_comma_joined_list_token_is_unknown():
+    with pytest.raises(ValueError, match="torch,triton"):
+        resolve_list_selectors(["torch,triton"])
 
 
 def test_list_operators_rejects_backend_missing_from_workload():
