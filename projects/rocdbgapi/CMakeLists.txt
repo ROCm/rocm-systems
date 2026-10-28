@@ -323,15 +323,6 @@ option(BUILD_SHARED_LIBS "Build amd-dbgapi as a shared library" ON)
 option(ENABLE_TESTS "Build all rocdbgapi test suites" OFF)
 option(ENABLE_UNIT_TESTS "Build rocdbgapi unit tests" ${ENABLE_TESTS})
 
-# Only one tier exists today, so this condition is just the unit tier's
-# option.  When a second tier is added, extend it to
-# ENABLE_UNIT_TESTS OR ENABLE_<TIER>_TESTS so that test/ is entered
-# whenever any tier is requested.
-if(ENABLE_UNIT_TESTS)
-    enable_testing()
-    add_subdirectory(test)
-endif()
-
 if(ENABLE_ASSERTIONS)
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         # Add -UNDEBUG to the CXXFLAGS (project is C++ only, no CFLAGS needed)
@@ -380,8 +371,12 @@ configure_file(
     @ONLY
 )
 
-add_library(
-    amd-dbgapi
+# Source list shared between the installable library (amd-dbgapi) and
+# the test-only internal seam target (amd-dbgapi-internal, defined in
+# cmake/AmdDbgapiInternal.cmake when any of ENABLE_<TIER>_TESTS is on).
+# Keep this list as the single source of truth so the two targets stay
+# in sync.
+set(_dbgapi_lib_sources
     src/agent.cpp
     src/architecture.cpp
     src/callbacks.cpp
@@ -405,6 +400,8 @@ add_library(
     src/wave.cpp
     src/workgroup.cpp
 )
+
+add_library(amd-dbgapi ${_dbgapi_lib_sources})
 
 set_target_properties(
     amd-dbgapi
@@ -457,7 +454,9 @@ if(API_TRACING)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_sources(amd-dbgapi PRIVATE src/os_driver_kfd.cpp src/utils_linux.cpp)
+    # OS-specific source list, also consumed by amd-dbgapi-internal.
+    set(_dbgapi_lib_os_sources src/os_driver_kfd.cpp src/utils_linux.cpp)
+    target_sources(amd-dbgapi PRIVATE ${_dbgapi_lib_os_sources})
 
     set(CMAKE_REQUIRED_FLAGS_BKP "${CMAKE_REQUIRED_FLAGS}")
     set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -std=c++17")
@@ -493,10 +492,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endif()
     set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS_BKP}")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    target_sources(
-        amd-dbgapi
-        PRIVATE src/os_driver_kmd.cpp src/utils_windows.cpp
-    )
+    set(_dbgapi_lib_os_sources src/os_driver_kmd.cpp src/utils_windows.cpp)
+    target_sources(amd-dbgapi PRIVATE ${_dbgapi_lib_os_sources})
 
     target_include_directories(
         amd-dbgapi
@@ -681,6 +678,18 @@ install(
     FILE "${AMD_DBGAPI_TARGETS_NAME}"
     COMPONENT dev
 )
+
+# Only one tier exists today, so this condition is just the unit tier's
+# option.  When a second tier is added, extend it to
+# ENABLE_UNIT_TESTS OR ENABLE_<TIER>_TESTS so that test/ is entered
+# whenever any tier is requested.
+if(ENABLE_UNIT_TESTS)
+    enable_testing()
+    # Build the test-only seam target that exposes internal C++ classes
+    # to unit tests.
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AmdDbgapiInternal.cmake)
+    add_subdirectory(test)
+endif()
 
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
