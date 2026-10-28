@@ -225,7 +225,8 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fname,
   // Check if file exists, also use the nothrow version
   std::error_code ferr{};
   if (!std::filesystem::exists(fname, ferr)) {
-    LogPrintfError("File exist check failed with: %s", ferr.message().c_str());
+    LogPrintfError("Cannot access %s: %s", fname,
+                   ferr ? ferr.message().c_str() : "file does not exist");
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto* l = new hip::LibraryContainer(std::string(fname));
