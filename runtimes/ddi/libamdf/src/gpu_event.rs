@@ -39,7 +39,7 @@ pub(crate) unsafe extern "C" fn create(
                 .event_service
                 .lock()
                 .map_err(|_| INTERNAL)?
-                .create(&device.native, &[], SignalEventAddressing::Mapped)
+                .create(&device.native, SignalEventAddressing::Mapped)
                 .map_err(|error| device.native_error_status(&error))
         })();
         let (mut event, mailbox) = match result {
