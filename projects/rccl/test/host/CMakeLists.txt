@@ -506,6 +506,7 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/allocator_fakes.cc
     fakes/ce_fakes.cc
     fakes/collconfig_fakes.cc
     fakes/collectives_fakes.cc
@@ -519,6 +520,7 @@ function(rccl_define_micro_source_lists)
     fakes/rccl_wrap_fakes.cc
     fakes/recorder_fakes.cc
     fakes/register_stubs.cc
+    fakes/rma_fakes.cc
     fakes/roctx_fakes.cc
     fakes/sched_stubs.cc
     fakes/strongstream_stubs.cc
