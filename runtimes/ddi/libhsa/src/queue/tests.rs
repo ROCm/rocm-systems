@@ -11,6 +11,28 @@ use std::sync::atomic::AtomicUsize;
 const WRITE_INDEX_OFFSET: usize = 56;
 const READ_INDEX_OFFSET: usize = 128;
 
+#[test]
+/// Verifies a fault deferred to the system worker falls back only once.
+fn deferred_fault_uses_queue_callback_after_system_failure() {
+    let mut delivery = VmFaultCallbackState::Unseen;
+    assert_eq!(delivery.observe(true), VmFaultCallbackAction::Defer);
+    // KFD may report the same fault through both queue signals.
+    assert_eq!(delivery.observe(true), VmFaultCallbackAction::Ignore);
+    assert!(delivery.take_after_system_failure());
+    assert!(!delivery.take_after_system_failure());
+    assert_eq!(delivery.observe(false), VmFaultCallbackAction::Ignore);
+}
+
+#[test]
+/// Verifies a delivered system fault is not replayed through the queue.
+fn delivered_system_fault_has_no_queue_fallback() {
+    let mut delivery = VmFaultCallbackState::Unseen;
+    assert_eq!(delivery.observe(true), VmFaultCallbackAction::Defer);
+    delivery.report_by_system();
+    assert!(!delivery.take_after_system_failure());
+    assert_eq!(delivery.observe(false), VmFaultCallbackAction::Ignore);
+}
+
 /// Counts owner drops during queue scratch rollback tests.
 struct DropCount(
     /// Number of observed owner drops.

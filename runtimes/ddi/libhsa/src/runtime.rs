@@ -189,6 +189,8 @@ pub(crate) struct HsaState {
     system_event_handlers: Vec<(SystemEventHandler, CallbackArg)>,
     /// Native system event worker joined during final teardown.
     pub(crate) system_event_worker: Option<JoinHandle<()>>,
+    /// Sticky failure of system-event observation, separate from shutdown.
+    pub(crate) system_event_failed: Arc<AtomicBool>,
     /// Shared stop request observed by those workers.
     pub(crate) stop_workers: Arc<AtomicBool>,
     /// Counts native work that must finish before session release.
@@ -589,6 +591,7 @@ impl HsaState {
             vm_fault_details: None,
             system_event_handlers: Vec::new(),
             system_event_worker: None,
+            system_event_failed: Arc::new(AtomicBool::new(false)),
             stop_workers: Arc::new(AtomicBool::new(false)),
             inflight: Arc::new(InFlightTracker::new()),
             pc_sampling_state: PcSamplingState::new(),
