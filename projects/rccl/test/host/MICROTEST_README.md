@@ -603,13 +603,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `rma_socket_setup.cc` (`RMA_SOCKET_SETUP_CC_PATH`, from
     `rma-socket-setup-test.cc`); suites `RmaSocketSetupMicrotest.*`.
 
-  The `net_ib` tests share three headers in `transport/net_ib/`:
+  The `net_ib` tests share five headers in `transport/net_ib/`:
   `NetIbGlobals.h` (`NetIbResetGlobals()`, which every fixture's TearDown
   calls because the device tables are process-wide), `NetIbSupportSeams.h`
   (the `gdr.cc` capability probes a unit is renamed onto, since `gdr-test.cc`
-  compiles the real `gdr.cc`) and `NetIbDmaBufProbe.h`. Device discovery runs
-  against `IbVerbsWorld.h`, the fake HCAs and verbs libraries that
-  `FakeIbWorld` in `net-ib-cast-test-common.h` also builds on.
+  compiles the real `gdr.cc`), `NetIbDmaBufProbe.h`, `NetIbQpSeams.h`
+  (`connect.cc`'s QP state helpers and `clockNano`, renamed onto for the same
+  reason by the `p2p_resiliency*.cc` tests) and `NetIbResiliencyScene.h` (a
+  send/recv comm pair with failover contexts on two `IbVerbsScene` devices).
+  Device discovery runs against `IbVerbsWorld.h`, the fake HCAs and verbs
+  libraries that `FakeIbWorld` in `net-ib-cast-test-common.h` also builds on.
 
 - **`rccl-UnitTestsMicroNetIbCastDataPath`** — the net_ib_cast data path in
   `src/transport/net_ib_cast/`: `p2p.cc` (`NET_IB_CAST_P2P_CC_PATH`, suites
