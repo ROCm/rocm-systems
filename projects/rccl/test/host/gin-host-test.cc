@@ -790,36 +790,33 @@ TEST_F(GinHostProxyAffinitySetupMicrotest, StashesCommAffinityBeforeSpawningProx
 }
 
 
-// AICOMRCCL-3181: ncclDevCommCreate corrupted the heap when a devComm was
-// requested with ginConnectionType=FULL and ginContextCount=0. The context
-// count flows through ncclGinContextCount() = ROUNDUP(request, ginCommCount),
-// which returned 0 for a 0 request, so ginDevCommSetupWithBackend handed the
-// backend nContextsPerComm=0 (a zero-length context table) and the per-context
-// resource regions were sized to 0, while the live connection still wrote
-// context slot 0. Every GIN connection needs at least one context.
+// AICOMRCCL-3181: ginConnectionType=FULL with ginContextCount=0 must not size the
+// context table / per-context regions to 0 (the heap corruption). A 0 request is
+// promoted to one context per live GIN connection. Exercised at two connections
+// with exact asserts, so a clamp mistakenly applied after ROUNDUP (0 per comm at
+// two connections) would be caught.
 TEST_F(GinHostProxyAffinitySetupMicrotest, ZeroContextRequestWithFullConnectionGetsOneContextPerComm) {
   g_osCpuCountValue.store(0);  // don't take the affinity-pin branch
 
   struct ncclGinState& ginState = sr_->ginState;
-  const int ginCommCount = ginState.backends[0].ginCommCount;  // == 1 in this fixture
+  ginState.backends[0].ginCommCount = 2;                      // two live GIN connections
+  ginState.backends[0].ginComms[1] = reinterpret_cast<void*>(0x11);
   ncclDevCommRequirements reqs{};
-  reqs.ginContextCount = 0;                             // <-- the bug trigger
-  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;    // <-- the bug trigger
+  reqs.ginContextCount = 0;                                   // the bug trigger
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   reqs.ginTrafficClass = NCCL_CONFIG_UNDEF_INT;
 
   ncclResult_t ret =
     ginDevCommSetupWithBackend(comm_.get(), &reqs, &devComm_, /*deviceCodeVersion=*/0, &ginState.backends[0]);
 
   ASSERT_EQ(ncclSuccess, ret);
-  // A 0 request must be clamped to one context per live GIN connection, never 0.
-  EXPECT_GE(static_cast<int>(devComm_.ginContextCount), ginCommCount);
-  EXPECT_EQ(static_cast<int>(devComm_.ginContextCount) % ginCommCount, 0);
-  EXPECT_GE(fakeBackend_.lastConfigNContexts, 1);  // backend was never asked for 0 contexts
-  EXPECT_EQ(1, fakeBackend_.createContextCalls);
+  EXPECT_EQ(static_cast<int>(devComm_.ginContextCount), 2);   // one context per connection
+  EXPECT_EQ(fakeBackend_.lastConfigNContexts, 1);             // exactly one per comm, never 0
+  EXPECT_EQ(2, fakeBackend_.createContextCalls);              // one createContext per connection
 }
 
-// Any positive ginContextCount request must be preserved exactly as before:
-// the min-one-context clamp only rescues the degenerate 0 request.
+// A positive request is unchanged by the promotion: it still rounds up to
+// ROUNDUP(req, ginCommCount).
 TEST_F(GinHostProxyAffinitySetupMicrotest, PositiveContextRequestIsUnchangedByTheClamp) {
   g_osCpuCountValue.store(0);
 
