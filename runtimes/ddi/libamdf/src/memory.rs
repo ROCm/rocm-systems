@@ -19,7 +19,6 @@ use rocddi::memory;
 use rocddi::memory::storage::TryPush;
 use rocddi::memory::storage::{Allocator, Owned, OwnerVec};
 use std::ffi::c_void;
-use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 const BACKING_FLAGS: u64 = AMDF_MEMORY_FLAG_HOST_VISIBLE
@@ -198,18 +197,12 @@ impl PendingGpu {
         }
     }
 
-    fn into_inner(mut self) -> memory::device::Allocation {
-        // SAFETY: Construction sets Some and only this consuming call removes it.
-        unsafe { self.allocation.take().unwrap_unchecked() }
+    fn allocation(&self) -> Result<&memory::device::Allocation, u64> {
+        self.allocation.as_ref().ok_or(INTERNAL)
     }
-}
 
-impl Deref for PendingGpu {
-    type Target = memory::device::Allocation;
-
-    fn deref(&self) -> &Self::Target {
-        // SAFETY: Borrowing precedes the sole consuming into_inner call.
-        unsafe { self.allocation.as_ref().unwrap_unchecked() }
+    fn into_inner(mut self) -> Result<memory::device::Allocation, u64> {
+        self.allocation.take().ok_or(INTERNAL)
     }
 }
 
@@ -497,25 +490,31 @@ unsafe fn profile(
     if local && endpoint.is_none() {
         return Err(UNSUPPORTED);
     }
+    let instance = unsafe { &*scope.instance };
     if let Some(endpoint) = endpoint {
         if endpoint.instance != scope.instance {
             return Err(INVALID);
         }
         supported_endpoint(endpoint)?;
-        if local {
-            let owner = unsafe { &*scope.endpoint };
-            if !endpoint.native.can_access_local_memory(&owner.native) {
-                return Err(UNSUPPORTED);
-            }
+    }
+    // The cached driver policy query rejects a closing native session. Keep
+    // AMDF's PRECONDITION status ahead of that query for valid handles.
+    if instance.closing {
+        return Err(PRECONDITION);
+    }
+    if local {
+        let endpoint = endpoint.ok_or(UNSUPPORTED)?;
+        let owner = unsafe { &*scope.endpoint };
+        if !instance
+            .native
+            .can_access_local_memory(&endpoint.native, &owner.native)
+        {
+            return Err(UNSUPPORTED);
         }
     }
     // Public VRAM has a different capacity from private VRAM on partial-BAR
     // devices. Separate profiles keep both placement and host-map limits exact.
     let host_visible = !local || ordinal == 1;
-    let instance = unsafe { &*scope.instance };
-    if instance.closing {
-        return Err(PRECONDITION);
-    }
     if registered
         && endpoint
             .is_some_and(|endpoint| !instance.native.supports_host_registration(&endpoint.native))
@@ -1255,6 +1254,7 @@ pub(crate) unsafe extern "C" fn create(
                 memory::device::MemoryKind::DeviceLocal {
                     host_visible: visible,
                     coherent: false,
+                    extended_coherent: false,
                     uncached: false,
                     contiguous: false,
                 }
@@ -1311,9 +1311,9 @@ pub(crate) unsafe extern "C" fn create(
                 !registered,
                 out_release_info,
             );
-            let addresses = native_allocation.info();
+            let addresses = native_allocation.allocation()?.info();
             if profile.guaranteed_flags & AMDF_MEMORY_FLAG_SHAREABLE != 0 {
-                let dma_buf = linux_interop::export_dma_buf(&native_allocation)
+                let dma_buf = linux_interop::export_dma_buf(native_allocation.allocation()?)
                     .map_err(|error| device.native_error_status(&error))?;
                 physical_backing_id.words = dma_buf.info().physical_backing_id;
             }
@@ -1321,6 +1321,7 @@ pub(crate) unsafe extern "C" fn create(
                 // SAFETY: The requested device remains live throughout creation.
                 let access_device = unsafe { &*requested.device.cast::<Device>() };
                 let address = native_allocation
+                    .allocation()?
                     .device_address(&access_device.native)
                     .map_err(|error| access_device.native_error_status(&error))?;
                 access_records
@@ -1345,7 +1346,7 @@ pub(crate) unsafe extern "C" fn create(
                     .map_err(|_| EXHAUSTED)?;
             }
             (
-                Backing::Gpu(native_allocation.into_inner()),
+                Backing::Gpu(native_allocation.into_inner()?),
                 addresses.host_address,
                 if local && visible {
                     match device.native.endpoint().host_local_cacheability {
@@ -1524,10 +1525,9 @@ pub(crate) unsafe extern "C" fn map(
         }
         range(map.byte_offset, map.byte_length, memory.info.byte_length).map_err(|_| INVALID)?;
         let host = memory.host.ok_or(UNSUPPORTED)?;
-        let slot = {
-            let _scope = memory.host_allocator.scope();
-            Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?
-        };
+        let slot = memory
+            .host_allocator
+            .with_scope(|| Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED))?;
         let (maintenance, line, flush, invalidate) =
             host_transitions(&*(*memory.scope).instance, memory.cacheability)?;
         let address = host
@@ -1983,7 +1983,7 @@ pub(crate) unsafe extern "C" fn import(
             false,
             out_release_info,
         );
-        let native_info = native_allocation.info();
+        let native_info = native_allocation.allocation()?.info();
         if has_identity(external.physical_backing_id.words)
             && external.physical_backing_id.words != native_info.physical_backing_id
         {
@@ -1993,6 +1993,7 @@ pub(crate) unsafe extern "C" fn import(
         for (index, (requested, capability)) in accesses.iter().zip(&capabilities).enumerate() {
             let device = &*requested.device.cast::<Device>();
             let address = native_allocation
+                .allocation()?
                 .device_address(&device.native)
                 .map_err(|error| device.native_error_status(&error))?;
             access_records
@@ -2017,7 +2018,7 @@ pub(crate) unsafe extern "C" fn import(
         let mut owner = slot.write(Memory {
             scope: scope_pointer.cast(),
             host_allocator: instance.host_allocator,
-            backing: Backing::Gpu(native_allocation.into_inner()),
+            backing: Backing::Gpu(native_allocation.into_inner()?),
             allocated_backing: false,
             info: amdf_memory_info_t {
                 memory_profile_ordinal: profile.ordinal,

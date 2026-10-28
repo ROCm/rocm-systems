@@ -24,6 +24,10 @@ extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclCollPreconnect
 
 extern std::function<ncclResult_t(struct ncclComm*, int)> g_doLaunches;
 
+// The public ncclGroupStart/ncclGroupEnd. Fail loud until a test installs them.
+extern std::function<ncclResult_t()> g_ncclGroupStart;
+extern std::function<ncclResult_t()> g_ncclGroupEnd;
+
 void ResetGroupFakes();
 
 #endif  // RCCL_TEST_HOST_GROUP_FAKES_H_

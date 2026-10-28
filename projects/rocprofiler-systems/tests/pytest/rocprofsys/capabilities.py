@@ -3,19 +3,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional
 import functools
 import os
+import re
 import shutil
 import subprocess
-import re
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from .cache import persistent_cache, persistent_cached_property
 
 
-def _get_amdsmi_version_output(rocm_path: Optional[Path] = None) -> Optional[str]:
+def _get_amdsmi_version_output(rocm_path: Path | None = None) -> str | None:
     """Return combined stdout/stderr of ``amd-smi version`` if available, else None."""
     amdsmi_exe = None
     if rocm_path is not None:
@@ -37,13 +36,14 @@ def _get_amdsmi_version_output(rocm_path: Optional[Path] = None) -> Optional[str
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         return (result.stdout or "") + " " + (result.stderr or "")
     except (subprocess.SubprocessError, OSError):
         return None
 
 
-def get_amdsmi_version(rocm_path: Optional[Path] = None) -> Optional[tuple[int, int]]:
+def get_amdsmi_version(rocm_path: Path | None = None) -> tuple[int, int] | None:
     """Return (major, minor) of amd-smi if available, else None."""
     raw = _get_amdsmi_version_output(rocm_path)
     if raw is None:
@@ -56,8 +56,8 @@ def get_amdsmi_version(rocm_path: Optional[Path] = None) -> Optional[tuple[int, 
 
 
 def get_amdgpu_version(
-    rocm_path: Optional[Path] = None,
-) -> Optional[tuple[int, int, int]]:
+    rocm_path: Path | None = None,
+) -> tuple[int, int, int] | None:
     """Return (major, minor, patch) of the amdgpu driver if available, else None."""
     raw = _get_amdsmi_version_output(rocm_path)
     if raw is None:
@@ -81,9 +81,7 @@ def get_amdgpu_version(
 _OPTIONAL_CAPABILITIES = frozenset({"CAP_PERFMON"})  # Introduced in kernel 5.8
 
 
-def find_roctx_site_packages(
-    rocm_path: Optional[Path], python_version: str
-) -> Optional[Path]:
+def find_roctx_site_packages(rocm_path: Path | None, python_version: str) -> Path | None:
     """Return the ROCm-provided roctx site-packages directory for a Python version.
 
     rocprofiler-sdk builds and installs its ``roctx`` Python bindings
@@ -134,10 +132,10 @@ class SystemCapabilities:
     rocprofsys_examples_dir: Path
     rocprofsys_avail: Path
     is_installed: bool
-    rocm_path: Optional[Path]
-    rocprofsys_site_packages: Optional[Path]
-    _python_versions_hint: Optional[list[str]] = field(default=None, repr=False)
-    _python_root_dirs_hint: Optional[list[Path]] = field(default=None, repr=False)
+    rocm_path: Path | None
+    rocprofsys_site_packages: Path | None
+    _python_versions_hint: list[str] | None = field(default=None, repr=False)
+    _python_root_dirs_hint: list[Path] | None = field(default=None, repr=False)
 
     @classmethod
     def from_config(cls, config) -> SystemCapabilities:
@@ -175,6 +173,7 @@ class SystemCapabilities:
                     capture_output=True,
                     text=True,
                     timeout=10,
+                    check=False,
                 )
                 return result.stdout if result.returncode == 0 else ""
             except (subprocess.SubprocessError, OSError):
@@ -194,7 +193,7 @@ class SystemCapabilities:
         return "unknown"
 
     @persistent_cached_property
-    def default_nic(self) -> Optional[str]:
+    def default_nic(self) -> str | None:
         """Get the name of the default NIC
 
         Returns: Result of executing the get_default_nic.sh script
@@ -208,6 +207,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return None
@@ -234,6 +234,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=15,
+                check=False,
             )
             if result.returncode != 0:
                 return []
@@ -252,7 +253,7 @@ class SystemCapabilities:
             return []
 
     @persistent_cached_property
-    def papi_nic_events(self) -> Optional[str]:
+    def papi_nic_events(self) -> str | None:
         """Get the list of all events that we want PAPI to record.
 
         Returns: Result of executing the generate_papi_nic_events.sh script
@@ -268,6 +269,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return None
@@ -302,6 +304,7 @@ class SystemCapabilities:
                 text=True,
                 timeout=10,
                 env=ucx_env,
+                check=False,
             )
             if result.returncode != 0:
                 return False
@@ -339,7 +342,7 @@ class SystemCapabilities:
         return count if count > 0 else 2
 
     @persistent_cached_property
-    def ptrace_scope(self) -> Optional[int]:
+    def ptrace_scope(self) -> int | None:
         """Get the value of the yama ``ptrace_scope`` kernel parameter.
 
         Returns ``None`` when the sysctl does not exist, which means the yama
@@ -392,6 +395,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
         except (subprocess.SubprocessError, OSError):
             return False
@@ -442,6 +446,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return False
@@ -480,6 +485,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return 0
@@ -499,7 +505,7 @@ class SystemCapabilities:
     @functools.cached_property
     def _supported_python_versions_and_executables(
         self,
-    ) -> tuple[Optional[list[str]], Optional[list[Path]]]:
+    ) -> tuple[list[str] | None, list[Path] | None]:
         """Return the list of supported python versions and executables"""
         return _get_supported_python_versions_and_executables(
             self.rocprofsys_site_packages,
@@ -508,12 +514,12 @@ class SystemCapabilities:
         )
 
     @property
-    def supported_python_versions(self) -> Optional[list[str]]:
+    def supported_python_versions(self) -> list[str] | None:
         """Return the list of supported python versions"""
         return self._supported_python_versions_and_executables[0]
 
     @property
-    def supported_python_executables(self) -> Optional[list[Path]]:
+    def supported_python_executables(self) -> list[Path] | None:
         """Return the list of supported python executables"""
         return self._supported_python_versions_and_executables[1]
 
@@ -533,14 +539,14 @@ class SystemCapabilities:
                 f"Python version '{version}' not found. Available: {', '.join(self.supported_python_versions)}"
             )
 
-    def roctx_site_packages(self, python_version: str) -> Optional[Path]:
+    def roctx_site_packages(self, python_version: str) -> Path | None:
         """ROCm's roctx site-packages directory for ``python_version``, if usable.
 
         See :func:`find_roctx_site_packages`.
         """
         return find_roctx_site_packages(self.rocm_path, python_version)
 
-    def python_lib_dir(self, python_version: str) -> Optional[Path]:
+    def python_lib_dir(self, python_version: str) -> Path | None:
         """Return the interpreter's own ``lib`` directory, or None if absent.
 
         On some rocprofiler-sdk builds the compiled ``libpyroctx.<abi>.so``
@@ -593,6 +599,7 @@ class SystemCapabilities:
                 text=True,
                 timeout=10,
                 env=env,
+                check=False,
             )
             return result.returncode == 0
         except (subprocess.SubprocessError, OSError):
@@ -615,13 +622,13 @@ class SystemCapabilities:
         return False
 
     @persistent_cached_property
-    def oshrun_exec(self) -> Optional[Path]:
+    def oshrun_exec(self) -> Path | None:
         """Get the path to the oshrun executable."""
         result = shutil.which("oshrun")
         return Path(result) if result else None
 
     @persistent_cached_property
-    def oshrun_version(self) -> Optional[tuple[int, ...]]:
+    def oshrun_version(self) -> tuple[int, ...] | None:
         """Get the parsed version of oshrun as a tuple (major, minor)"""
         if not self.oshrun_exec:
             return None
@@ -631,6 +638,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return None
@@ -669,7 +677,9 @@ class SystemCapabilities:
                     + extra
                     + ["-n", "1", probe_path, "--", "SENTINEL"]
                 )
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=30, check=False
+                )
                 if result.returncode == 0:
                     return result.stdout.strip() == "SENTINEL"
             return False
@@ -679,7 +689,7 @@ class SystemCapabilities:
             os.unlink(probe_path)
 
     @persistent_cached_property
-    def rocprofiler_sdk_version(self) -> Optional[tuple[int, int, int]]:
+    def rocprofiler_sdk_version(self) -> tuple[int, int, int] | None:
         """Return rocprofiler-sdk (major, minor, patch) from ``version.h`` under ROCm.
 
         ROCm root resolution: configured ``rocm_path`` when set, else the
@@ -700,13 +710,13 @@ class SystemCapabilities:
         )
 
     @persistent_cached_property
-    def julia_exec(self) -> Optional[Path]:
+    def julia_exec(self) -> Path | None:
         """Get the path to the Julia executable."""
         path = shutil.which("julia")
         return Path(path) if path else None
 
     @persistent_cached_property
-    def mpiexec_exec(self) -> Optional[Path]:
+    def mpiexec_exec(self) -> Path | None:
         """Find MPI launcher executable."""
         for candidate in ["mpiexec", "mpirun"]:
             path = shutil.which(candidate)
@@ -733,6 +743,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return False
@@ -741,12 +752,12 @@ class SystemCapabilities:
             return False
 
     @persistent_cached_property
-    def amdsmi_version(self) -> Optional[tuple[int, int]]:
+    def amdsmi_version(self) -> tuple[int, int] | None:
         """Get (major, minor) version of amd-smi, or None if not available."""
         return get_amdsmi_version(self.rocm_path)
 
     @persistent_cached_property
-    def amdgpu_version(self) -> Optional[tuple[int, int, int]]:
+    def amdgpu_version(self) -> tuple[int, int, int] | None:
         """Get (major, minor, patch) of the amdgpu driver, or None if not available."""
         return get_amdgpu_version(self.rocm_path)
 
@@ -757,7 +768,7 @@ _ROCPROFILER_SDK_VERSION_H_RE = re.compile(
 )
 
 
-def _rocprofiler_sdk_version_from_version_h(path: Path) -> Optional[tuple[int, int, int]]:
+def _rocprofiler_sdk_version_from_version_h(path: Path) -> tuple[int, int, int] | None:
     if not path.is_file():
         return None
     try:
@@ -770,7 +781,7 @@ def _rocprofiler_sdk_version_from_version_h(path: Path) -> Optional[tuple[int, i
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
 
-def _get_python_version(executable: Path) -> Optional[str]:
+def _get_python_version(executable: Path) -> str | None:
     """Get major.minor Python version from an executable."""
     try:
         result = subprocess.run(
@@ -778,6 +789,7 @@ def _get_python_version(executable: Path) -> Optional[str]:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         if result.returncode == 0:
             output = result.stdout.strip() or result.stderr.strip()
@@ -789,7 +801,7 @@ def _get_python_version(executable: Path) -> Optional[str]:
     return None
 
 
-def _find_python_in_dirs(version: str, root_dirs: list[Path]) -> Optional[Path]:
+def _find_python_in_dirs(version: str, root_dirs: list[Path]) -> Path | None:
     """Search for a specific Python version across multiple root directories."""
     for root_dir in root_dirs:
         for name in [f"python{version}", "python3", "python"]:
@@ -804,10 +816,10 @@ def _find_python_in_dirs(version: str, root_dirs: list[Path]) -> Optional[Path]:
 
 
 def _get_supported_python_versions_and_executables(
-    rocprofsys_site_packages: Optional[Path],
-    python_versions_hint: Optional[list[str]],
-    python_root_dirs_hint: Optional[list[Path]],
-) -> tuple[Optional[list[str]], Optional[list[Path]]]:
+    rocprofsys_site_packages: Path | None,
+    python_versions_hint: list[str] | None,
+    python_root_dirs_hint: list[Path] | None,
+) -> tuple[list[str] | None, list[Path] | None]:
     """Return the list of supported python versions and executables
 
     A supported python version is one that has a corresponding libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so.
@@ -824,7 +836,7 @@ def _get_supported_python_versions_and_executables(
 
     if python_versions_hint:
         for version in python_versions_hint:
-            found: Optional[Path] = None
+            found: Path | None = None
             if python_root_dirs_hint:
                 found = _find_python_in_dirs(version, python_root_dirs_hint)
             if found is None:
