@@ -12,3 +12,9 @@
 # GTest/GMock linkage, and CTest working directory.
 add_dbgapi_unit_test(dbgapi_smoke_test SOURCES smoke_test.cpp)
 
+# Internal-symbol check: links amd-dbgapi-internal and calls a function from
+# src/utils.cpp that the public library does not export.
+add_dbgapi_unit_test(dbgapi_internal_symbol_test
+  SOURCES internal_symbol_test.cpp
+  LIBS amd-dbgapi-internal
+)
