@@ -231,7 +231,7 @@ def test_no_change_guard_does_not_rewrite(tmp_path):
     mtime_first = out.stat().st_mtime
 
     time.sleep(0.05)
-    run(tmp_path, out)
+    assert run(tmp_path, out).returncode == 0
     mtime_second = out.stat().st_mtime
 
     assert mtime_first == mtime_second, "file was rewritten on second run with identical inputs"
@@ -377,7 +377,7 @@ def test_real_header_is_reproducible(tmp_path):
     first = out.read_text()
 
     time.sleep(0.05)
-    run(TUNER_DIR, out)
+    assert run(TUNER_DIR, out).returncode == 0
     second = out.read_text()
 
     assert first == second
