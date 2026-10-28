@@ -24,34 +24,18 @@
 
 """Maintenance of gcov counter (.gcda) files for code coverage CI.
 
+The move and merge commands let CI collect the counters of separate test runs
+and combine them into a single report without running the tests again.
+
 A test killed by a timeout (SIGKILL) while libgcov is writing a .gcda file
-can leave it corrupt. A newly created file ends up truncated: gcov silently
-under-reports it and gcov-tool merge crashes on it. The check command finds
-truncated files with GCC's own tools and deletes them:
-
-  - gcov-tool rewrite reads every file with libgcov's reader and warns about
-    files that end mid-record or are not gcov data files at all.
-  - gcov-dump function counts: libgcov writes a record for every function in
-    the translation unit, so a .gcda must list as many functions as its .gcno.
-    This catches files that are truncated on a record boundary, which
-    gcov-tool rewrite accepts.
-
-A file that is only missing part or all of its final end-of-file word passes
-both checks, which is harmless: gcov and gcov-tool merge read all of its
-counters.
-
-libgcov rewrites an existing .gcda in place without truncating it, so a kill
-during a rewrite leaves a well-formed file whose leading counters are from the
-new run and the rest from the previous one. No check can detect this; it
-undercounts the killed run's coverage.
+can leave it truncated. gcov reads what is left, but gcov-tool merge can crash
+on it. Rather than predicting which files gcov-tool accepts, merge combines
+each file separately and leaves out any file that gcov-tool fails to merge.
 
 A .gcda whose stamp differs from its .gcno was written by an older compile of
 the object. gcov reports such files as 0% covered without failing, so check
-fails instead of deleting them: the counters were collected against a build
-that no longer exists, which is a problem with the CI steps, not with a test.
-
-The move and merge commands let CI collect the counters of separate test runs
-and combine them into a single report without running the tests again.
+fails on them: the counters were collected against a build that no longer
+exists, which is a problem with the CI steps, not with a test.
 """
 
 import os
@@ -84,36 +68,13 @@ def find_gcda(root):
                 yield os.path.join(dirpath, itr)
 
 
-def rewrite_errors(gcov_tool, root):
-    """Files that gcov-tool rewrite reports problems with"""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        proc = subprocess.run(
-            [gcov_tool, "rewrite", "-o", os.path.join(tmpdir, "out"), root],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-        )
-
-    # gcov-tool changes into root and names files relative to it, e.g.:
-    #   gcov-tool-11: warning: ./a/b.gcda:record size mismatch 2 bytes unread
-    #   ./a/b.gcda:not a gcov data file
-    bad = {}
-    for line in proc.stdout.splitlines():
-        match = re.search(r"(\./.*?\.gcda):(.*)", line)
-        if match:
-            path = os.path.normpath(os.path.join(root, match.group(1)))
-            bad.setdefault(path, match.group(2).strip())
-
-    if proc.returncode != 0 and not bad:
-        raise RuntimeError(
-            f"{gcov_tool} rewrite {root} failed ({proc.returncode}):\n{proc.stdout}"
-        )
-
-    return bad
+def github_message(kind, message):
+    github = os.environ.get("GITHUB_ACTIONS", "") == "true"
+    print(f"::{kind}::{message}" if github else f"{kind}: {message}")
 
 
-def dump_summary(gcov_dump, path):
-    """Stamp and number of functions in a .gcda or .gcno file"""
+def read_stamp(gcov_dump, path):
+    """Stamp of a .gcda or .gcno file, or None if gcov-dump cannot read one"""
     proc = subprocess.run(
         [gcov_dump, path],
         stdout=subprocess.PIPE,
@@ -121,58 +82,38 @@ def dump_summary(gcov_dump, path):
         universal_newlines=True,
     )
     stamp = re.search(r":stamp (\d+)$", proc.stdout, re.MULTILINE)
-    return (stamp.group(1) if stamp else None, proc.stdout.count(":FUNCTION "))
+    return stamp.group(1) if stamp else None
 
 
-def compare_notes(gcov_dump, gcda):
-    """Returns (stale, corrupt) error messages for a .gcda vs its .gcno"""
+def stale_error(gcov_dump, gcda):
+    """Error message if a .gcda does not match the stamp of its .gcno"""
     gcno = f"{gcda[:-5]}.gcno"
     if not os.path.isfile(gcno):
-        return (None, None)
+        return None
 
-    gcda_stamp, ngcda = dump_summary(gcov_dump, gcda)
-    gcno_stamp, ngcno = dump_summary(gcov_dump, gcno)
-    if gcda_stamp != gcno_stamp:
-        return (f"stamp {gcda_stamp} does not match {gcno} stamp {gcno_stamp}", None)
-    if ngcda != ngcno:
-        return (None, f"has {ngcda} of {ngcno} functions")
-    return (None, None)
+    gcda_stamp = read_stamp(gcov_dump, gcda)
+    gcno_stamp = read_stamp(gcov_dump, gcno)
+    # a .gcda without a readable stamp was truncated, not built against another .gcno
+    if gcda_stamp is None or gcda_stamp == gcno_stamp:
+        return None
+    return f"stamp {gcda_stamp} does not match {gcno} stamp {gcno_stamp}"
 
 
 def check(args):
-    gcov_tool = gcov_sibling(args.gcov, "gcov-tool")
     gcov_dump = gcov_sibling(args.gcov, "gcov-dump")
     root = os.path.realpath(args.directory)
 
-    allfiles = list(find_gcda(root))
-    if not allfiles:
-        print(f"No .gcda files found in {root}")
-        return
-
-    bad = rewrite_errors(gcov_tool, root)
-
-    stale = {}
-    files = [itr for itr in allfiles if itr not in bad]
+    files = list(find_gcda(root))
     with concurrent.futures.ThreadPoolExecutor() as pool:
-        for path, (stale_error, error) in zip(
-            files, pool.map(lambda x: compare_notes(gcov_dump, x), files)
-        ):
-            if stale_error is not None:
-                stale[path] = stale_error
-            if error is not None:
-                bad[path] = error
+        errors = list(pool.map(lambda x: stale_error(gcov_dump, x), files))
 
-    github = os.environ.get("GITHUB_ACTIONS", "") == "true"
-    for path, error in sorted(bad.items()):
-        message = f"deleting corrupt coverage data {path}: {error}"
-        print(f"::warning::{message}" if github else f"warning: {message}")
-        os.remove(path)
+    stale = sorted((path, err) for path, err in zip(files, errors) if err is not None)
+    for path, error in stale:
+        github_message(
+            "error", f"coverage data {path} is from a different build: {error}"
+        )
 
-    for path, error in sorted(stale.items()):
-        message = f"coverage data {path} is from a different build: {error}"
-        print(f"::error::{message}" if github else f"error: {message}")
-
-    print(f"Checked {len(allfiles)} .gcda files, deleted {len(bad)}")
+    print(f"Checked {len(files)} .gcda files")
 
     if stale:
         print(f"{len(stale)} .gcda files do not match the build", file=sys.stderr)
@@ -193,25 +134,74 @@ def move(args):
     print(f"Moved {count} .gcda files from {args.source} to {args.destination}")
 
 
+def merge_one(gcov_tool, tmpdir, relpath, inputs, output):
+    """Merge one .gcda from several directories; returns an error message on failure"""
+    target = os.path.join(output, relpath)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    if len(inputs) == 1:
+        shutil.move(os.path.join(inputs[0], relpath), target)
+        return None
+
+    # gcov-tool merge combines directories: give it directories holding only this file
+    workdir = tempfile.mkdtemp(dir=tmpdir)
+    name = os.path.basename(relpath)
+    result = None
+    for idx, itr in enumerate(inputs):
+        current = os.path.join(workdir, f"in{idx}")
+        os.makedirs(current)
+        shutil.move(os.path.join(itr, relpath), os.path.join(current, name))
+        if result is None:
+            result = current
+            continue
+
+        merged = os.path.join(workdir, f"out{idx}")
+        proc = subprocess.run(
+            [gcov_tool, "merge", "-o", merged, result, current],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+        )
+        if proc.returncode != 0:
+            first = proc.stdout.strip().splitlines()[:1]
+            return f"gcov-tool merge failed ({proc.returncode}): {' '.join(first)}"
+        result = merged
+
+    shutil.move(os.path.join(result, name), target)
+    return None
+
+
 def merge(args):
     gcov_tool = gcov_sibling(args.gcov, "gcov-tool")
-    # gcov-tool merge fails if either input directory has no .gcda files
-    inputs = [itr for itr in args.directories if any(find_gcda(itr))]
+
+    inputs = {}
+    for itr in args.directories:
+        for path in find_gcda(itr):
+            inputs.setdefault(os.path.relpath(path, itr), []).append(itr)
+
     if not inputs:
         # no tests ran, e.g. the build failed: a report would show 0% coverage
         print("No .gcda files to merge", file=sys.stderr)
         return 1
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        result = inputs[0]
-        for idx, itr in enumerate(inputs[1:]):
-            output = os.path.join(tmpdir, f"{idx}")
-            subprocess.run([gcov_tool, "merge", "-o", output, result, itr], check=True)
-            result = output
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            errors = list(
+                pool.map(
+                    lambda x: merge_one(gcov_tool, tmpdir, x[0], x[1], args.output),
+                    inputs.items(),
+                )
+            )
 
-        count = move_gcda(result, args.output)
+    failed = 0
+    for relpath, error in sorted(zip(inputs.keys(), errors)):
+        if error is not None:
+            failed += 1
+            github_message("warning", f"leaving out coverage data {relpath}: {error}")
 
-    print(f"Merged {len(inputs)} directories into {count} .gcda files in {args.output}")
+    print(
+        f"Merged {len(args.directories)} directories into "
+        f"{len(inputs) - failed} .gcda files in {args.output}"
+    )
 
 
 def main():
@@ -219,7 +209,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     check_parser = subparsers.add_parser(
-        "check", help="Delete corrupt .gcda files under a directory"
+        "check", help="Fail if .gcda files under a directory do not match their .gcno"
     )
     check_parser.add_argument("directory", help="Directory to search for .gcda files")
     check_parser.set_defaults(func=check)
@@ -234,7 +224,7 @@ def main():
     merge_parser = subparsers.add_parser(
         "merge",
         help="Sum the counters of .gcda files in several directories and move the "
-        "result into an output directory",
+        "result into an output directory, leaving out files gcov-tool cannot merge",
     )
     merge_parser.add_argument("-o", "--output", required=True, help="Output directory")
     merge_parser.add_argument(
