@@ -686,6 +686,27 @@ fn native_work_busy_keeps_the_queue_and_parent_borrow_for_retry() {
 }
 
 #[test]
+fn unmapping_a_peer_producer_releases_its_device_borrow() {
+    let environment = Environment::new();
+    let (queue, _) = fixture_queue(&environment);
+    queue.mappings.store(1, Ordering::Release);
+    let pointer = queue.into_raw().cast::<amdf_user_queue_t>();
+    let producer_queues = AtomicU64::new(1);
+    let mapping = Owned::new(Mapping {
+        queue: pointer.cast(),
+        producer_queues: Some(&raw const producer_queues),
+        info: amdf_user_queue_mapping_info_t::default(),
+    })
+    .unwrap();
+    // SAFETY: Both counted parents remain live until their mapping is removed.
+    unsafe { assert_eq!(unmap(mapping.into_raw().cast()), 0) };
+    assert_eq!(producer_queues.load(Ordering::Acquire), 0);
+    // SAFETY: The queue has no remaining producer mapping or work.
+    unsafe { assert_eq!(destroy(pointer), 0) };
+    assert_eq!(environment.queues.load(Ordering::Acquire), 0);
+}
+
+#[test]
 fn partial_native_teardown_consumes_handle_without_replaying_cleanup() {
     let environment = Environment::new();
     let (queue, fixture) = fixture_queue(&environment);
