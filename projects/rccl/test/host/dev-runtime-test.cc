@@ -6780,6 +6780,22 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
   EXPECT_EQ(ncclCommQueryProperties(comm, &raw), ncclInvalidUsage);
 }
 
+// NCCL 2.32 derives nLsaTeams from the topology instead of running
+// ncclDevrInitOnce, so a property query sets up no device-runtime state: no VMM
+// granularity query, and bigSize -- the "initialised" marker -- stays 0.
+TEST_F(CommQueryPropertiesTest, NLsaTeams_DoesNotInitialiseDeviceRuntime) {
+  ScopedHook granularity(g_hipMemGetAllocationGranularity,
+                         [](size_t* g, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
+                           *g = 4096;
+                           return hipSuccess;
+                         });
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.nLsaTeams, 1);  // all 8 ranks on node 0
+  EXPECT_EQ(granularity.calls, 0);
+  EXPECT_EQ(comm->devrState.bigSize, 0u);
+}
+
 // A caller that JIT-compiles its device code must allocate the devComm in the
 // runtime layout, so it is told the runtime's size, not its own headers'.
 TEST_F(CommQueryPropertiesTest, Caller231_ReportsRuntimeDevCommSize) {
