@@ -284,7 +284,7 @@ impl DrmRegisteredHost {
                     native_size as u64,
                     permissions,
                     uncached,
-                )?
+                )?;
             };
         }
         allocation.owner.check()?;

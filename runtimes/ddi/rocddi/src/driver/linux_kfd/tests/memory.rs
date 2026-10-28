@@ -84,6 +84,7 @@ fn desc() -> AllocationDesc {
 fn scratch_pool() -> Mutex<ScratchPool> {
     Mutex::new(ScratchPool::new(sysfs::KfdQueueProperties {
         gfx_target: 120_001,
+        target_profile: crate::topology::GpuTargetProfile::Gfx1201,
         xcc_count: 1,
         ..sysfs::KfdQueueProperties::default()
     }))
@@ -684,6 +685,7 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
         native: sysfs::KfdNode {
             queues: sysfs::KfdQueueProperties {
                 gfx_target,
+                target_profile: crate::topology::GpuTargetProfile::from_kfd_target(gfx_target),
                 ..sysfs::KfdQueueProperties::default()
             },
             ..node()
