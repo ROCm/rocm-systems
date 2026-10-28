@@ -9,13 +9,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from membw_analysis.models import NodeSpec, TreeSpec
+from membw_analysis.models import BOTTLENECK_LEVELS, NodeSpec, TreeSpec
 from utils.logger import console_error
 from utils.utils_common import load_yaml
 
 # Duplicated from engine._OPS keys to avoid circular import (engine imports tree_spec).
 _VALID_OPS = frozenset({"gte", "gt", "lt", "lte"})
-_VALID_LEVELS = frozenset({"GL1", "GL2", "EA"})
 
 # Structural edits (add/remove nodes, rename keys) change the hash
 # and require updating it here. Reordering and threshold-only edits are safe.
@@ -163,7 +162,7 @@ def _validate_node(
     """Validate a single node and recurse into children."""
     is_catch_all = node.requires_parent and len(node.requires_siblings_false) > 0
 
-    if node.level not in _VALID_LEVELS:
+    if node.level not in BOTTLENECK_LEVELS:
         errors.append(f"Node {node.id!r}: invalid level {node.level!r}")
 
     if is_catch_all:

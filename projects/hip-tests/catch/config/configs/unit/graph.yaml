@@ -776,6 +776,9 @@ graph:
   Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapture:
     <<: *level_default
     tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_LegacyStreamWaitIsRejected:
+    <<: *level_default
+    tags: [capture]
   Unit_hipStreamBeginCapture_Negative_StreamOffenceInvalidatesWholeCapture:
     <<: *level_default
     tags: [capture]
@@ -1676,6 +1679,12 @@ graph:
     <<: *level_2
     tags: [exec]
   Unit_hipGraphSegmentOrdering_EmptyNodeCrossStreamCompletion:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphDualStreamCapture_LightBranchOnSideStream:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphDualStreamCapture_HeavyBranchOnSideStream:
     <<: *level_2
     tags: [exec]
   Unit_hipGraphKernelNodePriority_CaptureStreamPriorityCopied:
