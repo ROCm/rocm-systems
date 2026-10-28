@@ -78,7 +78,13 @@ public:
 
     static common::version get_version();
 
-    static std::vector<std::string>            get_domain_choices();
+    static std::vector<std::string> get_domain_choices();
+
+    /// @brief Domain names the compiled rocprofiler-sdk headers can trace,
+    ///        including group aliases such as `hip_api`. This is the key set of
+    ///        the callback and buffered domain maps.
+    static std::vector<std::string> get_supported_domain_names();
+
     static std::string                         get_domain_defaults();
     static std::vector<operation_setting_spec> get_operation_settings();
 
@@ -216,6 +222,31 @@ tracing_config<SdkBackend, Externals>::get_domain_choices()
     std::ranges::sort(choices_vec);
 
     return choices_vec;
+}
+
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
+std::vector<std::string>
+tracing_config<SdkBackend, Externals>::get_supported_domain_names()
+{
+    const auto callback_domains = get_callback_domain_map();
+    const auto buffered_domains = get_buffered_domain_map();
+
+    auto names = std::unordered_set<std::string>{};
+    names.reserve(callback_domains.size() + buffered_domains.size());
+
+    for(const auto& entry : callback_domains)
+    {
+        names.emplace(entry.first);
+    }
+    for(const auto& entry : buffered_domains)
+    {
+        names.emplace(entry.first);
+    }
+
+    auto sorted = std::vector<std::string>{ names.begin(), names.end() };
+    std::ranges::sort(sorted);
+    return sorted;
 }
 
 template <policies::tracing_config::backend   SdkBackend,
