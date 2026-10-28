@@ -2929,8 +2929,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
 
   NCCLCHECKGOTO(ncclTopoPathAllDirectNVLink(comm->topo, &comm->isAllDirectNvlink), ret, fail);
-  // MNNVL clique peers have no topology edge (PATH_DIS); ncclTopoCheckP2p already treats them as PATH_NVL.
-  if (comm->MNNVL && comm->isAllDirectP2p) comm->isAllDirectNvlink = true;
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
   if (ginGateAllows(globalGinTypeBitMask, comm)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
