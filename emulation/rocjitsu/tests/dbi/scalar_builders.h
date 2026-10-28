@@ -105,13 +105,16 @@ static_assert(cdna3::OPR_SSRC_SRC_LITERAL == kScalarSrcLiteral &&
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
     return build_sopp_encoding(arch, scc1 ? cdna3::kSCbranchScc1Sopp : cdna3::kSCbranchScc0Sopp,
-                               offset);
+                               offset)
+        .value();
   case ROCJITSU_CODE_ARCH_CDNA4:
     return build_sopp_encoding(arch, scc1 ? cdna4::kSCbranchScc1Sopp : cdna4::kSCbranchScc0Sopp,
-                               offset);
+                               offset)
+        .value();
   case ROCJITSU_CODE_ARCH_RDNA4:
     return build_sopp_encoding(arch, scc1 ? rdna4::kSCbranchScc1Sopp : rdna4::kSCbranchScc0Sopp,
-                               offset);
+                               offset)
+        .value();
   default:
     throw util::UnimplementedInst("s_cbranch_scc for target architecture");
   }
