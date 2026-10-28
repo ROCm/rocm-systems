@@ -6,6 +6,7 @@
 
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
+#include <utils.hh>
 
 #include "hip_cg_common.hh"
 
@@ -125,7 +126,7 @@ static __global__ void coop_kernel(unsigned int* first_array, unsigned int* seco
 }
 
 static __global__ void test_kernel(unsigned int* atomic_val, unsigned int* array,
-                                   unsigned int loops) {
+                                   unsigned int loops, unsigned long long spin_ticks) {
   cg::grid_group grid = cg::this_grid();
   unsigned rank = grid.thread_rank();
 
@@ -141,57 +142,15 @@ static __global__ void test_kernel(unsigned int* atomic_val, unsigned int* array
     // near "total number of blocks". It will be the last wavefront to
     // reach the atomicInc, but everyone will have only hit the atomic once.
     if (rank == (grid.size() - 1)) {
-      long long time_diff = 0;
-      long long last_clock = clock64();
-      do {
-        long long cur_clock = clock64();
-        if (cur_clock > last_clock) {
-          time_diff += (cur_clock - last_clock);
-        }
-        // If it rolls over, we don't know how much to add to catch up.
-        // So just ignore those slipped cycles.
-        last_clock = cur_clock;
-      } while (time_diff < 1000000);
-    }
-
-    if (threadIdx.x == 0) {
-      array[offset] = atomicInc(&atomic_val[0], UINT_MAX);
-    }
-    grid.sync();
-    offset += gridDim.x;
-  }
-}
-
-__global__ void test_kernel_gfx11(unsigned int* atomic_val, unsigned int* array,
-                                  unsigned int loops) {
 #if HT_AMD
-  cg::grid_group grid = cg::this_grid();
-  unsigned rank = grid.thread_rank();
-
-  int offset = blockIdx.x;
-  for (int i = 0; i < loops; i++) {
-    // Make the last thread run way behind everyone else.
-    // If the barrier below fails, then the other threads may hit the
-    // atomicInc instruction many times before the last thread ever gets
-    // to it.
-    // As such, without the barrier, the last array entry will eventually
-    // contain a very large value, defined by however many times the other
-    // wavefronts make it through this loop.
-    // If the barrier works, then it will likely contain some number
-    // near "total number of blocks". It will be the last wavefront to
-    // reach the atomicInc, but everyone will have only hit the atomic once.
-    if (rank == (grid.size() - 1)) {
-      long long time_diff = 0;
-      long long last_clock = clock_function();
-      do {
-        long long cur_clock = clock_function();
-        if (cur_clock > last_clock) {
-          time_diff += (cur_clock - last_clock);
-        }
-        // If it rolls over, we don't know how much to add to catch up.
-        // So just ignore those slipped cycles.
-        last_clock = cur_clock;
-      } while (time_diff < 1000000);
+      const long long start = clock_function();
+      while (clock_function() - start < static_cast<long long>(spin_ticks)) {
+      }
+#else
+      const long long start = clock64();
+      while (clock64() - start < static_cast<long long>(spin_ticks)) {
+      }
+#endif
     }
 
     if (threadIdx.x == 0) {
@@ -200,7 +159,6 @@ __global__ void test_kernel_gfx11(unsigned int* atomic_val, unsigned int* array,
     grid.sync();
     offset += gridDim.x;
   }
-#endif
 }
 
 static void verify_coop_buffers(unsigned int* host_input, unsigned int* first_array,
@@ -454,9 +412,12 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
 
   int num_threads_in_block = block_size * warp_size;
 
-  auto test_kernel_used = IsGfx11() ? test_kernel_gfx11 : test_kernel;
+  // 2 ms stagger for the last wavefront.
+  constexpr unsigned int kStaggerUs = 2000;
+  unsigned long long spin_ticks = kStaggerUs * SpinTicksPerUs();
+
   // Calculate the device occupancy to know how many blocks can be run.
-  HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm, test_kernel_used,
+  HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm, test_kernel,
                                                          num_threads_in_block, 0));
 
   int requested_blocks = warps / block_size;
@@ -486,11 +447,12 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
   INFO("Launching a cooperative kernel with " << warps << " warps in " << requested_blocks
                                               << " thread blocks");
 
-  void* params[3];
+  void* params[4];
   params[0] = reinterpret_cast<void*>(&kernel_atomic);
   params[1] = reinterpret_cast<void*>(&kernel_buffer);
   params[2] = reinterpret_cast<void*>(&loops);
-  HIP_CHECK(hipLaunchCooperativeKernel(test_kernel_used, requested_blocks, num_threads_in_block,
+  params[3] = reinterpret_cast<void*>(&spin_ticks);
+  HIP_CHECK(hipLaunchCooperativeKernel(test_kernel, requested_blocks, num_threads_in_block,
                                        params, 0, 0));
 
   // Read back the buffer to host
