@@ -36,6 +36,7 @@
 
 // hrr_api_args.h — for hrr_args_* struct types and hrr_api_id_t enum
 #include "hrr/hrr_api_args.h"
+#include "hrr/hrr_host_rect.h"
 
 // HIP runtime internals
 #include "../hip_global.hpp"       // hip::asKernel()
@@ -2128,65 +2129,14 @@ hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStr
 // blob. Keyed off srcMemoryType/dstMemoryType (no single "kind" field).
 // ---------------------------------------------------------------------------
 
-// Byte footprint of the host side of a driver-style copy, measured from the host
-// base pointer (srcHost / dstHost).
+// The host side of a driver-style copy is a pitched rect measured from the host
+// base pointer (srcHost / dstHost), as the runtime addresses it
+// (amd::BufferRect). hrr/hrr_host_rect.h does the arithmetic, and replay
+// includes the same header, so both sides agree on the footprint. A copy whose
+// footprint does not fit in size_t is not recorded: hrr_host_rect_extent()
+// returns SIZE_MAX for it, so the caller still reaches write_host_rect_blob,
+// which records the loss.
 //
-// The runtime addresses the host buffer as a pitched rect (amd::BufferRect):
-//   row   = pitch ? pitch : width
-//   slice = pitch*pitch_height ? pitch*pitch_height : row*height
-//   first byte = z*slice + y*row + x
-//   last byte  = first + (depth-1)*slice + (height-1)*row + width - 1
-// The blob holds only the copied rows (write_host_rect_blob), for the H2D
-// source and the D2H expected output alike, but the footprint still locates
-// them, and a copy whose footprint does not fit in size_t is not recorded.
-// For a copy the runtime accepted, footprint >= width*height*depth.
-//
-// Every step is checked, as replay's hrr_host_rect is: a wrapped footprint would
-// place rows outside the buffer the copy was given.
-struct HostRect {
-  size_t row, slice, first, bytes;  // bytes == 0: nothing is copied
-  bool ok;                          // false: the footprint does not fit in size_t
-};
-
-// a*b + c, refusing to wrap.
-static bool size_mad(size_t a, size_t b, size_t c, size_t* out) {
-  if (a != 0 && b > (SIZE_MAX - c) / a) return false;
-  *out = a * b + c;
-  return true;
-}
-
-static HostRect host_rect(size_t pitch, size_t pitch_height, size_t x, size_t y, size_t z,
-                          size_t width, size_t height, size_t depth) {
-  HostRect r{0, 0, 0, 0, false};
-  if (width == 0 || height == 0 || depth == 0) {
-    r.ok = true;
-    return r;
-  }
-  r.row = (pitch != 0) ? pitch : width;
-  if (r.row < width) r.row = width;  // defensive: degenerate pitch
-  size_t dense = 0, yx = 0, last = 0;
-  if (!size_mad(r.row, height, 0, &dense) || !size_mad(pitch, pitch_height, 0, &r.slice))
-    return r;
-  if (r.slice < dense) r.slice = dense;  // 0 => runtime default
-  // first = z*slice + y*row + x, the offset of the first byte; bytes = first +
-  // (depth-1)*slice + (height-1)*row + width.
-  if (!size_mad(y, r.row, x, &yx) || !size_mad(z, r.slice, yx, &r.first) ||
-      !size_mad(height - 1, r.row, width, &last) ||
-      !size_mad(depth - 1, r.slice, last, &last) || !size_mad(1, last, r.first, &r.bytes))
-    return r;
-  r.ok = true;
-  return r;
-}
-
-// SIZE_MAX for a footprint that overflows, so the caller still reaches
-// write_host_rect_blob, which records the loss.
-static size_t drvmemcpy_host_byte_count(size_t pitch, size_t pitch_height,
-                                        size_t x, size_t y, size_t z,
-                                        size_t width, size_t height, size_t depth) {
-  const HostRect r = host_rect(pitch, pitch_height, x, y, z, width, height, depth);
-  return r.ok ? r.bytes : SIZE_MAX;
-}
-
 // Blob of a host rect: its copied rows packed end to end, width*height*depth
 // bytes whatever the pitches and offsets, so capture costs what the copy moves.
 // The bytes before the first row and between rows and slices are never read:
@@ -2198,18 +2148,18 @@ static hrr_cap::Hash128 write_host_rect_blob(const void* base, size_t pitch,
                                              size_t pitch_height, size_t x, size_t y,
                                              size_t z, size_t width, size_t height,
                                              size_t depth) {
-  const HostRect r = host_rect(pitch, pitch_height, x, y, z, width, height, depth);
+  const HrrHostRect r = hrr_host_rect(pitch, pitch_height, x, y, z, width, height, depth);
   if (!r.ok) {
     LogPrintfWarning("[HRR capture] host copy rect %zux%zux%zu at pitch %zu overflows size_t",
                      width, height, depth, pitch);
     hrr_cap::writer::mark_incomplete("pitched host copy not recorded");
     return {0, 0};
   }
-  if (r.bytes == 0) return {0, 0};
-  // Neither product wraps: both are at most r.bytes, which fits.
+  if (r.extent == 0) return {0, 0};
+  // Neither product wraps: both are at most r.extent, which fits.
   const size_t n = width * height * depth;
   const auto* src = static_cast<const uint8_t*>(base) + r.first;
-  if ((height == 1 || r.row == width) && (depth == 1 || r.slice == width * height)) {
+  if (hrr_host_rect_dense(&r)) {
     return hrr_cap::writer::write_blob(src, n);  // dense: the rows are one run
   }
   std::unique_ptr<uint8_t[]> buf(new (std::nothrow) uint8_t[n]);
@@ -2234,9 +2184,9 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
   if (!p) { hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a)); return; }
   std::memcpy(a.drv3d_bytes, p, sizeof(HIP_MEMCPY3D));
   if (p->srcMemoryType == hipMemoryTypeHost && p->srcHost) {
-    size_t n = drvmemcpy_host_byte_count(p->srcPitch, p->srcHeight, p->srcXInBytes,
-                                         p->srcY, p->srcZ, p->WidthInBytes,
-                                         p->Height, p->Depth);
+    size_t n = hrr_host_rect_extent(p->srcPitch, p->srcHeight, p->srcXInBytes,
+                                    p->srcY, p->srcZ, p->WidthInBytes,
+                                    p->Height, p->Depth);
     if (n > 0) {
       auto h = write_host_rect_blob(p->srcHost, p->srcPitch, p->srcHeight, p->srcXInBytes,
                                     p->srcY, p->srcZ, p->WidthInBytes, p->Height, p->Depth);
@@ -2247,9 +2197,9 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
     // D2H expected output, the copied rows of the destination rect.
     // An array source is skipped because playback declines array-typed rects,
     // so the blob would be an expected output nothing ever validates.
-    size_t n = drvmemcpy_host_byte_count(p->dstPitch, p->dstHeight, p->dstXInBytes,
-                                         p->dstY, p->dstZ, p->WidthInBytes,
-                                         p->Height, p->Depth);
+    size_t n = hrr_host_rect_extent(p->dstPitch, p->dstHeight, p->dstXInBytes,
+                                    p->dstY, p->dstZ, p->WidthInBytes,
+                                    p->Height, p->Depth);
     if (n > 0) {
       // The null stream needs the sync too: hipDrvMemcpy3DAsync(p, nullptr) is
       // still asynchronous, so skipping it can snapshot dstHost before the copy
@@ -2283,9 +2233,9 @@ static void capture_drvmemcpy2d_impl(T& a, hrr_api_id_t api_id, const hip_Memcpy
   // that falls back to x + WidthInBytes. See hip::getDrvMemcpy3DDesc().
   if (p->srcMemoryType == hipMemoryTypeHost && p->srcHost) {
     size_t pitch = p->srcPitch ? p->srcPitch : p->srcXInBytes + p->WidthInBytes;
-    size_t n = drvmemcpy_host_byte_count(pitch, /*pitch_height=*/0, p->srcXInBytes,
-                                         p->srcY, /*z=*/0, p->WidthInBytes,
-                                         p->Height, /*depth=*/1);
+    size_t n = hrr_host_rect_extent(pitch, /*pitch_height=*/0, p->srcXInBytes,
+                                    p->srcY, /*z=*/0, p->WidthInBytes,
+                                    p->Height, /*depth=*/1);
     if (n > 0) {
       auto h = write_host_rect_blob(p->srcHost, pitch, /*pitch_height=*/0, p->srcXInBytes,
                                     p->srcY, /*z=*/0, p->WidthInBytes, p->Height, /*depth=*/1);
@@ -2294,9 +2244,9 @@ static void capture_drvmemcpy2d_impl(T& a, hrr_api_id_t api_id, const hip_Memcpy
   } else if (dst_ready && p->dstMemoryType == hipMemoryTypeHost && p->dstHost &&
              p->srcMemoryType != hipMemoryTypeArray) {
     size_t pitch = p->dstPitch ? p->dstPitch : p->dstXInBytes + p->WidthInBytes;
-    size_t n = drvmemcpy_host_byte_count(pitch, /*pitch_height=*/0, p->dstXInBytes,
-                                         p->dstY, /*z=*/0, p->WidthInBytes,
-                                         p->Height, /*depth=*/1);
+    size_t n = hrr_host_rect_extent(pitch, /*pitch_height=*/0, p->dstXInBytes,
+                                    p->dstY, /*z=*/0, p->WidthInBytes,
+                                    p->Height, /*depth=*/1);
     if (n > 0) {
       auto h = write_host_rect_blob(p->dstHost, pitch, /*pitch_height=*/0, p->dstXInBytes,
                                     p->dstY, /*z=*/0, p->WidthInBytes, p->Height, /*depth=*/1);
@@ -2383,14 +2333,6 @@ hipError_t capture_hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy,
 // (capture-time, untranslatable) host VA, and validate D2H output.
 // ---------------------------------------------------------------------------
 
-// SIZE_MAX when the extent overflows, as drvmemcpy_host_byte_count.
-static size_t memcpy2d_host_byte_count(size_t pitch, size_t width, size_t height) {
-  if (height == 0 || width == 0) return 0;
-  if (pitch < width) pitch = width;  // defensive: degenerate pitch
-  size_t n = 0;
-  return size_mad(pitch, height - 1, width, &n) ? n : SIZE_MAX;
-}
-
 // Shared blob logic for both 2D variants. Writes the H2D source blob or the D2H
 // expected-output blob into `a`, then emits the event.
 template <typename T>
@@ -2399,7 +2341,7 @@ static void capture_memcpy2d_impl(
     const void* src, size_t spitch, size_t width, size_t height,
     hipMemcpyKind kind, hipStream_t stream, bool is_async) {
   if (kind == hipMemcpyHostToDevice && src) {
-    size_t n = memcpy2d_host_byte_count(spitch, width, height);
+    size_t n = hrr_host_rect_extent(spitch, 0, 0, 0, 0, width, height, 1);
     if (n > 0) {
       auto h = write_host_rect_blob(src, spitch, 0, 0, 0, 0, width, height, 1);
       a.blob_hash_lo = h.lo;
@@ -2407,7 +2349,7 @@ static void capture_memcpy2d_impl(
       hrr_trace_h2d(is_async ? "hipMemcpy2DAsync" : "hipMemcpy2D", dst, n);
     }
   } else if (kind == hipMemcpyDeviceToHost && dst) {
-    size_t n = memcpy2d_host_byte_count(dpitch, width, height);
+    size_t n = hrr_host_rect_extent(dpitch, 0, 0, 0, 0, width, height, 1);
     if (n > 0) {
       if (is_async) {
         hipError_t sync_r = sync_for_d2h_snapshot(stream);

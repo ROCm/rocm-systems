@@ -3,18 +3,19 @@
 
 //! `ROCr` tool ABI tables and dispatch ownership.
 //!
-//! Each public HSA symbol jumps through an atomic table-owner slot and then
-//! reads the current function pointer. The table given to a tool contains the
-//! preceding implementation pointer, so a replacement can call through to the
-//! runtime. Initial edits are published after `OnLoad` succeeds; later
-//! attachment edits remain visible through the same stable table storage.
+//! Each public HSA symbol jumps through an atomic function slot. The
+//! registrar layer uses stable bridges into retained C tables so existing
+//! late attachment remains visible. Legacy `OnLoad` edits are snapshotted
+//! after its callback returns, and its staging tables remain pinned.
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::mem::size_of;
+use std::ptr::NonNull;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicPtr, Ordering};
 
+/// Generated support for this frontend.
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/api_trace_generated.rs"));
 }
@@ -34,6 +35,7 @@ struct ApiTableVersion {
 }
 
 impl ApiTableVersion {
+    /// Builds a table version with its exact ABI byte size.
     fn new(major_id: u32, minor_id: usize, step_id: u32) -> Self {
         Self {
             major_id,
@@ -54,6 +56,7 @@ struct ApiTable<const N: usize> {
 }
 
 impl<const N: usize> ApiTable<N> {
+    /// Builds a stable function table with version metadata.
     fn new(major: u32, step: u32, functions: [*mut c_void; N]) -> Self {
         Self {
             version: ApiTableVersion::new(major, size_of::<Self>(), step),
@@ -86,23 +89,34 @@ struct RootTable {
 struct ApiTables {
     /// Points into the table fields of this same pinned allocation.
     root: RootTable,
+    /// Pinned table of core HSA function pointers.
     core: ApiTable<{ generated::CORE_COUNT }>,
+    /// Pinned table of AMD extension function pointers.
     amd_ext: ApiTable<{ generated::AMD_EXT_COUNT }>,
+    /// Pinned table of finalizer extension pointers.
     finalizer_ext: ApiTable<{ generated::FINALIZER_EXT_COUNT }>,
+    /// Pinned table of image extension pointers.
     image_ext: ApiTable<{ generated::IMAGE_EXT_COUNT }>,
+    /// Pinned table of tool support function pointers.
     tools: ApiTable<{ generated::TOOLS_COUNT }>,
+    /// Pinned table of PC sampling extension pointers.
     pc_sampling_ext: ApiTable<{ generated::PC_SAMPLING_EXT_COUNT }>,
 }
 
 // SAFETY: Root pointers refer only to fields within the pinned Box<ApiTables>.
-// The process tool mutex owns runtime-side mutation. Exported trampolines and
-// tool callbacks read aligned function slots in the retained table; attached
-// tools own synchronization of their subsequent slot edits.
+// The process tool mutex owns Rust-side mutation of private and legacy
+// tables. Legacy tools must finish their edits before OnLoad returns;
+// afterward the staging table is retained for tool-owned pointers.
 unsafe impl Send for ApiTables {}
 
 impl ApiTables {
+    /// Allocates the root table and all child tables at stable addresses.
     fn new() -> Box<Self> {
-        let original = generated::initial_functions();
+        Self::from_functions(&generated::initial_functions())
+    }
+
+    /// Creates a private staging table from the last published functions.
+    fn from_functions(functions: &generated::InitialFunctions) -> Box<Self> {
         let mut tables = Box::new(Self {
             root: RootTable {
                 version: ApiTableVersion::new(3, size_of::<RootTable>(), 1),
@@ -113,12 +127,12 @@ impl ApiTables {
                 tools: std::ptr::null_mut(),
                 pc_sampling_ext: std::ptr::null_mut(),
             },
-            core: ApiTable::new(2, 0, original.core),
-            amd_ext: ApiTable::new(2, generated::AMD_EXT_STEP, original.amd_ext),
-            finalizer_ext: ApiTable::new(2, 0, original.finalizer_ext),
-            image_ext: ApiTable::new(2, 1, original.image_ext),
-            tools: ApiTable::new(1, 0, original.tools),
-            pc_sampling_ext: ApiTable::new(1, 0, original.pc_sampling_ext),
+            core: ApiTable::new(2, 0, functions.core),
+            amd_ext: ApiTable::new(2, generated::AMD_EXT_STEP, functions.amd_ext),
+            finalizer_ext: ApiTable::new(2, 0, functions.finalizer_ext),
+            image_ext: ApiTable::new(2, 1, functions.image_ext),
+            tools: ApiTable::new(1, 0, functions.tools),
+            pc_sampling_ext: ApiTable::new(1, 0, functions.pc_sampling_ext),
         });
         tables.root.core = &raw mut tables.core;
         tables.root.amd_ext = &raw mut tables.amd_ext;
@@ -129,6 +143,7 @@ impl ApiTables {
         tables
     }
 
+    /// Snapshots the functions in every API table.
     fn functions(&self) -> generated::InitialFunctions {
         generated::InitialFunctions {
             core: self.core.functions,
@@ -140,6 +155,7 @@ impl ApiTables {
         }
     }
 
+    /// Replaces the private function slots from a validated snapshot.
     fn restore(&mut self, saved: &generated::InitialFunctions) {
         self.core.functions = saved.core;
         self.amd_ext.functions = saved.amd_ext;
@@ -150,10 +166,19 @@ impl ApiTables {
     }
 }
 
+/// Leaked table allocation retained by the registrar across HSA generations.
+struct ProfilerTable(NonNull<ApiTables>);
+
+// SAFETY: Rust never dereferences these allocations after registration. The
+// registrar can rewrite their fields, and assembly bridges read them under
+// the existing HSA tool ABI. Moving the pointer does not touch those fields.
+unsafe impl Send for ProfilerTable {}
+
 /// Owned `dlopen` reference whose code stays mapped through process exit.
 struct ToolLibrary(usize);
 
 impl ToolLibrary {
+    /// Opens a named tool library and takes ownership of its handle.
     fn open(name: &CStr) -> Option<Self> {
         // RTLD_NODELETE retains code until process exit: a shutdown wrapper
         // may still be returning through this library after OnUnload.
@@ -167,6 +192,7 @@ impl ToolLibrary {
         (!handle.is_null()).then_some(Self(handle as usize))
     }
 
+    /// Finds an already-loaded tool library without loading it again.
     fn open_loaded(name: &CStr) -> Option<Self> {
         // SAFETY: RTLD_NOLOAD resolves only an existing process mapping and
         // takes one reference when it succeeds.
@@ -179,6 +205,7 @@ impl ToolLibrary {
         (!handle.is_null()).then_some(Self(handle as usize))
     }
 
+    /// Looks up a symbol in an opened tool library.
     fn symbol(&self, name: &CStr) -> *mut c_void {
         // SAFETY: The handle remains owned by this ToolLibrary.
         unsafe { libc::dlsym(self.0 as *mut c_void, name.as_ptr()) }
@@ -186,6 +213,7 @@ impl ToolLibrary {
 }
 
 impl Drop for ToolLibrary {
+    /// Releases the library reference while `RTLD_NODELETE` keeps code mapped.
     fn drop(&mut self) {
         // SAFETY: This closes one owned dlopen reference. RTLD_NODELETE keeps
         // code mapped while a tool wrapper can still be on the call stack.
@@ -195,14 +223,32 @@ impl Drop for ToolLibrary {
 
 /// Process-owned API tables and attached tool libraries.
 struct ToolState {
-    /// Pinned function tables published to tools and HSA trampolines.
+    /// Private source for the last published function snapshot.
     tables: Box<ApiTables>,
+    /// Each registration stays pinned because the registrar can retain and
+    /// rewrite its C table after the corresponding HSA generation ends.
+    profiler_tables: Vec<ProfilerTable>,
+    /// A tool can retain a table pointer after `OnUnload`; keep every staging
+    /// table alive until process exit, including failed attachment attempts.
+    #[allow(clippy::vec_box, reason = "each C table needs a stable address")]
+    legacy_tables: Vec<Box<ApiTables>>,
     /// Libraries whose callbacks may still be in flight.
     libraries: Vec<ToolLibrary>,
-    /// Optional library that supplied the tool registration entry point.
+    /// Keeps the registrar mapped while it retains any HSA table pointer.
     registration: Option<ToolLibrary>,
-    /// Whether this tool set has completed initialization.
-    active: bool,
+    /// Attachment state of the current HSA generation.
+    phase: ToolPhase,
+}
+
+/// Serialized tool attachment phase for one HSA generation.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ToolPhase {
+    /// No tool callbacks are active for an HSA generation.
+    Inactive,
+    /// Legacy tool callbacks are running.
+    Loading,
+    /// Tool callbacks have completed and wrappers are published.
+    Active,
 }
 
 /// Candidate tool and its requested attachment order.
@@ -215,21 +261,20 @@ struct ToolCandidate {
     order: u64,
 }
 
+/// Loaded tools and stable API tables for the current process.
 static STATE: Mutex<Option<ToolState>> = Mutex::new(None);
-static SCRATCH_TABLE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+/// Runtime-owned callback slots read by queue operations.
+static SCRATCH_SLOTS: [AtomicPtr<c_void>; generated::TOOLS_COUNT] =
+    [const { AtomicPtr::new(std::ptr::null_mut()) }; generated::TOOLS_COUNT];
 
+/// Native no-op target for a scratch bridge without a registered callback.
+extern "C" fn no_scratch_callback(_: *const c_void) -> u32 {
+    0
+}
+
+/// Returns a registered scratch callback at the given table index.
 pub(crate) fn scratch_callback(index: usize) -> Option<unsafe extern "C" fn(*const c_void) -> u32> {
-    if index >= generated::TOOLS_COUNT {
-        return None;
-    }
-    let table = SCRATCH_TABLE.load(Ordering::Acquire);
-    if table.is_null() {
-        return None;
-    }
-    // SAFETY: The pinned API table has TOOLS_COUNT pointer slots. Tools may
-    // replace them after registration; read the current aligned slot so late
-    // attachment is visible without taking the tool-loader mutex.
-    let pointer = unsafe { table.cast::<*mut c_void>().add(index).read_volatile() };
+    let pointer = SCRATCH_SLOTS.get(index)?.load(Ordering::Acquire);
     if pointer.is_null() {
         return None;
     }
@@ -240,17 +285,21 @@ pub(crate) fn scratch_callback(index: usize) -> Option<unsafe extern "C" fn(*con
     })
 }
 
+/// Atomically publishes the current API tables to export trampolines.
 fn publish(tables: &ApiTables) {
     generated::publish(tables);
-    SCRATCH_TABLE.store(
-        (&raw const tables.tools.functions[0]) as *mut c_void,
-        Ordering::Release,
-    );
+    for (slot, callback) in SCRATCH_SLOTS.iter().zip(tables.tools.functions) {
+        slot.store(callback, Ordering::Release);
+    }
 }
 
+/// Tool entry point called with mutable HSA API tables on attach.
 type OnLoad = unsafe extern "C" fn(*mut RootTable, u64, u64, *const *const c_char) -> bool;
+/// Tool entry point called when HSA unloads the tool.
 type OnUnload = unsafe extern "C" fn();
+/// rocprofiler import-registration entry point.
 type RegisterImport = extern "C" fn() -> u32;
+/// Existing rocprofiler-register C ABI for one root API table.
 type Register = unsafe extern "C" fn(
     *const c_char,
     RegisterImport,
@@ -259,14 +308,16 @@ type Register = unsafe extern "C" fn(
     u64,
     *mut u64,
 ) -> u32;
-
+/// ABI version value for HSA register.
 const HSA_REGISTER_VERSION: u32 = 12_100;
 
 #[unsafe(no_mangle)]
+/// Reports the HSA import registration version to rocprofiler.
 pub extern "C" fn rocprofiler_register_import_hsa() -> u32 {
     HSA_REGISTER_VERSION
 }
 
+/// Checks whether the process is running in a secure execution mode.
 fn secure_execution() -> bool {
     // SAFETY: These libc queries have no pointer arguments or retained state.
     unsafe {
@@ -276,6 +327,7 @@ fn secure_execution() -> bool {
     }
 }
 
+/// Splits and validates the configured list of tool library names.
 fn parse_tool_names(names: &str) -> Vec<String> {
     let mut parsed = Vec::new();
     let mut current = String::new();
@@ -306,22 +358,32 @@ fn parse_tool_names(names: &str) -> Vec<String> {
     parsed
 }
 
+/// Registers a retained table through the existing rocprofiler ABI.
+///
+/// The registrar can rewrite this table after the call returns. Bridges read
+/// those fields to preserve late attachment; the C ABI provides no update
+/// callback or synchronization with those reads.
 fn register_profiler(state: &mut ToolState) -> bool {
     let Some(library) = ToolLibrary::open(c"librocprofiler-register.so.0") else {
         return false;
     };
     let symbol = library.symbol(c"rocprofiler_register_library_api_table");
-    if symbol.is_null() {
+    if symbol.is_null() || state.profiler_tables.try_reserve(1).is_err() {
         return false;
     }
-    // SAFETY: The symbol name and signature are the public
-    // rocprofiler-register C ABI. The table Box stays pinned for its lifetime.
+    // SAFETY: The symbol has the public rocprofiler-register C signature.
     let register: Register = unsafe { std::mem::transmute(symbol) };
-    let saved = state.tables.functions();
-    let saved_root = state.tables.root;
-    let mut root = (&raw mut state.tables.root).cast::<c_void>();
+    // The registrar has no unregister API. Leak this allocation into process
+    // ownership before handing its address to C, including failure paths.
+    let tables = ProfilerTable(NonNull::from(Box::leak(ApiTables::new())));
+    // SAFETY: The allocation remains valid for the process lifetime, and
+    // forming a raw field address does not read a concurrently changed slot.
+    let mut root = unsafe { &raw mut (*tables.0.as_ptr()).root }.cast::<c_void>();
     let mut identifier = 0u64;
-    // SAFETY: The registration call borrows one writable root table pointer.
+    let tables_ptr = tables.0.as_ptr();
+    state.profiler_tables.push(tables);
+    // SAFETY: The root and child tables are pinned by the process allocation
+    // even if registration fails after retaining their addresses.
     let status = unsafe {
         register(
             c"hsa".as_ptr(),
@@ -332,18 +394,21 @@ fn register_profiler(state: &mut ToolState) -> bool {
             &raw mut identifier,
         )
     };
-    state.tables.root = saved_root;
-    // NO_TOOLS (1) can still install the attachment queue shim. Retain its
-    // table edits and load legacy tools afterwards, matching ROCr's protocol.
-    if status > 1 || !generated::valid(&state.tables) {
-        state.tables.restore(&saved);
+    state.registration = Some(library);
+    if status > 1 {
         return false;
     }
+    // SAFETY: The pointer still names the leaked table. The generated helper
+    // computes field addresses only; it does not read registrar-owned values.
+    unsafe { generated::publish_profiler(tables_ptr) };
+    state.tables.restore(&generated::bridge_functions());
     publish(&state.tables);
-    state.registration = Some(library);
+    // NO_TOOLS (1) may still have installed the attachment queue shim. The
+    // bridge remains live while legacy tools are attached after this call.
     status == 0
 }
 
+/// Collects the name of a loaded library during linker iteration.
 unsafe extern "C" fn collect_loaded_library(
     info: *mut libc::dl_phdr_info,
     _size: usize,
@@ -365,6 +430,7 @@ unsafe extern "C" fn collect_loaded_library(
     0
 }
 
+/// Combines environment and already-loaded libraries into tool candidates.
 fn loaded_tool_candidates(env_count: usize) -> Vec<ToolCandidate> {
     let mut loaded = Vec::<CString>::new();
     // SAFETY: The callback borrows loaded only during this synchronous call.
@@ -392,6 +458,7 @@ fn loaded_tool_candidates(env_count: usize) -> Vec<ToolCandidate> {
     candidates
 }
 
+/// Attaches configured legacy tools and lets each modify the API tables.
 fn load_legacy_tools(state: &mut ToolState) {
     let names = if secure_execution() {
         Vec::new()
@@ -424,15 +491,19 @@ fn load_legacy_tools(state: &mut ToolState) {
             continue;
         }
         let symbol = library.symbol(c"OnLoad");
-        if symbol.is_null() || state.libraries.try_reserve(1).is_err() {
+        if symbol.is_null() {
             failed.push(name);
             continue;
         }
-        // SAFETY: OnLoad has the published HSA tool C ABI and runs while the
-        // table owner is held exclusively by the process tool mutex.
+        if state.libraries.try_reserve(1).is_err() || state.legacy_tables.try_reserve(1).is_err() {
+            failed.push(name);
+            continue;
+        }
+        // SAFETY: OnLoad has the published HSA tool C ABI. The table is pinned
+        // and its edits must finish before OnLoad returns; the tool-loader
+        // mutex keeps runtime-side table publication serialized.
         let on_load: OnLoad = unsafe { std::mem::transmute(symbol) };
-        let saved = state.tables.functions();
-        let saved_root = state.tables.root;
+        let mut staging = ApiTables::from_functions(&state.tables.functions());
         let failed_names = failed.iter().map(|name| name.as_ptr()).collect::<Vec<_>>();
         let failed_ptr = if failed_names.is_empty() {
             std::ptr::null()
@@ -441,71 +512,94 @@ fn load_legacy_tools(state: &mut ToolState) {
         };
         let success = unsafe {
             on_load(
-                &raw mut state.tables.root,
-                u64::from(state.tables.root.version.major_id),
+                &raw mut staging.root,
+                u64::from(staging.root.version.major_id),
                 failed_names.len() as u64,
                 failed_ptr,
             )
         };
-        // The root table points to the pinned tables owned by this runtime.
-        // Tools may replace individual function pointers, not these owners.
-        state.tables.root = saved_root;
-        if success && generated::valid(&state.tables) {
-            publish(&state.tables);
+        // A tool can retain the root and child tables after OnUnload. Keep the
+        // storage pinned even when OnLoad fails or supplies an invalid table.
+        if success {
+            if generated::valid(&staging) {
+                state.tables.restore(&staging.functions());
+                publish(&state.tables);
+            } else {
+                // OnLoad succeeded, so the tool may still retain its table or
+                // need OnUnload. Keep both alive even though its edits cannot
+                // be published to HSA callers.
+                failed.push(name);
+            }
             state.libraries.push(library);
         } else {
-            state.tables.restore(&saved);
             failed.push(name);
         }
+        state.legacy_tables.push(staging);
     }
 }
 
+/// Loads and attaches legacy HSA tools in configured order.
 pub(crate) fn load() {
+    {
+        let mut guard = STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = guard.get_or_insert_with(|| ToolState {
+            tables: ApiTables::new(),
+            profiler_tables: Vec::new(),
+            legacy_tables: Vec::new(),
+            libraries: Vec::new(),
+            registration: None,
+            phase: ToolPhase::Inactive,
+        });
+        if state.phase != ToolPhase::Inactive {
+            return;
+        }
+        state.phase = ToolPhase::Loading;
+    }
     let mut guard = STATE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let state = guard.get_or_insert_with(|| ToolState {
-        tables: ApiTables::new(),
-        libraries: Vec::new(),
-        registration: None,
-        active: false,
-    });
-    if state.active {
+    let Some(state) = guard.as_mut() else {
         return;
-    }
+    };
     let registered = register_profiler(state);
     let v1_requested = std::env::var("HSA_TOOLS_ROCPROFILER_V1_TOOLS")
         .is_ok_and(|value| !matches!(value.as_str(), "0" | "off" | "false" | "no"));
     if !registered || v1_requested {
         load_legacy_tools(state);
     }
-    state.active = true;
+    state.phase = ToolPhase::Active;
 }
 
+/// Detaches loaded tools and restores original API function pointers.
 pub(crate) fn unload() {
     let mut guard = STATE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(state) = guard.as_mut().filter(|state| state.active) else {
+    let Some(state) = guard
+        .as_mut()
+        .filter(|state| state.phase == ToolPhase::Active)
+    else {
         return;
     };
     for library in state.libraries.iter().rev() {
         let symbol = library.symbol(c"OnUnload");
         if !symbol.is_null() {
-            // SAFETY: OnUnload has the published HSA tool C ABI; the library
-            // remains loaded through this callback.
+            // SAFETY: OnUnload has the published HSA tool C ABI; the
+            // library remains loaded through this callback.
             let on_unload: OnUnload = unsafe { std::mem::transmute(symbol) };
             unsafe { on_unload() };
         }
     }
     generated::reset();
-    SCRATCH_TABLE.store(std::ptr::null_mut(), Ordering::Release);
+    generated::reset_profiler();
+    for slot in &SCRATCH_SLOTS {
+        slot.store(std::ptr::null_mut(), Ordering::Release);
+    }
     state.tables.restore(&generated::initial_functions());
     state.libraries.clear();
-    state.registration = None;
-    // rocprofiler-register can retain the root pointer for later attachment,
-    // so its storage remains stable across HSA init/shutdown generations.
-    state.active = false;
+    state.phase = ToolPhase::Inactive;
 }
 
 /// The v1 image extension has a different field order from the tool trace
@@ -530,6 +624,7 @@ pub(crate) fn image_extension_table() -> [usize; 14] {
     .map(|name| generated::public_address(name).unwrap_or(0))
 }
 
+/// Returns the AMD loader extension function table.
 pub(crate) fn loader_extension_table() -> [usize; 7] {
     [
         "hsa_ven_amd_loader_query_host_address",
@@ -543,6 +638,7 @@ pub(crate) fn loader_extension_table() -> [usize; 7] {
     .map(|name| generated::public_address(name).unwrap_or(0))
 }
 
+/// Returns the PC sampling extension function table.
 pub(crate) fn pc_sampling_extension_table() -> [usize; 7] {
     [
         "hsa_ven_amd_pcs_iterate_configuration",
