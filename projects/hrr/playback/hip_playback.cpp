@@ -1061,7 +1061,9 @@ void hrr_decode_kernel_args(PlaybackContext& ctx, const uint8_t* p,
 // walks the signature of the loaded code object and copies each parameter's size
 // out of kernelParams[i] (rocclr/platform/kernel.cpp, captureHIPArgs), so only a
 // short list or a narrower argument is read past; extra arguments and wider ones
-// are never touched. On a mismatch `why` says which.
+// are never touched. CLR reads 8 bytes for a pointer parameter whatever its
+// declared size, which the comparison cannot see: kArgOverreadPad covers it.
+// On a mismatch `why` says which.
 static bool kernel_args_match(const std::vector<size_t>& recorded,
                               const std::vector<size_t>& declared,
                               std::string& why) {
@@ -1478,7 +1480,12 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             }
             // Round up to 64-byte alignment; add 256 bytes for hidden arg space.
             uint32_t kbuf_sz = ((cursor + 63) & ~63u) + 256;
-            std::vector<uint8_t> kbuf(kbuf_sz, 0);
+            // The 256 bytes are inside the size handed to CLR, which only checks
+            // offset + size against it and then reads 8 bytes for a pointer
+            // parameter whatever size the code object gives it (rocclr
+            // captureHIPArgs): a 4-byte pointer at kbuf_sz - 4 would read past
+            // the end. Allocate kArgOverreadPad more than the size we pass.
+            std::vector<uint8_t> kbuf(kbuf_sz + kArgOverreadPad, 0);
             for (size_t i = 0; i < arg_storage.size(); ++i) {
                 const auto& s = arg_storage[i];
                 const size_t n = recorded_arg_size(s);
