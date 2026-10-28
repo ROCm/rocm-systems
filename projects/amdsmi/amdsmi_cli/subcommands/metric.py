@@ -3426,7 +3426,7 @@ class MetricCommands:
             args.nic = self.device_handles_ainics
 
         # Handle multiple NICs
-        if args.nic != None:
+        if args.nic is not None:
             handled_multiple_nics, device_handle = self.helpers.handle_ainics(
                 args, self.logger, self.metric_nic
             )

@@ -23,6 +23,7 @@ _NAME_BYTES = 64
 _INVALID_UTF8 = b"ab\xffcd"
 _REPLACEMENT_CHAR = "\N{REPLACEMENT CHARACTER}"
 _FIXED_NAME = "ab" + _REPLACEMENT_CHAR + "cd"
+_FW_TYPE_FIXED, _FW_TYPE_RUNNING, _FW_TYPE_STORED = 0, 1, 2
 
 
 class _FakeParameterException(Exception):
@@ -81,6 +82,29 @@ def _load(names: List[str], wrapper: types.SimpleNamespace) -> Dict[str, Any]:
     return namespace
 
 
+def _fw_info_getter(entries: List[Any]) -> Any:
+    """The firmware getter against a fake library reporting ``(type, name, version)`` entries."""
+
+    def fake_get_fw_info(handle: object, out: Any) -> int:
+        fw_info = out._obj
+        fw_info.num_fw = len(entries)
+        for i, (fw_type, name, version) in enumerate(entries):
+            fw_info.fw[i].type = fw_type
+            fw_info.fw[i].fw.name = name
+            fw_info.fw[i].fw.version = version
+        return _STATUS_SUCCESS
+
+    wrapper = types.SimpleNamespace(
+        amdsmi_processor_handle=_FakeHandle,
+        amdsmi_nic_fw_info_t=_FwInfo,
+        amdsmi_get_nic_fw_info=fake_get_fw_info,
+        AMDSMI_NIC_FW_VERSION_TYPE_FIXED=_FW_TYPE_FIXED,
+        AMDSMI_NIC_FW_VERSION_TYPE_RUNNING=_FW_TYPE_RUNNING,
+        AMDSMI_NIC_FW_VERSION_TYPE_STORED=_FW_TYPE_STORED,
+    )
+    return _load(["amdsmi_get_nic_fw_info"], wrapper)["amdsmi_get_nic_fw_info"]
+
+
 def _stats_getter(function_name: str) -> Any:
     """A statistics getter whose fake library reports one counter with a bad name."""
 
@@ -105,19 +129,7 @@ def _stats_getter(function_name: str) -> Any:
 
 class TestNicTextDecode(unittest.TestCase):
     def test_a_firmware_name_and_version_are_replaced(self) -> None:
-        def fake_get_fw_info(handle: object, out: Any) -> int:
-            fw_info = out._obj
-            fw_info.num_fw = 1
-            fw_info.fw[0].fw.name = _INVALID_UTF8
-            fw_info.fw[0].fw.version = _INVALID_UTF8
-            return _STATUS_SUCCESS
-
-        wrapper = types.SimpleNamespace(
-            amdsmi_processor_handle=_FakeHandle,
-            amdsmi_nic_fw_info_t=_FwInfo,
-            amdsmi_get_nic_fw_info=fake_get_fw_info,
-        )
-        getter = _load(["amdsmi_get_nic_fw_info"], wrapper)["amdsmi_get_nic_fw_info"]
+        getter = _fw_info_getter([(_FW_TYPE_FIXED, _INVALID_UTF8, _INVALID_UTF8)])
         self.assertEqual(getter(_FakeHandle()), {_FIXED_NAME: _FIXED_NAME})
 
     def test_a_netdev_name_is_replaced(self) -> None:
@@ -148,3 +160,17 @@ class TestNicTextDecode(unittest.TestCase):
     def test_an_rdma_statistic_name_is_replaced(self) -> None:
         getter = _stats_getter("amdsmi_get_nic_rdma_port_statistics")
         self.assertEqual(getter(_FakeHandle(), 0), {_FIXED_NAME: 7})
+
+
+class TestNicFwInfoNames(unittest.TestCase):
+    def test_running_and_stored_versions_of_one_name_are_both_reported(self) -> None:
+        getter = _fw_info_getter(
+            [(_FW_TYPE_RUNNING, b"fw.version", b"1.0"), (_FW_TYPE_STORED, b"fw.version", b"2.0")]
+        )
+        self.assertEqual(getter(_FakeHandle()), {"fw.version": "1.0", "fw.version (stored)": "2.0"})
+
+    def test_distinct_names_keep_their_plain_key(self) -> None:
+        getter = _fw_info_getter(
+            [(_FW_TYPE_FIXED, b"board.id", b"A"), (_FW_TYPE_RUNNING, b"fw.version", b"")]
+        )
+        self.assertEqual(getter(_FakeHandle()), {"board.id": "A", "fw.version": "N/A"})

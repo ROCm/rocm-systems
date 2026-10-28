@@ -2735,6 +2735,11 @@ def amdsmi_get_nic_fw_info(
     fw_info = amdsmi_wrapper.amdsmi_nic_fw_info_t()
     _check_res(amdsmi_wrapper.amdsmi_get_nic_fw_info(processor_handle, ctypes.byref(fw_info)))
 
+    type_labels = {
+        amdsmi_wrapper.AMDSMI_NIC_FW_VERSION_TYPE_FIXED: "fixed",
+        amdsmi_wrapper.AMDSMI_NIC_FW_VERSION_TYPE_RUNNING: "running",
+        amdsmi_wrapper.AMDSMI_NIC_FW_VERSION_TYPE_STORED: "stored",
+    }
     fw_info_dict = {}
     # num_fw comes from the C layer; clamp to the fixed fw[] capacity so a bad
     # count can't drive an out-of-bounds ctypes access.
@@ -2742,6 +2747,9 @@ def amdsmi_get_nic_fw_info(
         entry = fw_info.fw[i].fw
         name = entry.name.decode("utf-8", errors="replace")
         version = entry.version.decode("utf-8", errors="replace")
+        # A running and a stored version share one name; keep both.
+        if name in fw_info_dict:
+            name = f"{name} ({type_labels.get(fw_info.fw[i].type, 'unknown')})"
         fw_info_dict[name] = version if version else "N/A"
 
     return fw_info_dict

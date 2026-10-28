@@ -75,9 +75,13 @@ def _metric_parser():
     parser_self = mock.MagicMock()
     parser_self.helpers = _AinicOnlyHelpers()
     parser_self._guard_extended_requires_port = AMDSMIParser._guard_extended_requires_port
+    parser_self._guard_nic_arguments_require_nic = AMDSMIParser._guard_nic_arguments_require_nic
     subparsers = argparse.ArgumentParser().add_subparsers()
     AMDSMIParser._add_metric_parser(parser_self, subparsers, lambda *args, **kwargs: None)
-    return subparsers.choices["metric"]
+    parser = subparsers.choices["metric"]
+    # The stand-in does not register the device arguments, so add the one the NIC checks read.
+    parser.add_argument("--nic", nargs="*", default=None)
+    return parser
 
 
 class TestMetricNicRdmaParser(unittest.TestCase):
@@ -85,7 +89,7 @@ class TestMetricNicRdmaParser(unittest.TestCase):
         self.parser = _metric_parser()
 
     def _parse(self, *argv):
-        namespace, _ = self.parser.parse_known_args(list(argv))
+        namespace, _ = self.parser.parse_known_args(["--nic", *argv])
         return namespace
 
     def test_bare_rdma_means_every_port(self):
@@ -112,12 +116,48 @@ class TestMetricNicRdmaParser(unittest.TestCase):
                 self._parse("--rdma", "--extended")
 
 
+class TestMetricNicArgumentValidation(unittest.TestCase):
+    """``--port``, ``--rdma`` and ``--sensors`` mean nothing without ``--nic``, and an index is not negative."""
+
+    def setUp(self):
+        self.parser = _metric_parser()
+
+    def _parse(self, *argv):
+        with mock.patch.object(self.parser, "exit", side_effect=SystemExit(2)):
+            namespace, _ = self.parser.parse_known_args(list(argv))
+        return namespace
+
+    def _assert_rejected(self, *argv):
+        with mock.patch.object(self.parser, "exit", side_effect=SystemExit(2)):
+            with self.assertRaises(SystemExit):
+                self.parser.parse_known_args(list(argv))
+
+    def test_port_without_nic_is_rejected(self):
+        self._assert_rejected("--port")
+
+    def test_rdma_without_nic_is_rejected(self):
+        self._assert_rejected("--rdma", "0")
+
+    def test_sensors_without_nic_is_rejected(self):
+        self._assert_rejected("--sensors")
+
+    def test_the_nic_flags_are_accepted_with_nic(self):
+        namespace = self._parse("--nic", "--port", "0", "--rdma", "--sensors")
+        self.assertEqual((namespace.port, namespace.rdma, namespace.sensors), (0, -1, True))
+
+    def test_a_negative_port_index_is_rejected(self):
+        self._assert_rejected("--nic", "--port", "-5")
+
+    def test_a_negative_rdma_index_is_rejected(self):
+        self._assert_rejected("--nic", "--rdma", "-2")
+
+
 class TestMetricNicSensorsParser(unittest.TestCase):
     def setUp(self):
         self.parser = _metric_parser()
 
     def _parse(self, *argv):
-        namespace, _ = self.parser.parse_known_args(list(argv))
+        namespace, _ = self.parser.parse_known_args(["--nic", *argv])
         return namespace
 
     def test_sensors_defaults_to_off(self):
