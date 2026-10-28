@@ -37,11 +37,14 @@ constexpr uint32_t kFlag = 2;  // epoch cells start at 1, so the kernel uses fla
 constexpr float kUntouched = -1.0f;
 constexpr auto kWatchdog = std::chrono::seconds(30);
 constexpr auto kSettle = std::chrono::milliseconds(20);  // lets every thread finish its first read of the late lines
+constexpr auto kPrefetchFaultWait = std::chrono::milliseconds(500);  // a prefetch VM fault is reported asynchronously
 #if defined(DWORDX4_INTRINSICS_FORCE_OFF)
 constexpr bool kForceOff = true;
 #else
 constexpr bool kForceOff = false;
 #endif
+
+__global__ void noOp() {}
 
 // Writes the device-side RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS and whether the toolchain offers the b128 builtins.
 __global__ void reportReReadPath(int* out) {
@@ -258,6 +261,62 @@ TEST_F(DdaReduceScatterFabricLL, AbortExitsTheWaitAndAdvancesEpoch) {
     ASSERT_EQ(v, kUntouched) << "an aborted thread wrote recvbuff";
   }
   expectEpochAdvanced();
+}
+
+// The gfx1250 send prefetch is non-speculative, so a line past sendbuff in an unmapped page would raise a VM fault.
+TEST_F(DdaReduceScatterFabricLL, PrefetchStaysInsideSendbuffEndingAtUnmappedPage) {
+  int vmm = 0;
+  ASSERT_EQ(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0), hipSuccess);
+  if (vmm == 0) {
+    GTEST_SKIP() << "virtual memory management unsupported";
+  }
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = 0;
+  size_t gran = 0;
+  ASSERT_EQ(hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityMinimum), hipSuccess);
+  hipMemGenericAllocationHandle_t handle = 0;
+  ASSERT_EQ(hipMemCreate(&handle, gran, &prop, 0), hipSuccess);
+  // Reserve two granules and map only the first, so the second stays an unmapped guard right after sendbuff.
+  hipDeviceptr_t va = 0;
+  ASSERT_EQ(hipMemAddressReserve(&va, 2 * gran, gran, 0, 0), hipSuccess);
+  ASSERT_EQ(hipMemMap(va, gran, 0, handle, 0), hipSuccess);
+  hipMemAccessDesc access = {};
+  access.location.type = hipMemLocationTypeDevice;
+  access.location.id = 0;
+  access.flags = hipMemAccessFlagsProtReadWrite;
+  ASSERT_EQ(hipMemSetAccess(va, gran, &access, 1), hipSuccess);
+
+  // 16B is the smallest shard (two packets); 144B is a multiple of 16 but not of the 128B line.
+  for (const size_t count : {size_t{4}, size_t{36}}) {
+    const size_t total = count * sizeof(float) * kRanks;
+    float* send = reinterpret_cast<float*>(reinterpret_cast<char*>(va) + gran - total);
+    std::vector<float> host(count * kRanks);
+    for (size_t i = 0; i < host.size(); ++i) {
+      host[i] = sendValue(static_cast<int>(i / count), i % count);
+    }
+    ASSERT_EQ(hipMemcpy(send, host.data(), total, hipMemcpyHostToDevice), hipSuccess);
+    // Each launch starts from flag 2 again, so it stays in bank 0, the only bank the host scratch holds.
+    const uint32_t epoch = kFlag - 1;
+    ASSERT_EQ(hipMemcpy(dEpoch_, &epoch, sizeof(epoch), hipMemcpyHostToDevice), hipSuccess);
+    // The aborted wait still runs the prefetch and the send phase, then exits without needing any peer.
+    *abortFlag_ = 1;
+    hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<float, 0>), dim3(1), dim3(kThreads), 0, stream_, dPeers_,
+                       dRecv_, send, count, kSelf, kRanks, dEpoch_, 1, dda::common::ddaLLRsBankBytes(kRanks),
+                       DdaKernelParams{abortFlag_});
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
+    ASSERT_TRUE(finishes()) << "kernel did not exit on abort, shard bytes " << count * sizeof(float);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess) << "shard bytes " << count * sizeof(float);
+  }
+  // A prefetch fault reaches the host after the kernel ends and aborts at the next launch, so wait and launch here.
+  std::this_thread::sleep_for(kPrefetchFaultWait);
+  hipLaunchKernelGGL(noOp, dim3(1), dim3(1), 0, stream_);
+  ASSERT_EQ(hipGetLastError(), hipSuccess);
+  ASSERT_EQ(hipStreamSynchronize(stream_), hipSuccess) << "a prefetch past sendbuff faulted";
+  EXPECT_EQ(hipMemUnmap(va, gran), hipSuccess);
+  EXPECT_EQ(hipMemRelease(handle), hipSuccess);
+  EXPECT_EQ(hipMemAddressFree(va, 2 * gran), hipSuccess);
 }
 
 // Names the re-read path this build runs, so the test list shows which binary covers which path.
