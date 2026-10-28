@@ -263,14 +263,18 @@ TEST(RomeModelsPresetTopologiesMicrotest, EveryPresetTreeBase_IsAccepted) {
 
 class RomeModelsParseGraphMicrotest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    scene_ = std::make_unique<RomeModelsParseScene>(kRingGpus);
+  void SetUp() override { UseGpus(kRingGpus); }
+
+  void TearDown() override { ResetNcclFakes(); }
+
+  // Rebuild the scene and the graph for a GPU count other than the default, so a
+  // test that needs a wider system still reads it through system() and graph().
+  void UseGpus(int nGpus) {
+    scene_ = std::make_unique<RomeModelsParseScene>(nGpus);
     scene_->system()->totalBw = kTotalBw;
     graph_ = std::make_unique<ncclTopoGraph>();
     std::memset(graph_.get(), 0, sizeof(*graph_));
   }
-
-  void TearDown() override { ResetNcclFakes(); }
 
   ncclTopoSystem* system() { return scene_->system(); }
   ncclTopoGraph* graph() { return graph_.get(); }
@@ -347,16 +351,14 @@ TEST_F(RomeModelsParseGraphMicrotest, DuplicateGpuInChannel_IsIgnored) {
 }
 
 TEST_F(RomeModelsParseGraphMicrotest, MultiDigitGpuNumbers_AreParsed) {
-  RomeModelsParseScene wide(12);
-  ncclTopoGraph graph;
-  std::memset(&graph, 0, sizeof(graph));
+  UseGpus(12);
 
-  ASSERT_EQ(parseGraph("0 1 2 3 4 5 6 7 8 9 10 11", wide.system(), &graph, nullptr, nullptr, 0),
+  ASSERT_EQ(parseGraph("0 1 2 3 4 5 6 7 8 9 10 11", system(), graph(), nullptr, nullptr, 0),
             ncclSuccess);
 
-  EXPECT_EQ(graph.nChannels, 1);
-  EXPECT_EQ(graph.intra[10], RomeModelsParseScene::kRankBase + 10);
-  EXPECT_EQ(graph.intra[11], RomeModelsParseScene::kRankBase + 11);
+  EXPECT_EQ(graph()->nChannels, 1);
+  EXPECT_EQ(graph()->intra[10], RomeModelsParseScene::kRankBase + 10);
+  EXPECT_EQ(graph()->intra[11], RomeModelsParseScene::kRankBase + 11);
 }
 
 // A ring list of `channels` identical well-formed segments for the 4-GPU scene.
@@ -401,39 +403,29 @@ std::string ChannelWithGpuCount(int count) {
 }
 
 TEST_F(RomeModelsParseGraphMicrotest, MoreGpusInOneChannelThanMaxNodes_IsRejected) {
-  RomeModelsParseScene wide(NCCL_TOPO_MAX_NODES);
-  wide.system()->totalBw = kTotalBw;
-  ncclTopoGraph graph;
-  std::memset(&graph, 0, sizeof(graph));
+  UseGpus(NCCL_TOPO_MAX_NODES);
 
   // Exactly one GPU number too many, so an off-by-one in the bound fails here.
   // Before the bound, the 145th number was written to gpus[144] -- one int past
   // the array -- which ASan reports as a stack-buffer-overflow at offset 608.
   const std::string tooManyGpus = ChannelWithGpuCount(NCCL_TOPO_MAX_NODES + 1);
 
-  EXPECT_EQ(parseGraph(tooManyGpus.c_str(), wide.system(), &graph, nullptr, nullptr, 0),
+  EXPECT_EQ(parseGraph(tooManyGpus.c_str(), system(), graph(), nullptr, nullptr, 0),
             ncclInvalidUsage);
-
-  ResetNcclFakes();
 }
 
 TEST_F(RomeModelsParseGraphMicrotest, ExactlyMaxNodesGpusInOneChannel_IsAccepted) {
-  RomeModelsParseScene wide(NCCL_TOPO_MAX_NODES);
-  wide.system()->totalBw = kTotalBw;
-  ncclTopoGraph graph;
-  std::memset(&graph, 0, sizeof(graph));
+  UseGpus(NCCL_TOPO_MAX_NODES);
 
   // The widest channel that still fits, so a bound tightened by one breaks here.
   const std::string exactlyFull = ChannelWithGpuCount(NCCL_TOPO_MAX_NODES);
 
-  ASSERT_EQ(parseGraph(exactlyFull.c_str(), wide.system(), &graph, nullptr, nullptr, 0),
+  ASSERT_EQ(parseGraph(exactlyFull.c_str(), system(), graph(), nullptr, nullptr, 0),
             ncclSuccess);
 
-  EXPECT_EQ(graph.nChannels, 1);
-  EXPECT_EQ(graph.intra[NCCL_TOPO_MAX_NODES - 1],
+  EXPECT_EQ(graph()->nChannels, 1);
+  EXPECT_EQ(graph()->intra[NCCL_TOPO_MAX_NODES - 1],
             RomeModelsParseScene::kRankBase + NCCL_TOPO_MAX_NODES - 1);
-
-  ResetNcclFakes();
 }
 
 TEST_F(RomeModelsParseGraphMicrotest, GpuNumberWiderThanIntRange_IsRejected) {
@@ -491,11 +483,8 @@ std::string WidestChannelThenNets(const char* trailingNets) {
 }
 
 TEST_F(RomeModelsParseGraphMicrotest, MoreNetsInOneChannelThanNetsArrayHolds_IsRejected) {
-  RomeModelsParseScene wide(NCCL_TOPO_MAX_NODES);
-  wide.system()->totalBw = kTotalBw;
-  wide.system()->nodes[NET].count = 2;
-  ncclTopoGraph graph;
-  std::memset(&graph, 0, sizeof(graph));
+  UseGpus(NCCL_TOPO_MAX_NODES);
+  system()->nodes[NET].count = 2;
 
   // The existing per-channel limit is the runtime ngpus * 2, not the size of
   // nets[], and it used > where the array needs >=. At the widest GPU count the
@@ -503,27 +492,20 @@ TEST_F(RomeModelsParseGraphMicrotest, MoreNetsInOneChannelThanNetsArrayHolds_IsR
   // which ASan reports at offset 1888. This is the smallest input that reaches it.
   const std::string tooManyNets = WidestChannelThenNets(" N5 N6");
 
-  EXPECT_EQ(parseGraph(tooManyNets.c_str(), wide.system(), &graph, nullptr, nullptr, 0),
+  EXPECT_EQ(parseGraph(tooManyNets.c_str(), system(), graph(), nullptr, nullptr, 0),
             ncclInvalidUsage);
-
-  ResetNcclFakes();
 }
 
 TEST_F(RomeModelsParseGraphMicrotest, NetInTheLastSlotOfTheNetsArray_IsAccepted) {
-  RomeModelsParseScene wide(NCCL_TOPO_MAX_NODES);
-  wide.system()->totalBw = kTotalBw;
-  wide.system()->nodes[NET].count = 2;
-  ncclTopoGraph graph;
-  std::memset(&graph, 0, sizeof(graph));
+  UseGpus(NCCL_TOPO_MAX_NODES);
+  system()->nodes[NET].count = 2;
 
   // Writes nets[287], the last slot that exists, so a bound tightened by one
   // breaks here.
   const std::string exactlyFull = WidestChannelThenNets(" N5");
 
-  EXPECT_EQ(parseGraph(exactlyFull.c_str(), wide.system(), &graph, nullptr, nullptr, 0),
+  EXPECT_EQ(parseGraph(exactlyFull.c_str(), system(), graph(), nullptr, nullptr, 0),
             ncclSuccess);
-
-  ResetNcclFakes();
 }
 
 // NET numbers are held biased by 'N', so the widest one that still fits an int is
