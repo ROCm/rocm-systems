@@ -30,8 +30,8 @@
 #include <hip/hip_common.h>
 #include <hip/linker_types.h>
 
-#if HIP_FORCE_API_VERSION > HIP_API_VERSION
-#  error "HIP_FORCE_API_VERSION is newer than the installed HIP headers"
+#if HIP_TARGET_API_VERSION > HIP_API_VERSION
+#  error "HIP_TARGET_API_VERSION is newer than the installed HIP headers"
 #endif
 
 enum {
@@ -243,7 +243,7 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
  ensure ABI compatibility, we must typedef the actual struct name here.
 */
 
-#if HIP_FORCE_API_VERSION < 600
+#if HIP_TARGET_API_VERSION < 600
 
 #include <hip/hip_deprecated.h>
 // Legacy version, HIP_ABI_IMPL is on the latest version, so it must not see this.
@@ -253,7 +253,7 @@ typedef struct hipDeviceProp_tR0600 {} hipDeviceProp_tR0600;
 
 #endif
 
-#if HIP_FORCE_API_VERSION >= 600
+#if HIP_TARGET_API_VERSION >= 600
 // Latest version.
 
 /**
@@ -330,7 +330,10 @@ typedef struct hipDeviceProp_t {
   int memoryClockRate;              ///< Max global memory clock frequency in khz.
   int memoryBusWidth;               ///< Global memory bus width in bits.
   int l2CacheSize;                  ///< L2 cache size.
-  int persistingL2CacheMaxSize;     ///< Device's max L2 persisting lines in bytes
+  int persistingL2CacheMaxSize;     ///< Maximum L2 cache size in bytes available for persisting
+                                    ///< accesses. 0 when the device does not support L2 persistence.
+                                    ///< Applications should check this value before calling
+                                    ///< hipDeviceSetLimit with hipLimitPersistingL2CacheSize.
   int maxThreadsPerMultiProcessor;  ///< Maximum resident threads per multi-processor.
   int streamPrioritiesSupported;    ///< Device supports stream priority
   int globalL1CacheSupported;       ///< Indicates globals are cached in L1
@@ -877,6 +880,9 @@ enum hipLimit_t {
                                    ///< device. Currently not supported
   hipLimitMallocHeapSize = 0x02,   ///< Limit of heap size in bytes on the current device, should
                                    ///< be less than the global memory size on the device
+  hipLimitPersistingL2CacheSize = 0x03, ///< Requested persisting L2 cache size in bytes for the
+                                        ///< current device. This size can be set to a value up to
+                                        ///< persistingL2CacheMaxSize reported in hipDeviceProp_t.
   hipExtLimitScratchMin = 0x1000,  ///< Minimum allowed value in bytes for scratch limit on this
                                    ///< device. Valid only on Rocm device. This is read only.
   hipExtLimitScratchMax = 0x1001,  ///< Maximum allowed value in bytes for scratch limit on this
@@ -2616,9 +2622,9 @@ hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool);
 hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device);
 
 // hipDeviceProp_t and hipGetDeviceProperties/hipChooseDevice are versioned.
-// See HIP_FORCE_API_VERSION in hip_common.h.
+// See HIP_TARGET_API_VERSION in hip_common.h.
 
-#if HIP_FORCE_API_VERSION >= 600
+#if HIP_TARGET_API_VERSION >= 600
 
 hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600* prop, int deviceId);
 
@@ -2687,8 +2693,9 @@ hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig);
  * @brief Gets resource limits of current device
  *
  * The function queries the size of limit value, as required by the input enum value hipLimit_t,
- * which can be either #hipLimitStackSize, or #hipLimitMallocHeapSize. Any other input as
- * default, the function will return #hipErrorUnsupportedLimit.
+ * which can be either #hipLimitStackSize, #hipLimitMallocHeapSize, or
+ * #hipLimitPersistingL2CacheSize. Any other input as default, the function will return
+ * #hipErrorUnsupportedLimit.
  *
  * @param [out] pValue Returns the size of the limit in bytes
  * @param [in]  limit The limit to query
@@ -2707,6 +2714,10 @@ hipError_t hipDeviceGetLimit(size_t* pValue, enum hipLimit_t limit);
  *
  * #hipLimitMallocHeapSize sets the limit value of the heap used by the malloc()/free()
  * calls. For limit size, use the #hipDeviceGetLimit API.
+ *
+ * #hipLimitPersistingL2CacheSize sets the persisting L2 cache size in bytes for the current device.
+ * The value must not exceed hipDeviceProp_t::persistingL2CacheMaxSize. Applications should verify
+ * that persistingL2CacheMaxSize is greater than 0 before using this limit.
  *
  * Any other input as default, the funtion will return hipErrorUnsupportedLimit.
  *
@@ -2782,7 +2793,7 @@ hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config);
  */
 hipError_t hipSetDeviceFlags(unsigned flags);
 
-#if HIP_FORCE_API_VERSION >= 600
+#if HIP_TARGET_API_VERSION >= 600
 hipError_t hipChooseDeviceR0600(int* device, const hipDeviceProp_tR0600* prop);
 
 /**
@@ -4471,7 +4482,7 @@ hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* 
                                                  unsigned long long flags, hipStream_t stream);
 
 // Deprecated since 800. Introduced in 700.
-#if (HIP_FORCE_API_VERSION >= 700 && HIP_FORCE_API_VERSION < 800) || defined(HIP_ABI_IMPL)
+#if (HIP_TARGET_API_VERSION >= 700 && HIP_TARGET_API_VERSION < 800) || defined(HIP_ABI_IMPL)
 
 /**
  * @brief Advise about the usage of a given memory range to HIP.
@@ -4498,7 +4509,7 @@ hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise ad
 #endif
 
 // Deprecated since 800.
-#if HIP_FORCE_API_VERSION < 800 || defined(HIP_ABI_IMPL)
+#if HIP_TARGET_API_VERSION < 800 || defined(HIP_ABI_IMPL)
 
 /**
  * @brief Advise about the usage of a given memory range to HIP.
@@ -4524,7 +4535,7 @@ hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advic
 #endif
 
 // Latest
-#if HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
+#if HIP_TARGET_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
 
 hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                            hipMemLocation location);
@@ -6433,6 +6444,40 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDevice
 hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count,
                                hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                                size_t* failIdx, hipStream_t stream __dparm(0));
+
+/**
+ * @brief Perform Batch of 1D copies with extended operation support.[BETA]
+ *
+ * Extended hipMemcpyBatchAsync. The operation and hints for each copy are selected
+ * through attrs[i].flags (hipMemcpyFlags). Not supported during stream capture.
+ *
+ * @param [in] dsts        - Array of destination pointers.
+ * @param [in] srcs        - Array of source pointers.
+ * @param [in] sizes       - Bytes copied from srcs[i] to dsts[i].
+ * @param [in] sizesDst    - Swap entries: bytes copied from dsts[i] to srcs[i],
+ *                            0 < sizesDst[i] <= sizes[i]. Must be 0 for non-swap entries.
+ *                            NULL = symmetric.
+ * @param [in] waits       - Reserved for future use. Must be NULL.
+ * @param [in] signals     - Reserved for future use. Must be NULL.
+ * @param [in] count       - Number of copy operations.
+ * @param [in] attrs       - Array of hipExtMemcpyAttributes.
+ * @param [in] attrsIdxs   - Array mapping attributes to copy index ranges.
+ * @param [in] numAttrs    - Number of entries in attrs/attrsIdxs.
+ * @param [in] stream      - Stream to execute on.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported,
+ *          #hipErrorInvalidResourceHandle, #hipErrorStreamCaptureUnsupported
+ *
+ * @warning This API is marked as Beta. While this feature is complete, it can
+ *          change and might have outstanding issues.
+ */
+hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+                                  size_t* sizes, size_t* sizesDst,
+                                  hipExtMemcpyWait* waits,
+                                  hipExtMemcpySignal* signals,
+                                  size_t count,
+                                  hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  hipStream_t stream __dparm(0));
 
 /**
  * @brief Perform Batch of 3D copies
