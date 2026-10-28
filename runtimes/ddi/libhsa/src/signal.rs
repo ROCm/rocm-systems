@@ -636,12 +636,11 @@ impl HsaState {
     pub(crate) fn create_signal_event(
         &mut self,
     ) -> Option<(crate::platform::event::SignalEvent, usize, u32)> {
-        let (gpu, rest) = self.gpus.split_first()?;
-        let peers = rest.iter().map(|peer| &peer.device).collect::<Vec<_>>();
+        let gpu = self.gpus.first()?;
         let (event, mailbox) = self
             .signal_state
             .event_service
-            .create(&gpu.device, &peers, SignalEventAddressing::Identity)
+            .create(&gpu.device, SignalEventAddressing::Identity)
             .ok()?;
         let id = event.info().kfd_event_id;
         Some((event, mailbox.host, id))
