@@ -137,7 +137,3 @@ class TestNicVendorStatisticsScope(unittest.TestCase):
         _load_function(wrapper)(_FakeHandle(), _PORT_INDEX)
 
         self.assertTrue(all(len(args) == 5 for args in calls))
-
-
-if __name__ == "__main__":
-    unittest.main()

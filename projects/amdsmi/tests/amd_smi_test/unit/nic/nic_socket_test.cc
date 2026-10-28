@@ -65,13 +65,10 @@ TEST_F(NicUnit, DeprecatedBrcmTypesReportNoProcessors) {
 }
 
 TEST_F(NicUnit, SocketWithoutNicProcessorsDestroysCleanly) {
-  auto num_destroyed = int{0};
   auto* socket = new AMDSmiSocket("0000:c1:00");
   ASSERT_TRUE(socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_NIC).empty());
 
   delete socket;
-
-  EXPECT_EQ(num_destroyed, 0);
 }
 
 }  // namespace

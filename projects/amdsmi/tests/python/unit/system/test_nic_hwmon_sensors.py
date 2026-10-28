@@ -247,7 +247,3 @@ class TestNicHwmonSensors(unittest.TestCase):
     def test_an_object_that_is_not_a_handle_is_rejected(self) -> None:
         with self.assertRaises(_FakeParameterException):
             _run([], handle=object())
-
-
-if __name__ == "__main__":
-    unittest.main()
