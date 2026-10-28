@@ -628,13 +628,19 @@ TEST(DecoderSmokeTest, MultiPixelImageLoadsKeepTheirXmlTuple) {
 }
 
 TEST(DecoderSmokeTest, ImageAtomicsSeparatePayloadFromOptionalReturn) {
+  constexpr uint8_t kDeviceScope = 2;
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
                     ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
                     ROCJITSU_CODE_ARCH_RDNA4})
     for (bool compare_swap : {false, true})
       for (bool wide : {false, true})
-        for (bool returns : {false, true})
+        for (uint8_t return_control = 0;
+             return_control < (arch == ROCJITSU_CODE_ARCH_RDNA4 ? 8 : 2); ++return_control)
           for (bool tfe : {false, true}) {
+            const bool split = arch == ROCJITSU_CODE_ARCH_RDNA4;
+            const uint8_t th = split ? return_control : 0;
+            const bool returns =
+                split ? (th & amdgpu::GFX12_TH_ATOMIC_RETURN) != 0 : return_control != 0;
             if (tfe && !returns)
               continue; // Qualify TFE status together with a returned value.
             if (tfe && arch == ROCJITSU_CODE_ARCH_CDNA2)
@@ -642,7 +648,7 @@ TEST(DecoderSmokeTest, ImageAtomicsSeparatePayloadFromOptionalReturn) {
             SCOPED_TRACE(static_cast<unsigned>(arch));
             SCOPED_TRACE(compare_swap);
             SCOPED_TRACE(wide);
-            SCOPED_TRACE(returns);
+            SCOPED_TRACE(return_control);
             SCOPED_TRACE(tfe);
             const unsigned result_words = wide ? 2 : 1;
             const unsigned payload_words = result_words * (compare_swap ? 2 : 1);
@@ -694,7 +700,8 @@ TEST(DecoderSmokeTest, ImageAtomicsSeparatePayloadFromOptionalReturn) {
               rdna4::VimageBuilderFields fields{};
               fields.dmask = mask;
               fields.tfe = tfe;
-              fields.th = returns ? amdgpu::GFX12_TH_ATOMIC_RETURN : 0;
+              fields.scope = kDeviceScope;
+              fields.th = th;
               fields.vdata = 8;
               assign(rdna4::build_vimage(compare_swap ? rdna4::kImageAtomicCmpswapVimage
                                                       : rdna4::kImageAtomicAddUintVimage,
@@ -1918,7 +1925,7 @@ struct RdnaVopdExecutionCase {
 
 class RdnaVopdExecutionSmokeTest : public ::testing::TestWithParam<RdnaVopdExecutionCase> {};
 
-TEST_P(RdnaVopdExecutionSmokeTest, RejectsWave64Execution) {
+TEST_P(RdnaVopdExecutionSmokeTest, HandlesWave64ExecutionAccordingToArchitecture) {
   const auto &tc = GetParam();
   const auto words = make_vopdxy_pair(9, 8);
 
@@ -1943,7 +1950,16 @@ TEST_P(RdnaVopdExecutionSmokeTest, RejectsWave64Execution) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
 
-  EXPECT_THROW((void)cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
+  const auto result = cu->execute_instruction(inst.get(), *wf);
+  if (tc.arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+  } else {
+    // RDNA3 and RDNA3.5 explicitly skip VOPD when the wave is in wave64 mode.
+    EXPECT_TRUE(result.succeeded());
+    EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
+  }
 }
 
 TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {

@@ -44,6 +44,9 @@ performance:
   Performance_hipMemcpyBatchAsync_H2D_Pinned: *level_stress
   Performance_hipMemcpyBatchAsync_D2H_Pageable: *level_stress
   Performance_hipMemcpyBatchAsync_D2H_Pinned: *level_stress
+  Performance_hipMemcpy3DBatchAsync_H2D_Aligned: *level_stress
+  Performance_hipMemcpy3DBatchAsync_D2H_Aligned: *level_stress
+  Performance_hipMemcpy3DBatchAsync_P2P_Aligned: *level_stress
   Performance_hipMemcpyDtoD_PeerAccessEnabled: *level_stress
   Performance_hipMemcpyDtoD_PeerAccessDisabled: *level_stress
   Performance_hipMemcpyDtoDAsync_PeerAccessEnabled: *level_stress
@@ -227,6 +230,9 @@ performance:
   Performance_PyFR_Couette_IndividualGraphs: *level_stress
   Performance_PyFR_Couette_StepSimulation: *level_stress
   Performance_PyFR_Couette_SingleIteration: *level_stress
+  Performance_GraphBench_Launch: *level_stress
+  Performance_GraphBench_Sweep: *level_stress
+  Performance_GraphBench_Verify: *level_stress
   Performance_hipPerfMemcpy_test: *level_stress
   Performance_hipPerfBufferCopyRectSpeed_test: *level_stress
   Performance_hipPerfBufferCopySpeed_test: *level_stress

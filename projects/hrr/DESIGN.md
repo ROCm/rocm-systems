@@ -180,7 +180,7 @@ the parent that exited cleanly needs no repair. A sub-archive is skipped when
 payloads, finds it complete in the sense `load_archive` uses. `--info` on a
 root applies the same check before it shows a process as complete.
 
-### Archive Format (v10)
+### Archive Format (v12)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -298,7 +298,7 @@ projects/hrr/                     — standalone HRR project (portable layer)
                                     Not used by capture — it is the format an
                                     out-of-tree producer writes and playback reads
   playback/
-    hrr_reader.h/.cpp             — archive loader, v10 format; record framing
+    hrr_reader.h/.cpp             — archive loader, v12 format; record framing
                                     (read_raw_record / open_record_stream) shared
                                     with the region sidecars
     hrr_region_map.h/.cpp         — region timeline: merge, cursor, live block set,
@@ -383,13 +383,13 @@ The generator classifies each API:
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 When adding HIP API support, update this script to classify the API in the appropriate capture and playback policy sets. APIs requiring non-trivial serialization or replay belong in `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs belong in `NOOP_PLAYBACK_APIS`.
 
-## Archive Format (v10)
+## Archive Format (v12)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 10
+HRR_VERSION = 12
 ```
 
 Version history, so an archive written by an older runtime can be placed:
@@ -429,12 +429,18 @@ Version history, so an archive written by an older runtime can be placed:
 - **v10** puts pinned host snapshot records after a kernel launch's arguments
   (`num_snapshots` was always 0). A v9 reader would not restore them. See
   Pinned Host Snapshots below.
+- **v11** records `hipKernelSetCacheConfig`, appended to
+  `HipDispatchTable`, which shifts the compiler API IDs up by one again. A v10
+  reader would decode those events as the wrong API.
+- **v12** records `hipExtMemcpyBatchAsync`, appended to `HipDispatchTable`,
+  which shifts the compiler API IDs up by one again. A v11 reader would decode
+  those events as the wrong API.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 10)
+                      events.bin HRR_VERSION = 12)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     active             one line naming the process instance (boot id and
@@ -751,7 +757,10 @@ missing stream handles by creating a temporary stream.
 The full `hipStreamBeginCapture` → `hipStreamEndCapture` → `hipGraphInstantiate` →
 `hipGraphLaunch` chain is supported. All four are `MANUAL_PLAYBACK_APIS`. `BeginCapture`
 falls back to `hipStreamCaptureModeGlobal` if `ThreadLocal` fails. `EndCapture` records
-the returned `hipGraph_t` into `graph_map`. `GraphInstantiate` uses
+the returned `hipGraph_t` into `graph_map`. Capture also records an `EndCapture` that
+failed with `hipErrorStreamCaptureInvalidated` or `hipErrorStreamCaptureUnjoined`, since
+both still end the capture; replay ends its own capture and discards the graph.
+`GraphInstantiate` uses
 `hipGraphInstantiateWithFlags(..., 0)` and records the exec into `graph_exec_map`.
 `GraphLaunch` translates both handles and, when `--timing` is active, wraps the call
 with `hipEventRecord` to accumulate elapsed time into `total_graph_ms`.
@@ -828,16 +837,20 @@ For each D2H memcpy event that has a captured expected-data blob:
 4. Increments `ctx.d2h_pass` (byte-exact), `ctx.d2h_pass_tol` (within tolerance),
    or `ctx.d2h_fail`
 
-**Tolerance-based validation.** A byte-exact `memcmp` is tried first as a fast path.
-On mismatch, the validator interprets both buffers as each candidate float encoding
-(fp32, bf16, fp16, fp64) and passes when every element satisfies
-`|live − expected| ≤ atol + rtol·|expected|`. Thresholds: see README D2H table.
+**Byte-exact by default.** A buffer passes when it matches its blob byte for byte.
+Blobs carry no dtype, and reading integers as floats lets any int32 below about
+9.8e8 match zero within 1e-3, so a guessed tolerance would let a no-op handler pass
+its round-trip. A replay whose outputs really are nondeterministic floats opts in
+with `HIP_HRR_D2H_TOL=<type>:<atol>:<rtol>`, with `<type>` one of `f32`, `bf16`, `f16`, `f64` (no other spelling, `fp32` included, is accepted):
+a mismatching buffer then passes when every element, read as that type, satisfies
+`|live − expected| ≤ atol + rtol·|expected|`. A linear copy whose blob is shorter
+than the copy is skipped, not compared on the prefix.
 
 On failure the validator reports element counts, max absolute/relative error, and
 64-bit FNV-1a content hashes (useful for replay-vs-replay determinism comparison).
 The summary distinguishes exact passes, within-tolerance passes, and failures.
 
-**Exit codes:** `0` if all checks pass or are within tolerance (or no D2H blobs);
+**Exit codes:** `0` if all checks pass or are within an opted-in tolerance (or no D2H blobs);
 `1` on any unexplained D2H failure; `2` for an early "replay diverged" abort triggered
 once accumulated failures cross `HIP_HRR_REPLAY_DIVERGENCE_ABORT` (`note_d2h_fail`).
 
@@ -1164,6 +1177,21 @@ linear range search through `alloc_map`. If the workload allocates a large pool 
 passes many sub-pointers as kernel arguments, this scan becomes O(N) per pointer per
 kernel dispatch. For archives with thousands of allocations and tight kernel launch
 loops this can make replay significantly slower than the original.
+
+### Unmapped Pointer Arguments
+
+A recorded pointer argument in no allocation, VMM reservation or region (memory
+a framework carved out of its own pool, or a destination from a playback no-op
+such as `hipMemAllocPitch`) is handled the same way by every handler, generated
+or manual: `translate_ptr` notes the miss and `dispatch_event` applies one
+policy. By default the event's result is discarded, the event is reported as
+`[HRR] Unmapped: T<tid> Event <index> (<API>): recorded pointer 0x<addr> ...`,
+and the summary shows `Unmapped : N event(s) not replayed as recorded`; the
+count alone does not fail the run. `--strict-unmapped` ends the replay at the
+first such event instead. The rationale and the resulting fidelity guarantee
+are written above `HrrUnmappedNote` in `playback/hip_playback.h`. Kernel
+arguments (pointers only by shape, counted as `Untranslated`) and releases such
+as `hipFree` use `lookup_ptr` and are outside the policy.
 
 ### GPU Allocator Address Non-Determinism
 
@@ -1521,7 +1549,7 @@ The event wire format (finding H5):
   shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
   (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
   normally instead of being dropped at 65535 bytes. This is the change that bumped
-  `HRR_VERSION` to 4; the current version is 10, see Archive Format above. The
+  `HRR_VERSION` to 4; the current version is 12, see Archive Format above. The
   writer's single-record buffer path now writes any oversized record straight through.
 - **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
   a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch
@@ -1570,11 +1598,12 @@ dispatch before the create populates the translation map and silently
 
 D2H validation can pass when replay actually diverged:
 
-- **Length clamp.** Linear copies compare `min(copy_size, blob_size)`; a truncated or crash-recovered blob validates only a prefix (the corrupted tail is unchecked) and still counts as PASS. A zero-length compare counts as pass. The 2D, 3D and driver copies do not clamp: a blob shorter than the host rect replay reads it as is not validated.
-- **Float-dtype guessing.** Blobs carry no dtype. On a byte mismatch the validator
-  tries `{fp32, bf16, fp16, fp64}` and passes on the first encoding within tolerance,
-  so integer/index/pointer output buffers can silently false-pass; both-NaN counts as
-  equal.
+- **Short blobs.** A blob shorter than its copy (linear) or host rect (2D, 3D and
+  driver copies) is not validated; the check counts as skipped, and a replay whose
+  every check is skipped fails. A zero-length compare counts as pass.
+- **Opted-in tolerance.** `HIP_HRR_D2H_TOL` applies its type to every read-back in
+  the replay, so an integer/index/pointer buffer in the same archive can false-pass
+  against a near-zero float reading; both-NaN counts as equal.
 - **Zero-init masks OOB.** Replay zero-initialises each (possibly over-allocated)
   device allocation, so an out-of-bounds-reading kernel reads deterministic zeros
   instead of faulting and may still validate. It also diverges from non-zero original
@@ -1623,6 +1652,16 @@ exits non-zero if the counts drift from its recorded baseline. The build does no
 the CI "Check API matrix" step derives the manifest, compares it with the baseline and
 checks that the checked-in expectations header is current, so a newly-captured
 struct-input API cannot lose its payload unnoticed.
+
+### Batch Memcpy — Device Operands, 16 Entries
+
+`hipMemcpyBatchAsync` and `hipExtMemcpyBatchAsync` record their per-entry arrays inline,
+up to 16 entries. A larger batch is recorded truncated to its first 16 entries; capture
+warns once and marks the archive unreplayable.
+
+`dsts`/`srcs` are replayed through pointer translation only, so device operands replay
+but host operands do not: a pageable pointer has no allocation entry and becomes null,
+and host-allocated memory is replayed without its contents.
 
 ### Fail-Loud Scope Exclusions
 
