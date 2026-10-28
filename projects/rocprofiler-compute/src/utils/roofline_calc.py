@@ -5,7 +5,7 @@ import csv
 from dataclasses import dataclass
 from enum import Flag
 from pathlib import Path
-from typing import Any, Optional, SupportsFloat, Union
+from typing import Any, List, Optional, SupportsFloat, Union
 
 import numpy as np
 import pandas as pd
@@ -146,7 +146,7 @@ def sanitize_ai_value(value: Union[SupportsFloat, str, None]) -> float:
     return numeric if np.isfinite(numeric) else 0
 
 
-def roofline_mem_levels(gpu_arch: str, gpu_model: str) -> list[str]:
+def roofline_mem_levels(gpu_arch: str, gpu_model: str) -> List[str]:
     """Memory levels the roofline plots, in the model's hierarchy order: those with a
     measured bandwidth ceiling, except MALL, which is measured but not plotted."""
     measured = mi_gpu_specs.get_roofline_bandwidth(gpu_arch)

@@ -27,7 +27,7 @@ from ctypes import (
     sizeof,
 )
 from pathlib import Path
-from typing import Any
+from typing import Any, Tuple
 
 import utils.hip_interface as hip
 import utils.hiprtc_interface as hiprtc
@@ -56,7 +56,7 @@ class Bench_base(ABC):
 
         # Arch or hardware-specific variables must be set in child classes
         # self.lds_sizes: dict[str, int]
-        self.unsupported_data_types: tuple[str, ...]
+        self.unsupported_data_types: Tuple[str, ...]
         self.cache_kernel_selector: dict[str, str]
         self.matrix_kernel_selector: dict[str, str]
         self.matrix_ops: dict[str, int]

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, FrozenSet, Optional, Set, Tuple
 
 from utils.logger import console_debug, console_error, console_warning
 from vendored import yaml
@@ -66,9 +66,9 @@ class MIGPUSpecs:
     _all_gpu_models: list[str] = []
 
     # key: gpu_arch, the arch's roofline block; only archs with a roofline benchmark
-    _roofline: dict[str, dict[str, Any]] = {}
+    _roofline: Dict[str, Dict[str, Any]] = {}
     # key: gpu_arch, the roofline.csv columns its benchmark measures
-    _roofline_columns: dict[str, frozenset[str]] = {}
+    _roofline_columns: Dict[str, FrozenSet[str]] = {}
 
     _initialized = False
 
@@ -446,7 +446,7 @@ class MIGPUSpecs:
         return cls._all_gpu_models
 
     @classmethod
-    def get_roofline_archs(cls) -> tuple[str, ...]:
+    def get_roofline_archs(cls) -> Tuple[str, ...]:
         """Return the archs the roofline benchmark runs on."""
         return tuple(cls._roofline)
 
@@ -468,14 +468,14 @@ class MIGPUSpecs:
         return next(t for t in ROOFLINE_MATRIX_TYPES if t.lower() in roofline)
 
     @classmethod
-    def get_roofline_bandwidth(cls, gpu_arch: str) -> tuple[str, ...]:
+    def get_roofline_bandwidth(cls, gpu_arch: str) -> Tuple[str, ...]:
         """Return the memory levels with a measured bandwidth ceiling on gpu_arch."""
         return tuple(cls._roofline.get(gpu_arch, {}).get("bandwidth", []))
 
     @classmethod
     def get_roofline_data_types(
         cls, gpu_arch: str
-    ) -> tuple[tuple[str, bool, bool], ...]:
+    ) -> Tuple[Tuple[str, bool, bool], ...]:
         """Return (data type, has VALU ceiling, has matrix ceiling) for each data type
         measured on gpu_arch, in plot order. Mixed-precision matrix types such as F6F4
         are left out: the roofline does not plot them."""
@@ -488,13 +488,13 @@ class MIGPUSpecs:
         )
 
     @classmethod
-    def get_roofline_columns(cls, gpu_arch: str) -> frozenset[str]:
+    def get_roofline_columns(cls, gpu_arch: str) -> FrozenSet[str]:
         """Return the roofline.csv columns measured on gpu_arch; none for an arch
         without a roofline benchmark, such as gfx908."""
         return cls._roofline_columns.get(gpu_arch, frozenset())
 
     @classmethod
-    def get_all_roofline_columns(cls) -> frozenset[str]:
+    def get_all_roofline_columns(cls) -> FrozenSet[str]:
         """Return every roofline.csv column name of a known memory level or data type,
         whether or not an arch measures it, so analyze can default each to NaN."""
         levels = cls._all_memory_levels()
@@ -526,7 +526,7 @@ class MIGPUSpecs:
         return roofline_column(data_type, "valu")
 
     @classmethod
-    def _roofline_list(cls, gpu_arch: str, key: str) -> tuple[str, ...]:
+    def _roofline_list(cls, gpu_arch: str, key: str) -> Tuple[str, ...]:
         """Return a list of gpu_arch's roofline block; "matrix" and "mixed" read the
         key of the arch's matrix type, e.g. "mfma" and "mfma_mixed"."""
         roofline = cls._roofline.get(gpu_arch, {})
@@ -538,7 +538,7 @@ class MIGPUSpecs:
         return tuple(roofline.get(key, []))
 
     @classmethod
-    def _all_memory_levels(cls) -> set[str]:
+    def _all_memory_levels(cls) -> Set[str]:
         return {
             level
             for design in cls._gpu_design.values()
@@ -546,7 +546,7 @@ class MIGPUSpecs:
         }
 
     @classmethod
-    def _measured_roofline_columns(cls, gpu_arch: str) -> frozenset[str]:
+    def _measured_roofline_columns(cls, gpu_arch: str) -> FrozenSet[str]:
         matrix_type = cls.get_roofline_matrix_type(gpu_arch)
         bandwidth = cls.get_roofline_bandwidth(gpu_arch)
         valu = cls._roofline_list(gpu_arch, "valu")
