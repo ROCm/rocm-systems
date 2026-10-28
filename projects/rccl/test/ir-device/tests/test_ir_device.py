@@ -21,7 +21,9 @@ symmetric-memory support), GoogleTest SKIPs and exits 0 — without this mapping
 those would misleadingly show as PASSED.
 """
 
+import os
 import re
+import subprocess
 
 import pytest
 
@@ -122,6 +124,42 @@ def test_composite_barrier_session(run_gtest):
     """[C2] composite ncclBarrierSession structural check (+ runtime skipped)."""
     proc, log = run_gtest("IRDeviceTest.C2*", "ir_composite_barrier.log")
     _summarize_gtest(proc, log, "ncclBarrierSession")
+
+
+@pytest.mark.ir_device
+@pytest.mark.reduce_copy
+def test_reduce_copy_typed_exports(ir_test_binary, paths):
+    """[D0] Every typed ReduceCopy thunk is exported from librccl_device.bc.
+
+    Types follow bindings/ir/util.h on HIP: RCCL has no FP8 entry points.
+    """
+    all_types = "I8 U8 I32 U32 I64 U64 F16 F32 F64 BF16".split()
+    ops = {"ncclLsaReduceSum": all_types, "ncclLsaCopy": all_types,
+           "ncclLsaReduceSumCopy": all_types, "ncclLocalReduceSumCopy": all_types,
+           "ncclMultimemReduceSum": all_types[2:], "ncclMultimemCopy": all_types[2:],
+           "ncclMultimemReduceSumCopy": all_types[2:]}
+    expected = [f"{op}_{t}" for op, types in ops.items() for t in types]
+    llvm_dis = os.path.join(paths.LLVM_BIN, "llvm-dis")
+    ir = subprocess.run([llvm_dis, paths.BITCODE, "-o", "-"], stdout=subprocess.PIPE,
+                        universal_newlines=True, check=True).stdout
+    exported = set(re.findall(r"^define (?!internal |private )[^@\n]*@(\w+)\(", ir, re.M))
+    missing = [s for s in expected if s not in exported]
+    assert not missing, (f"{len(missing)} of {len(expected)} typed ReduceCopy thunks not "
+                         f"exported from {paths.BITCODE}: {', '.join(missing[:6])}")
+
+
+@pytest.mark.ir_device
+@pytest.mark.reduce_copy
+def test_reduce_copy_typed_local(run_gtest, monkeypatch):
+    """[D1] ncclLocalReduceSumCopy_{I8,F32,BF16}: 3 sources -> 2 destinations."""
+    # D1 runs the -O0 thunks on a 120 KiB stack. HSA_NO_SCRATCH_RECLAIM=1 makes
+    # ROCr map that for every wave slot of the GPU (~75 GiB on MI300X, over
+    # its 32 GiB scratch aperture); with reclaim it maps what this dispatch needs.
+    monkeypatch.setenv("HSA_NO_SCRATCH_RECLAIM", "0")
+    proc, log = run_gtest("IRReduceCopyTest.*", "ir_reduce_copy.log")
+    _summarize_gtest(proc, log, "typed ReduceCopy thunks")
+    with open(log) as fh:  # an empty filter match would also exit 0
+        assert "[       OK ] IRReduceCopyTest.D1_" in fh.read(), f"D1 did not run, see {log}"
 
 
 @pytest.mark.ir_device

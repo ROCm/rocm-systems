@@ -54,11 +54,35 @@ IR_OUTDIR = os.environ.get("IR_OUTDIR", os.path.join(WORKDIR, "ir_test_build"))
 
 IR_DIR = os.path.join(RCCL_DIR, "bindings", "ir")
 IR_TEST_SRC = os.path.join(IR_DIR, "test", "IR_test.cpp")
+# [D] typed ReduceCopy cases, linked into the same IR_test.exe.
+IR_REDUCE_COPY_SRC = os.path.join(_THIS_DIR, "..", "IR_reduce_copy_test.cpp")
 BITCODE = os.path.join(RCCL_BUILD, "lib", "librccl_device.bc")
 HIPIFY_INC = os.path.join(RCCL_BUILD, "hipify", "src", "include")
 GENERATED_INC = os.path.join(RCCL_BUILD, "include")
 AMDCLANGPP = os.path.join(ROCM_PATH, "bin", "amdclang++")
 TEST_EXE = os.path.join(IR_OUTDIR, "IR_test.exe")
+
+# ROCm LLVM tools for the bitcode build and its export check.
+LLVM_TOOLS = ("clang++", "opt", "llvm-dis", "llvm-as")
+
+
+def _find_llvm_bin():
+    """Return the first ROCm LLVM bin dir holding all LLVM_TOOLS, or None.
+
+    ROCm 6 links $ROCM_PATH/llvm to lib/llvm, not every newer install keeps
+    that link, and $ROCM_PATH/bin/amdclang++ resolves into the LLVM bin dir
+    of the compiler this harness drives.
+    """
+    dirs = [os.path.join(ROCM_PATH, "llvm", "bin"),
+            os.path.join(ROCM_PATH, "lib", "llvm", "bin"),
+            os.path.dirname(os.path.realpath(AMDCLANGPP))]
+    for d in dirs:
+        if all(os.path.isfile(os.path.join(d, t)) for t in LLVM_TOOLS):
+            return os.path.normpath(d)
+    return None
+
+
+LLVM_BIN = _find_llvm_bin()
 
 # --- Multi-rank GIN/composite barrier functional test (separate MPI binary) ---
 # This one needs the host RCCL library + MPI in addition to the bitcode, so it
@@ -106,9 +130,12 @@ def _missing_prerequisite():
         return f"IR_test.cpp not found at {IR_TEST_SRC}"
     if not os.path.isfile(AMDCLANGPP):
         return f"amdclang++ not found at {AMDCLANGPP} (set ROCM_PATH)"
-    llvm_dis = os.path.join(ROCM_PATH, "llvm", "bin", "llvm-dis")
-    if not os.path.isfile(llvm_dis):
-        return f"llvm-dis not found at {llvm_dis} (install ROCm llvm tools for IR device tests)"
+    if LLVM_BIN is None:
+        return (
+            f"ROCm LLVM tools ({' '.join(LLVM_TOOLS)}) not found under "
+            f"{ROCM_PATH}/llvm/bin, {ROCM_PATH}/lib/llvm/bin or beside "
+            "amdclang++ (install ROCm llvm tools for IR device tests)"
+        )
     if not os.path.isdir(HIPIFY_INC):
         return (
             f"hipify staging dir not found at {HIPIFY_INC} "
@@ -140,6 +167,8 @@ def _build_bitcode():
         f"BITCODE_LIB_ARCH={ARCH}",
         f"BUILDDIR={RCCL_BUILD}",
         f"ROCM_PATH={ROCM_PATH}",
+        # The Makefile defaults to $(ROCM_PATH)/llvm, which not every ROCm has.
+        f"ROCM_LLVM={os.path.dirname(LLVM_BIN)}",
         "llvm_ir",
     ]
     build_log = os.path.join(LOGDIR, "ir_bitcode_build.log")
@@ -189,6 +218,7 @@ def _build_test_binary():
         f"-I{gtest_inc}",
         f"-I{os.path.join(ROCM_PATH, 'include')}",
         IR_TEST_SRC,
+        IR_REDUCE_COPY_SRC,
         "-Xoffload-linker", BITCODE,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
         f"-L{os.path.join(ROCM_PATH, 'lib')}", "-lamdhip64",
@@ -393,6 +423,7 @@ def paths():
         RCCL_DIR=RCCL_DIR,
         RCCL_BUILD=RCCL_BUILD,
         ROCM_PATH=ROCM_PATH,
+        LLVM_BIN=LLVM_BIN,
         ARCH=ARCH,
         GTEST_ROOT=GTEST_ROOT,
         IR_OUTDIR=IR_OUTDIR,
