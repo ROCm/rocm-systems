@@ -68,6 +68,10 @@
 #include "inc/amd_hsa_signal.h"
 #include "inc/hsa_ext_amd.h"
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <emmintrin.h>
+#endif
+
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
 #ifndef MWAITX_ECX_TIMER_ENABLE
@@ -176,8 +180,23 @@ struct SharedSignal {
   }
 
   void GetRawTs(uint64_t& start, uint64_t& end) const {
+#if defined(__x86_64__) || defined(_M_X64)
+    // start_ts and end_ts fill one aligned 16-byte chunk, which a single load reads in one round
+    // trip when the signal is in device memory; two loads would cost two
+    static_assert(offsetof(amd_signal_t, start_ts) % 16 == 0 &&
+                      offsetof(amd_signal_t, end_ts) == offsetof(amd_signal_t, start_ts) + 8,
+                  "start_ts and end_ts must fill one aligned 16-byte chunk");
+    // The load faults on a misaligned address. The signal allocators align to SharedSignal.
+    static_assert(alignof(amd_signal_t) >= 16 && offsetof(SharedSignal, amd_signal) % 16 == 0,
+                  "amd_signal must be 16-byte aligned in every SharedSignal");
+    const __m128i timestamps =
+        _mm_load_si128(reinterpret_cast<const __m128i*>(&amd_signal.start_ts));
+    start = _mm_cvtsi128_si64(timestamps);
+    end = _mm_cvtsi128_si64(_mm_unpackhi_epi64(timestamps, timestamps));
+#else
     start = amd_signal.start_ts;
     end = amd_signal.end_ts;
+#endif
   }
 
   static __forceinline SharedSignal* Convert(hsa_signal_t signal) {
@@ -237,12 +256,12 @@ void FlushDeviceStores(volatile int64_t* stored, int64_t value);
 class SignalBatch {
  public:
   /// @p access_agents are granted access to the arena; empty when @p region is
-  /// already mapped for every agent.
+  /// already mapped for every agent. @p shadow_members keeps a host-side copy of each member's
+  /// Signal*, for an arena the host reaches across a link.
   static hsa_status_t Create(uint32_t count, const hsa_signal_value_t* initial_values,
                              bool use_interrupt, const MemoryRegion* region,
                              const std::vector<hsa_agent_t>& access_agents,
-                             bool host_access_via_hdp,
-                             SignalBatch** batch,
+                             bool host_access_via_hdp, bool shadow_members, SignalBatch** batch,
                              hsa_signal_t* signals);
 
   static __forceinline hsa_amd_signal_batch_t Convert(SignalBatch* batch) {
@@ -270,10 +289,10 @@ class SignalBatch {
     return num_shadowed_arenas_.load(std::memory_order_relaxed) != 0;
   }
 
-  /// @brief Resolves @p handle from host memory when it names a slot of an arena the host
-  /// reaches across the bus, where reading the slot's id and core_signal would cost a bus round
-  /// trip each. Returns false when @p handle is in no such arena; otherwise sets @p member,
-  /// to nullptr when the member has been destroyed.
+  /// @brief Resolves @p handle from host memory when it names a slot of an arena in device
+  /// memory, which the host reaches across PCIe or XGMI, so reading the slot's id and
+  /// core_signal would cost a round trip each. Returns false when @p handle is in no such arena;
+  /// otherwise sets @p member, to nullptr when the member has been destroyed.
   static bool FindShadowedMember(uint64_t handle, Signal** member);
 
  private:
@@ -302,7 +321,7 @@ class SignalBatch {
   const bool host_access_via_hdp_;
 
   /// Host copy of each slot's core_signal, cleared when the member is destroyed. Only
-  /// allocated for arenas the host reaches across the bus.
+  /// allocated for arenas in device memory.
   std::unique_ptr<std::atomic<Signal*>[]> shadow_members_;
 
   /// One for the batch handle plus one per live member object.
