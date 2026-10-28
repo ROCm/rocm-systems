@@ -10,7 +10,9 @@
 
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this stands in for
+#include "alloc.h"
 #include "comm.h"
+#include "gdrwrap.h"
 #include "utils.h"
 #include "profiler.h"
 
@@ -71,6 +73,9 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t
 std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)> g_profilerStopCeCollEvent =
     DefaultProfilerCeCollEvent;
 
+// alloc.h per-device allocation counters, defined in src/init.cc.
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
+
 void ResetCommFakes() {
   g_commSetAsyncError = DefaultCommSetAsyncError;
   g_commCount = DefaultCommCount;
@@ -79,10 +84,12 @@ void ResetCommFakes() {
   g_profilerStopCeCollEvent = DefaultProfilerCeCollEvent;
   g_commEnsureReadyResult = ncclSuccess;
   g_envCtaPolicy = NCCL_CONFIG_UNDEF_INT;
+  ncclGdrCopy = nullptr;
 }
 
 // --- Comm globals (real in init.cc) ---------------------------------------
 enum ncclLaunchMode ncclParamLaunchMode = ncclLaunchModeParallel;
+gdr_t ncclGdrCopy = nullptr;
 
 // The per-launch resource params init.cc declares. collTaskAppend resolves the
 // task's CTA counts through them (env > per-call > comm), so they are referenced
