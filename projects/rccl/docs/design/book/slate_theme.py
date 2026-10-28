@@ -1,7 +1,7 @@
-"""AMD-style Mermaid theme modeled on the HIP programming-model figures, light for print.
+"""Slate Mermaid theme: a muted grey palette, light for print.
 
-Very faint grey surface (#f7f7f8), white nodes with AMD gray (#585556) outlines,
-charcoal (#312f37) Open Sans text and AMD red (#8f1414) for failure outcomes.
+Very faint grey surface (#f7f7f8), white nodes with slate gray (#585556) outlines,
+charcoal (#312f37) Open Sans text and deep red (#8f1414) for failure outcomes.
 The docs' component and outcome classes keep their meaning; only their tints change.
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ CFG = dict(M.READABLE, theme="base", look="handDrawn", handDrawnSeed=7, themeVar
     "doneTaskBorderColor": "#9d9fa2", "gridColor": "#d6d6da", "todayLineColor": "#8f1414",
 })
 
-# Existing book fill, stroke -> AMD book fill, stroke, per legend class: soft tints, muted strokes.
+# Prism book fill, stroke -> Slate book fill, stroke, per legend class: soft tints, muted strokes.
 CLASS_MAP = {
     ("#e5f1ff", "#007aff"): ("#e8f0fa", "#2f6db5"),  # gin
     ("#f5ebfb", "#af52de"): ("#f2ecf8", "#7b4fa6"),  # rma
@@ -49,7 +49,7 @@ CLASS_MAP = {
     ("#eeeefb", "#5856d6"): ("#ededf8", "#4f4cb0"),  # devmem
     ("#e8f8ec", "#34c759"): ("#e9f5ec", "#2e8b46"),  # okpath
     ("#fff9e0", "#ffcc00"): ("#fbf5de", "#a8860a"),  # stagepath
-    ("#ffeceb", "#ff3b30"): ("#f8e4e4", "#8f1414"),  # failpath: AMD red
+    ("#ffeceb", "#ff3b30"): ("#f8e4e4", "#8f1414"),  # failpath: deep red
     ("#f9f9fb", "#d1d1d6"): ("#ffffff", "#b5b5ba"),  # neutral
 }
 
@@ -59,7 +59,7 @@ def _rgb(h: str) -> str:
 
 
 def recolor(src: str) -> str:
-    """Rewrite classDef colors and sequence box/rect tints to the AMD palette."""
+    """Rewrite classDef colors and sequence box/rect tints to the Slate palette."""
     out = src
     for (lf, ls), (df, ds) in CLASS_MAP.items():
         out = re.sub(rf"fill:{lf}\s*,\s*stroke:{ls}", f"fill:{df},stroke:{ds}", out, flags=re.I)

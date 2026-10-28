@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the multi-segment design notes as an AMD-style (rocm-docs-core) book and PDF.
+"""Build the multi-segment design notes as a Slate-style (rocm-docs-core) book and PDF.
 
     python -m pip install -r requirements.txt && python -m playwright install chromium
     python build_book.py
@@ -18,7 +18,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-import amd_theme as A
+import slate_theme as A
 import mermaid_svg as M
 
 HERE = Path(__file__).resolve().parent
@@ -120,7 +120,7 @@ def main() -> int:
             key = f"{stem}-{n[0]:02d}"
             cap = M.CAPTION.search(m.group(1))
             cap = cap.group(1) if cap else key
-            cls = "amd-diagram" + (" fig-landscape" if placements[key] == "landscape" else "")
+            cls = "slate-diagram" + (" fig-landscape" if placements[key] == "landscape" else "")
             return f"```{{figure}} _diagrams/{key}.svg\n:name: fig-{key}\n:alt: {cap}\n:figclass: {cls}\n\n{cap}\n```"
 
         text = M.FENCE.sub(fig, fname.read_text())
@@ -139,7 +139,7 @@ def main() -> int:
         f"# {TITLE}\n\nDesign notes for registering one DMA-BUF memory region per physical segment on every "
         f"InfiniBand path in RCCL. Built from docs commit `{rev}` on {stamp[:8]}.\n\n"
         "Start with the overview. Each part can be read on its own; figures are numbered per chapter.\n")
-    shutil.copy(HERE / "mseg_amd.css", SRC / "_static" / "mseg_amd.css")
+    shutil.copy(HERE / "mseg_slate.css", SRC / "_static" / "mseg_slate.css")
     (SRC / "conf.py").write_text(CONF.format(title=TITLE, rev=rev, repo=REPO_URL, branch=branch))
 
     for builder, out in (("html", HTML), ("singlehtml", SINGLE)):
@@ -154,21 +154,21 @@ def main() -> int:
         if r.returncode:
             return r.returncode
 
-    pdf = BUILD / f"rccl_multiseg_book_amd_{rev}_{stamp}.pdf"
+    pdf = BUILD / f"rccl_multiseg_book_slate_{rev}_{stamp}.pdf"
     rc = subprocess.run([sys.executable, str(HERE / "make_pdf.py"), str(SINGLE / "index.html"), str(pdf),
                          "--title", TITLE, "--rev", f"docs {rev}", "--pages-dir", str(BUILD / "pdf_pages"),
-                         "--fig-selector", "figure.amd-diagram img"]).returncode
+                         "--fig-selector", "figure.slate-diagram img"]).returncode
     if rc:
         problems.append("PDF readability check failed; see " + str(pdf.with_suffix(".check.json")))
 
-    zpath = BUILD / f"rccl_multiseg_book_amd_{rev}_{stamp}.zip"
+    zpath = BUILD / f"rccl_multiseg_book_slate_{rev}_{stamp}.zip"
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         for p in sorted(HTML.rglob("*")):
             if p.is_file():
                 z.write(p, f"html/{p.relative_to(HTML)}")
         if pdf.exists():
             z.write(pdf, pdf.name)
-        z.writestr("README.txt", f"{TITLE} (AMD style)\nDocs commit {rev}, built {stamp}\n\n"
+        z.writestr("README.txt", f"{TITLE} (Slate style)\nDocs commit {rev}, built {stamp}\n\n"
                    "Open html/index.html, or read the PDF.\n")
     (BUILD / "placements.json").write_text(json.dumps(placements, indent=1))
     print("html:", HTML / "index.html")
@@ -196,7 +196,7 @@ version = release = "docs {rev}"
 html_theme_options = {{"flavor": "rocm", "link_main_doc": False, "repository_provider": "github",
                       "use_repository_button": False, "show_toc_level": 2}}
 html_static_path = ["_static"]
-html_css_files = ["mseg_amd.css"]
+html_css_files = ["mseg_slate.css"]
 numfig = True
 numfig_format = {{"figure": "Figure %s"}}
 numfig_secnum_depth = 1

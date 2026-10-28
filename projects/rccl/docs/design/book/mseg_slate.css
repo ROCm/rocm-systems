@@ -1,11 +1,11 @@
 /* Multi-segment design book on rocm-docs-core: diagram surface and print layout. */
-figure.amd-diagram { margin: 1.4rem auto; text-align: center; }
-figure.amd-diagram img {
+figure.slate-diagram { margin: 1.4rem auto; text-align: center; }
+figure.slate-diagram img {
   background: #f7f7f8; border: 1px solid #e6e6e9; border-radius: 10px; padding: 18px; box-sizing: content-box;
   max-width: calc(100% - 36px); height: auto;
 }
-figure.amd-diagram figcaption { font-size: 0.9rem; color: var(--pst-color-text-muted); margin-top: 0.5rem; }
-figure.amd-diagram figcaption .caption-number { font-weight: 600; color: var(--pst-color-text-base); }
+figure.slate-diagram figcaption { font-size: 0.9rem; color: var(--pst-color-text-muted); margin-top: 0.5rem; }
+figure.slate-diagram figcaption .caption-number { font-weight: 600; color: var(--pst-color-text-base); }
 
 @page { size: letter; }
 @page wide { size: letter landscape; }
@@ -25,8 +25,8 @@ figure.amd-diagram figcaption .caption-number { font-weight: 600; color: var(--p
   h1, h2, h3, h4 { break-inside: avoid; }
   h2 { font-size: 14pt; break-after: avoid; }
   h3, h4 { break-after: avoid; }
-  figure.amd-diagram { break-inside: avoid; page-break-inside: avoid; }
-  figure.amd-diagram img { max-height: 8.5in; width: auto; padding: 9px; border-radius: 10px; max-width: calc(100% - 18px); }
+  figure.slate-diagram { break-inside: avoid; page-break-inside: avoid; }
+  figure.slate-diagram img { max-height: 8.5in; width: auto; padding: 9px; border-radius: 10px; max-width: calc(100% - 18px); }
   figure.fig-landscape { page: wide; }
   figure.fig-landscape img { max-height: 5.7in; }
   pre { white-space: pre-wrap !important; word-break: break-word; font-size: 8pt; break-inside: auto; }
