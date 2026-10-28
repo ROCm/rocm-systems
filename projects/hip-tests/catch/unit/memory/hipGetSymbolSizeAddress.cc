@@ -30,8 +30,8 @@ HIP_GET_SYMBOL_SIZE_ADDRESS_DEFINE_GLOBALS(float)
 HIP_GET_SYMBOL_SIZE_ADDRESS_DEFINE_GLOBALS(char)
 HIP_GET_SYMBOL_SIZE_ADDRESS_DEFINE_GLOBALS(double)
 
-// Not using macros for the new tests because make its less readable and harder to find what exactly
-// is going on, so spell it out verbosely.
+// The managed tests are spelled out instead of using macros, which would make them less readable
+// and harder to follow.
 __managed__ int managed_int_var = 0;
 __managed__ int managed_int_arr[kArraySize] = {};
 __managed__ float managed_float_var = 0;
