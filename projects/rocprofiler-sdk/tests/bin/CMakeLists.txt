@@ -60,10 +60,9 @@ endif()
 if(rocjpeg_FOUND AND rocjpeg_VERSION VERSION_GREATER 0.6.0)
     add_subdirectory(rocjpeg)
 endif()
-if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL 3.8.0)
-    # rocshmem >= 3.8.0 provides the full host-stream API set that rocshmem-demo
-    # exercises, including signal_add_on_stream and signal_set_on_stream. Skip the
-    # subdir on older installs so the build does not break.
+if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL 3.3.0)
+    # rocshmem >= 3.3.0 introduced the full host-stream API set that rocshmem-demo
+    # exercises. Skip the subdir on older installs so the build does not break.
     add_subdirectory(rocshmem)
 endif()
 add_subdirectory(hipfile)

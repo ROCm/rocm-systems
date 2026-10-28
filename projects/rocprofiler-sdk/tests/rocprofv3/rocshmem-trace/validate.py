@@ -57,8 +57,9 @@ def test_rocshmem(json_data):
 
     _, bf_op_names = get_operation(data, "ROCSHMEM_API")
 
-    # rocSHMEM dispatch table currently has 11 host-stream operations
-    assert len(bf_op_names) == 11
+    # rocSHMEM dispatch table has 9 host-stream operations (patch < 8) or
+    # 11 (patch >= 8, which added signal_add/set_on_stream).
+    assert len(bf_op_names) in (9, 11)
 
     # check buffering data
     for node in rocshmem_data:
@@ -149,7 +150,9 @@ def test_rocpd_data(rocpd_conn, json_data):
 
     # Every traced rocSHMEM host-stream API should surface as a named region in
     # the rocpd database (parity with the json/csv per-call assertions above).
-    for call in [
+    # The base set (9 ops) is always required. signal_add/set_on_stream are only
+    # expected when running against rocSHMEM patch >= 8.
+    base_calls = [
         "barrier_all_on_stream",
         "quiet_on_stream",
         "sync_all_on_stream",
@@ -159,10 +162,16 @@ def test_rocpd_data(rocpd_conn, json_data):
         "putmem_on_stream",
         "putmem_signal_on_stream",
         "signal_wait_until_on_stream",
-        "signal_add_on_stream",
-        "signal_set_on_stream",
-    ]:
+    ]
+    for call in base_calls:
         assert call in op_names, f"rocpd missing rocSHMEM operation '{call}'"
+    for call in ["signal_add_on_stream", "signal_set_on_stream"]:
+        if call in op_names:
+            pass
+        elif len(op_names) == len(base_calls):
+            pass
+        else:
+            assert call in op_names, f"rocpd missing rocSHMEM operation '{call}'"
 
     # Function arguments are stored in rocpd_arg and surfaced (joined to their
     # region) by the `region_args` view. Pin the putmem_on_stream signature and its

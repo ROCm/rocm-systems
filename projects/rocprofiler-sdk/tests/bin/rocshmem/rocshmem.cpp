@@ -39,6 +39,7 @@ THE SOFTWARE.
 // was built with (OpenMPI, MPICH, MVAPICH); the lookup below just covers common launchers.
 
 #include <hip/hip_runtime.h>
+#include <rocshmem/api_trace.h>
 #include <rocshmem/rocshmem.hpp>
 
 #include <algorithm>
@@ -153,8 +154,10 @@ main(int /*argc*/, char** /*argv*/)
                                          peer,
                                          stream);
         rocshmem_signal_wait_until_on_stream(signal, ROCSHMEM_CMP_GE, 1, stream);
+#if ROCSHMEM_API_TRACE_VERSION_PATCH >= 8
         rocshmem_signal_add_on_stream(signal, 1, peer, stream);
         rocshmem_signal_set_on_stream(signal, 1, peer, stream);
+#endif
 
         rocshmem_broadcastmem_on_stream(
             ROCSHMEM_TEAM_WORLD, dst, src, kPerPeBytes, /*pe_root=*/0, stream);

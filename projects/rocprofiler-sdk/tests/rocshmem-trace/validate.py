@@ -26,8 +26,9 @@ import sys
 import os
 import pytest
 
-# The 11 host-stream APIs registered by rocshmem/src/api_trace.cc.
-EXPECTED_OPERATIONS = {
+# The base set of host-stream APIs registered by rocshmem/src/api_trace.cc
+# (patch < 8).
+BASE_OPERATIONS = {
     "barrier_all_on_stream",
     "quiet_on_stream",
     "sync_all_on_stream",
@@ -37,6 +38,10 @@ EXPECTED_OPERATIONS = {
     "putmem_on_stream",
     "putmem_signal_on_stream",
     "signal_wait_until_on_stream",
+}
+
+# Patch >= 8 adds signal_add_on_stream and signal_set_on_stream.
+EXTENDED_OPERATIONS_PATCH_8 = {
     "signal_add_on_stream",
     "signal_set_on_stream",
 }
@@ -45,8 +50,22 @@ EXPECTED_OPERATIONS = {
 # exercise the tracer under repetition. Update both numbers in lockstep if
 # the demo's iteration count changes.
 DEMO_ITERATIONS = 3
-EXPECTED_BUFFER_RECORDS = len(EXPECTED_OPERATIONS) * DEMO_ITERATIONS  # 33
-EXPECTED_CALLBACK_RECORDS = EXPECTED_BUFFER_RECORDS * 2  # phase 1 + phase 2 = 66
+
+
+def _get_expected_operations(sdk_data):
+    """Return the expected operation set based on how many ops the trace reports.
+
+    The rocSHMEM dispatch table has 9 ops (patch < 8) or 11 (patch >= 8).
+    Detect which set the current build provides by inspecting the registered
+    operation names so the validators work against any supported version.
+    """
+    op_lookup = get_operation(sdk_data["buffer_records"], "ROCSHMEM_API")
+    if op_lookup is None:
+        return BASE_OPERATIONS
+    _, op_names = op_lookup
+    if len(op_names) > len(BASE_OPERATIONS):
+        return BASE_OPERATIONS | EXTENDED_OPERATIONS_PATCH_8
+    return BASE_OPERATIONS
 
 
 def node_exists(name, data, min_len=1):
@@ -117,42 +136,44 @@ def test_size_entries(input_data):
 def test_rocshmem_domain_registered(input_data):
     """The ROCSHMEM_API buffer-tracing kind exposes every operation name."""
     sdk_data = _get_sdk_data(input_data)
+    expected_ops = _get_expected_operations(sdk_data)
     op_lookup = get_operation(sdk_data["buffer_records"], "ROCSHMEM_API")
     assert (
         op_lookup is not None
     ), "ROCSHMEM_API kind not registered in buffer_records.names"
     _, op_names = op_lookup
-    assert len(op_names) == len(EXPECTED_OPERATIONS), (
-        f"expected {len(EXPECTED_OPERATIONS)} operations, "
-        f"got {len(op_names)}: {op_names}"
+    assert len(op_names) == len(expected_ops), (
+        f"expected {len(expected_ops)} operations, " f"got {len(op_names)}: {op_names}"
     )
-    assert set(op_names) == EXPECTED_OPERATIONS, (
+    assert set(op_names) == expected_ops, (
         f"operation set mismatch.\n  got:      {sorted(op_names)}"
-        f"\n  expected: {sorted(EXPECTED_OPERATIONS)}"
+        f"\n  expected: {sorted(expected_ops)}"
     )
 
 
 def test_rocshmem_ext_domain_registered(input_data):
     """The ROCSHMEM_API_EXT buffer-tracing kind exposes every operation name."""
     sdk_data = _get_sdk_data(input_data)
+    expected_ops = _get_expected_operations(sdk_data)
     op_lookup = get_operation(sdk_data["buffer_records"], "ROCSHMEM_API_EXT")
     assert (
         op_lookup is not None
     ), "ROCSHMEM_API_EXT kind not registered in buffer_records.names"
     _, op_names = op_lookup
-    assert len(op_names) == len(EXPECTED_OPERATIONS), (
-        f"expected {len(EXPECTED_OPERATIONS)} operations, "
-        f"got {len(op_names)}: {op_names}"
+    assert len(op_names) == len(expected_ops), (
+        f"expected {len(expected_ops)} operations, " f"got {len(op_names)}: {op_names}"
     )
-    assert set(op_names) == EXPECTED_OPERATIONS, (
+    assert set(op_names) == expected_ops, (
         f"operation set mismatch.\n  got:      {sorted(op_names)}"
-        f"\n  expected: {sorted(EXPECTED_OPERATIONS)}"
+        f"\n  expected: {sorted(expected_ops)}"
     )
 
 
 def test_buffer_records_contain_all_apis(input_data):
     """Every traced API surfaces at least once in the buffer-tracing stream."""
     sdk_data = _get_sdk_data(input_data)
+    expected_ops = _get_expected_operations(sdk_data)
+    expected_buf = len(expected_ops) * DEMO_ITERATIONS
     op_lookup = get_operation(sdk_data["buffer_records"], "ROCSHMEM_API")
     assert op_lookup is not None, "ROCSHMEM_API kind missing"
     kind_idx, op_names = op_lookup
@@ -160,9 +181,9 @@ def test_buffer_records_contain_all_apis(input_data):
     bf_records = sdk_data["buffer_records"].get("rocshmem_api_traces", [])
     if not bf_records:
         pytest.skip("rocshmem tracing unavailable (no buffer records captured)")
-    assert len(bf_records) >= EXPECTED_BUFFER_RECORDS, (
-        f"expected >={EXPECTED_BUFFER_RECORDS} rocshmem_api buffer records "
-        f"({DEMO_ITERATIONS} iters x {len(EXPECTED_OPERATIONS)} APIs), "
+    assert len(bf_records) >= expected_buf, (
+        f"expected >={expected_buf} rocshmem_api buffer records "
+        f"({DEMO_ITERATIONS} iters x {len(expected_ops)} APIs), "
         f"got {len(bf_records)}"
     )
 
@@ -196,10 +217,10 @@ def test_buffer_records_contain_all_apis(input_data):
         assert rec["start_timestamp"] < rec["end_timestamp"]
         assert rec["correlation_id"]["internal"] > 0
 
-    assert observed_ops == EXPECTED_OPERATIONS, (
+    assert observed_ops == expected_ops, (
         "rocshmem-demo did not exercise every traced API."
-        f"\n  missing: {sorted(EXPECTED_OPERATIONS - observed_ops)}"
-        f"\n  extra:   {sorted(observed_ops - EXPECTED_OPERATIONS)}"
+        f"\n  missing: {sorted(expected_ops - observed_ops)}"
+        f"\n  extra:   {sorted(observed_ops - expected_ops)}"
     )
 
 
@@ -207,6 +228,8 @@ def test_buffer_ext_records_contain_args_and_retval(input_data):
     """EXT buffer records carry the same coverage as the basic buffer stream,
     plus an ``args`` payload and a ``retval`` field."""
     sdk_data = _get_sdk_data(input_data)
+    expected_ops = _get_expected_operations(sdk_data)
+    expected_buf = len(expected_ops) * DEMO_ITERATIONS
     op_lookup = get_operation(sdk_data["buffer_records"], "ROCSHMEM_API_EXT")
     assert op_lookup is not None, "ROCSHMEM_API_EXT kind missing"
     kind_idx, op_names = op_lookup
@@ -215,9 +238,9 @@ def test_buffer_ext_records_contain_args_and_retval(input_data):
     if not ext_records:
         pytest.skip("rocshmem ext tracing unavailable (no buffer ext records captured)")
 
-    assert len(ext_records) >= EXPECTED_BUFFER_RECORDS, (
-        f"expected >={EXPECTED_BUFFER_RECORDS} rocshmem_api_ext buffer records "
-        f"({DEMO_ITERATIONS} iters x {len(EXPECTED_OPERATIONS)} APIs), "
+    assert len(ext_records) >= expected_buf, (
+        f"expected >={expected_buf} rocshmem_api_ext buffer records "
+        f"({DEMO_ITERATIONS} iters x {len(expected_ops)} APIs), "
         f"got {len(ext_records)}"
     )
 
@@ -260,16 +283,18 @@ def test_buffer_ext_records_contain_args_and_retval(input_data):
                 assert key in arg, f"missing arg.{key}: {rec}"
                 assert isinstance(arg[key], str), f"arg.{key} is not a string: {rec}"
 
-    assert observed_ops == EXPECTED_OPERATIONS, (
+    assert observed_ops == expected_ops, (
         "rocshmem-demo did not exercise every traced API in EXT stream."
-        f"\n  missing: {sorted(EXPECTED_OPERATIONS - observed_ops)}"
-        f"\n  extra:   {sorted(observed_ops - EXPECTED_OPERATIONS)}"
+        f"\n  missing: {sorted(expected_ops - observed_ops)}"
+        f"\n  extra:   {sorted(observed_ops - expected_ops)}"
     )
 
 
 def test_callback_records_contain_all_apis(input_data):
     """Same coverage check via the callback-tracing stream."""
     sdk_data = _get_sdk_data(input_data)
+    expected_ops = _get_expected_operations(sdk_data)
+    expected_cb = len(expected_ops) * DEMO_ITERATIONS * 2
     op_lookup = get_operation(sdk_data["buffer_records"], "ROCSHMEM_API")
     assert op_lookup is not None
     _, op_names = op_lookup
@@ -278,9 +303,9 @@ def test_callback_records_contain_all_apis(input_data):
     if not cb_records:
         pytest.skip("json-tool did not record any callback traces for rocshmem_api")
 
-    assert len(cb_records) >= EXPECTED_CALLBACK_RECORDS, (
-        f"expected >={EXPECTED_CALLBACK_RECORDS} rocshmem_api callback records "
-        f"({DEMO_ITERATIONS} iters x {len(EXPECTED_OPERATIONS)} APIs x 2 phases), "
+    assert len(cb_records) >= expected_cb, (
+        f"expected >={expected_cb} rocshmem_api callback records "
+        f"({DEMO_ITERATIONS} iters x {len(expected_ops)} APIs x 2 phases), "
         f"got {len(cb_records)}"
     )
 
@@ -294,9 +319,9 @@ def test_callback_records_contain_all_apis(input_data):
         ), f"operation index out of range: {rec}"
         observed_ops.add(op_names[rec["operation"]])
 
-    assert observed_ops == EXPECTED_OPERATIONS, (
+    assert observed_ops == expected_ops, (
         "callback stream missing some rocshmem APIs."
-        f"\n  missing: {sorted(EXPECTED_OPERATIONS - observed_ops)}"
+        f"\n  missing: {sorted(expected_ops - observed_ops)}"
     )
 
 
@@ -558,6 +583,7 @@ def test_perfetto_data(request, input_data):
     `rocshmem_api` mapping in all builds.
     """
     sdk_data = _get_sdk_data(input_data)
+    expected_ops = _get_expected_operations(sdk_data)
     bf_records = sdk_data["buffer_records"].get("rocshmem_api_traces", [])
 
     json_path = request.config.getoption("--input")
@@ -610,7 +636,7 @@ def test_perfetto_data(request, input_data):
     if not name_hits.empty:
         observed = set()
         for n in name_hits["name"].astype(str):
-            for op in EXPECTED_OPERATIONS:
+            for op in expected_ops:
                 if op in n:
                     observed.add(op)
                     break
@@ -632,10 +658,10 @@ def test_perfetto_data(request, input_data):
                 f"{sorted(name_hits['name'].astype(str).unique())[:5]}). "
                 "Per-call naming may not yet be enabled in this build."
             )
-        assert observed == EXPECTED_OPERATIONS, (
+        assert observed == expected_ops, (
             "perfetto is missing some rocSHMEM API calls."
             f"\n  found:   {sorted(observed)}"
-            f"\n  missing: {sorted(EXPECTED_OPERATIONS - observed)}"
+            f"\n  missing: {sorted(expected_ops - observed)}"
         )
         return
 
