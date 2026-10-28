@@ -12,6 +12,8 @@
 use crate::Error;
 use crate::device::Device;
 use crate::driver;
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// Driver-independent cause of a GPU virtual-memory fault.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -114,6 +116,31 @@ impl DeviceEventSubscription {
     /// later poll can still retrieve an event recorded before a polling failure.
     pub fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
         self.inner.poll()
+    }
+
+    /// Waits up to `timeout` for the next event on this subscription.
+    ///
+    /// A zero timeout observes once. `Busy` means another subscriber has
+    /// filled the retained event buffer and can clear it by reading; native
+    /// driver errors are returned to the caller without an implicit retry.
+    ///
+    /// # Errors
+    /// Reports native polling and driver-lifetime failures.
+    pub fn wait(&mut self, timeout: Duration) -> Result<Option<DeviceEvent>, Error> {
+        let started = Instant::now();
+        loop {
+            match self.poll() {
+                Ok(Some(event)) => return Ok(Some(event)),
+                Ok(None) => {}
+                Err(error) if error.kind() == crate::ErrorKind::Busy => {}
+                Err(error) => return Err(error),
+            }
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return Ok(None);
+            }
+            thread::sleep(remaining.min(Duration::from_millis(1)));
+        }
     }
 }
 
