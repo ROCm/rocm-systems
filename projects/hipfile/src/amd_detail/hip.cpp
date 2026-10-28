@@ -92,6 +92,14 @@ Hip::hipDeviceGetStreamPriorityRange() const
     return range;
 }
 
+int
+Hip::hipStreamGetPriority(hipStream_t stream) const
+{
+    int priority{};
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamGetPriority(stream, &priority));
+    return priority;
+}
+
 void
 Hip::hipStreamDestroy(hipStream_t stream) const
 {

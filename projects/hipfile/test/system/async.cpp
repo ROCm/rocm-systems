@@ -748,6 +748,29 @@ INSTANTIATE_TEST_SUITE_P(HipAsyncUnregistered, HipAsyncUnregisteredStream, ::tes
                              return param_info.param.name;
                          });
 
+// The greatest priority is reserved for the fallback path's bounce streams.
+TEST_F(HipAsync, reservedPriorityStreamIsRejected)
+{
+    int least{};
+    int greatest{};
+    ASSERT_EQ(hipDeviceGetStreamPriorityRange(&least, &greatest), hipSuccess);
+    if (least == greatest) {
+        GTEST_SKIP() << "Device has a single stream priority";
+    }
+    hipStream_t stream{};
+    ASSERT_EQ(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking, greatest), hipSuccess);
+
+    EXPECT_EQ(hipFileStreamRegister(stream, 0), HipFileOpError(hipFileInvalidValue));
+    for (const auto &fn : asyncIOFns) {
+        EXPECT_EQ(
+            fn.function(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+            HipFileOpError(hipFileAsyncNotSupported))
+            << fn.name;
+    }
+    EXPECT_EQ(hipFileStreamDeregister(stream), HipFileOpError(hipFileInvalidValue));
+    ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+}
+
 // Overrides only the fastpath AIS entry points to throw, so a fastpath async IO that is otherwise
 // selected fails at stream-execution time. Every other HIP call inherits the real implementation, so
 // the fallback path runs for real.

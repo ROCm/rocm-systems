@@ -68,6 +68,7 @@ struct Hip {
     virtual void        hipStreamSynchronize(hipStream_t stream) const;
     virtual hipStream_t hipStreamCreateWithPriority(unsigned int flags, int priority) const;
     virtual HipStreamPriorityRange hipDeviceGetStreamPriorityRange() const;
+    virtual int                    hipStreamGetPriority(hipStream_t stream) const;
     virtual void                   hipStreamDestroy(hipStream_t stream) const;
     virtual void  hipStreamWaitValue64(hipStream_t stream, uint64_t *ptr, uint64_t value, unsigned int flags,
                                        uint64_t mask) const;

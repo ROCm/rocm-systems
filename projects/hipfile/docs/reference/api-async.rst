@@ -53,10 +53,14 @@ reuses the handle could pick up the old stream's state.
 ``hipFileStreamDeregister()`` synchronizes the stream before it frees the
 stream's resources, so it waits for the stream's transfers in flight.
 
-.. note::
-
-   If you use high-priority HIP streams for asynchronous I/O, a transfer that
-   uses the fallback path can hang. See :ref:`hipfile-async-high-priority-streams`.
+hipFile reserves the device's greatest stream priority for the streams its
+fallback path copies data on. A stream at that priority could hold up those
+copies while it waits for a transfer, so hipFile rejects it:
+``hipFileStreamRegister()`` returns ``hipFileInvalidValue``, and
+``hipFileReadAsync()`` and ``hipFileWriteAsync()`` return
+``hipFileAsyncNotSupported``. Use a lower priority for streams you use for
+asynchronous I/O. A device with only one stream priority level has no reserved
+priority. See :ref:`hipfile-greatest-priority-streams` for a related case.
 
 Stream registration flags
 ===========================

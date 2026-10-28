@@ -853,6 +853,9 @@ void hipFileBatchIODestroy(hipFileBatchHandle_t batch_idp);
  * @note `hipStreamPerThread` is synchronous too. Any other stream that isn't
  *       registered is registered implicitly, with no flags; deregister it before
  *       destroying it.
+ * @note hipFile reserves the device's greatest stream priority for its fallback
+ *       I/O. A stream created at that priority returns `hipFileAsyncNotSupported`,
+ *       unless the device has only one priority level.
  *
  * @return \hipfile_error_return
  */
@@ -882,6 +885,9 @@ hipFileError_t hipFileReadAsync(hipFileHandle_t fh, void *buffer_base, size_t *s
  * @note `hipStreamPerThread` is synchronous too. Any other stream that isn't
  *       registered is registered implicitly, with no flags; deregister it before
  *       destroying it.
+ * @note hipFile reserves the device's greatest stream priority for its fallback
+ *       I/O. A stream created at that priority returns `hipFileAsyncNotSupported`,
+ *       unless the device has only one priority level.
  *
  * @return \hipfile_error_return
  */
@@ -902,6 +908,9 @@ hipFileError_t hipFileWriteAsync(hipFileHandle_t fh, void *buffer_base, size_t *
  *       implicitly applies `flags` to later requests. Registering the default
  *       stream (a NULL handle or `hipStreamPerThread`) does nothing and returns
  *       success.
+ * @note hipFile reserves the device's greatest stream priority for its fallback
+ *       I/O. Registering a stream created at that priority returns
+ *       `hipFileInvalidValue`, unless the device has only one priority level.
  *
  * @return \hipfile_error_return
  */

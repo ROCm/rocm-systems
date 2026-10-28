@@ -8,21 +8,22 @@ Known issues
 
 This page documents known issues with hipFile.
 
-.. _hipfile-async-high-priority-streams:
+.. _hipfile-greatest-priority-streams:
 
-Asynchronous I/O on high-priority streams can hang
-==================================================
+Fallback I/O can hang behind a blocked greatest-priority stream
+===============================================================
 
-An asynchronous transfer that uses the fallback path can hang if you issue it
-on a high-priority HIP stream. The stream waits on the GPU for the transfer to
-finish, and the fallback path copies the data through the GPU on its own
-streams. hipFile creates those streams at the highest priority, which gives
-them hardware queues that streams of other priorities don't use. A
-high-priority stream can share those queues, so the copy can end up queued
-behind the stream's wait and never run.
+The fallback path copies data through the GPU on streams that hipFile creates
+at the device's greatest priority, which gives them hardware queues that
+streams of other priorities don't use. hipFile rejects asynchronous I/O on
+streams at that priority (see :doc:`/reference/api-async`), but an application
+can still create its own. If one of them is blocked, for example on a stream
+wait value, until a hipFile call that uses the fallback path returns, that
+call can hang: its copy can be queued behind the blocked stream on a shared
+hardware queue and never run.
 
-To work around this issue, use default-priority or low-priority streams for
-asynchronous I/O.
+To work around this issue, don't block a greatest-priority stream on hipFile
+I/O.
 
 Poor performance with GPU Virtual Functions
 ===========================================

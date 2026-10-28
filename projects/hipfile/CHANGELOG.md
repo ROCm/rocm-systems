@@ -19,6 +19,7 @@
 * `hipFileReadAsync()` and `hipFileWriteAsync()` now register a stream implicitly on its first use, with no flags, as cuFile does, so calling `hipFileStreamRegister()` first is optional. Registering a stream that was registered implicitly applies its flags to later requests. Deregister every stream used for asynchronous I/O before destroying it.
 * `hipFileReadAsync()` and `hipFileWriteAsync()` on `hipStreamPerThread` now run synchronously, like the null stream.
 * `hipFileStreamDeregister()` now synchronizes the stream before freeing its resources, so it waits for all work queued on the stream, including asynchronous I/O in flight.
+* hipFile now reserves the device's greatest stream priority for its fallback I/O streams. For a stream at that priority, `hipFileStreamRegister()` returns `hipFileInvalidValue`, and `hipFileReadAsync()` and `hipFileWriteAsync()` return `hipFileAsyncNotSupported`. Use a lower priority for streams used for asynchronous I/O. Devices with a single stream priority level are not affected.
 
 ### Fixed
 
@@ -38,7 +39,7 @@
 
 * The bandwidth reported by `ais-stats` and the Stats API is derived from the sum of the per-operation latencies instead of the elapsed wall-clock time, so when several threads issue I/O concurrently, the reported bandwidth is understated by roughly the number of concurrent threads. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).
 * On devices that don't support stream wait values, asynchronous transfers run one at a time, because the ROCm runtime runs stream host functions on a single thread, and a running transfer also delays host functions queued on other streams.
-* Asynchronous I/O on a high-priority HIP stream can hang when the transfer uses the fallback path. Use default-priority or low-priority streams for asynchronous I/O.
+* A hipFile call that uses the fallback path can hang if the application has blocked one of its own greatest-priority HIP streams until that call returns. Don't block a greatest-priority stream on hipFile I/O.
 
 ## hipFile 0.5.0 for ROCm 10.1.0
 

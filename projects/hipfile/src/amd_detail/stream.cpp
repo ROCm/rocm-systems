@@ -52,6 +52,13 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
         return;
     }
 
+    // Fallback bounce copies run at the greatest priority; parking a stream there could queue them behind it.
+    auto priorities = Context<Hip>::get()->hipDeviceGetStreamPriorityRange();
+    if (priorities.least != priorities.greatest &&
+        Context<Hip>::get()->hipStreamGetPriority(hip_stream) == priorities.greatest) {
+        throw ReservedStreamPriority();
+    }
+
     can_use_stream_wait_value =
         Context<Hip>::get()->hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, device_id) != 0;
     if (!can_use_stream_wait_value) {

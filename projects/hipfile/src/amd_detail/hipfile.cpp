@@ -556,6 +556,9 @@ try {
 catch (hipFileError_t e) {
     return e;
 }
+catch (const ReservedStreamPriority &) {
+    return {hipFileAsyncNotSupported, hipSuccess};
+}
 catch (const std::invalid_argument &) {
     return {hipFileInvalidValue, hipSuccess};
 }

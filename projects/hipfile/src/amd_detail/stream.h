@@ -8,6 +8,7 @@
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <unordered_map>
 
 template <typename T> class PassKey;
@@ -16,6 +17,13 @@ namespace hipFile {
 
 /// @brief True for the null stream and hipStreamPerThread, which are never registered
 bool isDefaultStream(hipStream_t hip_stream);
+
+/// @brief The stream is at the device's greatest priority, which hipFile reserves for its fallback IO streams
+struct ReservedStreamPriority : public std::invalid_argument {
+    ReservedStreamPriority() : std::invalid_argument("Stream priority is reserved for fallback IO")
+    {
+    }
+};
 
 class IStream {
 public:

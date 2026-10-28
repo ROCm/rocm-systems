@@ -42,13 +42,18 @@ hipFileFlagsPowerSet()
                               ::testing::Values(0, HIPFILE_STREAM_PAGE_ALIGNED_INPUTS));
 }
 
-// A registered stream allocates one signal slot under a DeviceGuard and frees it when
-// released. Point the mocked allocation at real storage so the ctor's zero-init write is valid.
+// A registered stream checks its priority, then allocates one signal slot under a DeviceGuard and frees it
+// when released. Streams default to normal priority. Point the mocked allocation at real storage so the
+// ctor's zero-init write is valid.
 static void
 expectSignalMemory(StrictMock<MHip> &mhip, uint64_t *storage)
 {
     using ::testing::AnyNumber;
     using ::testing::Return;
+    EXPECT_CALL(mhip, hipDeviceGetStreamPriorityRange)
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HipStreamPriorityRange{1, -1}));
+    EXPECT_CALL(mhip, hipStreamGetPriority).Times(AnyNumber()).WillRepeatedly(Return(0));
     EXPECT_CALL(mhip, hipDeviceGetAttribute).Times(AnyNumber()).WillRepeatedly(Return(1));
     EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
     EXPECT_CALL(mhip, hipExtMallocWithFlags)
@@ -208,6 +213,14 @@ TEST_F(HipFileStreamExternal, register_and_deregister_default_stream_succeed)
     ASSERT_EQ(hipFileStreamDeregister(nullptr), HIPFILE_SUCCESS);
 }
 
+TEST_F(HipFileStreamExternal, register_stream_at_reserved_priority_returns_invalid_value)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipStreamGetPriority(nonnull_stream)).WillOnce(::testing::Return(-1));
+    ASSERT_EQ(hipFileStreamRegister(nonnull_stream, 0), HipFileOpError(hipFileInvalidValue));
+    ASSERT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
+}
+
 TEST_F(HipFileStream, registered_stream_has_signal_slot)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
@@ -221,6 +234,7 @@ TEST_F(HipFileStream, registered_stream_has_signal_slot)
 TEST_F(HipFileStream, default_streams_have_no_signal_slot)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice).Times(2);
+    EXPECT_CALL(mhip, hipStreamGetPriority).Times(0);
     EXPECT_CALL(mhip, hipDeviceGetAttribute).Times(0);
     EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
     for (auto hip_stream : {static_cast<hipStream_t>(nullptr), hipStreamPerThread}) {
@@ -349,10 +363,41 @@ TEST_F(HipFileStream, register_after_implicit_registration_rejects_invalid_flags
     stream_map.registerStream(nonnull_stream, 0);
 }
 
+TEST_F(HipFileStream, register_stream_at_reserved_priority_throws)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipStreamGetPriority(nonnull_stream)).WillOnce(::testing::Return(-1));
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+    EXPECT_THROW(stream_map.registerStream(nonnull_stream, 0), ReservedStreamPriority);
+    EXPECT_EQ(stream_map.findStream(nonnull_stream), nullptr);
+}
+
+TEST_F(HipFileStream, implicit_stream_at_reserved_priority_throws)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipStreamGetPriority(nonnull_stream)).WillOnce(::testing::Return(-1));
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+    EXPECT_THROW(StreamMap::makeImplicitStream(nonnull_stream), ReservedStreamPriority);
+}
+
+TEST_F(HipFileStream, reserved_priority_is_not_enforced_with_one_priority_level)
+{
+    // With a single level, bounce streams can't be separated by priority, so rejecting would reject
+    // everything.
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipDeviceGetStreamPriorityRange)
+        .WillOnce(::testing::Return(HipStreamPriorityRange{0, 0}));
+    stream_map.registerStream(nonnull_stream, 0);
+    EXPECT_NE(stream_map.findStream(nonnull_stream), nullptr);
+}
+
 // Implicit registration through the real DriverState, as hipFileReadAsync/hipFileWriteAsync use it.
 struct HipFileStreamImplicit : public HipFileOpened {
     HipFileStreamImplicit()
     {
+        ON_CALL(mhip, hipDeviceGetStreamPriorityRange)
+            .WillByDefault(::testing::Return(HipStreamPriorityRange{1, -1}));
+        ON_CALL(mhip, hipStreamGetPriority).WillByDefault(::testing::Return(0));
         ON_CALL(mhip, hipDeviceGetAttribute).WillByDefault(::testing::Return(1));
         ON_CALL(mhip, hipExtMallocWithFlags)
             .WillByDefault(::testing::Return(static_cast<void *>(&signal_storage)));
@@ -419,6 +464,21 @@ TEST_F(HipFileStreamImplicit, implicitly_registered_stream_deregisters)
     (void)lookup(nonnull_stream);
     EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
     EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HIPFILE_SUCCESS);
+    EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
+}
+
+TEST_F(HipFileStreamImplicit, async_io_on_reserved_priority_stream_is_not_supported)
+{
+    EXPECT_CALL(mhip, hipStreamGetPriority(nonnull_stream)).WillRepeatedly(::testing::Return(-1));
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+    size_t  size{4096};
+    hoff_t  file_offset{0};
+    hoff_t  buf_offset{0};
+    ssize_t bytes{0};
+    EXPECT_EQ(hipFileReadAsync(fh, buf, &size, &file_offset, &buf_offset, &bytes, nonnull_stream),
+              HipFileOpError(hipFileAsyncNotSupported));
+    EXPECT_EQ(hipFileWriteAsync(fh, buf, &size, &file_offset, &buf_offset, &bytes, nonnull_stream),
+              HipFileOpError(hipFileAsyncNotSupported));
     EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
 }
 
