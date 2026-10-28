@@ -182,6 +182,11 @@ class FakeIbWorld {
         *nIfs = 1;
         return ncclSuccess;
       }};
+  HookOf<decltype(g_ncclSocketToString)> socketToString{
+      g_ncclSocketToString, [](const union ncclSocketAddress*, char* buf, size_t, int) {
+        buf[0] = '\0';
+        return static_cast<const char*>(buf);
+      }};
   // Like ibv_get_device_list: a NULL-terminated array, non-NULL even when there is no HCA.
   HookOf<decltype(g_ibvGetDeviceList)> getDeviceList{g_ibvGetDeviceList, [this](struct ibv_device*** ret, int* n) {
                                                           listed_ = list;
