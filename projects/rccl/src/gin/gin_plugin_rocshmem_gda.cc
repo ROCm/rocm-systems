@@ -22,6 +22,7 @@
 #include "gin/gin_rocshmem_gda_factory.h"
 #include "common_cast.h"  // IbCastInitDevices/IbCastDevs/IbCastGetPhysProperties
 #include <hip/hip_runtime.h>
+#include <mutex>
 #include <string.h>
 
 // RCCL env-var parameters for traffic class (defined in transport/net_ib/)
@@ -99,44 +100,41 @@ static int ginGdaBootstrapAllgather(void* ctx, void* buf, size_t perRankSize) {
 // Vtable implementations
 ///////////////////////////////////////////////////////////////////////////////
 
-// GIN-capable NIC table, built once at init. Maps each logical GIN device index
-// (enumerated via devices()/getProperties()) to its physical IB-CAST device
-// index, so getProperties() reports that NIC's real name + pciPath.
+// Maps each logical GIN device index to its physical IB-CAST device index.
 #define GIN_GDA_MAX_DEVS MAX_IB_DEVS
+static std::mutex ginGdaDevTableMutex;
 static int ginGdaPhysDevIndex[GIN_GDA_MAX_DEVS];
-static int ginGdaNDevs = 0;
+static int ginGdaNDevs = -1;  // -1 = not yet built
 
-// Build ginGdaPhysDevIndex[] by intersecting the factory's GIN-capable NIC set
-// (recognized vendor + active port, resolved by ibverbs device name) with the
-// IB-CAST device table (which owns the per-NIC name + pciPath + topology ids).
-static void ginRocshmemGdaBuildDevTable() {
-  ginGdaNDevs = 0;
+// Match GIN-capable NIC names (from the factory) to their IB-CAST device index.
+// Idempotent: builds only on first call. Returns the device count.
+static int ginRocshmemGdaBuildDevTable() {
+  std::lock_guard<std::mutex> lock(ginGdaDevTableMutex);
+  if (ginGdaNDevs != -1) return ginGdaNDevs;
 
+  int n = 0;
   char ginNames[GIN_GDA_MAX_DEVS][MAXNAMESIZE];
   int nGin = rocshmem_gin_list_devices(&ginNames[0][0], GIN_GDA_MAX_DEVS, MAXNAMESIZE);
-  if (nGin <= 0) return;
   if (nGin > GIN_GDA_MAX_DEVS) nGin = GIN_GDA_MAX_DEVS;
-
-  // Match each GIN-capable NIC name to its physical IB-CAST device index.
-  for (int g = 0; g < nGin && ginGdaNDevs < GIN_GDA_MAX_DEVS; g++) {
+  for (int g = 0; g < nGin && n < GIN_GDA_MAX_DEVS; g++) {
     for (int d = 0; d < IbCastNDevs; d++) {
       if (strncmp(ginNames[g], IbCastDevs[d].devName, MAXNAMESIZE) == 0) {
-        ginGdaPhysDevIndex[ginGdaNDevs++] = d;
+        ginGdaPhysDevIndex[n++] = d;
         break;
       }
     }
   }
+  ginGdaNDevs = n;
+  return n;
 }
 
 static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   const char* gin_type = getenv("NCCL_GIN_TYPE");
   if (!gin_type || atoi(gin_type) != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) return ncclInternalError;
   if (rocshmem_gin_probe_devices() <= 0) return ncclInternalError;
-  // Populate the IB-CAST device table (name + pciPath + topology ids) and build
-  // the GIN-capable subset so devices()/getProperties() expose one entry per NIC.
+  // Populate the IB-CAST device table, then build the GIN-capable subset.
   if (IbCastInitDevices(logFunction, nullptr) != ncclSuccess) return ncclInternalError;
-  ginRocshmemGdaBuildDevTable();
-  if (ginGdaNDevs <= 0) {
+  if (ginRocshmemGdaBuildDevTable() <= 0) {
     IbCastFinalizeDevices();  // balance the ref before bailing
     return ncclInternalError;
   }
@@ -147,6 +145,7 @@ static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLog
 }
 
 static ncclResult_t ginRocshmemGdaDevices(int* ndev) {
+  std::lock_guard<std::mutex> lock(ginGdaDevTableMutex);
   *ndev = ginGdaNDevs;
   return ncclSuccess;
 }
@@ -161,13 +160,18 @@ static ncclResult_t ginRocshmemGdaGetGinProperties(ncclGinProperties_t* ginProps
 }
 
 static ncclResult_t ginRocshmemGdaGetProperties(int dev, ncclNetProperties_v12_t* props) {
-  if (dev < 0 || dev >= ginGdaNDevs) {
-    WARN("GIN rocshmem-gda: requested properties for NIC %d, only %d GIN NICs enumerated", dev, ginGdaNDevs);
-    return ncclInvalidUsage;
+  int physDev;
+  {
+    std::lock_guard<std::mutex> lock(ginGdaDevTableMutex);
+    if (dev < 0 || dev >= ginGdaNDevs) {
+      WARN("GIN rocshmem-gda: requested properties for NIC %d, only %d GIN NICs enumerated", dev, ginGdaNDevs);
+      return ncclInvalidUsage;
+    }
+    physDev = ginGdaPhysDevIndex[dev];
   }
   // Report the real per-NIC name + pciPath + topology rail/plane ids from the
   // IB-CAST table so the topology places one GIN node per NIC near its GPU.
-  NCCLCHECK(IbCastGetPhysProperties(ginGdaPhysDevIndex[dev], props));
+  NCCLCHECK(IbCastGetPhysProperties(physDev, props));
   props->ptrSupport = NCCL_PTR_CUDA;
   props->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA;
   props->netDeviceVersion = NCCL_GIN_ROCSHMEM_VERSION;
