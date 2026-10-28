@@ -39,75 +39,105 @@ typedef unsigned int uint;
 typedef unsigned long ulong;
 typedef unsigned long long ullong;
 
-extern "C" __device__ __attribute__((const)) bool __ockl_wfany_i32(int);
-extern "C" __device__ __attribute__((const)) bool __ockl_wfall_i32(int);
-extern "C" __device__ uint __ockl_activelane_u32(void);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) bool __ockl_wfany_i32(int);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) bool __ockl_wfall_i32(int);
+extern "C" __device__ __HIP_DEPRECATED_OCML uint __ockl_activelane_u32(void);
 
-extern "C" __device__ __attribute__((const)) uint __ockl_mul24_u32(uint, uint);
-extern "C" __device__ __attribute__((const)) int __ockl_mul24_i32(int, int);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) uint __ockl_mul24_u32(uint, uint);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ockl_mul24_i32(int, int);
 extern "C" __device__ __HIP_DEPRECATED_OCML
     __attribute__((const)) uint __ockl_mul_hi_u32(uint, uint);
 extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ockl_mul_hi_i32(int, int);
-extern "C" __device__ __attribute__((const)) uint __ockl_sadd_u32(uint, uint, uint);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) uint __ockl_sadd_u32(uint, uint, uint);
 
 extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_fmin_f32(float,
                                                                                          float);
 extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_fmax_f32(float,
                                                                                          float);
 
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtn_f32_f64(double);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtp_f32_f64(double);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtz_f32_f64(double);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_cvtrtn_f32_f64(
+    double);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_cvtrtp_f32_f64(
+    double);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_cvtrtz_f32_f64(
+    double);
 
 
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtn_f32_s32(int);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtp_f32_s32(int);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtz_f32_s32(int);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtn_f32_u32(__hip_uint32_t);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtp_f32_u32(__hip_uint32_t);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtz_f32_u32(__hip_uint32_t);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtn_f32_s64(__hip_int64_t);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtp_f32_s64(__hip_int64_t);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtz_f32_s64(__hip_int64_t);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtn_f32_u64(__hip_uint64_t);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtp_f32_u64(__hip_uint64_t);
-extern "C" __device__ __attribute__((const)) float __ocml_cvtrtz_f32_u64(__hip_uint64_t);
-extern "C" __device__ __attribute__((const)) double __ocml_cvtrtn_f64_s64(__hip_int64_t);
-extern "C" __device__ __attribute__((const)) double __ocml_cvtrtp_f64_s64(__hip_int64_t);
-extern "C" __device__ __attribute__((const)) double __ocml_cvtrtz_f64_s64(__hip_int64_t);
-extern "C" __device__ __attribute__((const)) double __ocml_cvtrtn_f64_u64(__hip_uint64_t);
-extern "C" __device__ __attribute__((const)) double __ocml_cvtrtp_f64_u64(__hip_uint64_t);
-extern "C" __device__ __attribute__((const)) double __ocml_cvtrtz_f64_u64(__hip_uint64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_cvtrtn_f32_s32(int);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_cvtrtp_f32_s32(int);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) float __ocml_cvtrtz_f32_s32(int);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) float __ocml_cvtrtn_f32_u32(__hip_uint32_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) float __ocml_cvtrtp_f32_u32(__hip_uint32_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) float __ocml_cvtrtz_f32_u32(__hip_uint32_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) float __ocml_cvtrtn_f32_s64(__hip_int64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) float __ocml_cvtrtp_f32_s64(__hip_int64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) float __ocml_cvtrtz_f32_s64(__hip_int64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) float __ocml_cvtrtn_f32_u64(__hip_uint64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) float __ocml_cvtrtp_f32_u64(__hip_uint64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) float __ocml_cvtrtz_f32_u64(__hip_uint64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) double __ocml_cvtrtn_f64_s64(__hip_int64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) double __ocml_cvtrtp_f64_s64(__hip_int64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) double __ocml_cvtrtz_f64_s64(__hip_int64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) double __ocml_cvtrtn_f64_u64(__hip_uint64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) double __ocml_cvtrtp_f64_u64(__hip_uint64_t);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((const)) double __ocml_cvtrtz_f64_u64(__hip_uint64_t);
 
-extern "C" __device__ __attribute__((convergent)) void __ockl_gws_barrier(uint nwm1, uint rid);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((convergent)) void __ockl_gws_barrier(
+    uint nwm1, uint rid);
 
 extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) __hip_uint32_t __ockl_lane_u32();
-extern "C" __device__ __attribute__((const)) int __ockl_grid_is_valid(void);
-extern "C" __device__ __attribute__((convergent)) void __ockl_grid_sync(void);
-extern "C" __device__ __attribute__((const)) uint __ockl_multi_grid_num_grids(void);
-extern "C" __device__ __attribute__((const)) uint __ockl_multi_grid_grid_rank(void);
-extern "C" __device__ __attribute__((const)) uint __ockl_multi_grid_size(void);
-extern "C" __device__ __attribute__((const)) uint __ockl_multi_grid_thread_rank(void);
-extern "C" __device__ __attribute__((const)) int __ockl_multi_grid_is_valid(void);
-extern "C" __device__ __attribute__((convergent)) void __ockl_multi_grid_sync(void);
-extern "C" __device__ __attribute__((const)) uint __ockl_grid_bar_arrive(void);
-extern "C" __device__ __attribute__((convergent)) void __ockl_grid_bar_wait(uint);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ockl_grid_is_valid(void);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((convergent)) void __ockl_grid_sync(void);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) uint
+__ockl_multi_grid_num_grids(void);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) uint
+__ockl_multi_grid_grid_rank(void);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) uint
+__ockl_multi_grid_size(void);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) uint
+__ockl_multi_grid_thread_rank(void);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) int __ockl_multi_grid_is_valid(
+    void);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((convergent)) void __ockl_multi_grid_sync(
+    void);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((const)) uint
+__ockl_grid_bar_arrive(void);
+extern "C" __device__ __HIP_DEPRECATED_OCML
+    __attribute__((convergent)) void __ockl_grid_bar_wait(uint);
 
 extern "C" __device__ __HIP_DEPRECATED_OCML void __ockl_atomic_add_noret_f32(float*, float);
 
-extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_add_i32(int a);
-extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_and_i32(int a);
-extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_or_i32(int a);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((convergent)) int __ockl_wgred_add_i32(
+    int a);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((convergent)) int __ockl_wgred_and_i32(
+    int a);
+extern "C" __device__ __HIP_DEPRECATED_OCML __attribute__((convergent)) int __ockl_wgred_or_i32(
+    int a);
 
-extern "C" __device__ __hip_uint64_t __ockl_fprintf_stderr_begin();
-extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_args(
+extern "C" __device__ __HIP_DEPRECATED_OCML __hip_uint64_t __ockl_fprintf_stderr_begin();
+extern "C" __device__ __HIP_DEPRECATED_OCML __hip_uint64_t __ockl_fprintf_append_args(
     __hip_uint64_t msg_desc, __hip_uint32_t num_args, __hip_uint64_t value0, __hip_uint64_t value1,
     __hip_uint64_t value2, __hip_uint64_t value3, __hip_uint64_t value4, __hip_uint64_t value5,
     __hip_uint64_t value6, __hip_uint32_t is_last);
-extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_string_n(__hip_uint64_t msg_desc,
-                                                                    const char* data,
-                                                                    __hip_uint64_t length,
-                                                                    __hip_uint32_t is_last);
+extern "C" __device__ __HIP_DEPRECATED_OCML __hip_uint64_t __ockl_fprintf_append_string_n(
+    __hip_uint64_t msg_desc, const char* data, __hip_uint64_t length, __hip_uint32_t is_last);
 
 // Using hip.amdgcn.bc - sync threads
 #define __CLK_LOCAL_MEM_FENCE 0x01
