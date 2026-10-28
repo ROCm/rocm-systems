@@ -124,6 +124,8 @@ struct EventObserver {
     state: Mutex<ObserverState>,
     /// Requests the polling worker to exit.
     stop: AtomicBool,
+    /// A terminal polling failure prevents reliable exception observation.
+    polling_failed: AtomicBool,
     /// Worker joined when the final device handle goes away.
     worker: Mutex<Option<JoinHandle<()>>>,
 }
@@ -169,6 +171,9 @@ impl ObserverState {
 impl EventObserver {
     fn register_epoch(&self, epoch: Shared<AtomicU64>) -> Result<(), u64> {
         let mut state = self.state.lock().map_err(|_| INTERNAL)?;
+        if self.polling_failed.load(Ordering::Acquire) {
+            return Err(INTERNAL);
+        }
         // Holding the epoch list lock pairs registration with event delivery:
         // a newly activated handle observes delivered events and any terminal
         // operation report that reached another handle first.
@@ -204,6 +209,15 @@ impl EventObserver {
             }
         }
         Ok(())
+    }
+
+    /// Latches failed observation without inventing GPU reset evidence.
+    fn record_polling_failure(&self) {
+        let _state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.polling_failed.store(true, Ordering::Release);
     }
 
     /// Counts an operation's loss once. A queue supplies its creation epoch;
@@ -255,6 +269,11 @@ pub(crate) fn advance_reset_epoch(epoch: &AtomicU64, resource_epoch: u64) {
 }
 
 impl Device {
+    /// Reports loss of the native exception observer without inventing reset.
+    pub(crate) fn event_observation_failed(&self) -> bool {
+        self.event_observer.polling_failed.load(Ordering::Acquire)
+    }
+
     pub(crate) fn observe_loss(&self, resource_epoch: u64) {
         self.event_observer
             .record_operation_loss(&self.reset_epoch, Some(resource_epoch));
@@ -281,23 +300,49 @@ impl Device {
 /// destruction joins it before releasing either the public handle or native
 /// connection, so a notification cannot access freed frontend state.
 fn device_event_worker(mut subscription: DeviceEventSubscription, observer: &EventObserver) {
+    device_event_worker_with(
+        |timeout| subscription.wait(timeout),
+        thread::sleep,
+        observer,
+    );
+}
+
+/// Runs the observer policy with an injectable event source and retry pause.
+fn device_event_worker_with(
+    mut wait: impl FnMut(Duration) -> Result<Option<DeviceEvent>, rocddi::Error>,
+    mut pause: impl FnMut(Duration),
+    observer: &EventObserver,
+) {
+    let mut retry_delay = Duration::from_millis(1);
+    let mut driver_failures = 0u8;
     while !observer.stop.load(Ordering::Acquire) {
-        match subscription.poll() {
+        match wait(Duration::from_millis(1)) {
             Ok(Some(event)) => {
+                retry_delay = Duration::from_millis(1);
+                driver_failures = 0;
                 if observer.record_event(event).is_err() {
+                    observer.record_polling_failure();
                     return;
                 }
             }
-            Ok(None) => thread::sleep(Duration::from_millis(1)),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    rocddi::ErrorKind::Driver | rocddi::ErrorKind::Busy
-                ) =>
-            {
-                thread::sleep(Duration::from_millis(1));
+            Ok(None) => {
+                retry_delay = Duration::from_millis(1);
+                driver_failures = 0;
             }
-            Err(_) => return,
+            Err(error) if error.kind() == rocddi::ErrorKind::Busy => {
+                driver_failures = 0;
+                pause(retry_delay);
+                retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
+            }
+            Err(error) if error.kind() == rocddi::ErrorKind::Driver && driver_failures < 16 => {
+                driver_failures += 1;
+                pause(retry_delay);
+                retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
+            }
+            Err(_) => {
+                observer.record_polling_failure();
+                return;
+            }
         }
     }
 }
@@ -325,6 +370,7 @@ fn register_event_observer(
         endpoint_id,
         state: Mutex::new(ObserverState::new(instance.host_allocator)),
         stop: AtomicBool::new(false),
+        polling_failed: AtomicBool::new(false),
         worker: Mutex::new(None),
     })?;
     observer.register_epoch(epoch)?;
@@ -1012,6 +1058,7 @@ mod observer_tests {
             endpoint_id,
             state: Mutex::new(ObserverState::new(Allocator::system())),
             stop: AtomicBool::new(false),
+            polling_failed: AtomicBool::new(false),
             worker: Mutex::new(None),
         }
     }
@@ -1089,6 +1136,42 @@ mod observer_tests {
         observer.record_event(reset(endpoint_id, true)).unwrap();
         observer.record_operation_loss(&epoch, None);
         assert_eq!(epoch.load(Ordering::Acquire), 2);
+    }
+
+    #[test]
+    fn poll_failure_does_not_invent_reset_or_hide_later_native_loss() {
+        let observer = observer([7; 16]);
+        let first = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH)).unwrap();
+        observer.register_epoch(first.clone()).unwrap();
+        observer.record_polling_failure();
+        observer.record_polling_failure();
+        assert_eq!(first.load(Ordering::Acquire), INITIAL_RESET_EPOCH);
+        let late = Shared::new(AtomicU64::new(INITIAL_RESET_EPOCH)).unwrap();
+        assert_eq!(observer.register_epoch(late).err(), Some(INTERNAL));
+        observer.record_operation_loss(&first, None);
+        assert_eq!(first.load(Ordering::Acquire), 2);
+    }
+
+    #[test]
+    fn repeated_driver_errors_stop_the_observer_after_bounded_retries() {
+        let observer = observer([7; 16]);
+        let mut calls = 0;
+        let mut pauses = Vec::new();
+        device_event_worker_with(
+            |_| {
+                calls += 1;
+                Err(rocddi::Error::Operation {
+                    kind: rocddi::ErrorKind::Driver,
+                    detail: "injected event poll failure",
+                })
+            },
+            |delay| pauses.push(delay),
+            &observer,
+        );
+        assert_eq!(calls, 17);
+        assert_eq!(pauses.len(), 16);
+        assert!(observer.polling_failed.load(Ordering::Acquire));
+        assert!(!observer.stop.load(Ordering::Acquire));
     }
 
     #[test]

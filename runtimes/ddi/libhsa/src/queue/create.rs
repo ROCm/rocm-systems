@@ -306,15 +306,25 @@ pub(crate) unsafe fn create_hardware_queue(
             callback,
             callback_data: data,
             vm_faulted: false,
+            vm_fault_callback_state: VmFaultCallbackState::Unseen,
             vm_fault_address: 0,
             vm_fault_reason: 0,
             teardown_started: false,
         },
     );
     runtime.queue_state.released_counted_queues.remove(&public);
+    let observer_failed = runtime.system_event_failed.clone();
     let event_worker = thread::Builder::new()
         .name("rocddi-queue-events".into())
-        .spawn(move || queue_event_worker(&prepared.stop, &worker_alive, &worker_signal, public));
+        .spawn(move || {
+            queue_event_worker(
+                &prepared.stop,
+                &worker_alive,
+                &worker_signal,
+                &observer_failed,
+                public,
+            )
+        });
     let Ok(event_worker) = event_worker else {
         let Some(mut record) = runtime.queue_state.queues.remove(&public) else {
             prepared.tracker.quarantine();
