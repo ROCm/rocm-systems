@@ -146,7 +146,7 @@ A later follow-up removes the 16-segment cap; its design is in [registering past
 | [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md) | IB-CAST RMA handle, consensus with magic and version, completion-driven credits, error propagation | work on `net_ib_cast` GIN |
 | [Code map](multi_segment_code_map.md) | every symbol the stack adds or changes, per file and layer, with line numbers and links to the design sections | look for where a behavior lives or which pull request owns it |
 | [Testing](multi_segment_testing.md) | test strategy, coverage, hybrid DeepEP tests, runner jobs, how to run, known failures | run, add or debug tests |
-| [rocSHMEM GDA and Anvil SDMA](multi_segment_gin_rocshmem_gda_and_anvil_sdma.md) | proposed support in the device-initiated GIN backends | plan GIN types 5 or 6 |
+| [rocSHMEM GDA and Anvil SDMA](multi_segment_gin_rocshmem_gda_and_anvil_sdma.md) | proposed support in the device-initiated GIN backends | plan GIN types 6 or 7 |
 | [Sync and removal](multi_segment_sync_and_removal.md) | upstream-sync footprint and how to remove the workaround once the driver exports whole ranges | plan an upstream sync or a driver-fix rollout |
 | [Past 16 segments](multi_segment_varseg.md) | design to drop the 16-segment cap | work on the cap follow-up |
 | [Side table on first registration](multi_segment_sidetable_first_reg.md) | design to defer the 1.4 MiB side-table cost | work on connect memory cost |
