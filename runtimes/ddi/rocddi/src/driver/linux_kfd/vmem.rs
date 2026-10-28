@@ -330,10 +330,16 @@ impl KfdVirtualAddress {
     }
 
     fn check(&self) -> Result<(), Error> {
-        if self.reservation.is_none() {
+        let Some(reservation) = self.reservation.as_ref() else {
             return Err(error(
                 ErrorKind::InvalidArgument,
                 "virtual-address reservation was already released",
+            ));
+        };
+        if !reservation.is_live() {
+            return Err(error(
+                ErrorKind::DriverContract,
+                "virtual-address reservation ownership is uncertain",
             ));
         }
         if self.uncertain.load(Ordering::Acquire) {
@@ -937,7 +943,13 @@ impl KfdVirtualHostMapping {
             )
         })?;
         let owner = Owned::try_new_uninit()?;
-        let mut reservation = os_memory::Reservation::view(address, size);
+        let parent = address_owner.reservation.as_ref().ok_or_else(|| {
+            error(
+                ErrorKind::InvalidArgument,
+                "virtual-address reservation was already released",
+            )
+        })?;
+        let mut reservation = os_memory::Reservation::view_in(parent, address, size);
         reservation
             .map_dma_buf_with_permissions(memory.dma_buf()?, offset, permissions.bits())
             .map_err(|source| native_error("virtual-memory host map", source))?;
