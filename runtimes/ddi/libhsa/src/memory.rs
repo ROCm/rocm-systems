@@ -17,28 +17,26 @@
 //! allocations, pointer metadata, IPC and interop, virtual memory, and
 //! copy/SVM operations. This root retains shared state and shutdown order.
 
-mod copy_svm;
-mod interop;
-pub(crate) use copy_svm::hsa_memory_copy;
+pub(crate) mod copy_svm;
+pub(crate) mod interop;
+pub(crate) use crate::api::memory::copy_svm::hsa_memory_copy;
 pub(crate) use copy_svm::image_device_address;
 use copy_svm::*;
-mod virtual_memory;
+pub(crate) mod virtual_memory;
 
 use crate::platform::fd::{AsFd, IntoRawFd};
 use std::collections::{BTreeMap, HashMap};
-use std::ffi::{c_char, c_void};
-use std::mem::{MaybeUninit, align_of, size_of};
+use std::ffi::c_void;
+use std::mem::{align_of, size_of};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::platform::memory as linux_interop;
 use crate::platform::memory::AisFileOperation as AisOperation;
-use crate::platform::memory::{
-    KfdIpcMemoryHandle as IpcMemoryHandle, KfdSvmAccess as SvmAccess,
-    KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation,
-};
+use crate::platform::memory::{KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation};
 use rocddi::device::Device;
 use rocddi::device::gpu::{
     CopyRect, GpuCopyOptions, GpuCopySequence, GpuCopySignal, GpuCopySignalOperation,
@@ -46,26 +44,75 @@ use rocddi::device::gpu::{
 };
 use rocddi::memory::device::{
     Allocation, DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
-    VirtualHostMapping, VirtualMemory, VirtualMemoryPlacement,
+    VirtualHostMapping, VirtualMemory,
 };
 use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 
 use crate::ffi::*;
-use crate::runtime::{
-    HsaState, InFlightGeneration, boundary, cache_handles_in_level_order, initialized_mut, lock,
-    map_error,
-};
+use crate::runtime::{HsaState, InFlightGeneration, boundary, initialized_mut, lock, map_error};
 use crate::signal::{AsyncCopyClock, AsyncCopyProfile, SignalState};
 
-/// Synthetic GPU pool kind for coarse-grained memory.
-const GPU_POOL_COARSE: u64 = 1;
-/// Synthetic GPU pool kind for fine-grained memory.
-pub(crate) const GPU_POOL_FINE: u64 = 2;
-/// Synthetic GPU pool kind for workgroup memory.
-const GPU_POOL_GROUP: u64 = 3;
-/// Synthetic GPU pool kind for extended fine-grained memory.
-pub(crate) const GPU_POOL_EXTENDED: u64 = 4;
+/// Handle slots reserved for each agent's memory pools.
+pub(crate) const POOL_HANDLE_STRIDE: u64 = 0x10;
+
+/// CPU memory-pool class encoded in an HSA pool handle.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u64)]
+pub(crate) enum CpuPoolKind {
+    /// Fine-grained host memory.
+    Fine = 1,
+    /// Extended fine-grained host memory.
+    ExtendedFine = 2,
+    /// Uncached kernel-argument memory.
+    Kernarg = 3,
+    /// Coarse-grained host memory.
+    Coarse = 4,
+}
+
+impl CpuPoolKind {
+    /// CPU pools in the order exposed to HSA clients.
+    pub(crate) const ALL: [Self; 4] = [Self::Fine, Self::ExtendedFine, Self::Kernarg, Self::Coarse];
+
+    /// Decodes the kind slot within one CPU agent's handle range.
+    pub(crate) fn from_slot(slot: u64) -> Option<Self> {
+        match slot {
+            1 => Some(Self::Fine),
+            2 => Some(Self::ExtendedFine),
+            3 => Some(Self::Kernarg),
+            4 => Some(Self::Coarse),
+            _ => None,
+        }
+    }
+}
+
+/// GPU memory-pool class encoded in an HSA pool handle.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u64)]
+pub(crate) enum GpuPoolKind {
+    /// Coarse-grained local memory.
+    Coarse = 1,
+    /// Fine-grained local memory.
+    Fine = 2,
+    /// Per-workgroup memory.
+    Group = 3,
+    /// Extended fine-grained local memory.
+    ExtendedFine = 4,
+}
+
+impl GpuPoolKind {
+    /// Decodes the kind slot within one GPU agent's handle range.
+    pub(crate) fn from_slot(slot: u64) -> Option<Self> {
+        match slot {
+            1 => Some(Self::Coarse),
+            2 => Some(Self::Fine),
+            3 => Some(Self::Group),
+            4 => Some(Self::ExtendedFine),
+            _ => None,
+        }
+    }
+}
+
 /// Native allocation flag requesting PCIe-visible memory.
 const ALLOC_PCIE: u32 = 1;
 /// Native allocation flag requesting contiguous memory.
@@ -73,30 +120,30 @@ const ALLOC_CONTIGUOUS: u32 = 1 << 1;
 /// Native allocation flag permitting code execution.
 const ALLOC_EXECUTABLE: u32 = 1 << 2;
 /// Native allocation flag requesting uncached memory.
-const ALLOC_UNCACHED: u32 = 1 << 3;
+pub(crate) const ALLOC_UNCACHED: u32 = 1 << 3;
 /// Native allocation flags accepted by this frontend.
 const ALLOC_FLAGS: u32 = ALLOC_PCIE | ALLOC_CONTIGUOUS | ALLOC_EXECUTABLE | ALLOC_UNCACHED;
 /// SVM policy bit allowing host access.
-const SVM_FLAG_HOST_ACCESS: u32 = 0x01;
+pub(crate) const SVM_FLAG_HOST_ACCESS: u32 = 0x01;
 /// SVM policy bit requesting coherent access.
-const SVM_FLAG_COHERENT: u32 = 0x02;
+pub(crate) const SVM_FLAG_COHERENT: u32 = 0x02;
 /// SVM policy bit restricting placement to the local hive.
-const SVM_FLAG_HIVE_LOCAL: u32 = 0x04;
+pub(crate) const SVM_FLAG_HIVE_LOCAL: u32 = 0x04;
 /// SVM policy bit making GPU access read-only.
-const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
+pub(crate) const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
 /// SVM policy bit allowing GPU execution.
-const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
+pub(crate) const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
 /// SVM policy bit marking a range read-mostly for GPUs.
-const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
+pub(crate) const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
 /// Largest accepted SVM migration-granularity encoding.
-const SVM_MAX_MIGRATION_GRANULARITY: u64 = 18;
+pub(crate) const SVM_MAX_MIGRATION_GRANULARITY: u64 = 18;
 /// Maximum number of SVM attributes accepted in one request.
-const SVM_MAX_ATTRIBUTES: usize = 2044;
+pub(crate) const SVM_MAX_ATTRIBUTES: usize = 2044;
 /// Linux I/O error number used when native cleanup cannot be proved.
 const EIO: i32 = 5;
 
 /// Accepts only the HSA virtual-memory access bits implemented here.
-fn valid_access_permissions(access: u32) -> bool {
+pub(crate) fn valid_access_permissions(access: u32) -> bool {
     access & !(ACCESS_PERMISSION_RW | ACCESS_PERMISSION_EX) == 0
 }
 
@@ -112,27 +159,27 @@ pub(crate) enum AsyncCopyProfiling {
 /// HSA memory handles and metadata around rocddi allocation owners.
 pub(crate) struct MemoryState {
     /// Ordinary HSA allocations keyed by host address.
-    allocations: HashMap<usize, Memory>,
+    pub(crate) allocations: HashMap<usize, Memory>,
     /// Imported IPC memory keyed by host address.
-    ipc_allocations: HashMap<usize, Memory>,
+    pub(crate) ipc_allocations: HashMap<usize, Memory>,
     /// External memory imports keyed by host address.
-    interop_allocations: HashMap<usize, Memory>,
+    pub(crate) interop_allocations: HashMap<usize, Memory>,
     /// Host ranges locked for GPU access.
-    locked_allocations: Vec<LockedMemory>,
+    pub(crate) locked_allocations: Vec<LockedMemory>,
     /// Outstanding asynchronous copy borrows per allocation address.
     async_copy_borrows: HashMap<usize, usize>,
     /// Prevents unsafe reuse after uncertain asynchronous copy retirement.
-    async_copy_quarantine: Arc<AtomicBool>,
+    pub(crate) async_copy_quarantine: Arc<AtomicBool>,
     /// Process setting captured by new asynchronous copies.
     pub(crate) async_copy_profiling: AsyncCopyProfiling,
     /// Virtual address reservations ordered by base address.
-    vmem_reservations: BTreeMap<usize, VmemReservation>,
+    pub(crate) vmem_reservations: BTreeMap<usize, VmemReservation>,
     /// Physical virtual-memory handles indexed by public ID.
-    vmem_handles: HashMap<u64, VmemHandle>,
+    pub(crate) vmem_handles: HashMap<u64, VmemHandle>,
     /// Active virtual-memory mappings ordered by base address.
-    vmem_mappings: BTreeMap<usize, VmemMapping>,
+    pub(crate) vmem_mappings: BTreeMap<usize, VmemMapping>,
     /// Prefetch and copy workers joined before memory owners are released.
-    workers: Vec<thread::JoinHandle<()>>,
+    pub(crate) workers: Vec<thread::JoinHandle<()>>,
 }
 
 impl MemoryState {
@@ -163,7 +210,7 @@ impl MemoryState {
     /// Join completed workers before accepting another asynchronous operation.
     /// `is_finished` ensures joining cannot wait for work that needs the runtime
     /// lock held by the submitter.
-    fn reap_finished_workers(&mut self) {
+    pub(crate) fn reap_finished_workers(&mut self) {
         let mut index = 0;
         while index < self.workers.len() {
             if self.workers[index].is_finished() {
@@ -176,9 +223,14 @@ impl MemoryState {
 
     /// Joins memory workers after the shared stop request is published.
     pub(crate) fn join_workers(&mut self) {
-        for worker in self.workers.drain(..) {
+        for worker in self.take_workers() {
             let _ = worker.join();
         }
+    }
+
+    /// Detaches workers so shutdown can join them outside the lifecycle lock.
+    pub(crate) fn take_workers(&mut self) -> Vec<JoinHandle<()>> {
+        std::mem::take(&mut self.workers)
     }
 
     /// Reports whether an unfinished native copy still retains memory borrows.
@@ -207,17 +259,17 @@ impl MemoryState {
 /// valid. Range resolution preserves the offset between those aliases instead
 /// of assuming that host and GPU virtual addresses are identical.
 #[derive(Clone)]
-struct PointerDescription {
+pub(crate) struct PointerDescription {
     /// HSA pointer classification reported to callers.
-    pointer_type: u32,
+    pub(crate) pointer_type: u32,
     /// Address visible to the owning agent.
-    agent_base: usize,
+    pub(crate) agent_base: usize,
     /// CPU alias when this allocation is host accessible.
-    host_base: Option<usize>,
+    pub(crate) host_base: Option<usize>,
     /// Byte extent common to the address aliases.
-    size: usize,
+    pub(crate) size: usize,
     /// HSA agent that owns the allocation.
-    owner: HsaAgent,
+    pub(crate) owner: HsaAgent,
     /// Pool allocation flags exposed by pointer queries.
     global_flags: u32,
     /// Whether this address came from host registration.
@@ -227,7 +279,7 @@ struct PointerDescription {
     /// Caller-set pointer metadata.
     user_data: usize,
     /// Agents with established access to the allocation.
-    accessible: Vec<HsaAgent>,
+    pub(crate) accessible: Vec<HsaAgent>,
 }
 
 impl PointerDescription {
@@ -259,7 +311,7 @@ impl PointerDescription {
     }
 
     /// Returns a host mapping for a complete device address range.
-    fn host_range(&self, address: usize, size: usize) -> Option<usize> {
+    pub(crate) fn host_range(&self, address: usize, size: usize) -> Option<usize> {
         self.offset_range(address, size)?;
         self.host_address(address)
     }
@@ -284,24 +336,24 @@ impl PointerDescription {
 /// HsaState-owned allocation plus callbacks registered for its destruction.
 pub(crate) struct Memory {
     /// Native backing and its mapping lifetime.
-    allocation: Allocation,
+    pub(crate) allocation: Allocation,
     /// Canonical metadata for every public address alias.
-    description: PointerDescription,
+    pub(crate) description: PointerDescription,
     /// Pool flags fixed when this allocation was created.
-    pool_global_flags: u32,
+    pub(crate) pool_global_flags: u32,
     /// Callbacks invoked after public ownership is removed.
-    deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
+    pub(crate) deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
 }
 
 /// Application callback invoked after an allocation loses public ownership.
 #[derive(Clone, Copy)]
-struct RegisteredDeallocationCallback {
+pub(crate) struct RegisteredDeallocationCallback {
     /// Public allocation address supplied when the callback was registered.
-    pointer: usize,
+    pub(crate) pointer: usize,
     /// Application callback invoked after public ownership ends.
-    callback: unsafe extern "C" fn(*mut c_void, *mut c_void),
+    pub(crate) callback: unsafe extern "C" fn(*mut c_void, *mut c_void),
     /// Caller-owned argument passed back to that callback.
-    user_data: usize,
+    pub(crate) user_data: usize,
 }
 
 impl Memory {
@@ -362,7 +414,7 @@ impl Memory {
     }
 
     /// Checks whether the requested address belongs to this object.
-    fn contains(&self, address: usize) -> bool {
+    pub(crate) fn contains(&self, address: usize) -> bool {
         self.description.contains(address)
     }
 
@@ -395,7 +447,7 @@ impl Memory {
     }
 
     /// Wraps an attached IPC allocation and its accessible agents.
-    fn new_ipc(
+    pub(crate) fn new_ipc(
         allocation: Allocation,
         size: usize,
         owner: HsaAgent,
@@ -427,7 +479,7 @@ impl Memory {
     }
 
     /// Releases this object’s native backing.
-    fn free(&mut self) -> Result<(), rocddi::Error> {
+    pub(crate) fn free(&mut self) -> Result<(), rocddi::Error> {
         self.allocation.free()
     }
 }
@@ -440,24 +492,24 @@ pub(crate) struct LockedMemory {
     /// Native registration when the host range needed one.
     allocation: Option<Allocation>,
     /// Host and agent aliases reported by pointer queries.
-    description: PointerDescription,
+    pub(crate) description: PointerDescription,
 }
 
 /// Reserved virtual-address interval and the mappings currently occupying it.
 pub(crate) struct VmemReservation {
     /// Native reserved address range.
-    address: VirtualAddress,
+    pub(crate) address: VirtualAddress,
     /// Public pointer metadata for the reservation.
-    description: PointerDescription,
+    pub(crate) description: PointerDescription,
     /// Callbacks invoked when public ownership is removed.
-    deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
+    pub(crate) deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
     /// Mappings that still occupy this reserved range.
-    mappings: usize,
+    pub(crate) mappings: usize,
 }
 
 impl VmemReservation {
     /// Records a reserved virtual range and its registration state.
-    fn new(address: VirtualAddress, registered: bool) -> Self {
+    pub(crate) fn new(address: VirtualAddress, registered: bool) -> Self {
         let info = address.info();
         Self {
             address,
@@ -479,7 +531,7 @@ impl VmemReservation {
     }
 
     /// Checks whether the requested address belongs to this object.
-    fn contains_range(&self, address: usize, size: usize) -> bool {
+    pub(crate) fn contains_range(&self, address: usize, size: usize) -> bool {
         address
             .checked_sub(self.address.info().address as usize)
             .and_then(|offset| offset.checked_add(size))
@@ -487,7 +539,7 @@ impl VmemReservation {
     }
 
     /// Releases this object’s native backing.
-    fn free(&mut self) -> Result<(), rocddi::Error> {
+    pub(crate) fn free(&mut self) -> Result<(), rocddi::Error> {
         self.address.free()
     }
 }
@@ -495,19 +547,19 @@ impl VmemReservation {
 /// Retained physical-memory handle shared by public references and mappings.
 pub(crate) struct VmemHandle {
     /// Native physical backing or imported fabric handle.
-    backing: VmemBacking,
+    pub(crate) backing: VmemBacking,
     /// Number of public references to this handle.
-    references: usize,
+    pub(crate) references: usize,
     /// Number of active virtual-address mappings.
-    mappings: usize,
+    pub(crate) mappings: usize,
     /// HSA pool from which the backing originates.
-    pool: HsaMemoryPool,
+    pub(crate) pool: HsaMemoryPool,
     /// HSA physical-memory type exposed for this handle.
-    memory_type: u32,
+    pub(crate) memory_type: u32,
 }
 
 /// Origin of physical backing behind an HSA virtual-memory handle.
-enum VmemBacking {
+pub(crate) enum VmemBacking {
     /// Allocation created through this runtime.
     Owned(VirtualMemory),
     /// Native allocation imported from a DMA-BUF.
@@ -523,7 +575,7 @@ enum VmemBacking {
 
 impl VmemHandle {
     /// Records virtual memory backing, pool, and memory type.
-    fn new(backing: VmemBacking, pool: HsaMemoryPool, memory_type: u32) -> Self {
+    pub(crate) fn new(backing: VmemBacking, pool: HsaMemoryPool, memory_type: u32) -> Self {
         Self {
             backing,
             references: 1,
@@ -534,12 +586,12 @@ impl VmemHandle {
     }
 
     /// Checks whether the virtual memory handle came from an import.
-    fn imported(&self) -> bool {
+    pub(crate) fn imported(&self) -> bool {
         !matches!(&self.backing, VmemBacking::Owned(_))
     }
 
     /// Returns native backing when this frontend owns the allocation.
-    fn owned_memory(&self) -> Option<&VirtualMemory> {
+    pub(crate) fn owned_memory(&self) -> Option<&VirtualMemory> {
         match &self.backing {
             VmemBacking::Owned(memory) => Some(memory),
             VmemBacking::DmaBuf(_) | VmemBacking::Fabric { .. } => None,
@@ -547,7 +599,7 @@ impl VmemHandle {
     }
 
     /// Returns the known allocation size, if native metadata provides it.
-    fn known_size(&self) -> Option<u64> {
+    pub(crate) fn known_size(&self) -> Option<u64> {
         match &self.backing {
             VmemBacking::Owned(memory) | VmemBacking::DmaBuf(memory) => Some(memory.info().size),
             VmemBacking::Fabric { .. } => None,
@@ -575,7 +627,7 @@ impl VmemHandle {
     }
 
     /// Releases this object’s native backing.
-    fn free(&mut self) -> Result<(), rocddi::Error> {
+    pub(crate) fn free(&mut self) -> Result<(), rocddi::Error> {
         match &mut self.backing {
             VmemBacking::Owned(memory) | VmemBacking::DmaBuf(memory) => memory.free(),
             VmemBacking::Fabric { imports, .. } => {
@@ -594,20 +646,20 @@ impl VmemHandle {
     }
 }
 
-/// Native mapping owner selected by whether access belongs to a CPU or GPU.
-enum VmemAccessOwner {
+/// Native device mapping owner; CPU accesses share the host map on `VmemMapping`.
+pub(crate) enum VmemAccessOwner {
     /// Native mapping in an activated device VM.
     Device(VirtualDeviceMapping),
-    /// Native mapping in the host process address space.
-    Host(VirtualHostMapping),
+    /// Permission record for the process-wide host mapping.
+    Host,
 }
 
 /// Per-agent permissions and the native object that enforces them.
-struct VmemAccess {
+pub(crate) struct VmemAccess {
     /// HSA permission mask granted to this agent.
-    permissions: u32,
+    pub(crate) permissions: u32,
     /// Native mapping retained until this access is removed.
-    owner: VmemAccessOwner,
+    pub(crate) owner: VmemAccessOwner,
 }
 
 impl VmemAccess {
@@ -615,7 +667,7 @@ impl VmemAccess {
     fn free(&mut self) -> Result<(), rocddi::Error> {
         match &mut self.owner {
             VmemAccessOwner::Device(mapping) => mapping.free(),
-            VmemAccessOwner::Host(mapping) => mapping.free(),
+            VmemAccessOwner::Host => Ok(()),
         }
     }
 }
@@ -623,28 +675,55 @@ impl VmemAccess {
 /// One mapped virtual subrange and all native per-agent access mappings.
 pub(crate) struct VmemMapping {
     /// Public physical-memory handle supplying backing.
-    handle: u64,
+    pub(crate) handle: u64,
     /// Base address of the parent reservation.
-    reservation: usize,
+    pub(crate) reservation: usize,
     /// First mapped virtual byte.
-    address: usize,
+    pub(crate) address: usize,
     /// Byte offset into physical backing.
-    offset: usize,
+    pub(crate) offset: usize,
     /// Mapped byte extent.
-    size: usize,
+    pub(crate) size: usize,
     /// Per-agent permissions and native map owners.
-    access: HashMap<u64, VmemAccess>,
+    pub(crate) access: HashMap<u64, VmemAccess>,
+    /// One process-wide host map shared by all CPU-agent access records.
+    pub(crate) host_mapping: Option<VirtualHostMapping>,
 }
 
 impl VmemMapping {
+    /// Returns the process-wide CPU permission union after one agent changes.
+    fn host_permissions_after(&self, agent: u64, permissions: u32) -> u32 {
+        self.access
+            .iter()
+            .filter(|(other, access)| {
+                **other != agent && matches!(access.owner, VmemAccessOwner::Host)
+            })
+            .fold(permissions, |bits, (_, access)| bits | access.permissions)
+    }
+
+    /// Returns the currently granted process-wide CPU permission union.
+    fn host_permissions(&self) -> u32 {
+        self.access
+            .values()
+            .filter(|access| matches!(access.owner, VmemAccessOwner::Host))
+            .fold(ACCESS_PERMISSION_NONE, |bits, access| {
+                bits | access.permissions
+            })
+    }
+
     /// Checks whether the requested address belongs to this object.
-    fn contains(&self, address: usize) -> bool {
+    pub(crate) fn contains(&self, address: usize) -> bool {
         contains(self.address, self.size, address)
     }
 
     /// Releases access.
-    fn free_access(&mut self) -> Result<(), rocddi::Error> {
-        let agents = self.access.keys().copied().collect::<Vec<_>>();
+    pub(crate) fn free_access(&mut self) -> Result<(), rocddi::Error> {
+        let agents = self
+            .access
+            .iter()
+            .filter(|(_, access)| matches!(access.owner, VmemAccessOwner::Device(_)))
+            .map(|(agent, _)| *agent)
+            .collect::<Vec<_>>();
         for agent in agents {
             let Some(mut access) = self.access.remove(&agent) else {
                 continue;
@@ -654,6 +733,12 @@ impl VmemMapping {
                 return Err(error);
             }
         }
+        if let Some(mapping) = &mut self.host_mapping {
+            mapping.free()?;
+            self.host_mapping = None;
+        }
+        self.access
+            .retain(|_, access| !matches!(access.owner, VmemAccessOwner::Host));
         Ok(())
     }
 }
@@ -665,6 +750,7 @@ impl LockedMemory {
         host_base: usize,
         device_base: usize,
         size: usize,
+        owner: HsaAgent,
         global_flags: u32,
         accessible: Vec<HsaAgent>,
     ) -> Self {
@@ -675,7 +761,7 @@ impl LockedMemory {
                 agent_base: device_base,
                 host_base: Some(host_base),
                 size,
-                owner: HsaAgent { handle: CPU_AGENT },
+                owner,
                 global_flags,
                 registered: true,
                 alloc_flags: POINTER_ALLOC_NONPAGED | POINTER_ALLOC_HOST_ACCESS,
@@ -691,7 +777,7 @@ impl LockedMemory {
     }
 
     /// Releases this object’s native backing.
-    fn free(&mut self) -> Result<(), rocddi::Error> {
+    pub(crate) fn free(&mut self) -> Result<(), rocddi::Error> {
         self.allocation.as_mut().map_or(Ok(()), Allocation::free)
     }
 }
@@ -704,7 +790,7 @@ fn contains(base: usize, size: usize, address: usize) -> bool {
 }
 
 /// Returns the current host page.
-fn current_host_page() -> Result<usize, Status> {
+pub(crate) fn current_host_page() -> Result<usize, Status> {
     let page = usize::try_from(rocddi::memory::host::host_page_size().map_err(map_error)?)
         .map_err(|_| ERROR)?;
     if page < 4096 || !page.is_power_of_two() {
@@ -713,10 +799,14 @@ fn current_host_page() -> Result<usize, Status> {
     Ok(page)
 }
 
-mod allocation;
-mod pointer;
-mod pool;
+pub(crate) mod allocation;
+pub(crate) mod pointer;
+pub(crate) mod pool;
 
+#[cfg(test)]
+use crate::api::memory::copy_svm::async_copy::*;
+#[cfg(test)]
+use crate::api::memory::{allocation::*, copy_svm::*, interop::*, pointer::*, virtual_memory::*};
 use pointer::*;
 use pool::*;
 pub(crate) use pool::{SignalBatchPool, signal_batch_pool};

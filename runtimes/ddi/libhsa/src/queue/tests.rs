@@ -4,7 +4,12 @@
 //! Queue ownership, atomic index, and ABI regression tests.
 
 use super::*;
+use crate::api::queue::index::*;
 use std::sync::atomic::AtomicUsize;
+
+/// Independent fixture positions for the public AMD queue control ABI.
+const WRITE_INDEX_OFFSET: usize = 56;
+const READ_INDEX_OFFSET: usize = 128;
 
 /// Counts owner drops during queue scratch rollback tests.
 struct DropCount(
