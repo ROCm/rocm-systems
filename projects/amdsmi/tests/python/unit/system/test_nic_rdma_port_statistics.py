@@ -52,6 +52,12 @@ def setUpModule():
         raise unittest.SkipTest(f"py-interface not importable: {_LOAD_ERROR}")
 
 
+def tearDownModule():
+    # The package is registered at import; drop it so no other test sees this checkout's modules.
+    for name in [n for n in sys.modules if n == _PACKAGE or n.startswith(f"{_PACKAGE}.")]:
+        del sys.modules[name]
+
+
 STATS = {"rx_rdma_ucast_pkts": 7, "tx_rdma_ucast_pkts": 9, "qps_created": 0}
 
 

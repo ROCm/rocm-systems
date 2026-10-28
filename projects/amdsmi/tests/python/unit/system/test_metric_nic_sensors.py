@@ -252,7 +252,3 @@ class TestMetricNicSensors(unittest.TestCase):
         self._assert_blocks(values["SENSORS"], [("core", 1, 1), ("core", 1, 2)])
         self.assertEqual(values["SENSORS"]["SENSOR_0"]["VALUE"], "30.0 \N{DEGREE SIGN}C")
         self.assertEqual(values["SENSORS"]["SENSOR_1"]["VALUE"], "40.0 \N{DEGREE SIGN}C")
-
-
-if __name__ == "__main__":
-    unittest.main()
