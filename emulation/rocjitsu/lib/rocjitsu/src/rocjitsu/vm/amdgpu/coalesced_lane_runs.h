@@ -5,6 +5,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/amdgpu/memory_transaction.h"
+#include "rocjitsu/vm/amdgpu/strided_lane_addresses.h"
 
 #include <algorithm>
 #include <array>
@@ -64,15 +65,65 @@ inline void scatter_lane_run(uint64_t address, uint64_t lane_mask, uint32_t size
 
 namespace detail {
 
+/// Address and originating physical lane used by the shared standard sort.
+struct CoalescedLaneAddress {
+  uint64_t address;
+  uint32_t index;
+};
+
+/// Share the standard address sort across callback instantiations and keep it out of line.
+RJ_NOINLINE void sort_lane_addresses(CoalescedLaneAddress *lanes, uint32_t count);
+
+/// Visit maximal runs of adjacent active lanes whose addresses are contiguous.
+template <typename F>
+bool for_each_lane_ordered_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
+                               uint32_t stride, F &fn) {
+  for (uint64_t remaining = lane_mask; remaining;) {
+    const uint32_t first = std::countr_zero(remaining);
+    uint32_t last = first;
+    uint64_t mask = uint64_t{1} << first;
+    remaining &= ~mask;
+    while (last + 1 < wf_size && (remaining & (uint64_t{1} << (last + 1))) &&
+           addrs[last] <= std::numeric_limits<uint64_t>::max() - stride &&
+           addrs[last + 1] == addrs[last] + stride) {
+      ++last;
+      mask |= uint64_t{1} << last;
+      remaining &= ~(uint64_t{1} << last);
+    }
+    if (!fn(CoalescedLaneRun{.address = addrs[first],
+                             .lane_mask = mask,
+                             .first_lane = first,
+                             .size = (last - first + 1) * stride,
+                             .lane_ordered = true}))
+      return false;
+  }
+  return true;
+}
+
+/// Whether `lane`, the first active lane to break ascending disjoint order,
+/// proves that the operands overlap or wrap. Active lanes through `previous`
+/// are ascending and disjoint, so any overlap among them involves `lane`.
+/// A false result means unproven and must fall through to the sorted inspection.
+inline bool proves_lane_overlap(const uint64_t *addrs, uint64_t lane_mask, uint32_t previous,
+                                uint32_t lane, uint32_t stride) {
+  const uint64_t last_start = std::numeric_limits<uint64_t>::max() - (stride - 1);
+  const uint64_t address = addrs[lane];
+  if (address > last_start || addrs[previous] > last_start)
+    return true;
+  for (uint64_t prior = lane_mask & (~uint64_t{0} >> (63 - previous)); prior; prior &= prior - 1) {
+    const uint64_t other = addrs[std::countr_zero(prior)];
+    if ((address > other ? address - other : other - address) < stride)
+      return true;
+  }
+  return false;
+}
+
 /// Keep sorting and gather/scatter storage off the ordinary contiguous path.
 template <typename F>
 RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lane_mask,
                                              uint32_t wf_size, uint32_t stride,
                                              MemoryTransactionPolicy transactions, F &fn) {
-  struct Lane {
-    uint64_t address;
-    uint32_t index;
-  };
+  using Lane = CoalescedLaneAddress;
   std::array<Lane, 64> lanes;
   uint32_t count = 0;
   bool address_ordered = true;
@@ -82,8 +133,7 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
     lanes[count++] = {addrs[lane], lane};
   }
   if (!address_ordered)
-    std::ranges::sort(lanes.begin(), lanes.begin() + count,
-                      [](const Lane &a, const Lane &b) { return a.address < b.address; });
+    sort_lane_addresses(lanes.data(), count);
 
   // Preserve the existing lane order for overlapping operands. In particular,
   // sorting must not change which lane supplies the final byte of a store.
@@ -99,28 +149,8 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
     split_operands |= (lanes[i].address & transaction_mask) !=
                       ((lanes[i].address + stride - 1) & transaction_mask);
   }
-  if (overlap) {
-    for (uint64_t remaining = lane_mask; remaining;) {
-      const uint32_t first = std::countr_zero(remaining);
-      uint32_t last = first;
-      uint64_t mask = uint64_t{1} << first;
-      remaining &= ~mask;
-      while (last + 1 < wf_size && (remaining & (uint64_t{1} << (last + 1))) &&
-             addrs[last] <= std::numeric_limits<uint64_t>::max() - stride &&
-             addrs[last + 1] == addrs[last] + stride) {
-        ++last;
-        mask |= uint64_t{1} << last;
-        remaining &= ~(uint64_t{1} << last);
-      }
-      if (!fn(CoalescedLaneRun{.address = addrs[first],
-                               .lane_mask = mask,
-                               .first_lane = first,
-                               .size = (last - first + 1) * stride,
-                               .lane_ordered = true}))
-        return false;
-    }
-    return true;
-  }
+  if (overlap)
+    return for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
 
   if (split_operands) {
     // A lane may contribute to two transactions. Partition contiguous bytes
@@ -231,6 +261,19 @@ bool for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint
   assert(wf_size <= 64 && stride != 0);
   if (!lane_mask)
     return true;
+  if constexpr (detail::kVectorizedStrideCheck) {
+    // Keep the SIMD precheck on full Wave32 accesses. Other masks and Wave64
+    // retain the existing scan; extending the policy needs separate qualification.
+    if (wf_size == 32 && lane_mask == UINT32_MAX) {
+      if (detail::is_strided_lane_addresses(addrs, 32, stride)) {
+        return fn(CoalescedLaneRun{.address = addrs[0],
+                                   .lane_mask = lane_mask,
+                                   .first_lane = 0,
+                                   .size = 32 * stride,
+                                   .lane_ordered = true});
+      }
+    }
+  }
   const uint32_t first = std::countr_zero(lane_mask);
   uint32_t last = first;
   uint64_t remaining = lane_mask & ~(uint64_t{1} << first);
@@ -249,40 +292,21 @@ bool for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint
   // Ordinary strided instructions also stay inline: validating monotonic,
   // non-overlapping operands needs no lane/run arrays or gather buffers. A
   // contiguous address across an inactive lane still needs the reordered path.
-  bool direct_runs = true;
+  // Overlap proven before sorting selects the same lane-ordered runs.
   uint32_t previous = first;
   for (uint64_t check = lane_mask & ~(uint64_t{1} << first); check; check &= check - 1) {
     const uint32_t lane = std::countr_zero(check);
     if (addrs[previous] > std::numeric_limits<uint64_t>::max() - stride ||
         addrs[lane] < addrs[previous] + stride ||
         (lane != previous + 1 && addrs[lane] == addrs[previous] + stride)) {
-      direct_runs = false;
+      if (!detail::proves_lane_overlap(addrs, lane_mask, previous, lane, stride))
+        return detail::for_each_reordered_lane_run(addrs, lane_mask, wf_size, stride, transactions,
+                                                   fn);
       break;
     }
     previous = lane;
   }
-  if (direct_runs) {
-    for (uint64_t pending = lane_mask; pending;) {
-      const uint32_t begin = std::countr_zero(pending);
-      uint32_t end = begin;
-      uint64_t mask = uint64_t{1} << begin;
-      pending &= ~mask;
-      while (end + 1 < wf_size && (pending & (uint64_t{1} << (end + 1))) &&
-             addrs[end + 1] == addrs[end] + stride) {
-        ++end;
-        mask |= uint64_t{1} << end;
-        pending &= ~(uint64_t{1} << end);
-      }
-      if (!fn(CoalescedLaneRun{.address = addrs[begin],
-                               .lane_mask = mask,
-                               .first_lane = begin,
-                               .size = (end - begin + 1) * stride,
-                               .lane_ordered = true}))
-        return false;
-    }
-    return true;
-  }
-  return detail::for_each_reordered_lane_run(addrs, lane_mask, wf_size, stride, transactions, fn);
+  return detail::for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
 }
 
 } // namespace rocjitsu::amdgpu

@@ -234,8 +234,8 @@ TEST(DsMemorySnapshot, RejectsUnimplementedGdsWithoutPreparingPayload) {
 TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
   constexpr std::array opcodes = {cdna4::kDsWriteB32Ds, cdna4::kDsWriteB64Ds, cdna4::kDsWriteB96Ds,
                                   cdna4::kDsWriteB128Ds};
-  constexpr uint32_t wave = 64;
-  SnapshotFixture fx(wave);
+  constexpr uint32_t wave_size = 64;
+  SnapshotFixture fx(wave_size);
   ASSERT_NE(fx.wf, nullptr);
   fx.seed();
   fx.cu->set_plugin_group(fx.group);
@@ -245,7 +245,7 @@ TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
         for (bool alias : {false, true})
           for (uint64_t exec : {uint64_t{0}, uint64_t{0xa55aa55aa55aa55a}, ~uint64_t{0}}) {
             SCOPED_TRACE(testing::Message()
-                         << "wave=" << wave << " width=" << width << " data=" << unsigned(data)
+                         << "wave=" << wave_size << " width=" << width << " data=" << unsigned(data)
                          << " acc=" << acc << " alias=" << alias << " exec=" << exec);
             fx.wf->set_exec(exec);
             fx.wf->set_vgpr_write_mask(0x5555555555555555ull);
@@ -256,11 +256,11 @@ TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
             ASSERT_NE(inst, nullptr);
             const auto *state = inst->data_as<VectorMemState>();
             ASSERT_NE(state, nullptr);
-            ASSERT_EQ(state->store_data.size(), wave * width * sizeof(uint32_t));
+            ASSERT_EQ(state->store_data.size(), wave_size * width * sizeof(uint32_t));
             EXPECT_EQ(state->exec_mask, exec);
             EXPECT_EQ(state->lane_mask, exec);
             std::set<Read> expected_reads;
-            for (uint32_t lane = 0; lane < wave; ++lane) {
+            for (uint32_t lane = 0; lane < wave_size; ++lane) {
               const bool active = (exec >> lane) & 1;
               if (active)
                 expected_reads.emplace(address, lane, ExecutionPlugin::kFullByteMask,
@@ -289,7 +289,7 @@ TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
                   expected_callbacks.emplace_back(data_base + element, exec,
                                                   ExecutionPlugin::kFullByteMask);
               } else {
-                for (uint32_t lane = 0; lane < wave; ++lane)
+                for (uint32_t lane = 0; lane < wave_size; ++lane)
                   if ((exec >> lane) & 1)
                     for (uint32_t element = 0; element < width; ++element)
                       if (data_base + element < fx.register_count)
@@ -303,8 +303,8 @@ TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
 
 TEST(DsMemorySnapshot, DualLoadsPreserveAddressesAndPerLaneObservations) {
   for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    const uint32_t wave = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
-    SnapshotFixture fx(wave, arch, 16);
+    const uint32_t wave_size = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
+    SnapshotFixture fx(wave_size, arch, 16);
     ASSERT_NE(fx.wf, nullptr);
     fx.seed();
     const std::array<uint16_t, 4> opcodes =
@@ -313,7 +313,7 @@ TEST(DsMemorySnapshot, DualLoadsPreserveAddressesAndPerLaneObservations) {
                          cdna4::kDsRead2st64B64Ds}
             : std::array{cdna5::kDsLoad2addrB32Vds, cdna5::kDsLoad2addrStride64B32Vds,
                          cdna5::kDsLoad2addrB64Vds, cdna5::kDsLoad2addrStride64B64Vds};
-    const uint64_t wave_mask = wave == 64 ? ~uint64_t{0} : 0xffffffffull;
+    const uint64_t wave_mask = wave_size == 64 ? ~uint64_t{0} : 0xffffffffull;
     for (bool observed : {false, true}) {
       fx.cu->set_plugin_group(observed ? fx.group : nullptr);
       for (uint32_t kind = 0; kind < opcodes.size(); ++kind)
@@ -339,7 +339,7 @@ TEST(DsMemorySnapshot, DualLoadsPreserveAddressesAndPerLaneObservations) {
             EXPECT_EQ(state->exec_mask, exec);
             const uint32_t scale = (kind < 2 ? 4u : 8u) * (kind % 2 ? 64u : 1u);
             std::vector<ReadCallback> expected_callbacks;
-            for (uint32_t lane = 0; lane < wave; ++lane) {
+            for (uint32_t lane = 0; lane < wave_size; ++lane) {
               const bool active = (exec >> lane) & 1;
               const uint32_t base = address < 16 ? SnapshotFixture::word(address, lane) : 0;
               EXPECT_EQ(state->per_lane_addr[lane], active ? base + scale + fx.wf->lds_base() : 0);
@@ -360,13 +360,13 @@ TEST(DsMemorySnapshot, DualLoadsPreserveAddressesAndPerLaneObservations) {
 
 TEST(DsMemorySnapshot, OutstandingLogicalZeroPayloadSurvivesLaterIssue) {
   for (const auto &target : kStoreTargets) {
-    for (uint32_t wave : target.wave_sizes) {
-      if (wave == 0)
+    for (uint32_t wave_size : target.wave_sizes) {
+      if (wave_size == 0)
         continue;
-      SCOPED_TRACE(testing::Message() << "arch=" << target.arch << " wave=" << wave);
-      SnapshotFixture fx(wave, target.arch, 256);
+      SCOPED_TRACE(testing::Message() << "arch=" << target.arch << " wave=" << wave_size);
+      SnapshotFixture fx(wave_size, target.arch, 256);
       ASSERT_NE(fx.wf, nullptr);
-      fx.wf->set_exec(wave == 64 ? ~uint64_t{0} : 0xffffffffu);
+      fx.wf->set_exec(wave_size == 64 ? ~uint64_t{0} : 0xffffffffu);
       const auto words = target.encode(target.opcodes[1], 0, 0);
       auto first = fx.issue_encoded(words);
       ASSERT_NE(first, nullptr);
@@ -491,18 +491,18 @@ TEST(DsMemorySnapshot, BoundaryFallbackDoesNotReadNeighborWave) {
 }
 
 TEST(DsMemorySnapshot, Rdna4Wave32BoundaryFallbackPreservesPayloadAndCallbacks) {
-  constexpr uint32_t wave = 32;
+  constexpr uint32_t wave_size = 32;
   constexpr uint8_t data = 255, address = 7;
   constexpr uint64_t exec = (uint64_t{1} << 1) | (uint64_t{1} << 17) | (uint64_t{1} << 31);
   for (uint16_t opcode : {rdna4::kDsStoreB96Vds, rdna4::kDsStoreB128Vds}) {
-    SnapshotFixture fx(wave, ROCJITSU_CODE_ARCH_RDNA4, 256, 2);
+    SnapshotFixture fx(wave_size, ROCJITSU_CODE_ARCH_RDNA4, 256, 2);
     ASSERT_NE(fx.wf, nullptr);
-    auto *neighbor = fx.cu->dispatch_wf(1, 0, 104, 256, wave);
+    auto *neighbor = fx.cu->dispatch_wf(1, 0, 104, 256, wave_size);
     ASSERT_NE(neighbor, nullptr);
     ASSERT_EQ(neighbor->vgpr_alloc().base, fx.wf->vgpr_alloc().base + 256);
     fx.seed();
     for (uint32_t reg = 0; reg < 3; ++reg)
-      for (uint32_t lane = 0; lane < wave; ++lane)
+      for (uint32_t lane = 0; lane < wave_size; ++lane)
         fx.cu->write_vgpr(neighbor->vgpr_alloc().base + reg, lane, 0xaabbcc00 + reg);
     fx.wf->set_exec(exec);
     fx.cu->set_plugin_group(fx.group);
@@ -512,13 +512,13 @@ TEST(DsMemorySnapshot, Rdna4Wave32BoundaryFallbackPreservesPayloadAndCallbacks) 
     const auto *state = inst->data_as<VectorMemState>();
     ASSERT_NE(state, nullptr);
     const uint32_t width = opcode == rdna4::kDsStoreB96Vds ? 3 : 4;
-    ASSERT_EQ(state->store_data.size(), wave * width * sizeof(uint32_t));
+    ASSERT_EQ(state->store_data.size(), wave_size * width * sizeof(uint32_t));
     EXPECT_EQ(state->exec_mask, exec);
     EXPECT_EQ(state->lane_mask, exec);
     std::set<Read> expected_reads;
     std::vector<ReadCallback> expected_callbacks = {
         {address, exec, ExecutionPlugin::kFullByteMask}};
-    for (uint32_t lane = 0; lane < wave; ++lane) {
+    for (uint32_t lane = 0; lane < wave_size; ++lane) {
       SCOPED_TRACE(testing::Message() << "width=" << width << " lane=" << lane);
       const bool active = (exec >> lane) & 1;
       EXPECT_EQ(state->per_lane_addr[lane],

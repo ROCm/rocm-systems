@@ -192,9 +192,7 @@ def _clear_pipeline_caches(monkeypatch):
 @pytest.fixture
 def pipeline_table(tmp_path, monkeypatch):
     """Point the loader at a small generated table."""
-    analysis_configs = tmp_path / "rocprof_compute_soc" / "analysis_configs"
-    analysis_configs.mkdir(parents=True)
-    (analysis_configs / "instruction_pipelines.yaml").write_text(
+    (tmp_path / "instruction_pipelines.yaml").write_text(
         yaml.safe_dump({
             "commit": "0" * 40,
             "arch_overrides": {
@@ -211,7 +209,7 @@ def pipeline_table(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     _clear_pipeline_caches(monkeypatch)
-    monkeypatch.setattr(code_object_analysis.config, "rocprof_compute_home", tmp_path)
+    monkeypatch.setattr(code_object_analysis.config, "analysis_configs_dir", tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -258,7 +256,7 @@ def test_lookup_answers_a_repeated_mnemonic_from_memory(pipeline_table):
 def test_lookup_without_a_table_leaves_every_type_unset(tmp_path, monkeypatch):
     """A missing table degrades to empty types instead of failing analyze."""
     _clear_pipeline_caches(monkeypatch)
-    monkeypatch.setattr(code_object_analysis.config, "rocprof_compute_home", tmp_path)
+    monkeypatch.setattr(code_object_analysis.config, "analysis_configs_dir", tmp_path)
 
     assert InstructionPipelines.lookup("v_mov_b32_e32 v1, 0") is None
     assert InstructionPipelines.lookup("s_waitcnt") is None
