@@ -180,12 +180,13 @@ bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
   case ROCJITSU_CODE_ARCH_CDNA5:
     return false;
-  default:
-    // ensure_blocks_built rejects RISC-V and requires a registered decoder
-    // before patching; every registered AMDGPU architecture is handled above.
-    assert(false && "unified VGPR allocation for an unadmitted architecture");
-    return false;
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_INVALID:
+    break;
   }
+  assert(false && "unified VGPR allocation for an unadmitted architecture");
+  return false;
 }
 
 // How one kernel's VGPR allocation divides into an ordinary prefix and an
