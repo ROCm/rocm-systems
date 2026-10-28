@@ -1419,7 +1419,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         parser.error = _intercept
 
     def _add_device_arguments(
-        self, subcommand_parser: argparse.ArgumentParser, required=False, cpu_core_supported=True
+        self,
+        subcommand_parser: argparse.ArgumentParser,
+        required=False,
+        cpu_core_supported=True,
+        cpu_supported=None,
     ):
         # Device arguments help text
         gpu_help = (
@@ -1446,7 +1450,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             # Some subcommands accept --cpu/--core only so they can reject them
             # with a clear COMMAND_NOT_SUPPORTED error; hide the flags from help
             # in that case instead of advertising unsupported device targets.
-            cpu_arg_help = cpu_help if cpu_core_supported else argparse.SUPPRESS
+            # ``cpu_supported`` overrides the --cpu visibility independently when
+            # a command services --cpu but still rejects --core (e.g. ``list``).
+            cpu_shown = cpu_core_supported if cpu_supported is None else cpu_supported
+            cpu_arg_help = cpu_help if cpu_shown else argparse.SUPPRESS
             core_arg_help = core_help if cpu_core_supported else argparse.SUPPRESS
             device_args.add_argument(
                 "-U",
@@ -1592,19 +1599,20 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
     def _add_list_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not self.helpers.is_amdgpu_initialized():
-            # The list subcommand is only applicable to systems with amdgpu initialized
+        if not (
+            self.helpers.is_amdgpu_initialized() or self.helpers.is_amd_hsmp_initialized()
+        ):
             return
 
         # Subparser help text
-        list_help = "List GPU information"
+        list_help = "List GPU or CPU information"
         list_optionals_title = "List Arguments"
         list_subcommand_help = f"{self.description}\n\nLists all detected GPUs on the system.\
                             \nLists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU.\
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF.\
-                            \n--cpu and --core are not supported for this command; use\
-                            \n`amd-smi static --cpu` instead."
+                            \nUse --cpu to list CPU family, model, and stepping.\
+                            \n--core is not supported for this command."
         enumeration_help = "Enumeration mapping to other features.\
                             \n    Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, OAM_ID, and PHYSICAL_ACC_ID"
 
@@ -1620,7 +1628,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         list_parser.add_argument("-e", "--enumeration", action="store_true", help=enumeration_help)
 
         # Add Universal Arguments
-        self._add_device_arguments(list_parser, required=False, cpu_core_supported=False)
+        # list services --cpu (shown) but still rejects --core (suppressed).
+        self._add_device_arguments(
+            list_parser, required=False, cpu_core_supported=False, cpu_supported=True
+        )
         self._add_command_modifiers(list_parser)
 
     def _add_static_parser(self, subparsers: argparse._SubParsersAction, func):
