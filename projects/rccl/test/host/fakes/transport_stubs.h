@@ -17,6 +17,9 @@
 #include "nccl.h"
 
 struct ncclComm;
+struct ncclPeerInfo;
+struct ncclProxyConnector;
+struct ncclReg;
 struct ncclTopoGraph;
 
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
@@ -46,6 +49,16 @@ extern int g_ncclNvlsInitCalls;
 // init.cc:2185, gated on comm->nvlsSupport surviving the :2182 fold.
 extern ncclResult_t g_ncclNvlsTuningResult;
 extern int g_ncclNvlsTuningCalls;
+
+// Buffer deregistration in src/transport/net.cc, coll_net.cc and nvls_ub.cc. Defaults fail loudly.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, void*)> g_ncclNetDeregBuffer;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, void*)> g_ncclCollnetDeregBuffer;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg*)> g_ncclNvlsUbDeregister;
+
+// canConnect of both ncclTransports slots (src/transport.cc). Default: every peer is reachable.
+extern std::function<ncclResult_t(int*, struct ncclComm*, struct ncclTopoGraph*, struct ncclPeerInfo*,
+                                  struct ncclPeerInfo*)>
+    g_transportCanConnect;
 
 void ResetTransportStubs();
 
