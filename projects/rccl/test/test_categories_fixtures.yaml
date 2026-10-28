@@ -76,6 +76,7 @@ test_categories:
       - "LlFifoSysScopeDeviceTest.*"
       - "LlFifoSysScope.*"
       - "DdaIpcGpuBarrierOrdering.*"
+      - "DdaReduceScatterFabricLL.*"
       - "DIVUP.*"
       - "ROUNDUP.*"
       - "ALIGN_POWER.*"

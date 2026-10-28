@@ -130,12 +130,15 @@ protected:
     ASSERT_EQ(hipGetLastError(), hipSuccess);
   }
 
-  // Raises the abort flag if the kernel outlives the watchdog, so a lost wake-up fails instead of hanging.
+  // Past the watchdog, raises abort and publishes every peer, so a lost wake-up or an ignored abort fails, not hangs.
   bool finishes() {
     const auto deadline = std::chrono::steady_clock::now() + kWatchdog;
     while (hipStreamQuery(stream_) == hipErrorNotReady) {
       if (std::chrono::steady_clock::now() > deadline) {
         *abortFlag_ = 1;
+        for (int r = 1; r < kRanks; ++r) {
+          publishPeer((kSelf + r) % kRanks);
+        }
         EXPECT_EQ(hipStreamSynchronize(stream_), hipSuccess);
         return false;
       }
