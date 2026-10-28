@@ -90,17 +90,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
                 $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
         )
-        # GCC's vptr sanitizer adds references to the key-function-owned RTTI of
+        # The vptr sanitizer adds references to the key-function-owned RTTI of
         # simulator classes used by inline accessors. Standalone plugin modules
-        # do not link that simulator image. Compile separate module objects with
-        # only vptr checks disabled; the original objects retain full UBSan
-        # coverage in rocjitsu_tests, which links the simulator objects.
+        # do not link that simulator image. When RJ_UBSAN_VPTR is ON, compile
+        # separate module objects with only vptr checks disabled; the original
+        # objects retain full UBSan coverage in rocjitsu_tests, which links the
+        # simulator objects. When OFF, the original objects already omit vptr
+        # and can be reused by the modules.
         set(plugin_objects ${object_lib})
-        if(
-            CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
-            AND RJ_ENABLE_UBSAN
-            AND RJ_UBSAN_VPTR
-        )
+        if(RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR)
             set(plugin_objects ${object_lib}_standalone)
             get_target_property(plugin_sources ${object_lib} SOURCES)
             rj_add_object_library(${plugin_objects} ${plugin_sources})

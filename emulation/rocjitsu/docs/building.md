@@ -32,7 +32,7 @@ configuration. Keep that header tree at a matching revision.
 | `ROCJITSU_HOST_CPU_BASELINE` | `x86-64-v3` on Linux x86-64 with GCC/Clang; `default` otherwise | Host CPU baseline: `default`, `x86-64`, `x86-64-v3`, or `x86-64-v4` |
 | `RJ_ENABLE_ASAN` | `OFF` | Enable AddressSanitizer |
 | `RJ_ENABLE_UBSAN` | `OFF` | Enable UndefinedBehaviorSanitizer |
-| `RJ_UBSAN_VPTR` | `OFF` with GCC; `ON` otherwise | Keep UBSan's dynamic-type (vptr) check when `RJ_ENABLE_UBSAN` is on |
+| `RJ_UBSAN_VPTR` | `OFF` with GCC; `ON` otherwise | Enable UBSan's dynamic-type (vptr) check when `RJ_ENABLE_UBSAN` is on |
 | `RJ_ENABLE_TSAN` | `OFF` | Enable ThreadSanitizer |
 | `RJ_ENABLE_MSAN` | `OFF` | Enable MemorySanitizer |
 | `RJ_SANITIZER_RUNTIME` | `AUTO` | Select `AUTO`, `SHARED`, or `STATIC` sanitizer runtime linkage |
@@ -72,6 +72,18 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_MSAN=1
 # UndefinedBehaviorSanitizer
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_UBSAN=1
 ```
+
+GCC UBSan builds disable dynamic-type (`vptr`) checks by default because
+contention in the sanitizer's shared type cache can slow multithreaded emulation.
+Add `-DRJ_UBSAN_VPTR=ON` to enable those checks. Clang UBSan builds default to
+`ON` and explicitly enable `vptr`, which Clang excludes from
+`-fsanitize=undefined`. Use `-DRJ_UBSAN_VPTR=OFF` to disable it. The option has
+no effect when `RJ_ENABLE_UBSAN` is off, and CMake reports the effective `vptr`
+setting when UBSan is enabled.
+
+Standalone plugin modules omit `vptr` checks because they do not link the
+simulator's RTTI. When `RJ_UBSAN_VPTR=ON`, the build compiles separate plugin
+objects so the copies linked into the unit tests keep those checks.
 
 `AUTO` uses shared runtimes for ASan, UBSan, and TSan, and the only
 supported static runtime for MSan. `SHARED` rejects MSan explicitly because
