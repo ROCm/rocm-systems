@@ -299,6 +299,7 @@ if(BUILD_TESTS)
     GroupCallTests.cpp
     NonBlockingTests.cpp
     RasJsonTests.cpp
+    RasProgressCountersTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
     RegisterTests.cpp
