@@ -682,6 +682,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  */
 #define AMD_DBGAPI_VERSION_0_82
 
+/**
+ * The function was introduced in version 0.83 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.83"``.
+ */
+#define AMD_DBGAPI_VERSION_0_83
+
 /** @} */
 
 /** \ingroup callbacks_group
@@ -1459,6 +1465,68 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_architecture_get_info (
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_get_architecture (
     uint32_t elf_amdgpu_machine,
     amd_dbgapi_architecture_id_t *architecture_id) AMD_DBGAPI_VERSION_0_54;
+
+/**
+ * Indication of architecture compatibility.
+ */
+typedef enum
+{
+  /**
+   * The code object architecture is not compatible with the agent
+   * architecture.
+   */
+  AMD_DBGAPI_ARCHITECTURE_INCOMPATIBLE = 0,
+  /**
+   * The code object architecture is compatible with the agent architecture.
+   */
+  AMD_DBGAPI_ARCHITECTURE_COMPATIBLE = 1
+} amd_dbgapi_architecture_compatibility_state_t;
+
+/**
+ * Check if a code object compiled for one architecture can be loaded and
+ * debugged on an agent with a different architecture.
+ *
+ * This function determines architectural compatibility between a code object
+ * and an agent's architecture.  A code object may target a generic architecture (e.g.
+ * gfx9-4-generic, gfx10-3-generic, gfx11-generic) that is compatible with
+ * multiple specific agent architectures within the same family.
+ *
+ * The compatibility rules are defined in the LLVM AMDGPU documentation at
+ * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table,
+ * ensuring consistent behavior between runtime code object loading and debugger
+ * validation.
+ *
+ * \param[in] code_object_architecture_id Architecture that the code object
+ * was compiled for.
+ *
+ * \param[in] agent_architecture_id Architecture of the agent that will execute
+ * the code object.
+ *
+ * \param[out] compatibility_state Indicates whether the code object can be
+ * loaded and debugged on the agent.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_SUCCESS The function has been executed
+ * successfully and the result is stored in \p compatibility_state.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_FATAL A fatal error occurred.  The library
+ * is left uninitialized and \p compatibility_state is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED The library is not
+ * initialized.  The library is left uninitialized and \p compatibility_state is
+ * unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARCHITECTURE_ID \p
+ * code_object_architecture_id or \p agent_architecture_id is invalid.
+ * \p compatibility_state is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT \p compatibility_state is
+ * NULL.  \p compatibility_state is unaltered.
+ */
+amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_architecture_is_compatible (
+    amd_dbgapi_architecture_id_t code_object_architecture_id,
+    amd_dbgapi_architecture_id_t agent_architecture_id,
+    amd_dbgapi_architecture_compatibility_state_t *compatibility_state)
+    AMD_DBGAPI_VERSION_0_83;
 
 /**
  * Opaque client symbolizer handle.
