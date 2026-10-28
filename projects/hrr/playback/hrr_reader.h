@@ -236,6 +236,11 @@ bool load_archive(const std::string& path, Archive& archive);
 // later process with the same pid starts capturing, is not one of them.
 uint64_t pid_from_archive_dir_name(const std::string& name);
 
+// The directory load_archive reads for `input`: the directory itself when it holds
+// events.bin, else the one pid-<pid>/ it holds. Prints why and returns false for
+// anything else (no archive, or several process captures).
+bool resolve_archive_path(const std::string& input, std::string& resolved);
+
 // Whether load_archive would find the archive in `archive_dir` complete: a
 // trailer whose total_events counts the records before it. Walks the record
 // headers and seeks over the payloads, so it costs a fraction of a load.

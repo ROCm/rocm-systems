@@ -228,7 +228,7 @@ std::vector<std::string> find_region_streams(const std::string& archive_dir) {
   return out;
 }
 
-static bool resolve_archive_path(const std::string& input, std::string& resolved) {
+bool resolve_archive_path(const std::string& input, std::string& resolved) {
   fs::path path(input);
   if (fs::exists(path / "events.bin")) {
     resolved = path.string();

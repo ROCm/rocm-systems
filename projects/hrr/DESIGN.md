@@ -251,7 +251,10 @@ each `events.bin` trailer, unchecked; with `--trusted-key` it loads the root's s
 `--repair` refuses `--trusted-key`: it rewrites files and does not verify them, so
 `--repair --signing-key` instead refuses an archive that holds a signature which does not
 verify under the seed's public key (it would sign over an alteration); an archive with no
-signature, such as a crashed one, is repaired and signed. To sign an altered or changed
+signature, such as a crashed one, is repaired and signed as found (it says the content was
+not verified). The check runs before `events.bin` is parsed, and the parse is held to the
+digest the check saw, as in replay; signing is then held to the verified digests, with the
+digests of the `events.bin` and `manifest.json` that repair wrote for those two. To sign an altered or changed
 signed archive anyway, delete its `hrr.sig` and `hrr.manifest` first.
 Replay refuses, naming the file, when
 the signature does not verify, any file differs from its manifest line, a file is

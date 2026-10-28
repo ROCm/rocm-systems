@@ -523,6 +523,63 @@ HRR_TEST_CASE(Unit_HRR_Sign_RepairRefusesToSignAnAlteredSignedArchive) {
 /**
  * Test Description
  * ----------------
+ *   --repair --signing-key writes back what it parses from events.bin and signs it,
+ *   so events.bin must be read only after the signature is checked, and held to the
+ *   digest the check saw (a swap between the two is the hole; it cannot be timed from
+ *   a test, so what is asserted is the order, which closes it):
+ *   - a signed archive whose events.bin is torn and no longer matches its signature
+ *     is refused before events.bin is parsed: the reader's "Recovered ... torn record"
+ *     diagnostic, printed while parsing, is absent, and nothing is rewritten;
+ *   - negative control: the same torn events.bin in an unsigned archive is parsed
+ *     (the diagnostic is printed) and repaired, so the marker proves parsing happened;
+ *   - a signed archive whose signature matches its torn events.bin repairs and the
+ *     result verifies, so the digests of the two rewritten files are what signing is
+ *     held to.
+ */
+HRR_TEST_CASE(Unit_HRR_Sign_RepairChecksTheSignatureBeforeReadingEvents) {
+  const auto tear = [](Archive& a) {  // file header and 5 bytes of a record: a torn tail
+    std::string e = read_text_file(a.dir / "events.bin");
+    write_bytes(a.dir / "events.bin", e.substr(0, sizeof(hrr_file_header)) + std::string(5, 'x'));
+  };
+  std::string err;
+  {
+    Archive a("repair_order");
+    tear(a);  // signed over the complete events.bin: the signature no longer matches
+    const std::string events_before = read_text_file(a.dir / "events.bin");
+    auto [ret, out] = hrr_playback_merged(a.dir, "--repair --signing-key " + a.write_seed_file().string());
+    INFO(out);
+    CHECK(ret != 0);
+    CHECK(out.find("events.bin") != std::string::npos);        // refused, naming the file
+    CHECK(out.find("torn record") == std::string::npos);       // before it was parsed
+    CHECK(read_text_file(a.dir / "events.bin") == events_before);
+  }
+  {
+    Archive a("repair_order_unsigned", /*sign=*/false);
+    tear(a);
+    auto [ret, out] = hrr_playback_merged(a.dir, "--repair --signing-key " + a.write_seed_file().string());
+    INFO(out);
+    CHECK(ret == 0);
+    CHECK(out.find("torn record") != std::string::npos);  // parsed
+    CHECK(a.verify(&err) == VerifyResult::kOk);
+  }
+  {
+    Archive a("repair_order_signed_torn", /*sign=*/false);
+    tear(a);
+    REQUIRE(hrr_sign::sign_archive(a.dir.string(), a.seed, &err));  // signed as it is: verifies
+    auto [ret, out] = hrr_playback_merged(a.dir, "--repair --signing-key " + a.write_seed_file().string());
+    INFO(out);
+    CHECK(ret == 0);
+    CHECK(out.find("torn record") != std::string::npos);
+    CHECK(a.verify(&err) == VerifyResult::kOk);
+    INFO(err);
+    CHECK(read_text_file(a.dir / "events.bin").size() ==
+          sizeof(hrr_file_header) + sizeof(hrr_eof_record));  // rewritten with the trailer
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
  *   HIP_HRR_TRUSTED_KEY is for replay, as --help says; --repair checks no signature:
  *   - with it exported, --repair --signing-key still signs a crashed archive (the
  *     documented path), and a plain --repair still repairs;
@@ -792,6 +849,7 @@ HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_RepairSignsOrDropsStaleSignature)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_KeyOptionsAreNotIgnored)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_SigningFollowsTheDirectoryDescriptor)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_RepairRefusesToSignAnAlteredSignedArchive)
+HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_RepairChecksTheSignatureBeforeReadingEvents)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_TrustedKeyVariableDoesNotBlockRepair)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_ManifestLimitAppliesToSigningToo)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_FilesAreHeldToTheVerifiedDigestsWhenRead)

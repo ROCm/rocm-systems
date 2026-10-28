@@ -1229,41 +1229,35 @@ static bool check_signature(const std::string& dir, hrr::VerifiedFiles* files,
 // --repair --signing-key signs whatever is in the directory, so a signed archive
 // that was altered would leave signed by the user's key. A signature that is
 // present must therefore verify under the seed's own public key before anything
-// is rewritten. An archive with no signature (a crash, or captured unsigned) is
-// the case --signing-key is for, and passes.
-//
-// The check and the signing that follows share one directory descriptor `dir_fd`
-// (-1 on Windows), and `*held` keeps the digests the check saw so that signing
-// refuses any file changed since; see resign_repaired. Without a signature there
-// is nothing to hold the content to, and `*held` stays unset.
-static bool check_existing_signature(const fs::path& dir, int dir_fd,
-                                     std::optional<hrr_sign::ExpectedTree>* held) {
-  std::string err;
+// is rewritten, and before anything is parsed: events.bin is read into the
+// archive that repair writes back and signs, so it is read through the check
+// (hrr::ArchiveCheck) and held to the digest the check saw, like replay does.
+// The check leaves the digests in Archive::verified, which signing is then held to
+// (see resign_repaired). An archive with no signature (a crash, or captured
+// unsigned) is the case --signing-key is for, and is read and signed as found;
+// load_for_repair decides that before installing this.
+static bool check_repair_signature(const std::string& dir, hrr::VerifiedFiles* files,
+                                   std::string* err) {
+  std::string key_err;
   uint8_t seed[hrr_sign::kSeedSize], pub[hrr_sign::kPublicKeySize];
-  const bool have_pub = hrr_sign::read_key_file(g_signing_key_path, true, seed, &err) &&
+  const bool have_pub = hrr_sign::read_key_file(g_signing_key_path, true, seed, &key_err) &&
                         hrr_sign::public_key_from_seed(seed, pub);
   rocm::sha2::secure_zero(seed, sizeof(seed));
   if (!have_pub) {
-    fprintf(stderr, "[HRR] repair: not signed: %s\n", err.c_str());
+    *err = "not signed: " + key_err;
     return false;
   }
-  std::map<std::string, std::string> seen;
-  const hrr_sign::VerifyResult vr = hrr_sign::verify_archive(
-      dir.string(), pub, &err, &seen, hrr_sign::kMaxManifestBytes, dir_fd);
-  if (vr == hrr_sign::VerifyResult::kOk) held->emplace().digests = std::move(seen);
+  std::string verr;
+  const hrr_sign::VerifyResult vr = hrr_sign::verify_archive(dir, pub, &verr, files);
+  if (vr == hrr_sign::VerifyResult::kOk) return true;
   if (vr == hrr_sign::VerifyResult::kUnsigned) {
-    fprintf(stderr, "[HRR] repair: %s has no signature; its content is signed as found, "
-                    "not verified\n", dir.string().c_str());
-  }
-  if (vr == hrr_sign::VerifyResult::kRefused) {
-    fprintf(stderr, "[HRR] repair: refusing to sign %s: it holds a signature that does not "
-                    "verify under this key (%s); it may have been altered. To sign it anyway, "
-                    "delete %s and %s first\n",
-            dir.string().c_str(), err.c_str(), hrr_sign::kSignatureName,
-            hrr_sign::kManifestName);
+    *err = "its signature was removed while repair was starting; not repairing it unverified";
     return false;
   }
-  return true;
+  *err = "repair refuses to sign it: it holds a signature that does not verify under this key (" +
+         verr + "); it may have been altered. To sign it anyway, delete " +
+         hrr_sign::kSignatureName + " and " + hrr_sign::kManifestName + " first";
+  return false;
 }
 
 // After --repair rewrote events.bin and manifest.json the old signature, if any,
@@ -1298,11 +1292,35 @@ static bool resign_repaired(const fs::path& dir, int dir_fd,
 }
 #endif
 
+// hrr::load_archive for --repair. With --signing-key a present signature is
+// checked before events.bin is opened (check_repair_signature); without a
+// signature, or without --signing-key, the archive is read as found.
+static bool load_for_repair(const std::string& path, hrr::Archive& archive) {
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+  std::string dir;
+  if (!hrr::resolve_archive_path(path, dir)) return false;
+  const bool signed_dir =
+      !g_signing_key_path.empty() &&
+      fs::symlink_status(fs::path(dir) / hrr_sign::kSignatureName).type() !=
+          fs::file_type::not_found;
+  if (!g_signing_key_path.empty() && !signed_dir) {
+    fprintf(stderr, "[HRR] repair: %s has no signature; its content is signed as found, "
+                    "not verified\n", dir.c_str());
+  }
+  hrr::set_archive_check(signed_dir ? check_repair_signature : nullptr);
+  const bool ok = hrr::load_archive(dir, archive);
+  hrr::set_archive_check(nullptr);
+  return ok;
+#else
+  return hrr::load_archive(path, archive);
+#endif
+}
+
 static int repair_archive(const hrr::Archive& archive) {
   const fs::path archive_dir(archive.path);
 #ifdef HRR_HAVE_ARCHIVE_SIGN
-  // One descriptor for the directory serves the signature check and the signing
-  // after it, so the directory cannot be swapped on the path between the two.
+  // One descriptor for the directory serves the signing, which hashes the tree
+  // through it, so the directory cannot be swapped on the path afterwards.
   int dir_fd = -1;
   std::optional<hrr_sign::ExpectedTree> held;
   [[maybe_unused]] hrr::safefs::Fd dir_holder;
@@ -1316,8 +1334,10 @@ static int repair_archive(const hrr::Archive& archive) {
     }
     dir_fd = dir_holder.get();
 #endif
-    if (!check_existing_signature(archive_dir, dir_fd, &held)) return 1;
   }
+  // Signed archive: load_for_repair verified it before reading, and its digests
+  // are what the rest of the repair is held to. Unsigned: signed as found.
+  if (archive.checked) held.emplace().digests = archive.verified;
 #endif
 
   if (archive.complete) {
@@ -1338,11 +1358,26 @@ static int repair_archive(const hrr::Archive& archive) {
     return 1;
   }
 
+  // The digest of what is written to each rewritten file, taken as it is written
+  // (a signed archive only): signing is held to these, so a file swapped in after
+  // the write is refused rather than signed.
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+  const bool hashing = held.has_value();
+#else
+  const bool hashing = false;
+#endif
+  hrr::StreamHash events_hash, manifest_hash;
+  hrr::StreamHash* const eh = hashing ? &events_hash : nullptr;
+  const auto write_h = [](FILE* out, const void* p, size_t n, hrr::StreamHash* h) {
+    if (h) h->update(p, n);
+    return write_u(out, p, n);
+  };
+
   // Rewrite events.bin trimmed to the last complete record plus the trailer.
   const bool events_ok = write_file_in_dir(archive_dir, "events.bin", [&](FILE* out) {
     // The flags say how the blobs were laid out, and repair keeps every blob.
     hrr_file_header fh{HRR_MAGIC, HRR_VERSION, archive.flags};
-    bool ok = write_u(out, &fh, sizeof(fh));
+    bool ok = write_h(out, &fh, sizeof(fh), eh);
 
     uint64_t max_seq = 0;
     for (const auto& ev : archive.events) {
@@ -1352,7 +1387,7 @@ static int repair_archive(const hrr::Archive& archive) {
       // bytes, so a future reader bug surfaces here instead of as silent UB.
       assert(ev.raw_payload.size() >= sizeof(hrr_event_header) &&
              "repair: event raw_payload smaller than hrr_event_header");
-      ok = write_u(out, ev.raw_payload.data(), ev.raw_payload.size());
+      ok = write_h(out, ev.raw_payload.data(), ev.raw_payload.size(), eh);
       if (ev.header().sequence_id > max_seq) max_seq = ev.header().sequence_id;
     }
 
@@ -1361,7 +1396,7 @@ static int repair_archive(const hrr::Archive& archive) {
     // (writer::flush()). The offline tool leaves timestamp_ns / thread_id at 0.
     if (ok) {
       hrr_eof_record rec = hrr_make_eof_record(max_seq + 1, archive.events.size());
-      ok = write_u(out, &rec, sizeof(rec));
+      ok = write_h(out, &rec, sizeof(rec), eh);
     }
     return ok;
   }, &err);
@@ -1375,18 +1410,22 @@ static int repair_archive(const hrr::Archive& archive) {
   if (!read_process_manifest(manifest_path, info))
     info.pid = pid_from_archive_dir(archive_dir);
 
+  char manifest_text[256];
+  const int manifest_len = snprintf(manifest_text, sizeof(manifest_text),
+                                    "{\n"
+                                    "  \"pid\": %llu,\n"
+                                    "  \"parent_pid\": %llu,\n"
+                                    "  \"complete\": true,\n"
+                                    "  \"event_count\": %zu,\n"
+                                    "  \"blob_count\": %zu\n"
+                                    "}\n",
+                                    static_cast<unsigned long long>(info.pid),
+                                    static_cast<unsigned long long>(info.parent_pid),
+                                    archive.events.size(), archive.blob_count);
   const bool manifest_ok = write_file_in_dir(archive_dir, "manifest.json", [&](FILE* mf) {
-    return fprintf(mf,
-                   "{\n"
-                   "  \"pid\": %llu,\n"
-                   "  \"parent_pid\": %llu,\n"
-                   "  \"complete\": true,\n"
-                   "  \"event_count\": %zu,\n"
-                   "  \"blob_count\": %zu\n"
-                   "}\n",
-                   static_cast<unsigned long long>(info.pid),
-                   static_cast<unsigned long long>(info.parent_pid),
-                   archive.events.size(), archive.blob_count) > 0;
+    return manifest_len > 0 && manifest_len < static_cast<int>(sizeof(manifest_text)) &&
+           write_h(mf, manifest_text, static_cast<size_t>(manifest_len),
+                   hashing ? &manifest_hash : nullptr);
   }, &err);
   if (!manifest_ok) {
     fprintf(stderr, "[HRR] repair: %s\n", err.c_str());
@@ -1396,8 +1435,12 @@ static int repair_archive(const hrr::Archive& archive) {
   printf("[HRR] Repaired archive: %zu events kept, clean trailer + manifest written\n",
          archive.events.size());
 #ifdef HRR_HAVE_ARCHIVE_SIGN
-  // Repair rewrote events.bin and manifest.json; any other file must be as verified.
-  if (held) held->rewritten = {"events.bin", "manifest.json"};
+  // Repair rewrote events.bin and manifest.json; each must now be exactly what was
+  // written, and any other file as verified.
+  if (held) {
+    held->digests["events.bin"] = events_hash.hex();
+    held->digests["manifest.json"] = manifest_hash.hex();
+  }
   if (!resign_repaired(archive_dir, dir_fd, held)) return 1;
 #endif
   return 0;
@@ -1513,7 +1556,7 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
     // Scoped per iteration so each archive's events are released before the
     // next is read — these run to gigabytes apiece.
     hrr::Archive archive;
-    if (!hrr::load_archive(dir.string(), archive)) {
+    if (!load_for_repair(dir.string(), archive)) {
       fprintf(stderr, "[HRR] repair: cannot load %s; skipping\n", dir.string().c_str());
       failed++;
       continue;
@@ -1948,7 +1991,9 @@ int main(int argc, char** argv) {
   }
 
   hrr::Archive archive;
-  if (!hrr::load_archive(archive_path, archive)) return 1;
+  if (!(do_repair && !show_info ? load_for_repair(archive_path, archive)
+                                : hrr::load_archive(archive_path, archive)))
+    return 1;
 
   // --info: print summary and exit without touching the GPU
   if (show_info) {
