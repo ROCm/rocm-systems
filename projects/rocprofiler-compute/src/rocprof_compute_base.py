@@ -293,8 +293,6 @@ class RocProfCompute:
 
     def handle_profile_args(self) -> None:
         apply_panel_shortcuts(self.__args, "filter_blocks")
-        # True when only block 4 is selected, by --roofline or -b 4
-        self.__args.roof_only = self.__args.filter_blocks == ["4"]
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
