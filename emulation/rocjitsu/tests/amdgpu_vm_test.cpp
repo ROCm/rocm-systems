@@ -113,12 +113,14 @@ public:
 
 class CommandProcessorCacheTestAccess {
 public:
-  static void flush(CommandProcessor &cp, bool completion) {
+  static void flush_gpu_caches(CommandProcessor &cp) {
     std::lock_guard lock(cp.hw_queue_mutex_);
-    if (completion)
-      cp.completion_->flush_caches();
-    else
-      cp.flush_gpu_caches();
+    cp.flush_gpu_caches();
+  }
+
+  static void flush_completion_caches(CommandProcessor &cp) {
+    std::lock_guard lock(cp.hw_queue_mutex_);
+    cp.completion_->flush_caches();
   }
 };
 
@@ -10057,8 +10059,16 @@ TEST_P(AqlQueueFailureConcurrencyTest, DefersCacheFlushUntilWorkersJoin) {
 }
 
 TEST(CommandProcessorTest, CacheMaintenanceSerializesWithRuntimeWaveStateFlush) {
-  for (bool completion : {false, true}) {
-    SCOPED_TRACE(completion ? "completion" : "queue maintenance");
+  struct CpMaintenance {
+    const char *name;
+    void (*flush)(amdgpu::CommandProcessor &);
+  };
+  for (const auto [name, flush] :
+       {CpMaintenance{"CP queue maintenance",
+                      amdgpu::CommandProcessorCacheTestAccess::flush_gpu_caches},
+        CpMaintenance{"CP completion flush",
+                      amdgpu::CommandProcessorCacheTestAccess::flush_completion_caches}}) {
+    SCOPED_TRACE(name);
     VmFixture fixture;
     ASSERT_NO_FATAL_FAILURE(fixture.initialize());
     (void)fixture.engine->step();
@@ -10069,7 +10079,7 @@ TEST(CommandProcessorTest, CacheMaintenanceSerializesWithRuntimeWaveStateFlush) 
     std::thread cp_thread([&] {
       start.arrive_and_wait();
       for (uint32_t iteration = 0; iteration < kFlushCount; ++iteration)
-        amdgpu::CommandProcessorCacheTestAccess::flush(*fixture.cp(), completion);
+        flush(*fixture.cp());
     });
     std::thread runtime_thread([&] {
       start.arrive_and_wait();
@@ -10084,8 +10094,25 @@ TEST(CommandProcessorTest, CacheMaintenanceSerializesWithRuntimeWaveStateFlush) 
 
 TEST(CommandProcessorTest, CacheMaintenanceLeavesPendingFailureWithItsProducer) {
   using namespace std::chrono_literals;
-  for (uint32_t operation = 0; operation < 4; ++operation) {
-    SCOPED_TRACE(operation);
+  struct CacheMaintenance {
+    const char *name;
+    void (*run)(VmFixture &);
+  };
+  for (const auto [name, run] : {
+           CacheMaintenance{"CP queue maintenance",
+                            [](VmFixture &fixture) {
+                              amdgpu::CommandProcessorCacheTestAccess::flush_gpu_caches(
+                                  *fixture.cp());
+                            }},
+           CacheMaintenance{"CP completion flush",
+                            [](VmFixture &fixture) {
+                              amdgpu::CommandProcessorCacheTestAccess::flush_completion_caches(
+                                  *fixture.cp());
+                            }},
+           CacheMaintenance{"CU flush_l1", [](VmFixture &fixture) { fixture.cu()->flush_l1(); }},
+           CacheMaintenance{"CU flush_all", [](VmFixture &fixture) { fixture.cu()->flush_all(); }},
+       }) {
+    SCOPED_TRACE(name);
     VmFixture fixture;
     ASSERT_NO_FATAL_FAILURE(fixture.initialize());
     const uint64_t kernel = fixture.write_kernel(0x1000, &test::kUndecodableInstruction,
@@ -10112,12 +10139,7 @@ TEST(CommandProcessorTest, CacheMaintenanceLeavesPendingFailureWithItsProducer) 
     EXPECT_TRUE(ready);
     if (ready) {
       EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
-      if (operation < 2)
-        amdgpu::CommandProcessorCacheTestAccess::flush(*fixture.cp(), operation == 1);
-      else if (operation == 2)
-        fixture.cu()->flush_l1();
-      else
-        fixture.cu()->flush_all();
+      run(fixture);
       EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0))
           << "Cache maintenance delivered a pending dispatch failure";
       EXPECT_TRUE(fixture.cp()->has_dispatch_for_test(1, 0, dispatch_id));
