@@ -38,6 +38,9 @@ common = [
     # workflow_dispatch only), so it is likewise outside TheRock PR CI.
     ".github/workflows/rccl[-_]*.yml",
     ".github/workflows/therock-rccl-*.yml",
+    # Test drivers invoked only by those therock-rccl-* workflows; nothing in
+    # the build consumes them.
+    "projects/rccl/ci/scripts/*",
 
     "*/.markdownlint-ci2.yaml",
     "tools/systems_pr_bot/*",
