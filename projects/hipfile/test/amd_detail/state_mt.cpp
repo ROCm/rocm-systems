@@ -274,20 +274,8 @@ thread_function(int id)
                     //       on the data
                 } break;
 
-                // Case 10: Get a random stream
+                // Case 10: Get a file and a buffer
                 case 10: {
-                    if (hip_streams.empty()) {
-                        break;
-                    }
-                    uniform_int_distribution<size_t> vec_dist{0, hip_streams.size() - 1};
-                    size_t                           idx = vec_dist(gen);
-
-                    auto stream = ds->getStream(hip_streams[idx]);
-
-                } break;
-
-                // Case 11: Get a file and a buffer
-                case 11: {
                     if (buffers.size() == 0 || files.size() == 0) {
                         break;
                     }
@@ -308,9 +296,9 @@ thread_function(int id)
                     //       on the data
                 } break;
 
-                // Case 12: Get a file, buffer, and a stream
+                // Case 11: Get a file, buffer, and a stream
                 //
-                case 12: {
+                case 11: {
                     if (buffers.empty() || files.empty() || hip_streams.empty()) {
                         break;
                     }
@@ -332,8 +320,36 @@ thread_function(int id)
                     auto [file, buffer, stream] = ds->getFileBufferAndStream(fh, buf, hip_stream);
                 } break;
 
-                default:
+                // Case 12: Get a file, a buffer, and a new stream that isn't registered, which
+                //          registers it implicitly
+                case 12: {
+                    if (buffers.empty() || files.empty()) {
+                        break;
+                    }
+
+                    hipStream_t hip_stream;
+                    hipError_t  err = hipStreamCreateWithFlags(&hip_stream, hipStreamNonBlocking);
+                    if (err != hipSuccess) {
+                        {
+                            lock_guard<mutex> guard{io_mutex};
+                            cerr << "hipStreamCreateWithFlags() failed!" << endl;
+                        }
+                        exit(EXIT_FAILURE);
+                    }
+
+                    uniform_int_distribution<size_t> file_dist{0, files.size() - 1};
+                    auto                             fh = files[file_dist(gen)].second;
+
+                    uniform_int_distribution<size_t> buf_dist{0, buffers.size() - 1};
+                    auto                             buf = buffers[buf_dist(gen)];
+
+                    auto [file, buffer, stream] = ds->getFileBufferAndStream(fh, buf, hip_stream);
+                    hip_streams.push_back(hip_stream);
+                } break;
+
+                default: {
                     fail("ERROR: Tried to pick a non-existent case");
+                }
             }
         }
     }
