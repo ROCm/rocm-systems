@@ -72,34 +72,6 @@ rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
   "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
   "the IbQpsPerConn fake default")
-rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/p2p.cc"
-  "NCCL_PARAM(IbReceiverSideMatchingScheme, \"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)"
-  "fakes/transport_net_ib_p2p_fakes.cc: ncclParamIbReceiverSideMatchingScheme()")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_p2p_fakes.cc"
-  "int64_t ncclParamIbReceiverSideMatchingScheme() {"
-  "the IbReceiverSideMatchingScheme fake signature")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_p2p_fakes.cc"
-  "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2);"
-  "the IbReceiverSideMatchingScheme fake default")
-rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/p2p.cc"
-  "NCCL_PARAM(IbArThreshold, \"IB_AR_THRESHOLD\", -2)"
-  "fakes/transport_net_ib_p2p_fakes.cc: ncclParamIbArThreshold()")
-rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/p2p.cc"
-  "int64_t ncclIbArThreshold = 8192;" "fakes/transport_net_ib_p2p_fakes.cc: ncclIbArThreshold")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_p2p_fakes.cc"
-  "int64_t ncclParamIbArThreshold() { return g_loadParam(\"IB_AR_THRESHOLD\", -2); }"
-  "the IbArThreshold fake default")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_p2p_fakes.cc"
-  "int64_t ncclIbArThreshold = 8192;" "the ncclIbArThreshold fake default")
-rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/p2p_resiliency.cc"
-  "NCCL_PARAM(IbResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)"
-  "fakes/transport_net_ib_resiliency_fakes.cc: ncclParamIbResiliencyPortFailover()")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_resiliency_fakes.cc"
-  "int64_t ncclParamIbResiliencyPortFailover() {"
-  "the IbResiliencyPortFailover fake signature")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_resiliency_fakes.cc"
-  "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0);"
-  "the IbResiliencyPortFailover fake default")
 # The net_ib_cast connect / qp_sharing fakes repeat these params; both copies must agree.
 foreach(_param
     "NCCL_PARAM(IbCastTimeout, \"IB_TIMEOUT\", 20)"
@@ -125,8 +97,16 @@ foreach(_param
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_qp_sharing_fakes.cc"
     "${_param}" "the qp_sharing.cc default")
 endforeach()
-# The net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
+# The net_ib, net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
 set(_rccl_cast_pins
+  "transport/net_ib/p2p.cc" "NCCL_PARAM(IbArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
+  "transport/net_ib/p2p.cc" "int64_t ncclIbArThreshold = 8192<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "int64_t ncclIbArThreshold = 8192<SEMI>"
+  "transport/net_ib/p2p.cc" "NCCL_PARAM(IbReceiverSideMatchingScheme, \"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
+  "transport/net_ib/p2p_resiliency.cc" "NCCL_PARAM(IbResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
+    "transport_net_ib_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
   "transport/net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
     "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
   "transport/net_ib_cast/p2p.cc" "int64_t IbCastArThreshold = 8192<SEMI>"
