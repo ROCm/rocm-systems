@@ -1120,8 +1120,8 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
 
       // A handle imported from another process (dmabuf or fabric) has no region until its
       // placement is recovered from the dma-buf. Once it is, the region names the agent whose
-      // memory backs the import, as for a local handle. One the driver cannot describe, or whose
-      // memory belongs to an agent outside this process, keeps the owner and flags unset.
+      // memory backs the import, as for a local handle. A handle the driver cannot describe, or
+      // whose memory belongs to an agent outside this process, keeps the owner and flags unset.
       MemoryHandle* memHandle = mappedHandleIt->second.mem_handle;
       EnsureImportInfo(memHandle);
       const AMD::MemoryRegion* memRegion = static_cast<const AMD::MemoryRegion*>(memHandle->region);
