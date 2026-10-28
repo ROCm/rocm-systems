@@ -101,6 +101,8 @@ pub(crate) struct Device {
     pub queues: AtomicU64,
     /// Public native events borrowing this device.
     pub events: AtomicU64,
+    /// Native signal-page capability sampled at device activation.
+    pub native_events_available: bool,
     /// Generation shared with the endpoint's exception observer.
     pub reset_epoch: Shared<AtomicU64>,
     /// Keeps exception polling alive while this handle is public.
@@ -735,6 +737,12 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
             if *instance.host_backing_head.lock().map_err(|_| INTERNAL)? != 0 {
                 return Err(BUSY);
             }
+            instance
+                .event_service
+                .lock()
+                .map_err(|_| INTERNAL)?
+                .preflight_session_destroy(&mut instance.native)
+                .map_err(|error| native(&error))?;
             // Native cleanup can make partial progress. Retain this handle on
             // failure for destruction only; no new child may borrow it then.
             instance.closing = true;
@@ -975,6 +983,16 @@ pub(crate) unsafe extern "C" fn device_create(
                 return Err(crate::support::native(&error));
             }
         };
+        // Feature queries are metadata-only. Sample the process signal-page
+        // state here so they never contend on its native-resource mutex.
+        let native_events_available = if instance.process_lifetime {
+            process_signal_event_available(&native).map_err(|error| {
+                unregister(&endpoint.children);
+                crate::support::native(&error)
+            })?
+        } else {
+            false
+        };
         let event_observer = match register_event_observer(
             instance,
             &native,
@@ -995,6 +1013,7 @@ pub(crate) unsafe extern "C" fn device_create(
             },
             queues: AtomicU64::new(0),
             events: AtomicU64::new(0),
+            native_events_available,
             reset_epoch,
             event_observer,
         });
@@ -1018,12 +1037,8 @@ pub(crate) unsafe extern "C" fn device_info(
                 device_instance(device)
                     .native
                     .supports_host_registration(device.native.endpoint()),
-            ) | if device_instance(device).process_lifetime {
-                if process_signal_event_available(&device.native).map_err(|_| INTERNAL)? {
-                    AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS
-                } else {
-                    0
-                }
+            ) | if device.native_events_available {
+                AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS
             } else {
                 0
             },
