@@ -103,6 +103,9 @@ struct ncclShmemData {
 #endif
 };
 
+// Device-linker host passes only need the kernel declarations below; hiding the
+// device code keeps them from defining host shadows of ncclShmem.
+#if !defined(RCCL_DEVICE_LINKER) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef RCCL_DEVICE_LINKER
 __shared__ ncclShmemData ncclShmem;
 __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize() * (NCCL_MAX_NTHREADS / WARP_SIZE) / sizeof(ulong2)];
@@ -713,6 +716,10 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   if (ncclShmem.comm.progressCounters != nullptr) __syncthreads();
   profiler(FINI);
 }
+#define RCCL_DEVICE_BODY(...) { __VA_ARGS__; }
+#else
+#define RCCL_DEVICE_BODY(...) {}
+#endif
 
 __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
