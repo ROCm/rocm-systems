@@ -131,8 +131,8 @@ mpirun.mpich -np 8 -env NCCL_DEBUG=VERSION -env HSA_NO_SCRATCH_RECLAIM=1 ./build
 before the communicator is created, so RCCL's bootstrap, proxy and socket-transport TCP traffic is
 TLS-encrypted. The key must be at least 32 bytes and identical on all ranks, and RCCL must be
 built with `-DTLS_BACKEND=OPENSSL3` (otherwise communicator creation fails instead of falling back
-to plaintext). Requires RCCL 2.32 or newer, both at build time and at run time; with an older
-library the variable is ignored.
+to plaintext). Requires RCCL 2.32 or newer, both at build time and at run time; with older
+headers or an older library the test exits with an error.
 
 #### Grouped-broadcast (AllGatherV) mode
 
