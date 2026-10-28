@@ -56,6 +56,8 @@ IR_OUTDIR = os.environ.get("IR_OUTDIR", os.path.join(WORKDIR, "ir_test_build"))
 IR_DIR = os.path.join(RCCL_DIR, "bindings", "ir")
 IR_TEST_SRC = os.path.join(IR_DIR, "test", "IR_test.cpp")
 IR_IMPL_SRC = os.path.join(IR_DIR, "nccl_device_wrapper__impl.h")
+# [D] typed ReduceCopy cases, linked into the same IR_test.exe.
+IR_REDUCE_COPY_SRC = os.path.join(_THIS_DIR, "..", "IR_reduce_copy_test.cpp")
 BITCODE = os.path.join(RCCL_BUILD, "lib", "librccl_device.bc")
 HIPIFY_INC = os.path.join(RCCL_BUILD, "hipify", "src", "include")
 GENERATED_INC = os.path.join(RCCL_BUILD, "include")
@@ -68,7 +70,28 @@ TEST_EXE = os.path.join(IR_OUTDIR, "IR_test.exe")
 # consumer's device link. See bindings/ir/Makefile's ltoir target.
 LTO_IR = os.path.join(RCCL_BUILD, "lib", "librccl_device.ltoir")
 LTO_IR_TEST_EXE = os.path.join(IR_OUTDIR, "IR_test_ltoir.exe")
-LLVM_BIN = os.path.join(ROCM_PATH, "llvm", "bin")
+
+# ROCm LLVM tools for the bitcode/LTO IR builds and their static checks.
+LLVM_TOOLS = ("clang++", "opt", "llvm-dis", "llvm-as")
+
+
+def _find_llvm_bin():
+    """Return the first ROCm LLVM bin dir holding all LLVM_TOOLS, or None.
+
+    ROCm 6 links $ROCM_PATH/llvm to lib/llvm, not every newer install keeps
+    that link, and $ROCM_PATH/bin/amdclang++ resolves into the LLVM bin dir
+    of the compiler this harness drives.
+    """
+    dirs = [os.path.join(ROCM_PATH, "llvm", "bin"),
+            os.path.join(ROCM_PATH, "lib", "llvm", "bin"),
+            os.path.dirname(os.path.realpath(AMDCLANGPP))]
+    for d in dirs:
+        if all(os.path.isfile(os.path.join(d, t)) for t in LLVM_TOOLS):
+            return os.path.normpath(d)
+    return None
+
+
+LLVM_BIN = _find_llvm_bin()
 
 # --- Multi-rank GIN/composite barrier functional test (separate MPI binary) ---
 # This one needs the host RCCL library + MPI in addition to the bitcode, so it
@@ -116,9 +139,12 @@ def _missing_prerequisite():
         return f"IR_test.cpp not found at {IR_TEST_SRC}"
     if not os.path.isfile(AMDCLANGPP):
         return f"amdclang++ not found at {AMDCLANGPP} (set ROCM_PATH)"
-    llvm_dis = os.path.join(ROCM_PATH, "llvm", "bin", "llvm-dis")
-    if not os.path.isfile(llvm_dis):
-        return f"llvm-dis not found at {llvm_dis} (install ROCm llvm tools for IR device tests)"
+    if LLVM_BIN is None:
+        return (
+            f"ROCm LLVM tools ({' '.join(LLVM_TOOLS)}) not found under "
+            f"{ROCM_PATH}/llvm/bin, {ROCM_PATH}/lib/llvm/bin or beside "
+            "amdclang++ (install ROCm llvm tools for IR device tests)"
+        )
     if not os.path.isdir(HIPIFY_INC):
         return (
             f"hipify staging dir not found at {HIPIFY_INC} "
@@ -145,10 +171,12 @@ def _missing_static_prerequisite():
     """
     if not os.path.isfile(IR_IMPL_SRC):
         return f"nccl_device_wrapper__impl.h not found at {IR_IMPL_SRC}"
-    for tool in ("clang++", "opt", "llvm-dis", "llvm-as", "llvm-nm"):
-        path = os.path.join(LLVM_BIN, tool)
-        if not os.path.isfile(path):
-            return f"{tool} not found at {path} (install the ROCm LLVM tools)"
+    if LLVM_BIN is None:
+        return (
+            f"ROCm LLVM tools ({' '.join(LLVM_TOOLS)}) not found under "
+            f"{ROCM_PATH}/llvm/bin, {ROCM_PATH}/lib/llvm/bin or beside "
+            "amdclang++ (install the ROCm LLVM tools)"
+        )
     if not os.path.isdir(HIPIFY_INC):
         return (
             f"hipify staging dir not found at {HIPIFY_INC} "
@@ -169,6 +197,8 @@ def _run_ir_make(make_args, log_name, artifact):
         *make_args,
         f"BUILDDIR={RCCL_BUILD}",
         f"ROCM_PATH={ROCM_PATH}",
+        # The Makefile defaults to $(ROCM_PATH)/llvm, which not every ROCm has.
+        f"ROCM_LLVM={os.path.dirname(LLVM_BIN)}",
     ]
     name = os.path.basename(artifact)
     build_log = os.path.join(LOGDIR, log_name)
@@ -234,6 +264,10 @@ def _build_test_binary(device_lib=None, exe=None, log_name="ir_test_build.log"):
     """
     device_lib = BITCODE if device_lib is None else device_lib
     exe = TEST_EXE if exe is None else exe
+    # The [D] ReduceCopy cases go only into the .bc binary: D1 needs
+    # HSA_NO_SCRATCH_RECLAIM=0 (see test_reduce_copy_typed_local), which the
+    # LTO IR smoke test, running the whole binary, does not set.
+    srcs = [IR_TEST_SRC] + ([IR_REDUCE_COPY_SRC] if device_lib == BITCODE else [])
     os.makedirs(IR_OUTDIR, exist_ok=True)
     gtest_inc = os.path.join(GTEST_ROOT, "include")
     gtest_libdir = _find_gtest_libdir()
@@ -252,7 +286,7 @@ def _build_test_binary(device_lib=None, exe=None, log_name="ir_test_build.log"):
         f"-I{GENERATED_INC}",
         f"-I{gtest_inc}",
         f"-I{os.path.join(ROCM_PATH, 'include')}",
-        IR_TEST_SRC,
+        *srcs,
         "-Xoffload-linker", device_lib,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
         f"-L{os.path.join(ROCM_PATH, 'lib')}", "-lamdhip64",
