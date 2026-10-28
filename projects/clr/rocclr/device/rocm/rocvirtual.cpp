@@ -1808,7 +1808,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
-  const uint32_t sw_queue_size = queueMask;
   static constexpr size_t kPacketSize = sizeof(hsa_kernel_dispatch_packet_t);
 
   // Unpack first/last headers; apply system-scope once for the whole batch.
@@ -1855,8 +1854,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   }
   fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
 
-  // A chunk is reserved whole, so it can never exceed the ring capacity.
-  const size_t kPeriod = std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, sw_queue_size);
+  // A chunk is reserved whole, so it can never exceed the ring capacity. Cap it at
+  // half the ring: a full-capacity chunk is only grantable once read_dispatch_id has
+  // caught up exactly.
+  const size_t kPeriod = std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, queueSize / 2);
   // Ramp-up: submit a small first (lead) chunk so the doorbell is rung after
   // copying only kLead packets instead of a full kPeriod, then double the chunk
   // size up to kPeriod. The GPU starts executing the lead while the CPU keeps
