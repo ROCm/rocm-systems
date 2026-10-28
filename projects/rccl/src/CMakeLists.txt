@@ -883,10 +883,6 @@ add_dependencies(copy_nccl_device_headers nccl_device_header_symlinks)
 
 # Generate device/host tables and all the collective functions that are going to be in librccl.so
 #==================================================================================================
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-if (NOT Python3_FOUND)
-  message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
-endif()
 
 set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 set(GEN_SYM_DIR "${GEN_DIR}/symmetric")

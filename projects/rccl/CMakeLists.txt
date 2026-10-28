@@ -803,6 +803,9 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For ex
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+if (NOT Python3_FOUND)
+  message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
+endif()
 
 ## Compile tuner/*.csv into librccl.so so the built-in CSV tuner works without
 ## the files being staged on every node. Disk locations remain as overrides.
