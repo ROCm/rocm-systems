@@ -38,8 +38,12 @@ impl LinuxKfdDriver {
         descriptor: BorrowedFd<'_>,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        let kfd = self.kfd()?;
-        KfdVirtualMemory::import_with_kfd(descriptor.as_raw_fd(), &kfd)
+        self.with_context_resources(|resources| {
+            let kfd = resources.kfd()?;
+            KfdVirtualMemory::import_with_kfd(descriptor.as_raw_fd(), &kfd, |gpu_id| {
+                resources.bindings.svm_identity(gpu_id).ok()
+            })
+        })
     }
 
     pub(crate) fn export_virtual_memory(memory: &KfdVirtualMemory) -> Result<DmaBuf, Error> {

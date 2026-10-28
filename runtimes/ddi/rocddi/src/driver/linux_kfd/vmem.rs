@@ -49,6 +49,15 @@ struct SubmitError {
     update: Option<(u32, u64)>,
 }
 
+/// KFD metadata source and activated-endpoint translation for an import.
+#[derive(Clone, Copy)]
+struct ImportOrigin<'a> {
+    /// Native connection queried for the DMA-BUF's placement.
+    kfd: &'a super::sys::Kfd,
+    /// Maps a native GPU ID to an activated endpoint identity.
+    endpoint_id: &'a dyn Fn(u32) -> Option<[u8; 16]>,
+}
+
 /// Per-device DRM virtual-memory state serialized by its owning `DeviceVm`.
 pub(super) struct VmState {
     /// Timeline sync object shared by mapping transactions on this VM.
@@ -462,7 +471,7 @@ impl KfdVirtualMemory {
         };
         vm.check()?;
 
-        let gpu_id = vm.gpu_id;
+        let endpoint_id = vm.endpoint_id();
 
         let owner = Owned::try_new_uninit()?;
         let reservation =
@@ -478,7 +487,7 @@ impl KfdVirtualMemory {
                 mapping_granularity: page,
                 physical_backing_id: [0; 2],
                 placement: Some(if native_kind & uapi::VRAM != 0 {
-                    VirtualMemoryPlacement::Device(gpu_id)
+                    VirtualMemoryPlacement::Device(endpoint_id)
                 } else {
                     VirtualMemoryPlacement::System
                 }),
@@ -557,11 +566,21 @@ impl KfdVirtualMemory {
     pub(super) fn import_with_kfd(
         descriptor: i32,
         kfd: &super::sys::Kfd,
+        endpoint_id: impl Fn(u32) -> Option<[u8; 16]>,
     ) -> Result<Owned<Self>, Error> {
-        Self::import_impl(descriptor, Some(kfd))
+        Self::import_impl(
+            descriptor,
+            Some(ImportOrigin {
+                kfd,
+                endpoint_id: &endpoint_id,
+            }),
+        )
     }
 
-    fn import_impl(descriptor: i32, kfd: Option<&super::sys::Kfd>) -> Result<Owned<Self>, Error> {
+    fn import_impl(
+        descriptor: i32,
+        source: Option<ImportOrigin<'_>>,
+    ) -> Result<Owned<Self>, Error> {
         let dma_buf = os_file::duplicate_file(descriptor)
             .map_err(|source| native_error("virtual-memory descriptor duplication", source))?;
         let file_info = os_file::dma_buf_file_info(&dma_buf)
@@ -571,8 +590,8 @@ impl KfdVirtualMemory {
             as u64;
         // Older KFD versions can import the DMA-BUF but cannot describe its
         // origin. Preserve that distinction for the HSA handle-info query.
-        let placement = kfd
-            .and_then(|kfd| kfd.dma_buf_info(dma_buf.as_raw_fd()).ok())
+        let placement = source
+            .and_then(|source| source.kfd.dma_buf_info(dma_buf.as_raw_fd()).ok())
             .and_then(|details| {
                 let info = details.info;
                 if info.size != file_info.size {
@@ -580,9 +599,9 @@ impl KfdVirtualMemory {
                 }
                 match info.flags & (uapi::VRAM | uapi::GTT) {
                     uapi::GTT => Some(VirtualMemoryPlacement::System),
-                    uapi::VRAM if info.gpu_id != 0 => {
-                        Some(VirtualMemoryPlacement::Device(info.gpu_id))
-                    }
+                    uapi::VRAM if info.gpu_id != 0 => source
+                        .and_then(|source| (source.endpoint_id)(info.gpu_id))
+                        .map(VirtualMemoryPlacement::Device),
                     _ => None,
                 }
             });

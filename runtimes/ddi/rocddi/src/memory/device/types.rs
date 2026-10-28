@@ -208,8 +208,8 @@ pub struct VirtualMemoryInfo {
 pub enum VirtualMemoryPlacement {
     /// System memory visible through a CPU agent.
     System,
-    /// Device memory owned by the KFD GPU with this native identity.
-    Device(u32),
+    /// Device memory owned by the endpoint with this stable identity.
+    Device([u8; 16]),
 }
 
 /// Cached facts for one reserved process virtual-address range.

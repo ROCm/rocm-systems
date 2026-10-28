@@ -78,7 +78,7 @@ fn imported_vmem_placement_comes_from_kfd_dma_buf_info() {
     let source = backing_file();
     for (flags, expected) in [
         (uapi::GTT, Some(VirtualMemoryPlacement::System)),
-        (uapi::VRAM, Some(VirtualMemoryPlacement::Device(42))),
+        (uapi::VRAM, Some(VirtualMemoryPlacement::Device([42; 16]))),
         (uapi::GTT | uapi::VRAM, None),
     ] {
         let kfd = sys::Kfd::with_hook(
@@ -92,7 +92,10 @@ fn imported_vmem_placement_comes_from_kfd_dma_buf_info() {
                 Ok(())
             }),
         );
-        let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &kfd).unwrap();
+        let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &kfd, |id| {
+            (id == 42).then_some([42; 16])
+        })
+        .unwrap();
         assert_eq!(imported.info().placement, expected);
     }
 
@@ -105,7 +108,25 @@ fn imported_vmem_placement_comes_from_kfd_dma_buf_info() {
             Ok(())
         }),
     );
-    let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &old_kfd).unwrap();
+    let imported =
+        KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &old_kfd, |_| None).unwrap();
+    assert_eq!(imported.info().placement, None);
+
+    let foreign_kfd = sys::Kfd::with_hook(
+        File::open("/dev/null").unwrap(),
+        Arc::new(|call| {
+            if let sys::Call::DmaBufInfo(args, _) = call {
+                args.size = page();
+                args.gpu_id = 99;
+                args.flags = uapi::VRAM;
+            }
+            Ok(())
+        }),
+    );
+    let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &foreign_kfd, |id| {
+        (id == 42).then_some([42; 16])
+    })
+    .unwrap();
     assert_eq!(imported.info().placement, None);
 }
 
