@@ -844,7 +844,8 @@ PyTorch operator analysis
 
 These options work only with the default ``--output-format stdout``. If you
 combine ``--list-operators`` with ``--operator``, rocprof-compute
-lists all operators and ignores the filter.
+lists operators for the chosen ``--list-operators`` values and ignores the
+``--operator`` filter.
 
 
 List all operators
@@ -918,7 +919,7 @@ Filtering by Operator
 ``--operator`` selects operators with shell-style glob patterns.
 ``FW:PATTERN`` limits matching to that framework. A later piece with no
 framework stays on the preceding one. A piece before any framework matches
-collected torch, triton, and user nodes. A pattern can match an operator's
+all collected nodes. A pattern can match an operator's
 name or its full call path, such as ``nn.Module.Net.forward/aten::addmm``.
 Matching is case-sensitive. Spaces or commas separate patterns.
 
@@ -947,7 +948,7 @@ These options do not change the printed operator tree. Kernel IDs depend on
    # Framework-scoped match
    $ rocprof-compute analyze --experimental --operator torch:*relu* --path ./workload
 
-   # Path match before any framework (torch, triton, and user)
+   # Path match before any framework (all collected nodes)
    $ rocprof-compute analyze --experimental --operator "*/aten::addmm" --path ./workload
 
    # Match all collected operators (no arguments)
