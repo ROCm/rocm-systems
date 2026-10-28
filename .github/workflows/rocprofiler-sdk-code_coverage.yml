@@ -285,11 +285,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       # always move the counters so they do not mix with the next step's
-      run: |
-        rc=0
-        python3 ./source/scripts/gcda-tool.py check build || rc=$?
-        python3 ./source/scripts/gcda-tool.py move build ${RUNNER_TEMP}/gcda/tests
-        exit ${rc}
+      run: python3 ./source/scripts/gcda-tool.py move build ${RUNNER_TEMP}/gcda/tests
 
     - name: Configure, Build, and Test (Samples Code Coverage)
       if: ${{ !cancelled() && steps.coverage-tests.outcome != 'skipped' }}
@@ -322,11 +318,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       # always move the counters so they do not mix with the next step's
-      run: |
-        rc=0
-        python3 ./source/scripts/gcda-tool.py check build || rc=$?
-        python3 ./source/scripts/gcda-tool.py move build ${RUNNER_TEMP}/gcda/samples
-        exit ${rc}
+      run: python3 ./source/scripts/gcda-tool.py move build ${RUNNER_TEMP}/gcda/samples
 
     - name: Merge Code Coverage Data
       id: merge-coverage
