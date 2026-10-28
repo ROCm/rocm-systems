@@ -11,6 +11,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 
 ### Known issues
 
@@ -45,7 +46,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_CE_AR_2SHOT_MAX_BYTES` (default `-1`): overrides the 2-shot AllReduce size cap from the arch table. Set to a positive value to override `ceNonRegMax[AR]`. Renamed from `RCCL_CE_AR_MAX_MSG_BYTES`.
 * `RCCL_CE_AR_2SHOT_MIN_BYTES` (default `-1`): overrides the minimum message size for the CE 2-shot AllReduce path. When `-1`, resolved from `ceNonRegMin[AllReduce]` in the per-arch table.
 * `RCCL_CE_AR_REG_MAX_MSG_BYTES` (default `-1`): overrides the registered CE AllReduce size cap from the arch table.
-* `RCCL_CE_AR_STAGING_BYTES` (default `-1`): overrides the CE AllReduce staging buffer allocation size; when unset, `NCCL_CE_AR_STAGING_BYTES` is used.
+* `RCCL_CE_AR_STAGING_BYTES` (default `-1`): overrides the CE AllReduce staging buffer allocation size; when unset, `NCCL_CE_AR_STAGING_BYTES` is used. CE ReduceScatter shares this buffer.
+* `RCCL_CE_REDUCESCATTER` (default `0`): opt-in Copy Engine ReduceScatter on a single-node symmetric communicator with `CTA_POLICY_ZERO`. Always stages through `ceARTmpBuf`; user-buffer registration is not required. No message-size cap (large messages are pipelined).
 * `RCCL_CE_COLL_MAX_BYTES` (default `-1`): overrides the CE registered-window and 2-shot size cap for all non-AllReduce collectives (AllGather, AlltoAll, etc.). When `-1`, resolved from `ceRegMax[func]` or `ceNonRegMax[func]` in the per-arch table.
 * `RCCL_CE_COLL_MIN_BYTES` (default `-1`): overrides the minimum message size for CE non-AllReduce paths (both registered-window and scratch). When `-1`, resolved from `ceNonRegMin[func]` in the per-arch table.
 * `RCCL_SYM_K_MAX_BYTES` (default `-1`): overrides the symmetric-kernel upper bound for all collectives. When `-1`, resolved from `symMaxR2[func]` (eager) or `symMaxR2Graph[func]` (graph-capture) in the per-arch table. `kThreshUnlimited` (SIZE_MAX) in the table means no suppression.
