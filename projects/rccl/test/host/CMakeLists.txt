@@ -13,6 +13,12 @@ rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
+rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
+  "RCCL_PARAM(ForceEnableDMABUF, \"FORCE_ENABLE_DMABUF\", 0);"
+  "fakes/rocmwrap_fakes.cc: rcclParamForceEnableDMABUF()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rocmwrap_fakes.cc"
+  "int64_t rcclParamForceEnableDMABUF() { return g_loadParam(\"RCCL_FORCE_ENABLE_DMABUF\", 0); }"
+  "the ForceEnableDMABUF fake default")
 # src/enqueue/task_prep/*.cc declare these five but define none, and param_redirect.h only rewrites
 # NCCL_PARAM where it expands, so the hand-written bodies below are the only definitions on that link line.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
@@ -217,6 +223,7 @@ function(rccl_define_micro_source_lists)
     ras-peers-test.cc                    # src/ras/peers.cc
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
+    net-telemetry-test.cc                # src/transport/net_telemetry.cc, src/include/net_telemetry.h
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
@@ -363,6 +370,7 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
     fakes/init_fakes.cc
+    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib (GDR flush flag seams)
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -632,6 +640,16 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroNvls -- REAL src/transport/nvls.cc, which RCCL always compiles
+  # as its NVLS stubs (the multicast code needs CUDART_VERSION >= 12010). Its own
+  # binary: fakes/transport_stubs.cc and fakes/collective_stubs.cc fake the ncclNvls*
+  # entry points nvls.cc defines for real.
+  set(TEST_MICRO_NVLS_SOURCE_FILES
+    nvls-test.cc
+    fakes/nccl_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroNcclDevice -- src/nccl_device/ requirement builders. Own binary:
   # fakes/dev_runtime_micro_fakes.cc fakes three of them in rccl-UnitTestsMicro.
   set(TEST_MICRO_NCCL_DEVICE_SOURCE_FILES
@@ -869,6 +887,30 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroNet -- src/transport/net.cc. Own binary: transport_stubs.cc, which most
+  # targets link, defines rcclUseAinic and netTransport, and net.cc defines both.
+  set(TEST_MICRO_NET_SOURCE_FILES
+    net-test.cc
+    fakes/collectives_fakes.cc           # func/algo/proto name tables
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc                  # core floor, incl. proxy profiler hooks
+    fakes/net_ib_cast_common_fakes.cc    # netIbCast
+    fakes/net_ib_cast_connect_fakes.cc   # rcclCastNetP2pPolicy
+    fakes/os_fakes.cc
+    fakes/proxy_fakes.cc
+    fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
+    fakes/rocmwrap_fakes.cc
+    fakes/topo_stubs.cc
+    fakes/transport_net_ib_connect_net_fakes.cc  # rcclNetP2pPolicy, GDR flush-flag accessors
+    fakes/transport_net_ib_fakes.cc
+    fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real parseStringList/matchIfList for NCCL_IB_HCA
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # src/diagnostics/p2p.cc; fakes transport/p2p.cc, which rccl-UnitTestsMicro compiles.
   set(TEST_MICRO_DIAGNOSTICS_SOURCE_FILES
     diag-p2p-test.cc
@@ -925,12 +967,16 @@ function(rccl_define_micro_source_lists)
   # src/algorithms/dda/
   set(TEST_MICRO_DDA_SOURCE_FILES
     algorithms/dda/fabric/fabric-gpu-barrier-test.cc
+    algorithms/dda/fabric/fabric-init-test.cc
     algorithms/dda/fabric/fabric-mem-handler-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc  # real DeviceBuffer
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     fakes/bootstrap_stubs.cc             # bootstrapAllGather
+    fakes/comm_fakes.cc                  # allocTracker
     fakes/env_fakes.cc                   # NCCL_CUMEM_SKIP_FREE
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/rccl_wrap_fakes.cc             # DDA params and thresholds
     fakes/utils_fakes.cc                 # getBusId (alloc.h side stream)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1505,6 +1551,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
     RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
+    NET_TELEMETRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
@@ -1887,6 +1934,16 @@ if(_ENQ_BUILD_DEVLINKER)
 endif()
 
 # ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNvls
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNvls
+  SOURCES ${TEST_MICRO_NVLS_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    NVLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/nvls.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroNcclDevice
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroNcclDevice
@@ -2211,6 +2268,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
     FABRIC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_mem_handler.cc"
     # hipify renames .cu to .cu.cpp
     FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
+    FABRIC_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_init.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
 
 # ---------------------------------------------------------------------------
@@ -2266,6 +2324,22 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastInit
     NET_IB_CAST_MULTIPLANE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/multiplane.cc"
     NET_IB_CAST_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_cast_gid_inspect.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_init.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNet
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNet
+  SOURCES ${TEST_MICRO_NET_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # the net_ib_cast fakes' headers
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_DMABUF_EXPORT_DEF}  # standalone: the cuMem DMA-BUF arms in-build gets from rccl
+    # net_tmp.cc, not net.cc: src/CMakeLists.txt lists plugin/net.cc first, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_tmp.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
