@@ -98,6 +98,12 @@ tolerance. Prints a summary box, writes a per-stream comparison CSV to
 `$HOME/rocDecode_perf_results/<timestamp>/` (outside the repo; override the base with
 `ROCDECODE_PERF_RESULTS_DIR`), and exits `0` if there are no regressions, `1` otherwise.
 
+If no baseline is available — either the baseline file is missing or it has no column for
+the detected GPU — the script runs in **measure-only mode**: all streams are measured, FPS
+is saved to CSV (which can serve as a future baseline), and the summary reports
+`— NO BASELINE` per codec with `— MEASURED` overall (exit 0). The specific reason is
+printed as a WARNING.
+
 ```shell
 test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--quick] [--check-rocm]
 ```
@@ -148,7 +154,8 @@ export ROCDECODE_PERF_DIR="$HOME/Movies/rocDecodePerformance"
 ```
 
 The baseline is not distributed with the repo (it lives on an internal SharePoint site);
-download `rocDecode_perf_baseline.html` into `$ROCDECODE_PERF_DIR` before running.
+download `rocDecode_perf_baseline.html` into `$ROCDECODE_PERF_DIR` for regression
+comparison. Without the baseline file, the script runs in measure-only mode (see above).
 
 ## Claude Code Skills
 
