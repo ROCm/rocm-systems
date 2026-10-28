@@ -517,6 +517,14 @@ class Device : public NullDevice {
   virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override;
   virtual cl_int virtualUnmap(void* va, size_t size) override;
 
+  //! Maps phys at va. With track_mapping, creates the VA sub-object, wires MemObjMap, resolves
+  //! the owning agent on its existing device views, and rolls the sub-object back if the map
+  //! fails.
+  cl_int MapPhysicalToVirtual(void* va, size_t size, amd::Memory* phys, bool track_mapping) const;
+
+  //! Unmaps va. With track_mapping, also tears down the VA sub-object bookkeeping.
+  cl_int UnmapVirtual(void* va, size_t size, bool track_mapping) const;
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice,
                             int numaNode = -1) override;
@@ -736,10 +744,6 @@ class Device : public NullDevice {
 
   //! Current number of queues pending deferred destroy.
   size_t DeferredQueueCount();
-
- protected:
-  //! Re-resolve the owning agent cached on a freshly mapped VMM allocation.
-  void RefreshMappedMemoryOwner(amd::Memory* vaddr_sub_obj) const override;
 
  private:
   bool create();

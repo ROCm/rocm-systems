@@ -1197,36 +1197,50 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
   return (success = (deviceMemory_ != nullptr));
 }
 
-// Recompute the owning agent once the VA is backed (post hsa_amd_vmem_map), the first point
-// where the true owner of VMM-mapped / imported memory is knowable. Also called from
-// computeAndSetOwningAgent() for IPC-shared memory.
-void Memory::refreshOwningAgentFromPointerInfo() {
-  if (deviceMemory_ == nullptr) {
-    return;
+// Resolve the agent that owns the backing pages, which for imported memory is a peer device.
+// A mapped VMM range asks its physical handle, since pointer_info reports no owner for a handle
+// imported from another process. Other memory (IPC-opened) asks pointer_info, keyed off a valid
+// agentOwner because ROCr does not always tag IPC memory with HSA_EXT_POINTER_TYPE_IPC. A fabric
+// import reports no owner either way and falls back to this device.
+void Memory::refreshOwningAgent() {
+  hsa_agent_t agent = {};
+  amd::Memory* phys = (owner() != nullptr) ? owner()->getUserData().phys_mem_obj : nullptr;
+
+  if (phys != nullptr) {
+    hsa_amd_vmem_alloc_handle_t handle{phys->getUserData().hsa_handle};
+    hsa_amd_vmem_handle_info_t handle_info = {};
+    handle_info.size = sizeof(handle_info);
+    if (Hsa::vmem_get_vmem_info(handle, &handle_info) == HSA_STATUS_SUCCESS) {
+      agent = handle_info.agent;
+    }
+  } else {
+    hsa_amd_pointer_info_t ptr_info = {};
+    ptr_info.size = sizeof(ptr_info);
+    if (hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &ptr_info, nullptr, nullptr,
+                             nullptr) == HSA_STATUS_SUCCESS) {
+      agent = ptr_info.agentOwner;
+    }
   }
 
-  hsa_amd_pointer_info_t info = {};
-  info.size = sizeof(info);
-  hsa_status_t err = hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &info, nullptr,
-                                          nullptr, nullptr);
-
-  // ROCr does not always tag IPC-opened memory with HSA_EXT_POINTER_TYPE_IPC, so key off a
-  // valid agentOwner rather than the pointer type. A zero handle is expected for a fabric
-  // import, whose placement is never recoverable. Always set an agent: computeAndSetOwningAgent()
-  // calls this with nothing cached, and getOwningAgent() feeds the copy agents in rocblit.
-  setOwningAgent((err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0)
-                     ? info.agentOwner
-                     : dev().getBackendDevice());
+  // Always set an agent: computeAndSetOwningAgent() calls this with nothing cached, and
+  // getOwningAgent() feeds the copy agents in rocblit.
+  setOwningAgent(agent.handle != 0 ? agent : dev().getBackendDevice());
 }
 
 // Helper function to compute and cache the owning agent
 void Buffer::computeAndSetOwningAgent() {
   hsa_agent_t agent;
 
-  // Sub-buffers must inherit agent from parent, not recompute it. That includes VMM
-  // sub-objects, whose VA is not yet backed here; they are resolved post-map by
-  // Device::RefreshMappedMemoryOwner. IPC-shared memory is not a sub-buffer, so it falls
-  // through to the vmmImported/ipcShared branch below.
+  // Memory backed by another device's pages is owned by that device. A mapped VMM range belongs
+  // to its physical handle's agent rather than the VA reservation it is carved from, so this
+  // must precede the sub-buffer inheritance below.
+  if (owner() != nullptr &&
+      (owner()->getUserData().phys_mem_obj != nullptr || owner()->ipcShared())) {
+    refreshOwningAgent();
+    return;
+  }
+
+  // Sub-buffers must inherit agent from parent, not recompute it
   if (owner() != nullptr && owner()->parent() != nullptr) {
     const Memory* parentMemory = static_cast<const Memory*>(
         owner()->parent()->getDeviceMemory(dev_));
@@ -1237,11 +1251,6 @@ void Buffer::computeAndSetOwningAgent() {
     }
     // Fallback if parent not available (shouldn't happen)
     LogWarning("Sub-buffer parent not available for agent inheritance");
-  }
-
-  if (owner() != nullptr && (owner()->ipcShared() || owner()->vmmImported())) {
-    refreshOwningAgentFromPointerInfo();
-    return;
   }
 
   if (kind_ == MEMORY_KIND_ARENA || kind_ == MEMORY_KIND_HOST) {

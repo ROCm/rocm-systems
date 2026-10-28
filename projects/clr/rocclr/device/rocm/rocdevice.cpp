@@ -2758,81 +2758,73 @@ bool Device::virtualFree(void* addr) {
 }
 
 // ================================================================================================
-// A VMM allocation's owning agent is cached on each per-device device::Memory at create()
-// time, before the VA is backed, so for an imported handle it was left naming the local
-// device. hsa_amd_vmem_map has run by now, so pointer_info can name the exporting peer.
-void Device::RefreshMappedMemoryOwner(amd::Memory* vaddr_sub_obj) const {
-  if (vaddr_sub_obj == nullptr) {
-    return;
-  }
-
-  if (ROC_VMM_REFRESH_OWNING_AGENT) {
-    constexpr bool kNoAlloc = false;
-    for (const auto& ctx_dev : vaddr_sub_obj->getContext().devices()) {
-      if (auto* dev_mem =
-              static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*ctx_dev, kNoAlloc))) {
-        dev_mem->refreshOwningAgentFromPointerInfo();
-      }
+// Single map implementation shared by the synchronous hipMemMap path (Device::virtualMap) and
+// the command path (VirtualGPU::submitVirtualMap). track_mapping is false for the mempool /
+// graph callers that manage the VA bookkeeping themselves.
+cl_int Device::MapPhysicalToVirtual(void* va, size_t size, amd::Memory* phys,
+                                    bool track_mapping) const {
+  amd::Memory* vaddr_sub_obj = nullptr;
+  if (track_mapping) {
+    vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
+    if (vaddr_sub_obj == nullptr) {
+      LogError("MapPhysicalToVirtual: MapMemObjBookkeeping failed");
+      return CL_INVALID_VALUE;
     }
   }
 
-  // The dispatching device need not be in the allocation's context.
-  if (auto* dev_mem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*this))) {
-    dev_mem->refreshOwningAgentFromPointerInfo();
-  }
-}
-
-// ================================================================================================
-// Direct synchronous map/unmap path bypassing VirtualMapCommand. Used by the
-// non-async hipMemMap/hipMemUnmap entry points (wired up in subsequent
-// commits). No execution() lock and no barrier packet: the HIP layer is
-// responsible for draining access-device queues from the CPU side before
-// calling, and hsa_amd_vmem_{map,unmap} are synchronous w.r.t. the CPU.
-cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
-  if (phys == nullptr) {
-    LogError("virtualMap: phys is nullptr");
-    return CL_INVALID_VALUE;
-  }
-
-  amd::Memory* vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
-  if (vaddr_sub_obj == nullptr) {
-    LogError("virtualMap: MapMemObjBookkeeping failed");
-    return CL_INVALID_VALUE;
-  }
-
-  hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
-  opaque_hsa_handle.handle = phys->getUserData().hsa_handle;
-  hsa_status_t hsa_status = Hsa::vmem_map(vaddr_sub_obj->getSvmPtr(), size,
-                                          vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0);
+  hsa_amd_vmem_alloc_handle_t phys_handle{phys->getUserData().hsa_handle};
+  const size_t phys_offset = (vaddr_sub_obj != nullptr) ? vaddr_sub_obj->getOffset() : 0;
+  hsa_status_t hsa_status = Hsa::vmem_map(va, size, phys_offset, phys_handle, 0);
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("virtualMap: hsa_amd_vmem_map failed with status: %d", hsa_status);
-    // Roll back the bookkeeping so the sub_obj/MemObjMap doesn't leak.
-    // FinalizeMapMemObjBookkeeping was never called, so MemObjMap doesn't
-    // contain va and the cross-links are not wired. Just tear down the
-    // sub-buffer view directly.
-    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
-    vaddr_sub_obj->release();
+    LogPrintfError("MapPhysicalToVirtual: hsa_amd_vmem_map failed with status: %d", hsa_status);
+    if (vaddr_sub_obj != nullptr) {
+      // Roll back the bookkeeping so the sub_obj doesn't leak. FinalizeMapMemObjBookkeeping was
+      // never called, so MemObjMap doesn't contain va and the cross-links are not wired. Just
+      // tear down the sub-buffer view directly.
+      vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+      vaddr_sub_obj->release();
+    }
     return CL_OUT_OF_HOST_MEMORY;
   }
 
-  constexpr bool kImportVmmForInterprocess = true;
-  // FinalizeMapMemObjBookkeeping() re-resolves the owning agent on every device view via
-  // Device::RefreshMappedMemoryOwner(), now that the handle is reachable.
-  FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+  if (vaddr_sub_obj != nullptr) {
+    constexpr bool kImportVmmForInterprocess = true;
+    FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+
+    // Views created before the map inherited the VA reservation's owner. Views created later
+    // resolve it in computeAndSetOwningAgent().
+    constexpr bool kNoAlloc = false;
+    for (const auto* ctx_device : vaddr_sub_obj->getContext().devices()) {
+      if (auto* dev_mem =
+              static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*ctx_device, kNoAlloc))) {
+        dev_mem->refreshOwningAgent();
+      }
+    }
+  }
   return CL_SUCCESS;
 }
 
 // ================================================================================================
-cl_int Device::virtualUnmap(void* va, size_t size) {
+// Single unmap implementation shared by Device::virtualUnmap and VirtualGPU::submitVirtualMap.
+cl_int Device::UnmapVirtual(void* va, size_t size, bool track_mapping) const {
+  if (!track_mapping) {
+    hsa_status_t hsa_status = Hsa::vmem_unmap(va, size);
+    if (hsa_status != HSA_STATUS_SUCCESS) {
+      LogPrintfError("UnmapVirtual: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
+      return CL_INVALID_VALUE;
+    }
+    return CL_SUCCESS;
+  }
+
   amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va);
   if (vaddr_sub_obj == nullptr) {
-    LogPrintfError("virtualUnmap: no sub_obj for va: %p", va);
+    LogPrintfError("UnmapVirtual: no sub_obj for va: %p", va);
     return CL_INVALID_VALUE;
   }
 
   hsa_status_t hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), size);
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("virtualUnmap: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
+    LogPrintfError("UnmapVirtual: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
     return CL_INVALID_VALUE;
   }
 
@@ -2840,6 +2832,28 @@ cl_int Device::virtualUnmap(void* va, size_t size) {
   constexpr bool kReleaseSubObj = true;
   UnmapMemObjBookkeeping(vaddr_sub_obj, va, kDestroyVirtualBuffer, kReleaseSubObj);
   return CL_SUCCESS;
+}
+
+// ================================================================================================
+// Direct synchronous map/unmap path bypassing VirtualMapCommand. Used by the
+// non-async hipMemMap/hipMemUnmap entry points. No execution() lock and no
+// barrier packet: the HIP layer is responsible for draining access-device
+// queues from the CPU side before calling, and hsa_amd_vmem_{map,unmap} are
+// synchronous w.r.t. the CPU.
+cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
+  if (phys == nullptr) {
+    LogError("virtualMap: phys is nullptr");
+    return CL_INVALID_VALUE;
+  }
+
+  constexpr bool kTrackMapping = true;
+  return MapPhysicalToVirtual(va, size, phys, kTrackMapping);
+}
+
+// ================================================================================================
+cl_int Device::virtualUnmap(void* va, size_t size) {
+  constexpr bool kTrackMapping = true;
+  return UnmapVirtual(va, size, kTrackMapping);
 }
 
 // ================================================================================================

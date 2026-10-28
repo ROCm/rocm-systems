@@ -211,10 +211,6 @@ release(bool, ROC_USE_FGS_KERNARG, true,                                      \
         "Use fine grain kernel args segment for supported asics")             \
 release(uint, ROC_P2P_SDMA_SIZE, 1024,                                        \
         "The minimum size in KB for P2P transfer with SDMA")                  \
-release(bool, ROC_VMM_REFRESH_OWNING_AGENT, true,                             \
-        "Re-resolve a VMM mapping's owning agent once its VA is backed, so "  \
-        "copies into memory imported from another process use the peer SDMA " \
-        "engine")                                                             \
 release(uint, ROC_AQL_QUEUE_SIZE, 16384,                                      \
         "AQL queue size in AQL packets")                                      \
 release(uint, ROC_SIGNAL_POOL_SIZE, 64,                                       \
