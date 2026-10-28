@@ -132,6 +132,37 @@ protected:
     }
   }
 
+  // Publishes one 8B half of every line of a peer: half 0 is payload word 0 and flag 1, half 1 is word 2 and flag 3.
+  void publishHalf(int peer, int half) {
+    for (size_t pk = 0; pk < kPackets; ++pk) {
+      volatile uint32_t* w = line(kSelf, peer, pk);
+      w[2 * half] = bitsOf(peerValue(peer, 2 * pk + half));
+      std::atomic_thread_fence(std::memory_order_release);
+      w[2 * half + 1] = kFlag;
+    }
+  }
+
+  // One peer's lines carry only one fresh half, so the kernel must keep waiting until the other half lands.
+  void checkTornLineWaits(int freshHalf) {
+    const int torn = (kSelf + 2) % kRanks;
+    for (int r = 1; r < kRanks; ++r) {
+      if ((kSelf + r) % kRanks != torn) {
+        publishPeer((kSelf + r) % kRanks);
+      }
+    }
+    publishHalf(torn, freshHalf);
+    launch();
+    const auto deadline = std::chrono::steady_clock::now() + kWatchdog;
+    while (!phase1Done() && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::yield();
+    }
+    std::this_thread::sleep_for(kSettle);
+    ASSERT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << "kernel finished with only half " << freshHalf << " fresh";
+    publishHalf(torn, 1 - freshHalf);
+    ASSERT_TRUE(finishes()) << "kernel never saw the second half land";
+    expectReduced();
+  }
+
   // True once every thread has stored its first phase-1 line, so nearly all of them are already polling.
   bool phase1Done() {
     const int peer = (kSelf + 1) % kRanks;
@@ -261,6 +292,14 @@ TEST_F(DdaReduceScatterFabricLL, AbortExitsTheWaitAndAdvancesEpoch) {
     ASSERT_EQ(v, kUntouched) << "an aborted thread wrote recvbuff";
   }
   expectEpochAdvanced();
+}
+
+TEST_F(DdaReduceScatterFabricLL, TornLineWithOnlyFirstHalfFreshIsReRead) {
+  checkTornLineWaits(0);
+}
+
+TEST_F(DdaReduceScatterFabricLL, TornLineWithOnlySecondHalfFreshIsReRead) {
+  checkTornLineWaits(1);
 }
 
 // The gfx1250 send prefetch is non-speculative, so a line past sendbuff in an unmapped page would raise a VM fault.
