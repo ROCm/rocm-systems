@@ -533,7 +533,9 @@ hsa_ven_amd_loader_iterate_executables(
  *
  * @details The result is the value that
  * ::HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE reports after the code
- * object is loaded. It depends only on the code object, not on the agent.
+ * object in @p code_object_reader is loaded. It depends only on that code
+ * object, not on the agent. Options that substitute a different image are
+ * applied at load time and are not part of this result.
  *
  * @param[in] code_object_reader A code object reader that holds the code
  * object.
@@ -567,11 +569,16 @@ hsa_status_t hsa_ven_amd_loader_code_object_reader_get_load_size(
  * @p address is an application-owned range, for example a virtual-memory
  * mapping or an mmap allocation. It must be aligned to 256 bytes, the
  * alignment the runtime uses when it allocates code itself. The runtime does
- * not check that the range is mapped or executable. The bytes occupied by the
- * code object, as reported by
+ * not check that the range is mapped or executable, and it does not change the
+ * range's access permissions. The agent's mapping must be writable, so the
+ * image can be copied there when @p executable is frozen, and executable, so
+ * the agent can dispatch it. The host mapping need not be writable. The bytes
+ * occupied by the code object in @p code_object_reader, as reported by
  * ::hsa_ven_amd_loader_code_object_reader_get_load_size, must fit in @p size.
- * The range stays owned by the application. Destroying @p executable does not
- * unmap it.
+ * An option that substitutes a different image is applied before that check,
+ * and ::HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE then reports the
+ * image that was loaded. The range stays owned by the application. Destroying
+ * @p executable does not unmap it.
  *
  * Only supported for GPU agents and code object version 2 and later. Other
  * error conditions are as for ::hsa_executable_load_agent_code_object.

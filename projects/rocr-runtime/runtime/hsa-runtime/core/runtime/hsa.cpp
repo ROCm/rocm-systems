@@ -277,7 +277,6 @@ hsa_status_t hsa_system_extension_supported(uint16_t extension, uint16_t version
       extension == HSA_EXTENSION_PROFILING_EVENTS)
     return HSA_STATUS_SUCCESS;
 
-  // Same minor hsa_system_major_extension_supported reports for the loader.
   if (extension == HSA_EXTENSION_AMD_LOADER && version_major == 1) {
     *result = version_minor <= 4;
     return HSA_STATUS_SUCCESS;
@@ -319,7 +318,7 @@ hsa_status_t hsa_system_major_extension_supported(uint16_t extension, uint16_t v
   }
 
   if ((extension == HSA_EXTENSION_AMD_LOADER) && (version_major == 1)) {
-    *version_minor = 4;
+    *version_minor = 0;
     *result = true;
     return HSA_STATUS_SUCCESS;
   }

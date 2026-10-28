@@ -1629,7 +1629,13 @@ hsa_status_t ExecutableImpl::LoadCodeObject(hsa_agent_t agent, hsa_code_object_t
   loaded_code_objects.push_back(std::static_pointer_cast<LoadedCodeObjectImpl>(objects.back()));
 
   status = LoadSegments(agent, code.get(), majorVersion, load_address, load_limit);
-  if (status != HSA_STATUS_SUCCESS) return status;
+  if (status != HSA_STATUS_SUCCESS) {
+    if (load_address && loaded_code_objects.back()->LoadedSegments().empty()) {
+      loaded_code_objects.pop_back();
+      objects.pop_back();
+    }
+    return status;
+  }
 
   for (size_t i = 0; i < code->SymbolCount(); ++i) {
     if (majorVersion >= 2 &&

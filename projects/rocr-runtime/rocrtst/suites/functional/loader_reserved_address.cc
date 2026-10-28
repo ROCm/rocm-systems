@@ -45,7 +45,11 @@ void LoaderReservedAddressTest::SetUp(void) {
   ASSERT_SUCCESS(
       hsa_system_major_extension_supported(HSA_EXTENSION_AMD_LOADER, 1, &minor, &supported));
   ASSERT_TRUE(supported);
-  ASSERT_GE(minor, 4);
+  // The reported minor stays 0. 1.04 is visible only to the exact-version query.
+  ASSERT_EQ(minor, uint16_t{0});
+  bool has_104 = false;
+  ASSERT_SUCCESS(hsa_system_extension_supported(HSA_EXTENSION_AMD_LOADER, 1, 4, &has_104));
+  ASSERT_TRUE(has_104);
   ASSERT_SUCCESS(
       hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(loader_), &loader_));
   ASSERT_NE(loader_.hsa_ven_amd_loader_code_object_reader_get_load_size, nullptr);
@@ -128,6 +132,20 @@ void LoaderReservedAddressTest::LoadAtAddressTest(void) {
   EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ARGUMENT,
             loader_.hsa_ven_amd_loader_executable_load_agent_code_object_at_address(
                 rejected, gpu, reader_, nullptr, static_cast<char*>(address) + 64, span, nullptr));
+  EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ARGUMENT,
+            loader_.hsa_ven_amd_loader_executable_load_agent_code_object_at_address(
+                rejected, gpu, reader_, nullptr, address, load_size - 1, nullptr));
+
+  // Both rejections are published and then dropped. The executable stays empty.
+  int loaded = 0;
+  ASSERT_SUCCESS(loader_.hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
+      rejected,
+      [](hsa_executable_t, hsa_loaded_code_object_t, void* data) {
+        *static_cast<int*>(data) += 1;
+        return HSA_STATUS_SUCCESS;
+      },
+      &loaded));
+  EXPECT_EQ(loaded, 0);
   EXPECT_SUCCESS(hsa_executable_destroy(rejected));
 
   // Load the same executable normally and in a custom spot then compare.
