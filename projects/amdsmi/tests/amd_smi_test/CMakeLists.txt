@@ -139,14 +139,8 @@ target_link_libraries(
     ${FILESYSTEM_LIB}
 )
 
-# Self-contained NIC telemetry contract suite. It drives the telemetry facade
-# against injected fakes (IDevlinkClient) and a tmpdir hwmon tree, so it needs no
-# live NIC and no root and is safe to run in CI. Building it here (under
-# BUILD_TESTS) means it can no longer silently rot the way a script-only target
-# does, and add_test() lets `ctest` gate it. The remaining NIC test tools
-# (test_nic_transport_suite, benchmark_nic_transport, probe_devlink_*) stay in
-# tests/nic/build_tests.sh by design: they require a live interface + root and
-# cannot run unattended. -fno-rtti matches the ABI amdsminic is built against.
+# NIC telemetry suite: injected fakes and a tmpdir hwmon tree, so it needs no NIC or root. The
+# tools that need a live interface stay in tests/nic/build_tests.sh. -fno-rtti matches amdsminic.
 add_executable(test_nic_telemetry_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_telemetry_suite.cpp)
 target_compile_options(test_nic_telemetry_suite PRIVATE -fno-rtti)
 target_link_libraries(test_nic_telemetry_suite amdsminic ${FILESYSTEM_LIB})
@@ -172,9 +166,15 @@ add_test(NAME nic_stats_suite COMMAND test_nic_stats_suite)
 add_executable(test_nic_log_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_log_suite.cpp)
 target_compile_options(test_nic_log_suite PRIVATE -fno-rtti)
 target_include_directories(test_nic_log_suite PRIVATE ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/src)
-if(LIBNL3_FOUND)
+# Follow how amdsminic was built, so the suite sees the same netlink code the library has.
+get_target_property(_nic_definitions amdsminic COMPILE_DEFINITIONS)
+if(HAVE_LIBNL3 IN_LIST _nic_definitions)
     target_compile_definitions(test_nic_log_suite PRIVATE HAVE_LIBNL3)
-    target_include_directories(test_nic_log_suite PRIVATE ${LIBNL3_INCLUDE_DIRS})
+    if(USING_BUNDLED_NETLINK)
+        target_link_libraries(test_nic_log_suite PRIVATE libnl::genl)
+    else()
+        target_include_directories(test_nic_log_suite PRIVATE ${LIBNL3_INCLUDE_DIRS})
+    endif()
 endif()
 target_link_libraries(test_nic_log_suite PRIVATE amdsminic ${FILESYSTEM_LIB})
 add_test(NAME nic_log_suite COMMAND test_nic_log_suite)

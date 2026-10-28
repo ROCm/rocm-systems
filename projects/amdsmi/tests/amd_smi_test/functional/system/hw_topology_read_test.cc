@@ -81,16 +81,17 @@ void TestHWTopologyRead::Run(void) {
 
   uint32_t num_devices = num_monitor_devs();
 
-  // Null output pointers must be rejected regardless of topology.
+  // Null output pointers must be rejected regardless of topology, except the optional hop count.
   if (num_devices > 0) {
     EXPECT_EQ(amdsmi_get_link_topology(processor_handles_[0], processor_handles_[0], nullptr),
               AMDSMI_STATUS_INVAL);
     amdsmi_link_type_t null_type;
     amdsmi_p2p_capability_t null_cap;
     uint64_t null_hops;
-    ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], nullptr,
-                                        &null_type),
-              AMDSMI_STATUS_INVAL);
+    const auto null_hops_status = amdsmi_topo_get_link_type(
+        processor_handles_[0], processor_handles_[0], nullptr, &null_type);
+    EXPECT_TRUE((null_hops_status == AMDSMI_STATUS_SUCCESS) ||
+                (null_hops_status == AMDSMI_STATUS_NOT_SUPPORTED));
     ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], &null_hops,
                                         nullptr),
               AMDSMI_STATUS_INVAL);
