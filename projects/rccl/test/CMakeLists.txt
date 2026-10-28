@@ -224,6 +224,7 @@ if(BUILD_TESTS)
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
+      CheapPostSendFenceTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
