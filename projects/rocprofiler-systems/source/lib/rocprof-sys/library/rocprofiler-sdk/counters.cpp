@@ -10,6 +10,7 @@
 #include <cstdint>
 
 #include <memory>
+#include <optional>
 #include <timemory/utility/types.hpp>
 
 #include "logger/debug.hpp"
@@ -28,8 +29,7 @@ metadata_initialize_counter_category()
 void
 metadata_initialize_counter_track(const char* name)
 {
-    trace_cache::get_metadata_registry().add_track(
-        { .track_name = name, .thread_id = std::nullopt, .extdata = "{}" });
+    trace_cache::get_metadata_registry().ensure_track(name, std::nullopt);
 }
 
 void

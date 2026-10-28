@@ -11,6 +11,7 @@
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/causal/data.hpp"
 #include "library/runtime.hpp"
@@ -30,6 +31,7 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
 #include <tuple>
+#include <unistd.h>
 #include <vector>
 
 #include "logger/debug.hpp"
@@ -117,13 +119,16 @@ struct thread_metadata_source
         {
             constexpr size_t UNKNOWN_TIME = 0;
             thread_id                     = extended_info->index_data->system_value;
-            rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { .parent_process_id = getppid(),
-                  .process_id        = getpid(),
-                  .thread_id         = thread_id,
-                  .start             = UNKNOWN_TIME,
-                  .end               = UNKNOWN_TIME,
-                  .extdata           = "{}" });
+            rocprofsys::trace_cache::get_metadata_registry().ensure_thread(
+                thread_id, [thread_id] {
+                    return rocprofsys::trace_cache::info::thread{ .parent_process_id =
+                                                                      getppid(),
+                                                                  .process_id = getpid(),
+                                                                  .thread_id  = thread_id,
+                                                                  .start   = UNKNOWN_TIME,
+                                                                  .end     = UNKNOWN_TIME,
+                                                                  .extdata = "{}" };
+                });
         }
         return thread_id;
     }
