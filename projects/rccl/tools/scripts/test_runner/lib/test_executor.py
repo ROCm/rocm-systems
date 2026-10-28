@@ -3288,10 +3288,49 @@ class TestExecutor:
         # llvm-cov to attribute that coverage.
         host_test_dir = os.path.join(test_dir, "host")
         for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
+                       "rccl-UnitTestsMicroAlloc",
+                       "rccl-UnitTestsMicroAllocator",
+                       "rccl-UnitTestsMicroAmdsmiWrap",
+                       "rccl-UnitTestsMicroApiTrace",
+                       "rccl-UnitTestsMicroArgcheck",
+                       "rccl-UnitTestsMicroBootstrap",
+                       "rccl-UnitTestsMicroCftDevRuntime",
+                       "rccl-UnitTestsMicroCollTrace",
+                       "rccl-UnitTestsMicroCollectives",
+                       "rccl-UnitTestsMicroCore",
+                       "rccl-UnitTestsMicroCpuset",
+                       "rccl-UnitTestsMicroCrypt",
+                       "rccl-UnitTestsMicroDdaColl",
+                       "rccl-UnitTestsMicroDebug",
+                       "rccl-UnitTestsMicroGinHostProxy",
+                       "rccl-UnitTestsMicroLinux",
+                       "rccl-UnitTestsMicroMemManager",
+                       "rccl-UnitTestsMicroMgmtTaskEnq",
+                       "rccl-UnitTestsMicroMnnvl",
+                       "rccl-UnitTestsMicroNcclDevice",
+                       "rccl-UnitTestsMicroOnerank",
+                       "rccl-UnitTestsMicroParam",
+                       "rccl-UnitTestsMicroPlugin",
+                       "rccl-UnitTestsMicroProfiler",
+                       "rccl-UnitTestsMicroProxy",
+                       "rccl-UnitTestsMicroRecorder",
+                       "rccl-UnitTestsMicroRocmwrap",
+                       "rccl-UnitTestsMicroRoctxNvml",
+                       "rccl-UnitTestsMicroRomeModels",
+                       "rccl-UnitTestsMicroStrongstream",
+                       "rccl-UnitTestsMicroTopo",
+                       "rccl-UnitTestsMicroUtils",
                        "rccl-UnitTestsMicroInit-uncached",
                        "rccl-UnitTestsMicroInit-faultinj",
                        "rccl-UnitTestsMicroEnqueue",
-                       "rccl-UnitTestsMicroSymKernels"]:
+                       "rccl-UnitTestsMicroSymKernels",
+                       "rccl-UnitTestsMicroNvls",
+                       "rccl-UnitTestsMicroGinHost",
+                       "rccl-UnitTestsMicroRomeModels",
+                       "rccl-UnitTestsMicroDda",
+                       "rccl-UnitTestsMicroTopo",
+                       "rccl-UnitTestsMicroNetIbCastInit",
+                       "rccl-UnitTestsMicroNetIbCastDataPath"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])
@@ -3334,7 +3373,7 @@ class TestExecutor:
         # Ignore patterns for non-relevant files
         ignore_regex = (
             ".*tuner_v.*|.*profiler_v.*|.*net_v.*|.*_deps.*|ext.*|"
-            ".*coll_net.*|.*nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
+            ".*coll_net.*|.*tuning/nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
             ".*gensrc.*|.*rccl-tests.*"
         )
 

@@ -83,6 +83,9 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       reqs->barrierCount = 1;
       reqs->ginSignalCount = 1;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
@@ -100,6 +103,9 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       // barrierCount provisions per-CTA hybrid world barriers (LSA+rail+world) used
       // by HybridAlltoAllTimedKernel to join CTA 0 (GIN) with LSA CTAs each iter.
       // The production body still uses barrier index 0 on CTA 0 and lsaBarrier on
@@ -291,7 +297,7 @@ __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWin
     gin.put(ncclTeamWorld(devComm), r,
         recvwin, recvoffset + devComm.rank * size,
         sendwin, sendoffset + r * size,
-        size, ncclGin_SignalInc{signalIndex});
+        size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
   }
 
   gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
@@ -339,13 +345,13 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
       gin.put(world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
-          size, ncclGin_SignalInc{signalIndex});
+          size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
     }
     for (int r = startLsa + lsaSize + tid; r < world.nRanks; r += nthreads) {
       gin.put(world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
-          size, ncclGin_SignalInc{signalIndex});
+          size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
     }
 
     if (numRemotePeers > 0)

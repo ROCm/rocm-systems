@@ -340,6 +340,68 @@ TEST_F(EnqueueMicrotest, ShmemDynamicSize_DeviceLinker_IsAlwaysZero) {
 #endif
 
 // ===========================================================================
+// rcclP2pTaskParts (enqueue.cc:1333) and rcclP2pPolicyChannels (enqueue.cc:1342)
+//
+// Multi-node AINIC Scatter takes the most power-of-two parts whose nRanks - 1
+// flows fit p2pnChannels, at most p2pnChannelsPerPeer; everything else takes
+// p2pnChannelsPerPeer. Both ends of a pair must get the same answer, so it may
+// depend only on comm-wide fields.
+// ===========================================================================
+
+namespace {
+std::unique_ptr<ncclComm> P2pPartsComm(int nNodes, int nRanks, int p2pnChannels, int perPeer) {
+  std::unique_ptr<ncclComm> comm{new ncclComm{}};
+  comm->nNodes = nNodes;
+  comm->nRanks = nRanks;
+  comm->p2pnChannels = p2pnChannels;
+  comm->p2pnChannelsPerPeer = perPeer;
+  comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+  return comm;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_AinicScatterTakesThePartsWhoseFlowsFitThePool) {
+  g_rcclUseAinicValue = true;
+  struct Case {
+    int nNodes, nRanks, p2pnChannels, perPeer, scatterParts;
+  };
+  // 8 GPUs per node with the MI355X pools, the pool boundary (16 peers x 2 parts fill 32 channels,
+  // 17 peers do not), power-of-two rounding (64 / 19 = 3) and the one-part floor (64 / 127 = 0).
+  for (Case k : {Case{2, 16, 32, 2, 2}, Case{3, 24, 64, 4, 2}, Case{4, 32, 32, 2, 1}, Case{8, 64, 64, 2, 1},
+                 Case{2, 17, 32, 2, 2}, Case{2, 18, 32, 2, 1}, Case{3, 20, 64, 8, 2}, Case{16, 128, 64, 2, 1}}) {
+    auto comm = P2pPartsComm(k.nNodes, k.nRanks, k.p2pnChannels, k.perPeer);
+    EXPECT_EQ(k.scatterParts, rcclP2pTaskParts(comm.get(), ncclFuncScatter))
+      << k.nRanks << " ranks, " << k.p2pnChannels << " channels";
+    for (ncclFunc_t f : {ncclFuncSendRecv, ncclFuncSend, ncclFuncRecv, ncclFuncAlltoAll, ncclFuncGather,
+                         ncclFuncAlltoAllv}) {
+      EXPECT_EQ(k.perPeer, rcclP2pTaskParts(comm.get(), f)) << "collAPI=" << int(f);
+    }
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_ScatterKeepsPerPeerOutsideMultiNodeAinicOrWithAUserCount) {
+  auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
+  g_rcclUseAinicValue = false;
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "not AINIC";
+  g_rcclUseAinicValue = true;
+  comm->config.nChannelsPerNetPeer = 2;
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "NCCL_NCHANNELS_PER_NET_PEER set";
+  comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+  comm->nNodes = 1;
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "single node";
+}
+
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
+  // Returns before the arch policy table, so comm->topo is never read.
+  g_rcclUseAinicValue = true;
+  auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncScatter;
+  EXPECT_EQ(1, rcclP2pPolicyChannels(comm.get(), &task));
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), nullptr));
+}
+
+// ===========================================================================
 // calcP2pChannelCount (enqueue.cc:1550)
 //
 // DEAD CODE: repo-wide grep finds exactly one occurrence -- its own definition.
@@ -773,6 +835,7 @@ struct ChunkComm {
   ncclComm& comm{*storage};
   explicit ChunkComm(int protoSimpleBuf = 1 << 22) {
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) comm.buffSizes[p] = protoSimpleBuf;
+    comm.p2pLl128BuffSize = protoSimpleBuf;
     // LOAD-BEARING: rcclProtoGrainSize(LL128) (scheduler.h:22) is
     //   WarpSize * ll128ShmemElemsPerThread * ll128DataElems * 8 / ll128LineElems
     // so a zero WarpSize makes grainSize 0, and :3028's
@@ -1075,6 +1138,95 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_PipelineLadder_LargeBytesStayUnhalved)
   EXPECT_EQ(uint32_t((1 << 22) / NCCL_STEPS), r.chunkSize);
 }
 
+namespace {
+// gfx950 LL128 with the RCCL_IB_GDR_FLUSH_FLAG_TUNE x4 collective buffer: 8 nodes x 8 GPUs, a 448 KiB default
+// (send/recv) buffer, 8-word lines with 7 data words. The default chunk is 49 KiB, the x4 chunk 196 KiB, and
+// both are multiples of the fixture's 1792-byte LL128 grain.
+constexpr int kLl128DefaultBuff = 448 << 10;
+constexpr uint32_t kLl128DefaultChunk = (kLl128DefaultBuff / NCCL_STEPS / 8) * 7;
+constexpr uint32_t kLl128ScaledChunk = 4 * kLl128DefaultChunk;
+constexpr int kScaledChannels = 64;
+
+void MakeScaledLl128(ChunkComm& cc, int nRanks = 64, bool scaled = true) {
+  cc.comm.nNodes = nRanks / 8;
+  cc.comm.nRanks = nRanks;
+  cc.comm.ll128LineElems = 8;
+  cc.comm.ll128DataElems = 7;
+  cc.comm.buffSizes[NCCL_PROTO_LL128] = 4 * kLl128DefaultBuff;
+  cc.comm.p2pLl128BuffSize = scaled ? kLl128DefaultBuff : 4 * kLl128DefaultBuff;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineShrinksToDefaultChunk) {
+  // 16 MB on 64 channels is ~1 chunk per channel at 196 KiB, far under nRanks / 2 = 32, so the chunk halves to
+  // the default and stops there. Measured on 8 nodes: the x4 chunk ran 16 MB broadcast at 63% of the default.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  ASSERT_EQ(0u, kLl128ScaledChunk % rcclProtoGrainSize(NCCL_PROTO_LL128, cc.get()));
+  for (ncclFunc_t f : {ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    auto r = RunChunking(cc, t, kScaledChannels, size_t(16) << 20);
+    ASSERT_EQ(ncclSuccess, r.rc) << "func=" << int(f);
+    EXPECT_EQ(kLl128DefaultChunk, r.chunkSize) << "func=" << int(f);
+    EXPECT_EQ(kLl128DefaultChunk, RunChunking(cc, t, kScaledChannels, 1024).chunkSize)
+        << "func=" << int(f) << ": never below the default chunk";
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineKeepsLargeChunkForLargeMessages) {
+  // 1 GB carries 83 chunks of 196 KiB per channel, past nRanks / 2, so the x4 chunk stays (+6% measured);
+  // 256 MB carries 20, so one halving to 98 KiB brings it to 41.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize) << "func=" << int(f);
+    EXPECT_EQ(kLl128ScaledChunk / 2, RunChunking(cc, t, kScaledChannels, size_t(256) << 20).chunkSize)
+        << "func=" << int(f);
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineThresholdScalesWithRanks) {
+  // The same 256 MB on 2 nodes (nRanks / 2 = 8) already has enough chunks for the x4 chunk.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc, /*nRanks=*/16);
+  auto t = MakeTask(ncclFuncBroadcast, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(256) << 20).chunkSize);
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128PipelineUnscaledBufferKeepsItsChunk) {
+  // A large LL128 buffer that send/recv shares (NCCL_LL128_BUFFSIZE) is not the scaled collective buffer, so the
+  // pipeline ladder leaves it alone, as before.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc, 64, /*scaled=*/false);
+  auto t = MakeTask(ncclFuncBroadcast, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(16) << 20).chunkSize);
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128RingCollectivesKeepTheLargeChunk) {
+  // Only the pipeline patterns shrink: Ring all_gather / reduce_scatter / all_reduce gain from the x4 chunk.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncAllGather, ncclFuncReduceScatter, ncclFuncAllReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(16) << 20).chunkSize) << "func=" << int(f);
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128TreeKeepsTheDefaultChunk) {
+  // Tree/LL128 never uses the scaled chunk, even where its ladder would not halve (1 GB).
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncAllReduce, ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128DefaultChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize) << "func=" << int(f);
+  }
+  MakeScaledLl128(cc, 64, /*scaled=*/false);
+  auto t = MakeTask(ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize)
+      << "an unscaled buffer keeps its chunk";
+}
+
 TEST_F(EnqueueMicrotest, CalcCollChunking_CollnetChain_ClampsToTwoFiftySixK) {
   // :2960 chunkSize = min(256*1024, stepSize*chunkSteps). With a large buffer
   // the 256K clamp is what decides, so this pins the literal.
@@ -1233,6 +1385,44 @@ TEST_F(EnqueueMicrotest, PackedChannels_TinyTransfer_PacksIntoOneChannel) {
   // however many are offered.
   EXPECT_EQ(1, rcclKernelPackedChannels(RankComm(8).get(), ncclFuncAllReduce, 4,
                                         ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+}
+
+TEST_F(EnqueueMicrotest, PackedChannels_CapsToCommNChannels) {
+  // nChannels == 0 skips the cap. Count 10240 / max 32 packs to 5.
+  {
+    RankComm rc(8);
+    EXPECT_EQ(0, rc.get()->nChannels);
+    EXPECT_EQ(5, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
+  // nMaxChannels > nChannels: the cap is applied before the packer arithmetic.
+  // 3 with the cap, 5 without it, 4 if the cap were applied after the arithmetic.
+  {
+    RankComm rc(8);
+    rc.get()->nChannels = 4;
+    EXPECT_EQ(3, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
+  // nMaxChannels <= nChannels: the cap does not change the answer.
+  {
+    RankComm uncapped(8);
+    RankComm capped(8);
+    capped.get()->nChannels = 16;
+    const size_t count = size_t(1) << 24;
+    int plain = rcclKernelPackedChannels(uncapped.get(), ncclFuncAllReduce, count,
+                                         ncclFloat32, NCCL_PROTO_SIMPLE, 8);
+    int limited = rcclKernelPackedChannels(capped.get(), ncclFuncAllReduce, count,
+                                           ncclFloat32, NCCL_PROTO_SIMPLE, 8);
+    EXPECT_EQ(8, plain);
+    EXPECT_EQ(plain, limited);
+  }
+  // nChannels == 1 is the first value where the cap bites; a > 1 guard would return 5.
+  {
+    RankComm rc(8);
+    rc.get()->nChannels = 1;
+    EXPECT_EQ(1, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
 }
 
 TEST_F(EnqueueMicrotest, PackedChannels_LargeTransfer_SaturatesToMaxChannels) {
@@ -2152,6 +2342,48 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
 
   EXPECT_EQ(0, record.calls);
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ROCM-33092: an addon collective never reaches ncclEnqueueCheck, so the info overload is what keeps
+// comm->opCount in step with the native path.
+TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_AdvancesOpCountOnSuccess) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  int localRankToRank[1] = {0};
+  ac.c()->localRankToRank = localRankToRank;
+  ac.c()->opCount = 7;
+
+  struct ncclInfo info = {};
+  info.opName = "ReduceScatter";
+  info.comm = ac.c();
+  info.stream = kAddonStream;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
+  EXPECT_EQ(8u, ac.c()->opCount);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_LaunchFailedLeavesOpCount) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+  int localRankToRank[1] = {0};
+  ac.c()->localRankToRank = localRankToRank;
+  ac.c()->opCount = 7;
+
+  struct ncclInfo info = {};
+  info.opName = "ReduceScatter";
+  info.comm = ac.c();
+  info.stream = kAddonStream;
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [] { return ncclInternalError; }));
+  EXPECT_EQ(7u, ac.c()->opCount);
 }
 
 // ===========================================================================
@@ -3506,6 +3738,13 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ConsultsEveryRcclTuningHookExactlyOnce)
   // a lie: deleting either call site was invisible.
   EXPECT_EQ(1, g_rcclOverrideAlgorithmCalls) << "rcclOverrideAlgorithm (:2733)";
   EXPECT_EQ(1, g_rcclOverrideProtocolCalls) << "rcclOverrideProtocol (:2734)";
+  EXPECT_EQ(1, g_rcclUpdateCollectiveAlgorithmCalls) << "rcclUpdateCollectiveAlgorithm";
+  EXPECT_TRUE(g_rcclUpdateCollectiveAlgorithmBeforeProtocol)
+      << "rcclUpdateCollectiveAlgorithm must run before rcclUpdateCollectiveProtocol picks the Tree protocol";
+  EXPECT_EQ(1, g_rcclUpdateRemoteFlushAlgoProtoCalls) << "rcclUpdateRemoteFlushAlgoProto";
+  EXPECT_TRUE(g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol)
+      << "rcclUpdateRemoteFlushAlgoProto must run after rcclUpdateCollectiveProtocol so its choice stands";
+  EXPECT_EQ(1, g_rcclUpdateCollectiveChannelsCalls) << "rcclUpdateCollectiveChannels";
 }
 
 // LATENT BUG (enqueue.cc:2659): rcclOverrideChannels returns ncclResult_t, but
@@ -3544,6 +3783,26 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_OverrideChannelsCanChangeTheChannelCoun
   ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(),
                                          /*simInfo=*/nullptr));
   EXPECT_EQ(3, task.nMaxChannels) << "the override's channel count must reach the task";
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_RemoteFlushChannelsSetTheCountCappedByComm) {
+  // A positive rcclUpdateRemoteFlushAlgoProto return replaces the Ring/Tree channel count, capped at comm->nChannels.
+  for (int commChannels : {64, 32}) {
+    AlgoInfoComm cc;
+    cc.get()->nChannels = commChannels;
+    auto task = CostTask(ncclFuncAllReduce);
+    CostTable tbl;  // left empty: the RING/SIMPLE fallback is taken
+    g_rcclUpdateRemoteFlushAlgoProtoChannels = 48;
+    ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+    EXPECT_EQ(std::min(48, commChannels), task.nMaxChannels) << "comm->nChannels=" << commChannels;
+  }
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 64;
+  auto task = CostTask(ncclFuncAllReduce);
+  CostTable tbl;
+  g_rcclUpdateRemoteFlushAlgoProtoChannels = 0;
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+  EXPECT_EQ(64, task.nMaxChannels) << "0 keeps RCCL's own count";
 }
 
 // The NCCL_MIN_NCHANNELS floor at :2652-2656. Left undriven, g_paramMinNchannels
@@ -3748,6 +4007,66 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
 }
 
 // ===========================================================================
+// ceCollTaskAppend -- deferred CE staging setup (ROCM-32044)
+// ===========================================================================
+
+// Comm ready for ceCollTaskAppend: CE initialized, out of every group; leaves the thread's group heads clean.
+struct CeAppendScene {
+  CollTaskComm cc;
+  CeAppendScene() {
+    ClearGroupHeads();
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+      cc.get()->groupNext[type] = reinterpret_cast<ncclComm*>(NCCL_COMM_GROUP_INVALID);
+    }
+    cc.get()->ceColl.initialized = true;
+  }
+  ~CeAppendScene() { ClearGroupHeads(); }
+  static void ClearGroupHeads() {
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+      ncclGroupCommHead[type] = nullptr;
+    }
+  }
+  ncclResult_t Append(ncclFunc_t func) {
+    ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_CE_REGISTERED);
+    info.coll = func;
+    return ceCollTaskAppend(cc.get(), &info, nullptr, nullptr, nullptr, nullptr, ncclDevRedOpFull{});
+  }
+  bool JoinedSymRegister() { return ncclGroupCommHead[ncclGroupTaskTypeSymRegister] == cc.get(); }
+};
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceWithoutStaging_MarksPendingAndJoinsSymRegister) {
+  CeAppendScene scene;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_TRUE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_TRUE(scene.JoinedSymRegister());
+  EXPECT_FALSE(ncclIntruQueueEmpty(&scene.cc.get()->planner.collCeTaskQueue));
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceAlreadyPending_StillJoinsSymRegister) {
+  CeAppendScene scene;
+  scene.cc.get()->ceColl.stagingPending = true;  // left by a group that failed before its SymRegister job ran
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_TRUE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_TRUE(scene.JoinedSymRegister());
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceWithStaging_QueuesNoSetup) {
+  CeAppendScene scene;
+  uint8_t staging = 0;
+  scene.cc.get()->ceColl.ceARTmpBuf = &staging;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_FALSE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_FALSE(scene.JoinedSymRegister());
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllGather_QueuesNoSetup) {
+  CeAppendScene scene;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllGather));
+  EXPECT_FALSE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_FALSE(scene.JoinedSymRegister());
+}
+
+// ===========================================================================
 // addP2pToPlan (enqueue.cc:1334) -- gfx1250 SendRecv protocol selection.
 // GPU SendRecvTests skip off gfx1250, so host CI never reached this planner.
 // These tests fake cudaArch=1250 / nRanks=4 and inspect the emitted
@@ -3797,6 +4116,7 @@ struct Gfx1250AddP2pScene {
     c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
     c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
     c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    c->p2pLl128BuffSize = c->buffSizes[NCCL_PROTO_LL128];
     SetSingleGpuArch(topo.get(), "gfx1250");
     topo->ll128Enabled = true;
     c->topo = topo.get();
@@ -3858,6 +4178,27 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1Mixed2KiB8KiB_OneLl128WorkIt
   auto* batch = sc.bp.tailBatch();
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(true), batch->funcId) << "ENABLE=1 in-window uses the LL128 kernel";
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_ScaledCollectiveLl128Buffer_P2pStepKeepsTheP2pSize) {
+  // With the 4x collective LL128 buffer, send/recv LL128 steps must still come from p2pLl128BuffSize: the net
+  // transport allocates send/recv LL128 buffers at that size.
+  SetParam("P2P_LL128_ENABLE", 1);
+  Gfx1250AddP2pScene sc;
+  ncclComm* c = sc.bp.c();
+  c->p2pLl128BuffSize = 1 << 20;
+  c->buffSizes[NCCL_PROTO_LL128] = 4 << 20;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/8192, /*recvBytes=*/8192));
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  ASSERT_EQ(1, work->sendProtoLL);
+  ASSERT_EQ(1, work->recvProtoLL);
+  auto dataChunk = [&](int buffSize) {
+    return u32fp8Decode(u32fp8Encode((uint32_t)(buffSize / NCCL_STEPS / c->ll128LineElems * c->ll128DataElems)));
+  };
+  ASSERT_NE(dataChunk(1 << 20), dataChunk(4 << 20));
+  EXPECT_EQ(dataChunk(1 << 20), u32fp8Decode(work->sendChunkSize_u32fp8));
+  EXPECT_EQ(dataChunk(1 << 20), u32fp8Decode(work->recvChunkSize_u32fp8));
 }
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Default2KiB_UsesLegacyLlKernel) {

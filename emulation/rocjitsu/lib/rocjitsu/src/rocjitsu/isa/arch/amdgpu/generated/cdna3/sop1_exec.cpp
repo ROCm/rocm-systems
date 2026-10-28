@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -194,63 +195,66 @@ void SQuadmaskB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
-  uint32_t src_reg =
-      amdgpu::relative_scalar_selector(ssrc0.encoding_value(), width_words, wf.m0(), false, false);
-  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
+  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
+  auto src_reg = amdgpu::relative_scalar_selector(wf, ssrc0.encoding_value(), wf.m0(), width_words,
+                                                  false, false);
+  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC,
+                      static_cast<int>(src_reg.value_or(0)));
+  amdgpu::RegisterAccess regs(wf);
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(
-        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
+    regs.write_scalar64(sdst, regs.read_scalar64(indexed_src));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(sdst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
+    regs.write_scalar(sdst, regs.read_scalar(indexed_src));
   }
 }
 
 void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
-  uint32_t src_reg =
-      amdgpu::relative_scalar_selector(ssrc0.encoding_value(), width_words, wf.m0(), false, false);
-  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
+  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
+  auto src_reg = amdgpu::relative_scalar_selector(wf, ssrc0.encoding_value(), wf.m0(), width_words,
+                                                  false, false);
+  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC,
+                      static_cast<int>(src_reg.value_or(0)));
+  amdgpu::RegisterAccess regs(wf);
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(
-        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
+    regs.write_scalar64(sdst, regs.read_scalar64(indexed_src));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(sdst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
+    regs.write_scalar(sdst, regs.read_scalar(indexed_src));
   }
 }
 
 void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
-  uint32_t dst_reg =
-      amdgpu::relative_scalar_selector(sdst.encoding_value(), width_words, wf.m0(), true, false);
-  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
+  auto dst_reg = amdgpu::relative_scalar_selector(wf, sdst.encoding_value(), wf.m0(), width_words,
+                                                  true, false);
+  if (!dst_reg)
+    return;
+  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(*dst_reg));
+  amdgpu::RegisterAccess regs(wf);
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
-                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
+    regs.write_scalar64(indexed_dst, regs.read_scalar64(ssrc0));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    regs.write_scalar(indexed_dst, regs.read_scalar(ssrc0));
   }
 }
 
 void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
-  uint32_t dst_reg =
-      amdgpu::relative_scalar_selector(sdst.encoding_value(), width_words, wf.m0(), true, false);
-  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
+  auto dst_reg = amdgpu::relative_scalar_selector(wf, sdst.encoding_value(), wf.m0(), width_words,
+                                                  true, false);
+  if (!dst_reg)
+    return;
+  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(*dst_reg));
+  amdgpu::RegisterAccess regs(wf);
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
-                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
+    regs.write_scalar64(indexed_dst, regs.read_scalar64(ssrc0));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    regs.write_scalar(indexed_dst, regs.read_scalar(ssrc0));
   }
 }
 
 void SCbranchJoinSop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cbranch_join_sop1(*this, wf);
+  const uint32_t saved_csp = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  wf.pc = amdgpu::cbranch_join(wf, saved_csp, wf.pc + size_) - size_;
 }
 
 void SAbsI32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_abs_i32_sop1(*this, wf); }

@@ -321,6 +321,9 @@ testResult_t BroadcastGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       // Barriers must cover BOTH the size-adaptive hybrid/SAG grids (pool =
       // max(-V, ladder peak)) and the ring's own (larger) CTA count.
       {
@@ -589,7 +592,7 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
   // edge that does order them. Other CTAs still run the grid-strided local copy.
   const bool commCta = (blockIdx.x == 0);
 
-  // ncclGin_SignalInc is a *remote* action: each put increments the receiving
+  // The put's SignalInc is a *remote* action: each put increments the receiving
   // peer's signal (confirmed vs AllGather/AlltoAll, where a rank receives N puts
   // and waits base+N). So the root -- which receives no puts -- must not wait on
   // its own signal; instead every non-root receives exactly one put and waits
@@ -626,7 +629,7 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
         gin.put(ncclTeamWorld(devComm), r,
             recvwin, recvoffset,
             sendwin, sendoffset,
-            msgBytes, ncclGin_SignalInc{signalIndex});
+            msgBytes, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
       }
 
       // flush(): all source buffers safe to reuse once the puts are pushed.
@@ -728,7 +731,7 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
         gin.put(ncclTeamWorld(devComm), r,
             recvwin, recvoffset + rOff,
             sendwin, sendoffset + rOff,
-            rChunk.count * sizeof(T), ncclGin_SignalInc{sigScatter});
+            rChunk.count * sizeof(T), TEST_GIN_WEAK_SIGNAL_INC(sigScatter));
       }
     }
     // No intermediate flush: the scatter and allgather sources are both the
@@ -754,7 +757,7 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
       gin.put(ncclTeamWorld(devComm), r,
           recvwin, recvoffset + myByteOff,
           myWin, myWinOff,
-          myBytes, ncclGin_SignalInc{sigGather});
+          myBytes, TEST_GIN_WEAK_SIGNAL_INC(sigGather));
     }
     // Every rank (root included) receives exactly N-1 allgather puts. Block 0
     // issued them all, so it is also the only CTA with queues left to drain.

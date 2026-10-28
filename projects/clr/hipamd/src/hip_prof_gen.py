@@ -6,7 +6,8 @@
 # SPDX-License-Identifier: MIT
 
 import os, sys, re, io
-import CppHeaderParser
+from cxxheaderparser.errors import CxxParseError
+from cxxheaderparser.simple import parse_string
 import filecmp
 
 PROF_HEADER = "hip_prof_str.h"
@@ -187,6 +188,34 @@ def pointer_ck(arg_type):
       ptr_type = re.sub(r'const ', '', ptr_type)
     if ptr_type == 'void': ptr_type = ''
   return ptr_type
+
+# cxxheaderparser rejects preprocessor directives, blank them out first
+def strip_preprocessor(text):
+  out = []
+  cont = False
+  for line in text.split('\n'):
+    if cont or line.lstrip().startswith('#'):
+      cont = line.rstrip().endswith('\\')
+      out.append('')
+    else:
+      out.append(line)
+  return '\n'.join(out)
+
+# cxxheaderparser leaves enumerator values unevaluated, resolve plain integers only
+def enum_value(enumerator, last):
+  if enumerator.value is None:
+    return None if last is None else last + 1
+  tokens = enumerator.value.tokens
+  if len(tokens) == 1:
+    try:
+      return int(tokens[0].value, 0)
+    except ValueError:
+      pass
+  return None
+
+# Enum tag name, None for anonymous enums
+def enum_name(enum):
+  return getattr(enum.typename.segments[-1], 'name', None)
 #############################################################
 # Parsing API header
 # hipError_t hipSetupArgument(const void* arg, size_t size, size_t offset);
@@ -771,26 +800,30 @@ parse_api(api_hfile, api_map)
 parse_src(api_map, src_dir, src_pat, opts_map)
 
 try:
-  cppHeader = CppHeaderParser.CppHeader(INPUT)
-except CppHeaderParser.CppParseError as e:
+  with open(INPUT, 'r') as f:
+    cppHeader = parse_string(strip_preprocessor(f.read()))
+except CxxParseError as e:
   print(e)
   sys.exit(1)
 
 # Callback IDs
 api_callback_ids = []
 
-for enum in cppHeader.enums:
-  if enum['name'] == 'hip_api_id_t':
-    for value in enum['values']:
-      if value['name'] == 'HIP_API_ID_NONE' or value['name'] == 'HIP_API_ID_FIRST':
+for enum in cppHeader.namespace.enums:
+  if enum_name(enum) == 'hip_api_id_t':
+    last_value = None
+    for enumerator in enum.values:
+      value = enum_value(enumerator, last_value)
+      if value is not None: last_value = value
+      if enumerator.name == 'HIP_API_ID_NONE' or enumerator.name == 'HIP_API_ID_FIRST':
         continue
-      if value['name'] == 'HIP_API_ID_LAST':
+      if enumerator.name == 'HIP_API_ID_LAST':
         break
-      if type(value['value']) == str:
+      if value is None:
         continue
-      m = re.match(r'HIP_API_ID_(\S*)', value['name'])
+      m = re.match(r'HIP_API_ID_(\S*)', enumerator.name)
       if m:
-        api_callback_ids.append((m.group(1), value['value']))
+        api_callback_ids.append((m.group(1), value))
     break
 
 # Checking for non-conformant APIs with missing HIP_INIT macro

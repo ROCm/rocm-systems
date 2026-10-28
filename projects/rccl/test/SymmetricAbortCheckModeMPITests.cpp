@@ -46,6 +46,7 @@
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
+#include "ScopedEnv.hpp"
 #include "TestChecks.hpp"
 
 #include <atomic>
@@ -60,6 +61,8 @@
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
+// NCCL_CHECK_MODE and NCCL_SYM_KERNEL are read in ncclCommInitRank, so tests set them before creating the communicator.
+using RcclUnitTesting::ScopedEnv;
 
 namespace {
 
@@ -73,44 +76,6 @@ constexpr size_t CHECK_COUNT = 64 * 1024;
 // the kernel a generous but bounded window to notice the flag.
 constexpr int ABORT_DELAY_MS = 3000;
 constexpr int ABORT_DEADLINE_MS = 30000;
-
-// NCCL_CHECK_MODE and NCCL_SYM_KERNEL are read during ncclCommInitRank, so the
-// tests set them before creating the communicator and restore them afterwards.
-class ScopedEnv
-{
-public:
-    ScopedEnv(const char* name, const char* value)
-        : name_(name)
-    {
-        const char* prev = std::getenv(name);
-        if (prev) {
-            had_ = true;
-            prev_ = prev;
-        }
-        if (value) {
-            setenv(name, value, 1);
-        } else {
-            unsetenv(name);
-        }
-    }
-
-    ~ScopedEnv()
-    {
-        if (had_) {
-            setenv(name_.c_str(), prev_.c_str(), 1);
-        } else {
-            unsetenv(name_.c_str());
-        }
-    }
-
-    ScopedEnv(const ScopedEnv&) = delete;
-    ScopedEnv& operator=(const ScopedEnv&) = delete;
-
-private:
-    std::string name_;
-    std::string prev_;
-    bool had_ = false;
-};
 
 } // namespace
 
@@ -441,8 +406,13 @@ protected:
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &nRanks);
 
+        // ASSERT_MPI_EQ is collective, so every rank asserts on rank 0's result.
         ncclUniqueId id;
-        if (rank == 0) ASSERT_MPI_EQ(ncclSuccess, ncclGetUniqueId(&id));
+        ncclResult_t idRes = ncclSuccess;
+        if (rank == 0) {
+            idRes = ncclGetUniqueId(&id);
+        }
+        ASSERT_MPI_EQ(ncclSuccess, idRes);
         MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
 
         // Non-blocking so the watchdog can abort while the main thread is only

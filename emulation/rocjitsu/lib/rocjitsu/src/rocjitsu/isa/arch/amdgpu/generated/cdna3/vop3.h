@@ -4072,6 +4072,22 @@ public:
   Operand sdst_exec;
 };
 
+class VExpLegacyF32Vop3 : public Vop3 {
+public:
+  VExpLegacyF32Vop3(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+};
+
+class VLogLegacyF32Vop3 : public Vop3 {
+public:
+  VLogLegacyF32Vop3(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+};
+
 class VAddCoU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VAddCoU32Vop3SdstEnc(const MachineInst *inst);

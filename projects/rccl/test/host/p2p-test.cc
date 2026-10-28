@@ -211,17 +211,12 @@ inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
 // p2p.cc link-satisfying stubs + this file's controllable alloc seams.
 //
 // Defined here (not in a shared fakes/ .cc) because they have no owning fakes
-// file: allocTracker is an alloc.h data symbol p2p.cc alone references. The
-// ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro shims
-// above. They must land after #include P2P_CC_PATH so the production types
-// they mention (allocationTracker, the alloc.h templates, etc.) are already
-// in scope. busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they
-// live in fakes/utils_fakes.cc, not here.
+// file. The ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro
+// shims above. They must land after #include P2P_CC_PATH so the production
+// types they mention (the alloc.h templates, etc.) are already in scope.
+// busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they live in
+// fakes/utils_fakes.cc, not here.
 // ---------------------------------------------------------------------------
-
-// allocTracker is an array of per-device counters in alloc.h; size it to the
-// same MAX_ALLOC_TRACK_NGPU the header uses. Zero-initialised.
-struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 // Controllable seams: ncclCudaCallocAsync / ncclCudaMemcpyAsync. Substitutes
 // for the header-only function templates in alloc.h -- the shim macros above
@@ -3760,6 +3755,32 @@ TEST_F(P2pSetupMicrotest, SendSetup_LinkTypeQueryFails_ReturnsInternalError)
     EXPECT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
                                       &connect_info_, &send_, 0, 0),
               ncclInternalError);
+
+    p2pTransport.send.free(&comm_, &send_);
+}
+
+TEST_F(P2pSetupMicrotest, SendSetup_QueriesLinkTypeBySmiIndexNotByProcessLocalOrdinal)
+{
+    // One GPU per process: both peers are HIP ordinal 0, so only the SMI indices tell them apart.
+    myInfo_.nvmlDev = 5;
+    peers_[0].nvmlDev = myInfo_.nvmlDev;
+    peer_.cudaDev = myInfo_.cudaDev;
+    peer_.nvmlDev = 6;
+    int first = -1, second = -1;
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+    link_.emplace(g_ncclTopoGetLinkType,
+        [&first, &second](int a, int b, bool*, int) -> ncclResult_t {
+            first = a;
+            second = b;
+            return ncclInternalError;
+        });
+
+    EXPECT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclInternalError);
+    EXPECT_EQ(first, myInfo_.nvmlDev);
+    EXPECT_EQ(second, peer_.nvmlDev);
 
     p2pTransport.send.free(&comm_, &send_);
 }

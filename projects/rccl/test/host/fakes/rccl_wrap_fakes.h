@@ -20,6 +20,7 @@
 
 struct ncclComm;
 struct ncclTaskColl;
+struct rcclCollDecision;
 
 // -------------------------------------------------------------------------
 // Tuning-override seams (rccl_wrap.cc:109-1751). All default to no-ops so a test
@@ -40,6 +41,16 @@ extern int64_t g_rcclParamDirectReduceScatterThreshold;  // UNDRIVEN
 // Call counters for the no-op tuning hooks: a no-op that was never called and one
 // that was look identical without these, so a dropped call site would be silent.
 extern int g_rcclUpdateCollectiveProtocolCalls;
+extern int g_rcclUpdateCollectiveAlgorithmCalls;
+extern bool g_rcclUpdateCollectiveAlgorithmBeforeProtocol;
+extern int g_rcclUpdateRemoteFlushAlgoProtoCalls;
+extern bool g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol;
+// Channel count the rcclUpdateRemoteFlushAlgoProto fake returns (0: keep RCCL's own).
+extern int g_rcclUpdateRemoteFlushAlgoProtoChannels;
+// rcclScaleCollLl128BuffSize fake: counts calls and multiplies buffSizes[NCCL_PROTO_LL128] by the factor.
+extern int g_rcclScaleCollLl128BuffSizeCalls;
+extern int g_rcclScaleCollLl128BuffSizeFactor;
+extern int g_rcclUpdateCollectiveChannelsCalls;
 extern int g_rcclSetPipeliningCalls;
 extern int g_rcclUpdateThreadThresholdCalls;
 extern int g_rcclOptThreadBlockSizeCalls;
@@ -96,11 +107,46 @@ extern std::function<size_t(int, bool, bool)> g_rcclHierarchicalTempBufferSize;
 extern int64_t g_rcclParamHierarchicalAllGather;
 extern int64_t g_rcclParamHierarchicalReduceScatter;
 
+// CE AllReduce staging (ncclCeEnsureAllReduceStaging, ncclCeInit in ce_coll.cc).
+extern int64_t g_rcclParamCeAllReduce;
+extern int64_t g_rcclParamCeArStagingBytes;
+
 // checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
 // hsaScratchEnv argument, which is the only proof the check read the environment at all.
 extern bool g_validHsaScratch;
 extern const char* g_lastHsaScratchEnv;
 extern int g_firmwareVersion;
+
+// The backend selectors and DDA gates collectives.cc dispatches on. Fail loud until a test installs them.
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                  hipStream_t, bool, bool, struct rcclCollDecision*)>
+    g_rcclSelectAllReduce;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
+                                  bool, struct rcclCollDecision*)>
+    g_rcclSelectAllGather;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool,
+                                  struct rcclCollDecision*)>
+    g_rcclSelectReduceScatter;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
+                                  bool, struct rcclCollDecision*)>
+    g_rcclSelectAlltoAll;
+extern std::function<bool(const struct ncclComm*, size_t, size_t, bool, const char*)> g_rcclDdaEnabled;
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaEntryThreshold;
+extern std::function<ncclResult_t(int, const char**)> g_rcclGetAlgoName;
+extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;
+extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect;
+// RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1).
+extern int64_t g_rcclParamDdaEnable;
+
+// -------------------------------------------------------------------------
+// DDA params and thresholds. Defaults match rccl_wrap.cc with no arch table.
+// -------------------------------------------------------------------------
+extern int64_t g_rcclParamDdaLL;      // 1
+extern int64_t g_rcclParamDdaLL128;   // kDdaThresholdUnset
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold;  // kDdaLLBaseDefault, UNDRIVEN
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;  // 0
+extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaVmmThreshold;  // kDdaVmmBaseDefault, UNDRIVEN
+extern std::function<size_t(const struct ncclComm*)> g_rcclDdaScratchPayloadCap;
 
 void ResetRcclWrapFakes();
 

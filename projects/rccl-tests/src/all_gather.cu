@@ -89,6 +89,9 @@ testResult_t AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       // Cover both the -V/deviceCtaCount launch and the size-adaptive CTA count the
       // kernel self-selects (allGatherCtas, clamped to allGatherPoolCtas()), decoupled
       // from -V -- the kernel indexes barrier/lsaBarrier/signal by blockIdx.x.
@@ -225,7 +228,7 @@ __device__ void ginAllGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
     gin.put(ncclTeamWorld(devComm), r,
         recvwin, recvoffset + (size_t)devComm.rank * chunkBytes,
         sendwin, sendoffset,
-        chunkBytes, ncclGin_SignalInc{signalIndex});
+        chunkBytes, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
   }
   // The puts above are per-thread; the flush below is CTA-collective and must not
   // run until every issuing thread in this CTA has submitted.

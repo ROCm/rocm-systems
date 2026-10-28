@@ -29,6 +29,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -49,6 +50,8 @@
 #include <utility>
 using namespace rocjitsu;
 namespace {
+constexpr uint32_t kGfx9DataFormat32 = 4u << 15;
+
 class InstructionPolicyMachine {
 public:
   explicit InstructionPolicyMachine(rj_code_arch_t arch)
@@ -98,8 +101,8 @@ public:
     cu->write_sgpr(scalar + 4, 0x1000);
     cu->write_sgpr(scalar + 5, 0);
     cu->write_sgpr(scalar + 6, 4096);
-    // Raw buffers use complete byte-range bounds rather than zero-stride record bounds.
-    cu->write_sgpr(scalar + 7, 3u << 28);
+    // CDNA requires a valid DATA_FORMAT; RDNA selects COMPLETE byte-range bounds.
+    cu->write_sgpr(scalar + 7, arch_is_cdna_4_or_lower(cu->arch()) ? kGfx9DataFormat32 : 3u << 28);
     cu->write_vgpr(base + 4, 0, 0);
     cu->write_vgpr(base + 5, 0, 0);
     const uint32_t returned = run(words, src, 0, 0, 0xf0, true, buffer);
@@ -116,6 +119,18 @@ public:
 void witness(const char *name, rj_code_arch_t arch, uint32_t got, uint32_t expected) {
   EXPECT_EQ(got, expected) << name << " arch=" << unsigned(arch);
 }
+TEST(AtomicSemanticsAndDecode, IntegerEvaluatorRejectsUnsupportedOperations) {
+  for (amdgpu::AtomicOp op :
+       {amdgpu::AtomicOp::NONE, amdgpu::AtomicOp::FCMPSWAP, amdgpu::AtomicOp::FADD,
+        amdgpu::AtomicOp::FMIN, amdgpu::AtomicOp::FMAX, amdgpu::AtomicOp::PK_ADD_F16,
+        amdgpu::AtomicOp::PK_ADD_BF16, amdgpu::AtomicOp::APPEND, amdgpu::AtomicOp::CONSUME,
+        amdgpu::AtomicOp::BARRIER_ARRIVE, static_cast<amdgpu::AtomicOp>(0xff)}) {
+    SCOPED_TRACE(static_cast<unsigned>(op));
+    EXPECT_THROW(amdgpu::apply_int_atomic<uint32_t>(op, 1, 2, 1), std::invalid_argument);
+    EXPECT_THROW(amdgpu::apply_int_atomic<uint64_t>(op, 1, 2, 1), std::invalid_argument);
+  }
+}
+
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedMemorySubtract) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
@@ -594,9 +609,14 @@ protected:
     compute_unit_->write_sgpr(scalar_base + 4, kAddress);
     compute_unit_->write_sgpr(scalar_base + 5, 0);
     compute_unit_->write_sgpr(scalar_base + 6, 4096);
-    compute_unit_->write_sgpr(scalar_base + 7,
-                              amdgpu::addr_calc::uses_rdna_buffer_range_check(GetParam()) ? 2u << 28
-                                                                                          : 0);
+    // RDNA selects this fixture's range rule; CDNA1-4 needs a valid DATA_FORMAT.
+    // CDNA5 uses the default descriptor encoding.
+    uint32_t word3 = 0;
+    if (amdgpu::addr_calc::uses_rdna_buffer_range_check(GetParam()))
+      word3 = 2u << 28;
+    else if (arch_is_cdna_4_or_lower(GetParam()))
+      word3 = kGfx9DataFormat32;
+    compute_unit_->write_sgpr(scalar_base + 7, word3);
     compute_unit_->write_vgpr(base_, 0, source_bits);
     compute_unit_->write_vgpr(base_ + 1, 0, compare_bits);
     compute_unit_->write_vgpr(base_ + 4, 0, 0);
@@ -954,6 +974,10 @@ TEST_P(AtomicPolicyExecutionTest, Rdna4StackPairsParentTransitionsAndPrimitiveRa
   }
 }
 
+// LDS F32/F64 expectations are captured on gfx1010/gfx1030/gfx1100. CDNA1-4 and RDNA3.5
+// inherit them without equivalent captures (CDNA5/RDNA4 skip this test). RDNA3/3.5 ISA 13.2
+// and CDNA2 ISA 9.5.2 / CDNA3/4 ISA 9.2.2 specify flushing the CompareStore result; the
+// measured paths instead flush comparison inputs and preserve the stored/retained bits.
 TEST_P(AtomicPolicyExecutionTest, DsFloatCompareStoreEqualityAndDenormals) {
   if (modern_policy())
     GTEST_SKIP() << "This ISA exposes integer compare-store only";
@@ -967,10 +991,12 @@ TEST_P(AtomicPolicyExecutionTest, DsFloatCompareStoreEqualityAndDenormals) {
     EXPECT_EQ(execute_ds(opcode, nan, one, nan, 0xf0, width), nan);
     EXPECT_EQ(execute_ds(opcode, 1, one, 0, 0, width), one);
     EXPECT_EQ(execute_ds(opcode, 1, one, 0, 0xf0, width), 1u);
-    EXPECT_EQ(execute_ds(opcode, one, 1, one, 0, width), 0u);
-    // Compare-store flushes its result using the input control, including a failed comparison.
-    EXPECT_EQ(execute_ds(opcode, 1, one, one, 0, width), 0u);
-    EXPECT_EQ(execute_ds(opcode, negative_zero | 1, one, one, 0, width), negative_zero);
+    // Flushing applies only to the comparison: RDNA1, RDNA2 and RDNA3 hardware
+    // stores a matching denormal source unchanged and leaves memory untouched
+    // on a mismatch.
+    EXPECT_EQ(execute_ds(opcode, one, 1, one, 0, width), 1u);
+    EXPECT_EQ(execute_ds(opcode, 1, one, one, 0, width), 1u);
+    EXPECT_EQ(execute_ds(opcode, negative_zero | 1, one, one, 0, width), negative_zero | 1);
     EXPECT_EQ(execute_ds(opcode, 1, one, one, 0x50, width), 1u);
   }
 }
@@ -1030,6 +1056,8 @@ TEST_P(AtomicPolicyExecutionTest, BufferFloatCompareSwapDefinesOnlyReturnedEleme
   }
 }
 
+// Only gfx1100 global F32 was captured. RDNA1/2 cache F32, RDNA3 BUFFER F32, and RDNA3.5
+// cache F32 inherit the same compare-store policy without equivalent hardware captures.
 TEST_P(AtomicPolicyExecutionTest, MemoryFloatCompareStore) {
   if (GetParam() != ROCJITSU_CODE_ARCH_RDNA1 && GetParam() != ROCJITSU_CODE_ARCH_RDNA2 &&
       GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
@@ -1038,6 +1066,11 @@ TEST_P(AtomicPolicyExecutionTest, MemoryFloatCompareStore) {
     EXPECT_EQ(execute_memory(buffer, 0, 0x3f800000, 0xf0, true, 0x80000000), 0x3f800000u);
     EXPECT_EQ(execute_memory(buffer, 0x7fc00002, 0x3f800000, 0xf0, true, 0x7fc00002), 0x7fc00002u);
     EXPECT_EQ(execute_memory(buffer, 1, 0x3f800000, 0, true, 0), 0x3f800000u);
+    // Flushing applies only to the comparison: a matching denormal replacement is
+    // stored unchanged and a mismatch leaves denormal memory untouched.
+    EXPECT_EQ(execute_memory(buffer, 0x3f800000, 1, 0, true, 0x3f800000), 1u);
+    EXPECT_EQ(execute_memory(buffer, 1, 0x3f800000, 0, true, 0x40400000), 1u);
+    EXPECT_EQ(execute_memory(buffer, 0x80000001, 0x3f800000, 0, true, 0x3f800000), 0x80000001u);
   }
 }
 

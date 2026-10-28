@@ -45,12 +45,14 @@ enum class WfState : uint8_t {
   WAITCNT,  ///< Stalled at a waitcnt.
   VM_RETRY, ///< A prepared memory operation is waiting for backing availability.
   BARRIER,  ///< Stalled at a barrier.
+  GWS_WAIT, ///< Parked at a Global Wave Sync rendezvous (device-global).
   ENDING,   ///< s_endpgm executed but outstanding memory ops are draining.
 };
 
 /// @brief Simulator execution failures that are not architectural wave state.
 enum class InstructionExecutionError : uint8_t {
   None,
+  InvalidInstructionEncoding,
   UnsupportedOperandValue,
   UnimplementedInstruction,
 };
@@ -230,14 +232,13 @@ public:
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
 
-  /// @brief Return the AQL ring packet id (dispatch's ring index) for this wave.
-  /// @details This is the queue read index at which the dispatch packet was
-  /// fetched. rocm-dbgapi correlates a trapped wave to its dispatch by matching
-  /// this against the queue's read/write dispatch ids (TTMP11[6:30]).
-  uint32_t aql_packet_id() const { return aql_packet_id_; }
+  /// @brief Return the wrapped AQL ring slot associated with this wave.
+  /// @details ROCdbgapi reconstructs its monotonic dispatch index from the
+  /// consumer cursor and this slot (TTMP11[6:30] on gfx9.4).
+  uint32_t queue_packet_id() const { return queue_packet_id_; }
 
-  /// @brief Set the AQL ring packet id (called at dispatch).
-  void set_aql_packet_id(uint32_t id) { aql_packet_id_ = id; }
+  /// @brief Set the wrapped AQL ring slot (called at dispatch).
+  void set_queue_packet_id(uint32_t id) { queue_packet_id_ = id; }
 
   /// @brief GPU load bias for code-object-relative function addresses.
   uint64_t code_load_bias() const { return code_load_bias_; }
@@ -314,6 +315,25 @@ public:
 
   /// @brief Leave the currently joined named barrier.
   bool barrier_leave();
+
+  /// @brief Seed a Global Wave Sync resource's shared barrier/semaphore counter.
+  void gws_init(uint32_t rid, uint32_t count);
+
+  /// @brief Arrive at a GWS barrier; may park the wave. The resource is process-
+  /// global and accepts arrivals across dispatches (see GwsDevice for the policy).
+  void gws_barrier_arrive(uint32_t rid, uint32_t count);
+
+  /// @brief Signal (V) a GWS semaphore, releasing one waiter if present.
+  void gws_sema_v(uint32_t rid);
+
+  /// @brief Wait (P) on a GWS semaphore; may park this wave when no credit.
+  void gws_sema_p(uint32_t rid);
+
+  /// @brief Bulk-signal (BR) a GWS semaphore, releasing up to @p count waiters.
+  void gws_sema_br(uint32_t rid, uint32_t count);
+
+  /// @brief Release all waiters parked on a GWS resource.
+  void gws_sema_release_all(uint32_t rid);
 
   /// @brief Return the aligned LDS allocation size for this workgroup.
   uint32_t lds_size() const { return lds_size_; }
@@ -448,6 +468,9 @@ public:
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t VSKIP_BIT = 1u << 28;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
+  /// Short for conditional stack pointer, used by fork/join instructions
+  static constexpr uint32_t CSP_SHIFT = 29;
+  static constexpr uint32_t CSP_MASK = 7u << CSP_SHIFT;
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
   /// in each arch's isa.h, which all spell it member<13, 13>.
@@ -457,6 +480,16 @@ public:
   bool ieee_mode() const { return (mode_raw_ & IEEE_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
+
+  /// @brief Return MODE.CSP, the number of pending fork stack entries.
+  uint32_t cond_stack_ptr() const { return (mode_raw_ & CSP_MASK) >> CSP_SHIFT; }
+
+  /// @brief Set MODE.CSP, leaving every other MODE bit unchanged.
+  /// @param csp New stack depth; only the lowest 3 bits are used.
+  void set_cond_stack_ptr(uint32_t csp) {
+    set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT));
+  }
+
   uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
   uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
@@ -702,10 +735,13 @@ public:
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
+  /// @brief Warn about qualified ISA undefined behavior on the issuing thread.
+  void report_undefined_behavior(std::string_view reason) const;
+
   /// @brief Record a fail-closed instruction execution error.
   /// @details Execution callbacks use this for inputs whose architectural
   /// behavior is not implemented. Callers must not treat it as a hardware trap.
-  void report_instruction_execution_error(InstructionExecutionError error) {
+  void report_instruction_execution_error(InstructionExecutionError error) const {
     instruction_execution_error_ = error;
   }
 
@@ -976,7 +1012,7 @@ public:
     wg_id_ = 0;
     wg_coord_ = {};
     dispatch_id_ = 0;
-    aql_packet_id_ = 0;
+    queue_packet_id_ = 0;
     code_load_bias_ = 0;
     wave_in_group_ = 0;
     address_space_ = {};
@@ -1017,6 +1053,12 @@ public:
     named_barrier_id_ = 0;
     barrier_complete_.fill(false);
     waiting_barrier_bit_ = kNoBarrierWait;
+    gws_wait_rid_ = kNoGwsWait;
+    gws_wait_is_barrier_ = false;
+    gws_wait_generation_ = 0;
+    gws_wait_seq_ = 0;
+    gws_wait_steps_ = 0;
+    gws_wait_progress_ = 0;
     if (memory_wait_scoreboard_)
       memory_wait_scoreboard_->clear();
     wait_counters_ = {};
@@ -1066,11 +1108,11 @@ protected:
   uint64_t dispatch_generation_ = 0; ///< Incremented whenever this slot is dispatched.
   uint32_t wg_id_ = 0;               ///< Workgroup ID (set per dispatch).
   std::array<uint32_t, 3> wg_coord_{};
-  uint32_t dispatch_id_ = 0;         ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t aql_packet_id_ = 0;       ///< AQL ring packet id of the dispatch (debugger correlation).
-  uint64_t code_load_bias_ = 0;      ///< GPU load bias for code-object-relative call targets.
-  uint32_t wave_in_group_ = 0;       ///< Position of this wave within its workgroup (debugger).
-  AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
+  uint32_t dispatch_id_ = 0;     ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t queue_packet_id_ = 0; ///< Wrapped AQL ring slot of the dispatch (debugger correlation).
+  uint64_t code_load_bias_ = 0;  ///< GPU load bias for code-object-relative call targets.
+  uint32_t wave_in_group_ = 0;   ///< Position of this wave within its workgroup (debugger).
+  AddressSpaceHandle address_space_;             ///< Generation-safe GPU address-space identity.
   std::shared_ptr<const GpuVmAccess> vm_access_; ///< Dispatch-scoped immutable VM snapshot.
   uint32_t process_id_ = 0; ///< Owning process ID (PASID analog, set per dispatch).
 
@@ -1078,7 +1120,7 @@ protected:
   std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
   std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
-  InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
@@ -1136,7 +1178,19 @@ private:
   /// Completion bits: named, workgroup, workgroup trap, cluster, cluster trap.
   std::array<bool, 5> barrier_complete_{};
   uint8_t waiting_barrier_bit_ = kNoBarrierWait; ///< Completion bit awaited by split wait.
-  WfState state_ = WfState::HALTED;              ///< Current execution state.
+  static constexpr uint32_t kNoGwsWait = 0xffffffff;
+  uint32_t gws_wait_rid_ = kNoGwsWait; ///< GWS resource id this wave is parked on.
+  bool gws_wait_is_barrier_ = false;   ///< Parked at a GWS barrier (vs a semaphore P).
+  uint64_t gws_wait_generation_ = 0;   ///< Resource release generation observed at park.
+  /// Device-global arrival order stamped on a parked semaphore P-waiter. The GWS
+  /// store releases a V/BR credit to the oldest queued waiter first (across all
+  /// CUs), so a later P cannot jump an earlier parked one (see GwsDevice). Unused
+  /// by barrier waiters (they wake via the release generation).
+  uint64_t gws_wait_seq_ = 0;
+  uint64_t gws_wait_progress_ = 0; ///< Last observed process instruction progress.
+  uint32_t gws_wait_steps_ =
+      0; ///< Unpaused CU steps since this process last executed an instruction.
+  WfState state_ = WfState::HALTED; ///< Current execution state.
   MemoryWaitShadow memory_wait_shadow_;
   std::unique_ptr<MemoryWaitScoreboard> memory_wait_scoreboard_;
   WaitCounters wait_counters_; ///< Outstanding memory operation counters.
@@ -1201,6 +1255,7 @@ private:
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
+  friend class GwsDevice;       // Device-global GWS store parks/wakes this wave.
   friend class ::rocjitsu::ExecutionPluginGroup;
 
   // Memory pipelines complete deferred VM loads into physical SGPR/VGPR
