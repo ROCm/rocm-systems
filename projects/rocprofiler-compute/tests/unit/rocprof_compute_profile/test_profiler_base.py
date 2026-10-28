@@ -808,6 +808,10 @@ def test_parse_args_debug_gate(argv, diagnostics, parse_cli_args):
     "argv, gate",
     [
         (["analyze", "--debug-single-metric"], "--debug"),
+        (
+            ["analyze", "--experimental", "--debug-single-metric"],
+            "requires --debug",
+        ),
         (["analyze", "--debug", "--torch-operator", "all"], "--experimental"),
     ],
 )
