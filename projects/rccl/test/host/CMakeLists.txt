@@ -893,6 +893,19 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTaskPrep
     TASK_SCHED_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/ce_sched.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_taskprep.yaml")
 
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroRmaIbProxy -- ncclRmaIbProxyTest() in src/transport/net_ib/gin.cc.
+# Its own binary: gin.cc defines symbols rccl-UnitTestsMicro fakes (e.g. ncclParamGinType
+# for gin-plugin-init-test.cc), and rma-ib-proxy-test.cc defines every extern gin.cc needs.
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroRmaIbProxy
+  SOURCES rma-ib-proxy-test.cc ../common/main_altrsmi.cpp
+  EXTRA_INCLUDES ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify renames this one.
+    NET_IB_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gin_tmp.cc")
+
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
 # =====================================================================
