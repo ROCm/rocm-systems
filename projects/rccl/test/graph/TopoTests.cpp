@@ -126,11 +126,10 @@ protected:
     ASSERT_EQ(xmlAddNode(xml, nullptr, "system", &root), ncclSuccess);
   }
 
-  // <cpu> populated with the attributes ncclTopoGetSystemFromXml() requires to
-  // build a full system (numaid, host id, x86 vendor/family/model).
+  // <cpu> with the attributes ncclTopoGetSystemFromXml() requires; defaults to a non-Rome Turin host.
   struct ncclXmlNode* addSystemCpu(uint64_t hostHash, int numaId = 0,
-                                   const char* vendor = "AuthenticAMD", int familyId = 25,
-                                   int modelId = 1) {
+                                   const char* vendor = "AuthenticAMD", int familyId = 26,
+                                   int modelId = 2) {
     struct ncclXmlNode* cpu = nullptr;
     EXPECT_EQ(xmlAddNode(xml, root, "cpu", &cpu), ncclSuccess);
     char hash[32];

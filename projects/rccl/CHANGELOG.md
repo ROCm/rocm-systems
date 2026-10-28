@@ -11,6 +11,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed AMD EPYC Rome, Milan and Genoa hosts no longer being recognized as Rome-class since the NCCL 2.31 CPU family detection change. The Rome topology presets (including the 4H4P and 1H16P models) and GDR between a GPU and a NIC on the same CPU root complex apply to these hosts again. Turin hosts stay outside the Rome class, and the inter-CPU bandwidth stays at 16 GB/s for every AMD generation.
 
 ### Known issues
 
