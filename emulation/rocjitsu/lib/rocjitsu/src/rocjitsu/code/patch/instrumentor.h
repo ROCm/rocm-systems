@@ -455,8 +455,7 @@ public:
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
   ///
-  /// Unlike patch(), accepts `LogBufferPtr*` arguments, for callers that supply
-  /// the kernarg wrapper themselves.
+  /// Refuses the same points patch() does.
   ///
   /// Currently intended for tests and debugging, although could eventually
   /// be used to communicate important information for the host (an ordering
@@ -469,6 +468,13 @@ private:
   rj_code_arch_t arch_;
   std::vector<InstrumentationPoint> points_;
   bool patched_ = false;
+
+  // The patch gates refuse points that need runtime support no runtime provides
+  // yet. Tests skip them through the InstrumentorTestAccess friend to exercise
+  // the gated path, whether or not they provide that support themselves; the
+  // planner's checks after the gates still run. Production callers cannot skip.
+  friend struct InstrumentorTestAccess;
+  bool skip_patch_gates_ = false;
 
   // Lazily populated.
   std::unique_ptr<Decoder> decoder_;
