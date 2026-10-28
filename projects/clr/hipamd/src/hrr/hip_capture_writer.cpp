@@ -1025,8 +1025,9 @@ static uint64_t file_bytes(uint64_t len) {
 // still opens an archive of its own, held to the same limit.
 // HIP_HRR_CAPTURE_MAX_BLOB_MB caps one blob: a larger copy is not stored, its
 // event records no blob, the archive is marked incomplete and capture goes on.
-// Code objects and the fat binaries HIP registers are not held to it. 0, the
-// default, sets no limit. Both apply with or without the reserve.
+// Code objects and the fat binaries HIP registers are not held to it; a
+// hipLinkAddData image is. 0, the default, sets no limit. Both apply with or
+// without the reserve.
 //
 // A write over the archive limit is refused and capture stopped under the same
 // hold of g_file_mu, which flush() takes to decide on the trailer: an archive

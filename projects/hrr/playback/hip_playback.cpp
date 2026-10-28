@@ -1839,39 +1839,75 @@ static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* byte
     return true;
 }
 
+// True, having refused the call by name, when `size` bytes of host memory a call
+// reads have no blob: capture left them out, as it does for a blob over
+// HIP_HRR_CAPTURE_MAX_BLOB_MB.
+static bool host_contents_left_out(const char* api, uint64_t size, uint64_t hash_lo,
+                                   uint64_t hash_hi) {
+    if (size == 0 || hash_lo || hash_hi) return false;
+    fprintf(stderr, "[HRR] %s: %llu bytes of host memory were captured without their "
+                    "contents; refusing the call\n",
+            api, (unsigned long long)size);
+    return true;
+}
+
+namespace {
+
+// The source for a to-symbol copy: the recorded blob when the copy came from
+// host memory, the translated device address otherwise. Null, said on stderr,
+// when there is neither.
+template <typename A>
+static const void* to_symbol_source(PlaybackContext& ctx, const A* a,
+                                    const char* api) {
+    if (a->blob_hash_lo || a->blob_hash_hi) {
+        size_t blob_sz = 0;
+        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi,
+                                         &blob_sz);
+        if (!blob || blob_sz < a->count) {
+            fprintf(stderr, "[HRR] %s: host source blob missing from the "
+                    "archive.\n", api);
+            return nullptr;
+        }
+        return blob;
+    }
+    const void* src = ctx.translate_ptr(a->src);
+    // Capture stores the source by the same rule (memcpy_src_is_host), so a host
+    // source with no blob was left out.
+    const auto kind = static_cast<hipMemcpyKind>(a->kind);
+    hipPointerAttribute_t attr{};
+    const bool from_host =
+        kind == hipMemcpyHostToDevice || kind == hipMemcpyHostToHost ||
+        (kind == hipMemcpyDefault && src &&
+         (hipPointerGetAttributes(&attr, src) != hipSuccess ||
+          (attr.type != hipMemoryTypeDevice && attr.type != hipMemoryTypeUnified)));
+    if (from_host && host_contents_left_out(api, a->count, a->blob_hash_lo, a->blob_hash_hi))
+        return nullptr;
+    if (!src)
+        fprintf(stderr, "[HRR] %s: device source 0x%llx is not mapped.\n", api,
+                (unsigned long long)a->src);
+    return src;
+}
+
+static void* symbol_or_complain(PlaybackContext& ctx, uint64_t rec,
+                                const char* api) {
+    void* symbol = ctx.translate_symbol(rec);
+    if (!symbol)
+        fprintf(stderr, "[HRR] %s: symbol 0x%llx is not in this archive's "
+                "symbol registry.\n", api, (unsigned long long)rec);
+    return symbol;
+}
+
+}  // namespace
+
 hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
                                                   const uint8_t* payload) {
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphAddMemcpyNodeToSymbol*>(payload);
     const auto kind = static_cast<hipMemcpyKind>(a->kind);
-    void* symbol = ctx.translate_symbol(a->symbol);
-    if (!symbol) {
-        fprintf(stderr,
-                "[HRR] hipGraphAddMemcpyNodeToSymbol: symbol 0x%llx is not in "
-                "this archive's symbol registry.\n",
-                (unsigned long long)a->symbol);
-        return hipErrorInvalidSymbol;
-    }
-
-    const void* src = nullptr;
-    if (a->blob_hash_lo || a->blob_hash_hi) {
-        size_t blob_sz = 0;
-        src = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
-        if (!src || blob_sz < a->count) {
-            fprintf(stderr,
-                    "[HRR] hipGraphAddMemcpyNodeToSymbol: host source blob "
-                    "missing from the archive.\n");
-            return hipErrorInvalidValue;
-        }
-    } else {
-        src = ctx.translate_ptr(a->src);
-        if (!src) {
-            fprintf(stderr,
-                    "[HRR] hipGraphAddMemcpyNodeToSymbol: device source 0x%llx "
-                    "is not mapped.\n", (unsigned long long)a->src);
-            return hipErrorInvalidValue;
-        }
-    }
+    void* symbol = symbol_or_complain(ctx, a->symbol, "hipGraphAddMemcpyNodeToSymbol");
+    if (!symbol) return hipErrorInvalidSymbol;
+    const void* src = to_symbol_source(ctx, a, "hipGraphAddMemcpyNodeToSymbol");
+    if (!src) return hipErrorInvalidValue;
 
     std::vector<hipGraphNode_t> deps;
     hipGraphNode_t* dep_ptr = nullptr;
@@ -1948,42 +1984,6 @@ hipError_t playback_hipGraphAddMemcpyNodeFromSymbol(PlaybackContext& ctx,
 // Same substitution as the two construction handlers above, for the same
 // reason: the symbol entry points need a host shadow address, so the mutation
 // is expressed against the resolved device address through the 1D spelling.
-
-namespace {
-
-// The host source for a to-symbol mutation: the recorded blob when the copy
-// came from host memory, the translated device address otherwise.
-template <typename A>
-static const void* to_symbol_source(PlaybackContext& ctx, const A* a,
-                                    const char* api) {
-    if (a->blob_hash_lo || a->blob_hash_hi) {
-        size_t blob_sz = 0;
-        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi,
-                                         &blob_sz);
-        if (!blob || blob_sz < a->count) {
-            fprintf(stderr, "[HRR] %s: host source blob missing from the "
-                    "archive.\n", api);
-            return nullptr;
-        }
-        return blob;
-    }
-    const void* src = ctx.translate_ptr(a->src);
-    if (!src)
-        fprintf(stderr, "[HRR] %s: device source 0x%llx is not mapped.\n", api,
-                (unsigned long long)a->src);
-    return src;
-}
-
-static void* symbol_or_complain(PlaybackContext& ctx, uint64_t rec,
-                                const char* api) {
-    void* symbol = ctx.translate_symbol(rec);
-    if (!symbol)
-        fprintf(stderr, "[HRR] %s: symbol 0x%llx is not in this archive's "
-                "symbol registry.\n", api, (unsigned long long)rec);
-    return symbol;
-}
-
-}  // namespace
 
 hipError_t playback_hipGraphMemcpyNodeSetParamsToSymbol(PlaybackContext& ctx,
                                                         const uint8_t* payload) {
@@ -3241,7 +3241,8 @@ hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
 // hipHostRegister recorded a snapshot of the host memory as a blob.
 // At replay we allocate a fresh host buffer (malloc), restore the blob
 // into it, call hipHostRegister on it, and track the (recorded -> live)
-// mapping so kernel-arg pointer translations work.
+// mapping so kernel-arg pointer translations work. A registration recorded
+// without its blob is refused.
 // hipHostUnregister unregisters, frees the backing buffer, and removes the entry.
 
 hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
@@ -3249,6 +3250,8 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     size_t sz = static_cast<size_t>(a->sizeBytes);
     if (sz == 0) return hipSuccess;
     free_replaced_host_alloc(ctx, a->hostPtr);
+    if (host_contents_left_out("hipHostRegister", sz, a->blob_hash_lo, a->blob_hash_hi))
+        return hipErrorNotFound;
     if (!ctx.charge_host(sz, "hipHostRegister backing buffer"))
         return hipErrorMemoryAllocation;
 
@@ -3265,25 +3268,21 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     }
 
     // Restore snapshot into the buffer.
-    if (a->blob_hash_lo || a->blob_hash_hi) {
-        size_t blob_sz = 0;
-        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
-        if (blob && blob_sz == sz)
-            std::memcpy(buf, blob, sz);
-        else
-            std::memset(buf, 0, sz);
-        if (!blob && ctx.fatal_error.load(std::memory_order_acquire)) {
-            // The blob was refused (cap or allocation), not merely absent:
-            // do not register zeros in its place.
-#ifdef _WIN32
-            _aligned_free(buf);
-#else
-            free(buf);
-#endif
-            return hipErrorUnknown;
-        }
-    } else {
+    size_t blob_sz = 0;
+    const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
+    if (blob && blob_sz == sz)
+        std::memcpy(buf, blob, sz);
+    else
         std::memset(buf, 0, sz);
+    if (!blob && ctx.fatal_error.load(std::memory_order_acquire)) {
+        // The blob was refused (cap or allocation), not merely absent:
+        // do not register zeros in its place.
+#ifdef _WIN32
+        _aligned_free(buf);
+#else
+        free(buf);
+#endif
+        return hipErrorUnknown;
     }
 
     hipError_t r = hipHostRegister(buf, sz, a->flags);
@@ -3650,18 +3649,6 @@ static void scan_h2d_payload(PlaybackContext& ctx, const void* blob, size_t n,
                 (unsigned long long)dst_rec, hits, n);
 }
 
-// True, having refused the copy by name, when a host-to-device copy of `size`
-// bytes has no blob: capture left its contents out, as it does for a copy over
-// HIP_HRR_CAPTURE_MAX_BLOB_MB.
-static bool h2d_contents_left_out(const char* api, uint64_t size, uint64_t hash_lo,
-                                  uint64_t hash_hi) {
-    if (size == 0 || hash_lo || hash_hi) return false;
-    fprintf(stderr, "[HRR] %s: host-to-device copy of %llu bytes was captured without "
-                    "its contents; refusing the call\n",
-            api, (unsigned long long)size);
-    return true;
-}
-
 // This mirrors the captured API exactly — hipMemcpyAsync on the default stream
 // (stream_rec==0, translated to nullptr) must still use the async variant.
 static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
@@ -3669,7 +3656,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
                                      uint64_t size, int32_t kind,
                                      bool is_async, hipStream_t stream,
                                      uint64_t hash_lo, uint64_t hash_hi) {
-    if (kind == hipMemcpyHostToDevice && h2d_contents_left_out(api, size, hash_lo, hash_hi))
+    if (kind == hipMemcpyHostToDevice && host_contents_left_out(api, size, hash_lo, hash_hi))
         return hipErrorNotFound;
     // Only the kinds that write device memory translate dst. A D2H dst is a
     // host buffer replay never uses (validation reads back into its own), and
@@ -4639,7 +4626,7 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
 
 // Resolve the H2D source blob for a driver copy, a hipMemcpy3D or a hipMemcpy2D
 // into *blob. hipErrorNotFound when capture left the contents of a non-empty
-// rect out (h2d_contents_left_out). Otherwise hipSuccess, with *blob null when
+// rect out (host_contents_left_out). Otherwise hipSuccess, with *blob null when
 // there is nothing faithful to substitute: no blob recorded, or a blob smaller
 // than the recorded source rect (an archive captured before the blob-footprint
 // fix, or a damaged one). Never fall back to the stale capture-time host VA,
@@ -4648,7 +4635,7 @@ static hipError_t drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
                                          uint64_t hash_lo, uint64_t hash_hi,
                                          size_t need, const void** blob) {
     *blob = nullptr;
-    if (h2d_contents_left_out(api, need, hash_lo, hash_hi)) return hipErrorNotFound;
+    if (host_contents_left_out(api, need, hash_lo, hash_hi)) return hipErrorNotFound;
     size_t blob_sz = 0;
     const void* found = (hash_lo || hash_hi)
                             ? ctx.load_blob(hash_lo, hash_hi, &blob_sz)

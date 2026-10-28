@@ -381,6 +381,9 @@ struct HrrDiskSpaceMid {
 
 }  // namespace
 
+// Written by the to-symbol graph copies of Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct.
+__device__ unsigned char hrr_limit_symbol[kBigCopy];
+
 __global__ void hrr_disk_space_big_arg(HrrDiskSpaceBig big, int* out) {
   if (threadIdx.x == 0) out[0] = big.bytes[0] + big.bytes[sizeof(big.bytes) - 1];
 }
@@ -744,8 +747,9 @@ TEST_CASE("Unit_HRR_CaptureLimit_ForkAfterStop_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-// Run with HIP_HRR_CAPTURE_MAX_BLOB_MB set to 1: two copies and a 2D copy over
-// it, then one under it and its read back.
+// Run with HIP_HRR_CAPTURE_MAX_BLOB_MB set to 1: two copies, a 2D copy, a
+// registration and two to-symbol graph copies from pinned memory over it, then
+// one copy under it and its read back.
 TEST_CASE("Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct", "[.][hrr-direct]") {
   if (getenv("HIP_HRR_CAPTURE_MAX_BLOB_MB") == nullptr)
     HRR_SKIP("started by Unit_HRR_CaptureLimit_SkipsLargeBlob");
@@ -754,9 +758,23 @@ TEST_CASE("Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&dev, kBigCopy));
   copy_to_device(dev, 1700, kBigCopy);
   copy_to_device(dev, 1701, kBigCopy);
-  const std::vector<unsigned char> rows = pattern(kBigCopy, 1703);
+  std::vector<unsigned char> rows = pattern(kBigCopy, 1703);
   HRR_HIP_CHECK(hipMemcpy2D(dev, kStepCopy, rows.data(), kStepCopy, kStepCopy,
                             kBigCopy / kStepCopy, hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipHostRegister(rows.data(), kBigCopy, hipHostRegisterDefault));
+  HRR_HIP_CHECK(hipHostUnregister(rows.data()));
+  void* pinned = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(&pinned, kBigCopy));
+  std::memcpy(pinned, rows.data(), kBigCopy);
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t node = nullptr;
+  for (const hipMemcpyKind kind : {hipMemcpyHostToDevice, hipMemcpyDefault})
+    HRR_HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(&node, graph, nullptr, 0,
+                                                HIP_SYMBOL(hrr_limit_symbol), pinned,
+                                                kBigCopy, 0, kind));
+  HRR_HIP_CHECK(hipGraphDestroy(graph));
+  HRR_HIP_CHECK(hipHostFree(pinned));
   copy_to_device(dev, 1702, kStepCopy);
   std::vector<unsigned char> out(kStepCopy);
   HRR_HIP_CHECK(hipMemcpy(out.data(), dev, kStepCopy, hipMemcpyDeviceToHost));
@@ -1115,7 +1133,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureLimit_ForkAfterStop) {
 
 // A copy over the per-blob limit is recorded without its contents and the
 // archive is marked incomplete, but capture goes on and stores the next copy.
-// Replay refuses each copy it has no contents for.
+// Replay refuses each call whose host memory it has no contents for.
 HRR_TEST_CASE(Unit_HRR_CaptureLimit_SkipsLargeBlob) {
   ScopedDir cap(cap_dir("limit_blob"));
   const WorkloadRun run = run_workload("Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct", cap.path,
@@ -1151,10 +1169,13 @@ HRR_TEST_CASE(Unit_HRR_CaptureLimit_SkipsLargeBlob) {
   const auto [rc, out] = hrr_playback_merged(cap.path, "--continue-on-error");
   INFO("Replay output:\n" << out);
   CHECK(rc != 0);
-  const std::string refused = ": host-to-device copy of " + std::to_string(kBigCopy) +
-                              " bytes was captured without its contents; refusing the call";
+  const std::string refused = ": " + std::to_string(kBigCopy) +
+                              " bytes of host memory were captured without their contents; "
+                              "refusing the call";
   CHECK(count_of(out, "hipMemcpy" + refused) == 2);
   CHECK(count_of(out, "hipMemcpy2D" + refused) == 1);
+  CHECK(count_of(out, "hipHostRegister" + refused) == 1);
+  CHECK(count_of(out, "hipGraphAddMemcpyNodeToSymbol" + refused) == 2);
 }
 
 #endif  // !_WIN32 && HRR_TEST_EXE
