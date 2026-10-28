@@ -38,12 +38,15 @@ namespace {
 using namespace rocjitsu;
 
 constexpr uint32_t kIdentity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
+constexpr uint32_t kXyzOne = 4 | (5 << 3) | (6 << 6) | (1 << 9);
+constexpr uint32_t kZyxOne = 6 | (5 << 3) | (4 << 6) | (1 << 9);
 constexpr uint32_t kXOne = 4 | (1 << 9); // X, 0, 0, 1 (an R-only format).
 constexpr uint64_t kBase = 0x10000;
 constexpr uint32_t kDfmt32 = 4;
 constexpr uint32_t kDfmt8888 = 10;
 constexpr uint32_t kNfmtUint = 4;
 constexpr uint32_t kNfmtUnorm = 0;
+constexpr uint32_t kRgba32Uint = 61;
 
 struct Image {
   uint32_t data_format = kDfmt32;
@@ -334,7 +337,7 @@ TEST_F(Cdna2ImageAccessTest, XyzOneStoresRetainCompactedSelectorBehavior) {
   Image image;
   image.data_format = kDfmt8888;
   image.num_format = kNfmtUint;
-  image.selectors = 4 | (5 << 3) | (6 << 6) | (1 << 9);
+  image.selectors = kXyzOne;
   bind(image);
   wf->set_exec(1);
   write_coordinates(0, {0, 0, 0});
@@ -810,10 +813,7 @@ TEST_P(RdnaDecodedImageAccessTest, StoreDmaskExpandsPackedInputsAndAppliesQualif
   wf->set_exec(1);
   cu->write_vgpr(vb + 2, 0, 0);
   cu->write_vgpr(vb + 6, 0, 0);
-  constexpr uint32_t kRgba32Uint = 61;
   constexpr uint32_t kBgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
-  constexpr uint32_t kXyzOne = 4 | (5 << 3) | (6 << 6) | (1 << 9);
-  constexpr uint32_t kZyxOne = 6 | (5 << 3) | (4 << 6) | (1 << 9);
   struct Case {
     uint32_t selectors;
     uint8_t dmask;
@@ -859,8 +859,6 @@ TEST_P(RdnaDecodedImageAccessTest, PackedRgbStoresWriteConstantAlpha) {
   cu->write_vgpr(vb + 2, 0, 0);
   cu->write_vgpr(vb + 6, 0, 0);
   constexpr uint32_t kRgba2101010Uint = 40;
-  constexpr uint32_t kXyzOne = 4 | (5 << 3) | (6 << 6) | (1 << 9);
-  constexpr uint32_t kZyxOne = 6 | (5 << 3) | (4 << 6) | (1 << 9);
   for (const auto &[selectors, expected] :
        {std::pair{kXyzOne, 0x11u | (0x22u << 10) | (0x33u << 20) | (1u << 30)},
         std::pair{kZyxOne, 0x33u | (0x22u << 10) | (0x11u << 20) | (1u << 30)}}) {
@@ -878,7 +876,6 @@ TEST_P(RdnaDecodedImageAccessTest, UnmodeledStoreSelectorsReportUnimplemented) {
   wf->set_exec(1);
   cu->write_vgpr(vb + 2, 0, 0);
   cu->write_vgpr(vb + 6, 0, 0);
-  constexpr uint32_t kRgba32Uint = 61;
   constexpr uint32_t kXyzz = 4 | (5 << 3) | (6 << 6) | (6 << 9);
   constexpr uint32_t kX000 = 4;
   for (const uint32_t selectors : {kXyzz, kX000}) {
