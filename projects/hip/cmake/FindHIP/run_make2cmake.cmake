@@ -35,7 +35,11 @@ if (NOT "${depend_text}" STREQUAL "")
             set(file "")
         endif()
 
-        if(NOT IS_DIRECTORY "${file}")
+        # Make sure we check to see if we have a file, before asking if it is
+        # not a directory. if(NOT IS_DIRECTORY "") will return TRUE, which
+        # turns a dropped (non-existent) dependency into the current source
+        # directory once it goes through get_filename_component ABSOLUTE.
+        if(file AND NOT IS_DIRECTORY "${file}")
             get_filename_component(file_absolute "${file}" ABSOLUTE)
             list(APPEND dependency_list "${file_absolute}")
         endif()
