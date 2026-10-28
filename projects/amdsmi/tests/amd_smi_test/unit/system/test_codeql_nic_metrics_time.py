@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 import os
 from pathlib import Path
 import subprocess
@@ -64,13 +67,23 @@ class CodeqlNicMetricsTimeRegression(unittest.TestCase):
             binary = Path(directory) / "regression"
             source.write_text(PREFIX + body, encoding="ascii")
             subprocess.run(
-                ["c++", "-std=c++17", "-pthread", str(source), "-o", str(binary),
-                 "-Wl,--wrap=localtime,--wrap=asctime,--wrap=ctime"],
+                [
+                    "c++",
+                    "-std=c++17",
+                    "-pthread",
+                    str(source),
+                    "-o",
+                    str(binary),
+                    "-Wl,--wrap=localtime,--wrap=asctime,--wrap=ctime",
+                ],
                 check=True,
             )
             environment = dict(os.environ, TZ="UTC", LC_ALL="C")
             result = subprocess.run(
-                [str(binary), str(source)], env=environment, capture_output=True, text=True,
+                [str(binary), str(source)],
+                env=environment,
+                capture_output=True,
+                text=True,
                 timeout=15,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -84,8 +97,9 @@ class CodeqlNicMetricsTimeRegression(unittest.TestCase):
         for condition in ("j < ibs.size()", "k < ib_ports.size()"):
             position = function.index(condition)
             start = function.rindex("for (", 0, position)
-            loops.append(function[start:function.index("{", position)])
-        self.run_cpp(r"""
+            loops.append(function[start : function.index("{", position)])
+        self.run_cpp(
+            r"""
 int main() {
   for (const std::size_t count : {0, 1, 255, 256, 300}) {
     for (const std::size_t limit : {4, 16, 512}) {
@@ -94,14 +108,18 @@ int main() {
       std::vector<unsigned> ibs(count), ib_ports(count);
       std::size_t rdma_count = 0;
       std::size_t visits = 0;
-""" + loops[0] + r"""{
+"""
+            + loops[0]
+            + r"""{
         assert(j == visits);
         ++visits;
         ++rdma_count;
       }
       assert(visits == std::min(count, limit));
       visits = 0;
-""" + loops[1] + r"""{
+"""
+            + loops[1]
+            + r"""{
         assert(k == visits);
         ++visits;
       }
@@ -109,12 +127,15 @@ int main() {
     }
   }
 }
-""")
+"""
+        )
 
     def test_file_creation_time_uses_caller_owned_storage(self) -> None:
         source = (ROOT / "rocm_smi/src/rocm_smi_utils.cc").read_text(encoding="utf-8")
         function = extract_block(source, "std::string getFileCreationDate(")
-        self.run_cpp(function + r"""
+        self.run_cpp(
+            function
+            + r"""
 int main(int argc, char** argv) {
   assert(argc == 2);
   struct stat metadata{};
@@ -130,19 +151,23 @@ int main(int argc, char** argv) {
     return 1;
   }
 }
-""")
+"""
+        )
 
     def test_logger_time_uses_caller_owned_storage(self) -> None:
         source = (ROOT / "rocm_smi/src/rocm_smi_logger.cc").read_text(encoding="utf-8")
         function = extract_block(source, "std::string ROCmLogging::Logger::getCurrentTime(")
-        self.run_cpp(r"""
+        self.run_cpp(
+            r"""
 namespace ROCmLogging {
 class Logger {
  public:
   static std::string getCurrentTime();
 };
 }
-""" + function + r"""
+"""
+            + function
+            + r"""
 int main() {
   auto check = []() {
     for (unsigned iteration = 0; iteration < 200; ++iteration) {
@@ -164,19 +189,25 @@ int main() {
     return 1;
   }
 }
-""")
+"""
+        )
 
     def test_metrics_timestamp_preserves_ctime_newline(self) -> None:
         source = (ROOT / "rocm_smi/src/rocm_smi_gpu_metrics.cc").read_text(encoding="utf-8")
-        start = source.index("    const auto timestamp_time =", source.index("auto header_output ="))
+        start = source.index(
+            "    const auto timestamp_time =", source.index("auto header_output =")
+        )
         end = source.index('    tmp_outstream_metrics << "Version:', start)
-        self.run_cpp(r"""
+        self.run_cpp(
+            r"""
 std::string render_timestamp(std::time_t timestamp) {
   std::ostringstream tmp_outstream_metrics;
   const std::string kDoubleLine = "+==============================+";
   auto timestamp_to_time_point = [](std::time_t value) { return value; };
   const auto m_gpu_metrics_updated_timestamp = timestamp;
-""" + source[start:end] + r"""
+"""
+            + source[start:end]
+            + r"""
   return tmp_outstream_metrics.str();
 }
 int main() {
@@ -198,7 +229,8 @@ int main() {
     return 1;
   }
 }
-""")
+"""
+        )
 
 
 if __name__ == "__main__":

@@ -36,8 +36,8 @@ static void print_uuid(char* str, uuid_t* uuid) {
            static_cast<unsigned int>(uuid->time_mid),
            static_cast<unsigned int>((uuid->version << 12) | uuid->time_high),
            static_cast<unsigned int>((uuid->variant << 6) | uuid->clk_seq_hi),
-           static_cast<unsigned int>(uuid->clk_seq_low),
-           static_cast<unsigned int>(uuid->asic_4), uuid->asic_0);
+           static_cast<unsigned int>(uuid->clk_seq_low), static_cast<unsigned int>(uuid->asic_4),
+           uuid->asic_0);
 }
 
 static void insert_asic_serial(uuid_t* uuid, uint64_t serial) {
