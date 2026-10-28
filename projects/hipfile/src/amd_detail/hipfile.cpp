@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "async.h"
 #include "backend.h"
 #include "backend/fallback.h"
 #include "batch/batch.h"
@@ -530,9 +531,9 @@ catch (...) {
 }
 
 static hipFileError_t
-hipFileIOAsync(IoType, hipFileHandle_t, void *buffer_base, size_t *size_p, hoff_t *file_offset_p,
-               hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t,
-               const vector<shared_ptr<Backend>> &)
+hipFileIOAsync(IoType io_type, hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *file_offset_p,
+               hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t hipStream,
+               const vector<shared_ptr<Backend>> &backends)
 try {
     if (Context<DriverState>::get()->getRefCount() == 0) {
         ensureDriverInit();
@@ -541,10 +542,31 @@ try {
 
     checkNull({buffer_base, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p});
 
-    return {hipFileAsyncNotSupported, hipSuccess};
+    auto [file, buffer, stream] =
+        Context<DriverState>::get()->getFileBufferAndStream(fh, buffer_base, hipStream);
+
+    std::shared_ptr<Backend> backend{
+        selectBackend(backends, file, buffer, *size_p, *file_offset_p, *buffer_offset_p)};
+
+    enqueueAsync(std::move(backend), io_type, std::move(file), std::move(buffer), size_p, file_offset_p,
+                 buffer_offset_p, bytes_transferred_p, std::move(stream));
+
+    return {hipFileSuccess, hipSuccess};
 }
 catch (hipFileError_t e) {
     return e;
+}
+catch (const ReservedStreamPriority &) {
+    return {hipFileAsyncNotSupported, hipSuccess};
+}
+catch (const std::invalid_argument &) {
+    return {hipFileInvalidValue, hipSuccess};
+}
+catch (const std::bad_alloc &) {
+    return {hipFileHipDriverError, hipErrorOutOfMemory};
+}
+catch (const FileNotRegistered &) {
+    return {hipFileHandleNotRegistered, hipSuccess};
 }
 catch (...) {
     return handle_exception();
