@@ -16,7 +16,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Fixed out-of-bounds memory access issues in the HEVC, AVC, AV1, VP9 and base parsers.
 * Fixed `rocDecGetDecoderCaps` advertising 16-bit output surface formats for 8-bit content.
 * The `videoDecodeRaw` and `videoDecode` samples now exit with code 77 instead of 1 when the GPU doesn't support the stream's codec, and the `video_decodeRaw-*` and `video_decode-*` CTests report that as skipped instead of failed (e.g. the AV1 tests on gfx90a). A failed decoder capability query is still reported as an error.
-* The `videoDecodeBatch` sample now checks the GPU's decode capability for each input file first and decodes only the supported files, instead of exiting with 1 when any file has an unsupported codec (e.g. the AV1 files in `video_decodeBatch` on gfx90a). If no file is supported it exits with 77 and the `video_decodeBatch` CTest reports it as skipped. A failed decoder capability query is still reported as an error.
+* The `videoDecodeBatch` sample now checks the GPU's decode capability for each input file first and decodes only the supported files rather than exiting when a file has an unsupported codec.
 
 ## rocDecode 1.10.0 for ROCm 10.1.0
 
