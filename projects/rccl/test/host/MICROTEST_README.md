@@ -189,6 +189,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   scene, vocabulary and fake-reset fixture live in `TaskPrepScene.h`.
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
+- **`rccl-UnitTestsMicroProfiler`** — `src/plugin/profiler.cc` (via
+  `PROFILER_CC_PATH`, from `profiler-test.cc`); suite `ProfilerMicrotest.*`. Its
+  own binary: `nccl_stubs.cc` and `comm_fakes.cc` stub profiler entry points the
+  real file defines. `profiler-test.cc` drives the file-static `ncclProfiler`
+  with a fake `ncclProfiler_t` and stubs the rest of the link closure itself.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -730,6 +735,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc tests
 ./build/rccl-HostUnitTests
 ```
 

@@ -232,6 +232,16 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroProfiler -- src/plugin/profiler.cc. Its own binary: nccl_stubs.cc and
+  # comm_fakes.cc, which the other micro binaries link, stub entry points profiler.cc defines.
+  # profiler-test.cc stubs the rest of profiler.cc's link closure itself.
+  set(TEST_MICRO_PROFILER_SOURCE_FILES
+    profiler-test.cc
+    fakes/nccl_fakes.cc
+    fakes/collectives_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroTaskPrep -- host-only microtests for src/enqueue/task_prep/
   # and src/enqueue/task_sched/.
   # Its own binary, not rccl-UnitTestsMicro: that target compiles group.cc, rccl_wrap.cc and
@@ -854,6 +864,17 @@ if(_MICRO_BUILD_SYM_KERNELS)
       SYM_KERNELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/sym_kernels.cc"
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 endif()
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroProfiler
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroProfiler
+  SOURCES ${TEST_MICRO_PROFILER_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # plugin/profiler.cc is the only profiler.cc in SRC_FILES, so hipify keeps the name.
+    PROFILER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroTaskPrep -- host-only microtests for src/enqueue/task_prep/.

@@ -79,6 +79,8 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # plugin/profiler.cc (rccl-UnitTestsMicroProfiler)
+      - "ProfilerMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
