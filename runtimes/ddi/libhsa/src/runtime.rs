@@ -34,7 +34,7 @@ use rocddi::memory::device::Allocation;
 use rocddi::session::{DriverContextLifetime, Session, SessionRetirement};
 use rocddi::topology::host::{CpuCacheKind, CpuInfo};
 use rocddi::topology::{
-    Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo, SourceKind, TopologySnapshot,
+    Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo, TopologySnapshot,
 };
 
 use crate::callback_arg::CallbackArg;
@@ -631,10 +631,7 @@ impl HsaState {
 
     /// Selects the CPU node nearest a GPU by exact KFD node routes.
     pub(crate) fn nearest_cpu_agent(&self, endpoint: &Endpoint) -> HsaAgent {
-        let gpu_node = self
-            .topology
-            .nodes_for_endpoint(endpoint)
-            .find(|node| self.topology.sources[node.source.0].kind == SourceKind::LinuxKfd);
+        let gpu_node = self.topology.native_nodes_for_endpoint(endpoint).next();
         let best = self.cpus.iter().enumerate().min_by_key(|(index, cpu)| {
             let distance = match (gpu_node, cpu.node) {
                 (Some(gpu), Some(node)) if gpu.id == node => Some((0, 0)),
@@ -664,8 +661,8 @@ impl HsaState {
             .min_by_key(|(index, gpu)| {
                 let gpu_node = self
                     .topology
-                    .nodes_for_endpoint(&gpu.endpoint)
-                    .find(|node| self.topology.sources[node.source.0].kind == SourceKind::LinuxKfd);
+                    .native_nodes_for_endpoint(&gpu.endpoint)
+                    .next();
                 let distance = match (cpu_node, gpu_node) {
                     (Some(cpu), Some(gpu)) if cpu == gpu.id => Some((0, 0)),
                     (Some(cpu), Some(gpu)) => self
@@ -689,10 +686,7 @@ impl HsaState {
         let endpoint = &self.gpus[gpu_index].endpoint;
         let cpu_index = self.cpu_index(self.nearest_cpu_agent(endpoint))?;
         let cpu_node = self.cpus[cpu_index].node?;
-        let gpu_node = self
-            .topology
-            .nodes_for_endpoint(endpoint)
-            .find(|node| self.topology.sources[node.source.0].kind == SourceKind::LinuxKfd)?;
+        let gpu_node = self.topology.native_nodes_for_endpoint(endpoint).next()?;
         self.topology.route_between_nodes(cpu_node, gpu_node.id)
     }
 
@@ -771,8 +765,7 @@ impl HsaState {
         };
         let mut banks = self
             .topology
-            .nodes_for_endpoint(&gpu.endpoint)
-            .filter(|node| self.topology.sources[node.source.0].kind == SourceKind::LinuxKfd)
+            .native_nodes_for_endpoint(&gpu.endpoint)
             .flat_map(|node| self.topology.banks_for_node(node.id))
             .filter(|bank| {
                 bank.capacity_bytes != 0
@@ -807,8 +800,8 @@ impl HsaState {
         let (index, kind) = self.decode_gpu_pool(pool)?;
         let node = self
             .topology
-            .nodes_for_endpoint(&self.gpus[index].endpoint)
-            .find(|node| self.topology.sources[node.source.0].kind == SourceKind::LinuxKfd)?;
+            .native_nodes_for_endpoint(&self.gpus[index].endpoint)
+            .next()?;
         self.topology.banks_for_node(node.id).find(|bank| {
             bank.capacity_bytes != 0
                 && if kind == GpuPoolKind::Group {
