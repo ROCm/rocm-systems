@@ -1,6 +1,6 @@
 .. meta::
    :description: ROCm Systems Profiler documentation and reference
-   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
+   :keywords: rocsys, rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
 
 *******************************************
 ROCm Systems Profiler (rocprofiler-systems)
@@ -9,8 +9,13 @@ ROCm Systems Profiler (rocprofiler-systems)
 ROCm Systems Profiler is designed for the high-level profiling and comprehensive tracing
 of applications running on the CPU or the CPU and GPU. It supports dynamic binary
 instrumentation, call-stack sampling, and various other features for determining
-which function and line number are currently executing. To learn more, see
-:doc:`What is ROCm Systems Profiler? <what-is-rocprof-sys>`
+which function and line number are currently executing. The original
+``rocprof-sys-*`` tools provide these capabilities. To learn more, see :doc:`What is ROCm Systems Profiler? <what-is-rocprof-sys>`
+
+The ``rocsys`` command is a new unified command-line entry point for profiling. Running
+``rocsys -- ./app`` or ``rocsys profile -- ./app`` produces a full trace profile,
+and ``rocsys rewrite`` runs ``rocprof-sys-instrument`` in binary-rewrite mode (``-o``).
+See :doc:`Using the rocsys command <./how-to/using-rocsys>` for details.
 
 ROCm Systems Profiler is open source and hosted at `<https://github.com/ROCm/rocm-systems>`__.
 It is the successor to `<https://github.com/ROCm/omnitrace>`__.
@@ -33,7 +38,6 @@ profiling, how it supports performance analysis, and how to leverage its capabil
 
   .. grid-item-card:: How to
 
-    * :doc:`Using the rocsys command <./how-to/using-rocsys>`
     * :doc:`Configuring the environment <./how-to/configuring-validating-environment>`
 
       * :doc:`Configuring runtime options <./how-to/configuring-runtime-options>`
@@ -53,8 +57,9 @@ profiling, how it supports performance analysis, and how to leverage its capabil
       * :doc:`XGMI, PCIe, and SDMA metrics monitoring <./how-to/xgmi-pcie-sdma-sampling>`
       * :doc:`hipFile's AMD Infinity Storage I/O telemetry <./how-to/hipfile-telemetry>`
 
-    * :doc:`Understanding the output <./how-to/understanding-rocprof-sys-output>`
-    * :doc:`Use the preset profiles <./how-to/using-preset-profiles>`
+    * :doc:`Using the rocsys command (experimental) <./how-to/using-rocsys>`
+    * :doc:`Understanding the profiling output <./how-to/understanding-rocprof-sys-output>`
+    * :doc:`Using the preset profiles <./how-to/using-preset-profiles>`
 
   .. grid-item-card:: Conceptual
 
