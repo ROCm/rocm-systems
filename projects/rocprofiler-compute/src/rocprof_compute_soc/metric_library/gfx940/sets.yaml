@@ -1,0 +1,15 @@
+inherit: ../gfx90a/sets.yaml
+compute_thruput_flops:
+  metrics:
+  - compute.mfma_flops_f8
+  - compute.mfma_flops_bf16
+  - compute.mfma_flops_f16
+  - compute.mfma_flops_f32
+  - compute.mfma_flops_f64
+  - compute.mfma_iops_int8
+compute_thruput_util:
+  metrics:
+  - compute.salu_util
+  - compute.valu_util
+  - compute.vmem_util
+  - compute.branch_util
