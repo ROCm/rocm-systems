@@ -8,6 +8,16 @@ on:
       - "emulation/rocjitsu/**"
       - ".github/workflows/rocjitsu-benchmarks.yml"
   workflow_dispatch:
+    inputs:
+      publish_results:
+        description: "Publish dashboard results (leave disabled for test runs)"
+        required: false
+        type: boolean
+        default: false
+      pull_request_number:
+        description: "Optional open PR number for the selected side branch"
+        required: false
+        type: string
 
 # Each job grants only the access it needs.
 permissions: {}
@@ -17,36 +27,145 @@ defaults:
     shell: bash
 
 env:
-  CORPUS_SHA: e1bac822f3fd2e8c29e3a08ae6c326db1692a757 # rocjitsu-test-corpus#44
+  BENCHMARK_MANIFEST: benchmarks/suites/performance-v1.toml
+  CORPUS_SHA: b95ea549e1f500ce4ce83ae511ae5e4434930374
+  TENSILE_SHA: dd77374194a3ea1a7258cd54f87af6747b6362a5
+  NANOBIND_SHA: 9b3afa9dbdc23641daf26fadef7743e7127ff92f
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
+  TENSILE_SOURCE: ${{ github.workspace }}/tensile-source
+  NANOBIND_SOURCE: ${{ github.workspace }}/native-nanobind
   RESULTS_BRANCH: gh-pages-rocjitsu
   RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+  RESULTS_DOWNLOAD_DIR: ${{ github.workspace }}/benchmark-results
 
 jobs:
+  source-metadata:
+    name: Resolve benchmark source metadata
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      base_branch: ${{ steps.resolve.outputs.base_branch }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      pull_request_number: ${{ steps.resolve.outputs.pull_request_number }}
+      pull_request_url: ${{ steps.resolve.outputs.pull_request_url }}
+    env:
+      BENCHMARK_BRANCH: ${{ github.ref_name }}
+      BENCHMARK_SHA: ${{ github.sha }}
+    steps:
+      - name: Resolve source metadata before benchmarking
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_PULL_REQUEST: ${{ inputs.pull_request_number || '' }}
+        run: |
+          if [[ "${BENCHMARK_BRANCH}" == "develop" ]]; then
+            if [[ -n "${REQUESTED_PULL_REQUEST}" ]]; then
+              echo "::error::A pull request number is only valid for a side-branch run."
+              exit 1
+            fi
+            exit 0
+          fi
+
+          BASE_BRANCH=develop
+          BASE_BRANCH_SHA="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_BRANCH}" \
+            --jq '.object.sha')"
+          if [[ ! "${BASE_BRANCH_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve an immutable ${BASE_BRANCH} revision."
+            exit 1
+          fi
+          BASE_SHA="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/compare/${BASE_BRANCH_SHA}...${BENCHMARK_SHA}" \
+            --jq '.merge_base_commit.sha')"
+          if [[ ! "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve a canonical develop merge-base for ${BENCHMARK_SHA}."
+            exit 1
+          fi
+          printf 'base_branch=%s\nbase_sha=%s\n' \
+            "${BASE_BRANCH}" "${BASE_SHA}" >> "${GITHUB_OUTPUT}"
+
+          if [[ -z "${REQUESTED_PULL_REQUEST}" ]]; then
+            exit 0
+          fi
+          if [[ ! "${REQUESTED_PULL_REQUEST}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::pull_request_number must be a positive integer."
+            exit 1
+          fi
+
+          PR_JSON="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/pulls/${REQUESTED_PULL_REQUEST}")"
+          PR_STATE="$(jq -r '.state' <<< "${PR_JSON}")"
+          PR_BASE="$(jq -r '.base.ref' <<< "${PR_JSON}")"
+          PR_HEAD_REPOSITORY="$(jq -r '.head.repo.full_name // ""' <<< "${PR_JSON}")"
+          PR_HEAD_BRANCH="$(jq -r '.head.ref' <<< "${PR_JSON}")"
+          PR_HEAD_SHA="$(jq -r '.head.sha' <<< "${PR_JSON}")"
+          PR_URL="$(jq -r '.html_url' <<< "${PR_JSON}")"
+          if [[ "${PR_STATE}" != open \
+                || "${PR_BASE}" != "${BASE_BRANCH}" \
+                || "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" \
+                || "${PR_HEAD_BRANCH}" != "${BENCHMARK_BRANCH}" \
+                || "${PR_HEAD_SHA}" != "${BENCHMARK_SHA}" \
+                || "${PR_URL}" != "https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}" ]]; then
+            echo "::error::PR #${REQUESTED_PULL_REQUEST} must be an open ${GITHUB_REPOSITORY}:${BENCHMARK_BRANCH} PR to develop at ${BENCHMARK_SHA}."
+            exit 1
+          fi
+          printf 'pull_request_number=%s\npull_request_url=%s\n' \
+            "${REQUESTED_PULL_REQUEST}" "${PR_URL}" >> "${GITHUB_OUTPUT}"
+
   benchmark:
-    name: Run nightly benchmark
+    name: Run performance benchmark
+    needs: source-metadata
     runs-on: rocjitsu-benchmark
-    timeout-minutes: 210
+    timeout-minutes: 120
     permissions:
       contents: read
     outputs:
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
+      results_artifact: ${{ env.RESULTS_ARTIFACT }}
       machine: ${{ steps.machine.outputs.name }}
+      source_commit_message: ${{ steps.source.outputs.commit_message }}
+      workflow_commit_sha: ${{ steps.source.outputs.workflow_commit_sha }}
+      tensile_commit_sha: ${{ steps.tensile.outputs.commit_sha }}
       ran: ${{ steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure' }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
-      options: --user 0:0
+      options: >-
+        --user 0:0
+        --cgroup-parent=benchmark.slice
+        --cgroupns=host
+        --cpuset-cpus=0-63
+        --security-opt seccomp=unconfined
+        --volume /sys/fs/cgroup:/sys/fs/cgroup:ro
+        --volume /sys/kernel/sched_ext:/sys/kernel/sched_ext:ro
+        --volume /sys/devices/system/cpu:/sys/devices/system/cpu:ro
+        --mount type=bind,source=/usr/local/libexec/rocjitsu-benchmark-runner,target=/usr/local/libexec/rocjitsu-benchmark-runner,readonly
       env:
         DEBIAN_FRONTEND: noninteractive
 
     steps:
       - name: Set benchmark paths
+        env:
+          SOURCE_REF_TYPE: ${{ github.ref_type }}
         run: |
+          if [[ "${SOURCE_REF_TYPE}" != branch ]]; then
+            echo "::error::Select a branch, not a tag, when running this workflow."
+            exit 1
+          fi
+          : "${RUNNER_TEMP:?}" "${GITHUB_RUN_ID:?}" "${GITHUB_RUN_ATTEMPT:?}"
+          [[ "${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}" =~ ^[0-9]+:[0-9]+$ ]]
           BENCHMARK_DIR="${RUNNER_TEMP}/rocjitsu-benchmark-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ ! -e "${BENCHMARK_DIR}" && ! -L "${BENCHMARK_DIR}" ]]
+          mkdir -m 700 "${BENCHMARK_DIR}"
+          printf '%s:%s\n' "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" > "${BENCHMARK_DIR}/.owned-attempt"
           {
+            echo "BENCHMARK_DIR=${BENCHMARK_DIR}"
             echo "ROCJITSU_BUILD_DIR=${BENCHMARK_DIR}/build"
             echo "ROCJITSU_VENV=${BENCHMARK_DIR}/venv"
             echo "ROCJITSU_RESULT_DIR=${BENCHMARK_DIR}/results"
+            echo "PYTHONDONTWRITEBYTECODE=1"
           } >> "${GITHUB_ENV}"
 
       - name: Install base dependencies
@@ -60,13 +179,31 @@ jobs:
             git \
             libclang-rt-dev \
             libdrm-dev \
-            ninja-build
+            libomp-dev \
+            libzstd-dev \
+            ninja-build \
+            python3 \
+            python3-dev \
+            util-linux \
+            zlib1g-dev
 
       - name: Checkout rocm-systems
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: rocm-systems
+          ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Record benchmark source
+        id: source
+        working-directory: rocm-systems
+        run: |
+          COMMIT_MESSAGE="$(git show -s --format=%s HEAD)"
+          WORKFLOW_COMMIT_SHA="$(git rev-parse --verify HEAD^{commit})"
+          [[ "${WORKFLOW_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          printf 'workflow_commit_sha=%s\n' "${WORKFLOW_COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
+          printf 'commit_message=%s\n' "${COMMIT_MESSAGE}" >> "${GITHUB_OUTPUT}"
+          printf 'run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout benchmark corpus
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -74,6 +211,30 @@ jobs:
           repository: ROCm/rocjitsu-test-corpus
           ref: ${{ env.CORPUS_SHA }}
           path: rocjitsu-test-corpus
+          persist-credentials: false
+
+      - name: Checkout pinned Tensile source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ROCm/rocm-libraries
+          ref: ${{ env.TENSILE_SHA }}
+          path: tensile-source
+          persist-credentials: false
+
+      - name: Record checked Tensile revision
+        id: tensile
+        run: |
+          TENSILE_COMMIT_SHA="$(git -C "${TENSILE_SOURCE}" rev-parse --verify HEAD^{commit})"
+          [[ "${TENSILE_COMMIT_SHA}" == "${TENSILE_SHA}" ]]
+          printf 'commit_sha=%s\n' "${TENSILE_COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout pinned native nanobind
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: wjakob/nanobind
+          ref: ${{ env.NANOBIND_SHA }}
+          path: native-nanobind
+          submodules: recursive
           persist-credentials: false
 
       - name: Record benchmark machine
@@ -86,43 +247,67 @@ jobs:
           python-version: "3.12"
 
       - name: Install benchmark dependencies
-        run: |
-          python -m venv "${ROCJITSU_VENV}"
-          "${ROCJITSU_VENV}/bin/python" -m pip install \
-            --disable-pip-version-check \
-            -r "${CORPUS_SOURCE_DIR}/benchmarks/requirements.txt"
-
-          ROCM_PATH="$("${ROCJITSU_VENV}/bin/rocm-sdk" path --root)"
-          echo "ROCM_PATH=${ROCM_PATH}" >> "${GITHUB_ENV}"
-          echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+        run: python "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" dependencies
 
       - name: Build rocjitsu
-        run: |
-          cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTING=OFF \
-            -DLTO=OFF \
-            -DRJ_ENABLE_ASAN=OFF \
-            -DRJ_ENABLE_MSAN=OFF \
-            -DRJ_ENABLE_TSAN=OFF \
-            -DRJ_ENABLE_UBSAN=OFF \
-            -DROCM_PATH="${ROCM_PATH}"
-          cmake --build "${ROCJITSU_BUILD_DIR}" \
-            --target rocjitsu_bin rocjitsu_shared
+        run: python "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" rocjitsu
 
-      - name: Run nightly suite
+      - name: Prepare Tensile wheel and native adapter
+        run: python "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" native
+
+      - name: Generate pinned Tensile artifacts
+        id: prepare
+        run: |
+          "${ROCJITSU_VENV}/bin/python" "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" generate --manifest "${BENCHMARK_MANIFEST}"
+
+      - name: Run performance suite
+        if: ${{ success() && steps.prepare.outcome == 'success' }}
         timeout-minutes: 60
         id: benchmark
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
         run: |
-          "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
+          # Capture only this invocation; keep console output visible.
+          set +e
+          # Run every benchmark recorded in the selected TOML recipe; do not filter the selection.
+          # Filtering would omit required benchmarks and publish incomplete suite results.
+          taskset -c 0-15 "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
             --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
             --build-dir "${ROCJITSU_BUILD_DIR}" \
             --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json" \
             --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
-            --run-wrapper "\"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
-            --manifest benchmarks/suites/nightly.toml \
-            --output "${ROCJITSU_RESULT_DIR}"
+            --run-wrapper "/usr/bin/python3 -E -s /usr/local/libexec/rocjitsu-benchmark-runner/benchmark_run.py -- \"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
+            --manifest "${BENCHMARK_MANIFEST}" \
+            --output "${ROCJITSU_RESULT_DIR}" | taskset -c 0-15 tee "${BENCHMARK_DIR}/runner-output.txt"
+          RUNNER_PIPE_STATUS=("${PIPESTATUS[@]}")
+          set -e
+          RUNNER_EXIT="${RUNNER_PIPE_STATUS[0]}"
+          if [[ "${RUNNER_PIPE_STATUS[1]}" -ne 0 ]]; then exit "${RUNNER_PIPE_STATUS[1]}"; fi
+          case "${RUNNER_EXIT}" in
+            0) SUITE_STATUS=completed ;;
+            1) SUITE_STATUS=failed ;;
+            *) exit "${RUNNER_EXIT}" ;;
+          esac
+          # Only main's final line follows a normal run_suite return. An abort
+          # can also exit 1 and set finished_at, so neither alone is sufficient.
+          EXPECTED_ARTIFACT="$(realpath -- "${ROCJITSU_RESULT_DIR}")/run.json"
+          if [[ "$(tail -n 1 "${BENCHMARK_DIR}/runner-output.txt")" != "run ${SUITE_STATUS}: ${EXPECTED_ARTIFACT}" ]]; then
+            echo "Runner did not report normal suite completion." >&2
+            exit 1
+          fi
+          if ! python -m json.tool "${ROCJITSU_RESULT_DIR}/run.json" > /dev/null; then exit 1; fi
+          if [[ "${RUNNER_EXIT}" -eq 1 ]]; then
+            echo "case_failures=true" >> "${GITHUB_OUTPUT}"
+            echo "::warning::Suite completed with benchmark failures; preserving results."
+          fi
+
+      - name: Collect preparation diagnostics
+        if: always()
+        run: |
+          if [[ -n "${BENCHMARK_DIR:-}" && -f "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" && -x /usr/bin/python3 ]]; then
+            /usr/bin/python3 "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" diagnostics
+          else
+            echo "::warning::Preparation helper or system Python unavailable; retain Actions setup logs."
+          fi
 
       - name: Upload benchmark diagnostics
         if: always()
@@ -133,125 +318,222 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Upload preparation diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocjitsu-preparation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.BENCHMARK_DIR }}/preparation-diagnostics.tar.gz
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Clean owned benchmark scratch
+        if: always()
+        run: |
+          if [[ -n "${BENCHMARK_DIR:-}" && -f "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" && -x /usr/bin/python3 ]]; then
+            /usr/bin/python3 "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" cleanup
+          else
+            echo "::warning::Ownership cannot be checked without helper and system Python; scratch retained."
+          fi
+
   publish:
     name: Publish dashboard data
-    needs: benchmark
-    if: ${{ !cancelled() && github.ref == 'refs/heads/develop' && needs.benchmark.outputs.ran == 'true' }}
+    concurrency:
+      group: rocjitsu-publish-gh-pages-rocjitsu
+      cancel-in-progress: false
+      queue: max
+    needs: [source-metadata, benchmark]
+    if: ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' && (github.event_name != 'workflow_dispatch' || inputs.publish_results == true) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: write
     env:
+      RUN_ID: github-${{ github.run_id }}-attempt-${{ needs.benchmark.outputs.run_attempt }}
+      RESULTS_ARTIFACT: ${{ needs.benchmark.outputs.results_artifact }}
+      BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
+      DATA_DIR: ${{ github.workspace }}/publication/rocjitsu-dashboard/data
       BENCHMARK_MACHINE: ${{ needs.benchmark.outputs.machine }}
+      BENCHMARK_BRANCH: ${{ github.ref_name }}
+      BENCHMARK_COMMIT_MESSAGE: ${{ needs.benchmark.outputs.source_commit_message }}
+      WORKFLOW_COMMIT_SHA: ${{ needs.benchmark.outputs.workflow_commit_sha }}
+      TENSILE_COMMIT_SHA: ${{ needs.benchmark.outputs.tensile_commit_sha }}
+      SOURCE_BASE_BRANCH: ${{ needs.source-metadata.outputs.base_branch }}
+      SOURCE_BASE_SHA: ${{ needs.source-metadata.outputs.base_sha }}
+      SOURCE_PULL_REQUEST_NUMBER: ${{ needs.source-metadata.outputs.pull_request_number }}
+      SOURCE_PULL_REQUEST_URL: ${{ needs.source-metadata.outputs.pull_request_url }}
 
     steps:
       - name: Download benchmark diagnostics
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ env.RESULTS_ARTIFACT }}
-          path: incoming
-
-      - name: Checkout publisher corpus
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: ROCm/rocjitsu-test-corpus
-          ref: ${{ env.CORPUS_SHA }}
-          path: rocjitsu-test-corpus
-          persist-credentials: false
+          path: ${{ env.RESULTS_DOWNLOAD_DIR }}
 
       - name: Checkout repository for publication
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: publication
+          ref: ${{ env.RESULTS_BRANCH }}
 
-      - name: Checkout dashboard validator
+      - name: Checkout publication validation source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          repository: ROCm/rocm-systems
-          path: dashboard
+          path: rocm-systems
+          ref: ${{ github.sha }}
           persist-credentials: false
-          sparse-checkout: emulation/rocjitsu/website
 
-      - name: Set up publisher Python
+      - name: Set up publication validation Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
 
-      - name: Publish dashboard-ready result
+      - name: Install publication validation dependencies
+        run: python -m pip install -r "${ROCJITSU_SOURCE_DIR}/website/dashboard/scripts/dashboard-data/requirements-test.txt"
+
+      - name: Fill publication metadata
+        run: |
+          set -euo pipefail
+          DIAGNOSTICS_DIR="${RUNNER_TEMP}/dashboard-publication-diagnostics"
+          CANDIDATE_FILE="${DIAGNOSTICS_DIR}/candidate.json"
+          printf 'DIAGNOSTICS_DIR=%s\nCANDIDATE_FILE=%s\n' \
+            "${DIAGNOSTICS_DIR}" "${CANDIDATE_FILE}" >> "${GITHUB_ENV}"
+          mkdir -p "${DIAGNOSTICS_DIR}"
+          TRIGGER=
+          case "${GITHUB_EVENT_NAME}" in
+            push) TRIGGER=auto ;;
+            workflow_dispatch) TRIGGER=manual ;;
+          esac
+          jq \
+            --arg id "${RUN_ID}" \
+            --arg branch "${BENCHMARK_BRANCH}" \
+            --arg message "${BENCHMARK_COMMIT_MESSAGE}" \
+            --arg machine "${BENCHMARK_MACHINE}" --arg trigger "${TRIGGER}" \
+            --arg workflow_sha "${WORKFLOW_COMMIT_SHA}" \
+            --arg tensile_sha "${TENSILE_COMMIT_SHA}" \
+            --arg base_branch "${SOURCE_BASE_BRANCH}" --arg base_sha "${SOURCE_BASE_SHA}" \
+            --arg pr_number "${SOURCE_PULL_REQUEST_NUMBER}" --arg pr_url "${SOURCE_PULL_REQUEST_URL}" '
+              def known: if . == "" then null else . end;
+
+              # A checkout message describes the measurement only at the same SHA.
+              (if .provenance.rocjitsu.rocjitsu_commit_sha == $workflow_sha
+               then ($message | known) else null end) as $source_message |
+              (if $base_branch != "" and $base_sha != ""
+               then {branch: $base_branch, commit: $base_sha} else null end) as $source_base |
+              (if $pr_number == "" then null
+               elif $pr_url == "" then {number: ($pr_number | tonumber)}
+               else {number: ($pr_number | tonumber), url: $pr_url} end) as $pull_request |
+
+              .publication.id = $id |
+              .publication.source.branch = ($branch | known) |
+              .publication.source.message = $source_message |
+              .publication.source.base = $source_base |
+              .publication.source.pull_request = $pull_request |
+              .publication.trigger = ($trigger | known) |
+              .publication.machine_label = ($machine | known) |
+              .publication.workflow_commit_sha = ($workflow_sha | known) |
+              .publication.tensile_commit_sha = ($tensile_sha | known)
+            ' "${RESULTS_DOWNLOAD_DIR}/run.json" > "${CANDIDATE_FILE}"
+
+      - name: Validate publication candidate
+        run: |
+          : "${CANDIDATE_FILE:?}"
+          python -m pytest -q "${ROCJITSU_SOURCE_DIR}/website/dashboard/scripts/dashboard-data/test_publication_candidate.py"
+
+      - name: Store immutable run
         working-directory: publication
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          RUN_ID="github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
-          TRIGGER=auto
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            TRIGGER=manual
+          set -euo pipefail
+          if [[ "${BENCHMARK_BRANCH}" == develop ]]; then
+            RUN_GROUP=default-branch
+          else
+            RUN_GROUP=side-branches
           fi
-          # Read metadata before switching this checkout to the results branch.
-          COMMIT_MESSAGE="$(git show -s --format=%s "${GITHUB_SHA}")"
+          RUN_PATH="runs/${RUN_GROUP}/${RUN_ID}.json"
+          RUN_FILE="${DATA_DIR}/${RUN_PATH}"
+          INDEX_FILE="${DATA_DIR}/index.json"
 
-          MAX_ATTEMPTS=20
-          for ATTEMPT in $(seq 1 "${MAX_ATTEMPTS}"); do
-            # Reconstruct every attempt from the latest results branch instead
-            # of rebasing a commit containing a stale generated index.
-            git reset --hard HEAD
-            git clean -ffd
-
-            set +e
-            git ls-remote --exit-code --heads origin \
-              "refs/heads/${RESULTS_BRANCH}" >/dev/null
-            REMOTE_STATUS=$?
-            set -e
-            if [[ "${REMOTE_STATUS}" == 0 ]]; then
-              git fetch --no-tags origin \
-                "+refs/heads/${RESULTS_BRANCH}:refs/remotes/origin/${RESULTS_BRANCH}"
-              git switch --detach "refs/remotes/origin/${RESULTS_BRANCH}"
-            elif [[ "${REMOTE_STATUS}" == 2 ]]; then
-              git switch --orphan \
-                "publish-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${ATTEMPT}"
-              git rm -rf --ignore-unmatch .
-            else
-              exit "${REMOTE_STATUS}"
-            fi
-
-            (
-              cd "${CORPUS_SOURCE_DIR}"
-              python -m benchmarks.dashboard_publish \
-                --raw-run "${GITHUB_WORKSPACE}/incoming/run.json" \
-                --data-dir "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data" \
-                --run-id "${RUN_ID}" \
-                --repository "https://github.com/${GITHUB_REPOSITORY}" \
-                --environment-id "rocjitsu-benchmark-u2404-4150afe4-rocm-10.1.0a20260812" \
-                --expected-sha "${GITHUB_SHA}" \
-                --expected-corpus-sha "${CORPUS_SHA}" \
-                --machine-id "${BENCHMARK_MACHINE}" \
-                --trigger "${TRIGGER}" \
-                --branch develop \
-                --commit-message "${COMMIT_MESSAGE}" \
-                --source-ref "${GITHUB_REF_NAME}" \
-                --is-beta
-            )
-
-            node "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/scripts/validate-dashboard-data.mjs" \
-              "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data"
-
-            git add rocjitsu-dashboard/data
-            if git diff --cached --quiet; then
-              echo "Dashboard run ${RUN_ID} is already published"
-              exit 0
-            fi
-            git commit --signoff \
-              -m "Publish rocjitsu benchmark run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
-            if git push origin "HEAD:refs/heads/${RESULTS_BRANCH}"; then
-              exit 0
-            fi
-            if [[ "${ATTEMPT}" == "${MAX_ATTEMPTS}" ]]; then
+          # Check before writing so publication cannot follow a link outside data.
+          for PATH_COMPONENT in \
+            "${PWD}/rocjitsu-dashboard" "${DATA_DIR}" "${INDEX_FILE}" "${DATA_DIR}/runs" \
+            "${DATA_DIR}/runs/${RUN_GROUP}" "${RUN_FILE}"; do
+            if [[ -L "${PATH_COMPONENT}" ]]; then
+              echo "::error::Publication path is a symbolic link: ${PATH_COMPONENT}"
               exit 1
             fi
-            DELAY=$((ATTEMPT * 2))
-            if ((DELAY > 30)); then
-              DELAY=30
-            fi
-            sleep "$((DELAY + RANDOM % 5))"
           done
+
+          # Refuse unsafe or conflicting index entries before placing any new run.
+          if [[ -e "${INDEX_FILE}" ]]; then
+            if ! jq -e '
+              type == "object" and (.runFiles | type == "array") and
+              all(.runFiles[]; type == "string" and
+                test("^runs/(default-branch|side-branches)/[A-Za-z0-9][A-Za-z0-9._-]*\\.json$")) and
+              ((.runFiles | unique | length) == (.runFiles | length))
+            ' "${INDEX_FILE}" > /dev/null; then
+              echo "::error::Invalid publication index: ${INDEX_FILE}"
+              exit 1
+            fi
+          fi
+          # Publication retries retain the benchmark attempt's immutable ID.
+          mkdir -p "${DATA_DIR}/runs/${RUN_GROUP}"
+          if [[ -e "${RUN_FILE}" ]]; then
+            if ! cmp -s -- "${CANDIDATE_FILE}" "${RUN_FILE}"; then
+              echo "::error::Conflicting immutable run: ${RUN_FILE}"
+              exit 1
+            fi
+          else
+            (set -o noclobber; cat "${CANDIDATE_FILE}" > "${RUN_FILE}")
+          fi
+          printf 'RUN_PATH=%s\nRUN_FILE=%s\nINDEX_FILE=%s\n' \
+            "${RUN_PATH}" "${RUN_FILE}" "${INDEX_FILE}" >> "${GITHUB_ENV}"
+
+      - name: Update run index
+        working-directory: publication
+        run: |
+          set -euo pipefail
+          if [[ -e "${INDEX_FILE}" ]]; then
+            # An indexed retry must preserve both generatedAt and existing formatting.
+            if jq -e --arg path "${RUN_PATH}" '.runFiles | index($path) != null' \
+              "${INDEX_FILE}" > /dev/null; then
+              echo "Run is already indexed: ${RUN_PATH}"
+              exit 0
+            fi
+          fi
+          INDEX_TEMP="$(mktemp "${DATA_DIR}/.index.XXXXXX")"
+          trap 'rm -f -- "${INDEX_TEMP}"' EXIT
+          GENERATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [[ -e "${INDEX_FILE}" ]]; then
+            jq --arg path "${RUN_PATH}" --arg now "${GENERATED_AT}" \
+              '.runFiles += [$path] | .generatedAt = $now' "${INDEX_FILE}" > "${INDEX_TEMP}"
+          else
+            jq -n --arg path "${RUN_PATH}" --arg now "${GENERATED_AT}" \
+              '{generatedAt: $now, runFiles: [$path]}' > "${INDEX_TEMP}"
+          fi
+          mv "${INDEX_TEMP}" "${INDEX_FILE}"
+
+      - name: Commit and push publication
+        working-directory: publication
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The immutable run and its index entry belong in the same commit.
+          git add -- "${RUN_FILE}" "${INDEX_FILE}"
+          if git diff --cached --quiet; then
+            echo "Run is already published: ${RUN_ID}"
+            exit 0
+          fi
+          git commit --signoff -m "Publish rocjitsu benchmark run ${GITHUB_RUN_ID}.${BENCHMARK_RUN_ATTEMPT}" \
+            2>&1 | tee "${DIAGNOSTICS_DIR}/commit.log"
+          git push origin "HEAD:refs/heads/${RESULTS_BRANCH}" 2>&1 | tee "${DIAGNOSTICS_DIR}/push.log"
+
+      - name: Upload publication diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocjitsu-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          # This also resolves if metadata fails before exporting its environment.
+          path: ${{ runner.temp }}/dashboard-publication-diagnostics
+          if-no-files-found: warn
+          retention-days: 14

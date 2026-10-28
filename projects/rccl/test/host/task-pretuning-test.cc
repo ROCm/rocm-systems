@@ -70,7 +70,8 @@ class TaskPreTuning_LocallyValidRegistrations {
 // Routes ncclDevrFindWindow to a distinct window per buffer so send and recv cannot be confused.
 class TaskPreTuning_Windows {
  public:
-  TaskPreTuning_Windows(const void* sendbuff, void* sendUserPtr, const void* recvbuff, void* recvUserPtr)
+  TaskPreTuning_Windows(const void* sendbuff, void* sendUserPtr, const void* recvbuff, void* recvUserPtr,
+                        int winFlags = NCCL_WIN_COLL_SYMMETRIC)
     : sendbuff_(sendbuff), recvbuff_(recvbuff),
       hook_(g_devrFindWindow, [this](struct ncclComm*, void const* ptr, struct ncclDevrWindow** out) {
         *out = ptr == sendbuff_ ? sendWindow() : (ptr == recvbuff_ ? recvWindow() : nullptr);
@@ -78,6 +79,8 @@ class TaskPreTuning_Windows {
       }) {
     sendWindow_.userPtr = sendUserPtr;
     recvWindow_.userPtr = recvUserPtr;
+    sendWindow_.winFlags = winFlags;
+    recvWindow_.winFlags = winFlags;
   }
 
   struct ncclDevrWindow* sendWindow() { return sendbuff_ != nullptr ? &sendWindow_ : nullptr; }
@@ -142,10 +145,11 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_UnscaledColl_CopiesTheRawFiel
   EXPECT_EQ(1, in.nWorks);
   EXPECT_EQ(1, in.numPipeOps);
   EXPECT_EQ(kCollSendBytes, in.nBytes);
-  // fillCollTuningInput is a partial fill: these four stay the caller's, and the scheduler resolves them.
+  // Only an AllGather can be in place.
+  EXPECT_EQ(0, in.inPlace);
+  // fillCollTuningInput is a partial fill: these three stay the caller's, and the scheduler resolves them.
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.collNetSupport);
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.captured);
-  EXPECT_EQ(TaskPrep_Poisoned<int>(), in.inPlace);
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.CTAPolicy);
 }
 
@@ -296,7 +300,8 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_NvlsSupport_NeedsTheCommFlagA
   }
 }
 
-TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_NoWindows_MeasuresTheAlignmentFromTheRawPointers) {
+// Raw addresses differ by rank, so without windows the answer could too, aligned or not.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_NoWindows_NeverAligned) {
   for (size_t recvGap : {kAlignedGap, kMisalignedGap}) {
     TaskPrepScene scene;
     struct ncclRawTask* raw = scene.NewColl(ncclFuncAllReduce);
@@ -306,7 +311,7 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_NoWindows_MeasuresTheAlignmen
 
     ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
 
-    EXPECT_EQ(recvGap == kAlignedGap, in.symAligned16B) << "recvGap = " << recvGap;
+    EXPECT_FALSE(in.symAligned16B) << "recvGap = " << recvGap;
   }
 }
 
@@ -328,8 +333,10 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_BuffersInWindows_MeasuresTheA
   }
 }
 
-// One window only: a single (sendWin && recvWin) gate over both offsets would read this pair as misaligned.
-TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheRecvBufferInAWindow_StillOffsetsByItsUserPtr) {
+// One window only: the other buffer's raw address differs by rank. Its window-relative offsets align, so
+// only the both-windows rule reports it unaligned. symAligned16B is bool and poison reads back as true, so
+// these need a written false.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheRecvBufferInAWindow_NotAligned) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
   raw->coll.sendbuff = TaskPrep_Addr(kSendAddr);
   raw->coll.recvbuff = TaskPrep_Addr(kRecvWindowAlignedAddr);
@@ -340,11 +347,10 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheRecvBufferInAWindow_St
 
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
 
-  EXPECT_TRUE(in.symAligned16B);
+  EXPECT_FALSE(in.symAligned16B);
 }
 
-// The send twin: symAligned16B is bool, so poison reads back as true and only a written false can fail this.
-TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheSendBufferInAWindow_StillOffsetsByItsUserPtr) {
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheSendBufferInAWindow_NotAligned) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
   raw->coll.sendbuff = TaskPrep_Addr(kSendAddr);
   raw->coll.recvbuff = TaskPrep_Addr(kRawAlignedRecvAddr);
@@ -355,6 +361,44 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheSendBufferInAWindow_St
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
 
   EXPECT_FALSE(in.symAligned16B);
+}
+
+// The operands of FillCollTuningInput_BuffersInWindows_MeasuresTheAlignmentFromTheUserPtr, which align in
+// symmetric windows.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_WindowsNotSymmetric_NotAligned) {
+  struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
+  raw->coll.sendbuff = TaskPrep_Addr(kSendAddr);
+  raw->coll.recvbuff = TaskPrep_Addr(kRecvAddr);
+  TaskPreTuning_Windows windows(TaskPrep_Addr(kSendAddr), TaskPrep_Addr(kSendWindowAddr), TaskPrep_Addr(kRecvAddr),
+                                TaskPrep_Addr(kRecvWindowAddr), /*winFlags=*/0);
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
+
+  EXPECT_FALSE(in.symAligned16B);
+}
+
+// In place on rank 2 of 4: the operands are 2 * slice apart in one window. With a 24 B slice that is 48 B,
+// which passes the plain modulo-16 check, so only the func and slice size passed to ncclSymAligned16B
+// report it unaligned.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_InPlaceSlice_AlignedOnlyWhenTheSliceIs) {
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
+    for (size_t sliceBytes : {size_t(24), size_t(32)}) {
+      TaskPrepScene scene(kRanks, /*rank=*/2);
+      struct ncclRawTask* raw = scene.NewColl(func, ncclInt8);
+      raw->coll.count = sliceBytes;
+      void* window = TaskPrep_Addr(kSendWindowAddr);
+      void* slice = TaskPrep_Addr(kSendWindowAddr + 2 * sliceBytes);
+      raw->coll.sendbuff = func == ncclFuncAllGather ? slice : window;
+      raw->coll.recvbuff = func == ncclFuncAllGather ? window : slice;
+      TaskPreTuning_Windows windows(raw->coll.sendbuff, window, raw->coll.recvbuff, window);
+      ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+      ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
+
+      EXPECT_EQ(sliceBytes % 16 == 0, in.symAligned16B) << "func " << int(func) << " slice " << sliceBytes;
+    }
+  }
 }
 
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_UnscaledCollRegistrationsCoverBothBuffers_SetsRegBuff) {

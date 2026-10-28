@@ -91,9 +91,20 @@ target_compile_definitions(hipfile-trace PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(hipfile-trace PRIVATE hip::host ${hipfile_TARGET} Threads::Threads)
 target_compile_options(hipfile-trace PRIVATE ${_FLAGS})
 
-if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET hipfile-trace)
+# GPU-direct storage I/O workload for hipFile telemetry. Built whenever the hipFile
+# runtime is present (same gate as hipfile-trace). Telemetry pytest cases that need
+# the in-tree collector skip separately via require_hipfile_collector.
+add_executable(hipfile-io hipfile-io.cpp)
+target_compile_definitions(hipfile-io PRIVATE __HIP_PLATFORM_AMD__)
+target_compile_options(hipfile-io PRIVATE -W -Wall)
+target_link_libraries(hipfile-io PRIVATE hip::host ${hipfile_TARGET})
+if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
+    target_compile_options(hipfile-io PRIVATE -g1)
+endif()
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
-        TARGETS hipfile-trace
+        TARGETS hipfile-trace hipfile-io
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
         COMPONENT rocprofiler-systems-examples
     )

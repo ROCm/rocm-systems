@@ -32,7 +32,7 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 {
 
 // ============================================================================
-// Test stub policies (replace real cache/perfetto/settings to avoid globals)
+// Test stub policies (replace real cache/settings to avoid globals)
 // ============================================================================
 
 struct captured_sample
@@ -63,37 +63,25 @@ struct test_cache_policy
         {
             return;
         }
-        get_captured_samples().push_back({ device_id, timestamp, values });
+        get_captured_samples().push_back(
+            { .device_id = device_id, .timestamp = timestamp, .values = values });
     }
-};
-
-struct test_perfetto_policy
-{
-    using counter_track = void;
-
-    template <typename DeviceEntries>
-    static void init_storage(const DeviceEntries&)
-    {}
-    static void setup_counter_tracks(size_t, const std::vector<counter_metadata>&) {}
-    static void store_sample(size_t, const metrics&, std::uint64_t) {}
-    static void post_process(const enabled_metrics&) {}
 };
 
 struct test_settings_policy
 {
     static enabled_metrics get_gpu_perf_counter_enabled_metrics()
     {
-        return enabled_metrics{ { counter_definition{ "SQ_WAVES", 0 },
-                                  counter_definition{ "SQ_BUSY_CYCLES", 0 } } };
+        return enabled_metrics{
+            { counter_definition{ .name = "SQ_WAVES", .device_index = 0 },
+              counter_definition{ .name = "SQ_BUSY_CYCLES", .device_index = 0 } }
+        };
     }
-
-    static bool get_use_perfetto_legacy_metrics() { return false; }
 };
 
 struct test_config
 {
     using SettingsApi = test_settings_policy;
-    using PerfettoApi = test_perfetto_policy;
     using CacheApi    = test_cache_policy;
 };
 
@@ -142,7 +130,7 @@ setup_provider_expectations(const std::shared_ptr<MockBackendImpl>& mock,
                               MockBackend::available_counters_cb_t cb, void* user_data) {
             std::vector<MockBackend::counter_id_t> ids;
             ids.reserve(counters.size());
-            for(auto& c : counters)
+            for(auto const& c : counters)
             {
                 ids.push_back(c.id);
             }
@@ -155,9 +143,14 @@ setup_provider_expectations(const std::shared_ptr<MockBackendImpl>& mock,
         EXPECT_CALL(*mock, query_counter_details(::testing::Field(
                                &MockBackend::counter_id_t::handle, c.id.handle)))
             .WillRepeatedly([&c](MockBackend::counter_id_t) {
-                return std::vector<counter_metadata>{
-                    { c.id.handle, c.name, "", "", "", false, false, {} }
-                };
+                return std::vector<counter_metadata>{ { .counter_id  = c.id.handle,
+                                                        .name        = c.name,
+                                                        .description = "",
+                                                        .block       = "",
+                                                        .expression  = "",
+                                                        .is_constant = false,
+                                                        .is_derived  = false,
+                                                        .dimensions  = {} } };
             });
     }
 
@@ -231,16 +224,16 @@ TEST_F(SdkPmcCollectorWorkflowTest, SingleGpuWorkflow)
     constexpr std::uint64_t k_agent_handle   = 42;
     constexpr std::uint32_t k_context_handle = 100;
 
-    auto agent = make_agent(k_agent_handle, 0, "GPU 0");
+    auto const agent = make_agent(k_agent_handle, 0, "GPU 0");
 
     std::vector<counter_setup> counters = {
-        { MockBackend::counter_id_t{ 10 }, "SQ_WAVES" },
-        { MockBackend::counter_id_t{ 20 }, "SQ_BUSY_CYCLES" },
+        { .id = MockBackend::counter_id_t{ 10 }, .name = "SQ_WAVES" },
+        { .id = MockBackend::counter_id_t{ 20 }, .name = "SQ_BUSY_CYCLES" },
     };
 
     setup_provider_expectations(m_mock, k_agent_handle, counters, k_context_handle);
 
-    auto sample_call_count = std::make_shared<int>(0);
+    auto const sample_call_count = std::make_shared<int>(0);
     EXPECT_CALL(*m_mock, sample_device_counting_service(
                              ::testing::Field(&MockBackend::context_id_t::handle, 100u),
                              _, _, _, _))
@@ -257,7 +250,7 @@ TEST_F(SdkPmcCollectorWorkflowTest, SingleGpuWorkflow)
                 return MockBackend::status_success;
             });
 
-    auto provider = std::make_shared<MockProvider>(
+    auto const provider = std::make_shared<MockProvider>(
         std::vector<std::shared_ptr<rocprofsys::agent>>{ agent },
         test_settings_policy::get_gpu_perf_counter_enabled_metrics());
     provider->start();
@@ -290,14 +283,14 @@ TEST_F(SdkPmcCollectorWorkflowTest, SingleGpuWorkflow)
 
 TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
 {
-    auto agent0 = make_agent(10, 0, "GPU 0");
-    auto agent1 = make_agent(11, 1, "GPU 1");
+    auto const agent0 = make_agent(10, 0, "GPU 0");
+    auto const agent1 = make_agent(11, 1, "GPU 1");
 
-    std::vector<counter_setup> counters0 = {
-        { MockBackend::counter_id_t{ 100 }, "SQ_WAVES" },
+    std::vector<counter_setup> const counters0 = {
+        { .id = MockBackend::counter_id_t{ 100 }, .name = "SQ_WAVES" },
     };
-    std::vector<counter_setup> counters1 = {
-        { MockBackend::counter_id_t{ 200 }, "SQ_WAVES" },
+    std::vector<counter_setup> const counters1 = {
+        { .id = MockBackend::counter_id_t{ 200 }, .name = "SQ_WAVES" },
     };
 
     // Agent 0
@@ -325,17 +318,27 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
     EXPECT_CALL(*m_mock, query_counter_details(
                              ::testing::Field(&MockBackend::counter_id_t::handle, 100u)))
         .WillRepeatedly([](MockBackend::counter_id_t) {
-            return std::vector<counter_metadata>{
-                { 100, "SQ_WAVES", "", "", "", false, false, {} }
-            };
+            return std::vector<counter_metadata>{ { .counter_id  = 100,
+                                                    .name        = "SQ_WAVES",
+                                                    .description = "",
+                                                    .block       = "",
+                                                    .expression  = "",
+                                                    .is_constant = false,
+                                                    .is_derived  = false,
+                                                    .dimensions  = {} } };
         });
 
     EXPECT_CALL(*m_mock, query_counter_details(
                              ::testing::Field(&MockBackend::counter_id_t::handle, 200u)))
         .WillRepeatedly([](MockBackend::counter_id_t) {
-            return std::vector<counter_metadata>{
-                { 200, "SQ_WAVES", "", "", "", false, false, {} }
-            };
+            return std::vector<counter_metadata>{ { .counter_id  = 200,
+                                                    .name        = "SQ_WAVES",
+                                                    .description = "",
+                                                    .block       = "",
+                                                    .expression  = "",
+                                                    .is_constant = false,
+                                                    .is_derived  = false,
+                                                    .dimensions  = {} } };
         });
 
     EXPECT_CALL(*m_mock, create_counter_config(_, _, _, _))
@@ -388,12 +391,12 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
             return MockBackend::status_success;
         });
 
-    auto multi_gpu_enabled = enabled_metrics{ {
-        counter_definition{ "SQ_WAVES", 0 },
-        counter_definition{ "SQ_WAVES", 1 },
+    auto const multi_gpu_enabled = enabled_metrics{ {
+        counter_definition{ .name = "SQ_WAVES", .device_index = 0 },
+        counter_definition{ .name = "SQ_WAVES", .device_index = 1 },
     } };
 
-    auto provider = std::make_shared<MockProvider>(
+    auto const provider = std::make_shared<MockProvider>(
         std::vector<std::shared_ptr<rocprofsys::agent>>{ agent0, agent1 },
         multi_gpu_enabled);
     provider->start();
@@ -426,10 +429,10 @@ TEST_F(SdkPmcCollectorWorkflowTest, SampleFailureProducesEmptyMetrics)
     constexpr std::uint64_t k_agent_handle   = 42;
     constexpr std::uint32_t k_context_handle = 100;
 
-    auto agent = make_agent(k_agent_handle, 0, "GPU 0");
+    auto const agent = make_agent(k_agent_handle, 0, "GPU 0");
 
     std::vector<counter_setup> counters = {
-        { MockBackend::counter_id_t{ 10 }, "SQ_WAVES" },
+        { .id = MockBackend::counter_id_t{ 10 }, .name = "SQ_WAVES" },
     };
 
     setup_provider_expectations(m_mock, k_agent_handle, counters, k_context_handle);
@@ -437,7 +440,7 @@ TEST_F(SdkPmcCollectorWorkflowTest, SampleFailureProducesEmptyMetrics)
     EXPECT_CALL(*m_mock, sample_device_counting_service(_, _, _, _, _))
         .WillRepeatedly(Return(MockBackend::status_error));
 
-    auto provider = std::make_shared<MockProvider>(
+    auto const provider = std::make_shared<MockProvider>(
         std::vector<std::shared_ptr<rocprofsys::agent>>{ agent },
         test_settings_policy::get_gpu_perf_counter_enabled_metrics());
     provider->start();

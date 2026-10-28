@@ -40,6 +40,7 @@ time_trace=false
 use_ninja=false
 force_reduce_pipeline=false
 enable_tdm_simple=false
+enable_tdm_prim_ll128=false
 generate_sym_kernels=true
 device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
@@ -63,7 +64,7 @@ quiet_warnings=false
 #                   Does NOT enable alltoall_wg offload.
 build_rocshmem_support=false
 build_rocshmem_gin=false
-rocshmem_mono_hash="33d980d7ca1f0bf90cfe4ff9106310abcf47b550"
+rocshmem_mono_hash="f636cc5be66716349dd9ed42eebb7b4d651fbb20"
 custom_cmake_options=""
 
 # #################################################
@@ -74,7 +75,7 @@ function display_help()
     echo "RCCL build & installation helper script"
     echo " Options:"
     echo "       --address-sanitizer     Build with address sanitizer enabled"
-    echo "       --all_unrolls           Build every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es) instead of the per-arch default set"
+    echo "       --all_unrolls           Also build unroll factors 8 and 16 on top of the per-arch default set"
     echo "       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)"
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
     echo "       --debug                 Build debug library"
@@ -91,7 +92,8 @@ function display_help()
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
     echo "       --enable-rccl-ep-tests  Build the rccl_ep multi-GPU tests (requires --enable-mpi-tests and a runtime with working cuMem symmetric memory)"
-    echo "       --enable-tdm-simple     Build the experimental gfx1250 TDM SIMPLE copy path"
+    echo "       --enable-tdm-simple     Build the experimental gfx1250 TDM SIMPLE copy and reduce paths"
+    echo "       --enable-tdm-prim-ll128 Build the experimental gfx1250 TDM LL128 user-buffer path"
     echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "    -h|--help                  Prints this help message"
@@ -119,7 +121,8 @@ function display_help()
     echo "       --verbose               Show compile commands"
     echo ""
     echo "  Available RCCL-specific CMake options for --cmake-options:"
-    echo "    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env, gin, mixed, proxytrace, accl (default: OFF)"
+    echo "    -DBUILD_PROFILER_ACCL=OFF              Omit the ACCL timing-decomposition profiler (default: ON on Linux)"
+    echo "    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env, gin, mixed, proxytrace (default: OFF)"
     echo "    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)"
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
@@ -148,7 +151,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,enable-tdm-prim-ll128,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -181,6 +184,7 @@ while true; do
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
          --enable-rccl-ep-tests)     enable_rccl_ep_tests=true;                                                                        shift ;;
+         --enable-tdm-prim-ll128)    enable_tdm_prim_ll128=true;                                                                       shift ;;
          --enable-tdm-simple)        enable_tdm_simple=true;                                                                           shift ;;
     -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
@@ -399,7 +403,7 @@ if [[ "${build_local_gpu_only}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_LOCAL_GPU_TARGET_ONLY=ON"
 fi
 
-# Build every unroll factor for the targeted arch(es)
+# Also build unroll 8 and 16 on top of the per-arch default
 if [[ "${build_all_unrolls}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_ALL_UNROLLS=ON"
 fi
@@ -476,9 +480,13 @@ if [[ "${force_reduce_pipeline}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DFORCE_REDUCE_PIPELINING=ON"
 fi
 
-# Experimental gfx1250 TDM SIMPLE copy path
+# Experimental gfx1250 TDM SIMPLE copy and reduce paths
 if [[ "${enable_tdm_simple}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_TDM_SIMPLE=ON"
+fi
+
+if [[ "${enable_tdm_prim_ll128}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_TDM_PRIM_LL128=ON"
 fi
 
 # Disable symmetric memory kernels

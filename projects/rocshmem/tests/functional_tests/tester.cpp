@@ -80,6 +80,7 @@
 #include "tile_broadcast_tester.hpp"
 #include "tile_allgather_tester.hpp"
 #include "tile_reduce_tester.hpp"
+#include "tile_nd_rma_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
@@ -817,6 +818,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Wave Signal Fetch";
       testers.push_back(new SignalingOperationsTester(args));
       break;
+    case SignalAddTestType:
+      test_name = "Signal Add";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
+    case SignalSetTestType:
+      test_name = "Signal Set";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
+    case SignalWaitUntilTestType:
+      test_name = "Signal Wait Until";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
     case FloodPutTestType:
       test_name = "Flood Put (multidirectional)";
       testers.push_back(new FloodTester(args));
@@ -972,6 +985,78 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TileGetWGColumnMajorTestType:
       test_name = "Tile Get WG Column-Major";
       testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutRowMajorStartCoordTestType:
+      test_name = "Tile Put Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetRowMajorStartCoordTestType:
+      test_name = "Tile Get Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWaveRowMajorStartCoordTestType:
+      test_name = "Tile Put Wave Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveRowMajorStartCoordTestType:
+      test_name = "Tile Get Wave Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGRowMajorStartCoordTestType:
+      test_name = "Tile Put WG Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGRowMajorStartCoordTestType:
+      test_name = "Tile Get WG Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePut3DTestType:
+      test_name = "Tile Put 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGet3DTestType:
+      test_name = "Tile Get 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWG3DTestType:
+      test_name = "Tile Put WG 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWG3DTestType:
+      test_name = "Tile Get WG 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePut4DTestType:
+      test_name = "Tile Put 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGet4DTestType:
+      test_name = "Tile Get 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWG4DTestType:
+      test_name = "Tile Put WG 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWG4DTestType:
+      test_name = "Tile Get WG 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWave3DTestType:
+      test_name = "Tile Put Wave 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWave3DTestType:
+      test_name = "Tile Get Wave 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWave4DTestType:
+      test_name = "Tile Put Wave 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWave4DTestType:
+      test_name = "Tile Get Wave 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
       break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
@@ -1240,6 +1325,9 @@ bool Tester::peLaunchesKernel() {
     case PutmemOnStreamTestType:
     case PutmemSignalOnStreamTestType:
     case SignalWaitUntilOnStreamTestType:
+    case SignalAddTestType:
+    case SignalSetTestType:
+    case SignalWaitUntilTestType:
     case FloodPutTestType:
     case FloodPutNBITestType:
     case FloodPTestType:

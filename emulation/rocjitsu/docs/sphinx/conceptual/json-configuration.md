@@ -10,7 +10,7 @@ rocJITsu describes GPU topologies declaratively in JSON. A single
 configuration file defines the simulation parameters, the component
 hierarchy (SoC, XCDs, shader engines, compute units, caches, and
 memory), and the link connectivity between components. The VM creation
-functions `rj_vm_create` and `rj_vm_create_from_string` parse the JSON
+functions parse the JSON
 against an embedded FlatBuffers schema, construct the full component
 hierarchy, and load any program binaries before returning a ready-to-run
 virtual machine handle.
@@ -44,24 +44,46 @@ objects for the virtual machine and the topology.
 | `max_ticks` | int | Maximum simulation ticks. A value of `0` means unlimited. |
 | `num_threads` | int | Simdojo engine partitions, clamped to the aggregate XCD count. |
 | `cpu_dispatch_threads` | int | Inclusive dispatch width per SoC; omitted/0 selects from preferred allocations, 1 forces serial. |
-| `cpu_thread_budget` | int | Selection ceiling; omitted/0 uses affinity capped at 32, positive values override it. |
+| `cpu_thread_budget` | int | Selection ceiling; omitted/0 uses affinity and target allocations. Positive values override the budget. |
 | `async_helper_threads` | int | Shared MMA helpers: -1 selects the table, 0 disables, 1–128 overrides. |
+| `wait_checking` | string | Override diagnostics on every CU and GPU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
 | `thread_allocations` | array | Preferred engine, dispatch and helper allocations for this target. Largest fitting effective allocation wins. |
 | `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |
 | `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
+
+An optional `system` describes named nodes, their ordered GPU instances,
+endpoints, and links. `local_node` selects the node instantiated by this VM.
+For a multi-node manifest, pass a node ID to `rj_vm_create_for_node` or
+`rj_vm_create_from_string_for_node`, or put that ID in `local_node` and use
+the original creators. A NULL or empty API selector uses JSON `local_node`;
+without either selector, the manifest must contain exactly one node. Only
+the selected node's GPUs become local devices; links are descriptive until
+the corresponding modeled transport admits an operation.
 
 `num_threads` and `cpu_dispatch_threads` control different layers.
 `num_threads` partitions whole XCD subtrees across Simdojo engine threads. A
 single XCD is never split between engine partitions. In functional mode,
 `cpu_dispatch_threads` controls the host parallelism used to execute accepted
 CU work. Its pool is shared by all command processors in a SoC, and each width
-is clamped to per-CP CU capacity. The selection counts engines, all retained
+is bounded by one plus the sum of CUs-1 across nonempty XCDs. Each submission
+still uses at most its active CU count. The selection counts engines, all retained
 dispatch workers and shared helpers: E + sum(D - 1) + H. Explicit knobs
 override the selected allocation; configs without a table use serial defaults.
 Clocked mode always uses serial dispatch. See the source
 [configuration guide](../../configuration.md)
 for table examples and `rocjitsu --thread-budget-table`.
 `rocjitsu --cpu-thread-budget N` replaces JSON `cpu_thread_budget` for that launch.
+
+Ordinary memory wait warnings are enabled by default; gfx1250 XCNT replay-source
+checks are off. If warnings appear incorrect or checking slows a workload, use
+`rocjitsu --config <file> --wait-checking=off -- <command>` to disable both.
+`--wait-checking=on` enables ordinary checks only; `--wait-checking=all` also
+enables XCNT. The flag overrides JSON settings on every CU and GPU for the launch,
+leaving the source file unchanged. Omitting it preserves JSON settings and defaults.
+`mirage run` accepts the same flag with profiles or `--config`, including alongside
+`--cpu-thread-budget` in daemon and in-process modes.
+See the source [memory wait diagnostics guide](../../memory-wait-diagnostics.md)
+for coverage, per-CU controls and launch-mode restrictions.
 
 `exec_mode` is matched literally. Only `"clocked"` selects cycle-accurate
 mode. If the field is omitted or set to `"functional"`, `"cycle"`, or any

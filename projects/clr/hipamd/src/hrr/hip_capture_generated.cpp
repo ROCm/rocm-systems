@@ -46,6 +46,7 @@
 #include "utils/debug.hpp"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -207,6 +208,11 @@ static hipError_t capture_hipChooseDevice(int* device, const hipDeviceProp_tR060
     a.prop = reinterpret_cast<uint64_t>(prop);
     if (prop) {
       std::memcpy(a.prop_bytes, prop, sizeof(hipDeviceProp_t));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, uuid), 0, sizeof(prop->uuid));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, luid), 0, sizeof(prop->luid));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, pciDomainID), 0, sizeof(prop->pciDomainID));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, pciBusID), 0, sizeof(prop->pciBusID));
+      std::memset(a.prop_bytes + offsetof(hipDeviceProp_t, pciDeviceID), 0, sizeof(prop->pciDeviceID));
       a.prop_present = 1;
     }
     hrr_cap::writer::write_event_raw(HRR_API_HIPCHOOSEDEVICE, &a.hdr, sizeof(a));
@@ -224,6 +230,9 @@ static hipError_t capture_hipChooseDeviceR0000(int* device, const hipDeviceProp_
     a.properties = reinterpret_cast<uint64_t>(properties);
     if (properties) {
       std::memcpy(a.properties_bytes, properties, sizeof(hipDeviceProp_tR0000));
+      std::memset(a.properties_bytes + offsetof(hipDeviceProp_tR0000, pciDomainID), 0, sizeof(properties->pciDomainID));
+      std::memset(a.properties_bytes + offsetof(hipDeviceProp_tR0000, pciBusID), 0, sizeof(properties->pciBusID));
+      std::memset(a.properties_bytes + offsetof(hipDeviceProp_tR0000, pciDeviceID), 0, sizeof(properties->pciDeviceID));
       a.properties_present = 1;
     }
     hrr_cap::writer::write_event_raw(HRR_API_HIPCHOOSEDEVICER0000, &a.hdr, sizeof(a));
@@ -996,6 +1005,9 @@ static hipError_t capture_hipDrvGraphAddMemcpyNode(hipGraphNode_t* phGraphNode, 
               "of %u dependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipDrvGraphAddMemcpyNode",
+            "only the first 16 dependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.dependencies_bytes, dependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1165,6 +1177,8 @@ static hipError_t capture_hipExtLaunchMultiKernelMultiDevice(hipLaunchParams* la
     a.launchParamsList = reinterpret_cast<uint64_t>(launchParamsList);
     a.numDevices = static_cast<decltype(a.numDevices)>(numDevices);
     a.flags = static_cast<decltype(a.flags)>(flags);
+    hrr_cap::writer::note_unreplayable("hipExtLaunchMultiKernelMultiDevice",
+        "each hipLaunchParams entry names its kernel by a host function address in the capturing process, and a cooperative multi-device launch cannot be decomposed into per-device launches without breaking the grid-wide barrier it exists for");
     hrr_cap::writer::write_event_raw(HRR_API_HIPEXTLAUNCHMULTIKERNELMULTIDEVICE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1606,6 +1620,9 @@ static hipError_t capture_hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, 
               "of %u pDependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddChildGraphNode",
+            "only the first 16 pDependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1638,6 +1655,9 @@ static hipError_t capture_hipGraphAddDependencies(hipGraph_t graph, const hipGra
               "of %u from entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddDependencies",
+            "only the first 16 from entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.from_bytes, from, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1655,6 +1675,9 @@ static hipError_t capture_hipGraphAddDependencies(hipGraph_t graph, const hipGra
               "of %u to entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddDependencies",
+            "only the first 16 to entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.to_bytes, to, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1687,6 +1710,9 @@ static hipError_t capture_hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGr
               "of %u pDependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddEmptyNode",
+            "only the first 16 pDependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1720,6 +1746,9 @@ static hipError_t capture_hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode,
               "of %u pDependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddEventRecordNode",
+            "only the first 16 pDependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1753,6 +1782,9 @@ static hipError_t capture_hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, h
               "of %u pDependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddEventWaitNode",
+            "only the first 16 pDependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1775,6 +1807,8 @@ static hipError_t capture_hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGra
     a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
     a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
     if (pGraphNode) a.pGraphNode = reinterpret_cast<uint64_t>(*pGraphNode);
+    hrr_cap::writer::note_unreplayable("hipGraphAddHostNode",
+        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDHOSTNODE, &a.hdr, sizeof(a));
   }
   return r;
@@ -1803,6 +1837,9 @@ static hipError_t capture_hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hi
               "of %u pDependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddMemAllocNode",
+            "only the first 16 pDependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1840,6 +1877,9 @@ static hipError_t capture_hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hip
               "of %u pDependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddMemFreeNode",
+            "only the first 16 pDependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1873,6 +1913,9 @@ static hipError_t capture_hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipG
               "of %u pDependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddMemcpyNode",
+            "only the first 16 pDependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1913,6 +1956,9 @@ static hipError_t capture_hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hi
               "of %u pDependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddMemcpyNode1D",
+            "only the first 16 pDependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -1948,6 +1994,9 @@ static hipError_t capture_hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipG
               "of %u pDependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGraphAddMemsetNode",
+            "only the first 16 pDependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.pDependencies_bytes, pDependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -2155,6 +2204,8 @@ static hipError_t capture_hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExe
     a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
     a.node = reinterpret_cast<uint64_t>(node);
     a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
+    hrr_cap::writer::note_unreplayable("hipGraphExecHostNodeSetParams",
+        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHEXECHOSTNODESETPARAMS, &a.hdr, sizeof(a));
   }
   return r;
@@ -2312,6 +2363,8 @@ static hipError_t capture_hipGraphHostNodeSetParams(hipGraphNode_t node, const h
     a.ret         = static_cast<int32_t>(r);
     a.node = reinterpret_cast<uint64_t>(node);
     a.pNodeParams = reinterpret_cast<uint64_t>(pNodeParams);
+    hrr_cap::writer::note_unreplayable("hipGraphHostNodeSetParams",
+        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
     hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHHOSTNODESETPARAMS, &a.hdr, sizeof(a));
   }
   return r;
@@ -2917,10 +2970,8 @@ static hipError_t capture_hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* de
     a.ret         = static_cast<int32_t>(r);
     a.handle = reinterpret_cast<uint64_t>(handle);
     a.devPtr = reinterpret_cast<uint64_t>(devPtr);
-    if (handle) {
-      std::memcpy(a.handle_bytes, handle, sizeof(hipIpcMemHandle_t));
-      a.handle_present = 1;
-    }
+    // *handle is a capability and is not recorded.
+    if (handle) a.handle_present = 1;
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCGETMEMHANDLE, &a.hdr, sizeof(a));
   }
   return r;
@@ -2932,7 +2983,7 @@ static hipError_t capture_hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHa
   if (r == hipSuccess) {
     hrr_args_hipIpcOpenEventHandle a{};
     a.ret         = static_cast<int32_t>(r);
-    std::memcpy(a.handle_bytes, &handle, sizeof(handle));
+    // handle is a capability and is not recorded.
     if (event) a.event = reinterpret_cast<uint64_t>(*event);
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCOPENEVENTHANDLE, &a.hdr, sizeof(a));
   }
@@ -2945,7 +2996,7 @@ static hipError_t capture_hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t h
   if (r == hipSuccess) {
     hrr_args_hipIpcOpenMemHandle a{};
     a.ret         = static_cast<int32_t>(r);
-    std::memcpy(a.handle_bytes, &handle, sizeof(handle));
+    // handle is a capability and is not recorded.
     a.flags = static_cast<decltype(a.flags)>(flags);
     if (devPtr) a.devPtr = reinterpret_cast<uint64_t>(*devPtr);
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCOPENMEMHANDLE, &a.hdr, sizeof(a));
@@ -2989,6 +3040,8 @@ static hipError_t capture_hipLaunchCooperativeKernelMultiDevice(hipLaunchParams*
     a.launchParamsList = reinterpret_cast<uint64_t>(launchParamsList);
     a.numDevices = static_cast<decltype(a.numDevices)>(numDevices);
     a.flags = static_cast<decltype(a.flags)>(flags);
+    hrr_cap::writer::note_unreplayable("hipLaunchCooperativeKernelMultiDevice",
+        "each hipLaunchParams entry names its kernel by a host function address in the capturing process, and a cooperative multi-device launch cannot be decomposed into per-device launches without breaking the grid-wide barrier it exists for");
     hrr_cap::writer::write_event_raw(HRR_API_HIPLAUNCHCOOPERATIVEKERNELMULTIDEVICE, &a.hdr, sizeof(a));
   }
   return r;
@@ -3003,6 +3056,8 @@ static hipError_t capture_hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, 
     a.stream = reinterpret_cast<uint64_t>(stream);
     a.fn = 0;  // non-castable type skipped
     a.userData = reinterpret_cast<uint64_t>(userData);
+    hrr_cap::writer::note_unreplayable("hipLaunchHostFunc",
+        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
     hrr_cap::writer::write_event_raw(HRR_API_HIPLAUNCHHOSTFUNC, &a.hdr, sizeof(a));
   }
   return r;
@@ -3332,6 +3387,8 @@ static hipError_t capture_hipMemImportFromShareableHandle(hipMemGenericAllocatio
     a.osHandle = reinterpret_cast<uint64_t>(osHandle);
     a.shHandleType = static_cast<decltype(a.shHandleType)>(shHandleType);
     if (handle) a.handle = reinterpret_cast<uint64_t>(*handle);
+    hrr_cap::writer::note_unreplayable("hipMemImportFromShareableHandle",
+        "the recorded argument is an OS handle (a POSIX fd or a Win32 HANDLE) belonging to the process that exported it, and the same number in the replaying process names a different object or nothing at all");
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMIMPORTFROMSHAREABLEHANDLE, &a.hdr, sizeof(a));
   }
   return r;
@@ -3446,6 +3503,8 @@ static hipError_t capture_hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_
     a.handle_type = static_cast<decltype(a.handle_type)>(handle_type);
     a.flags = static_cast<decltype(a.flags)>(flags);
     if (mem_pool) a.mem_pool = reinterpret_cast<uint64_t>(*mem_pool);
+    hrr_cap::writer::note_unreplayable("hipMemPoolImportFromShareableHandle",
+        "the recorded argument is an OS handle (a POSIX fd or a Win32 HANDLE) belonging to the process that exported it, and the same number in the replaying process names a different object or nothing at all");
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPOOLIMPORTFROMSHAREABLEHANDLE, &a.hdr, sizeof(a));
   }
   return r;
@@ -4377,6 +4436,9 @@ static hipError_t capture_hipSetupArgument(const void* arg, size_t size, size_t 
               "of %u arg entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipSetupArgument",
+            "only the first 256 arg entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 256u;
       }
       std::memcpy(a.arg_bytes, arg, static_cast<size_t>(_n) * sizeof(unsigned char));
@@ -4413,6 +4475,8 @@ static hipError_t capture_hipStreamAddCallback(hipStream_t stream, hipStreamCall
     a.callback = 0;  // non-castable type skipped
     a.userData = reinterpret_cast<uint64_t>(userData);
     a.flags = static_cast<decltype(a.flags)>(flags);
+    hrr_cap::writer::note_unreplayable("hipStreamAddCallback",
+        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
     hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMADDCALLBACK, &a.hdr, sizeof(a));
   }
   return r;
@@ -4497,10 +4561,11 @@ static hipError_t capture_hipStreamDestroy(hipStream_t stream) {
   return r;
 }
 
-// Generated shim
+// Generated shim (custom: also record the failures that end the capture)
 static hipError_t capture_hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
   hipError_t r = g_real_table.hipStreamEndCapture_fn(stream, pGraph);
-  if (r == hipSuccess) {
+  if (r == hipSuccess || r == hipErrorStreamCaptureInvalidated ||
+      r == hipErrorStreamCaptureUnjoined) {
     hrr_args_hipStreamEndCapture a{};
     a.ret         = static_cast<int32_t>(r);
     a.stream = reinterpret_cast<uint64_t>(stream);
@@ -5121,6 +5186,8 @@ static hipError_t capture_hipUserObjectCreate(hipUserObject_t* object_out, void*
     a.initialRefcount = static_cast<decltype(a.initialRefcount)>(initialRefcount);
     a.flags = static_cast<decltype(a.flags)>(flags);
     if (object_out) a.object_out = reinterpret_cast<uint64_t>(*object_out);
+    hrr_cap::writer::note_unreplayable("hipUserObjectCreate",
+        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
     hrr_cap::writer::write_event_raw(HRR_API_HIPUSEROBJECTCREATE, &a.hdr, sizeof(a));
   }
   return r;
@@ -5593,6 +5660,8 @@ static hipError_t capture_hipStreamAddCallback_spt(hipStream_t stream, hipStream
     a.callback = 0;  // non-castable type skipped
     a.userData = reinterpret_cast<uint64_t>(userData);
     a.flags = static_cast<decltype(a.flags)>(flags);
+    hrr_cap::writer::note_unreplayable("hipStreamAddCallback_spt",
+        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
     hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMADDCALLBACK_SPT, &a.hdr, sizeof(a));
   }
   return r;
@@ -5705,6 +5774,8 @@ static hipError_t capture_hipLaunchHostFunc_spt(hipStream_t stream, hipHostFn_t 
     a.stream = reinterpret_cast<uint64_t>(stream);
     a.fn = 0;  // non-castable type skipped
     a.userData = reinterpret_cast<uint64_t>(userData);
+    hrr_cap::writer::note_unreplayable("hipLaunchHostFunc_spt",
+        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
     hrr_cap::writer::write_event_raw(HRR_API_HIPLAUNCHHOSTFUNC_SPT, &a.hdr, sizeof(a));
   }
   return r;
@@ -5738,6 +5809,9 @@ static hipError_t capture_hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, 
               "of %u dependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipDrvGraphAddMemsetNode",
+            "only the first 16 dependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.dependencies_bytes, dependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -5942,7 +6016,7 @@ static hipError_t capture_hipGetProcAddress(const char* symbol, void** pfn, int 
     a.hipVersion = static_cast<decltype(a.hipVersion)>(hipVersion);
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.symbolStatus = reinterpret_cast<uint64_t>(symbolStatus);
-    if (pfn) a.pfn = reinterpret_cast<uint64_t>(*pfn);
+    // pfn is not recorded, see UNRECORDED_OUTPUTS in the generator.
     if (symbol) {
       size_t _n = std::strlen(symbol);
       if (_n > 255u) {
@@ -5953,6 +6027,9 @@ static hipError_t capture_hipGetProcAddress(const char* symbol, void** pfn, int 
               "[HRR] hipGetProcAddress: symbol is %zu characters; "
               "recording the first 255 only", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGetProcAddress",
+            "symbol was truncated to 255 characters at capture "
+            "time; replay would pass a shortened string");
         _n = 255u;
       }
       std::memcpy(a.symbol_bytes, symbol, _n);
@@ -5987,6 +6064,9 @@ static hipError_t capture_hipStreamBeginCaptureToGraph(hipStream_t stream, hipGr
               "of %u dependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipStreamBeginCaptureToGraph",
+            "only the first 16 dependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.dependencies_bytes, dependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -6004,6 +6084,9 @@ static hipError_t capture_hipStreamBeginCaptureToGraph(hipStream_t stream, hipGr
               "of %u dependencyData entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipStreamBeginCaptureToGraph",
+            "only the first 16 dependencyData entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.dependencyData_bytes, dependencyData, static_cast<size_t>(_n) * sizeof(hipGraphEdgeData));
@@ -6161,6 +6244,9 @@ static hipError_t capture_hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode,
               "of %u dependencies entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipDrvGraphAddMemFreeNode",
+            "only the first 16 dependencies entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.dependencies_bytes, dependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
@@ -6351,6 +6437,9 @@ static hipError_t capture_hipStreamBatchMemOp(hipStream_t stream, unsigned int c
               "of %u paramArray entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipStreamBatchMemOp",
+            "only the first 16 paramArray entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.paramArray_bytes, paramArray, static_cast<size_t>(_n) * sizeof(hipStreamBatchMemOpParams));
@@ -6401,6 +6490,9 @@ static hipError_t capture_hipLinkAddFile(hipLinkState_t state, hipJitInputType t
               "[HRR] hipLinkAddFile: path is %zu characters; "
               "recording the first 255 only", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipLinkAddFile",
+            "path was truncated to 255 characters at capture "
+            "time; replay would pass a shortened string");
         _n = 255u;
       }
       std::memcpy(a.path_bytes, path, _n);
@@ -6418,6 +6510,9 @@ static hipError_t capture_hipLinkAddFile(hipLinkState_t state, hipJitInputType t
               "of %u options entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipLinkAddFile",
+            "only the first 32 options entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 32u;
       }
       std::memcpy(a.options_bytes, options, static_cast<size_t>(_n) * sizeof(hipJitOption));
@@ -6435,6 +6530,9 @@ static hipError_t capture_hipLinkAddFile(hipLinkState_t state, hipJitInputType t
               "of %u optionValues entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipLinkAddFile",
+            "only the first 32 optionValues entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 32u;
       }
       std::memcpy(a.optionValues_bytes, optionValues, static_cast<size_t>(_n) * sizeof(void*));
@@ -6481,6 +6579,9 @@ static hipError_t capture_hipLinkCreate(unsigned int numOptions, hipJitOption* o
               "of %u options entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipLinkCreate",
+            "only the first 32 options entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 32u;
       }
       std::memcpy(a.options_bytes, options, static_cast<size_t>(_n) * sizeof(hipJitOption));
@@ -6498,6 +6599,9 @@ static hipError_t capture_hipLinkCreate(unsigned int numOptions, hipJitOption* o
               "of %u optionValues entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipLinkCreate",
+            "only the first 32 optionValues entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 32u;
       }
       std::memcpy(a.optionValues_bytes, optionValues, static_cast<size_t>(_n) * sizeof(void*));
@@ -6719,6 +6823,9 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
               "of %u dsts entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipMemcpyBatchAsync",
+            "only the first 16 dsts entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.dsts_bytes, dsts, static_cast<size_t>(_n) * sizeof(void*));
@@ -6736,6 +6843,9 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
               "of %u srcs entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipMemcpyBatchAsync",
+            "only the first 16 srcs entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.srcs_bytes, srcs, static_cast<size_t>(_n) * sizeof(void*));
@@ -6753,6 +6863,9 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
               "of %u sizes entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipMemcpyBatchAsync",
+            "only the first 16 sizes entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.sizes_bytes, sizes, static_cast<size_t>(_n) * sizeof(size_t));
@@ -6770,6 +6883,9 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
               "of %u attrs entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipMemcpyBatchAsync",
+            "only the first 16 attrs entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.attrs_bytes, attrs, static_cast<size_t>(_n) * sizeof(hipMemcpyAttributes));
@@ -6787,6 +6903,9 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
               "of %u attrsIdxs entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipMemcpyBatchAsync",
+            "only the first 16 attrsIdxs entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.attrsIdxs_bytes, attrsIdxs, static_cast<size_t>(_n) * sizeof(size_t));
@@ -6824,6 +6943,9 @@ static hipError_t capture_hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3
               "of %u opList entries; replay of this call will be "
               "incomplete", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipMemcpy3DBatchAsync",
+            "only the first 16 opList entries were recorded at "
+            "capture time; replay would pass a partial array");
         _n = 16u;
       }
       std::memcpy(a.opList_bytes, opList, static_cast<size_t>(_n) * sizeof(hipMemcpy3DBatchOp));
@@ -6873,7 +6995,7 @@ static hipError_t capture_hipGetDriverEntryPoint(const char* symbol, void** func
     a.symbol = reinterpret_cast<uint64_t>(symbol);
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.status = reinterpret_cast<uint64_t>(status);
-    if (funcPtr) a.funcPtr = reinterpret_cast<uint64_t>(*funcPtr);
+    // funcPtr is not recorded, see UNRECORDED_OUTPUTS in the generator.
     hrr_cap::writer::write_event_raw(HRR_API_HIPGETDRIVERENTRYPOINT, &a.hdr, sizeof(a));
   }
   return r;
@@ -6888,7 +7010,7 @@ static hipError_t capture_hipGetDriverEntryPoint_spt(const char* symbol, void** 
     a.symbol = reinterpret_cast<uint64_t>(symbol);
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.status = reinterpret_cast<uint64_t>(status);
-    if (funcPtr) a.funcPtr = reinterpret_cast<uint64_t>(*funcPtr);
+    // funcPtr is not recorded, see UNRECORDED_OUTPUTS in the generator.
     hrr_cap::writer::write_event_raw(HRR_API_HIPGETDRIVERENTRYPOINT_SPT, &a.hdr, sizeof(a));
   }
   return r;
@@ -7093,7 +7215,7 @@ static hipError_t capture_hipGetProcAddress_spt(const char* symbol, void** pfn, 
     a.hipVersion = static_cast<decltype(a.hipVersion)>(hipVersion);
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.symbolStatus = reinterpret_cast<uint64_t>(symbolStatus);
-    if (pfn) a.pfn = reinterpret_cast<uint64_t>(*pfn);
+    // pfn is not recorded, see UNRECORDED_OUTPUTS in the generator.
     if (symbol) {
       size_t _n = std::strlen(symbol);
       if (_n > 255u) {
@@ -7104,6 +7226,9 @@ static hipError_t capture_hipGetProcAddress_spt(const char* symbol, void** pfn, 
               "[HRR] hipGetProcAddress_spt: symbol is %zu characters; "
               "recording the first 255 only", _n);
         }
+        hrr_cap::writer::note_unreplayable("hipGetProcAddress_spt",
+            "symbol was truncated to 255 characters at capture "
+            "time; replay would pass a shortened string");
         _n = 255u;
       }
       std::memcpy(a.symbol_bytes, symbol, _n);
@@ -7672,6 +7797,243 @@ static hipError_t capture_hipModuleEnumerateFunctions(hipFunction_t* functions, 
 }
 
 // Generated shim
+static hipError_t capture_hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target, enum hipFlushGPUDirectRDMAWritesScope scope) {
+  hipError_t r = g_real_table.hipDeviceFlushGPUDirectRDMAWrites_fn(target, scope);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceFlushGPUDirectRDMAWrites a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.target = static_cast<decltype(a.target)>(target);
+    a.scope = static_cast<decltype(a.scope)>(scope);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
+  hipError_t r = g_real_table.hipLibraryGetModule_fn(pMod, library);
+  if (r == hipSuccess) {
+    hrr_args_hipLibraryGetModule a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.library = reinterpret_cast<uint64_t>(library);
+    if (pMod) a.pMod = reinterpret_cast<uint64_t>(*pMod);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETMODULE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value, int device) {
+  hipError_t r = g_real_table.hipKernelSetAttributeForDevice_fn(kernel, attr, value, device);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelSetAttributeForDevice a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    a.attr = static_cast<decltype(a.attr)>(attr);
+    a.value = static_cast<decltype(a.value)>(value);
+    a.device = static_cast<decltype(a.device)>(device);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev) {
+  hipError_t r = g_real_table.hipKernelSetCacheConfig_fn(kernel, config, dev);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelSetCacheConfig a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    a.config = static_cast<decltype(a.config)>(config);
+    a.dev = static_cast<uint64_t>(static_cast<int>(dev));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELSETCACHECONFIG, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipExtMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t* sizesDst, hipExtMemcpyWait* waits, hipExtMemcpySignal* signals, size_t count, hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs, hipStream_t stream) {
+  hipError_t r = g_real_table.hipExtMemcpyBatchAsync_fn(dsts, srcs, sizes, sizesDst, waits, signals, count, attrs, attrsIdxs, numAttrs, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipExtMemcpyBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.sizesDst = reinterpret_cast<uint64_t>(sizesDst);
+    a.waits = reinterpret_cast<uint64_t>(waits);
+    a.signals = reinterpret_cast<uint64_t>(signals);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.attrs = reinterpret_cast<uint64_t>(attrs);
+    a.attrsIdxs = reinterpret_cast<uint64_t>(attrsIdxs);
+    a.numAttrs = static_cast<decltype(a.numAttrs)>(numAttrs);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    if (dsts) a.dsts = reinterpret_cast<uint64_t>(*dsts);
+    if (srcs) a.srcs = reinterpret_cast<uint64_t>(*srcs);
+    if (dsts && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_dsts = false;
+        if (!warned_dsts) {
+          warned_dsts = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u dsts entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 dsts entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.dsts_bytes, dsts, static_cast<size_t>(_n) * sizeof(void*));
+      a.dsts_n   = _n;
+      a.dsts_present = 1;
+    }
+    if (srcs && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_srcs = false;
+        if (!warned_srcs) {
+          warned_srcs = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u srcs entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 srcs entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.srcs_bytes, srcs, static_cast<size_t>(_n) * sizeof(void*));
+      a.srcs_n   = _n;
+      a.srcs_present = 1;
+    }
+    if (sizes && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_sizes = false;
+        if (!warned_sizes) {
+          warned_sizes = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u sizes entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 sizes entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.sizes_bytes, sizes, static_cast<size_t>(_n) * sizeof(size_t));
+      a.sizes_n   = _n;
+      a.sizes_present = 1;
+    }
+    if (sizesDst && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_sizesDst = false;
+        if (!warned_sizesDst) {
+          warned_sizesDst = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u sizesDst entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 sizesDst entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.sizesDst_bytes, sizesDst, static_cast<size_t>(_n) * sizeof(size_t));
+      a.sizesDst_n   = _n;
+      a.sizesDst_present = 1;
+    }
+    if (waits && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_waits = false;
+        if (!warned_waits) {
+          warned_waits = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u waits entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 waits entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.waits_bytes, waits, static_cast<size_t>(_n) * sizeof(hipExtMemcpyWait));
+      a.waits_n   = _n;
+      a.waits_present = 1;
+    }
+    if (signals && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_signals = false;
+        if (!warned_signals) {
+          warned_signals = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u signals entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 signals entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.signals_bytes, signals, static_cast<size_t>(_n) * sizeof(hipExtMemcpySignal));
+      a.signals_n   = _n;
+      a.signals_present = 1;
+    }
+    if (attrs && numAttrs > 0) {
+      uint32_t _n = static_cast<uint32_t>(numAttrs);
+      if (_n > 16u) {
+        static bool warned_attrs = false;
+        if (!warned_attrs) {
+          warned_attrs = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u attrs entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 attrs entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.attrs_bytes, attrs, static_cast<size_t>(_n) * sizeof(hipExtMemcpyAttributes));
+      a.attrs_n   = _n;
+      a.attrs_present = 1;
+    }
+    if (attrsIdxs && numAttrs > 0) {
+      uint32_t _n = static_cast<uint32_t>(numAttrs);
+      if (_n > 16u) {
+        static bool warned_attrsIdxs = false;
+        if (!warned_attrsIdxs) {
+          warned_attrsIdxs = true;
+          LogPrintfWarning(
+              "[HRR] hipExtMemcpyBatchAsync: recording only the first 16 "
+              "of %u attrsIdxs entries; replay of this call will be "
+              "incomplete", _n);
+        }
+        hrr_cap::writer::note_unreplayable("hipExtMemcpyBatchAsync",
+            "only the first 16 attrsIdxs entries were recorded at "
+            "capture time; replay would pass a partial array");
+        _n = 16u;
+      }
+      std::memcpy(a.attrsIdxs_bytes, attrsIdxs, static_cast<size_t>(_n) * sizeof(size_t));
+      a.attrsIdxs_n   = _n;
+      a.attrsIdxs_present = 1;
+    }
+    hrr_cap::writer::write_event_raw(HRR_API_HIPEXTMEMCPYBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -7776,6 +8138,9 @@ static void capture___hipRegisterVar(void** modules, void* var, char* hostVar, c
               "[HRR] __hipRegisterVar: deviceVar is %zu characters; "
               "recording the first 255 only", _n);
         }
+        hrr_cap::writer::note_unreplayable("__hipRegisterVar",
+            "deviceVar was truncated to 255 characters at capture "
+            "time; replay would pass a shortened string");
         _n = 255u;
       }
       std::memcpy(a.deviceVar_bytes, deviceVar, _n);
@@ -8403,6 +8768,11 @@ void hip_capture_build_table() {
   g_cap_table.hipDeviceGetLuid_fn = capture_hipDeviceGetLuid;
   g_cap_table.hipInitDevice_fn = capture_hipInitDevice;
   g_cap_table.hipModuleEnumerateFunctions_fn = capture_hipModuleEnumerateFunctions;
+  g_cap_table.hipDeviceFlushGPUDirectRDMAWrites_fn = capture_hipDeviceFlushGPUDirectRDMAWrites;
+  g_cap_table.hipLibraryGetModule_fn = capture_hipLibraryGetModule;
+  g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
+  g_cap_table.hipKernelSetCacheConfig_fn = capture_hipKernelSetCacheConfig;
+  g_cap_table.hipExtMemcpyBatchAsync_fn = capture_hipExtMemcpyBatchAsync;
 }
 
 void hip_capture_build_compiler_table() {
@@ -8421,6 +8791,5 @@ void hip_capture_build_compiler_table() {
   cap.__hipRegisterTexture_fn = capture___hipRegisterTexture;
   cap.__hipRegisterVar_fn = capture___hipRegisterVar;
   cap.__hipUnregisterFatBinary_fn = capture___hipUnregisterFatBinary;
-  std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),
-              &cap, sizeof(HipCompilerDispatchTable));
+  hip_capture_install_compiler_table(cap);
 }

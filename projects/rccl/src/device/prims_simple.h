@@ -28,7 +28,7 @@ class Primitives<T, RedOp, Fan, Direct,
                        RolePostSend = 0x10, RolePostRecv = 0x20, Aborted = 0x40, NetRegMode = 0x80,
                        ConnFifoEnabled = 0x100, DirectWrite = 0x200, DirectRead = 0x400, PatMode = 0x800,
                        NvlsMinPolling = 0x1000, NetDeviceUnpack = 0x2000, AnyNetDeviceUnpack = 0x4000,
-                       RoleWaitPatNvls = 0x8000, RolePostPatNvls = 0x10000;
+                       RoleWaitPatNvls = 0x8000, RolePostPatNvls = 0x10000, SysAcquireStep = 0x20000;
   const int tid, tidInBlock;
   const int nthreads;
   int nworkers;
@@ -46,6 +46,8 @@ class Primitives<T, RedOp, Fan, Direct,
   T* directBuff = NULL;
   uint64_t* connStepPtr;
   uint64_t connStepCache; // Cache last seen value of (*connStepPtr)
+  uint64_t* gdrFlushFlag = nullptr;
+  uint64_t* gdrFlushSeq;
   int connStepSize; // Connection step size
   void* netDeviceHandle;
   uint64_t accSize;
@@ -75,12 +77,15 @@ class Primitives<T, RedOp, Fan, Direct,
     else barrier();
   }
 
+  // Multi-RPN (hierarchical) PAT runs NCCL_PAT_MULTI_RPN_NWORKERS workers.
+  template <bool isHierarchical>
   inline __device__ void patBarrier() {
+    constexpr int nPatWorkers = isHierarchical ? NCCL_PAT_MULTI_RPN_NWORKERS : NCCL_PAT_NWORKERS;
     // To be revisited for correctness on gfx1250
 #if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
-    barrier_generic(__threadfence_block(), NCCL_PAT_NWORKERS, barrier_next_pat, barriers_pat);
+    barrier_generic(__threadfence_block(), nPatWorkers, barrier_next_pat, barriers_pat);
 #else
-    barrier_generic(__threadfence(), NCCL_PAT_NWORKERS, barrier_next_pat, barriers_pat);
+    barrier_generic(__threadfence(), nPatWorkers, barrier_next_pat, barriers_pat);
 #endif
   }
 
@@ -92,7 +97,7 @@ class Primitives<T, RedOp, Fan, Direct,
     barrier();
   }
 
-  inline __device__ uint64_t loadStepValue(uint64_t* ptr) {
+  inline __device__ uint64_t loadStepValue(uint64_t* ptr, bool sysAcquire = true) {
 #if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010
     if (flags & NvlsMinPolling) {
       uint64_t ans;
@@ -108,14 +113,44 @@ class Primitives<T, RedOp, Fan, Direct,
     //
     // To be revisited for correctness on gfx1250
 #if defined(__gfx950__)
-    // NET no-GDR can publish host-staged payloads from the CPU proxy.
-    // Acquire the tail before GPU workers consume the payload.
-    return ld_acquire_sys_global(ptr);
+    // A proxy or copy-engine published step needs a sys-scope acquire, else the payload reads after it can be stale.
+    // Relaxed suffices for a peer kernel's step only because the payload loads are then sys-scope (DWORDX4 builtins).
+    if (sysAcquire || !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS) {
+      return ld_acquire_sys_global(ptr);
+    }
+    uint64_t value = ld_relaxed_sys_global(ptr);
+    // Compiler-only barrier so the payload loads after the poll cannot be hoisted above the relaxed load.
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    return value;
 #elif defined(__gfx1200__) || defined(__gfx1201__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
     return __atomic_load_n(ptr, __ATOMIC_RELAXED);
 #endif
+  }
+
+  // The net proxy skips the GDR flush and publishes, per step, the flag value
+  // the remote NIC writes (RO=0) after the payload on each QP that carried the
+  // step, and which per-QP flags those are; seeing the value in local VRAM
+  // means the payload writes ahead of it on that QP have landed. Earlier steps
+  // were confirmed by their own waits, so only this step's QPs matter.
+  __device__ __forceinline__ void waitGdrFlushFlag(uint64_t* flag, uint64_t* seqs, uint64_t seqStep) {
+    uint64_t desc = ld_volatile_global(seqs + seqStep % NCCL_STEPS);
+    uint64_t seq = desc & NCCL_GDR_FLUSH_SEQ_MASK;
+    int count = (int)(desc >> NCCL_GDR_FLUSH_COUNT_SHIFT);
+    flag += ((desc >> NCCL_GDR_FLUSH_FIRST_SHIFT) & 0xff) * (NCCL_GDR_FLUSH_FLAG_STRIDE / sizeof(uint64_t));
+    int spins = 0;
+    while (true) {
+      // Load every slot unconditionally so all loads are in flight before the first wait.
+      uint64_t v[NCCL_GDR_FLUSH_MAX_WAIT_QPS];
+#pragma unroll
+      for (int q = 0; q < NCCL_GDR_FLUSH_MAX_WAIT_QPS; q++)
+        v[q] = ld_volatile_global(flag + q * (NCCL_GDR_FLUSH_FLAG_STRIDE / sizeof(uint64_t)));
+      bool landed = true;
+#pragma unroll
+      for (int q = 0; q < NCCL_GDR_FLUSH_MAX_WAIT_QPS; q++) landed &= (q >= count) | (v[q] >= seq);
+      if (landed || checkAbort(flags, Aborted, spins)) return;
+    }
   }
 
   template <int DirectRecv, int DirectSend, int Recv, int Send, int Src, int Dst>
@@ -129,7 +164,7 @@ class Primitives<T, RedOp, Fan, Direct,
       repeat = 50;
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
         __builtin_amdgcn_s_sleep(1);
-        connStepCache = loadStepValue(connStepPtr);
+        connStepCache = loadStepValue(connStepPtr, (flags & SysAcquireStep) != 0);
         if (checkAbort(flags, Aborted, spins)) break;
         // if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", ncclShmem.comm.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
         if (spins == 0 && repeat > 0) {
@@ -138,6 +173,7 @@ class Primitives<T, RedOp, Fan, Direct,
                     int(step + StepPerSlice));
         }
       }
+      if (!isSendNotRecv && gdrFlushFlag) waitGdrFlushFlag(gdrFlushFlag, gdrFlushSeq, step);
       __asm__ __volatile__("s_wakeup");
     }
 
@@ -300,11 +336,12 @@ class Primitives<T, RedOp, Fan, Direct,
           if (Send && Dst && ncclShmem.groups[group].dsts[1] == nullptr) {
             // this case should only be directCopySend() with registered buffers and send to net peer
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, Recv + Src, Recv * MaxRecv + Src, 0, 1, 1, PreOpSrcs,
-                       Pipeline>(tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
-                                 ncclShmem.groups[group].srcs, 1, ncclShmem.groups[group].dsts, workSize);
+                       Pipeline, /*EnableTdmReduce=*/1>(tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp,
+                                                        Recv * fan.nrecv() + Src, ncclShmem.groups[group].srcs, 1,
+                                                        ncclShmem.groups[group].dsts, workSize);
           } else {
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, MultimemSrcs, Recv + Src, Recv * MaxRecv + Src, MultimemDsts,
-                       Send + Dst, Send * MaxSend + Dst, PreOpSrcs, Pipeline>(
+                       Send + Dst, Send * MaxSend + Dst, PreOpSrcs, Pipeline, /*EnableTdmReduce=*/1>(
               tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
               ncclShmem.groups[group].srcs, Send * fan.nsend() + Dst, ncclShmem.groups[group].dsts, workSize,
               ncclShmem.groups[group].acc);
@@ -382,9 +419,10 @@ public:
           const bool isSendNotRecv = (Send && Recv) ? (flags & RoleWaitSend) : Send;
           int spins = 0;
           while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
-            connStepCache = loadStepValue(connStepPtr);
+            connStepCache = loadStepValue(connStepPtr, (flags & SysAcquireStep) != 0);
             if (checkAbort(flags, Aborted, spins)) break;
           }
+          if (!isSendNotRecv && gdrFlushFlag) waitGdrFlushFlag(gdrFlushFlag, gdrFlushSeq, step);
           void** ptrs = isSendNotRecv ? ncclShmem.groups[group].dsts : ncclShmem.groups[group].srcs;
           if ((flags & ConnFifoEnabled) && connFifo[step % NCCL_STEPS].mode == NCCL_MODE_OFFSET) {
             ssize_t offset = loadSsize(&connFifo[step % NCCL_STEPS].offset);
@@ -541,14 +579,19 @@ private:
         ncclShmem.groups[group].recvConns[index] =
           conn; // WaitRecv role saves since that's who needs it in setDataPtrs()
       flags |= (conn->flags & NCCL_NVLS_MIN_POLL) ? NvlsMinPolling : 0;
+      if (ncclConnStepNeedsSysAcquire(conn->flags)) {
+        flags |= SysAcquireStep;
+      }
       connStepPtr = conn->tail;
-      connStepCache = loadStepValue(connStepPtr);
+      connStepCache = loadStepValue(connStepPtr, (flags & SysAcquireStep) != 0);
       connStepSize = conn->stepSize / sizeof(T);
       connEltsFifo = (T*)conn->buffs[NCCL_PROTO_SIMPLE];
       if (conn->connFifo != nullptr) {
         flags |= ConnFifoEnabled;
         connFifo = conn->connFifo;
       }
+      gdrFlushFlag = conn->gdrFlushFlag;
+      gdrFlushSeq = conn->gdrFlushSeq;
       if (Direct) {
         if (ipcRegFlag) {
           // User buffers have been registered
@@ -594,8 +637,11 @@ private:
         ncclShmem.groups[group].sendConns[index] =
           conn; // WaitSend role saves since that's who needs it in setDataPtrs()
       flags |= (conn->flags & NCCL_NVLS_MIN_POLL) ? NvlsMinPolling : 0;
+      if (ncclConnStepNeedsSysAcquire(conn->flags)) {
+        flags |= SysAcquireStep;
+      }
       connStepPtr = conn->head;
-      connStepCache = loadStepValue(connStepPtr);
+      connStepCache = loadStepValue(connStepPtr, (flags & SysAcquireStep) != 0);
       connStepSize = conn->stepSize / sizeof(T);
       connEltsFifo = (T*)conn->buffs[NCCL_PROTO_SIMPLE];
       if (Direct) {
@@ -842,7 +888,11 @@ public:
         }
       }
     }
-    patBarrier();
+    if (localRanks > 1) {
+      patBarrier</*isHierarchical=*/true>();
+    } else {
+      patBarrier</*isHierarchical=*/false>();
+    }
   }
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
@@ -1199,11 +1249,11 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
     }
   }
   if (ps->flags & PatSkipped) {
-    patBarrier();
+    patBarrier</*isHierarchical=*/needsNvlsReduce>();
     if (nvlsPoster) {
       nvlsReducePeer->step += StepPerSlice;
     }
-    patBarrier();
+    patBarrier</*isHierarchical=*/needsNvlsReduce>();
     if (nvlsPoster) {
       st_relaxed_sys_global(nvlsReducePeer->headPtr, nvlsReducePeer->step);
     }
@@ -1239,6 +1289,7 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
       peer->stepCache = loadStepValue(peer->tailPtr);
       if (checkAbort(flags, Aborted, spins)) break;
     }
+    if (peer->conn->gdrFlushFlag) waitGdrFlushFlag(peer->conn->gdrFlushFlag, peer->conn->gdrFlushSeq, step);
   }
   if (send && (flags & RoleWaitSend)) {
     int spins = 0;
@@ -1268,7 +1319,7 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
       ncclShmem.groups[group].srcs[needsNvlsReduce ? 0 : 1] = ncclShmem.groups[group].dsts[0];
     }
   }
-  patBarrier();
+  patBarrier</*isHierarchical=*/needsNvlsReduce>();
   int nSrcs = (ps->recvDim < 0) ? 1 : 2;
   // No peer to receive from, remove one source
   void** srcs =
@@ -1309,7 +1360,7 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
     nvlsReducePeer->step += StepPerSlice;
   }
 
-  patBarrier();
+  patBarrier</*isHierarchical=*/needsNvlsReduce>();
 
   if (postSend && (flags & RolePostSend)) {
     if (nelem > 0 || peer->connFifo) fence_acq_rel_sys();
@@ -1338,7 +1389,7 @@ __device__ __forceinline__ void patNvlsBcast(struct ncclPatStep* ps, struct nccl
     ncclShmem.groups[group].dsts[1] =
       ((T*)nvlsBcastPeer->buff) + (nvlsBcastPeer->step % NCCL_STEPS) * nvlsBcastPeer->connStepSize + ps->nvlsOffset;
   }
-  patBarrier();
+  patBarrier</*isHierarchical=*/true>();
   if (workSize > 0) {
     reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 1, 1, 1, /*PreOpSrcs*/ 0>(tid, nthreads,
                                                                             ncclShmem.groups[group].redOpArgs,
@@ -1346,7 +1397,7 @@ __device__ __forceinline__ void patNvlsBcast(struct ncclPatStep* ps, struct nccl
                                                                             ncclShmem.groups[group].srcs, 1,
                                                                             ncclShmem.groups[group].dsts + 1, workSize);
   }
-  patBarrier();
+  patBarrier</*isHierarchical=*/true>();
 
   if (flags & RolePostPatNvls) {
     nvlsBcastPeer->step += StepPerSlice;
@@ -1360,8 +1411,8 @@ template <bool needsBcast = false>
 __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatShmem* shmem) {
   bool skipped = ps->flags & PatSkipped;
   if (skipped) {
-    patBarrier();
-    patBarrier();
+    patBarrier</*isHierarchical=*/needsBcast>();
+    patBarrier</*isHierarchical=*/needsBcast>();
     if (needsBcast) patNvlsBcast(ps, shmem, 0, /*skipped=*/true);
     return;
   } // Skipped
@@ -1390,6 +1441,9 @@ __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatSh
     while (peer->stepCache < step + ps->stepOffset + StepPerSlice) {
       peer->stepCache = loadStepValue(peer->tailPtr);
       if (checkAbort(flags, Aborted, spins)) break;
+    }
+    if (peer->conn->gdrFlushFlag) {
+      waitGdrFlushFlag(peer->conn->gdrFlushFlag, peer->conn->gdrFlushSeq, step + ps->stepOffset);
     }
     if (!needsBcast) {
       if (peer->accSize < ps->recvOffset + nelem + (step + ps->stepOffset) * peer->connStepSize) {
@@ -1420,7 +1474,7 @@ __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatSh
       ncclShmem.groups[group].dsts[1] = ncclShmem.groups[group].srcs[0];
     }
   }
-  patBarrier();
+  patBarrier</*isHierarchical=*/needsBcast>();
 
   int workSize = ncclShmem.aborted ? 0 : nelem;
 
@@ -1462,7 +1516,7 @@ __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatSh
   if (ps->recvDim >= 0 && (flags & RoleWaitRecv))
     atomicMax(&peer->accSize, ps->recvOffset + nelem + (step + ps->stepOffset) * peer->connStepSize);
 
-  patBarrier();
+  patBarrier</*isHierarchical=*/needsBcast>();
 
   if (postSend && (flags & RolePostSend)) {
     if (nelem > 0 || peer->connFifo) fence_acq_rel_sys();

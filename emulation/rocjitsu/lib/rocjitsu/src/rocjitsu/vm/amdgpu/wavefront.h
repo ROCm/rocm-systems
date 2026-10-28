@@ -45,12 +45,14 @@ enum class WfState : uint8_t {
   WAITCNT,  ///< Stalled at a waitcnt.
   VM_RETRY, ///< A prepared memory operation is waiting for backing availability.
   BARRIER,  ///< Stalled at a barrier.
+  GWS_WAIT, ///< Parked at a Global Wave Sync rendezvous (device-global).
   ENDING,   ///< s_endpgm executed but outstanding memory ops are draining.
 };
 
 /// @brief Simulator execution failures that are not architectural wave state.
 enum class InstructionExecutionError : uint8_t {
   None,
+  InvalidInstructionEncoding,
   UnsupportedOperandValue,
   UnimplementedInstruction,
 };
@@ -203,19 +205,12 @@ public:
 
   /// @brief Return the two-bit VGPR high-bank selector for an operand role.
   uint32_t vgpr_msb_for_role(VgprMsbRole role) const {
-    switch (role) {
-    case VgprMsbRole::Src0:
-      return vgpr_msb_mode_ & 0x3u;
-    case VgprMsbRole::Src1:
-      return (vgpr_msb_mode_ >> 2) & 0x3u;
-    case VgprMsbRole::Src2:
-      return (vgpr_msb_mode_ >> 4) & 0x3u;
-    case VgprMsbRole::Dst:
-      return (vgpr_msb_mode_ >> 6) & 0x3u;
-    case VgprMsbRole::None:
+    const unsigned field = static_cast<unsigned>(role);
+    if (field > static_cast<unsigned>(VgprMsbRole::Dst))
       return 0;
-    }
-    return 0;
+    // The zero field for None precedes Src0/Src1/Src2/Dst. Padding the byte
+    // with that field makes every role one shift without a selector switch.
+    return ((uint32_t{vgpr_msb_mode_} << 2) >> (field * 2)) & 3u;
   }
 
   /// @brief Return the wavefront slot index within the CU.
@@ -237,14 +232,13 @@ public:
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
 
-  /// @brief Return the AQL ring packet id (dispatch's ring index) for this wave.
-  /// @details This is the queue read index at which the dispatch packet was
-  /// fetched. rocm-dbgapi correlates a trapped wave to its dispatch by matching
-  /// this against the queue's read/write dispatch ids (TTMP11[6:30]).
-  uint32_t aql_packet_id() const { return aql_packet_id_; }
+  /// @brief Return the wrapped AQL ring slot associated with this wave.
+  /// @details ROCdbgapi reconstructs its monotonic dispatch index from the
+  /// consumer cursor and this slot (TTMP11[6:30] on gfx9.4).
+  uint32_t queue_packet_id() const { return queue_packet_id_; }
 
-  /// @brief Set the AQL ring packet id (called at dispatch).
-  void set_aql_packet_id(uint32_t id) { aql_packet_id_ = id; }
+  /// @brief Set the wrapped AQL ring slot (called at dispatch).
+  void set_queue_packet_id(uint32_t id) { queue_packet_id_ = id; }
 
   /// @brief GPU load bias for code-object-relative function addresses.
   uint64_t code_load_bias() const { return code_load_bias_; }
@@ -274,7 +268,17 @@ public:
   AddressSpaceHandle address_space() const { return address_space_; }
 
   /// @brief Set the owning GPU address space at dispatch time.
-  void set_address_space(AddressSpaceHandle address_space) { address_space_ = address_space; }
+  void set_address_space(AddressSpaceHandle address_space) {
+    if (address_space_ != address_space)
+      vm_access_.reset();
+    address_space_ = address_space;
+  }
+
+  /// @brief Return the immutable VM snapshot captured when this wave was admitted.
+  const GpuVmAccess *vm_access() const { return vm_access_.get(); }
+
+  /// @brief Share the dispatch-scoped VM snapshot with this wave.
+  void set_vm_access(std::shared_ptr<const GpuVmAccess> access) { vm_access_ = std::move(access); }
   /// @brief Select host monotonic timestamps for PM4, modeled time for AQL.
   void set_system_clock(bool enabled) { use_system_clock_ = enabled; }
   /// @brief Read the realtime clock selected by the launch ABI.
@@ -311,6 +315,25 @@ public:
 
   /// @brief Leave the currently joined named barrier.
   bool barrier_leave();
+
+  /// @brief Seed a Global Wave Sync resource's shared barrier/semaphore counter.
+  void gws_init(uint32_t rid, uint32_t count);
+
+  /// @brief Arrive at a GWS barrier; may park the wave. The resource is process-
+  /// global and accepts arrivals across dispatches (see GwsDevice for the policy).
+  void gws_barrier_arrive(uint32_t rid, uint32_t count);
+
+  /// @brief Signal (V) a GWS semaphore, releasing one waiter if present.
+  void gws_sema_v(uint32_t rid);
+
+  /// @brief Wait (P) on a GWS semaphore; may park this wave when no credit.
+  void gws_sema_p(uint32_t rid);
+
+  /// @brief Bulk-signal (BR) a GWS semaphore, releasing up to @p count waiters.
+  void gws_sema_br(uint32_t rid, uint32_t count);
+
+  /// @brief Release all waiters parked on a GWS resource.
+  void gws_sema_release_all(uint32_t rid);
 
   /// @brief Return the aligned LDS allocation size for this workgroup.
   uint32_t lds_size() const { return lds_size_; }
@@ -374,16 +397,7 @@ public:
 
   /// @brief Return the EXEC mask.
   /// @returns EXEC mask (one bit per lane, 1 = active).
-  uint64_t exec() const {
-    check_mask_memory_wait(RegClass::EXEC, lane_mask(), false);
-    return exec_ & lane_mask();
-  }
-
-  /// @brief Read selected scalar words of EXEC, preserving the raw pair value.
-  uint64_t read_exec(uint16_t index = 0, uint8_t width = 2) const {
-    check_scalar_memory_wait({RegClass::EXEC, index, width});
-    return exec_;
-  }
+  uint64_t exec() const { return exec_ & lane_mask(); }
 
   /// @brief Return the raw architectural EXEC register pair.
   ///
@@ -397,16 +411,10 @@ public:
   ///
   /// Wave32 leaves EXEC_HI available as scalar scratch. Vector instructions
   /// that update the execution mask must therefore preserve the non-lane bits.
-  void set_exec(uint64_t val) {
-    check_mask_memory_wait(RegClass::EXEC, lane_mask(), true);
-    exec_ = (exec_ & ~lane_mask()) | (val & lane_mask());
-  }
+  void set_exec(uint64_t val) { exec_ = (exec_ & ~lane_mask()) | (val & lane_mask()); }
 
   /// @brief Write both architectural EXEC words as a scalar instruction result.
-  void write_exec(uint64_t val) {
-    check_scalar_memory_wait({RegClass::EXEC, 0, 2}, true);
-    exec_ = val;
-  }
+  void write_exec(uint64_t val) { exec_ = val; }
 
   /// @brief Set the raw architectural EXEC register pair.
   void set_exec_raw(uint64_t val) { exec_ = val; }
@@ -425,28 +433,16 @@ public:
   /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
   uint64_t vcc() const { return vcc_; }
 
-  /// @brief Read selected scalar words of VCC, preserving the raw pair value.
-  uint64_t read_vcc(uint16_t index = 0, uint8_t width = 2) const {
-    check_scalar_memory_wait({RegClass::VCC, index, width});
-    return vcc_;
-  }
-
   /// @brief Return the active-lane portion of the VCC register pair.
   /// @returns VCC mask with non-lane bits cleared.
-  uint64_t vcc_mask(uint64_t read_lanes = ~uint64_t{0}) const {
-    check_mask_memory_wait(RegClass::VCC, read_lanes, false);
-    return vcc_ & lane_mask();
-  }
+  uint64_t vcc_mask() const { return vcc_ & lane_mask(); }
 
   /// @brief Set the active-lane portion of the VCC register pair.
   /// @param val New VCC mask value.
   ///
   /// Wave32 leaves VCC_HI available as scalar state. Mask-producing writes
   /// must therefore preserve the non-lane bits, matching set_exec().
-  void set_vcc(uint64_t val) {
-    check_mask_memory_wait(RegClass::VCC, lane_mask(), true);
-    vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask());
-  }
+  void set_vcc(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
 
   /// @brief Set the raw architectural VCC register pair.
   void set_vcc_raw(uint64_t val) { vcc_ = val; }
@@ -461,22 +457,20 @@ public:
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.
-  uint32_t m0() const {
-    check_scalar_memory_wait({RegClass::M0, 0, 1});
-    return m0_;
-  }
+  uint32_t m0() const { return m0_; }
 
   /// @brief Set the M0 special register.
   /// @param val New M0 value.
-  void set_m0(uint32_t val) {
-    check_scalar_memory_wait({RegClass::M0, 0, 1}, true);
-    m0_ = val;
-  }
+  void set_m0(uint32_t val) { m0_ = val; }
 
   static constexpr uint32_t DX10_CLAMP_BIT = 1u << 8;
   static constexpr uint32_t IEEE_BIT = 1u << 9;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
+  static constexpr uint32_t VSKIP_BIT = 1u << 28;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
+  /// Short for conditional stack pointer, used by fork/join instructions
+  static constexpr uint32_t CSP_SHIFT = 29;
+  static constexpr uint32_t CSP_MASK = 7u << CSP_SHIFT;
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
   /// in each arch's isa.h, which all spell it member<13, 13>.
@@ -486,6 +480,16 @@ public:
   bool ieee_mode() const { return (mode_raw_ & IEEE_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
+
+  /// @brief Return MODE.CSP, the number of pending fork stack entries.
+  uint32_t cond_stack_ptr() const { return (mode_raw_ & CSP_MASK) >> CSP_SHIFT; }
+
+  /// @brief Set MODE.CSP, leaving every other MODE bit unchanged.
+  /// @param csp New stack depth; only the lowest 3 bits are used.
+  void set_cond_stack_ptr(uint32_t csp) {
+    set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT));
+  }
+
   uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
   uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
@@ -496,12 +500,6 @@ public:
   /// @brief Return the per-wavefront scratch (private segment) base address.
   /// @returns Byte address in GPU memory where this wavefront's scratch starts.
   uint64_t scratch_base() const { return scratch_base_; }
-
-  /// @brief Read FLAT_SCRATCH as an instruction's address input.
-  uint64_t read_scratch_base(uint16_t index = 0, uint8_t width = 2) const {
-    check_scalar_memory_wait({RegClass::FLAT_SCRATCH, index, width});
-    return scratch_base_;
-  }
 
   /// @brief Set the per-wavefront scratch base address.
   /// @param val Scratch base byte address (set at dispatch by CP).
@@ -536,12 +534,6 @@ public:
     shared_aperture_limit_ = sl;
     private_aperture_base_ = pb;
     private_aperture_limit_ = pl;
-  }
-
-  /// @brief Observe an instruction's access to logical scalar register words.
-  void check_scalar_memory_wait(RegisterRef reg, bool write = false) const {
-    if (memory_wait_checks_enabled_ && memory_wait_shadow_.pending(reg, write))
-      check_active_memory_wait(reg, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask, write);
   }
 
   /// Diagnostic readiness is independent of eager functional writeback.
@@ -580,7 +572,7 @@ public:
   void set_wait_all() {
     wait_target_ = {0, 0, 0, 0, 0, 0, 0, 0};
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
@@ -588,56 +580,56 @@ public:
     wait_target_.lgkmcnt = lgkmcnt;
     wait_target_.expcnt = expcnt;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the VSCNT target (GFX10 S_WAITCNT_VSCNT).
   void set_wait_target_vscnt(uint8_t threshold) {
     wait_target_.vscnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the LOADCNT target (GFX11+ S_WAITCNT_VMCNT / S_WAIT_LOADCNT).
   void set_wait_target_loadcnt(uint8_t threshold) {
     wait_target_.vmcnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the STORECNT target (GFX11+ S_WAITCNT_VSCNT / S_WAIT_STORECNT).
   void set_wait_target_storecnt(uint8_t threshold) {
     wait_target_.vscnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the DSCNT target (GFX11+ S_WAITCNT_LGKMCNT / S_WAIT_DSCNT).
   void set_wait_target_dscnt(uint8_t threshold) {
     wait_target_.dscnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the KMCNT target (GFX11+ S_WAIT_KMCNT).
   void set_wait_target_kmcnt(uint8_t threshold) {
     wait_target_.kmcnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the TENSORCNT target (GFX12.5 S_WAIT_TENSORCNT).
   void set_wait_target_tensorcnt(uint8_t threshold) {
     wait_target_.tensorcnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set the ASYNCCNT target (GFX12.5 S_WAIT_ASYNCCNT).
   void set_wait_target_asynccnt(uint8_t threshold) {
     wait_target_.asynccnt = threshold;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set combined STORECNT + DSCNT targets (GFX12 S_WAIT_STORECNT_DSCNT).
@@ -645,7 +637,7 @@ public:
     wait_target_.vscnt = storecnt;
     wait_target_.dscnt = dscnt;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set combined LOADCNT + DSCNT targets (GFX12 S_WAIT_LOADCNT_DSCNT).
@@ -653,7 +645,7 @@ public:
     wait_target_.vmcnt = loadcnt;
     wait_target_.dscnt = dscnt;
     if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
+      set_state(WfState::WAITCNT);
   }
 
   /// @brief Set a single split-wait counter threshold by name.
@@ -679,11 +671,11 @@ public:
     else if (name == "wait_expcnt") {
       wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
       if (!wait_satisfied())
-        state_ = WfState::WAITCNT;
+        set_state(WfState::WAITCNT);
     } else if (name == "wait_samplecnt" || name == "wait_bvhcnt") {
       wait_target_.vmcnt = t; // map to vmcnt
       if (!wait_satisfied())
-        state_ = WfState::WAITCNT;
+        set_state(WfState::WAITCNT);
     } else if (name == "wait_loadcnt_dscnt") {
       set_wait_target_loadcnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
                                     static_cast<uint8_t>(threshold & 0x3F));
@@ -701,15 +693,11 @@ public:
   /// @brief Read the Scalar Condition Code (SCC) from the status register.
   /// @retval true SCC bit is set.
   /// @retval false SCC bit is clear.
-  bool read_scc() const {
-    check_scalar_memory_wait({RegClass::SCC, 0, 1});
-    return status_raw() & 1u;
-  }
+  bool read_scc() const { return status_raw() & 1u; }
 
   /// @brief Write the Scalar Condition Code (SCC) in the status register.
   /// @param val New SCC value.
   void write_scc(bool val) {
-    check_scalar_memory_wait({RegClass::SCC, 0, 1}, true);
     uint32_t s = status_raw();
     set_status_raw(val ? (s | 1u) : (s & ~1u));
   }
@@ -735,17 +723,25 @@ public:
 
   /// @brief Set the execution state.
   /// @param s New execution state.
-  void set_state(WfState s) { state_ = s; }
+  void set_state(WfState s) {
+    const bool was_active = !is_halted();
+    state_ = s;
+    if (was_active != !is_halted())
+      update_activity_counts(was_active, was_active && !debug_paused());
+  }
 
   /// @brief Check whether this wavefront slot is halted.
   /// @retval true Slot is halted and available for dispatch.
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
+  /// @brief Warn about qualified ISA undefined behavior on the issuing thread.
+  void report_undefined_behavior(std::string_view reason) const;
+
   /// @brief Record a fail-closed instruction execution error.
   /// @details Execution callbacks use this for inputs whose architectural
   /// behavior is not implemented. Callers must not treat it as a hardware trap.
-  void report_instruction_execution_error(InstructionExecutionError error) {
+  void report_instruction_execution_error(InstructionExecutionError error) const {
     instruction_execution_error_ = error;
   }
 
@@ -850,19 +846,34 @@ public:
   /// @details A debug-halted wave keeps its slot and all register state; the
   /// scheduler skips it so the CU can go quiescent without retiring the wave.
   bool debug_halted() const { return debug_halted_; }
-  void set_debug_halted(bool v) { debug_halted_ = v; }
+  void set_debug_halted(bool v) {
+    const bool was_runnable = !is_halted() && !debug_paused();
+    debug_halted_ = v;
+    if (was_runnable != (!is_halted() && !debug_paused()))
+      update_activity_counts(!is_halted(), was_runnable);
+  }
 
   /// @brief Whether KFD has temporarily suspended this wave's queue.
   /// @details Queue suspension freezes execution for a stable CWSR snapshot,
   /// but unlike debug_halted it does not imply an architectural stop reason.
   bool debug_suspended() const { return debug_suspended_; }
-  void set_debug_suspended(bool v) { debug_suspended_ = v; }
+  void set_debug_suspended(bool v) {
+    const bool was_runnable = !is_halted() && !debug_paused();
+    debug_suspended_ = v;
+    if (was_runnable != (!is_halted() && !debug_paused()))
+      update_activity_counts(!is_halted(), was_runnable);
+  }
   /// @brief Runtime-suspended: the queue's queue_percentage went to zero.
   /// @details A separate reason from the debugger's, because the two overlap.
   /// Sharing one bit let a runtime resume clear a debugger pause, and a
   /// debugger or CWSR resume clear an active runtime pause.
   bool runtime_suspended() const { return runtime_suspended_; }
-  void set_runtime_suspended(bool v) { runtime_suspended_ = v; }
+  void set_runtime_suspended(bool v) {
+    const bool was_runnable = !is_halted() && !debug_paused();
+    runtime_suspended_ = v;
+    if (was_runnable != (!is_halted() && !debug_paused()))
+      update_activity_counts(!is_halted(), was_runnable);
+  }
 
   /// @brief Whether a *debugger* currently holds this wave stopped.
   /// @details Deliberately excludes runtime_suspended_: KFD uses this to decide
@@ -914,7 +925,7 @@ public:
   /// the saved PC points just after the trap, matching the ROCr trap handler.
   void debug_trap(uint32_t trap_id) {
     trap_id_ = trap_id;
-    debug_halted_ = true;
+    set_debug_halted(true);
     single_step_ = false;
   }
 
@@ -950,7 +961,7 @@ public:
     set_mode_raw(saved.mode_raw);
     gfx12_trap_ctrl_raw_ = saved.gfx12_trap_ctrl_raw;
     trap_id_ = saved.trap_id;
-    debug_halted_ = saved.debug_halted;
+    set_debug_halted(saved.debug_halted);
     single_step_ = saved.single_step;
     fatal_exception_pending_ = saved.fatal_exception_pending;
     fatal_exception_cwsr_valid_ = saved.fatal_exception_cwsr_valid;
@@ -981,7 +992,7 @@ public:
     if (wait_counters_.empty())
       halt();
     else
-      state_ = WfState::ENDING;
+      set_state(WfState::ENDING);
   }
 
   /// @brief Log instruction count at end for trace/debug.
@@ -1001,10 +1012,11 @@ public:
     wg_id_ = 0;
     wg_coord_ = {};
     dispatch_id_ = 0;
-    aql_packet_id_ = 0;
+    queue_packet_id_ = 0;
     code_load_bias_ = 0;
     wave_in_group_ = 0;
     address_space_ = {};
+    vm_access_.reset();
     process_id_ = 0;
     use_system_clock_ = false;
     scratch_lease_.reset();
@@ -1041,12 +1053,18 @@ public:
     named_barrier_id_ = 0;
     barrier_complete_.fill(false);
     waiting_barrier_bit_ = kNoBarrierWait;
+    gws_wait_rid_ = kNoGwsWait;
+    gws_wait_is_barrier_ = false;
+    gws_wait_generation_ = 0;
+    gws_wait_seq_ = 0;
+    gws_wait_steps_ = 0;
+    gws_wait_progress_ = 0;
     if (memory_wait_scoreboard_)
       memory_wait_scoreboard_->clear();
     wait_counters_ = {};
     wait_target_ = {};
     ready_cycle_ = 0;
-    state_ = WfState::HALTED;
+    set_state(WfState::HALTED);
     for (auto &t : ttmp_)
       t = 0;
     trapsts_ = 0;
@@ -1081,24 +1099,28 @@ protected:
   Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size, uint32_t max_wf_size,
             uint32_t max_sgprs, uint32_t max_vgprs, bool mode_has_gpr_idx_en);
 
+  void update_activity_counts(bool was_active, bool was_runnable);
+  bool activity_tracked_ = false;
+
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
   InstructionComputeUnitView cu_view_;
   uint32_t wf_id_ = 0;               ///< Slot index within the CU (permanent).
   uint64_t dispatch_generation_ = 0; ///< Incremented whenever this slot is dispatched.
   uint32_t wg_id_ = 0;               ///< Workgroup ID (set per dispatch).
   std::array<uint32_t, 3> wg_coord_{};
-  uint32_t dispatch_id_ = 0;         ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t aql_packet_id_ = 0;       ///< AQL ring packet id of the dispatch (debugger correlation).
-  uint64_t code_load_bias_ = 0;      ///< GPU load bias for code-object-relative call targets.
-  uint32_t wave_in_group_ = 0;       ///< Position of this wave within its workgroup (debugger).
-  AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
-  uint32_t process_id_ = 0;          ///< Owning process ID (PASID analog, set per dispatch).
+  uint32_t dispatch_id_ = 0;     ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t queue_packet_id_ = 0; ///< Wrapped AQL ring slot of the dispatch (debugger correlation).
+  uint64_t code_load_bias_ = 0;  ///< GPU load bias for code-object-relative call targets.
+  uint32_t wave_in_group_ = 0;   ///< Position of this wave within its workgroup (debugger).
+  AddressSpaceHandle address_space_;             ///< Generation-safe GPU address-space identity.
+  std::shared_ptr<const GpuVmAccess> vm_access_; ///< Dispatch-scoped immutable VM snapshot.
+  uint32_t process_id_ = 0; ///< Owning process ID (PASID analog, set per dispatch).
 
   bool use_system_clock_ = false;                ///< PM4 shader timestamps use host monotonic time.
   std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
   std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
-  InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
@@ -1122,18 +1144,6 @@ private:
 
   /// @brief Check only the scalar words consumed by a wave mask operation.
   /// Raw access remains available for preserving the other half and observers.
-  void check_mask_memory_wait(RegClass reg_class, uint64_t lanes, bool write) const {
-    // Special-register halves share one shadow byte; records retain word indices.
-    if (!memory_wait_checks_enabled_ || !memory_wait_shadow_.pending({reg_class, 0, 1}, write))
-      return;
-    lanes &= lane_mask();
-    if (lanes & 0xffffffffu)
-      check_active_memory_wait({reg_class, 0, 1}, ~uint64_t{0},
-                               MemoryWaitScoreboard::kFullDwordByteMask, write);
-    if (lanes >> 32)
-      check_active_memory_wait({reg_class, 1, 1}, ~uint64_t{0},
-                               MemoryWaitScoreboard::kFullDwordByteMask, write);
-  }
 
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
@@ -1168,7 +1178,19 @@ private:
   /// Completion bits: named, workgroup, workgroup trap, cluster, cluster trap.
   std::array<bool, 5> barrier_complete_{};
   uint8_t waiting_barrier_bit_ = kNoBarrierWait; ///< Completion bit awaited by split wait.
-  WfState state_ = WfState::HALTED;              ///< Current execution state.
+  static constexpr uint32_t kNoGwsWait = 0xffffffff;
+  uint32_t gws_wait_rid_ = kNoGwsWait; ///< GWS resource id this wave is parked on.
+  bool gws_wait_is_barrier_ = false;   ///< Parked at a GWS barrier (vs a semaphore P).
+  uint64_t gws_wait_generation_ = 0;   ///< Resource release generation observed at park.
+  /// Device-global arrival order stamped on a parked semaphore P-waiter. The GWS
+  /// store releases a V/BR credit to the oldest queued waiter first (across all
+  /// CUs), so a later P cannot jump an earlier parked one (see GwsDevice). Unused
+  /// by barrier waiters (they wake via the release generation).
+  uint64_t gws_wait_seq_ = 0;
+  uint64_t gws_wait_progress_ = 0; ///< Last observed process instruction progress.
+  uint32_t gws_wait_steps_ =
+      0; ///< Unpaused CU steps since this process last executed an instruction.
+  WfState state_ = WfState::HALTED; ///< Current execution state.
   MemoryWaitShadow memory_wait_shadow_;
   std::unique_ptr<MemoryWaitScoreboard> memory_wait_scoreboard_;
   WaitCounters wait_counters_; ///< Outstanding memory operation counters.
@@ -1233,6 +1255,7 @@ private:
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
+  friend class GwsDevice;       // Device-global GWS store parks/wakes this wave.
   friend class ::rocjitsu::ExecutionPluginGroup;
 
   // Memory pipelines complete deferred VM loads into physical SGPR/VGPR

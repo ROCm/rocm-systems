@@ -52,8 +52,9 @@ bool WaitcheckStateOps::register_set_less(const RegisterSet &lhs, const Register
   std::vector<RegisterRef> rhs_regs;
   lhs_regs.reserve(lhs.size());
   rhs_regs.reserve(rhs.size());
-  lhs.for_each([&](RegisterRef ref) { lhs_regs.push_back(ref); });
-  rhs.for_each([&](RegisterRef ref) { rhs_regs.push_back(ref); });
+  // Inline these callbacks to avoid packing RegisterRef through the aggregate ABI.
+  lhs.for_each([&](RegisterRef ref) __attribute__((always_inline)) { lhs_regs.push_back(ref); });
+  rhs.for_each([&](RegisterRef ref) __attribute__((always_inline)) { rhs_regs.push_back(ref); });
   auto less = [](RegisterRef lhs_ref, RegisterRef rhs_ref) {
     return std::make_tuple(static_cast<uint8_t>(lhs_ref.cls), lhs_ref.index, lhs_ref.width) <
            std::make_tuple(static_cast<uint8_t>(rhs_ref.cls), rhs_ref.index, rhs_ref.width);
@@ -433,7 +434,7 @@ void WaitcheckStateOps::apply_xcnt_wait_implied_by_loadcnt(PendingState &state, 
 bool WaitcheckStateOps::scalar_memory_makes_counter_out_of_order(const PendingState &state,
                                                                  WaitCounterKind counter,
                                                                  WaitcntModel model) {
-  return counter == smem_wait_counter(model) && state.pending_smem[counter_index(counter)];
+  return counter == amdgpu::smem_wait_counter(model) && state.pending_smem[counter_index(counter)];
 }
 
 bool WaitcheckStateOps::counter_has_event_kind(const PendingState &state, WaitCounterKind counter,
@@ -457,7 +458,7 @@ bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingStat
 util::FailureOr<bool> WaitcheckStateOps::counter_out_of_order(const PendingState &state,
                                                               WaitCounterKind counter,
                                                               rj_code_arch_t arch) {
-  const auto model = waitcnt_model(arch);
+  const auto model = amdgpu::waitcnt_model(arch);
   if (model.failed())
     return util::Result::failure();
   // Match WaitcntBrackets::counterOutOfOrder. Scalar memory can always
@@ -627,7 +628,7 @@ void WaitcheckStateOps::apply_sgpr_hazard_wait(SgprHazardState &state, uint32_t 
 
 util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const WaitFields &fields,
                                                   rj_code_arch_t arch) {
-  if (waitcnt_model(arch).failed())
+  if (amdgpu::waitcnt_model(arch).failed())
     return util::Result::failure();
   for (size_t i = 0; i < fields.size(); ++i) {
     if (!fields[i])

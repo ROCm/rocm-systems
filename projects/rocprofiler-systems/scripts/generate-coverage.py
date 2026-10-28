@@ -30,7 +30,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 GCOVR_EXCLUDE_PATTERNS = [
     r"/usr/.*",
@@ -42,7 +41,7 @@ GCOVR_EXCLUDE_PATTERNS = [
 ]
 
 
-def find_tool(name: str, required: bool = True) -> Optional[str]:
+def find_tool(name: str, required: bool = True) -> str | None:
     path = shutil.which(name)
     if required and path is None:
         print(f"ERROR: {name} not found in PATH", file=sys.stderr)
@@ -82,8 +81,7 @@ def git(directory: Path, *args: str) -> bytes:
         proc = subprocess.run(
             ["git", *args],
             cwd=directory,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=60,
             check=False,
         )
@@ -94,7 +92,7 @@ def git(directory: Path, *args: str) -> bytes:
     return proc.stdout
 
 
-def changed_files(source_dir: Path, base: Optional[str]) -> set[Path]:
+def changed_files(source_dir: Path, base: str | None) -> set[Path]:
     """Files changed vs merge-base(HEAD, base): committed, staged/unstaged, untracked."""
     root = Path(
         os.fsdecode(git(source_dir, "rev-parse", "--show-toplevel")).strip()
@@ -142,6 +140,76 @@ def changed_files(source_dir: Path, base: Optional[str]) -> set[Path]:
     return dirty | untracked
 
 
+def _gcovr_base_cmd(
+    *,
+    gcov_cmd: str,
+    source_dir: Path,
+    dir_scope: Path,
+    extra_excludes: list[str],
+) -> list[str]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "gcovr",
+        "--root",
+        str(source_dir),
+        "--gcov-executable",
+        gcov_cmd,
+        "--exclude-unreachable-branches",
+        "--exclude-throw-branches",
+        "--gcov-ignore-parse-errors",
+        "--gcov-ignore-errors=source_not_found",
+        "--merge-lines",
+        "--merge-mode-functions=merge-use-line-max",
+        "-s",
+        "-p",
+        "--filter",
+        scope_filter(dir_scope),
+    ]
+    for pattern in GCOVR_EXCLUDE_PATTERNS + extra_excludes:
+        cmd.extend(["--exclude", pattern])
+    return cmd
+
+
+def _run(cmd: list[str], build_dir: Path) -> subprocess.CompletedProcess:
+    print(f"Running: {' '.join(cmd)}")
+    result = subprocess.run(
+        [*cmd, str(build_dir)], capture_output=True, text=True, check=False
+    )
+    if result.stdout:
+        print(result.stdout)
+    return result
+
+
+def _stale_source_excludes(json_path: Path, source_dir: Path) -> list[str]:
+    """Coverage data recorded for a file that no longer exists on disk.
+
+    Happens when the build directory is reused after files were renamed or
+    deleted (e.g. an incremental CI build): gcovr can still read line counts
+    from the stale .gcda/.gcno pair, but the HTML/single-page writers also
+    read the source file's *content* and hard-fail if it is missing. Excluding
+    those specific paths keeps the report generation from crashing on
+    coverage data that is unavoidably out of date.
+    """
+    data = load_coverage_json(json_path)
+    stale = []
+    for file_data in data.get("files", []):
+        filename = file_data.get("filename", "") or file_data.get("file", "")
+        if not filename:
+            continue
+        path = canonical(filename, source_dir)
+        if not path.is_file():
+            stale.append(path)
+    if stale:
+        print(
+            f"WARNING: {len(stale)} file(s) with coverage data no longer exist on "
+            f"disk; excluding from the report: "
+            f"{', '.join(str(p) for p in stale)}",
+            file=sys.stderr,
+        )
+    return [re.escape(str(p)) for p in stale]
+
+
 def run_gcovr(
     *,
     gcov_cmd: str,
@@ -157,40 +225,34 @@ def run_gcovr(
     xml_path = output_dir / f"{label}.xml"
     html_path = output_dir / f"{label}.html"
 
-    gcovr_cmd = [sys.executable, "-m", "gcovr"]
-    cmd = [
-        *gcovr_cmd,
-        "--root",
-        str(source_dir),
-        "--gcov-executable",
-        gcov_cmd,
-        "--exclude-unreachable-branches",
-        "--exclude-throw-branches",
-        "--gcov-ignore-parse-errors",
-        "--merge-lines",
-        "--merge-mode-functions=merge-use-line-max",
-        "-s",
-        "-p",
-        "--filter",
-        scope_filter(dir_scope),
-        "--json",
-        str(json_path),
-        "--xml",
-        str(xml_path),
-        "--html-details",
-        str(html_path),
-    ]
+    probe_cmd = _gcovr_base_cmd(
+        gcov_cmd=gcov_cmd, source_dir=source_dir, dir_scope=dir_scope, extra_excludes=[]
+    )
+    probe_cmd.extend(["--json", str(json_path)])
+    result = _run(probe_cmd, build_dir)
+    if result.returncode != 0:
+        print(f"gcovr stderr:\n{result.stderr}", file=sys.stderr)
+        sys.exit(1)
 
-    for pattern in GCOVR_EXCLUDE_PATTERNS:
-        cmd.extend(["--exclude", pattern])
+    extra_excludes = _stale_source_excludes(json_path, source_dir)
 
-    cmd.append(str(build_dir))
-
-    print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.stdout:
-        print(result.stdout)
+    cmd = _gcovr_base_cmd(
+        gcov_cmd=gcov_cmd,
+        source_dir=source_dir,
+        dir_scope=dir_scope,
+        extra_excludes=extra_excludes,
+    )
+    cmd.extend(
+        [
+            "--json",
+            str(json_path),
+            "--xml",
+            str(xml_path),
+            "--html-details",
+            str(html_path),
+        ]
+    )
+    result = _run(cmd, build_dir)
     if result.returncode != 0:
         print(f"gcovr stderr:\n{result.stderr}", file=sys.stderr)
         sys.exit(1)
@@ -208,7 +270,7 @@ def compute_file_coverage(
     *,
     source_dir: Path,
     dir_scope: Path,
-    changed: Optional[set[Path]] = None,
+    changed: set[Path] | None = None,
 ) -> list[dict]:
     files = []
     for file_data in data.get("files", []):
@@ -305,8 +367,8 @@ def generate_markdown(
     *,
     file_coverages: list[dict],
     totals: dict,
-    baseline_totals: Optional[dict],
-    baseline_files: Optional[list[dict]] = None,
+    baseline_totals: dict | None,
+    baseline_files: list[dict] | None = None,
     source_dir: Path,
 ) -> str:
     baseline_by_filename = (
@@ -345,7 +407,7 @@ def generate_markdown(
         for group_label, group_files in groups:
             if not group_files:
                 continue
-            lines.append(f"<details>")
+            lines.append("<details>")
             lines.append(f"<summary>{group_label} ({len(group_files)} files)</summary>")
             lines.append("")
             lines.append("| Lines | Functions | File |")

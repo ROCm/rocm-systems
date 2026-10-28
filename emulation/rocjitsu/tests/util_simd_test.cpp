@@ -9,6 +9,7 @@
 #include "util/simd_test_hooks.h"
 
 #include "util/data_types.h"
+#include "util/host_target.h"
 
 #include <gtest/gtest.h>
 
@@ -110,17 +111,20 @@ TEST(UtilSimd, Fp8WideningExhaustsEveryCode) {
 }
 
 TEST(UtilSimd, Native64MaskWorkaroundMacroIsBooleanOverridePoint) {
-  constexpr int workaround = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS;
-  constexpr int user_override = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS_USER_OVERRIDE;
+  constexpr int workaround = RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS;
+  constexpr int user_override = RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS_USER_OVERRIDE;
   static_assert(workaround == 0 || workaround == 1);
   static_assert(user_override == 0 || user_override == 1);
 
   if constexpr (!user_override) {
+    // Keep the expected policy independent of host_target.h. This reference
+    // checks detection; it does not select a production implementation.
 #if defined(__clang__) && defined(__GLIBCXX__) && defined(__AVX512F__)
-    EXPECT_EQ(workaround, 1);
+    constexpr int kExpectedDefaultMaskFallback = 1;
 #else
-    EXPECT_EQ(workaround, 0);
+    constexpr int kExpectedDefaultMaskFallback = 0;
 #endif
+    EXPECT_EQ(workaround, kExpectedDefaultMaskFallback);
   }
 }
 
@@ -166,7 +170,7 @@ TEST(UtilSimd, Broadcast_F32) {
 
 TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
   SKIP_IF_NO_SIMD();
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
   const auto check = []<typename Simd>() {
     constexpr std::size_t W = Simd::size();
     ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
@@ -185,7 +189,7 @@ TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
   };
 
   check.template operator()<util::native<uint32_t>>();
-#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   check.template operator()<util::native<uint64_t>>();
   check.template operator()<util::narrow32<uint32_t>>();
 #endif
@@ -194,7 +198,7 @@ TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
 
 TEST(UtilSimd, MaskBitBridgePortableFallbackRoundTripsEveryPattern) {
   SKIP_IF_NO_SIMD();
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
   const uint64_t full = util::mask<uint64_t>(FallbackSimd::size());
   for (uint64_t bits = 0; bits <= full; ++bits) {
     const auto mask = util::simd_mask_from_bits<FallbackSimd>(bits);
@@ -443,14 +447,8 @@ TEST(UtilSimd, ForceScalarOverrideDoesNotReachADlopenedModule) {
   ::dlclose(module);
 }
 
-// Toolchain guard for the SIMD fast path of v_exp_f32 (stdx::exp2) and
-// v_log_f32 (stdx::log2). Those VOP1 kernels take the SIMD path whenever
-// `util::has_stdx_simd`, with no runtime value check — so the vector libm
-// MUST be bit-identical to the scalar std::* used by the generated body, or
-// the fast path silently returns wrong results. These tests sweep full-range
-// random bit patterns (covering NaN/Inf/denormal/negative) and fail loudly if
-// any lane diverges, blocking a divergent toolchain at CI time. If one fails,
-// drop the corresponding row from SIMD_VOP1_UNARY rather than ship wrong math.
+// Compare scalar and SIMD paths over full-range random encodings, including
+// NaN payloads. LOG and EXP use the shared hardware mappings in both paths.
 template <class ScalarFn, class VectorFn>
 void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   using V = util::native<float>;
@@ -474,14 +472,18 @@ void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
 
 TEST(UtilSimd, Exp2_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
-  expect_simd_bit_exact([](float x) { return std::exp2(x); },
-                        [](util::native<float> v) { return util::stdx::exp2(v); });
+  for (bool quiet_snan : {false, true})
+    expect_simd_bit_exact(
+        [quiet_snan](float x) { return util::amdgpu_exp_f32(x, quiet_snan); },
+        [quiet_snan](util::native<float> v) { return util::exp_f32_simd(v, quiet_snan); });
 }
 
 TEST(UtilSimd, Log2_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
-  expect_simd_bit_exact([](float x) { return std::log2(x); },
-                        [](util::native<float> v) { return util::stdx::log2(v); });
+  for (bool quiet_snan : {false, true})
+    expect_simd_bit_exact(
+        [quiet_snan](float x) { return util::amdgpu_log_f32(x, quiet_snan); },
+        [quiet_snan](util::native<float> v) { return util::log_f32_simd(v, quiet_snan); });
 }
 
 // Toolchain guard for the ternary VOP2 FMA/MAC/MAD SIMD fast path
@@ -571,7 +573,7 @@ TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
   }
 }
 
-// native<double>: the f64 unary VOP1 fast path (v_ceil/floor/trunc/rndne/fract/
+// native<double>: the f64 unary VOP1 fast path (v_ceil/floor/trunc/rndne/
 // rcp/rsq/sqrt_f64) relies on util::stdx::{ceil,floor,trunc,nearbyint,sqrt} and
 // 1.0/x being bit-identical to the scalar std::* used in the generated bodies.
 // Sweeps full-range random 64-bit patterns, skipping lanes whose result is NaN
@@ -623,11 +625,30 @@ TEST(UtilSimd, RndneF64_VectorMatchesScalar_BitExact) {
   expect_f64_unary_bit_exact([](double x) { return std::nearbyint(x); },
                              [](util::native<double> x) { return util::rndne_simd(x); });
 }
-TEST(UtilSimd, FractF64_VectorMatchesScalar_BitExact) {
+TEST(UtilSimd, RcpF32MatchesPhysicalHardwareBits) {
   SKIP_IF_NO_SIMD();
-  expect_f64_unary_bit_exact([](double x) { return x - std::floor(x); },
-                             [](util::native<double> x) { return x - util::floor_simd(x); });
+  RestoreEnvironment restore;
+  const uint32_t cases[][2] = {
+      {0x3FC00000u, 0x3F2AAAAAu}, {0x3F802922u, 0x3F7FADD6u}, {0xBFB0333Cu, 0xBF39F868u},
+      {0x00800000u, 0x7E800000u}, {0xFF7FFFFFu, 0x80000000u}, {0x80000001u, 0xFF800000u},
+      {0x7F800000u, 0x00000000u}, {0xFFA12345u, 0xFFE12345u},
+  };
+  using V = util::native<float>;
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(mode), 0);
+    for (unsigned start = 0; start < std::size(cases); ++start) {
+      std::array<uint32_t, V::size()> input_bits;
+      for (unsigned lane = 0; lane < V::size(); ++lane)
+        input_bits[lane] = cases[(start + lane) % std::size(cases)][0];
+      const V input = util::load<float>(input_bits.data());
+      const V result = util::rcp_f32_simd(input);
+      for (unsigned lane = 0; lane < V::size(); ++lane)
+        EXPECT_EQ(std::bit_cast<uint32_t>(float(result[lane])),
+                  cases[(start + lane) % std::size(cases)][1]);
+    }
+  }
 }
+
 TEST(UtilSimd, RcpF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   expect_f64_unary_bit_exact([](double x) { return 1.0f / x; },
@@ -813,39 +834,6 @@ TEST(UtilSimd, F32ToF16Mode_VectorMatchesScalar_Sweep) {
                              << std::bit_cast<uint32_t>(in[i]);
       }
     }
-  }
-}
-
-// Guard for util::flush_denorm_f32_simd: denormals flush to sign-preserving
-// zero (FTZ); every other class (±0, normal, ±Inf, NaN payloads) passes through
-// bit-for-bit. The f32 rcp/rsq/exp/log SIMD ports funnel through this helper.
-TEST(UtilSimd, FlushDenormF32) {
-  SKIP_IF_NO_SIMD();
-  using V = util::native<float>;
-  constexpr std::size_t W = util::native_width_v<float>;
-  struct Case {
-    uint32_t in, out;
-  };
-  const Case cases[] = {
-      {0x00000001u, 0x00000000u}, // +smallest denormal -> +0
-      {0x80000001u, 0x80000000u}, // -smallest denormal -> -0
-      {0x007FFFFFu, 0x00000000u}, // +largest denormal  -> +0
-      {0x807FFFFFu, 0x80000000u}, // -largest denormal  -> -0
-      {0x00000000u, 0x00000000u}, // +0 untouched
-      {0x80000000u, 0x80000000u}, // -0 untouched
-      {0x00800000u, 0x00800000u}, // smallest normal untouched
-      {0x3F800000u, 0x3F800000u}, // 1.0 untouched
-      {0x7F800000u, 0x7F800000u}, // +Inf untouched
-      {0xFF800000u, 0xFF800000u}, // -Inf untouched
-      {0x7FC00000u, 0x7FC00000u}, // qNaN payload untouched
-      {0x7F800001u, 0x7F800001u}, // sNaN payload untouched
-  };
-  for (const auto &c : cases) {
-    V r = util::flush_denorm_f32_simd(util::broadcast<float>(c.in));
-    alignas(V) float out[W];
-    r.copy_to(out, util::stdx::element_aligned);
-    for (std::size_t i = 0; i < W; ++i)
-      EXPECT_EQ(std::bit_cast<uint32_t>(out[i]), c.out) << "in=0x" << std::hex << c.in;
   }
 }
 

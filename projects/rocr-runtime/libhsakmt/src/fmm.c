@@ -186,6 +186,11 @@ struct manageable_aperture {
 	vm_area_t *vm_ranges;
 	rbtree_t tree;
 	rbtree_t user_tree;
+	/* Largest page-rounded userptr extent. Bounds the leftward scan in
+	 * fmm_retire_stale_userptrs. Grows on insert and resets when user_tree
+	 * is empty.
+	 */
+	uint64_t userptr_max_extent;
 	pthread_mutex_t fmm_mutex;
 	bool is_cpu_accessible;
 	const manageable_aperture_ops_t *ops;
@@ -255,7 +260,9 @@ typedef struct {
 
 	/* DEBUG/TEMPORARY: whether to perform the SVM host unregister. Off by
 	 * default, so deregistration stays the no-op it was until the path has
-	 * more mileage; HSA_SVM_HOST_UNREGISTER_DEBUG opts in.
+	 * more mileage; HSA_SVM_HOST_UNREGISTER_DEBUG opts in. When it is on,
+	 * the NO_ACCESS revoke is queued on a worker thread instead of issued
+	 * on the deregistering thread.
 	 */
 	bool svm_host_unregister;
 } svm_t;
@@ -296,6 +303,27 @@ struct svm_api_range {
 #define SVM_API_GPU_MASK_BITS (sizeof(uint64_t) * 8)
 typedef struct svm_api_range svm_api_range_t;
 
+/*
+ * One deferred NO_ACCESS. The deregistering thread computes the ranges and the
+ * GPUs exactly as the synchronous path does and queues them here; the worker
+ * issues the ioctls.
+ *
+ * Ordering against a later grant for the same pages is what makes this safe.
+ * The synchronous path gets that from holding svm_api_mutex across both, which
+ * a worker cannot do without serializing everything again, so instead the
+ * queue is part of the ordering: before a register or a map touches a range,
+ * svm_revoke_sync_locked() cancels any queued revoke the new registration
+ * fully covers, and waits out anything else that overlaps. A revoke can
+ * therefore never land on pages a live registration has since been granted.
+ */
+struct svm_revoke_work {
+	struct svm_revoke_work *next;
+	void *addr;
+	uint64_t size;
+	uint64_t gpu_mask;
+	bool gpu_all;
+};
+
 struct hsa_kfd_fmm_context
 {
 	/* The other apertures are specific to each GPU. gpu_mem_t manages GPU
@@ -322,6 +350,19 @@ struct hsa_kfd_fmm_context
 	rbtree_t svm_api_range_tree;
 	pthread_mutex_t svm_api_mutex;
 	uint64_t svm_api_max_extent;
+
+	/* Deferred revoke queue, also under svm_api_mutex. svm_revoke_inflight
+	 * is the item whose ioctl is running with the mutex dropped, so it
+	 * still counts as pending for overlap purposes.
+	 */
+	struct svm_revoke_work *svm_revoke_head;
+	struct svm_revoke_work *svm_revoke_tail;
+	struct svm_revoke_work *svm_revoke_inflight;
+	pthread_cond_t svm_revoke_queued;	/* work arrived, or stop asked */
+	pthread_cond_t svm_revoke_retired;	/* an item finished */
+	pthread_t svm_revoke_thread;
+	bool svm_revoke_running;
+	bool svm_revoke_stop;
 
 	/* On APU, for memory allocated on the system memory that GPU doesn't
 	 * access via GPU driver, they are not managed by GPUVM. cpuvm_aperture
@@ -385,6 +426,14 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	pthread_mutex_init(&ctx->fmm_context->svm_api_mutex, NULL);
 	ctx->fmm_context->svm_api_max_extent = 0;
 
+	ctx->fmm_context->svm_revoke_head = NULL;
+	ctx->fmm_context->svm_revoke_tail = NULL;
+	ctx->fmm_context->svm_revoke_inflight = NULL;
+	ctx->fmm_context->svm_revoke_running = false;
+	ctx->fmm_context->svm_revoke_stop = false;
+	pthread_cond_init(&ctx->fmm_context->svm_revoke_queued, NULL);
+	pthread_cond_init(&ctx->fmm_context->svm_revoke_retired, NULL);
+
 	/* Initialize cpuvm_aperture */
 	ctx->fmm_context->cpuvm_aperture = init_aperture;
 
@@ -436,6 +485,11 @@ static inline HsaSharedMemoryHandle *to_hsa_shared_memory_handle(
 }
 
 static int __fmm_release(HsaKFDContext *ctx, vm_object_t *object, manageable_aperture_t *aperture);
+static int __fmm_release_locked(HsaKFDContext *ctx, vm_object_t *object,
+				manageable_aperture_t *aperture);
+static int _fmm_unmap_from_gpu(HsaKFDContext *ctx, manageable_aperture_t *aperture,
+			       void *address, uint32_t *device_ids_array,
+			       uint32_t device_ids_array_size, vm_object_t *obj);
 static int _fmm_unmap_from_gpu_scratch(HsaKFDContext *ctx, uint32_t gpu_id,
 				       manageable_aperture_t *aperture, void *address);
 static void print_device_id_array(uint32_t *device_id_array, uint32_t device_id_array_size);
@@ -518,6 +572,15 @@ static void vm_remove_area(manageable_aperture_t *app, vm_area_t *area)
 	free(area);
 }
 
+/* Page-rounded span of a userptr registration. */
+static uint64_t userptr_page_extent(const vm_object_t *obj)
+{
+	uint64_t ustart = (uint64_t)obj->userptr & ~(uint64_t)(PAGE_SIZE - 1);
+	uint64_t uend = PAGE_ALIGN_UP((uint64_t)obj->userptr + obj->userptr_size);
+
+	return uend - ustart;
+}
+
 static void vm_remove_object(manageable_aperture_t *app, vm_object_t *object)
 {
 	/* Free allocations inside the object */
@@ -536,8 +599,15 @@ static void vm_remove_object(manageable_aperture_t *app, vm_object_t *object)
 		free(object->mapped_node_id_array);
 
 	hsakmt_rbtree_delete(&app->tree, &object->node);
-	if (object->userptr)
+	if (object->userptr) {
 		hsakmt_rbtree_delete(&app->user_tree, &object->user_node);
+		/* A stale bound only widens later scans. Drop it once nothing
+		 * is tracked so one large registration does not keep widening
+		 * them for the life of the process.
+		 */
+		if (app->user_tree.root == &app->user_tree.sentinel)
+			app->userptr_max_extent = 0;
+	}
 
 	free(object);
 }
@@ -1007,6 +1077,76 @@ static void aperture_release_area(manageable_aperture_t *app, void *address,
 				  uint64_t MemorySizeInBytes)
 {
 	app->ops->release_area(app, address, MemorySizeInBytes);
+}
+
+/*
+ * mmap apertures reserve with MAP_FIXED_NOREPLACE or a kernel-chosen address,
+ * so a successful reservation proves no CPU mapping existed in [mem, mem+size).
+ * A userptr registration with a page in that range pins host pages that are
+ * gone, and since userptrs are looked up first in mmap apertures it would
+ * shadow the new object. Unmap and release such registrations, all
+ * references at once, before the caller publishes its object.
+ * Any registration that can reach the range has its key at or after
+ * start - userptr_max_extent, so the walk starts there instead of at the
+ * leftmost node. Caller holds app->fmm_mutex.
+ */
+static int fmm_retire_stale_userptrs(HsaKFDContext *ctx,
+				     manageable_aperture_t *app,
+				     void *mem, uint64_t size)
+{
+	uint64_t start = (uint64_t)mem;
+	uint64_t end = PAGE_ALIGN_UP(start + size);
+	/* Size 0 selects the first in-order node at that address. LKP_ADDR
+	 * would stop on a larger duplicate and skip the smaller one to its left.
+	 */
+	uint64_t scan = start > app->userptr_max_extent ?
+			start - app->userptr_max_extent : 0;
+	rbtree_key_t key = rbtree_key(scan, 0);
+	rbtree_node_t *n = rbtree_lookup_nearest(&app->user_tree, &key,
+						 LKP_ALL, RIGHT);
+	int ret;
+
+	while (n) {
+		vm_object_t *obj = vm_object_entry(n, 1);
+		uint64_t ustart = (uint64_t)obj->userptr & ~(uint64_t)(PAGE_SIZE - 1);
+		uint64_t uend = PAGE_ALIGN_UP((uint64_t)obj->userptr + obj->userptr_size);
+
+		/* user_tree is ordered by userptr; fetch next before removal */
+		n = hsakmt_rbtree_next(&app->user_tree, n);
+		if (ustart >= end)
+			break;
+		if (uend <= start)
+			continue;
+
+		if (obj->mapped_device_id_array_size > 0) {
+			obj->mapping_count = 1;
+			ret = _fmm_unmap_from_gpu(ctx, app, obj->start, NULL, 0, obj);
+			if (ret)
+				return ret;
+		}
+		obj->registration_count = 1;
+		ret = __fmm_release_locked(ctx, obj, app);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+/* Reserve VA for a new object. Caller holds app->fmm_mutex. */
+static void *aperture_reserve_area(HsaKFDContext *ctx, manageable_aperture_t *app,
+				   void *address, uint64_t size, uint64_t align)
+{
+	void *mem = aperture_allocate_area_aligned(app, address, size, align);
+
+	if (mem && app->ops == &mmap_aperture_ops &&
+	    fmm_retire_stale_userptrs(ctx, app, mem, size)) {
+		pr_err("Failed to retire stale userptr overlapping %p\n", mem);
+		aperture_release_area(app, mem, size);
+		return NULL;
+	}
+
+	return mem;
 }
 
 /* returns 0 on success. Assumes, that fmm_mutex is locked on entry */
@@ -1545,6 +1685,223 @@ static HSAKMT_STATUS fmm_unregister_mem_svm_api(HsaKFDContext *ctx,
 	return ret;
 }
 
+static bool svm_ranges_overlap(void *a_start, uint64_t a_size,
+			       void *b_start, uint64_t b_size)
+{
+	HSAuint64 a = (HSAuint64)a_start, b = (HSAuint64)b_start;
+
+	return a < b + b_size && b < a + a_size;
+}
+
+static bool svm_range_covers(void *outer_start, uint64_t outer_size,
+			     void *inner_start, uint64_t inner_size)
+{
+	HSAuint64 o = (HSAuint64)outer_start, i = (HSAuint64)inner_start;
+
+	return i >= o && i + inner_size <= o + outer_size;
+}
+
+/*
+ * Make the deferred queue safe for a registration or a grant of
+ * [address, address + size): cancel the queued revokes it fully covers, since
+ * the range is live again and the pages would only have been re-granted, and
+ * wait out anything else that overlaps rather than letting it land afterwards.
+ *
+ * Called with svm_api_mutex held; the wait drops it.
+ */
+static void svm_revoke_sync_locked(struct hsa_kfd_fmm_context *fmm_ctx,
+				   void *address, uint64_t size)
+{
+	struct svm_revoke_work *prev, *w, *next;
+	bool wait;
+
+	if (!fmm_ctx->svm.svm_host_unregister)
+		return;
+
+	do {
+		wait = false;
+
+		prev = NULL;
+		w = fmm_ctx->svm_revoke_head;
+		while (w) {
+			next = w->next;
+
+			if (!svm_ranges_overlap(address, size, w->addr, w->size)) {
+				prev = w;
+				w = next;
+				continue;
+			}
+			if (!svm_range_covers(address, size, w->addr, w->size)) {
+				/* Partial overlap: trimming it would be exact
+				 * but this is rare, so let the worker finish
+				 * it first instead.
+				 */
+				wait = true;
+				break;
+			}
+
+			if (prev)
+				prev->next = next;
+			else
+				fmm_ctx->svm_revoke_head = next;
+			if (fmm_ctx->svm_revoke_tail == w)
+				fmm_ctx->svm_revoke_tail = prev;
+			free(w);
+			w = next;
+		}
+
+		if (fmm_ctx->svm_revoke_inflight &&
+		    svm_ranges_overlap(address, size,
+				       fmm_ctx->svm_revoke_inflight->addr,
+				       fmm_ctx->svm_revoke_inflight->size))
+			wait = true;
+
+		if (wait)
+			pthread_cond_wait(&fmm_ctx->svm_revoke_retired,
+					  &fmm_ctx->svm_api_mutex);
+	} while (wait);
+}
+
+static void *svm_revoke_worker(void *arg)
+{
+	HsaKFDContext *ctx = arg;
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	struct svm_revoke_work *w;
+
+	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+	while (true) {
+		while (!fmm_ctx->svm_revoke_head && !fmm_ctx->svm_revoke_stop)
+			pthread_cond_wait(&fmm_ctx->svm_revoke_queued,
+					  &fmm_ctx->svm_api_mutex);
+
+		w = fmm_ctx->svm_revoke_head;
+		if (!w) {
+			if (fmm_ctx->svm_revoke_stop)
+				break;
+			continue;
+		}
+
+		fmm_ctx->svm_revoke_head = w->next;
+		if (!fmm_ctx->svm_revoke_head)
+			fmm_ctx->svm_revoke_tail = NULL;
+		fmm_ctx->svm_revoke_inflight = w;
+
+		/* The ioctl runs without the mutex so registrations of other
+		 * ranges are not blocked behind it; overlapping ones wait in
+		 * svm_revoke_sync_locked() on svm_revoke_inflight.
+		 */
+		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+		fmm_unregister_mem_svm_api(ctx, w->addr, w->size,
+					   w->gpu_mask, w->gpu_all);
+		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+
+		fmm_ctx->svm_revoke_inflight = NULL;
+		free(w);
+		pthread_cond_broadcast(&fmm_ctx->svm_revoke_retired);
+	}
+	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+
+	return NULL;
+}
+
+/* Called with svm_api_mutex held. Returns false if the caller should just
+ * issue the revoke itself.
+ */
+static bool svm_revoke_enqueue_locked(HsaKFDContext *ctx, void *addr, uint64_t size,
+				      uint64_t gpu_mask, bool gpu_all)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	struct svm_revoke_work *w;
+
+	if (!fmm_ctx->svm_revoke_running) {
+		if (pthread_create(&fmm_ctx->svm_revoke_thread, NULL,
+				   svm_revoke_worker, ctx)) {
+			pr_debug("failed to start the SVM revoke worker: %s\n",
+				 strerror(errno));
+			return false;
+		}
+		fmm_ctx->svm_revoke_running = true;
+	}
+
+	w = malloc(sizeof(*w));
+	if (!w)
+		return false;
+
+	w->next = NULL;
+	w->addr = addr;
+	w->size = size;
+	w->gpu_mask = gpu_mask;
+	w->gpu_all = gpu_all;
+
+	if (fmm_ctx->svm_revoke_tail)
+		fmm_ctx->svm_revoke_tail->next = w;
+	else
+		fmm_ctx->svm_revoke_head = w;
+	fmm_ctx->svm_revoke_tail = w;
+
+	pthread_cond_signal(&fmm_ctx->svm_revoke_queued);
+
+	return true;
+}
+
+/* Drain the queue and stop the worker. Safe to call when it never started. */
+static void svm_revoke_worker_stop(HsaKFDContext *ctx)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	pthread_t thread;
+
+	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+	if (!fmm_ctx->svm_revoke_running) {
+		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+		return;
+	}
+	fmm_ctx->svm_revoke_stop = true;
+	thread = fmm_ctx->svm_revoke_thread;
+	pthread_cond_broadcast(&fmm_ctx->svm_revoke_queued);
+	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+
+	pthread_join(thread, NULL);
+
+	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+	fmm_ctx->svm_revoke_running = false;
+	fmm_ctx->svm_revoke_stop = false;
+	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+}
+
+/* Join the worker, if it is still running, and destroy the conds it waits on.
+ * The context outlives hsakmt_fmm_destroy_process_apertures(), which can be
+ * followed by another init of the apertures, so the conds stay until the
+ * context itself is freed.
+ */
+void hsakmt_kfdcontext_fini_fmm_context(HsaKFDContext *ctx)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+
+	svm_revoke_worker_stop(ctx);
+	pthread_cond_destroy(&fmm_ctx->svm_revoke_queued);
+	pthread_cond_destroy(&fmm_ctx->svm_revoke_retired);
+}
+
+/* After fork the worker does not exist in the child, so drop the queue it
+ * would have drained instead of trying to join a thread that is gone.
+ */
+static void svm_revoke_worker_reset(struct hsa_kfd_fmm_context *fmm_ctx)
+{
+	struct svm_revoke_work *w, *next;
+
+	for (w = fmm_ctx->svm_revoke_head; w; w = next) {
+		next = w->next;
+		free(w);
+	}
+	free(fmm_ctx->svm_revoke_inflight);
+
+	fmm_ctx->svm_revoke_head = NULL;
+	fmm_ctx->svm_revoke_tail = NULL;
+	fmm_ctx->svm_revoke_inflight = NULL;
+	fmm_ctx->svm_revoke_running = false;
+	fmm_ctx->svm_revoke_stop = false;
+}
+
 static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 						  void *address,
 					      uint64_t size, HsaMemFlags flags)
@@ -1592,6 +1949,7 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	 */
 	if (fmm_ctx->svm.svm_host_unregister) {
 		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+		svm_revoke_sync_locked(fmm_ctx, (void *)aligned_addr, aligned_size);
 		tracked = svm_api_range_get_locked(fmm_ctx, address, (void *)aligned_addr,
 						   aligned_size, size);
 		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
@@ -2081,7 +2439,7 @@ void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,
 	/* Allocate address space for scratch backing, 64KB aligned */
 	if (hsakmt_is_dgpu) {
 		pthread_mutex_lock(&fmm_ctx->svm.dgpu_aperture->fmm_mutex);
-		mem = aperture_allocate_area_aligned(
+		mem = aperture_reserve_area(ctx,
 			fmm_ctx->svm.dgpu_aperture, address,
 			aligned_size, SCRATCH_ALIGN);
 		pthread_mutex_unlock(&fmm_ctx->svm.dgpu_aperture->fmm_mutex);
@@ -2133,7 +2491,7 @@ static void *__fmm_allocate_device(HsaKFDContext *ctx,
 
 	/* Allocate address space */
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	mem = aperture_allocate_area_aligned(aperture, address, MemorySizeInBytes, alignment);
+	mem = aperture_reserve_area(ctx, aperture, address, MemorySizeInBytes, alignment);
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
 	if (!mem)
@@ -2179,7 +2537,7 @@ static void *fmm_map_to_cpu(void *mem, uint64_t size, bool host_access,
 	return ret;
 }
 
-static void *fmm_allocate_va(uint32_t gpu_id, void *address, uint64_t size,
+static void *fmm_allocate_va(HsaKFDContext *ctx, uint32_t gpu_id, void *address, uint64_t size,
 			manageable_aperture_t *aperture, uint64_t alignment, HsaMemFlags mflags)
 {
 	void *mem = NULL;
@@ -2191,7 +2549,7 @@ static void *fmm_allocate_va(uint32_t gpu_id, void *address, uint64_t size,
 
 	/* Allocate address space */
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	mem = aperture_allocate_area_aligned(aperture, address, size, alignment);
+	mem = aperture_reserve_area(ctx, aperture, address, size, alignment);
 
 	if (mem) {
 		/* Assign handle 0 to vm_obj since no memory allocated yet */
@@ -2365,7 +2723,7 @@ void *hsakmt_fmm_allocate_device(HsaKFDContext *ctx,
 
 	/* special case for va allocation without vram alloc */
 	if (mflags.ui32.OnlyAddress)
-		return fmm_allocate_va(gpu_id, address, size, aperture, alignment, mflags);
+		return fmm_allocate_va(ctx, gpu_id, address, size, aperture, alignment, mflags);
 
 	/* special case for vram allocation without addr */
 	if(mflags.ui32.NoAddress)
@@ -2548,8 +2906,12 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 
 	num_node = numa_max_node() + 1;
 
+	/* Single NUMA node: bind is a no-op; don't fail NoSubstitute (udmabuf). */
+	if (num_node <= 1)
+		return 0;
+
 	/* Ignore binding requests to invalid nodes IDs */
-	if (numa_node_id >= (unsigned)num_node || numa_node_id == INVALID_NODEID || num_node <= 1) {
+	if (numa_node_id >= (unsigned)num_node || numa_node_id == INVALID_NODEID) {
 		pr_warn("numa_node_id is out range: numa_node_id %d, num_node %d\n", numa_node_id, num_node);
 		if (mflags.ui32.NoSubstitute)
 			return -EFAULT;
@@ -2646,7 +3008,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 
 	/* special case for va allocation without real memory alloc */
 	if (mflags.ui32.OnlyAddress)
-		return fmm_allocate_va(gpu_id, address, size, aperture, alignment, mflags);
+		return fmm_allocate_va(ctx, gpu_id, address, size, aperture, alignment, mflags);
 
 	/* KFD refuses userptr on a node in recoverable-fault mode: evicting a
 	 * userptr BO invalidates its PTEs instead of preempting the queues,
@@ -2669,7 +3031,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 
 		/* Allocate address space */
 		pthread_mutex_lock(&aperture->fmm_mutex);
-		mem = aperture_allocate_area_aligned(aperture, address, size, alignment);
+		mem = aperture_reserve_area(ctx, aperture, address, size, alignment);
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		if (!mem)
 			return NULL;
@@ -2784,7 +3146,8 @@ void *hsakmt_fmm_allocate_host(HsaKFDContext *ctx,
 	return fmm_allocate_host_cpu(ctx, address, MemorySizeInBytes, mflags);
 }
 
-static int __fmm_release(HsaKFDContext *ctx,
+/* Caller holds aperture->fmm_mutex. */
+static int __fmm_release_locked(HsaKFDContext *ctx,
 			vm_object_t *object, manageable_aperture_t *aperture)
 {
 	struct kfd_ioctl_free_memory_of_gpu_args args = {0};
@@ -2794,14 +3157,10 @@ static int __fmm_release(HsaKFDContext *ctx,
 	if (!object)
 		return -EINVAL;
 
-	pthread_mutex_lock(&aperture->fmm_mutex);
-
 	if (object->userptr) {
 		object->registration_count--;
-		if (object->registration_count > 0) {
-			pthread_mutex_unlock(&aperture->fmm_mutex);
+		if (object->registration_count > 0)
 			return 0;
-		}
 	}
 
 	/* If memory is user memory and it's still GPU mapped, munmap
@@ -2818,7 +3177,7 @@ static int __fmm_release(HsaKFDContext *ctx,
 	}
 
 	if (ret)
-		goto err_free_mem_failed;
+		return ret;
 
 	if (object->is_svm_paged) {
 		/* Paged host memory backed by SVM is registered through
@@ -2851,7 +3210,16 @@ static int __fmm_release(HsaKFDContext *ctx,
 	aperture_release_area(aperture, object->start, object->size);
 	vm_remove_object(aperture, object);
 
-err_free_mem_failed:
+	return 0;
+}
+
+static int __fmm_release(HsaKFDContext *ctx,
+			vm_object_t *object, manageable_aperture_t *aperture)
+{
+	int ret;
+
+	pthread_mutex_lock(&aperture->fmm_mutex);
+	ret = __fmm_release_locked(ctx, object, aperture);
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 	return ret;
 }
@@ -3488,7 +3856,8 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	 * DEBUG/TEMPORARY: the SVM host unregister is off unless
 	 * HSA_SVM_HOST_UNREGISTER_DEBUG is set to a non-0 value. Left off,
 	 * deregistering an SVM-API host range stays the no-op it has always
-	 * been and register only sets the coherency flags.
+	 * been and register only sets the coherency flags. When it is on, the
+	 * NO_ACCESS revoke is queued on a worker thread.
 	 */
 	svmHostUnregisterStr = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
 	fmm_ctx->svm.svm_host_unregister =
@@ -3823,6 +4192,11 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 	rbtree_node_t *n;
 
 	release_mmio(ctx);
+
+	/* Let the deferred revokes drain before the tracking they came from
+	 * goes away.
+	 */
+	svm_revoke_worker_stop(ctx);
 
 	/* Free any SVM-API ranges that were never explicitly deregistered.
 	 * The kernel reclaims the underlying SVM ranges on process teardown,
@@ -4216,6 +4590,8 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 			 * and the GPUs granted here are recorded for the revoke.
 			 */
 			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+			svm_revoke_sync_locked(fmm_ctx, svm_addr,
+					       PAGE_ALIGN_UP(page_offset + size));
 			ret = fmm_map_mem_svm_api(ctx, svm_addr,
 						  PAGE_ALIGN_UP(page_offset + size),
 						  nodes_to_map,
@@ -4318,6 +4694,9 @@ static void print_device_id_array(uint32_t *device_id_array, uint32_t device_id_
 #endif
 }
 
+/* A supplied obj requires the caller to hold aperture->fmm_mutex.
+ * With obj == NULL, this helper acquires and releases the mutex.
+ */
 static int _fmm_unmap_from_gpu(HsaKFDContext *ctx,
 		manageable_aperture_t *aperture, void *address,
 		uint32_t *device_ids_array, uint32_t device_ids_array_size,
@@ -4620,12 +4999,17 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 	if (exist_obj) {
 		++exist_obj->registration_count;
 	} else {
+		uint64_t extent;
+
 		obj->userptr = addr;
 		hsakmt_gpuid_to_nodeid(ctx, gpu_id, &obj->node_id);
 		obj->userptr_size = size;
 		obj->registration_count = 1;
 		obj->user_node.key = rbtree_key((unsigned long)addr, size);
 		hsakmt_rbtree_insert(&aperture->user_tree, &obj->user_node);
+		extent = userptr_page_extent(obj);
+		if (extent > aperture->userptr_max_extent)
+			aperture->userptr_max_extent = extent;
 	}
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
@@ -4783,7 +5167,7 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 	if (!aperture_is_valid(aperture->base, aperture->limit))
 		goto error_free_metadata;
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	mem = aperture_allocate_area_aligned(aperture, NULL, infoArgs.size,
+	mem = aperture_reserve_area(ctx, aperture, NULL, infoArgs.size,
 					     IMAGE_ALIGN);
 	if (!mem) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
@@ -4990,8 +5374,8 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	}
 
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	reservedMem = aperture_allocate_area(aperture, NULL,
-			(SizeInPages << PAGE_SHIFT));
+	reservedMem = aperture_reserve_area(ctx, aperture, NULL,
+			(SizeInPages << PAGE_SHIFT), 0);
 	if (!reservedMem) {
 		err = HSAKMT_STATUS_NO_MEMORY;
 		goto err_free_buffer;
@@ -5097,10 +5481,22 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 			nr = svm_api_range_put_locked(fmm_ctx, address, &rr,
 						      &gpu_mask, &gpu_all);
-			for (i = 0; i < nr; i++)
+			for (i = 0; i < nr; i++) {
+				/* Hand the ioctl to the worker and return; the
+				 * queue keeps it ordered against a later grant
+				 * for the same pages. Fall back to issuing it
+				 * here if the worker or the queue entry cannot
+				 * be had.
+				 */
+				if (svm_revoke_enqueue_locked(ctx, rr[i].addr,
+							      rr[i].size,
+							      gpu_mask, gpu_all))
+					continue;
+
 				fmm_unregister_mem_svm_api(ctx, rr[i].addr,
 							   rr[i].size,
 							   gpu_mask, gpu_all);
+			}
 			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 			free(rr);
 			return HSAKMT_STATUS_SUCCESS;
@@ -5464,6 +5860,11 @@ void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx)
 	uint32_t i;
 	
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+
+	/* This runs in the child after a fork, where the revoke worker does
+	 * not exist and its queue describes the parent's ranges.
+	 */
+	svm_revoke_worker_reset(fmm_ctx);
 	/* Close render node FDs. The child process needs to open new ones */
 	for (i = 0; i <= DRM_LAST_RENDER_NODE - DRM_FIRST_RENDER_NODE; i++) {
 

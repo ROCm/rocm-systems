@@ -13,22 +13,22 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 612
+contract_tests: 631
 contract_domains: 118
-declared_apis: 500
-covered_apis: 487
+declared_apis: 505
+covered_apis: 492
 uncovered_allowlisted: 13
 coverage_pct: 97.4
 -->
 
 - Snapshot date: 2026-08-26
 - Snapshot commit: `920418c484`
-- Contract tests: 612
+- Contract tests: 631
 - Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 498
-- Declared HIP runtime APIs directly exercised by contract tests: 487
-- Intentionally uncovered, allowlisted APIs: 11
-- Approximate declared API-name coverage: 97.8%
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 505
+- Declared HIP runtime APIs directly exercised by contract tests: 492
+- Intentionally uncovered, allowlisted APIs: 13
+- Approximate declared API-name coverage: 97.4%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`,
   `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`,
@@ -104,7 +104,7 @@ binaries instead of exposing portable state to assert.
 | `context_config` | 6 |
 | `context_mutation` | 5 |
 | `copy3d` | 4 |
-| `device` | 7 |
+| `device` | 11 |
 | `device_config` | 6 |
 | `device_identity` | 9 |
 | `device_lifecycle` | 7 |
@@ -160,14 +160,14 @@ binaries instead of exposing portable state to assert.
 | `kernel` | 4 |
 | `kernel_launch` | 7 |
 | `kernel_name_ref` | 3 |
-| `kernel_object_attributes` | 3 |
+| `kernel_object_attributes` | 5 |
 | `library` | 14 |
 | `library_file` | 3 |
 | `logging` | 3 |
 | `managed_memory` | 5 |
 | `mem_advise` | 6 |
 | `mem_advise_v2` | 4 |
-| `mem_batch_copy` | 3 |
+| `mem_batch_copy` | 4 |
 | `mem_batch_copy_3d` | 4 |
 | `mem_batch_discard` | 7 |
 | `mem_location_pool` | 4 |
@@ -209,7 +209,7 @@ binaries instead of exposing portable state to assert.
 | `texture_reference_symbol` | 10 |
 | `transfer` | 4 |
 | `vmm` | 5 |
-| `vmm_handle` | 4 |
+| `vmm_handle` | 6 |
 
 ## Keeping coverage honest
 

@@ -41,6 +41,26 @@
                     "query": "SELECT COUNT(*) as count FROM top_kernels"
                 }
             ]
+        },
+        {
+            "min_rows": 0,
+            "name": "rocpd_sample",
+            "required_columns": [
+                "id",
+                "guid",
+                "track_id",
+                "timestamp",
+                "event_id"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "A trace window that never opens must record no timer_sampling samples",
+                    "error_message": "timer_sampling samples were recorded even though the trace window never opened",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_sample R INNER JOIN rocpd_event E ON E.id = R.event_id AND E.guid = R.guid INNER JOIN rocpd_string S ON S.id = E.category_id AND S.guid = E.guid WHERE S.string = 'timer_sampling'"
+                }
+            ]
         }
     ]
 }

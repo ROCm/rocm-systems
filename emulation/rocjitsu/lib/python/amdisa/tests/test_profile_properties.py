@@ -394,7 +394,14 @@ def test_dpp_control_range_capabilities(profile, wave, row_bcast, row_xmask):
         (Rdna3Profile(), 'ENC_VOP3P', 'V_WMMA_F32_16X16X16_F16', DppOpcodeRule.FORBID),
         (Rdna3Profile(), 'ENC_VOP3P', 'V_FMA_MIX_F32', DppOpcodeRule.ALLOW),
         (Rdna3Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.ALLOW),
-        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_BF16', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8_BF8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_BF8_FP8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8_FP8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_BF8_BF8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_I32_IU8', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT8_U32_U4', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP3', 'V_MUL_LO_U32', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP1', 'V_NOP', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP1', 'V_PIPEFLUSH', DppOpcodeRule.ALLOW),
@@ -479,7 +486,7 @@ def test_non_split_generation_leaves_exec_named_sources_untouched(tmp_path):
     ('profile', 'enc_name', 'expected'),
     [
         (CdnaProfile(), 'ENC_FLAT', '0x7F'),
-        (Rdna3Profile(), 'ENC_FLAT', '0x7F'),
+        (Rdna3Profile(), 'ENC_FLAT', '0x7C'),
         (Rdna4Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
         (Rdna4Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
         (Cdna5Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
@@ -885,19 +892,19 @@ class TestCdna4Profile:
 
 
 class TestCdna1Profile:
-    """Cdna1Profile: no AccVGPR, GFX9_GLC coherency, sgpr_pair scratch."""
+    """Cdna1Profile: separate AccVGPR, GFX9_GLC coherency, sgpr_pair scratch."""
 
     def setup_method(self):
         self.p = Cdna1Profile()
 
-    def test_has_acc_vgpr_false(self):
-        assert self.p.has_acc_vgpr is False
+    def test_has_acc_vgpr_true(self):
+        assert self.p.has_acc_vgpr is True
 
-    def test_acc_vgpr_encoding_base_zero(self):
-        assert self.p.acc_vgpr_encoding_base == 0
+    def test_acc_vgpr_encoding_base(self):
+        assert self.p.acc_vgpr_encoding_base == 768
 
-    def test_max_acc_vgprs_zero(self):
-        assert self.p.max_acc_vgprs == 0
+    def test_max_acc_vgprs(self):
+        assert self.p.max_acc_vgprs == 256
 
     def test_coherency_model(self):
         assert self.p.coherency_model == MemoryCoherencyModel.GFX9_GLC
@@ -1440,3 +1447,46 @@ class TestMemoryCoherencyModelEnum:
     def test_values_are_distinct(self):
         vals = [m.value for m in MemoryCoherencyModel]
         assert len(vals) == len(set(vals))
+
+
+@pytest.mark.parametrize(
+    ('profile', 'supported'),
+    [
+        (Cdna1Profile(), True),
+        (Cdna2Profile(), True),
+        (CdnaProfile(), True),
+        (Cdna4Profile(), True),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), False),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+        (Cdna5Profile(), False),
+    ],
+)
+@pytest.mark.parametrize(
+    'encoding',
+    [
+        'ENC_VOP1',
+        'ENC_VOP2',
+        'ENC_VOP3',
+        'ENC_VOPC',
+        'ENC_VOP3P',
+        'VOP3_SDST_ENC',
+        'VOP3P_MFMA',
+        'ENC_MUBUF',
+        'ENC_MTBUF',
+        'ENC_MIMG',
+        'ENC_DS',
+        'ENC_FLAT',
+        'ENC_EXP',
+        'ENC_VINTRP',
+    ],
+)
+def test_vskip_vector_encodings(profile, supported, encoding):
+    assert profile.vskip_affected_encoding(encoding) is supported
+
+
+@pytest.mark.parametrize('encoding', ['ENC_SOP1', 'ENC_SOPC', 'ENC_SOPP', 'ENC_SMEM'])
+def test_vskip_does_not_suppress_scalar_encodings(encoding):
+    assert not CdnaProfile().vskip_affected_encoding(encoding)

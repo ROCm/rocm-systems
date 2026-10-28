@@ -450,6 +450,15 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       *pi = static_cast<int>(
           g_devices[device]->devices()[0]->info().gpuDirectRdmaWithHipVmmSupported_);
       break;
+    case hipDeviceAttributeGPUDirectRDMASupported:
+      *pi = prop.gpuDirectRDMASupported;
+      break;
+    case hipDeviceAttributeGPUDirectRDMAFlushWritesOptions:
+      *pi = static_cast<int>(prop.gpuDirectRDMAFlushWritesOptions);
+      break;
+    case hipDeviceAttributeGPUDirectRDMAWritesOrdering:
+      *pi = prop.gpuDirectRDMAWritesOrdering;
+      break;
     case hipDeviceAttributeHandleTypeFabricSupported:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().fabric_handle_);
       break;
@@ -507,6 +516,37 @@ hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusIdstr) {
   HIP_RETURN(hipSuccess);
 }
 
+hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget target,
+                                             hipFlushGPUDirectRDMAWritesScope scope) {
+  HIP_INIT_API(hipDeviceFlushGPUDirectRDMAWrites, target, scope);
+
+  if ((target != hipFlushGPUDirectRDMAWritesTargetCurrentDevice) ||
+      (scope != hipFlushGPUDirectRDMAWritesToOwner &&
+       scope != hipFlushGPUDirectRDMAWritesToAllDevices)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  const auto& info = hip::getCurrentDevice()->devices()[0]->info();
+
+  if ((hip::ihipRdmaFlushWritesOptions(info.hdpMemFlushCntl) &
+       hipFlushGPUDirectRDMAWritesOptionHost) == 0) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
+  // Already ordered by hardware at the requested scope: nothing to do.
+  // In our case it will be false all the time.
+  if (hip::ihipRdmaWritesOrdering() >= static_cast<int>(scope)) {
+    HIP_RETURN(hipSuccess);
+  }
+
+  // volatile, to protect it from optimization passes
+  volatile uint32_t* hdpMemFlushCntl = info.hdpMemFlushCntl;
+  *hdpMemFlushCntl = 1u;
+  static_cast<void>(*hdpMemFlushCntl);
+
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
   HIP_INIT_API(hipDeviceGetCacheConfig, cacheConfig);
 
@@ -542,6 +582,9 @@ hipError_t hipDeviceGetLimit(size_t* pValue, hipLimit_t limit) {
       break;
     case hipExtLimitScratchCurrent:
       *pValue = hip::getCurrentDevice()->devices()[0]->ScratchLimitCurrent();
+      break;
+    case hipLimitPersistingL2CacheSize:
+      *pValue = hip::getCurrentDevice()->devices()[0]->PersistingL2CacheSizeCurrent();
       break;
     default:
       LogPrintfError("UnsupportedLimit = %d is passed", limit);
@@ -630,6 +673,11 @@ hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) {
       break;
     case hipExtLimitScratchCurrent:
       if (!hip::getCurrentDevice()->devices()[0]->UpdateScratchLimitCurrent(value)) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      break;
+    case hipLimitPersistingL2CacheSize:
+      if (!hip::getCurrentDevice()->devices()[0]->UpdatePersistingL2CacheSizeCurrent(value)) {
         HIP_RETURN(hipErrorInvalidValue);
       }
       break;
