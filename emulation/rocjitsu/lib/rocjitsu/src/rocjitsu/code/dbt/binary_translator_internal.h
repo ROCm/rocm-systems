@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/isa/decode_result.h"
 
 #include <cstdint>
@@ -27,6 +28,13 @@ class Decoder;
 class Instruction;
 
 namespace internal {
+
+/// @brief Inject unavailable analysis into one translator without changing rule selection.
+struct BinaryTranslatorTestAccess {
+  static void force_unavailable_liveness(BinaryTranslator &translator) {
+    translator.force_unavailable_liveness_ = true;
+  }
+};
 
 enum class RewriteDischargeDecodeStatus : uint8_t {
   Success,

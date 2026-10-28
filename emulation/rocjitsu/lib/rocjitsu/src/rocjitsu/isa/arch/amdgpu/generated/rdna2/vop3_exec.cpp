@@ -356,12 +356,11 @@ void VFmacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
                 wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(),
                 (amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                  wf.ieee_mode(), inst_.omod) != 0));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
-            if (effective_omod == 0)
-              return v;
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst_.clamp) {
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
@@ -494,12 +493,11 @@ void VFmaLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
                 wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(),
                 (amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                  wf.ieee_mode(), inst_.omod) != 0));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
-            if (effective_omod == 0)
-              return v;
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst_.clamp) {
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
@@ -803,13 +801,11 @@ void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtPknormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  amdgpu::execute_v_cvt_pknorm_i16_f16_vop3(*this, wf);
 }
 
 void VCvtPknormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  amdgpu::execute_v_cvt_pknorm_u16_f16_vop3(*this, wf);
 }
 
 void VLshlrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {

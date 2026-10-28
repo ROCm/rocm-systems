@@ -22,7 +22,7 @@ int64_t IbCastArThreshold = 8192;
 NCCL_PARAM(IbCastReceiverSideMatchingScheme, "IB_RECEIVER_SIDE_MATCHING_SCHEME", -2);
 RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, "GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
 
-const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut"};
+const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut", "IGet", "Failed"};
 
 ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req) {
   for (int i = 0; i < NET_IB_MAX_REQUESTS; i++) {
@@ -785,8 +785,9 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     // RCCL: fence the RO=1 bulk data through an RO=0 scratchpad - RDMA_WRITE a
     // dummy payload into it, then RDMA_READ it back. The WRITE needs REMOTE_WRITE
     // on the flush QP.
-    bool useGpuFlushMem = rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering() &&
-                          comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr && comm->devs[i].gpuFlush.gpuMr != nullptr;
+    const bool useGpuFlushMem = rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering() &&
+                                comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr &&
+                                comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
     if (IbCastCommIsSharing(&comm->base)) {
@@ -805,8 +806,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.send_flags = 0;
       struct ibv_send_wr* badWriteWr;
       NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr));
-    }
-    if (useGpuFlushMem) {
+
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
     } else {
@@ -1493,3 +1493,7 @@ ncclResult_t ncclIbCastFaultOpsClear(void* comm) {
 }
 
 #endif /* ENABLE_FAULT_INJECTION */
+
+extern "C" const char* ncclIbCastTestGinIgetName(void) {
+  return IbCastReqTypeStr[NCCL_NET_IB_REQ_GIN_IGET];
+}
