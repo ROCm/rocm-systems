@@ -124,10 +124,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         SHARED
         src/rocjitsu/code/dbt/gfx1250_b0_to_a0_library.cpp
     )
+    # The library supplies only the gfx1250 model, but the DBT objects include
+    # lowerings that downcast to other architectures' instruction classes.
     foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)
+        rj_vptr_free_object_library(_translator_objects ${_object_lib})
         target_sources(
             rocjitsu_gfx1250_b0_to_a0
-            PRIVATE $<TARGET_OBJECTS:${_object_lib}>
+            PRIVATE $<TARGET_OBJECTS:${_translator_objects}>
         )
     endforeach()
     set_target_properties(

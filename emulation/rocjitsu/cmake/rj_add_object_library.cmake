@@ -38,6 +38,47 @@ function(rj_add_object_library name)
     _rj_configure_object_library(${name} util simdojo_headers)
 endfunction()
 
+# Select objects for a shared object that does not link the simulator image.
+# UBSan's vptr check references the RTTI of each class it checks, and a class
+# with a key function emits its RTTI only in the source that defines that
+# function. Such a shared object can therefore have undefined RTTI references.
+# When the check is enabled, compile a copy of <object-lib> without it and
+# return the copy; otherwise return <object-lib>. The original objects keep the
+# check wherever the simulator is linked, including rocjitsu_tests.
+#
+# The copy has the original's sources and private link libraries. Interface
+# link libraries are not copied, so callers must add any objects that the
+# original exposes through its interface.
+#
+# Usage: rj_vptr_free_object_library(<out-var> <object-lib>)
+function(rj_vptr_free_object_library out_var object_lib)
+    if(NOT (RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR))
+        set(${out_var} ${object_lib} PARENT_SCOPE)
+        return()
+    endif()
+    set(_copy ${object_lib}_no_vptr)
+    if(NOT TARGET ${_copy})
+        get_target_property(_source_dir ${object_lib} SOURCE_DIR)
+        get_target_property(_sources ${object_lib} SOURCES)
+        set(_absolute_sources)
+        foreach(_source IN LISTS _sources)
+            cmake_path(
+                ABSOLUTE_PATH _source
+                BASE_DIRECTORY "${_source_dir}"
+                NORMALIZE
+            )
+            list(APPEND _absolute_sources "${_source}")
+        endforeach()
+        rj_add_object_library(${_copy} ${_absolute_sources})
+        target_link_libraries(
+            ${_copy}
+            PRIVATE $<TARGET_PROPERTY:${object_lib},LINK_LIBRARIES>
+        )
+        target_compile_options(${_copy} PRIVATE -fno-sanitize=vptr)
+    endif()
+    set(${out_var} ${_copy} PARENT_SCOPE)
+endfunction()
+
 # Mark an existing ISA implementation target as a statically linked provider.
 # The target owns its provider source and self-contained declaration header;
 # CMake only records the header used to compose consumer-specific registries.

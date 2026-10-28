@@ -81,9 +81,10 @@ Add `-DRJ_UBSAN_VPTR=ON` to enable those checks. Clang UBSan builds default to
 no effect when `RJ_ENABLE_UBSAN` is off, and CMake reports the effective `vptr`
 setting when UBSan is enabled.
 
-Standalone plugin modules omit `vptr` checks because they do not link the
-simulator's RTTI. When `RJ_UBSAN_VPTR=ON`, the build compiles separate plugin
-objects so the copies linked into the unit tests keep those checks.
+Standalone plugin modules and the gfx1250 B0-to-A0 translator library omit
+`vptr` checks because they do not link the RTTI of every class their code
+checks. When `RJ_UBSAN_VPTR=ON`, the build compiles separate objects for them,
+so the objects linked into the simulator and unit tests keep those checks.
 
 `AUTO` uses shared runtimes for ASan, UBSan, and TSan, and the only
 supported static runtime for MSan. `SHARED` rejects MSan explicitly because
