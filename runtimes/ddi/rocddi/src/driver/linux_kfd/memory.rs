@@ -20,8 +20,8 @@ use crate::{Error, ErrorKind};
 use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// Process-local set of activated device VMs and their shared loss events.
 ///
@@ -143,8 +143,18 @@ impl ScratchPool {
         Ok(())
     }
 
-    fn allocate(&mut self, vm: &DeviceVm, size: u64) -> Result<u64, Error> {
+    fn allocate(&mut self, vm: &DeviceVm, size: u64) -> Result<(u64, Arc<AtomicBool>), Error> {
         self.initialize(vm)?;
+        let reservation = self
+            .reservation
+            .as_ref()
+            .filter(|range| range.is_live())
+            .ok_or_else(|| {
+                error(
+                    ErrorKind::DriverContract,
+                    "scratch aperture ownership is uncertain",
+                )
+            })?;
         let index = self
             .ranges
             .iter()
@@ -165,16 +175,17 @@ impl ScratchPool {
         }
         self.ranges[index].size = size;
         self.ranges[index].allocated = true;
-        self.reservation
-            .as_ref()
-            .and_then(|reservation| (reservation.address() as u64).checked_add(range.offset))
-            .ok_or_else(|| error(ErrorKind::Internal, "scratch address overflow"))
+        let address = (reservation.address() as u64)
+            .checked_add(range.offset)
+            .ok_or_else(|| error(ErrorKind::Internal, "scratch address overflow"))?;
+        Ok((address, reservation.poison_token()))
     }
 
     fn release(&mut self, address: u64, size: u64) -> Result<(), Error> {
         let base = self
             .reservation
             .as_ref()
+            .filter(|reservation| reservation.is_live())
             .map(|reservation| reservation.address() as u64)
             .ok_or_else(|| error(ErrorKind::Internal, "scratch aperture is not initialized"))?;
         let offset = address
@@ -570,7 +581,7 @@ impl DeviceVm {
             .initialize(self)
     }
 
-    fn allocate_scratch(&self, size: u64) -> Result<u64, Error> {
+    fn allocate_scratch(&self, size: u64) -> Result<(u64, Arc<AtomicBool>), Error> {
         self.initialize_scratch()?;
         if size == 0 || size % 4096 != 0 {
             return Err(error(
@@ -1491,7 +1502,7 @@ impl KfdAllocation {
         // Reserve owner storage before taking an aperture range. Once the
         // range is acquired, publication of its cleanup owner cannot fail.
         let owner = Owned::<Self>::try_new_uninit()?;
-        let address = vm.allocate_scratch(desc.size)?;
+        let (address, poison) = vm.allocate_scratch(desc.size)?;
         let Ok(address_usize) = usize::try_from(address) else {
             vm.release_scratch(address, desc.size)?;
             return Err(error(
@@ -1499,7 +1510,7 @@ impl KfdAllocation {
                 "scratch address exceeds the host address width",
             ));
         };
-        let reservation = os_memory::Reservation::view(address_usize, size);
+        let reservation = os_memory::Reservation::view_with_poison(address_usize, size, poison);
         let mut allocation = owner.write(Self {
             vm: vm.clone(),
             peers,
