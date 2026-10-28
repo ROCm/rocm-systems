@@ -43,12 +43,28 @@ set(rocprofv3-pc-sampling-rocpd-env
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+set(_pc_sampling_capture_command ${Python3_EXECUTABLE}
+                                 ${CMAKE_CURRENT_SOURCE_DIR}/run_capture.py)
+foreach(_skip_regex IN LISTS ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX)
+    list(APPEND _pc_sampling_capture_command --skip-regex "${_skip_regex}")
+endforeach()
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-pc-sampling-rocpd-capture-status
+    TEST_PATHS capture_test.py
+    COPY conftest.py run_capture.py
+    CONFIG pytest.ini
+    TIMEOUT 30
+    LABELS "integration-tests;pc-sampling;rocpd")
+
 # Produce a stochastic PC-sampling ROCPD database (+ JSON oracle).  No
 # --complete-isa-decode here, so instruction text is disassembled on demand during
 # post-processing (the first disassembly path).
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-rocpd
     COMMAND
+        ${_pc_sampling_capture_command} --status-file
+        ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-input/capture-status.json --
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled 1
         --kernel-trace --pc-sampling-unit cycles --pc-sampling-method stochastic
         --pc-sampling-interval 1048576 -d
@@ -74,9 +90,14 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini LIBRARY_PATH "${rocprofiler-sdk_LIB_DIR}"
     PYTHON_PATH
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-input/out_results.json
-         --rocpd-input ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-input/out_results.db
-         --expected-method stochastic
+    ARGS --capture-status
+         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-input/capture-status.json
+         --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-input/out_results.json
+         --rocpd-input
+         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-input/out_results.db
+         --expected-method
+         stochastic
     TIMEOUT 120
     LABELS "integration-tests;pc-sampling;stochastic;rocpd"
     PRELOAD "${PRELOAD_ENV}"
@@ -87,7 +108,9 @@ rocprofiler_add_integration_validate_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-rocpd-no-dispatch
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled 1
+        ${_pc_sampling_capture_command} --status-file
+        ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-no-dispatch-input/capture-status.json
+        -- $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled 1
         --kernel-trace false --pc-sampling-unit cycles --pc-sampling-method stochastic
         --pc-sampling-interval 1048576 -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-no-dispatch-input -o out
@@ -108,7 +131,9 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini LIBRARY_PATH "${rocprofiler-sdk_LIB_DIR}"
     PYTHON_PATH
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    ARGS --rocpd-input
+    ARGS --capture-status
+         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-no-dispatch-input/capture-status.json
+         --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-no-dispatch-input/out_results.db
          --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-no-dispatch-input/out_results.json
@@ -131,6 +156,8 @@ rocprofiler_add_integration_validate_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-rocpd-disasm
     COMMAND
+        ${_pc_sampling_capture_command} --status-file
+        ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-disasm-input/capture-status.json --
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled 1
         --kernel-trace --pc-sampling-unit cycles --pc-sampling-method stochastic
         --pc-sampling-interval 1048576 --complete-isa-decode -d
@@ -152,7 +179,9 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini LIBRARY_PATH "${rocprofiler-sdk_LIB_DIR}"
     PYTHON_PATH
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    ARGS --rocpd-disasm-input
+    ARGS --capture-status
+         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-disasm-input/capture-status.json
+         --rocpd-disasm-input
          ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-disasm-input/out_results.db
     TIMEOUT 120
     LABELS "integration-tests;pc-sampling;stochastic;rocpd"
@@ -168,7 +197,9 @@ rocprofiler_add_integration_validate_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-rocpd-host-trap
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled 1
+        ${_pc_sampling_capture_command} --status-file
+        ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-host-trap-input/capture-status.json
+        -- $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled 1
         --kernel-trace --pc-sampling-unit time --pc-sampling-method host_trap
         --pc-sampling-interval 1 -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-host-trap-input -o out
@@ -189,7 +220,9 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini LIBRARY_PATH "${rocprofiler-sdk_LIB_DIR}"
     PYTHON_PATH
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    ARGS --json-input
+    ARGS --capture-status
+         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-host-trap-input/capture-status.json
+         --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-host-trap-input/out_results.json
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-host-trap-input/out_results.db
