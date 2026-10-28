@@ -38,7 +38,7 @@ namespace CeMPITestConstants
 constexpr size_t kSmallCount      = 4096;   // elements per rank for fast tests
 constexpr size_t kMediumCount     = 65536;  // elements per rank for larger tests
 // Total AllReduce message size that forces the CE multi-chunk pipeline. A shard
-// spills past one staging slot once the message exceeds NCCL_CE_AR_MAX_MSG_BYTES
+// spills past one staging slot once the message exceeds RCCL_CE_AR_2SHOT_MAX_BYTES
 // (256 MiB); 512 MiB yields >= 4 chunks per shard at every rank count, plus a
 // partial tail chunk whenever nRanks is not a power of two. Costs a transient
 // host buffer of the same size per rank in fill/verify.
@@ -48,8 +48,10 @@ constexpr size_t kCeOnlyTotalBytes = 128ull * 1024 * 1024;
 constexpr size_t kCeOnlyRankStride = 517;   // per-rank offset so every rank wins some elements of Max/Min
 constexpr size_t kCeOnlyValueRange = 4096;  // keeps fill values exact in float32
 constexpr int    kCeOnlyIters      = 3;     // first call is CE registered, later ones CE 2-shot once ceARTmpBuf exists
-// A shard spans 8 default staging slots (128 MiB / nRanks vs 16 MiB / nRanks), so the CE pipeline must run.
-constexpr size_t kCeOnlyMinChunksPerShard = 2;
+// Staging pinned to 16 MiB in CeMPI_AllReduce::SetUp so 128 MiB / nRanks shard always spills its
+// slot (16 MiB / nRanks). At any rank count chunksPerShard >= 4; require >= 4 to catch single-shot
+// regressions. Must be set before the suite's first ncclCeInit: RCCL_PARAM latches forever.
+constexpr size_t kCeOnlyMinChunksPerShard = 4;
 constexpr int    kMinRanks2       = 2;
 constexpr int    kMinRanks4       = 4;
 constexpr int    kMinRanks8       = 8;
@@ -881,15 +883,22 @@ class CeMPI_AllReduce : public CeMPITest
 {
 protected:
     std::unique_ptr<MPIHelpers::MpiEnvGuard> ceAllReduceGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> ceArStagingGuard_;
 
     void SetUp() override
     {
         CeMPITest::SetUp();
         ceAllReduceGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_CE_ALLREDUCE", "1");
+        // Pin before any createTestCommunicator in this suite. rcclParamCeArStagingBytes
+        // caches on first read; a late guard in MaxOp/MinOp alone cannot override a
+        // default latched by TwoRanks/FourRanks/etc.
+        ceArStagingGuard_ =
+            std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_CE_AR_STAGING_BYTES", "16777216");
     }
 
     void TearDown() override
     {
+        ceArStagingGuard_.reset();
         ceAllReduceGuard_.reset();
         CeMPITest::TearDown();
     }
@@ -985,6 +994,7 @@ protected:
             GTEST_SKIP() << skipReason;
         }
 
+        // Staging size is pinned in SetUp (see ceArStagingGuard_).
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
         ncclComm_t comm = getActiveCommunicator();
         if(!isCeAllReduceDispatchConfigured(comm))

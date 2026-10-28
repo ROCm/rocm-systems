@@ -412,13 +412,17 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
     p2pLevel = PATH_PXB;
   }
 
-  // User override, last so NCCL_P2P_DISABLE / NCCL_P2P_LEVEL win over the CPU defaults
+  // Explicit NCCL_P2P_LEVEL/NCCL_P2P_DISABLE settings take precedence over
+  // platform defaults.
   NCCLCHECK(ncclGetUserP2pLevel(&p2pLevel));
 
-  // Compute the PCI distance and compare with the p2pLevel.
+  // Compute the PCI distance and compare with the p2pLevel. PATH_LOC is the
+  // explicit disable sentinel, not an allowed inter-rank path. This distinction
+  // matters for ranks that share a DEV node (e.g. MLOPart partitions with
+  // NCCL_TOPO_SPLIT_MLOPART=0) and therefore have a PATH_LOC path between them.
   // For MNNVL clique peers (IFoE cross-node), no topology edge exists between the merged GPUs,
   // so path->type is PATH_DIS. Treat them as PATH_NVL — fabric memory handles provide direct access.
-  if (mnnvl || path->type <= p2pLevel) *p2p = 1;
+  if (mnnvl || ((g1 == g2 || p2pLevel != PATH_LOC) && path->type <= p2pLevel)) *p2p = 1;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   if (*p2p == 1) {
@@ -527,7 +531,10 @@ NCCL_PARAM(NetGdrMloPart, "NET_GDR_MLOPART", 1);
 // the no-GDR diversion below (addInterStep, which only rewrites GPU<->NET) never degrades. Reading
 // the partition's own entry instead would feed the decision back its own diverted path and let
 // partitions of one device disagree about GDR.
+// A PXN relay is the exception: addInterStep marks it on the partition's own GPU<->NET entry only, never
+// on the DEV, so report PATH_PXN from there or ncclTopoCheckGdr cannot switch to the relay GPU's distance.
 static int ncclTopoGdrDistance(struct ncclTopoNode* gpu, int n) {
+  if (gpu->paths[NET] != NULL && gpu->paths[NET][n].type == PATH_PXN) return PATH_PXN;
   if (gpu->gpu.mloPart != NCCL_TOPO_UNDEF && gpu->gpu.parent != NULL && gpu->gpu.parent->paths[NET] != NULL)
     return gpu->gpu.parent->paths[NET][n].type;
   return gpu->paths[NET][n].type;
@@ -1645,9 +1652,20 @@ ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink
 }
 
 // Check whether the system is all GPUs connected directly to each other through NVLink/NVSwitch.
+// RCCL: another host's GPUs are only in the system as MNNVL clique peers, which have no topology edge (PATH_DIS)
+// and reach each other through fabric memory handles, so only pairs on the same host are checked.
+// TODO: Drop the host check once cross-node MNNVL pairs get PATH_NVL from the topology (see ncclTopoTrimSystem).
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* directNvlink) {
-  int maxPath;
-  NCCLCHECK(ncclTopoGetGpuMaxPath(system, GPU, &maxPath));
+  int maxPath = PATH_LOC;
+  for (int i = 0; i < system->nodes[GPU].count; i++) {
+    struct ncclTopoNode* gpu = system->nodes[GPU].nodes + i;
+    if (gpu->paths[GPU] == NULL) continue;
+    for (int j = 0; j < system->nodes[GPU].count; j++) {
+      struct ncclTopoNode* peer = system->nodes[GPU].nodes + j;
+      if (i == j || NCCL_TOPO_ID_SYSTEM_ID(peer->id) != NCCL_TOPO_ID_SYSTEM_ID(gpu->id)) continue;
+      maxPath = std::max(maxPath, gpu->paths[GPU][j].type);
+    }
+  }
   *directNvlink = maxPath <= PATH_NVL;
   return ncclSuccess;
 }

@@ -21,11 +21,16 @@ cases:
   Unit_HRR_Format_BadMagic: {}
   Unit_HRR_Format_EventTypeName: {}
   Unit_HRR_Format_HashHex: {}
+  Unit_HRR_Format_HostSnapshotRecord: {}
   Unit_HRR_Format_Roundtrip: {}
   Unit_HRR_Format_SmallPayloadForType: {}
   Unit_HRR_Format_TruncatedEvent: {}
   Unit_HRR_Format_UnknownEventType: {}
+  Unit_HRR_HostRect_Overflow: {}
+  Unit_HRR_HostRect_PitchedPadded3D: {}
+  Unit_HRR_HostRect_RuntimeDefaults: {}
   Unit_HRR_Playback_PlacementHeldRanges: {}
+  Unit_HRR_Playback_PlacementRangeChecked: {}
   Unit_HRR_Playback_PlacementPlan: {}
   Unit_HRR_Playback_ReplayedH2DDrainGraphGuard: {}
   Unit_HRR_Playback_VersionOption: {}
@@ -44,6 +49,9 @@ cases:
   Unit_HRR_Recovery_TornPayload: {}
   Unit_HRR_Recovery_TrailerCountMismatch: {}
   Unit_HRR_Recovery_TrailerOvercounts: {}
+  Unit_HRR_Scrub_RefusesOutOfBoundsTables: {}
+  Unit_HRR_Scrub_SkipsUnterminatedName: {}
+  Unit_HRR_Scrub_ZeroesAndRetypesBuildInfo: {}
   Unit_HRR_TranslatePtr_ExactMatch: {}
   Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull: {}
   Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset: {}

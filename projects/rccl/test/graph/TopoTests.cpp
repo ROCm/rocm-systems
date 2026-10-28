@@ -1227,6 +1227,74 @@ TEST_F(TopoTest, CheckGdr_NonMloPartGpuStillUsesOwnPath) {
   ncclTopoFree(built);
 }
 
+// DPX node of two rails: each GPU carries two partitions and has its own NIC, and the GPUs are XGMI
+// peers. A partition reaches the other rail's NIC through a partition of that rail (PXN), whose
+// buffers the NIC reads, so GDR is the relay's call. The PXN mark lives on the partition's own
+// GPU->NET entry while its parent DEV keeps the raw PHB distance; reading only the DEV refused GDR,
+// which diverted the relay through the CPU here and sent net.cc's shared p2p buffers to host memory
+// in the relay's process ("PXN should not use host buffers for data").
+TEST_F(TopoTest, CheckGdr_MloPartPxnRelayUsesRelayDistance) {
+  // NCCL_PXN_DISABLE gates the PXN rewrite and NCCL_PARAM caches it for the whole process.
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "CheckGdr_MloPartPxnRelayUsesRelayDistance",
+      [this]() {
+        const uint64_t host = 0xd3;
+        const int kParts = 2;
+        // Rails 0 and 2 keep the HIP dev indices 0-1 and 2-3 apart, as on the node that hit this.
+        const int rails[2] = {0, 2};
+        struct ncclXmlNode* cpu = addSystemCpu(host);
+        struct ncclXmlNode* gpuPci[2];
+        char gpuBus[2][32];
+        for (int r = 0; r < 2; r++) {
+          gpuPci[r] = addRail(cpu, rails[r], kParts, /*partitioned=*/true);
+          railGpuBusId(rails[r], gpuBus[r], sizeof(gpuBus[r]));
+        }
+        // XGMI entries hang off each partition's <gpu>; a target function picks the peer partition.
+        for (int r = 0; r < 2; r++) {
+          for (int s = 0; s < gpuPci[r]->nSubs; s++) {
+            struct ncclXmlNode* gpu = gpuPci[r]->subs[s];
+            if (strcmp(gpu->name, "gpu") != 0) continue;
+            for (int p = 0; p < kParts; p++) {
+              char target[32];
+              strcpy(target, gpuBus[1 - r]);
+              target[strlen(target) - 1] = '0' + p;
+              addGpuLink(gpu, target, /*count=*/8, PCI_ACCELERATOR_CLASS);
+            }
+          }
+        }
+
+        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2 * kParts);
+        ASSERT_EQ(built->nodes[NET].count, 2);
+
+        for (int g = 0; g < built->nodes[GPU].count; g++) {
+          struct ncclTopoNode* gpu = built->nodes[GPU].nodes + g;
+          ASSERT_NE(gpu->gpu.mloPart, NCCL_TOPO_UNDEF);
+          ASSERT_NE(gpu->gpu.parent, nullptr);
+          for (int n = 0; n < built->nodes[NET].count; n++) {
+            struct ncclTopoNode* net = built->nodes[NET].nodes + n;
+            // addRail numbers a rail's NIC like its partition 0.
+            const bool ownRail = gpu->gpu.dev / kParts == net->net.dev / kParts;
+            SCOPED_TRACE(testing::Message() << "gpu dev " << gpu->gpu.dev << " net dev " << net->net.dev
+                                            << (ownRail ? " (own rail)" : " (other rail)"));
+            if (ownRail) {
+              EXPECT_EQ(gpu->paths[NET][n].type, PATH_PXB);
+            } else {
+              EXPECT_EQ(gpu->paths[NET][n].type, PATH_PXN);
+              EXPECT_EQ(gpu->gpu.parent->paths[NET][n].type, PATH_PHB);
+            }
+            enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
+            ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, net->id, /*read=*/1, &mode), ncclSuccess);
+            EXPECT_NE(mode, ncclTopoGdrModeDisable);
+          }
+        }
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_PXN_DISABLE", "0"}});
+}
+
 // rcclRewriteSameDomainNetPaths() reclassifies a GPU/NIC pair sharing a PCI domain from PHB to PXB
 // on gfx1250, where the domain is one root complex and the host-bridge hop the BFS walked is not
 // the cost PHB stands for. It is keyed on the physical device because ncclTopoGdrDistance() reads
@@ -1572,6 +1640,154 @@ TEST_F(TopoTest, RingSearch_TwoRailNode_StaysOnTheLocalNicPathType) {
         ncclTopoFree(built);
       },
       {{"NCCL_CROSS_NIC", "2"}});
+}
+
+TEST_F(TopoTest, CheckP2p_LevelXgmiRejectsPhbPeer) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "CheckP2p_LevelXgmiRejectsPhbPeer",
+      [this]() {
+        ::unsetenv("NCCL_P2P_DISABLE");
+        const uint64_t host = 0xe6;
+        struct ncclXmlNode* cpu = addSystemCpu(host);
+        addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0);
+        addGpuPci(cpu, "0000:1c:00.0", "gfx942", /*rank=*/1, /*dev=*/1);
+
+        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_PHB);
+
+        int p2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &p2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(p2p, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_P2P_LEVEL", "XGMI"}});
+}
+
+TEST_F(TopoTest, ComputePaths_CpxPeersUseXgmiPath) {
+  RUN_ISOLATED_TEST(
+      "ComputePaths_CpxPeersUseXgmiPath",
+      [this]() {
+        ::unsetenv("NCCL_P2P_DISABLE");
+        ::unsetenv("NCCL_P2P_LEVEL");
+        ::unsetenv("NCCL_TOPO_SPLIT_MLOPART");
+        const uint64_t host = 0xe5;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+        // Split CPX partitions get their own DEV nodes, linked over XGMI.
+        EXPECT_EQ(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_NVL);
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        EXPECT_EQ(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_NVL);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].count, 0);
+
+        ncclTopoFree(built);
+      });
+}
+
+TEST_F(TopoTest, ComputePaths_UnsplitCpxPeersUseLocalPath) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "ComputePaths_UnsplitCpxPeersUseLocalPath",
+      [this]() {
+        ::unsetenv("NCCL_P2P_DISABLE");
+        ::unsetenv("NCCL_P2P_LEVEL");
+        const uint64_t host = 0xe8;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+        // Unsplit partitions share one DEV node, so distinct ranks are
+        // PATH_LOC apart, the same value as the NCCL_P2P_DISABLE level.
+        ASSERT_EQ(built->nodes[GPU].nodes[0].gpu.parent,
+                  built->nodes[GPU].nodes[1].gpu.parent);
+        EXPECT_EQ(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        EXPECT_EQ(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].count, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_TOPO_SPLIT_MLOPART", "0"}});
+}
+
+TEST_F(TopoTest, ComputePaths_P2pDisableDivertsUnsplitCpxPeers) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "ComputePaths_P2pDisableDivertsUnsplitCpxPeers",
+      [this]() {
+        const uint64_t host = 0xe8;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+        ASSERT_EQ(built->nodes[GPU].nodes[0].gpu.parent,
+                  built->nodes[GPU].nodes[1].gpu.parent);
+
+        for (int g = 0; g < built->nodes[GPU].count; g++) {
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].type, PATH_LOC);
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].count, 0);
+        }
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_LOC);
+        int peerP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &peerP2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(peerP2p, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_TOPO_SPLIT_MLOPART", "0"}, {"NCCL_P2P_DISABLE", "1"}});
+}
+
+TEST_F(TopoTest, ComputePaths_P2pDisableDivertsCpxPeersButPreservesSelfPath) {
+  // NCCL_P2P_DISABLE is cached process-wide. Isolate the test so it is the
+  // first P2P policy lookup and cannot affect other topology tests.
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "ComputePaths_P2pDisableDivertsCpxPeersButPreservesSelfPath",
+      [this]() {
+        const uint64_t host = 0xe5;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+        // Disabling P2P must not replace a GPU's zero-hop self path with a
+        // route through the CPU.
+        for (int g = 0; g < built->nodes[GPU].count; g++) {
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].type, PATH_LOC);
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].count, 0);
+        }
+        int selfP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 0, &selfP2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(selfP2p, 1);
+
+        // NCCL_P2P_DISABLE must divert the local CPX peer path through the CPU.
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].count, 0);
+        int peerP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &peerP2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(peerP2p, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_P2P_DISABLE", "1"}});
 }
 
 // Path link lists are sized to the hops they hold, not to NCCL_TOPO_MAX_HOPS (AICOMRCCL-2016).

@@ -990,6 +990,13 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::WakeAsyncSignalMonitor() {
+  // Notify unconditionally, as SetAsyncSignalHandler() does, so a monitor about to park can't
+  // miss it. Like SetAsyncSignalHandler(), this assumes waiters are gone before teardown.
+  if (!asyncSignals_.empty())
+    hsa_signal_handle((*asyncSignals_)->control.wake)->StoreReleaseAndNotify(1);
+}
+
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
                                  hsa_interop_map_flag_t flags, size_t size_hint, size_t* size,
                                  void** ptr, size_t* metadata_size, const void** metadata) {
@@ -2150,7 +2157,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       if (core::Runtime::runtime_singleton_->flag().wait_any()) {
         index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                      &async_events_.cond_[0], &async_events_.value_[0],
-                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false);
+                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false,
+                                     /*wake_async_monitor=*/false);
       } else {
         // Skip wake-up signal logic
         index = 1;
@@ -3112,6 +3120,11 @@ void Runtime::LoadTools() {
   typedef Agent* (*tool_wrap_t)(Agent*);
   typedef void (*tool_add_t)(Runtime*);
 
+  // Set when a v3 tool owns the API table. Tools named in HSA_TOOLS_LIB are an
+  // explicit request and still load; tools that are merely loaded in the
+  // process are not picked up, since they would wrap the table a second time.
+  bool skip_loaded_tools = false;
+
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
   if (!flag().disable_tool_register()) {
     auto* profiler_api_table_ = static_cast<void*>(&hsa_api_table());
@@ -3142,9 +3155,7 @@ void Runtime::LoadTools() {
       }
     }
 
-    // if rocprofiler library supports registration and v1 support not explicitly requested,
-    // do not use old method
-    if (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration) return;
+    skip_loaded_tools = (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration);
   }
 #endif
 
@@ -3189,7 +3200,8 @@ void Runtime::LoadTools() {
   }
 
   // Discover loaded tools.
-  std::vector<os::LibHandle> loaded_hds = os::GetLoadedToolsLib();
+  std::vector<os::LibHandle> loaded_hds;
+  if (!skip_loaded_tools) loaded_hds = os::GetLoadedToolsLib();
   for (auto& handle : loaded_hds) {
     const uint32_t* order = (const uint32_t*)os::GetExportAddress(handle, "HSA_AMD_TOOL_PRIORITY");
     if (order) {

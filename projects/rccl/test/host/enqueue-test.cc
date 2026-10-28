@@ -835,6 +835,7 @@ struct ChunkComm {
   ncclComm& comm{*storage};
   explicit ChunkComm(int protoSimpleBuf = 1 << 22) {
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) comm.buffSizes[p] = protoSimpleBuf;
+    comm.p2pLl128BuffSize = protoSimpleBuf;
     // LOAD-BEARING: rcclProtoGrainSize(LL128) (scheduler.h:22) is
     //   WarpSize * ll128ShmemElemsPerThread * ll128DataElems * 8 / ll128LineElems
     // so a zero WarpSize makes grainSize 0, and :3028's
@@ -1135,6 +1136,95 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_PipelineLadder_LargeBytesStayUnhalved)
   auto t = MakeTask(ncclFuncBroadcast, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
   auto r = RunChunking(cc, t, 4, size_t(1) << 40);
   EXPECT_EQ(uint32_t((1 << 22) / NCCL_STEPS), r.chunkSize);
+}
+
+namespace {
+// gfx950 LL128 with the RCCL_IB_GDR_FLUSH_FLAG_TUNE x4 collective buffer: 8 nodes x 8 GPUs, a 448 KiB default
+// (send/recv) buffer, 8-word lines with 7 data words. The default chunk is 49 KiB, the x4 chunk 196 KiB, and
+// both are multiples of the fixture's 1792-byte LL128 grain.
+constexpr int kLl128DefaultBuff = 448 << 10;
+constexpr uint32_t kLl128DefaultChunk = (kLl128DefaultBuff / NCCL_STEPS / 8) * 7;
+constexpr uint32_t kLl128ScaledChunk = 4 * kLl128DefaultChunk;
+constexpr int kScaledChannels = 64;
+
+void MakeScaledLl128(ChunkComm& cc, int nRanks = 64, bool scaled = true) {
+  cc.comm.nNodes = nRanks / 8;
+  cc.comm.nRanks = nRanks;
+  cc.comm.ll128LineElems = 8;
+  cc.comm.ll128DataElems = 7;
+  cc.comm.buffSizes[NCCL_PROTO_LL128] = 4 * kLl128DefaultBuff;
+  cc.comm.p2pLl128BuffSize = scaled ? kLl128DefaultBuff : 4 * kLl128DefaultBuff;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineShrinksToDefaultChunk) {
+  // 16 MB on 64 channels is ~1 chunk per channel at 196 KiB, far under nRanks / 2 = 32, so the chunk halves to
+  // the default and stops there. Measured on 8 nodes: the x4 chunk ran 16 MB broadcast at 63% of the default.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  ASSERT_EQ(0u, kLl128ScaledChunk % rcclProtoGrainSize(NCCL_PROTO_LL128, cc.get()));
+  for (ncclFunc_t f : {ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    auto r = RunChunking(cc, t, kScaledChannels, size_t(16) << 20);
+    ASSERT_EQ(ncclSuccess, r.rc) << "func=" << int(f);
+    EXPECT_EQ(kLl128DefaultChunk, r.chunkSize) << "func=" << int(f);
+    EXPECT_EQ(kLl128DefaultChunk, RunChunking(cc, t, kScaledChannels, 1024).chunkSize)
+        << "func=" << int(f) << ": never below the default chunk";
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineKeepsLargeChunkForLargeMessages) {
+  // 1 GB carries 83 chunks of 196 KiB per channel, past nRanks / 2, so the x4 chunk stays (+6% measured);
+  // 256 MB carries 20, so one halving to 98 KiB brings it to 41.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize) << "func=" << int(f);
+    EXPECT_EQ(kLl128ScaledChunk / 2, RunChunking(cc, t, kScaledChannels, size_t(256) << 20).chunkSize)
+        << "func=" << int(f);
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineThresholdScalesWithRanks) {
+  // The same 256 MB on 2 nodes (nRanks / 2 = 8) already has enough chunks for the x4 chunk.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc, /*nRanks=*/16);
+  auto t = MakeTask(ncclFuncBroadcast, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(256) << 20).chunkSize);
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128PipelineUnscaledBufferKeepsItsChunk) {
+  // A large LL128 buffer that send/recv shares (NCCL_LL128_BUFFSIZE) is not the scaled collective buffer, so the
+  // pipeline ladder leaves it alone, as before.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc, 64, /*scaled=*/false);
+  auto t = MakeTask(ncclFuncBroadcast, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(16) << 20).chunkSize);
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128RingCollectivesKeepTheLargeChunk) {
+  // Only the pipeline patterns shrink: Ring all_gather / reduce_scatter / all_reduce gain from the x4 chunk.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncAllGather, ncclFuncReduceScatter, ncclFuncAllReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(16) << 20).chunkSize) << "func=" << int(f);
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128TreeKeepsTheDefaultChunk) {
+  // Tree/LL128 never uses the scaled chunk, even where its ladder would not halve (1 GB).
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncAllReduce, ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128DefaultChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize) << "func=" << int(f);
+  }
+  MakeScaledLl128(cc, 64, /*scaled=*/false);
+  auto t = MakeTask(ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize)
+      << "an unscaled buffer keeps its chunk";
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_CollnetChain_ClampsToTwoFiftySixK) {
@@ -2254,6 +2344,48 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
 }
 
+// ROCM-33092: an addon collective never reaches ncclEnqueueCheck, so the info overload is what keeps
+// comm->opCount in step with the native path.
+TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_AdvancesOpCountOnSuccess) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  int localRankToRank[1] = {0};
+  ac.c()->localRankToRank = localRankToRank;
+  ac.c()->opCount = 7;
+
+  struct ncclInfo info = {};
+  info.opName = "ReduceScatter";
+  info.comm = ac.c();
+  info.stream = kAddonStream;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
+  EXPECT_EQ(8u, ac.c()->opCount);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_LaunchFailedLeavesOpCount) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+  int localRankToRank[1] = {0};
+  ac.c()->localRankToRank = localRankToRank;
+  ac.c()->opCount = 7;
+
+  struct ncclInfo info = {};
+  info.opName = "ReduceScatter";
+  info.comm = ac.c();
+  info.stream = kAddonStream;
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [] { return ncclInternalError; }));
+  EXPECT_EQ(7u, ac.c()->opCount);
+}
+
 // ===========================================================================
 // rcclAddonLaunch under graph capture (AICOMRCCL-2184). A captured addon collective joins the
 // per-communicator chain that ncclLaunchPrepare / ncclLaunchFinish capture native collectives into:
@@ -2314,10 +2446,12 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceSt
                                                   : "recordOther");
     return hipSuccess;
   });
-  ScopedHook advance(g_ncclStreamAdvanceToEvent, [&](struct ncclCudaGraph graph, hipStream_t stream, hipEvent_t event) {
-    EXPECT_EQ(kAddonGraphId, graph.graphId);
+  ScopedHook advanceToEvent(g_ncclStreamAdvanceToEvent, [](struct ncclCudaGraph, hipStream_t, hipEvent_t) {
+    return ncclInternalError;
+  });
+  ScopedHook advance(g_ncclStreamAdvanceToStream, [&](hipStream_t stream, hipStream_t source) {
     EXPECT_EQ(kAddonDeviceStream, stream);
-    EXPECT_EQ(kAddonScratchEvent, event);
+    EXPECT_EQ(kAddonStream, source);
     calls.push_back("advance");
     return ncclSuccess;
   });
@@ -2334,9 +2468,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceSt
     return ncclSuccess;
   }));
 
-  EXPECT_EQ((std::vector<std::string>{"acquire", "wait", "launch", "recordDone", "recordScratch", "advance",
-                                      "release"}),
-            calls);
+  EXPECT_EQ((std::vector<std::string>{"acquire", "wait", "launch", "recordDone", "advance", "release"}), calls);
+  EXPECT_EQ(0, advanceToEvent.calls);
 }
 
 TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithoutStreamOrdering_WaitsOnAndRecordsTheSerialEvent) {
@@ -2413,8 +2546,7 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedLaunchFailed_StillReleasesTheDevice
                        return ncclSuccess;
                      });
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
-  ScopedHook advance(g_ncclStreamAdvanceToEvent,
-                     [](struct ncclCudaGraph, hipStream_t, hipEvent_t) { return ncclInternalError; });
+  ScopedHook advance(g_ncclStreamAdvanceToStream, [](hipStream_t, hipStream_t) { return ncclInternalError; });
   ScopedHook release(g_strongStreamRelease,
                      [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
 
@@ -2425,6 +2557,95 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedLaunchFailed_StillReleasesTheDevice
   EXPECT_EQ(0, record.calls);
   EXPECT_EQ(0, advance.calls);
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ===========================================================================
+// ncclLaunchFinish fast-forward of deviceStream under capture: a single user stream reads the
+// launch stream's frontier directly, several user streams go through finishedEvent.
+// ===========================================================================
+
+namespace {
+hipStream_t const kSecondUserStream = reinterpret_cast<hipStream_t>(0x2B5);
+
+struct CapturedLaunchFinish {
+  CapturingAddonComm ac{/*graphStreamOrdering=*/1};
+  std::unique_ptr<ncclKernelPlan> plan{new ncclKernelPlan{}};
+  ncclCudaStreamList streams[2] = {};
+  explicit CapturedLaunchFinish(int numStreams) {
+    struct ncclKernelPlanner* planner = &ac.c()->planner;
+    planner->capturingGraph = ncclCudaGraphNone(ac.c()->config.graphUsageMode);
+    planner->capturingGraph.graphId = kAddonGraphId;
+    streams[0].stream = kAddonStream;
+    if (numStreams == 2) {
+      streams[0].next = &streams[1];
+      streams[1].stream = kSecondUserStream;
+    }
+    planner->streams = &streams[0];
+    planner->numStreams = numStreams;
+    ncclIntruQueueEnqueue(&planner->planQueue, plan.get());
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, LaunchFinish_CapturedSingleStream_AdvancesDeviceStreamToTheLaunchStream) {
+  CapturedLaunchFinish lf(/*numStreams=*/1);
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t event, hipStream_t stream) {
+    EXPECT_EQ(kAddonScratchEvent, event);
+    EXPECT_EQ(kAddonStream, stream);
+    return hipSuccess;
+  });
+  ScopedHook acquired(g_ncclStrongStreamAcquiredWorkStream,
+                      [](struct ncclCudaGraph graph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                        EXPECT_EQ(kAddonGraphId, graph.graphId);
+                        *workStream = kAddonDeviceStream;
+                        return ncclSuccess;
+                      });
+  ScopedHook toStream(g_ncclStreamAdvanceToStream, [](hipStream_t stream, hipStream_t source) {
+    EXPECT_EQ(kAddonDeviceStream, stream);
+    EXPECT_EQ(kAddonStream, source);
+    return ncclSuccess;
+  });
+  ScopedHook toEvent(g_ncclStreamAdvanceToEvent,
+                     [](struct ncclCudaGraph, hipStream_t, hipEvent_t) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, ncclLaunchFinish(lf.ac.c()));
+
+  EXPECT_EQ(1, toStream.calls);
+  EXPECT_EQ(0, toEvent.calls);
+  EXPECT_EQ(1, release.calls);
+}
+
+TEST_F(EnqueueMicrotest, LaunchFinish_CapturedTwoStreams_AdvancesDeviceStreamToTheFinishedEvent) {
+  CapturedLaunchFinish lf(/*numStreams=*/2);
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  ScopedHook acquired(g_ncclStrongStreamAcquiredWorkStream,
+                      [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                        *workStream = kAddonDeviceStream;
+                        return ncclSuccess;
+                      });
+  ScopedHook toStream(g_ncclStreamAdvanceToStream, [](hipStream_t, hipStream_t) { return ncclInternalError; });
+  ScopedHook toEvent(g_ncclStreamAdvanceToEvent, [](struct ncclCudaGraph graph, hipStream_t stream, hipEvent_t event) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(kAddonDeviceStream, stream);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    return ncclSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t stream, hipEvent_t event, unsigned int) {
+    EXPECT_EQ(kSecondUserStream, stream);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    return hipSuccess;
+  });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, ncclLaunchFinish(lf.ac.c()));
+
+  EXPECT_EQ(0, toStream.calls);
+  EXPECT_EQ(1, toEvent.calls);
+  EXPECT_EQ(1, wait.calls);
+  EXPECT_EQ(1, release.calls);
 }
 
 // ===========================================================================
@@ -3609,6 +3830,9 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ConsultsEveryRcclTuningHookExactlyOnce)
   EXPECT_EQ(1, g_rcclUpdateCollectiveAlgorithmCalls) << "rcclUpdateCollectiveAlgorithm";
   EXPECT_TRUE(g_rcclUpdateCollectiveAlgorithmBeforeProtocol)
       << "rcclUpdateCollectiveAlgorithm must run before rcclUpdateCollectiveProtocol picks the Tree protocol";
+  EXPECT_EQ(1, g_rcclUpdateRemoteFlushAlgoProtoCalls) << "rcclUpdateRemoteFlushAlgoProto";
+  EXPECT_TRUE(g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol)
+      << "rcclUpdateRemoteFlushAlgoProto must run after rcclUpdateCollectiveProtocol so its choice stands";
   EXPECT_EQ(1, g_rcclUpdateCollectiveChannelsCalls) << "rcclUpdateCollectiveChannels";
 }
 
@@ -3648,6 +3872,26 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_OverrideChannelsCanChangeTheChannelCoun
   ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(),
                                          /*simInfo=*/nullptr));
   EXPECT_EQ(3, task.nMaxChannels) << "the override's channel count must reach the task";
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_RemoteFlushChannelsSetTheCountCappedByComm) {
+  // A positive rcclUpdateRemoteFlushAlgoProto return replaces the Ring/Tree channel count, capped at comm->nChannels.
+  for (int commChannels : {64, 32}) {
+    AlgoInfoComm cc;
+    cc.get()->nChannels = commChannels;
+    auto task = CostTask(ncclFuncAllReduce);
+    CostTable tbl;  // left empty: the RING/SIMPLE fallback is taken
+    g_rcclUpdateRemoteFlushAlgoProtoChannels = 48;
+    ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+    EXPECT_EQ(std::min(48, commChannels), task.nMaxChannels) << "comm->nChannels=" << commChannels;
+  }
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 64;
+  auto task = CostTask(ncclFuncAllReduce);
+  CostTable tbl;
+  g_rcclUpdateRemoteFlushAlgoProtoChannels = 0;
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+  EXPECT_EQ(64, task.nMaxChannels) << "0 keeps RCCL's own count";
 }
 
 // The NCCL_MIN_NCHANNELS floor at :2652-2656. Left undriven, g_paramMinNchannels
@@ -3961,6 +4205,7 @@ struct Gfx1250AddP2pScene {
     c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
     c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
     c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    c->p2pLl128BuffSize = c->buffSizes[NCCL_PROTO_LL128];
     SetSingleGpuArch(topo.get(), "gfx1250");
     topo->ll128Enabled = true;
     c->topo = topo.get();
@@ -4022,6 +4267,27 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1Mixed2KiB8KiB_OneLl128WorkIt
   auto* batch = sc.bp.tailBatch();
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(true), batch->funcId) << "ENABLE=1 in-window uses the LL128 kernel";
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_ScaledCollectiveLl128Buffer_P2pStepKeepsTheP2pSize) {
+  // With the 4x collective LL128 buffer, send/recv LL128 steps must still come from p2pLl128BuffSize: the net
+  // transport allocates send/recv LL128 buffers at that size.
+  SetParam("P2P_LL128_ENABLE", 1);
+  Gfx1250AddP2pScene sc;
+  ncclComm* c = sc.bp.c();
+  c->p2pLl128BuffSize = 1 << 20;
+  c->buffSizes[NCCL_PROTO_LL128] = 4 << 20;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/8192, /*recvBytes=*/8192));
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  ASSERT_EQ(1, work->sendProtoLL);
+  ASSERT_EQ(1, work->recvProtoLL);
+  auto dataChunk = [&](int buffSize) {
+    return u32fp8Decode(u32fp8Encode((uint32_t)(buffSize / NCCL_STEPS / c->ll128LineElems * c->ll128DataElems)));
+  };
+  ASSERT_NE(dataChunk(1 << 20), dataChunk(4 << 20));
+  EXPECT_EQ(dataChunk(1 << 20), u32fp8Decode(work->sendChunkSize_u32fp8));
+  EXPECT_EQ(dataChunk(1 << 20), u32fp8Decode(work->recvChunkSize_u32fp8));
 }
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Default2KiB_UsesLegacyLlKernel) {
