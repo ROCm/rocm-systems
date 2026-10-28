@@ -19,7 +19,7 @@ RAW_TERMINATOR = f"){RAW_DELIM}\""
 
 
 def embed(tuner_dir, out_file):
-    csv_files = sorted(glob.glob(os.path.join(tuner_dir, "rccl_tuner*.csv")))
+    csv_files = sorted(glob.glob(os.path.join(glob.escape(tuner_dir), "rccl_tuner*.csv")))
 
     entries = []
     for csv_path in csv_files:
