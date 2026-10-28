@@ -73,10 +73,6 @@ class Var {
 
   void ResizeDVar(size_t size) { dMem_.resize(size); }
 
-  //! Drops the per-device memory objects; AllocateManagedVarPtr() repopulates
-  //! them on the next allocation.
-  void ClearDeviceVars() { dMem_.clear(); }
-
   FatBinaryInfo** ModuleInfo() { return modules_; }
   DeviceVarKind GetVarKind() const { return dVarKind_; }
   size_t GetSize() const { return size_; }
