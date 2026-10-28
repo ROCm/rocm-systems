@@ -157,13 +157,17 @@ jobs:
       # stages needed to build them (BUILD_TOPOLOGY.toml is the source of truth;
       # this only reads it). Empty output = build all (fan-out / unknown project
       # / run_all_tests CI-infra change). Also skips Windows when every changed
-      # project is disabled on Windows in the topology.
+      # project is disabled on Windows in the topology. The ci:run-wsl label adds
+      # the wsl-rocdxg stage that TheRock's WSL tests need.
       - name: Compute build-stage allowlist
         id: build_stages
+        env:
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           python3 .github/scripts/compute_build_stages.py \
             --changed-projects "${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}" \
             --run-all-tests "${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}" \
+            --pr-labels "${PR_LABELS}" \
             --therock-path "_therock"
 
   setup:

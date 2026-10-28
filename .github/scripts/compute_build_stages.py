@@ -33,6 +33,7 @@ Usage:
     python compute_build_stages.py \
         --changed-projects "projects/rdc,projects/rocdecode" \
         --run-all-tests false \
+        --pr-labels "ci:run-wsl" \
         --therock-path _therock
 
 It also emits ``windows_amdgpu_families=none`` when every changed project is
@@ -75,6 +76,12 @@ FULL_BUILD_PROJECTS = {
     "roctracer",
 }
 
+# TheRock's opt-in label for also testing the Linux build on WSL GPU runners
+# (ROCm/TheRock#8457). Those tests need the wsl-rocdxg artifact (the WSL
+# libhsakmt), and TheRock rejects ci:run-wsl when the allowlist omits its stage.
+WSL_RUN_LABEL = "ci:run-wsl"
+WSL_ARTIFACT = "wsl-rocdxg"
+
 
 def _parse_projects(changed_projects: str) -> List[str]:
     """Normalize 'projects/clr,projects/hip' -> ['clr', 'hip']."""
@@ -90,9 +97,11 @@ def compute_build_stages(
     changed_projects: str,
     therock_path: str,
     run_all_tests: bool = False,
+    run_wsl: bool = False,
 ) -> List[str]:
     """Return the allowlist of build stages required for this change set.
 
+    run_wsl adds the stages for the wsl-rocdxg artifact (ci:run-wsl).
     Returns [] (build everything) whenever narrowing is not safe.
     """
     # CI-infra changes (workflow/scripts/repos-config) force a full run upstream;
@@ -144,7 +153,10 @@ def compute_build_stages(
         logger.info(f"Unrecognized project(s) {sorted(unknown)} -> build all stages")
         return []
 
-    required = set(topology.get_stages_for_artifacts(list(resolved.values())))
+    artifacts = list(resolved.values())
+    if run_wsl:
+        artifacts.append(WSL_ARTIFACT)
+    required = set(topology.get_stages_for_artifacts(artifacts))
     if not required:
         logger.info("No stages mapped for changed projects -> build all stages")
         return []
@@ -238,6 +250,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="When 'true', build all stages. Set from the configure job's "
         "run_all_tests output for CI-infra changes.",
     )
+    parser.add_argument(
+        "--pr-labels",
+        default="",
+        help=f"Comma-separated PR labels. '{WSL_RUN_LABEL}' adds the "
+        f"{WSL_ARTIFACT} stages.",
+    )
     return parser.parse_args(argv)
 
 
@@ -257,10 +275,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
     )
     run_all_tests = str(args.run_all_tests).strip().lower() == "true"
+    pr_labels = {label.strip() for label in args.pr_labels.split(",")}
     build_stages = compute_build_stages(
         changed_projects=changed_projects,
         therock_path=args.therock_path,
         run_all_tests=run_all_tests,
+        run_wsl=WSL_RUN_LABEL in pr_labels,
     )
     windows_families = compute_windows_families(
         changed_projects=changed_projects,
