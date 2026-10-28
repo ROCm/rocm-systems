@@ -1274,7 +1274,7 @@ pub(crate) unsafe extern "C" fn create(
                                 peer_devices.as_slice(),
                                 address,
                                 memory::device::HostMappingPolicy::Fine,
-                                native_length,
+                                create.byte_length,
                                 alignment.max(page),
                                 permissions,
                             )
