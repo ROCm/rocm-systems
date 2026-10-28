@@ -409,11 +409,10 @@ static const std::map<amdsmi_processor_type_t, std::string> processor_type_map =
     {AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH, "BRCM_SWITCH"}};
 
 static const std::map<amdsmi_link_type_t, std::string> link_type_map = {
-    {AMDSMI_LINK_TYPE_INTERNAL, "INTERNAL"},
-    {AMDSMI_LINK_TYPE_PCIE, "PCIE"},
-    {AMDSMI_LINK_TYPE_XGMI, "XGMI"},
-    {AMDSMI_LINK_TYPE_NOT_APPLICABLE, "NOT_APPLICABLE"},
-    {AMDSMI_LINK_TYPE_UNKNOWN, "UNKNOWN"}};
+    {AMDSMI_LINK_TYPE_INTERNAL, "INTERNAL"}, {AMDSMI_LINK_TYPE_PCIE, "PCIE"},
+    {AMDSMI_LINK_TYPE_XGMI, "XGMI"},         {AMDSMI_LINK_TYPE_NOT_APPLICABLE, "NOT_APPLICABLE"},
+    {AMDSMI_LINK_TYPE_UNKNOWN, "UNKNOWN"},   {AMDSMI_LINK_TYPE_UALOE, "UALOE"},
+    {AMDSMI_LINK_TYPE_UALINK, "UALINK"}};
 
 int main() {
   amdsmi_status_t ret;
@@ -2038,7 +2037,8 @@ int main() {
       // Get nearest GPUs
       const char* topology_link_type_str[] = {
           "AMDSMI_LINK_TYPE_INTERNAL",       "AMDSMI_LINK_TYPE_PCIE",    "AMDSMI_LINK_TYPE_XGMI",
-          "AMDSMI_LINK_TYPE_NOT_APPLICABLE", "AMDSMI_LINK_TYPE_UNKNOWN",
+          "AMDSMI_LINK_TYPE_NOT_APPLICABLE", "AMDSMI_LINK_TYPE_UNKNOWN", "AMDSMI_LINK_TYPE_UALOE",
+          "AMDSMI_LINK_TYPE_UALINK",
       };
       printf("\tOutput of amdsmi_get_link_topology_nearest:\n");
       for (uint32_t topo_link_type = AMDSMI_LINK_TYPE_INTERNAL;

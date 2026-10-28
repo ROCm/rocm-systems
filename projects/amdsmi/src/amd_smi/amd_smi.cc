@@ -4092,6 +4092,12 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
     case RSMI_IOLINK_TYPE_XGMI:
       link_type = AMDSMI_LINK_TYPE_XGMI;
       break;
+    case RSMI_IOLINK_TYPE_UALOE:
+      link_type = AMDSMI_LINK_TYPE_UALOE;
+      break;
+    case RSMI_IOLINK_TYPE_UALINK:
+      link_type = AMDSMI_LINK_TYPE_UALINK;
+      break;
     default:
       link_type = AMDSMI_LINK_TYPE_UNKNOWN;
       break;

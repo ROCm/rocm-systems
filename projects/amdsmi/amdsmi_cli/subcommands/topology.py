@@ -529,6 +529,10 @@ class TopologyCommands:
                         link_type = "PCIE"
                     elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI:
                         link_type = "XGMI"
+                    elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_UALOE:
+                        link_type = "UALOE"
+                    elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_UALINK:
+                        link_type = "UALINK"
                     else:
                         link_type = "N/A"
 
@@ -803,6 +807,14 @@ class TopologyCommands:
                                 src_gpu_link_type[dest_gpu_key] = "PCIE"
                             elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI:
                                 src_gpu_link_type[dest_gpu_key] = "XGMI"
+                            elif (
+                                link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_UALOE
+                            ):
+                                src_gpu_link_type[dest_gpu_key] = "UALOE"
+                            elif (
+                                link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_UALINK
+                            ):
+                                src_gpu_link_type[dest_gpu_key] = "UALINK"
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         src_gpu_link_type[dest_gpu_key] = "N/A"
                         logging.debug(

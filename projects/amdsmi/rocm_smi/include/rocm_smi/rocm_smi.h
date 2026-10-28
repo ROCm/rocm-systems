@@ -918,6 +918,8 @@ typedef enum _RSMI_IO_LINK_TYPE {
   RSMI_IOLINK_TYPE_UNDEFINED = 0,     //!< unknown type.
   RSMI_IOLINK_TYPE_PCIEXPRESS,        //!< PCI Express
   RSMI_IOLINK_TYPE_XGMI,              //!< XGMI
+  RSMI_IOLINK_TYPE_UALOE,             //!< UALOE
+  RSMI_IOLINK_TYPE_UALINK,            //!< UALINK
   RSMI_IOLINK_TYPE_NUMIOLINKTYPES,    //!< Number of IO Link types
   RSMI_IOLINK_TYPE_SIZE = 0xFFFFFFFF  //!< Max of IO Link types
 } RSMI_IO_LINK_TYPE;
