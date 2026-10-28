@@ -4,6 +4,7 @@
 
 #include "gsl_assert.h"
 
+#include <stdexcept>
 #include <utility>
 
 std::string_view MockInputParameters::get_output_path()
@@ -135,6 +136,8 @@ void MockSdkWrapper::configure_callback_tracing_service(rocprofiler_context_id_t
                                                         rocprofiler_callback_tracing_cb_t callback,
                                                         void* callback_args)
 {
+    m_callback_tracing_service_info.push_back(
+        callback_tracing_service_info{kind, {operations, operations + operations_count}, callback_args});
 }
 
 void MockSdkWrapper::start_context(rocprofiler_context_id_t context_id)
@@ -217,6 +220,11 @@ const std::vector<MockSdkWrapper::dispatch_counting_service_info>&
     return m_dispatch_counting_service_info;
 }
 
+const std::vector<MockSdkWrapper::callback_tracing_service_info>& MockSdkWrapper::get_callback_tracing_service_info() const
+{
+    return m_callback_tracing_service_info;
+}
+
 const std::vector<MockSdkWrapper::create_counter_config_info>& MockSdkWrapper::get_create_counter_config_info() const
 {
     return m_create_counter_config_info;
@@ -237,6 +245,28 @@ const std::vector<MockSdkWrapper::hsa_intercept_registration_info>&
 const std::vector<MockSdkWrapper::query_counter_record_info>& MockSdkWrapper::get_query_counter_record_info() const
 {
     return m_query_counter_record_info;
+}
+
+void MockSdkWrapper::query_available_agents(rocprofiler_query_available_agents_cb_t callback,
+                                            void*                                   user_data)
+{
+    if (m_query_available_agents_fails)
+        throw std::runtime_error("query available agents failure");
+
+    std::vector<const void*> agents;
+    for (const auto& agent : m_available_agents)
+        agents.push_back(&agent);
+    callback(ROCPROFILER_AGENT_INFO_VERSION_0, agents.data(), agents.size(), user_data);
+}
+
+void MockSdkWrapper::set_available_agents(const std::vector<rocprofiler_agent_t>& agents)
+{
+    m_available_agents = agents;
+}
+
+void MockSdkWrapper::set_query_available_agents_fails(bool fails)
+{
+    m_query_available_agents_fails = fails;
 }
 
 /////////////////////////////////////////////////////////////////////////

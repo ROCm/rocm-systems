@@ -12,8 +12,11 @@ pub(crate) mod file;
 pub(crate) mod memory;
 pub(crate) mod process_identity;
 
+pub(crate) use clock::host_clock;
 pub(crate) use libc as errno;
-pub(crate) use memory::{HostAllocation, host_page_size};
+pub(crate) use memory::{HostAllocation, HostReservation, host_page_size};
+
+mod clock;
 
 use crate::{Error, ErrorKind};
 use std::io;
