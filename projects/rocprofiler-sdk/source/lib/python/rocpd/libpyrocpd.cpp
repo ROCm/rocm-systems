@@ -734,8 +734,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                             SELECT
                                 PMC_E.id,
                                 PMC_E.guid,
-                                PMC_I.nid,
-                                PMC_I.pid,
+                                P.nid,
+                                P.pid,
                                 PMC_E.pmc_id,
                                 PMC_E.event_id,
                                 PMC_I.name,
@@ -748,7 +748,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
                                 AND PMC_I.guid = PMC_E.guid
                                 INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id
-                                AND A.guid = PMC_I.guid;
+                                AND A.guid = PMC_I.guid
+                                INNER JOIN `rocpd_info_process` P ON P.id = PMC_I.pid
+                                AND P.guid = PMC_I.guid;
                         )";
 
                 execute_raw_sql_statements(conn, create_pmc_event_view);
