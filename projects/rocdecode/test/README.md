@@ -217,8 +217,13 @@ GPU-specific baseline. Works on both Linux and Windows (Git Bash + MSVC).
    performance sample (MSVC multi-config needs `--config Release`).
 3. `python test/perf_regression.py` — same regression check; GPU is detected via `hipInfo`.
 
-Invoke it by typing `/perf-check` in a Claude Code session started from the project root,
-or `/perf-check quick` for the fast one-stream-per-subfolder variant (`--quick`, ≤4K only).
+Invoke it by typing `/perf-check` in a Claude Code session started from the project root.
+Optional arguments:
+
+- `/perf-check quick` — fast one-stream-per-subfolder variant (`--quick`, ≤4K only).
+- `/perf-check --gpu Navi31` — specify the GPU name for baseline lookup explicitly.
+- `/perf-check quick --gpu Navi31` — both combined.
+
 Requires `ROCDECODE_PERF_DIR` (streams + baseline) as described under
 [`perf_regression.py`](#perf_regressionpy--performance-regression-check) above. On Windows,
 `pandas` and `lxml` must be installed (`pip install pandas lxml`).
