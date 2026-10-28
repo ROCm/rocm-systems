@@ -23,7 +23,6 @@ Panel Config:
         Coalescing:
           value: 100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum))
           unit: Percent
-      comparable: false
       cli_style: simple_bar
   - metric_table:
       id: 1602

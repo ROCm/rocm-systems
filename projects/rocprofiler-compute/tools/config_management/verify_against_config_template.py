@@ -54,7 +54,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from config_management import utils_ruamel as cm_utils  # noqa: E402
 
 REQUIRED_PANEL_KEYS = ("id", "title", "data source", "metrics_description")
-OPTIONAL_PANEL_KEYS = ("alias", "experimental", "description")
+OPTIONAL_PANEL_KEYS = ("alias", "experimental")
 DEFAULT_ALLOWED_PANEL_KEYS = set(REQUIRED_PANEL_KEYS) | set(OPTIONAL_PANEL_KEYS)
 
 # Experimental panels that should be excluded from template validation
