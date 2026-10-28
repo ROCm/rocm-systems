@@ -351,11 +351,12 @@ def main():
     baseline = {}
     col = None
     measure_only = False
+    measure_only_reason = ""
     if not baseline_path.is_file():
         # No baseline file — switch to measure-only mode so streams are still
         # measured and saved to CSV (the CSV can serve as a future baseline).
         measure_only = True
-        print(f"WARNING: baseline not found: {baseline_path}", file=sys.stderr)
+        measure_only_reason = f"baseline file not found: {baseline_path}"
     else:
         try:
             baseline, col = load_baseline(baseline_path, label)
@@ -368,11 +369,12 @@ def main():
             # All streams are still measured and saved to CSV so the results can
             # serve as a future baseline.
             measure_only = True
-            print(f"WARNING: {e}", file=sys.stderr)
+            measure_only_reason = str(e)
     print(f"GPU: {label}  ({detail})")
     if measure_only:
-        print("No baseline available — running in measure-only mode")
-        print("All streams will be measured and saved; no regression comparison.")
+        print(f"WARNING: {measure_only_reason}")
+        print("Running in measure-only mode — all streams will be measured and")
+        print("saved to CSV; no regression comparison.")
     else:
         print(f"Baseline column: {col}  ({len(baseline)} streams)  tolerance: {tol}%")
     if args.quick:
