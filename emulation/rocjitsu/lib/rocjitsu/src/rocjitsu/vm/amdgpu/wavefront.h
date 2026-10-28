@@ -232,14 +232,13 @@ public:
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
 
-  /// @brief Return the AQL ring packet id (dispatch's ring index) for this wave.
-  /// @details This is the queue read index at which the dispatch packet was
-  /// fetched. rocm-dbgapi correlates a trapped wave to its dispatch by matching
-  /// this against the queue's read/write dispatch ids (TTMP11[6:30]).
-  uint32_t aql_packet_id() const { return aql_packet_id_; }
+  /// @brief Return the wrapped AQL ring slot associated with this wave.
+  /// @details ROCdbgapi reconstructs its monotonic dispatch index from the
+  /// consumer cursor and this slot (TTMP11[6:30] on gfx9.4).
+  uint32_t queue_packet_id() const { return queue_packet_id_; }
 
-  /// @brief Set the AQL ring packet id (called at dispatch).
-  void set_aql_packet_id(uint32_t id) { aql_packet_id_ = id; }
+  /// @brief Set the wrapped AQL ring slot (called at dispatch).
+  void set_queue_packet_id(uint32_t id) { queue_packet_id_ = id; }
 
   /// @brief GPU load bias for code-object-relative function addresses.
   uint64_t code_load_bias() const { return code_load_bias_; }
@@ -469,6 +468,9 @@ public:
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t VSKIP_BIT = 1u << 28;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
+  /// Short for conditional stack pointer, used by fork/join instructions
+  static constexpr uint32_t CSP_SHIFT = 29;
+  static constexpr uint32_t CSP_MASK = 7u << CSP_SHIFT;
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
   /// in each arch's isa.h, which all spell it member<13, 13>.
@@ -478,6 +480,16 @@ public:
   bool ieee_mode() const { return (mode_raw_ & IEEE_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
+
+  /// @brief Return MODE.CSP, the number of pending fork stack entries.
+  uint32_t cond_stack_ptr() const { return (mode_raw_ & CSP_MASK) >> CSP_SHIFT; }
+
+  /// @brief Set MODE.CSP, leaving every other MODE bit unchanged.
+  /// @param csp New stack depth; only the lowest 3 bits are used.
+  void set_cond_stack_ptr(uint32_t csp) {
+    set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT));
+  }
+
   uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
   uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
@@ -1000,7 +1012,7 @@ public:
     wg_id_ = 0;
     wg_coord_ = {};
     dispatch_id_ = 0;
-    aql_packet_id_ = 0;
+    queue_packet_id_ = 0;
     code_load_bias_ = 0;
     wave_in_group_ = 0;
     address_space_ = {};
@@ -1096,11 +1108,11 @@ protected:
   uint64_t dispatch_generation_ = 0; ///< Incremented whenever this slot is dispatched.
   uint32_t wg_id_ = 0;               ///< Workgroup ID (set per dispatch).
   std::array<uint32_t, 3> wg_coord_{};
-  uint32_t dispatch_id_ = 0;         ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t aql_packet_id_ = 0;       ///< AQL ring packet id of the dispatch (debugger correlation).
-  uint64_t code_load_bias_ = 0;      ///< GPU load bias for code-object-relative call targets.
-  uint32_t wave_in_group_ = 0;       ///< Position of this wave within its workgroup (debugger).
-  AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
+  uint32_t dispatch_id_ = 0;     ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t queue_packet_id_ = 0; ///< Wrapped AQL ring slot of the dispatch (debugger correlation).
+  uint64_t code_load_bias_ = 0;  ///< GPU load bias for code-object-relative call targets.
+  uint32_t wave_in_group_ = 0;   ///< Position of this wave within its workgroup (debugger).
+  AddressSpaceHandle address_space_;             ///< Generation-safe GPU address-space identity.
   std::shared_ptr<const GpuVmAccess> vm_access_; ///< Dispatch-scoped immutable VM snapshot.
   uint32_t process_id_ = 0; ///< Owning process ID (PASID analog, set per dispatch).
 

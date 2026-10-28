@@ -48,6 +48,8 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -110,6 +112,8 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -172,6 +176,8 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -234,6 +240,8 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -296,6 +304,8 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -358,6 +368,8 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -420,6 +432,8 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -481,6 +495,8 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -542,6 +558,8 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -604,6 +622,8 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -666,6 +686,8 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -728,6 +750,8 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -790,6 +814,8 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -852,6 +878,8 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -914,6 +942,8 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -976,6 +1006,8 @@ VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1040,6 +1072,8 @@ VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1105,6 +1139,8 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1170,6 +1206,8 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1235,6 +1273,8 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1300,6 +1340,8 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1365,6 +1407,8 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1430,6 +1474,8 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1495,6 +1541,8 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1560,6 +1608,8 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1625,6 +1675,8 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1691,6 +1743,8 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1757,6 +1811,8 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1823,6 +1879,8 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1889,6 +1947,8 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1955,6 +2015,8 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -2021,6 +2083,8 @@ VCmpxTruF32Vopc::VCmpxTruF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3291,6 +3355,8 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3353,6 +3419,8 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3415,6 +3483,8 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3477,6 +3547,8 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3539,6 +3611,8 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3601,6 +3675,8 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3663,6 +3739,8 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3724,6 +3802,8 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3786,6 +3866,8 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3849,6 +3931,8 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3912,6 +3996,8 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3975,6 +4061,8 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4038,6 +4126,8 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4101,6 +4191,8 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4164,6 +4256,8 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4227,6 +4321,8 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4291,6 +4387,8 @@ VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4356,6 +4454,8 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4421,6 +4521,8 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4486,6 +4588,8 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4551,6 +4655,8 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4616,6 +4722,8 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4681,6 +4789,8 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4746,6 +4856,8 @@ VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4811,6 +4923,8 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4878,6 +4992,8 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4944,6 +5060,8 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5010,6 +5128,8 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5076,6 +5196,8 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5142,6 +5264,8 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5208,6 +5332,8 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5274,6 +5400,8 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5663,6 +5791,8 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5726,6 +5856,8 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5789,6 +5921,8 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5852,6 +5986,8 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5915,6 +6051,8 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5978,6 +6116,8 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -6395,6 +6535,8 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -6461,6 +6603,8 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -6527,6 +6671,8 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -6593,6 +6739,8 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -6659,6 +6807,8 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -6725,6 +6875,8 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -6787,6 +6939,8 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -6849,6 +7003,8 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -6911,6 +7067,8 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -6973,6 +7131,8 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7035,6 +7195,8 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7097,6 +7259,8 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7159,6 +7323,8 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7220,6 +7386,8 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7282,6 +7450,8 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7345,6 +7515,8 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7408,6 +7580,8 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7471,6 +7645,8 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7534,6 +7710,8 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7597,6 +7775,8 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7660,6 +7840,8 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7722,6 +7904,8 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7786,6 +7970,8 @@ VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7851,6 +8037,8 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7916,6 +8104,8 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7981,6 +8171,8 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8046,6 +8238,8 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8111,6 +8305,8 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8176,6 +8372,8 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8241,6 +8439,8 @@ VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8307,6 +8507,8 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8373,6 +8575,8 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8439,6 +8643,8 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8505,6 +8711,8 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8571,6 +8779,8 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8637,6 +8847,8 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8703,6 +8915,8 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8769,6 +8983,8 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9120,6 +9336,8 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9183,6 +9401,8 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9246,6 +9466,8 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9309,6 +9531,8 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9372,6 +9596,8 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9435,6 +9661,8 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9498,6 +9726,8 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9561,6 +9791,8 @@ VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9938,6 +10170,8 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10004,6 +10238,8 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10071,6 +10307,8 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10138,6 +10376,8 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10205,6 +10445,8 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10272,6 +10514,8 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10339,6 +10583,8 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10406,6 +10652,8 @@ VCmpxTruF16Vopc::VCmpxTruF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
