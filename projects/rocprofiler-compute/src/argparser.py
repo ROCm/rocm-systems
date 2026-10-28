@@ -8,6 +8,7 @@ from typing import Optional
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import console_warning
+from utils.ml_api_selectors import OPERATOR_SELECTORS
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
 
@@ -668,7 +669,7 @@ Examples:
             "\t\tList collected operators as a unified call tree.\n"
             "\t\tWith no arguments, lists every collected operator.\n"
             "\t\tRequires --output-format stdout. Ignores --operator.\n"
-            f"\t\tValues: {', '.join((*KNOWN_ML_API_BACKENDS, 'user'))}."
+            f"\t\tValues: {', '.join(OPERATOR_SELECTORS)}."
         ),
     )
     analyze_group.add_argument(
@@ -693,7 +694,7 @@ Examples:
             "\t\tOmitting the flag does not filter.\n"
             "\t\tRequires --output-format stdout.\n"
             "\t\tIgnored when --list-operators is set.\n"
-            f"\t\tValues: {', '.join((*KNOWN_ML_API_BACKENDS, 'user'))}."
+            f"\t\tValues: {', '.join(OPERATOR_SELECTORS)}."
         ),
     )
     analyze_group.add_argument(
