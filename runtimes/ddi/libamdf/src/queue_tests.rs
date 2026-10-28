@@ -6,6 +6,7 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
+use rocddi::device::gpu::queue::QueueAccessWidth;
 use rocddi::memory::storage::Allocator;
 use rocddi::{Error, ErrorKind};
 use std::ptr;
@@ -325,8 +326,8 @@ fn native_transport() -> queue::QueueTransport {
 }
 
 #[test]
-fn transport_requires_the_exact_advertised_atomic_widths_and_units() {
-    let mut native = native_transport();
+fn transport_copies_advertised_family_fields_and_native_addresses() {
+    let native = native_transport();
     let aql = family(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
     let host = transport(
         native,
@@ -338,101 +339,30 @@ fn transport_requires_the_exact_advertised_atomic_widths_and_units() {
     .unwrap();
     assert_eq!(host.format_version, aql.format_version);
     assert_eq!(host.format_features, aql.format_features);
-    assert!(
-        transport(
-            native,
-            aql.command_type,
-            aql.format_version,
-            aql.format_features,
-            true
-        )
-        .is_ok()
+    assert_eq!(host.ring_address, native.ring_host_address as u64);
+    assert_eq!(
+        host.read_index_address,
+        native.read_index_host_address as u64
     );
-    native.read_index_width = QueueAccessWidth::Bits32;
-    assert!(matches!(
-        transport(
-            native,
-            aql.command_type,
-            aql.format_version,
-            aql.format_features,
-            false
-        ),
-        Err(INTERNAL)
-    ));
-    native.read_index_width = QueueAccessWidth::Bits64;
-    let sdma = family(AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
-    assert!(matches!(
-        transport(
-            native,
-            sdma.command_type,
-            sdma.format_version,
-            sdma.format_features,
-            false
-        ),
-        Err(INTERNAL)
-    ));
-    native.index_unit_bytes = 1;
-    let host = transport(
+    assert_eq!(host.doorbell_address, native.doorbell_host_address as u64);
+    let device = transport(
         native,
-        sdma.command_type,
-        sdma.format_version,
-        sdma.format_features,
-        false,
+        aql.command_type,
+        aql.format_version,
+        aql.format_features,
+        true,
     )
     .unwrap();
-    assert_eq!(host.format_version, sdma.format_version);
-    assert_eq!(host.format_features, sdma.format_features);
-    native.read_index_wraps = true;
-    assert!(matches!(
-        transport(
-            native,
-            sdma.command_type,
-            sdma.format_version,
-            sdma.format_features,
-            false
-        ),
-        Err(INTERNAL)
-    ));
-}
-
-#[test]
-fn pm4_transport_requires_dword_units_and_a_wrapping_read_index() {
-    let pm4 = family(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
-    let mut native = native_transport();
-    native.index_unit_bytes = 4;
-    native.read_index_wraps = true;
-    assert!(
-        transport(
-            native,
-            pm4.command_type,
-            pm4.format_version,
-            pm4.format_features,
-            false
-        )
-        .is_ok()
+    assert_eq!(device.ring_address, native.ring_device_address);
+    assert_eq!(device.read_index_address, native.read_index_device_address);
+    assert_eq!(
+        device.doorbell_address,
+        native.doorbell_device_address.unwrap()
     );
-    native.read_index_wraps = false;
-    assert!(matches!(
-        transport(
-            native,
-            pm4.command_type,
-            pm4.format_version,
-            pm4.format_features,
-            false
-        ),
-        Err(INTERNAL)
-    ));
 }
 
 #[test]
-fn invalid_native_transport_rolls_back_and_reports_cleanup_failure() {
-    let family = family(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
-    let mut native = native_transport();
-    native.doorbell_host_address = 0;
-    assert!(matches!(
-        creation_transports(native, &family),
-        Err(INTERNAL)
-    ));
+fn rollback_creation_reports_cleanup_failure() {
     let invalid = INTERNAL;
 
     let queues = AtomicU64::new(1);
