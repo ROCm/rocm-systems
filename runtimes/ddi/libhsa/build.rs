@@ -244,6 +244,23 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
         .enumerate()
         .map(|(index, name)| (name.as_str(), index))
         .collect();
+    let bridge_names: Vec<&str> = exports
+        .iter()
+        .map(String::as_str)
+        .chain(PRIVATE_TABLE_FUNCTIONS)
+        .chain(
+            tables
+                .iter()
+                .find(|(member, _)| *member == "tools")
+                .into_iter()
+                .flat_map(|(_, fields)| fields.iter().map(String::as_str)),
+        )
+        .collect();
+    let bridge_positions: HashMap<&str, usize> = bridge_names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| (*name, index))
+        .collect();
     let mut lines = vec![
         "// Copyright (c) 2026 Advanced Micro Devices, Inc.".to_owned(),
         "// SPDX-License-Identifier: MIT".to_owned(),
@@ -254,6 +271,11 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
         String::new(),
         "/// Number of public HSA exports with dispatch slots.".to_owned(),
         format!("pub(super) const EXPORT_COUNT: usize = {};", exports.len()),
+        "/// Number of tool-visible bridge slots.".to_owned(),
+        format!(
+            "pub(super) const BRIDGE_COUNT: usize = {};",
+            bridge_names.len()
+        ),
         "/// AMD extension table revision read from the public header.".to_owned(),
         format!("pub(super) const AMD_EXT_STEP: u32 = {amd_step};"),
     ];
@@ -274,6 +296,10 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
         lines.push(format!("    /// Native implementation of `{name}`."));
         lines.push(format!("    fn __hsa_impl_{name}();"));
     }
+    for name in &bridge_names {
+        lines.push(format!("    /// Stable registrar bridge for `{name}`."));
+        lines.push(format!("    fn __hsa_bridge_{name}();"));
+    }
     for name in PUBLIC_EXTENSION_SYMBOLS {
         lines.push(format!("    /// Public export address of `{name}`."));
         lines.push(format!(
@@ -283,8 +309,9 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.extend([
         "}".to_owned(),
         String::new(),
-        "/// Original runtime functions used when no tool intercepts a slot.".to_owned(),
-        "static HSA_DEFAULT_SLOTS: [AtomicPtr<c_void>; EXPORT_COUNT] = [".to_owned(),
+        "/// Published functions read by the assembly export trampolines.".to_owned(),
+        "#[unsafe(no_mangle)]".to_owned(),
+        "static hsa_dispatch_slots: [AtomicPtr<c_void>; EXPORT_COUNT] = [".to_owned(),
     ]);
     for name in exports {
         lines.push(format!(
@@ -294,13 +321,31 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.extend([
         "];".to_owned(),
         String::new(),
-        "/// Published slot owners read by the assembly export trampolines.".to_owned(),
+        "/// Native fallbacks for bridges without a registrar table.".to_owned(),
         "#[unsafe(no_mangle)]".to_owned(),
-        "static hsa_dispatch_slots: [AtomicPtr<c_void>; EXPORT_COUNT] = [".to_owned(),
+        "static hsa_profiler_default_slots: [AtomicPtr<c_void>; BRIDGE_COUNT] = [".to_owned(),
     ]);
-    for index in 0..exports.len() {
+    for name in &bridge_names {
+        let initial = if tables
+            .iter()
+            .any(|(member, fields)| *member == "tools" && fields.iter().any(|field| field == name))
+        {
+            "super::no_scratch_callback as *mut c_void".to_owned()
+        } else {
+            format!("__hsa_impl_{name} as *mut c_void")
+        };
+        lines.push(format!("    AtomicPtr::new({initial}),"));
+    }
+    lines.extend([
+        "];".to_owned(),
+        String::new(),
+        "/// Addresses of registrar fields read by the assembly bridges.".to_owned(),
+        "#[unsafe(no_mangle)]".to_owned(),
+        "static hsa_profiler_slots: [AtomicPtr<c_void>; BRIDGE_COUNT] = [".to_owned(),
+    ]);
+    for index in 0..bridge_names.len() {
         lines.push(format!(
-            "    AtomicPtr::new(std::ptr::addr_of!(HSA_DEFAULT_SLOTS[{index}]) as *mut c_void),"
+            "    AtomicPtr::new(std::ptr::addr_of!(hsa_profiler_default_slots[{index}]) as *mut c_void),"
         ));
     }
     lines.extend([
@@ -315,6 +360,26 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
         for name in fields {
             let value = if runtime_functions.contains(name.as_str()) {
                 format!("__hsa_impl_{name} as *mut c_void")
+            } else {
+                "std::ptr::null_mut()".to_owned()
+            };
+            lines.push(format!("            {value},"));
+        }
+        lines.push("        ],".to_owned());
+    }
+    lines.extend([
+        "    }".to_owned(),
+        "}".to_owned(),
+        String::new(),
+        "/// Stable bridge pointers offered as the registrar layer to legacy tools.".to_owned(),
+        "pub(super) fn bridge_functions() -> InitialFunctions {".to_owned(),
+        "    InitialFunctions {".to_owned(),
+    ]);
+    for (member, fields) in tables {
+        lines.push(format!("        {member}: ["));
+        for name in fields {
+            let value = if bridge_positions.contains_key(name.as_str()) {
+                format!("__hsa_bridge_{name} as *mut c_void")
             } else {
                 "std::ptr::null_mut()".to_owned()
             };
@@ -357,14 +422,40 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.extend([
         "}".to_owned(),
         String::new(),
-        "/// Repoints public dispatch slots at the current tool tables.".to_owned(),
+        "/// Points bridges at retained registrar fields after registration.".to_owned(),
+        "pub(super) unsafe fn publish_profiler(tables: *mut super::ApiTables) {".to_owned(),
+    ]);
+    for (member, fields) in tables {
+        for (index, name) in fields.iter().enumerate() {
+            if let Some(position) = bridge_positions.get(name.as_str()) {
+                lines.push(format!(
+                    "    hsa_profiler_slots[{position}].store((unsafe {{ &raw const (*tables).{member}.functions[{index}] }}) as *mut c_void, Ordering::Release);"
+                ));
+            }
+        }
+    }
+    lines.extend([
+        "}".to_owned(),
+        String::new(),
+        "/// Restores bridges to native or no-op storage.".to_owned(),
+        "pub(super) fn reset_profiler() {".to_owned(),
+    ]);
+    for index in 0..bridge_names.len() {
+        lines.push(format!(
+            "    hsa_profiler_slots[{index}].store(std::ptr::addr_of!(hsa_profiler_default_slots[{index}]) as *mut c_void, Ordering::Release);"
+        ));
+    }
+    lines.extend([
+        "}".to_owned(),
+        String::new(),
+        "/// Publishes a snapshot of the tool tables to atomic dispatch slots.".to_owned(),
         "pub(super) fn publish(tables: &super::ApiTables) {".to_owned(),
     ]);
     for (member, fields) in tables {
         for (index, name) in fields.iter().enumerate() {
             if let Some(position) = positions.get(name.as_str()) {
                 lines.push(format!(
-                    "    hsa_dispatch_slots[{position}].store((&raw const tables.{member}.functions[{index}]) as *mut c_void, Ordering::Release);"
+                    "    hsa_dispatch_slots[{position}].store(tables.{member}.functions[{index}], Ordering::Release);"
                 ));
             }
         }
@@ -375,9 +466,9 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
         "/// Restores every public dispatch slot to its native implementation.".to_owned(),
         "pub(super) fn reset() {".to_owned(),
     ]);
-    for index in 0..exports.len() {
+    for (index, name) in exports.iter().enumerate() {
         lines.push(format!(
-            "    hsa_dispatch_slots[{index}].store(std::ptr::addr_of!(HSA_DEFAULT_SLOTS[{index}]) as *mut c_void, Ordering::Release);"
+            "    hsa_dispatch_slots[{index}].store(__hsa_impl_{name} as *mut c_void, Ordering::Release);"
         ));
     }
     lines.extend([
@@ -402,13 +493,27 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
 }
 
 /// Generates the C dispatch declarations for exported HSA symbols.
-fn generate_dispatch(exports: &[String]) -> String {
+fn generate_dispatch(exports: &[String], tables: &[(&str, Vec<String>)]) -> String {
+    let bridge_names: Vec<&str> = exports
+        .iter()
+        .map(String::as_str)
+        .chain(PRIVATE_TABLE_FUNCTIONS)
+        .chain(
+            tables
+                .iter()
+                .find(|(member, _)| *member == "tools")
+                .into_iter()
+                .flat_map(|(_, fields)| fields.iter().map(String::as_str)),
+        )
+        .collect();
     let mut lines = vec![
         "/* Copyright (c) 2026 Advanced Micro Devices, Inc. */".to_owned(),
         "/* SPDX-License-Identifier: MIT */".to_owned(),
         "/* Generated from the Linux HSA exports. */".to_owned(),
         ".text".to_owned(),
         ".hidden hsa_dispatch_slots".to_owned(),
+        ".hidden hsa_profiler_slots".to_owned(),
+        ".hidden hsa_profiler_default_slots".to_owned(),
     ];
     for name in exports
         .iter()
@@ -423,12 +528,35 @@ fn generate_dispatch(exports: &[String]) -> String {
             format!(".type {name}, @function"),
             format!("{name}:"),
             format!(
-                "    mov r11, qword ptr [rip + hsa_dispatch_slots + {}]",
+                "    jmp qword ptr [rip + hsa_dispatch_slots + {}]",
                 index * 8
             ),
-            "    jmp qword ptr [r11]".to_owned(),
             format!(".size {name}, .-{name}"),
         ]);
+    }
+    for (index, name) in bridge_names.iter().enumerate() {
+        lines.extend([
+            format!(".hidden __hsa_bridge_{name}"),
+            format!(".globl __hsa_bridge_{name}"),
+            format!(".type __hsa_bridge_{name}, @function"),
+            format!("__hsa_bridge_{name}:"),
+            format!(
+                "    mov r11, qword ptr [rip + hsa_profiler_slots + {}]",
+                index * 8
+            ),
+            "    mov r11, qword ptr [r11]".to_owned(),
+        ]);
+        lines.extend([
+            "    test r11, r11".to_owned(),
+            format!("    jnz .Lhsa_bridge_call_{index}"),
+            format!(
+                "    mov r11, qword ptr [rip + hsa_profiler_default_slots + {}]",
+                index * 8
+            ),
+            format!(".Lhsa_bridge_call_{index}:"),
+            "    jmp r11".to_owned(),
+        ]);
+        lines.push(format!(".size __hsa_bridge_{name}, .-__hsa_bridge_{name}"));
     }
     lines.push(String::new());
     lines.join("\n")
@@ -466,7 +594,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
     fs::write(
         out.join("api_trace_dispatch_linux.S"),
-        generate_dispatch(&exports),
+        generate_dispatch(&exports, &tables),
     )?;
     Ok(())
 }
