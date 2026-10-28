@@ -693,7 +693,8 @@ impl GpuDriverRef<'_> {
                 Ok(QueueState::LinuxKfd(DriverQueue::new(
                     (*driver).clone(),
                     inner,
-                )))
+                    desc,
+                )?))
             }
         }
     }

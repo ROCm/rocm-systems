@@ -14,8 +14,8 @@ use crate::device::gpu::kernel_queue::{
     KernelCommand, KernelQueue, KernelQueueFormat, KernelQueueWait,
 };
 use crate::device::gpu::queue::{
-    Queue, QueueAccessWidth, QueueParameters, QueuePriority, QueueRequest, QueueRingMemory,
-    SdmaEngineSelection, ring_doorbell,
+    Queue, QueueParameters, QueuePriority, QueueRequest, QueueRingMemory, SdmaEngineSelection,
+    ring_doorbell,
 };
 use crate::memory::{Allocation, DeviceAccess, MemoryKind};
 use crate::topology::{GpuSdmaDialect, GpuTargetProfile};
@@ -743,35 +743,6 @@ impl CopyResources {
                 })
             }
             .map_err(CopyFailure::retired)?;
-            let transport = queue.info();
-            if transport.ring_size_bytes != USER_RING_BYTES
-                || transport.index_unit_bytes != 1
-                || transport.read_index_wraps
-                || transport.read_index_width != QueueAccessWidth::Bits64
-                || transport.write_index_width != QueueAccessWidth::Bits64
-                || transport.doorbell_width != QueueAccessWidth::Bits64
-                || transport.ring_host_address == 0
-                || transport.ring_host_address % 4 != 0
-                || transport.read_index_host_address == 0
-                || transport.read_index_host_address % 8 != 0
-                || transport.write_index_host_address == 0
-                || transport.write_index_host_address % 8 != 0
-                || transport.doorbell_host_address == 0
-                || transport.doorbell_host_address % 8 != 0
-            {
-                let mut queue = queue;
-                // SAFETY: No packet or transport mapping was published.
-                #[allow(unsafe_code)]
-                let retired = unsafe { queue.destroy() }.is_ok();
-                if !retired {
-                    std::mem::forget(queue);
-                    std::mem::forget(command);
-                }
-                return Err(CopyFailure::retired(Error::Operation {
-                    kind: ErrorKind::DriverContract,
-                    detail: "KFD SDMA queue transport has unexpected index geometry",
-                }));
-            }
             CopyQueue::User(queue)
         } else {
             CopyQueue::Kernel(
