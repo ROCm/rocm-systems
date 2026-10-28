@@ -76,7 +76,7 @@ public:
             ::unsetenv("ROCPROFILER_REGISTER_TOOL_ATTACHED");
     }
 
-    ToolAttachedEnv(const ToolAttachedEnv&)            = delete;
+    ToolAttachedEnv(const ToolAttachedEnv&) = delete;
     ToolAttachedEnv& operator=(const ToolAttachedEnv&) = delete;
 
 private:
@@ -131,7 +131,7 @@ struct FakeThunk
     FakeThunk() { g_state = &state; }
     ~FakeThunk() { g_state = nullptr; }
 
-    FakeThunk(const FakeThunk&)            = delete;
+    FakeThunk(const FakeThunk&) = delete;
     FakeThunk& operator=(const FakeThunk&) = delete;
 
     static HSAKMT_STATUS OpenKfd()
