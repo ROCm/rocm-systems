@@ -966,16 +966,17 @@ These options do not change the printed operator tree. Kernel IDs depend on
        --operator torch:*conv*,*relu*,triton:*matmul* --path ./workload
 
 
-User-defined regions
---------------------
+User-defined ROCTx regions
+--------------------------
 
-``user`` selects a user-defined region, not an ML API. Unlike framework-based
-selection, which drops non-matching child nodes, a matched user region keeps
-every nested operator and kernel. Work outside that region is ignored.
+``user`` selects a user-defined ROCTx region, not an ML API. Unlike
+framework-based selection, which drops non-matching child nodes, a matched
+user-defined ROCTx region keeps every nested operator and kernel. Work
+outside that region is ignored.
 
 ``--list-operators user`` and ``--operator user:PATTERN`` use that rule.
 A framework pattern given with ``user:`` adds those matching
-operators; it does not cut work out of the user region.
+operators; it does not cut work out of the user-defined ROCTx region.
 
 .. code-block:: shell-session
 

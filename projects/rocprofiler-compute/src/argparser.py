@@ -519,7 +519,7 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="ML API trace",
         help=(
-            "\t\t\tTrace ML APIs. User-defined regions are included.\n"
+            "\t\t\tTrace ML APIs. User-defined ROCTx regions are included.\n"
             "\t\t\tuser is not a value.\n"
             "\t\t\tWith no arguments, traces every listed value.\n"
             f"\t\t\tValues: {', '.join(KNOWN_ML_API_BACKENDS)}."

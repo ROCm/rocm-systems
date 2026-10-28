@@ -87,8 +87,8 @@ launch statistics, so it also shows which operators are worth opening.
 The Triton equivalent is `--list-operators triton`.
 
 `--list-operators user` lists each user-defined ROCTx region. Unlike
-framework-based selection, which drops non-matching child nodes, user
-region selection includes everything in that region.
+framework-based selection, which drops non-matching child nodes,
+user-defined ROCTx region selection includes everything in that region.
 
 ## 4. Filter to an operator
 
@@ -107,9 +107,10 @@ Quote patterns so the shell does not expand them.
 
 `--operator triton:*rmsnorm_kernel*` works the same way.
 
-`--operator user:*UserDefined*` selects matching user regions and includes
-everything in that region. A framework pattern given with `user:` adds those
-matching operators; it does not cut work out of the user region.
+`--operator user:*UserDefined*` selects matching user-defined ROCTx regions
+and includes everything in that region. A framework pattern given with
+`user:` adds those matching operators; it does not cut work out of the
+user-defined ROCTx region.
 
 Worked examples are in the PyTorch operator analysis section of
 [the analyze CLI guide](../../docs/how-to/analyze/cli.rst).
