@@ -3377,7 +3377,8 @@ typedef struct {
  * @brief NIC RDMA port information
  *
  * Integer fields are set to the maximum value of their type (0xFF / 0xFFFF)
- * when the corresponding attribute is unavailable.
+ * when the corresponding attribute is unavailable. The MTU values are read once, when the
+ * NIC is discovered, and do not follow a later change.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
