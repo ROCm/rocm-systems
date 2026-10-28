@@ -3,13 +3,49 @@
 
 //! Native allocation requests and limits, independent of kernel handle formats.
 
-/// One native memory allocation request with explicit size and alignment.
+/// One native memory request with explicit size and alignment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AllocationDesc {
-    /// Requested bytes, satisfying the native allocator's size granularity.
+    /// Requested bytes. Host registration measures this extent from its exact
+    /// address; owned allocations satisfy the allocator's size granularity.
     pub size: u64,
     /// Required base alignment in bytes, expressed as a nonzero power of two.
     pub alignment: u64,
+}
+
+/// Returns the aligned base and page cover for `size` bytes starting at the
+/// exact registered host address. Both KFD and DRM registration use this rule.
+pub(crate) fn registered_host_page_cover(
+    address: usize,
+    size: usize,
+    page: usize,
+) -> Option<(usize, usize)> {
+    if address == 0 || size == 0 || !page.is_power_of_two() {
+        return None;
+    }
+    let offset = address & (page - 1);
+    let base = address - offset;
+    let cover = offset.checked_add(size)?.checked_add(page - 1)? & !(page - 1);
+    base.checked_add(cover)?;
+    Some((base, cover))
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::registered_host_page_cover;
+
+    #[test]
+    fn exact_unaligned_extent_covers_the_page_after_its_end() {
+        assert_eq!(
+            registered_host_page_cover(0x1001, 4096, 4096),
+            Some((0x1000, 8192))
+        );
+        assert_eq!(
+            registered_host_page_cover(0x1001, 4095, 4096),
+            Some((0x1000, 4096))
+        );
+        assert_eq!(registered_host_page_cover(0x1001, 0, 4096), None);
+    }
 }
 
 /// Native allocation limits for one backing kind. A successful query describes support,

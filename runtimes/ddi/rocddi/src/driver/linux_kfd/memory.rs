@@ -1280,20 +1280,28 @@ impl KfdAllocation {
         if size == 0 {
             return Err(error(ErrorKind::InvalidArgument, "allocation size is zero"));
         }
-        let userptr_offset = match kind {
-            BufferKind::Userptr(pages) => pages.address & (page - 1),
-            _ => 0,
+        let native_size = match kind {
+            BufferKind::Userptr(pages) => {
+                let (_, cover) =
+                    crate::memory::device::registered_host_page_cover(pages.address, size, page)
+                        .ok_or_else(|| {
+                            error(ErrorKind::InvalidArgument, "invalid registered host extent")
+                        })?;
+                cover
+            }
+            _ => {
+                let cover = size
+                    .checked_add(page - 1)
+                    .map(|size| size & !(page - 1))
+                    .ok_or_else(|| {
+                        error(
+                            ErrorKind::ResourceExhausted,
+                            "native allocation size overflows",
+                        )
+                    })?;
+                cover
+            }
         };
-        let native_size = size
-            .checked_add(userptr_offset)
-            .and_then(|size| size.checked_add(page - 1))
-            .map(|size| size & !(page - 1))
-            .ok_or_else(|| {
-                error(
-                    ErrorKind::ResourceExhausted,
-                    "native allocation size overflows",
-                )
-            })?;
         if !desc.alignment.is_power_of_two() {
             return Err(error(
                 ErrorKind::InvalidArgument,
