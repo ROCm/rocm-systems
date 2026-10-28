@@ -173,21 +173,58 @@ TEST(options_test, suggest_choice_picks_one_close_name)
     EXPECT_FALSE(suggest_choice("hip", choices).has_value());
 }
 
-TEST(options_test, shipped_table_is_empty_and_passes_tokens_through)
+TEST(options_test, shipped_table_recognizes_dry_run_and_passes_traces_through)
 {
-    EXPECT_TRUE(option_table().empty());
+    const auto table = option_table();
+    ASSERT_EQ(table.size(), 1U);
+    EXPECT_EQ(table.front().name, "dry-run");
+    EXPECT_EQ(table.front().kind, value_kind::flag);
+    EXPECT_EQ(table.front().required_caps, 0U);
+
     const auto* profile = find_verb("profile");
     ASSERT_NE(profile, nullptr);
     const context ctx{};
     const auto    argv =
-        std::vector<std::string>{ "rocsys", "profile", "--preset=quick", "--traces",
-                                  "hip",    "--",      "./app" };
-    const auto parsed = parse(make_request(*profile, true, argv, option_table(), ctx));
+        std::vector<std::string>{ "rocsys",   "profile", "--dry-run", "--preset=quick",
+                                  "--traces", "hip",     "--",        "./app" };
+    const auto parsed = parse(make_request(*profile, true, argv, table, ctx));
     ASSERT_TRUE(parsed);
-    EXPECT_TRUE(parsed.value().options.empty());
+    ASSERT_EQ(parsed.value().options.size(), 1U);
+    EXPECT_EQ(parsed.value().options.front().spec, &table.front());
+    EXPECT_TRUE(parsed.value().options.front().values.empty());
     EXPECT_EQ(parsed.value().passthrough,
               (std::vector<std::string>{ "--preset=quick", "--traces", "hip" }));
     EXPECT_EQ(parsed.value().app, (std::vector<std::string>{ "--", "./app" }));
+    EXPECT_EQ(command_argv("rocsys", parsed.value()),
+              (std::vector<std::string>{ "rocsys", "--preset=quick", "--traces", "hip",
+                                         "--", "./app" }));
+}
+
+TEST(options_test, dry_run_after_the_separator_stays_with_the_application)
+{
+    const auto* profile = find_verb("profile");
+    ASSERT_NE(profile, nullptr);
+    const context ctx{};
+    const auto    argv =
+        std::vector<std::string>{ "rocsys", "profile", "--", "./app", "--dry-run" };
+    const auto parsed = parse(make_request(*profile, true, argv, option_table(), ctx));
+    ASSERT_TRUE(parsed);
+    EXPECT_TRUE(parsed.value().options.empty());
+    EXPECT_EQ(parsed.value().app,
+              (std::vector<std::string>{ "--", "./app", "--dry-run" }));
+}
+
+TEST(options_test, dry_run_rejects_a_value)
+{
+    const auto* profile = find_verb("profile");
+    ASSERT_NE(profile, nullptr);
+    const context ctx{};
+    const auto    argv =
+        std::vector<std::string>{ "rocsys", "profile", "--dry-run=yes", "--", "./app" };
+    const auto parsed = parse(make_request(*profile, true, argv, option_table(), ctx));
+    ASSERT_FALSE(parsed);
+    EXPECT_NE(parsed.error().error.find("--dry-run does not take a value"),
+              std::string::npos);
 }
 
 TEST(options_test, token_list_stops_at_a_flag_and_keeps_the_application)
