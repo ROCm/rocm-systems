@@ -3331,6 +3331,8 @@ class TestExecutor:
                        "rccl-UnitTestsMicroTopo",
                        "rccl-UnitTestsMicroNetIbCastInit",
                        "rccl-UnitTestsMicroNetIbCastDataPath",
+                       "rccl-UnitTestsMicroNet",
+                       "rccl-UnitTestsMicroMisc",
                        "rccl-UnitTestsMicroP2pResiliency"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
