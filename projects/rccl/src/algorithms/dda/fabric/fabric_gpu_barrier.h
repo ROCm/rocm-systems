@@ -216,6 +216,38 @@ public:
     return peerFlags_[selfRank_] + getEpochFlagIdx(from, blockIdx.x);
   }
 
+  // ---- The flag calls of the peer-major pushes ----------------------------------------------------------------------
+  // Two schemes behind the same three calls, chosen on the host with setEpochFlags (RCCL_DDA_A2A_PUSH_PEER_EPOCH):
+  //   epoch (default): monotonic epoch flags, a post never waits (epochSignalWait / epochPostPiece / epochWaitPiece);
+  //   CAS: one-token flags, a post waits until the previous token was consumed (signalWaitPeer / postPeer / waitPeer).
+  // All ranks must use the same scheme. The kernels still bracket the launch with epochBegin / epochEnd; in the CAS
+  // scheme those only touch the epoch cell and are harmless.
+  __host__ void setEpochFlags(bool on) { useEpoch_ = on; }
+
+  // Entry handshake of block b: posts to rank `to` and waits for rank `from`.
+  __device__ __forceinline__ void signalWait(int to, int from, FlagType epoch) {
+    if (useEpoch_) {
+      epochSignalWait(to, from, epoch);
+    } else {
+      signalWaitPeer(to, from, static_cast<int>(blockIdx.x));
+    }
+  }
+  // Posts piece `piece` to rank `to` once every store of the block has completed.
+  __device__ __forceinline__ void postPeer(int to, FlagType epoch, unsigned piece) {
+    if (useEpoch_) {
+      epochPostPiece(to, epoch, piece);
+    } else {
+      postPeer(to, static_cast<int>(blockIdx.x));
+    }
+  }
+  // Waits until rank `from` has posted piece `piece` to this block.
+  __device__ __forceinline__ void waitPeer(int from, FlagType epoch, unsigned piece) {
+    if (useEpoch_) {
+      epochWaitPiece(epochFlagFrom(from), epoch, piece);
+    } else {
+      waitPeer(from);
+    }
+  }
 private:
   int nBlocks_{-1};
   int selfRank_{-1};
@@ -224,6 +256,7 @@ private:
   DdaKernelParams params_{};
   // Sticky for the rest of the kernel and uniform across the signaling lanes; see IpcGpuBarrier::aborted_.
   bool aborted_{false};
+  bool useEpoch_{true};
 
   __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags, DdaKernelParams params)
     : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags), params_(params) {}
