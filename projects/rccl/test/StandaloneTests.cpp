@@ -163,6 +163,70 @@ namespace RcclUnitTesting
   }
 
   /**
+   * \brief Splits one comm per device (at most two). With optOut the last rank passes NCCL_SPLIT_NOCOLOR:
+   *        it must get no comm, and the other ranks get one made of themselves.
+   * ******************************************************************************************/
+  static void SplitCommsLastRankOptOut(bool optOut)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 1) {
+      GTEST_SKIP() << "No devices available.";
+    }
+
+    const int numRanks = numDevices < 2 ? 1 : 2;
+    const int numJoined = optOut ? numRanks - 1 : numRanks;
+    std::vector<ncclComm_t> comms(numRanks);
+    ASSERT_EQ(ncclSuccess, ncclCommInitAll(comms.data(), numRanks, nullptr));
+
+    // The init job of an opting-out rank has no child comm to fill in
+    std::vector<ncclComm_t> subComms(numRanks, nullptr);
+    ASSERT_EQ(ncclSuccess, ncclGroupStart());
+    for (int rank = 0; rank < numRanks; rank++) {
+      const int color = rank < numJoined ? 0 : NCCL_SPLIT_NOCOLOR;
+      ASSERT_EQ(ncclSuccess, ncclCommSplit(comms[rank], color, rank, &subComms[rank], NULL));
+    }
+    ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+
+    for (int rank = 0; rank < numRanks; rank++) {
+      if (rank >= numJoined) {
+        EXPECT_EQ(nullptr, subComms[rank]) << "rank " << rank << " passed NCCL_SPLIT_NOCOLOR";
+        continue;
+      }
+      int subCommRank = -1, subCommNRank = -1;
+      ASSERT_NE(nullptr, subComms[rank]);
+      ASSERT_EQ(ncclSuccess, ncclCommUserRank(subComms[rank], &subCommRank));
+      ASSERT_EQ(ncclSuccess, ncclCommCount(subComms[rank], &subCommNRank));
+      EXPECT_EQ(rank, subCommRank);
+      EXPECT_EQ(numJoined, subCommNRank);
+    }
+
+    for (int rank = 0; rank < numRanks; rank++) {
+      if (subComms[rank]) {
+        EXPECT_EQ(ncclSuccess, ncclCommDestroy(subComms[rank]));
+      }
+      EXPECT_EQ(ncclSuccess, ncclCommDestroy(comms[rank]));
+    }
+  }
+
+  /**
+   * \brief Partial split: the rank that passes NCCL_SPLIT_NOCOLOR gets no comm and must not crash
+   *        (its init job used to store the device's shared memory size into that missing comm).
+   * ******************************************************************************************/
+  TEST(Standalone, SplitComms_NoColorRank)
+  {
+    RUN_ISOLATED_TEST("SplitComms_NoColorRank", []() { SplitCommsLastRankOptOut(true); });
+  }
+
+  /**
+   * \brief Control for SplitComms_NoColorRank: the same split with every rank joining.
+   * ******************************************************************************************/
+  TEST(Standalone, SplitComms_AllRanksJoin)
+  {
+    RUN_ISOLATED_TEST("SplitComms_AllRanksJoin", []() { SplitCommsLastRankOptOut(false); });
+  }
+
+  /**
    * \brief Verify there is no regression in timing for each protocol [LL, LL128, Simple]
    * ******************************************************************************************/
   TEST(Standalone, RegressionTiming)
