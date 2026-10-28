@@ -9,14 +9,6 @@ Speed-of-Light is the first panel to read after profiling. It puts every
 headline metric next to the hardware peak for the current GPU, so one table
 says whether a kernel is near any limit at all.
 
-## Prerequisites
-
-Install, supported GPUs, and which GPU the application runs on are in
-[Install ROCm Compute Profiler](../../docs/install/core-install.rst),
-[source install](../../docs/install/source-install.rst),
-[compatible accelerators](../../docs/reference/compatible-accelerators.rst),
-and [Selecting a GPU](../../docs/how-to/profile/mode.rst).
-
 This skill reads an existing workload directory. It does not collect one.
 
 Run `rocprof-compute analyze --help` before choosing flags.

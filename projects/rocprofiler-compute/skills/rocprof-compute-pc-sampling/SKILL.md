@@ -13,14 +13,6 @@ PC sampling is experimental. Every command below needs `--experimental`, and
 option names can change between releases, so run
 `rocprof-compute profile --experimental --help` before choosing flags.
 
-## Prerequisites
-
-Install, supported GPUs, and which GPU the application runs on are in
-[Install ROCm Compute Profiler](../../docs/install/core-install.rst),
-[source install](../../docs/install/source-install.rst),
-[compatible accelerators](../../docs/reference/compatible-accelerators.rst),
-and [Selecting a GPU](../../docs/how-to/profile/mode.rst).
-
 This skill drives `rocprof-compute --pc-sampling`. A request to invoke
 `rocprofv3 --pc-sampling-beta-enabled` directly belongs to the rocprofiler-sdk
 PC sampling skill, not this one. Method support is in

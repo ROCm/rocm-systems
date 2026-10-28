@@ -9,14 +9,6 @@ Start here for any "profile this" or "why is this kernel slow" request. This
 skill collects counters, narrows a workload down to one kernel, and identifies
 what limits it. Hand off to a focused skill once the limit is clear.
 
-## Prerequisites
-
-Install, supported GPUs, and which GPU the application runs on are in
-[Install ROCm Compute Profiler](../../docs/install/core-install.rst),
-[source install](../../docs/install/source-install.rst),
-[compatible accelerators](../../docs/reference/compatible-accelerators.rst),
-and [Selecting a GPU](../../docs/how-to/profile/mode.rst).
-
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 before choosing flags. Options change between releases; do not guess one.
 
