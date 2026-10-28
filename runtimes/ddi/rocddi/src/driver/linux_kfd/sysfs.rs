@@ -584,9 +584,9 @@ pub(super) fn contribute_topology(
             source,
             NativeNodeId::LinuxKfd(record.node),
             if record.gpu_id == 0 {
-                NodeKind::KfdHost
+                NodeKind::Host
             } else {
-                NodeKind::KfdGpu
+                NodeKind::Gpu
             },
         )?;
         nodes.try_push((record.node, record.gpu_id, id))?;
@@ -1743,7 +1743,7 @@ mod tests {
         assert_eq!(snapshot.sources.last().unwrap().generation, Some(1));
         assert!(snapshot.nodes.iter().any(|node| {
             node.native_id == NativeNodeId::LinuxKfd(0)
-                && node.kind == NodeKind::KfdHost
+                && node.kind == NodeKind::Host
                 && node.cpu
                     == Some(CpuNodeInfo {
                         core_count: 8,
