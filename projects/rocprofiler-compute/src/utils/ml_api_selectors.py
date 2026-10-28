@@ -16,17 +16,6 @@ OPERATOR_LABELS = {
 UNSCOPED_OPERATOR_KEY = "all_supported_backends"
 
 
-def split_selector_tokens(raw_values: List[str]) -> List[str]:
-    """Split on commas and drop empty pieces."""
-    tokens: List[str] = []
-    for value in raw_values:
-        for piece in str(value).split(","):
-            stripped = piece.strip()
-            if stripped:
-                tokens.append(stripped)
-    return tokens
-
-
 def _unique_keep_order(names: List[str]) -> List[str]:
     seen = set()
     unique: List[str] = []
@@ -38,18 +27,15 @@ def _unique_keep_order(names: List[str]) -> List[str]:
     return unique
 
 
-def _comma_patterns(text: str) -> List[str]:
-    return [piece.strip() for piece in text.split(",") if piece.strip()]
+def _argv_tokens(raw: List[str]) -> List[str]:
+    return [str(value).strip() for value in raw if str(value).strip()]
 
 
 def resolve_profile_selection(raw: Optional[List[str]]) -> List[str]:
     """Resolve --trace-ml-api."""
     if raw is None:
         return []
-    if not raw:
-        return list(KNOWN_ML_API_BACKENDS)
-
-    tokens = split_selector_tokens(raw)
+    tokens = _argv_tokens(raw)
     if not tokens:
         return list(KNOWN_ML_API_BACKENDS)
 
@@ -72,7 +58,7 @@ def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
     """Resolve --list-operators."""
     if raw is None:
         return None
-    tokens = split_selector_tokens(raw)
+    tokens = _argv_tokens(raw)
     for name in tokens:
         if name not in OPERATOR_SELECTORS:
             raise ValueError(
@@ -82,10 +68,8 @@ def resolve_list_selectors(raw: Optional[List[str]]) -> Optional[List[str]]:
     return _unique_keep_order(tokens)
 
 
-def _patterns_by_backend(token: str) -> Dict[str, List[str]]:
-    """Split one --operator token into backend glob patterns."""
-    token = token.replace(" ", ",")
-    selector_tokens = _comma_patterns(token)
+def _patterns_by_backend(tokens: List[str]) -> Dict[str, List[str]]:
+    """Assign each --operator argv word to a backend glob."""
     prefix: Optional[str] = None
     selections: Dict[str, List[str]] = {}
 
@@ -93,7 +77,7 @@ def _patterns_by_backend(token: str) -> Dict[str, List[str]]:
         key = backend if backend else UNSCOPED_OPERATOR_KEY
         selections.setdefault(key, []).append(pattern)
 
-    for selector_token in selector_tokens:
+    for selector_token in tokens:
         if "::" in selector_token and selector_token.find("::") <= selector_token.find(
             ":"
         ):
@@ -118,13 +102,10 @@ def resolve_operator_patterns(
     """Resolve --operator into backend glob patterns."""
     if raw is None:
         return None
-    token = " ".join(str(value).strip() for value in raw if str(value).strip())
-    if not token:
+    tokens = _argv_tokens(raw)
+    if not tokens:
         return {UNSCOPED_OPERATOR_KEY: ["**"]}
-    selections = _patterns_by_backend(token)
-    if not selections:
-        return {UNSCOPED_OPERATOR_KEY: ["**"]}
-    return selections
+    return _patterns_by_backend(tokens)
 
 
 def check_list_operators_against_traced_frameworks(
