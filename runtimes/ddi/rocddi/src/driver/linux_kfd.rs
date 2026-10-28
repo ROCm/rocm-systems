@@ -132,6 +132,8 @@ impl ProcessState {
 struct ProcessSlot {
     /// Forked children replace the inherited slot before touching its lock.
     process: u32,
+    /// Wipe-on-fork witness for this exact slot; zero in descendants.
+    fork_witness: Option<usize>,
     /// Serializes primary-context activation and shutdown across sessions.
     state: Mutex<ProcessState>,
 }
@@ -148,13 +150,18 @@ fn primary_slot() -> &'static ProcessSlot {
         let current = PRIMARY_SLOT.load(Ordering::Acquire);
         if !current.is_null() {
             // SAFETY: Published slots remain allocated for the process lifetime.
-            if unsafe { (*current).process == process } {
+            if unsafe {
+                (*current).process == process
+                    && os_process::fork_witness_valid((*current).fork_witness)
+            } {
                 // SAFETY: The matching published slot is never freed or moved.
                 return unsafe { &*current };
             }
         }
+        let witness = os_process::FreshForkWitness::new();
         let candidate = Box::into_raw(Box::new(ProcessSlot {
             process,
+            fork_witness: witness.as_ref().map(os_process::FreshForkWitness::address),
             state: Mutex::new(ProcessState {
                 resources: None,
                 joined_sessions: 0,
@@ -164,7 +171,12 @@ fn primary_slot() -> &'static ProcessSlot {
         match PRIMARY_SLOT.compare_exchange(current, candidate, Ordering::AcqRel, Ordering::Acquire)
         {
             // SAFETY: Publication gives this allocation static process scope.
-            Ok(_) => return unsafe { &*candidate },
+            Ok(_) => {
+                if let Some(witness) = witness {
+                    witness.retain_until_exit();
+                }
+                return unsafe { &*candidate };
+            }
             Err(_) => {
                 // SAFETY: This candidate was never published or borrowed.
                 unsafe { drop(Box::from_raw(candidate)) };
