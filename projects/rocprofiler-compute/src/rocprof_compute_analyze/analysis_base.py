@@ -64,6 +64,32 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
 ])
 
 
+def _check_ml_api_selectors_for_workload(
+    workload_path: str,
+    list_operators: Optional[list[str]],
+    operator_patterns: Optional[dict[str, list[str]]],
+    profiling_config: Optional[dict[str, Any]] = None,
+) -> None:
+    """Reject --list-operators / --operator this workload did not collect."""
+    if list_operators is None and operator_patterns is None:
+        return
+    if profiling_config is None:
+        profiling_config = file_io.load_profiling_config(workload_path)
+    trace_ml_api = profiling_config.get("trace_ml_api")
+    traced_frameworks = [str(name) for name in trace_ml_api] if trace_ml_api else []
+    try:
+        if list_operators is not None:
+            check_list_operators_against_traced_frameworks(
+                list_operators, traced_frameworks
+            )
+        elif operator_patterns is not None:
+            operator_patterns_for_traced_frameworks(
+                operator_patterns, traced_frameworks
+            )
+    except ValueError as error:
+        console_error("ml api trace", f"{workload_path}: {error}")
+
+
 class OmniAnalyze_Base:
     def __init__(
         self, args: argparse.Namespace, supported_archs: dict[str, str]
@@ -309,23 +335,16 @@ class OmniAnalyze_Base:
             args.path[0][0]
         )
         profiling_config = self.get_profiling_config()
-        trace_ml_api = profiling_config.get("trace_ml_api")
-        traced_frameworks = [str(name) for name in trace_ml_api] if trace_ml_api else []
         list_operators = getattr(args, "list_operators", None)
         operator_patterns = getattr(args, "operator_patterns", None)
-        try:
-            if list_operators is not None:
-                check_list_operators_against_traced_frameworks(
-                    list_operators, traced_frameworks
-                )
-            elif operator_patterns is not None:
-                args.operator_patterns = operator_patterns_for_traced_frameworks(
-                    operator_patterns, traced_frameworks
-                )
-        except ValueError as error:
-            console_error("ml api trace", str(error))
 
-        for dir_info in args.path:
+        for index, dir_info in enumerate(args.path):
+            _check_ml_api_selectors_for_workload(
+                dir_info[0],
+                list_operators,
+                operator_patterns,
+                profiling_config if index == 0 else None,
+            )
             if not any([
                 profiling_config.get("iteration_multiplexing"),
                 self.pc_sampling_only(),

@@ -13,7 +13,11 @@ from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.ml_api_selectors import OPERATOR_LABELS, OPERATOR_SELECTORS
+from utils.ml_api_selectors import (
+    OPERATOR_LABELS,
+    OPERATOR_SELECTORS,
+    operator_patterns_for_traced_frameworks,
+)
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     CallTreeNode,
@@ -42,6 +46,19 @@ def _restrict_patterns_to_operator_backends(
         for backend, patterns in selections.items()
         if backend in OPERATOR_SELECTORS
     }
+
+
+def _bind_operator_patterns_for_workload(
+    operator_patterns: dict[str, list[str]],
+    workload_path: str,
+) -> dict[str, list[str]]:
+    """Bind unscoped --operator patterns using this workload's yaml."""
+    profiling_config = file_io.load_profiling_config(workload_path)
+    trace_ml_api = profiling_config.get("trace_ml_api")
+    traced_frameworks = [str(name) for name in trace_ml_api] if trace_ml_api else []
+    return _restrict_patterns_to_operator_backends(
+        operator_patterns_for_traced_frameworks(operator_patterns, traced_frameworks)
+    )
 
 
 def _join_unique_operator_patterns(
@@ -202,11 +219,6 @@ class cli_analysis(OmniAnalyze_Base):
         operator_patterns = getattr(args, "operator_patterns", None)
         listing_requested = list_selectors is not None
         filter_requested = operator_patterns is not None and not listing_requested
-        filter_backends = (
-            list(_restrict_patterns_to_operator_backends(operator_patterns))
-            if filter_requested
-            else []
-        )
 
         for path_info in args.path:
             workload = self._runs[path_info[0]]
@@ -254,10 +266,10 @@ class cli_analysis(OmniAnalyze_Base):
                 continue
 
             if filter_requested:
-                pmc_group_keys = self.apply_operator_filter(
-                    args, workload, path_info[0], filter_backends
+                pmc_group_keys, operator_patterns_by_backend = (
+                    self.apply_operator_filter(args, workload, path_info[0])
                 )
-                labels = _labels_for_backends(filter_backends)
+                labels = _labels_for_backends(list(operator_patterns_by_backend))
                 workload.raw_pmc, slot_to_id = file_io.create_df_pmc_with_slot_ids(
                     path_info[0],
                     args.verbose,
@@ -333,11 +345,8 @@ class cli_analysis(OmniAnalyze_Base):
         list_selectors = getattr(args, "list_operators", None)
         operator_patterns = getattr(args, "operator_patterns", None)
         if operator_patterns is not None and list_selectors is None:
-            filter_backends = list(
-                _restrict_patterns_to_operator_backends(operator_patterns)
-            )
             for path_info in args.path:
-                self.handle_operator(args, self._runs[path_info[0]], filter_backends)
+                self.handle_operator(args, self._runs[path_info[0]], path_info[0])
 
         if args.list_stats:
             tty.show_kernel_stats(
@@ -451,20 +460,22 @@ class cli_analysis(OmniAnalyze_Base):
         args: argparse.Namespace,
         workload: schema.Workload,
         workload_path: str,
-        backends: list[str],
-    ) -> list[tuple]:
-        """Filter the operator forest and return pmc group keys on the subtree."""
+    ) -> tuple[list[tuple], dict[str, list[str]]]:
+        """Filter the operator forest and return pmc keys plus the bound map."""
         operator_patterns = getattr(args, "operator_patterns", None)
         if operator_patterns is None:
-            return []
-        operator_patterns_by_backend = _restrict_patterns_to_operator_backends(
-            operator_patterns
-        )
-        labels = _labels_for_backends(backends)
+            return [], {}
+        try:
+            operator_patterns_by_backend = _bind_operator_patterns_for_workload(
+                operator_patterns, workload_path
+            )
+        except ValueError as error:
+            console_error("ml api trace", f"{workload_path}: {error}")
+        labels = _labels_for_backends(list(operator_patterns_by_backend))
         if not operator_patterns_by_backend:
             console_error(
                 "ml api trace",
-                f"No {labels} operators matched the pattern(s).",
+                f"{workload_path}: No {labels} operators matched the pattern(s).",
             )
         nodes_matching_operator_patterns = _collect_nodes_matching_operator_patterns(
             workload.ml_api_call_trees, operator_patterns_by_backend
@@ -475,8 +486,8 @@ class cli_analysis(OmniAnalyze_Base):
             )
             console_error(
                 "ml api trace",
-                "No "
-                f"{labels} operators matched the pattern(s): {operator_pattern_text}",
+                f"{workload_path}: No {labels} operators matched the "
+                f"pattern(s): {operator_pattern_text}",
             )
         workload.ml_api_call_trees = copy_matched_operator_subtree(
             workload.ml_api_call_trees, nodes_matching_operator_patterns
@@ -493,12 +504,16 @@ class cli_analysis(OmniAnalyze_Base):
         if not pmc_group_keys:
             console_error(
                 "ml api trace",
-                f"No {labels} kernel dispatches on the matched operators",
+                f"{workload_path}: No {labels} kernel dispatches "
+                "on the matched operators",
             )
-        return pmc_group_keys
+        return pmc_group_keys, operator_patterns_by_backend
 
     def handle_operator(
-        self, args: argparse.Namespace, workload: schema.Workload, backends: list[str]
+        self,
+        args: argparse.Namespace,
+        workload: schema.Workload,
+        workload_path: str,
     ) -> None:
         """Display the matched operator call tree."""
         if not workload.ml_api_call_trees:
@@ -506,13 +521,16 @@ class cli_analysis(OmniAnalyze_Base):
         operator_patterns = getattr(args, "operator_patterns", None)
         if operator_patterns is None:
             return
-        operator_patterns_by_backend = _restrict_patterns_to_operator_backends(
-            operator_patterns
-        )
+        try:
+            operator_patterns_by_backend = _bind_operator_patterns_for_workload(
+                operator_patterns, workload_path
+            )
+        except ValueError as error:
+            console_error("ml api trace", f"{workload_path}: {error}")
         operator_pattern_text = _join_unique_operator_patterns(
             operator_patterns_by_backend
         )
-        labels = _labels_for_backends(backends)
+        labels = _labels_for_backends(list(operator_patterns_by_backend))
         print(f"\n{'=' * 80}")
         print(f"Matched {labels} Operators: {operator_pattern_text}")
         print("Sorted by total GPU kernel duration.")
