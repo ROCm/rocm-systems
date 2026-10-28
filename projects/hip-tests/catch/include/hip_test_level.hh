@@ -24,10 +24,17 @@
  *   1. HIP_TEST_LEVEL environment variable, e.g. HIP_TEST_LEVEL=level_0
  *   2. Hardcoded default (kDefaultLevel)
  *
- * HIP_TEST_LEVEL must name exactly one supported level. Anything else - a list,
- * an exclusion, a bracketed tag, an unsupported level, a typo - is rejected and
- * the run aborts, rather than silently falling back to the default parameters.
- * An empty value is treated as unset.
+ * HIP_TEST_LEVEL must name exactly one supported level or one test category -
+ * "quick", "standard", "comprehensive", "full", as defined in
+ * test_categories.yaml (see the generated hip_test_parameters.hh). A category
+ * stands for the highest level it covers, so "HIP_TEST_LEVEL=quick" is
+ * "HIP_TEST_LEVEL=level_0" and "HIP_TEST_LEVEL=full" is "HIP_TEST_LEVEL=level_4".
+ * It pairs with the matching label filter: "HIP_TEST_LEVEL=quick ctest -L quick"
+ * selects the category's tests and runs them with its parameters.
+ *
+ * Anything else - a list, an exclusion, a bracketed tag, an unsupported level,
+ * a typo - is rejected and the run aborts, rather than silently falling back to
+ * the default parameters. An empty value is treated as unset.
  */
 namespace HipTestLevel {
 
@@ -48,6 +55,8 @@ struct LevelResolution {
   std::string level = kDefaultLevel;
   /// Where @ref level came from.
   LevelSource source = LevelSource::kDefault;
+  /// Test category HIP_TEST_LEVEL named, empty when it named a level directly.
+  std::string category;
   /// Why HIP_TEST_LEVEL was rejected; empty when it was accepted or unset.
   std::string error;
 
