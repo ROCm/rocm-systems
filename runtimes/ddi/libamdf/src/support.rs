@@ -221,6 +221,7 @@ pub(crate) fn native(error: &rocddi::Error) -> u64 {
     }
     match error.kind() {
         rocddi::ErrorKind::InvalidArgument => INVALID,
+        rocddi::ErrorKind::NotFound => NOT_FOUND,
         rocddi::ErrorKind::Unsupported => UNSUPPORTED,
         rocddi::ErrorKind::PermissionDenied => u64::from(AMDF_STATUS_CODE_PERMISSION_DENIED),
         rocddi::ErrorKind::ResourceExhausted => EXHAUSTED,
