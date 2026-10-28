@@ -389,12 +389,10 @@ validate_config_file_values(const std::string& config_file, const std::string& t
         auto key       = std::string{};
         auto raw_value = std::string{};
 
-        if(auto const equal_pos = trimmed_line.find('='); equal_pos != std::string::npos)
+        if(auto const parsed = utility::string::split_key_value(trimmed_line))
         {
-            key = utility::string::trim(
-                std::string_view{ trimmed_line }.substr(0, equal_pos));
-            raw_value = utility::string::trim(
-                std::string_view{ trimmed_line }.substr(equal_pos + 1));
+            key       = utility::string::trim(parsed->key);
+            raw_value = utility::string::trim(parsed->value);
         }
         else
         {
@@ -3723,10 +3721,10 @@ get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
 get_mpi_rank_from_env()
 {
     // global rank env-vars: user-provided, then runtime-specific
-    return get_first_mpi_env_uint({ get_rank_filter_id(), "MPI_RANKID", "PMI_RANK",
-                                    "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK",
-                                    "SLURM_PROCID" },
-                                  "MPI rank");
+    auto env_var_options = std::vector<std::string>{ get_rank_filter_id() };
+    env_var_options.insert(env_var_options.end(), k_mpi_rank_env_names.begin(),
+                           k_mpi_rank_env_names.end());
+    return get_first_mpi_env_uint(env_var_options, "MPI rank");
 }
 
 [[nodiscard]] std::optional<std::uint64_t>
