@@ -1680,6 +1680,14 @@ class Isa {
   /// @returns True if the ISA supports images (ImageSupport).
   bool hasImageSupport() const { return imageSupport_; }
 
+  /// @returns The EF_AMDGPU_MACH_* value of e_flags for the processor, set on the row without
+  /// features only; 0 otherwise.
+  uint32_t elfMach() const { return elfMach_; }
+
+  /// @returns The generic processor (e.g. "gfx11-generic") whose code objects run on this
+  /// processor, set on the row without features only; nullptr if there is none.
+  const char* genericTarget() const { return genericTarget_; }
+
   /// @returns True if @p codeObjectIsa and @p agentIsa are compatible,
   /// false otherwise.
   static bool isCompatible(const Isa& codeObjectIsa, const Isa& agentIsa);
@@ -1705,7 +1713,7 @@ class Isa {
                 uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment,
                 uint32_t addressableVgprs, uint32_t vgprsPerSimd, uint32_t vgprAllocGranule,
                 uint32_t addressableSgprs, uint32_t sgprAllocGranule, bool trapHandlerEnabled,
-                bool imageSupport)
+                bool imageSupport, uint32_t elfMach = 0, const char* genericTarget = nullptr)
       : targetId_(targetId),
         runtimeRocSupported_(runtimeRocSupported),
         runtimePalSupported_(runtimePalSupported),
@@ -1727,7 +1735,9 @@ class Isa {
         addressableSgprs_(addressableSgprs),
         sgprAllocGranule_(sgprAllocGranule),
         trapHandlerEnabled_(trapHandlerEnabled),
-        imageSupport_(imageSupport) {}
+        imageSupport_(imageSupport),
+        elfMach_(elfMach),
+        genericTarget_(genericTarget) {}
 
   // @brief Returns the begin and end iterators for the suppported ISAs.
   static std::pair<const Isa*, const Isa*> supportedIsas();
@@ -1757,6 +1767,8 @@ class Isa {
   uint32_t sgprAllocGranule_;      //!< SGPR allocation granule.
   bool trapHandlerEnabled_;        //!< A trap handler is enabled.
   bool imageSupport_;              //!< Images are supported.
+  uint32_t elfMach_;               //!< EF_AMDGPU_MACH_* of the processor; 0 on feature rows
+  const char* genericTarget_;      //!< Generic processor it runs code for, or null
 };  // class Isa
 
 /*! \addtogroup Runtime

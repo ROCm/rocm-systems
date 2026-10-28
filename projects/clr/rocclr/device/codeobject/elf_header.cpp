@@ -6,6 +6,7 @@
 
 #include "device/codeobject/elf_header.hpp"
 
+#include "device/device.hpp"
 #include "elf/elfio/elf_types.hpp"
 
 #include <cstring>
@@ -41,78 +42,11 @@ constexpr uint32_t kSrameccOnV4 = 0xc00;
 constexpr uint32_t kGenericVersionMask = 0xff000000;
 constexpr uint32_t kGenericVersionOffset = 24;
 
-//! One processor of the loader's mach table
-struct MachInfo {
-  uint32_t mach;          //!< EF_AMDGPU_MACH_AMDGCN_* value of e_flags
-  const char* name;       //!< Processor name
-  bool xnackSupported;    //!< The processor has the xnack feature
-  bool srameccSupported;  //!< The processor has the sramecc feature
-};
-
-// ROCr's GetMachInfo (libamdhsacode/amd_hsa_code.cpp): the processors its loader accepts
-constexpr MachInfo kMachTable[] = {
-    {0x020, "gfx600", false, false},
-    {0x021, "gfx601", false, false},
-    {0x03a, "gfx602", false, false},
-    {0x022, "gfx700", false, false},
-    {0x023, "gfx701", false, false},
-    {0x024, "gfx702", false, false},
-    {0x025, "gfx703", false, false},
-    {0x026, "gfx704", false, false},
-    {0x03b, "gfx705", false, false},
-    {0x028, "gfx801", true, false},
-    {0x029, "gfx802", false, false},
-    {0x02a, "gfx803", false, false},
-    {0x03c, "gfx805", false, false},
-    {0x02b, "gfx810", true, false},
-    {0x02c, "gfx900", true, false},
-    {0x02d, "gfx902", true, false},
-    {0x02e, "gfx904", true, false},
-    {0x02f, "gfx906", true, true},
-    {0x030, "gfx908", true, true},
-    {0x031, "gfx909", true, false},
-    {0x03f, "gfx90a", true, true},
-    {0x032, "gfx90c", true, false},
-    {0x04c, "gfx942", true, true},
-    {0x04f, "gfx950", true, true},
-    {0x033, "gfx1010", true, false},
-    {0x034, "gfx1011", true, false},
-    {0x035, "gfx1012", true, false},
-    {0x042, "gfx1013", true, false},
-    {0x036, "gfx1030", false, false},
-    {0x037, "gfx1031", false, false},
-    {0x038, "gfx1032", false, false},
-    {0x039, "gfx1033", false, false},
-    {0x03e, "gfx1034", false, false},
-    {0x03d, "gfx1035", false, false},
-    {0x045, "gfx1036", false, false},
-    {0x041, "gfx1100", false, false},
-    {0x046, "gfx1101", false, false},
-    {0x047, "gfx1102", false, false},
-    {0x044, "gfx1103", false, false},
-    {0x043, "gfx1150", false, false},
-    {0x04a, "gfx1151", false, false},
-    {0x055, "gfx1152", false, false},
-    {0x058, "gfx1153", false, false},
-    {0x05d, "gfx1170", false, false},
-    {0x05e, "gfx1171", false, false},
-    {0x048, "gfx1200", false, false},
-    {0x04e, "gfx1201", false, false},
-    {0x049, "gfx1250", true, true},
-    {0x0eb, "gfx1250-strict", true, true},
-    {0x051, "gfx9-generic", true, false},
-    {0x05f, "gfx9-4-generic", true, true},
-    {0x052, "gfx10-1-generic", true, false},
-    {0x053, "gfx10-3-generic", false, false},
-    {0x054, "gfx11-generic", false, false},
-    {0x062, "gfx11-7-generic", false, false},
-    {0x059, "gfx12-generic", false, false},
-    {0x05b, "gfx12-5-generic", false, false},
-};
-
-const MachInfo* FindMach(uint32_t mach) {
-  for (const MachInfo& info : kMachTable) {
-    if (info.mach == mach) return &info;
+//! The amd::Isa row of the processor with EF_AMDGPU_MACH_* value @p mach, or null. Processors
+//! CLR has no row for (gfx6, gfx7) can't run on any device, so their code objects stay unnamed.
+const amd::Isa* FindMach(uint32_t mach) {
+  for (const amd::Isa* isa = amd::Isa::begin(); isa != amd::Isa::end(); ++isa) {
+    if (isa->elfMach() == mach) return isa;
   }
   return nullptr;
 }
@@ -258,22 +192,22 @@ bool GetIsaFromHeader(uint32_t elfClass, uint16_t machine, uint32_t osAbi, uint3
     return false;
   }
 
-  const MachInfo* info = FindMach(eFlags & kMachMask);
-  if (info == nullptr) {
+  const amd::Isa* isa = FindMach(eFlags & kMachMask);
+  if (isa == nullptr) {
     return false;
   }
-  std::string name = info->name;
+  std::string name = isa->targetId();
 
   if (codeObjectMajorVersion == 3) {
     if (eFlags & kSrameccV3) {
       name += ":sramecc+";
-    } else if (info->srameccSupported) {
+    } else if (isa->sramecc() != amd::Isa::Feature::Unsupported) {
       name += ":sramecc-";
     }
 
     if (eFlags & kXnackV3) {
       name += ":xnack+";
-    } else if (info->xnackSupported) {
+    } else if (isa->xnack() != amd::Isa::Feature::Unsupported) {
       name += ":xnack-";
     }
   } else {

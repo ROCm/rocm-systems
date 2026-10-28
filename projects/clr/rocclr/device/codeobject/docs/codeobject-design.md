@@ -72,7 +72,7 @@ static constructors.
 |---|---|---|
 | Container formats | `codeobject/offload_bundle.{hpp,cpp}` | `IsOffloadBundle`, `OffloadBundleSize`, `LookupCodeObjects`, `IsCompatibleTarget`, `TargetToGeneric` |
 | | `codeobject/compressed_bundle.{hpp,cpp}` | `IsCompressedBundle`, `IsKnownCompressedBundle`, `CompressedBundleSize`, `DecompressBundle` (zlib, zstd via `Os::loadLibrary`) |
-| | `codeobject/elf_header.{hpp,cpp}` | `IsElf`, `ElfImageSize`, `GetIsaFromHeader` (ROCr's mach table), `ForEachNote`, `DynamicSymbolNames` |
+| | `codeobject/elf_header.{hpp,cpp}` | `IsElf`, `ElfImageSize`, `GetIsaFromHeader` (`amd::Isa::elfMach`), `ForEachNote`, `DynamicSymbolNames` |
 | Metadata | `codeobject/msgpack.{hpp,cpp}` | `MsgPackReader`: bounds-checked, zero-copy reader |
 | | `codeobject/metadata_notes.{hpp,cpp}` | `MetadataNotes`: walks and merges the `NT_AMDGPU_METADATA` notes |
 | Runtime | `device/devprogram.{hpp,cpp}` | `createKernelMetadataMap`: ISA check, notes, printf strings, `.dynsym` names |
@@ -121,11 +121,16 @@ ROCr's loader still parses each code object itself when it loads it.
 | Compatibility | comgr's `isCompatibleIsaName`: same processor; a feature the code object sets (+ or -) must match the device; one it leaves unset (any) matches both. Processor and feature validity come from `amd::Isa` |
 | Order | entries in file order; each entry fills the first query still empty that it is compatible with (comgr's `lookup_code_object`) |
 | Per device | native entry first, then the device's generic target (`TargetToGeneric`), then SPIR-V |
-| Skipped | an ELF whose ISA the loader doesn't know (unknown mach, code object v2, 32-bit): it couldn't load anyway |
+| Skipped | an ELF whose ISA the loader doesn't know (unknown mach, code object v2, 32-bit), or of a processor with no `amd::Isa` row (gfx6, gfx7): no device could run it |
 
-The mach table in `elf_header.cpp` is ROCr's `GetMachInfo` with its numeric values, kept local
-because the copies of `amd_hsa_elf.h` in the PAL build lack the newer processors. A unit test
-checks that every processor it names is in `amd::Isa`.
+The processor data comes from `amd::Isa`, so a new processor is one row there. Its row without
+features carries two columns: `elfMach`, the `EF_AMDGPU_MACH_*` value of `e_flags` (the values
+of ROCr's `GetMachInfo`, written as numbers because the copies of `amd_hsa_elf.h` in the PAL
+build lack the newer processors), and `genericTarget`, the generic processor whose code objects
+it runs. `GetIsaFromHeader` finds the processor by `elfMach`, and for code object v3 takes the
+supported features from the row's `sramecc`/`xnack` columns; `TargetToGeneric` reads
+`genericTarget`. A unit test checks that every processor row has a unique `elfMach` that names
+it back, and that each generic target is a generic row of the same major version.
 
 ---
 
@@ -227,7 +232,7 @@ metadata are columns of the `amd::Isa` table. The CLR profiler demangles kernel 
 
 | Layer | Where | Needs | What |
 |---|---|---|---|
-| Offline unit tests | `codeobject/tests` (`codeobject_test`, `-DCODEOBJECT_BUILD_TESTS=ON`, Catch2 via FetchContent) | nothing for the format tests; comgr for the ISA check | 53 cases: bundle selection by `e_flags` including `amdgpu12.50` ids, generic targets, xnack/sramecc, SPIR-V, bounds, malformed headers; target-id compatibility; `TargetToGeneric`; CCOB v1-v3 x zlib/zstd and malformed sizes; ELF size, notes, `.dynsym`, also at every odd offset in the buffer (the readers copy headers instead of using typed pointers; checked with `-fsanitize=alignment`); the mach table against `amd::Isa`; note merging; msgpack in every width; truncation at every byte; the `amd::Isa` ISA columns against comgr's ISA metadata |
+| Offline unit tests | `codeobject/tests` (`codeobject_test`, `-DCODEOBJECT_BUILD_TESTS=ON`, Catch2 via FetchContent) | nothing for the format tests; comgr for the ISA check | 53 cases: bundle selection by `e_flags` including `amdgpu12.50` ids, generic targets, xnack/sramecc, SPIR-V, bounds, malformed headers; target-id compatibility; `TargetToGeneric`; CCOB v1-v3 x zlib/zstd and malformed sizes; ELF size, notes, `.dynsym`, also at every odd offset in the buffer (the readers copy headers instead of using typed pointers; checked with `-fsanitize=alignment`); the `elfMach` and `genericTarget` columns of `amd::Isa`; note merging; msgpack in every width; truncation at every byte; the `amd::Isa` ISA columns against comgr's ISA metadata |
 | GPU tests | hip-tests `unit/module/hipCodeObjectMetadata.cc` in `ModuleTest` | a GPU, hipcc | 7 cases: uncompressed and compressed (v2, v3) fat binaries, generic-only, native next to generic, raw ELF, two notes linked from separately assembled objects, each from a file and from memory; a CCOB patched to version 4. Checks names, argument offsets and sizes, LDS, launch bounds, scratch, argument values, buffered printf |
 | Fuzzing | `codeobject/tests/fuzz_codeobject.cpp` (`codeobject_fuzz`) | clang | bundle lookup, CCOB, ELF size, notes, `.dynsym`, msgpack |
 | Comparison | `co_compare` (CRUX tools) | a second runtime | names, parameters and attributes of every kernel in the installed Tensile libraries and hip-tests code objects: 9,773 kernels, no differences |

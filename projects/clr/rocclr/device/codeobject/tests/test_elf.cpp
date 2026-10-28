@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -546,21 +547,49 @@ TEST_CASE("The ISA is named from the ELF header like the loader names it", "[elf
   CHECK(isa(v5, ELF::EF_AMDGPU_MACH_AMDGCN_GFX1100, ELF::ELFOSABI_AMDGPU_HSA, ELF::EM_AMDGPU,
             ELFCLASS32) == "<none>");
   CHECK(isa(v5, ELF::EF_AMDGPU_MACH_AMDGCN_GFX940) == "<none>");
+  // gfx6 and gfx7 have no amd::Isa row: no device runs their code objects
+  CHECK(isa(v5, ELF::EF_AMDGPU_MACH_AMDGCN_GFX600) == "<none>");
+  CHECK(isa(v5, ELF::EF_AMDGPU_MACH_AMDGCN_GFX700) == "<none>");
   CHECK(isa(v5, ELF::EF_AMDGPU_MACH_AMDGCN_RESERVED_0X27) == "<none>");
 }
 
-TEST_CASE("Every processor of the mach table is in the ISA table", "[elf][isa]") {
-  // The bundle lookup checks the names GetIsaFromHeader makes against amd::Isa. gfx6 and gfx7
-  // have no amd::Isa rows: CLR runs on neither, so their entries never match a device.
-  const std::string gfx6 = "amdgcn-amd-amdhsa--gfx6";
-  const std::string gfx7 = "amdgcn-amd-amdhsa--gfx7";
-  for (uint32_t mach = 0; mach <= ELF::EF_AMDGPU_MACH; ++mach) {
+TEST_CASE("Every processor row has its mach value and generic target", "[elf][isa]") {
+  // GetIsaFromHeader and TargetToGeneric read these amd::Isa columns: set on the row without
+  // features, unique, and naming the row back; feature rows leave them unset.
+  std::set<uint32_t> machs;
+  for (const amd::Isa* isa = amd::Isa::begin(); isa != amd::Isa::end(); ++isa) {
+    const std::string targetId = isa->targetId();
+    INFO(targetId);
+    if (targetId.find(':') != std::string::npos) {
+      CHECK(isa->elfMach() == 0);
+      CHECK(isa->genericTarget() == nullptr);
+      continue;
+    }
+    REQUIRE(isa->elfMach() != 0);
+    CHECK(machs.insert(isa->elfMach()).second);
     std::string name;
-    if (GetIsaFromHeader(ELFCLASS64, ELF::EM_AMDGPU, ELF::ELFOSABI_AMDGPU_HSA,
-                         ELF::ELFABIVERSION_AMDGPU_HSA_V5, mach, name) &&
-        name.compare(0, gfx6.size(), gfx6) != 0 && name.compare(0, gfx7.size(), gfx7) != 0) {
-      INFO(name);
-      CHECK(amd::Isa::findIsa(name.c_str()) != nullptr);
+    REQUIRE(GetIsaFromHeader(ELFCLASS64, ELF::EM_AMDGPU, ELF::ELFOSABI_AMDGPU_HSA,
+                             ELF::ELFABIVERSION_AMDGPU_HSA_V6, isa->elfMach(), name));
+    CHECK(name == "amdgcn-amd-amdhsa--" + targetId);
+    if (isa->genericTarget() != nullptr) {
+      // A generic target is a generic row of the same major version with no generic itself
+      const std::string generic = isa->genericTarget();
+      const amd::Isa* row = amd::Isa::findIsa(("amdgcn-amd-amdhsa--" + generic).c_str());
+      REQUIRE(row != nullptr);
+      CHECK(generic.find("-generic") != std::string::npos);
+      CHECK(row->genericTarget() == nullptr);
+      CHECK(row->versionMajor() == isa->versionMajor());
     }
   }
+  // The values ROCr's loader uses (amd_hsa_elf.h), for a processor of each generation
+  CHECK(amd::Isa::findIsa("amdgcn-amd-amdhsa--gfx803")->elfMach() ==
+        ELF::EF_AMDGPU_MACH_AMDGCN_GFX803);
+  CHECK(amd::Isa::findIsa("amdgcn-amd-amdhsa--gfx90a")->elfMach() ==
+        ELF::EF_AMDGPU_MACH_AMDGCN_GFX90A);
+  CHECK(amd::Isa::findIsa("amdgcn-amd-amdhsa--gfx1100")->elfMach() ==
+        ELF::EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  CHECK(amd::Isa::findIsa("amdgcn-amd-amdhsa--gfx1250")->elfMach() ==
+        ELF::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  CHECK(amd::Isa::findIsa("amdgcn-amd-amdhsa--gfx12-5-generic")->elfMach() ==
+        ELF::EF_AMDGPU_MACH_AMDGCN_GFX12_5_GENERIC);
 }
