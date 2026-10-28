@@ -154,14 +154,21 @@ def _extract_hipinfo_device_block(output, device):
     """Extract the hipInfo output block for a specific device index.
 
     hipInfo prints one block per GPU, each starting with a '---' separator
-    followed by 'device#  N'. Return only the text for the requested device,
-    or the full output if parsing fails (single-GPU fallback)."""
+    followed by 'device#  N'. Return only the text for the requested device.
+    If no 'device#' line is present at all the format is unexpected, so return
+    the full output (single-GPU fallback); if device blocks were parsed but
+    none matches, return '' rather than another device's block."""
     blocks = re.split(r"^-{10,}$", output, flags=re.M)
+    saw_device_block = False
     for block in blocks:
         m = re.search(r"^device#\s+(\d+)", block, re.M)
-        if m and int(m.group(1)) == device:
-            return block
-    return output  # fallback: return everything (single-GPU or unexpected format)
+        if m:
+            saw_device_block = True
+            if int(m.group(1)) == device:
+                return block
+    # Parsed blocks but none for this device: better to fail detection than to
+    # report another GPU's identity. Otherwise assume single-GPU/legacy output.
+    return "" if saw_device_block else output
 
 
 def detect_gpu(device=0, gpu_name=None):
