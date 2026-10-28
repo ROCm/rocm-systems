@@ -43,6 +43,25 @@ def simple_model_forest_with_relu_and_addmm():
     return {"1": [simple]}
 
 
+def user_region_with_nested_addmm_and_outside_relu():
+    """User region1 wraps addmm; relu is a sibling root outside the region."""
+    addmm = CallTreeNode(name="aten::addmm", backend="torch")
+    addmm.kernels["addmm_kernel"] = KernelStats(
+        launches=1,
+        total_duration_ns=50.0,
+        pmc_group_keys=[ADDMM_PMC_GROUP_KEY],
+    )
+    region1 = CallTreeNode(name="region1", backend="user")
+    region1.children = [addmm]
+    relu = CallTreeNode(name="aten::relu", backend="torch")
+    relu.kernels["relu_kernel"] = KernelStats(
+        launches=1,
+        total_duration_ns=10.0,
+        pmc_group_keys=[RELU_PMC_GROUP_KEY],
+    )
+    return {"1": [region1, relu]}
+
+
 def torch_parent_triton_child_forest():
     child = CallTreeNode(name="triton.JITFunction.matmul_kernel", backend="triton")
     child.kernels["triton_matmul_kernel"] = KernelStats(
@@ -272,6 +291,35 @@ def test_apply_operator_filter_keeps_nodes_from_requested_backend():
     names = forest_node_names(workload.ml_api_call_trees)
     assert "nn.Module.Linear.forward" in names
     assert "triton.JITFunction.matmul_kernel" not in names
+
+
+def test_apply_operator_filter_user_region_keeps_nested_work_and_unions_relu():
+    workload = schema.Workload()
+    workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu()
+    args = argparse.Namespace(
+        operator_patterns=resolve_operator_patterns(["user:region1"])
+    )
+    region_keys = cli_analysis(args, {}).apply_operator_filter(
+        args, workload, "/workload", ["user"]
+    )
+    assert region_keys == [ADDMM_PMC_GROUP_KEY]
+    region_names = forest_node_names(workload.ml_api_call_trees)
+    assert region_names == ["region1", "aten::addmm"]
+
+    union_workload = schema.Workload()
+    union_workload.ml_api_call_trees = user_region_with_nested_addmm_and_outside_relu()
+    union_args = argparse.Namespace(
+        operator_patterns=resolve_operator_patterns(["user:region1 torch:*relu*"])
+    )
+    union_keys = cli_analysis(union_args, {}).apply_operator_filter(
+        union_args, union_workload, "/workload", ["user", "torch"]
+    )
+    assert union_keys == [ADDMM_PMC_GROUP_KEY, RELU_PMC_GROUP_KEY]
+    assert forest_node_names(union_workload.ml_api_call_trees) == [
+        "region1",
+        "aten::addmm",
+        "aten::relu",
+    ]
 
 
 def test_list_operators_omits_other_backend_kernel_lines(capsys):

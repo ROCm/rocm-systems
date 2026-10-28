@@ -41,10 +41,10 @@ def _labels_for_backends(backends: list[str]) -> str:
     return ", ".join(_ML_API_LABELS.get(backend, backend) for backend in backends)
 
 
-def _framewise_from_resolved(
+def _operator_patterns_by_backend(
     selections: dict[str, list[str]],
 ) -> dict[str, list[str]]:
-    """Keep known-backend patterns."""
+    """Keep patterns whose prefix is torch, triton, or user."""
     return {
         backend: list(patterns)
         for backend, patterns in selections.items()
@@ -54,14 +54,14 @@ def _framewise_from_resolved(
 
 def _operator_display_backends(selections: dict[str, list[str]]) -> list[str]:
     """Backends named by --operator."""
-    return list(_framewise_from_resolved(selections))
+    return list(_operator_patterns_by_backend(selections))
 
 
-def _unique_pattern_text(framewise_patterns: dict[str, list[str]]) -> str:
-    """Join unique glob patterns."""
+def _unique_pattern_text(operator_patterns_by_backend: dict[str, list[str]]) -> str:
+    """Join unique operator patterns."""
     seen: set[str] = set()
     ordered: list[str] = []
-    for patterns in framewise_patterns.values():
+    for patterns in operator_patterns_by_backend.values():
         for pattern in patterns:
             if pattern in seen:
                 continue
@@ -70,11 +70,11 @@ def _unique_pattern_text(framewise_patterns: dict[str, list[str]]) -> str:
     return ", ".join(ordered)
 
 
-def _collect_glob_matched_nodes(
+def _nodes_matching_operator_patterns(
     forest: dict[str, list[CallTreeNode]],
-    framewise_patterns: dict[str, list[str]],
+    operator_patterns_by_backend: dict[str, list[str]],
 ) -> list[CallTreeNode]:
-    """Return nodes matching a backend glob."""
+    """Return nodes whose name or path matches a pattern for that node's backend."""
     return [
         node
         for roots in forest.values()
@@ -82,7 +82,7 @@ def _collect_glob_matched_nodes(
         if any(
             parser.torch_operator_pattern_matches(pattern, "/".join(path))
             or parser.torch_operator_pattern_matches(pattern, node.name)
-            for pattern in framewise_patterns.get(node.backend or "", [])
+            for pattern in operator_patterns_by_backend.get(node.backend or "", [])
         )
     ]
 
@@ -453,35 +453,39 @@ class cli_analysis(OmniAnalyze_Base):
         workload_path: str,
         backends: list[str],
     ) -> list[tuple]:
-        """Glob-filter the operator forest and return pmc group keys on the subtree."""
+        """Filter the operator forest and return pmc group keys on the subtree."""
         resolved = getattr(args, "operator_patterns", None)
         if resolved is None:
             return []
-        framewise_patterns = _framewise_from_resolved(resolved)
+        operator_patterns_by_backend = _operator_patterns_by_backend(resolved)
         labels = _labels_for_backends(backends)
-        if not framewise_patterns:
+        if not operator_patterns_by_backend:
             console_error(
                 "ml api trace",
                 f"No {labels} operators matched the pattern(s).",
             )
-        confined_forest = filter_forest_by_backends(
-            workload.ml_api_call_trees, list(framewise_patterns)
+        collected_forest = workload.ml_api_call_trees
+        nodes_matching_operator_patterns = _nodes_matching_operator_patterns(
+            collected_forest, operator_patterns_by_backend
         )
-        matched_nodes = _collect_glob_matched_nodes(confined_forest, framewise_patterns)
-        if not matched_nodes:
-            all_patterns = _unique_pattern_text(framewise_patterns)
+        if not nodes_matching_operator_patterns:
+            all_patterns = _unique_pattern_text(operator_patterns_by_backend)
             console_error(
                 "ml api trace",
                 f"No {labels} operators matched the pattern(s): {all_patterns}",
             )
         workload.ml_api_call_trees = copy_matched_operator_subtree(
-            confined_forest, matched_nodes
+            collected_forest, nodes_matching_operator_patterns
         )
 
-        pmc_group_keys: list[tuple] = []
-        for roots in workload.ml_api_call_trees.values():
-            for root in roots:
-                pmc_group_keys.extend(_pmc_group_keys_from_node(root))
+        pmc_group_keys: list[tuple] = list(
+            dict.fromkeys(
+                key
+                for roots in workload.ml_api_call_trees.values()
+                for root in roots
+                for key in _pmc_group_keys_from_node(root)
+            )
+        )
         if not pmc_group_keys:
             console_error(
                 "ml api trace",
@@ -498,8 +502,8 @@ class cli_analysis(OmniAnalyze_Base):
         resolved = getattr(args, "operator_patterns", None)
         if resolved is None:
             return
-        framewise_patterns = _framewise_from_resolved(resolved)
-        patterns_str = _unique_pattern_text(framewise_patterns)
+        operator_patterns_by_backend = _operator_patterns_by_backend(resolved)
+        patterns_str = _unique_pattern_text(operator_patterns_by_backend)
         labels = _labels_for_backends(backends)
         subtree = workload.ml_api_call_trees
         print(f"\n{'=' * 80}")
