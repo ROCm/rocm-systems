@@ -89,8 +89,9 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   // Per-device decision: gfx9 must not flip the global setting for other adapters.
   bool use_pm4 = dxg_runtime->use_pm4_;
 #ifdef __linux__
-  if (Major() == 9)
+  if (Major() == 9 && Minor() == 5) {
     use_pm4 = false;
+  }
 #endif
   if (use_pm4) {
     device_info_.hwsInfo.hwsMask.aql_queue = 0;
