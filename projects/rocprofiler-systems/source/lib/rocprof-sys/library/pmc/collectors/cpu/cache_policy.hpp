@@ -84,12 +84,12 @@ struct cache_policy
                                     .long_description = long_description,
                                     .component        = component,
                                     .units            = "MHz",
-                                    .value_type       = rocprofsys::trace_cache::ABSOLUTE,
-                                    .block            = block,
-                                    .expression       = expression,
-                                    .is_constant      = is_constant,
-                                    .is_derived       = is_derived,
-                                    .extdata          = extdata });
+                                    .value_type  = rocprofsys::trace_cache::k_absolute,
+                                    .block       = block,
+                                    .expression  = expression,
+                                    .is_constant = is_constant,
+                                    .is_derived  = is_derived,
+                                    .extdata     = extdata });
             registry.add_track({ .track_name = freq_name,
                                  .thread_id  = std::nullopt,
                                  .extdata    = extdata });
@@ -106,13 +106,13 @@ struct cache_policy
                                     .description      = "CPU Core Load Percentage",
                                     .long_description = long_description,
                                     .component        = component,
-                                    .units            = trace_cache::PERCENTAGE,
-                                    .value_type       = rocprofsys::trace_cache::ABSOLUTE,
-                                    .block            = block,
-                                    .expression       = expression,
-                                    .is_constant      = is_constant,
-                                    .is_derived       = is_derived,
-                                    .extdata          = extdata });
+                                    .units            = trace_cache::k_percentage,
+                                    .value_type  = rocprofsys::trace_cache::k_absolute,
+                                    .block       = block,
+                                    .expression  = expression,
+                                    .is_constant = is_constant,
+                                    .is_derived  = is_derived,
+                                    .extdata     = extdata });
             registry.add_track({ .track_name = load_name,
                                  .thread_id  = std::nullopt,
                                  .extdata    = extdata });
@@ -151,29 +151,29 @@ struct cache_policy
 
         add_process_pmc(name<category::process_page>::value, "Page RSS",
                         "Process Physical Memory (RSS)", "MB",
-                        rocprofsys::trace_cache::ABSOLUTE);
+                        rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_virt>::value, "Virt Mem",
                         "Process Virtual Memory", "MB",
-                        rocprofsys::trace_cache::ABSOLUTE);
+                        rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_peak>::value, "Peak RSS",
                         "Process Peak Memory (HWM)", "MB",
-                        rocprofsys::trace_cache::ABSOLUTE);
+                        rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_context_switch>::value, "Ctx Switches",
-                        "Context Switches", "count", rocprofsys::trace_cache::ABSOLUTE);
+                        "Context Switches", "count", rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_page_fault>::value, "Page Faults",
-                        "Page Faults", "count", rocprofsys::trace_cache::ABSOLUTE);
+                        "Page Faults", "count", rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_user_mode_time>::value, "User Time",
                         "Process CPU Time in User Mode", "sec",
-                        rocprofsys::trace_cache::ABSOLUTE);
+                        rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_kernel_mode_time>::value, "Kernel Time",
                         "Process CPU Time in Kernel Mode", "sec",
-                        rocprofsys::trace_cache::ABSOLUTE);
+                        rocprofsys::trace_cache::k_absolute);
     }
 
     /**

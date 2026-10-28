@@ -115,7 +115,7 @@ struct cache_policy
                   .long_description = k_long_description,
                   .component        = k_component,
                   .units            = units,
-                  .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+                  .value_type       = rocprofsys::trace_cache::k_absolute,
                   .block            = k_block,
                   .expression       = k_expression,
                   .is_constant      = 0,

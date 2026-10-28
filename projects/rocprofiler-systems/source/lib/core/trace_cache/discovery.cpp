@@ -93,7 +93,7 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
                 const int pid        = std::stoi(match[2]);
                 if(parent_pid == root_pid)
                 {
-                    cache_map[pid].buff_storage = trace_cache::tmp_directory + filename;
+                    cache_map[pid].buff_storage = trace_cache::k_tmp_directory + filename;
                 }
             }
             else if(std::regex_match(filename, match, meta_regex))
@@ -102,7 +102,7 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
                 const int pid        = std::stoi(match[2]);
                 if(parent_pid == root_pid)
                 {
-                    cache_map[pid].metadata = trace_cache::tmp_directory + filename;
+                    cache_map[pid].metadata = trace_cache::k_tmp_directory + filename;
                 }
             }
         } catch(const std::exception& e)

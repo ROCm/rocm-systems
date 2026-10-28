@@ -180,8 +180,8 @@ private:
         }
 
         auto const used_space =
-            _head > _tail ? (_head - _tail) : (buffer_size - _tail + _head);
-        if(!force && used_space < flush_threshold)
+            _head > _tail ? (_head - _tail) : (k_buffer_size - _tail + _head);
+        if(!force && used_space < k_flush_threshold)
         {
             return;
         }
@@ -195,7 +195,7 @@ private:
         else
         {
             ofs.write(reinterpret_cast<const char*>(m_buffer->data() + _tail),
-                      buffer_size - _tail);
+                      k_buffer_size - _tail);
             ofs.write(reinterpret_cast<const char*>(m_buffer->data()), _head);
         }
         if(ofs.fail())
@@ -210,11 +210,11 @@ private:
     {
         auto* _data = m_buffer->data();
         memset(_data + m_head, std::numeric_limits<std::uint8_t>::max(),
-               buffer_size - m_head);
+               k_buffer_size - m_head);
 
         const record_header<TypeIdentifierEnum> header{
             .type = TypeIdentifierEnum::fragmented_space,
-            .size = buffer_size - m_head - k_header_size<TypeIdentifierEnum>
+            .size = k_buffer_size - m_head - k_header_size<TypeIdentifierEnum>
         };
         binary_write_archive archive{ .buffer = _data + m_head, .position = 0 };
         archive(header);
@@ -227,7 +227,7 @@ private:
         const size_t& number_of_bytes)
     {
         if(__builtin_expect((m_head + number_of_bytes +
-                             k_header_size<TypeIdentifierEnum>) > buffer_size,
+                             k_header_size<TypeIdentifierEnum>) > k_buffer_size,
                             0))
         {
             fragment_memory();

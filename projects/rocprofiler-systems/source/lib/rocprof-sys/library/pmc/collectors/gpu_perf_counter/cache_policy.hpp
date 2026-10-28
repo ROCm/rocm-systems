@@ -67,12 +67,12 @@ struct cache_policy
                                     .long_description = long_description,
                                     .component        = component,
                                     .units            = "count",
-                                    .value_type       = rocprofsys::trace_cache::ABSOLUTE,
-                                    .block            = meta.block,
-                                    .expression       = meta.expression,
-                                    .is_constant      = meta.is_constant ? 1U : 0U,
-                                    .is_derived       = meta.is_derived ? 1U : 0U,
-                                    .extdata          = "{}" });
+                                    .value_type  = rocprofsys::trace_cache::k_absolute,
+                                    .block       = meta.block,
+                                    .expression  = meta.expression,
+                                    .is_constant = meta.is_constant ? 1U : 0U,
+                                    .is_derived  = meta.is_derived ? 1U : 0U,
+                                    .extdata     = "{}" });
 
             name_entries.push_back({ .counter_id    = meta.counter_id,
                                      .pmc_info_name = std::move(qname),

@@ -48,7 +48,7 @@ cache_manager::post_process_bulk(progress::tracker& _tracker)
     LOG_DEBUG("Root process ID: {}", root_pid);
 
     const auto temp_directory_content =
-        discovery::list_dir_files(trace_cache::tmp_directory);
+        discovery::list_dir_files(trace_cache::k_tmp_directory);
     LOG_TRACE("Found {} files in temp directory", temp_directory_content.size());
 
     const auto cache_files =

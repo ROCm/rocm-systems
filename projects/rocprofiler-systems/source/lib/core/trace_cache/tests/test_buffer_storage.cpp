@@ -479,7 +479,7 @@ TEST_F(buffer_storage_test, repeated_fragmentation)
 
     storage.start();
 
-    const size_t fragment_trigger_size = rocprofsys::trace_cache::buffer_size / 5;
+    const size_t fragment_trigger_size = rocprofsys::trace_cache::k_buffer_size / 5;
     const std::vector<std::uint8_t> fragment_payload(fragment_trigger_size, 0xDD);
     const int                       cycle_count = 3;
     const int                       iter_count  = 2;

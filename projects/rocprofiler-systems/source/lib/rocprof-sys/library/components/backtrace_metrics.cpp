@@ -238,7 +238,7 @@ metadata_initialize_backtrace_metrics_pmc(size_t dev_id, const char* _units,
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::cpu, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, _track_name,
               trait::name<Category>::value, trait::name<Category>::description,
-              LONG_DESCRIPTION, COMPONENT, _units, trace_cache::ABSOLUTE, BLOCK,
+              LONG_DESCRIPTION, COMPONENT, _units, trace_cache::k_absolute, BLOCK,
               EXPRESSION, 0, 0, "{}" });
     });
 }

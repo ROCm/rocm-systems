@@ -446,7 +446,7 @@ struct external_dependencies
 
     // Single source of truth is core/trace_cache/cacheable.hpp's ABSOLUTE constant;
     // kfd_events.hpp never includes that header, so the value is surfaced here.
-    static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::ABSOLUTE;
+    static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::k_absolute;
 
     // Single source of truth for these strings is core/categories.hpp's
     // trait::name<category::X>; kfd_events.hpp itself never includes
