@@ -20,6 +20,9 @@
 
 namespace amd::nic::netlink {
 
+// The netlink layer returns libnl NLE_* codes, but transport::Result reports errno.
+int nle_to_errno(int nl_error);
+
 /**
  * High-level generic netlink client (family resolution + query execution).
  * Not thread-safe: each thread should create its own instance.
@@ -51,8 +54,6 @@ class GenericNetlinkClient {
             MessageHandler handler, void* arg, uint16_t flags = NLM_F_REQUEST);
 
   NLSocket& socket() { return socket_; }
-
-  bool is_connected() const { return is_connected_; }
 
  private:
   int query_impl(int family_id, uint8_t cmd, uint8_t version,

@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "smi_nic_log.h"
+#include "smi_nic_text.h"
 
 namespace amd::nic::netlink {
 
@@ -41,6 +42,12 @@ void log_devlink(const char* func, const char* op, const std::string& dev, int e
 
 std::string count_or_unknown(uint64_t value, uint64_t unknown) {
   return (value == unknown) ? "unknown" : std::to_string(value);
+}
+
+// Firmware supplies these strings, so keep only printable ASCII.
+template <size_t N>
+void copy_text(char (&dst)[N], const char* src) {
+  std::snprintf(dst, N, "%s", amd::smi::nic::text::printable_ascii(src).c_str());
 }
 
 // State threaded through the health-reporter dump callback.
@@ -106,8 +113,7 @@ int health_dump_handler(struct nl_msg* msg, void* arg) {
   }
 
   DevlinkReporter out{};
-  std::snprintf(out.name, sizeof(out.name), "%s",
-                NLAttributes::get_string(rtb[DEVLINK_ATTR_HEALTH_REPORTER_NAME]));
+  copy_text(out.name, NLAttributes::get_string(rtb[DEVLINK_ATTR_HEALTH_REPORTER_NAME]));
 
   out.healthy = 1;
   if (NLAttributes::is_present(rtb[DEVLINK_ATTR_HEALTH_REPORTER_STATE])) {
@@ -179,7 +185,7 @@ transport::Result<std::vector<DevlinkReporter>> DevlinkNetlinkClient::get_health
   int ret = init();
   if (ret < 0) {
     log_devlink(__PRETTY_FUNCTION__, "HEALTH_REPORTER_GET", dev, ret, "");
-    result.error_code = -ret;
+    result.error_code = nle_to_errno(-ret);
     return result;
   }
 
@@ -194,7 +200,7 @@ transport::Result<std::vector<DevlinkReporter>> DevlinkNetlinkClient::get_health
     log_devlink(__PRETTY_FUNCTION__, "HEALTH_REPORTER_GET", dev, ret, devlink_describe(reporters));
   }
   if (ret < 0) {
-    result.error_code = -ret;
+    result.error_code = nle_to_errno(-ret);
     return result;
   }
 
@@ -246,11 +252,13 @@ int port_dump_handler(struct nl_msg* msg, void* arg) {
   }
 
   DevlinkPortSplit split{};
+#ifndef NIC_NO_DEVLINK_PORT_SPLITTABLE
   if (NLAttributes::is_present(tb[DEVLINK_ATTR_PORT_SPLITTABLE])) {
     split.splittable = NLAttributes::get_u8(tb[DEVLINK_ATTR_PORT_SPLITTABLE]);
     // PORT_GET never carries SPLIT_COUNT; a port that reported its attributes is unsplit.
     split.split_count = 0;
   }
+#endif
   if (NLAttributes::is_present(tb[DEVLINK_ATTR_PORT_SPLIT_COUNT])) {
     split.split_count = NLAttributes::get_u32(tb[DEVLINK_ATTR_PORT_SPLIT_COUNT]);
   }
@@ -271,7 +279,7 @@ transport::Result<DevlinkPortSplit> DevlinkNetlinkClient::get_port_split(const s
   int ret = init();
   if (ret < 0) {
     log_devlink(__PRETTY_FUNCTION__, "PORT_GET", dev, ret, "");
-    result.error_code = -ret;
+    result.error_code = nle_to_errno(-ret);
     return result;
   }
 
@@ -287,7 +295,7 @@ transport::Result<DevlinkPortSplit> DevlinkNetlinkClient::get_port_split(const s
                 ctx.was_any_found ? devlink_describe(ctx.split) : "no port object");
   }
   if (ret < 0) {
-    result.error_code = -ret;
+    result.error_code = nle_to_errno(-ret);
     return result;
   }
   if (!ctx.was_any_found) {
@@ -323,10 +331,8 @@ void append_version(struct nlattr* version_attr, DevlinkVersionType type, Devlin
   }
   DevlinkVersion& v = out->versions[out->version_count];
   v.type = static_cast<uint8_t>(type);
-  std::snprintf(v.name, sizeof(v.name), "%s",
-                NLAttributes::get_string(vtb[DEVLINK_ATTR_INFO_VERSION_NAME]));
-  std::snprintf(v.value, sizeof(v.value), "%s",
-                NLAttributes::get_string(vtb[DEVLINK_ATTR_INFO_VERSION_VALUE]));
+  copy_text(v.name, NLAttributes::get_string(vtb[DEVLINK_ATTR_INFO_VERSION_NAME]));
+  copy_text(v.value, NLAttributes::get_string(vtb[DEVLINK_ATTR_INFO_VERSION_VALUE]));
   ++out->version_count;
 }
 
@@ -350,17 +356,17 @@ int device_info_handler(struct nl_msg* msg, void* arg) {
 
   DevlinkDeviceInfo& info = *ctx->out;
   if (NLAttributes::is_present(tb[DEVLINK_ATTR_INFO_DRIVER_NAME])) {
-    std::snprintf(info.driver_name, sizeof(info.driver_name), "%s",
-                  NLAttributes::get_string(tb[DEVLINK_ATTR_INFO_DRIVER_NAME]));
+    copy_text(info.driver_name, NLAttributes::get_string(tb[DEVLINK_ATTR_INFO_DRIVER_NAME]));
   }
   if (NLAttributes::is_present(tb[DEVLINK_ATTR_INFO_SERIAL_NUMBER])) {
-    std::snprintf(info.serial_number, sizeof(info.serial_number), "%s",
-                  NLAttributes::get_string(tb[DEVLINK_ATTR_INFO_SERIAL_NUMBER]));
+    copy_text(info.serial_number, NLAttributes::get_string(tb[DEVLINK_ATTR_INFO_SERIAL_NUMBER]));
   }
+#ifndef NIC_NO_DEVLINK_BOARD_SERIAL
   if (NLAttributes::is_present(tb[DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER])) {
-    std::snprintf(info.board_serial_number, sizeof(info.board_serial_number), "%s",
-                  NLAttributes::get_string(tb[DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER]));
+    copy_text(info.board_serial_number,
+              NLAttributes::get_string(tb[DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER]));
   }
+#endif
 
   // Version attributes repeat (one nested block per version); a flat parse()
   // index keeps only the last of each type, so walk the raw stream instead.
@@ -394,7 +400,7 @@ transport::Result<DevlinkDeviceInfo> DevlinkNetlinkClient::get_device_info(const
   int ret = init();
   if (ret < 0) {
     log_devlink(__PRETTY_FUNCTION__, "INFO_GET", dev, ret, "");
-    result.error_code = -ret;
+    result.error_code = nle_to_errno(-ret);
     return result;
   }
 
@@ -410,7 +416,7 @@ transport::Result<DevlinkDeviceInfo> DevlinkNetlinkClient::get_device_info(const
                 ctx.was_found ? devlink_describe(info) : "no devlink instance");
   }
   if (ret < 0) {
-    result.error_code = -ret;
+    result.error_code = nle_to_errno(-ret);
     return result;
   }
   if (!ctx.was_found) {

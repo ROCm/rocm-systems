@@ -32,8 +32,14 @@ inline std::optional<uint64_t> parse_sysfs_uint(const SmiSysfsReader::SysfsValue
   if (std::holds_alternative<int>(value)) {
     return static_cast<uint64_t>(std::get<int>(value));
   }
+  const auto& text = std::get<std::string>(value);
+  // stoul wraps a negative number to a huge value. It also stops at the first character it cannot
+  // read, which max_link_speed ("16.0 GT/s PCIe") relies on, so trailing text is accepted.
+  if (text.empty() || (text.front() == '-')) {
+    return std::nullopt;
+  }
   try {
-    return static_cast<uint64_t>(std::stoul(std::get<std::string>(value), nullptr, 0));
+    return static_cast<uint64_t>(std::stoul(text, nullptr, 0));
   } catch (const std::logic_error&) {
     return std::nullopt;
   }

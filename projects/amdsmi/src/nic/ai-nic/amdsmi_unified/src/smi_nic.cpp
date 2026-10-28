@@ -287,10 +287,7 @@ const std::vector<SmiInfiniBand>& SmiNicPort::infiniband() const { return infini
 uint8_t SmiNicPort::infiniband_num() const { return static_cast<uint8_t>(infiniband_.size()); }
 
 int SmiNicPort::collect_vendor_statistics() const {
-  // Built fresh and assigned wholesale (not merged) so a counter the driver
-  // stops reporting disappears instead of keeping its last value forever,
-  // and so FEC counters (previously merged via emplace into a map that
-  // already held them from a prior call) get refreshed instead of frozen.
+  // Built fresh and assigned wholesale, so a counter the driver stops reporting disappears.
   std::map<std::string, uint64_t> merged;
 
   auto result = transport_->get_statistics(iface_);

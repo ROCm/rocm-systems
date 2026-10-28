@@ -30,17 +30,15 @@ bool SmiNicSubsystemBroadcom::driver_loaded(const std::string& bdf, DriverType d
     case DriverType::Main:
       return std::any_of(
           kBroadcomMainDrivers.begin(), kBroadcomMainDrivers.end(), [&](const char* driver) {
-            return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/pci/drivers/" + driver,
-                                          bdf,
+            return is_driver_bound_to_bdf(driver_sysfs_root_ + kPciDriversDir + driver, bdf,
                                           /*is_canonical_match=*/false);
           });
     case DriverType::Rdma:
-      return std::any_of(kBroadcomRdmaAuxDrivers.begin(), kBroadcomRdmaAuxDrivers.end(),
-                         [&](const char* driver) {
-                           return is_driver_bound_to_bdf(
-                               driver_sysfs_root_ + "/sys/bus/auxiliary/drivers/" + driver, bdf,
-                               /*is_canonical_match=*/true);
-                         });
+      return std::any_of(
+          kBroadcomRdmaAuxDrivers.begin(), kBroadcomRdmaAuxDrivers.end(), [&](const char* driver) {
+            return is_driver_bound_to_bdf(driver_sysfs_root_ + kAuxDriversDir + driver, bdf,
+                                          /*is_canonical_match=*/true);
+          });
     default:
       return false;
   }

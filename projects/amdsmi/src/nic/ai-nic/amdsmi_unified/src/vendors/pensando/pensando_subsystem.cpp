@@ -52,12 +52,11 @@ bool SmiNicSubsystemPensando::is_pci_bridge_class(const std::string& sysfs_bus_p
 bool SmiNicSubsystemPensando::driver_loaded(const std::string& bdf, DriverType driver_type) const {
   switch (driver_type) {
     case DriverType::Main:
-      return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/pci/drivers/ionic", bdf,
+      return is_driver_bound_to_bdf(driver_sysfs_root_ + kPciDriversDir + kIonicDriverName, bdf,
                                     /*is_canonical_match=*/false);
     case DriverType::Rdma:
-      return is_driver_bound_to_bdf(
-          driver_sysfs_root_ + "/sys/bus/auxiliary/drivers/ionic_rdma.rdma", bdf,
-          /*is_canonical_match=*/true);
+      return is_driver_bound_to_bdf(driver_sysfs_root_ + kAuxDriversDir + kIonicRdmaDriverName, bdf,
+                                    /*is_canonical_match=*/true);
     default:
       return false;
   }

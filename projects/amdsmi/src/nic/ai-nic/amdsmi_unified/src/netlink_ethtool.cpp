@@ -142,7 +142,7 @@ transport::Result<transport::LinkSettings> EthtoolNetlinkClient::get_link_settin
                           link_settings_handler, &ctx);
 
   if ((ret < 0) && !result.success) {
-    result.error_code = -ret;
+    result.error_code = nle_to_errno(-ret);
   }
 
   return result;
@@ -209,7 +209,7 @@ transport::Result<transport::PauseParams> EthtoolNetlinkClient::get_pause_params
                           pause_handler, &ctx);
 
   if ((ret < 0) && !result.success) {
-    result.error_code = -ret;
+    result.error_code = nle_to_errno(-ret);
   }
 
   return result;
@@ -315,7 +315,7 @@ transport::Result<transport::FecStatistics_t> EthtoolNetlinkClient::get_fec_stat
                           fec_stats_handler, &ctx);
 
   if ((ret < 0) && !result.success) {
-    result.error_code = -ret;
+    result.error_code = nle_to_errno(-ret);
   }
 
   return result;

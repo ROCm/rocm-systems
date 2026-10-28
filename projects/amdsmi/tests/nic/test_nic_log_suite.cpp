@@ -391,6 +391,18 @@ namespace nl = amd::nic::netlink;
 
 auto ignore_msg(struct nl_msg*, void*) -> int { return NL_OK; }
 
+// The transport reports errno, but the netlink layer returns libnl NLE_* codes: NLE_OPNOTSUPP is
+// 10, which reads as "No child processes".
+auto test_netlink_errors_map_to_errno() -> void {
+  std::cout << "\nNetlink errors: libnl codes become errno\n";
+  check("operation not supported", (nl::nle_to_errno(NLE_OPNOTSUPP) == EOPNOTSUPP));
+  check("object not found", (nl::nle_to_errno(NLE_OBJ_NOTFOUND) == ENOENT));
+  check("out of memory", (nl::nle_to_errno(NLE_NOMEM) == ENOMEM));
+  check("permission denied", (nl::nle_to_errno(NLE_PERM) == EPERM));
+  check("try again", (nl::nle_to_errno(NLE_AGAIN) == EAGAIN));
+  check("unmapped code is an I/O error", (nl::nle_to_errno(NLE_MAX + 100) == EIO));
+}
+
 auto test_netlink_query_success_logged() -> void {
   std::cout << "\nNetlink query: successful dump logs command and SUCCESS\n";
   const auto fx = LogFixture_t{};
@@ -688,6 +700,7 @@ int main() {
   test_hwmon_scan_logged();
   test_hwmon_scan_missing_logged();
 #ifdef HAVE_LIBNL3
+  test_netlink_errors_map_to_errno();
   test_netlink_query_success_logged();
   test_netlink_query_failure_logged();
   test_devlink_describe_reporters();
