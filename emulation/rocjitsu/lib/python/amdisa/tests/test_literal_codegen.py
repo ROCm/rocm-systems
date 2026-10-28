@@ -14,7 +14,7 @@ from amdisa.codegen.execute.simd_codegen import (
 )
 from amdisa.cross_isa import SharedInstInfo, SharedInstructionPlan
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
-from amdisa.isa_profile import Cdna5Profile, Rdna4Profile
+from amdisa.isa_profile import Cdna4Profile, Cdna5Profile, Rdna4Profile
 from amdisa.parser import Parser, _uniquify_fieldless_names
 from amdisa.semantics import InstructionSemantics
 
@@ -812,6 +812,98 @@ def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():
 
     assert body == '  wf.pc += amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);'
     assert 'int64_t' not in body
+
+
+def _cdna4_codegen() -> CodeGenerator:
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna4',
+        profile=Cdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    return codegen
+
+
+def test_cbranch_fork_generated_execute_reads_mask_and_target_operands():
+    codegen = _cdna4_codegen()
+    i_fork = Instruction(
+        'S_CBRANCH_I_FORK',
+        'ENC_SOPK',
+        opcode=16,
+        operands=[
+            _operand('sdst', 'OPR_SDST', size=64, order=1),
+            _operand('simm16', 'OPR_LABEL', size=16, order=2),
+        ],
+    )
+    g_fork = Instruction(
+        'S_CBRANCH_G_FORK',
+        'ENC_SOP2',
+        opcode=41,
+        operands=[
+            _operand('ssrc0', 'OPR_SSRC_NOLIT', size=64, order=1),
+            _operand('ssrc1', 'OPR_SSRC_NOLIT', size=64, order=2),
+        ],
+    )
+
+    i_body = codegen._gen_execute_body(
+        i_fork,
+        InstructionSemantics('S_CBRANCH_I_FORK', 'cbranch_fork', operation='direct'),
+        'ENC_SOPK',
+    )
+    g_body = codegen._gen_execute_body(
+        g_fork,
+        InstructionSemantics('S_CBRANCH_G_FORK', 'cbranch_fork', operation='indirect'),
+        'ENC_SOP2',
+    )
+
+    assert 'compare = amdgpu::RegisterAccess(wf).read_scalar64(sdst);' in i_body
+    assert 'static_cast<int16_t>(simm16.encoding_value_)' in i_body
+    assert 'compare = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);' in g_body
+    assert 'encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc1);' in g_body
+    for body in (i_body, g_body):
+        assert body.endswith(
+            '  wf.pc = amdgpu::cbranch_fork(wf, compare, target, wf.pc + size_) - size_;'
+        )
+
+
+def test_cbranch_join_generated_execute_reads_saved_csp_from_ssrc0():
+    codegen = _cdna4_codegen()
+    join = Instruction(
+        'S_CBRANCH_JOIN',
+        'ENC_SOP1',
+        opcode=46,
+        operands=[
+            _operand('ssrc0', 'OPR_SREG', order=1),
+            _operand(
+                'sdst_exec',
+                'OPR_SDST_EXEC',
+                size=64,
+                is_input=False,
+                is_output=True,
+                order=2,
+                fieldless=True,
+            ),
+            _operand(
+                'pc',
+                'OPR_PC',
+                size=64,
+                is_input=False,
+                is_output=True,
+                order=3,
+                fieldless=True,
+            ),
+        ],
+    )
+
+    body = codegen._gen_execute_body(
+        join, InstructionSemantics('S_CBRANCH_JOIN', 'cbranch_join'), 'ENC_SOP1'
+    )
+
+    assert body == (
+        '  const uint32_t saved_csp = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);\n'
+        '  wf.pc = amdgpu::cbranch_join(wf, saved_csp, wf.pc + size_) - size_;'
+    )
 
 
 def test_literal_fma_can_share_with_matching_operand_layouts_only():

@@ -24,6 +24,7 @@
 #include "rocjitsu/isa/register_set.h"
 
 #include "../dbi_test_util.h"
+#include "../instrumentor_test_access.h"
 
 #include <gtest/gtest.h>
 
@@ -638,6 +639,29 @@ TEST(Instrumentor, RejectsAlignedOffsetPastLastInstruction) {
       << "error was: " << result.errors.front();
 }
 
+TEST(Instrumentor, RejectsCodeObjectsUsingTheBranchStack) {
+  // The anchor itself is an ordinary s_nop; the join elsewhere in .text is what
+  // makes liveness unreliable for every site.
+  auto image = make_gfx950_elf_with_text_words({
+      0xBF800000u, // s_nop 0
+      0xBE802E22u, // s_cbranch_join s34
+      0xBF810000u, // s_endpgm
+  });
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/0);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(
+      result.errors.front().find("conditional branch stack (s_cbranch_join at .text offset 4)"),
+      std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
 TEST(Instrumentor, RejectsOffsetInteriorToMultiWordInstruction) {
   // .text: [s_mov_b32 s0, 0xDEADBEEF (8 bytes)][s_nop 0]. Offset 4 lands in the
   // *interior* of the 8-byte instruction at offset 0, so no decoded instruction
@@ -915,6 +939,82 @@ TEST(InstrumentorPatch, PatchesEightByteAnchorEndToEnd) {
   EXPECT_EQ(relocated->size(), 8) << "relocated original must decode as an 8-byte instruction";
   EXPECT_NE(relocated->mnemonic().find("s_mov_b32"), std::string_view::npos)
       << "mnemonic was: " << relocated->mnemonic();
+}
+
+TEST(InstrumentorPatch, RejectsUnsupportedElfTableStridesBeforePatching) {
+  enum class Table { SectionHeaders, ProgramHeaders, Symbols, DynamicSymbols, Rela, Rel };
+  for (const auto table : {Table::SectionHeaders, Table::ProgramHeaders, Table::Symbols,
+                           Table::DynamicSymbols, Table::Rela, Table::Rel}) {
+    SCOPED_TRACE(static_cast<int>(table));
+    auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+    Elf64_Ehdr header{};
+    std::memcpy(&header, image.data(), sizeof(header));
+    const uint64_t strided_offset = image.size();
+    if (table == Table::SectionHeaders) {
+      constexpr uint16_t kStride = 2 * sizeof(Elf64_Shdr);
+      image.resize(image.size() + static_cast<size_t>(header.e_shnum) * kStride, 0);
+      for (size_t index = 0; index < header.e_shnum; ++index)
+        std::memcpy(image.data() + strided_offset + index * kStride,
+                    image.data() + header.e_shoff + index * sizeof(Elf64_Shdr), sizeof(Elf64_Shdr));
+      header.e_shoff = strided_offset;
+      header.e_shentsize = kStride;
+    } else if (table == Table::ProgramHeaders) {
+      constexpr uint16_t kStride = 2 * sizeof(Elf64_Phdr);
+      image.resize(image.size() + static_cast<size_t>(header.e_phnum) * kStride, 0);
+      for (size_t index = 0; index < header.e_phnum; ++index)
+        std::memcpy(image.data() + strided_offset + index * kStride,
+                    image.data() + header.e_phoff + index * sizeof(Elf64_Phdr), sizeof(Elf64_Phdr));
+      header.e_phoff = strided_offset;
+      header.e_phentsize = kStride;
+    } else if (table == Table::Rela || table == Table::Rel) {
+      std::vector<Elf64_Shdr> sections(header.e_shnum);
+      std::memcpy(sections.data(), image.data() + header.e_shoff,
+                  sections.size() * sizeof(Elf64_Shdr));
+      Elf64_Shdr relocations{};
+      relocations.sh_type = table == Table::Rela ? SHT_RELA : SHT_REL;
+      relocations.sh_offset = image.size();
+      relocations.sh_entsize = 2 * (table == Table::Rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel));
+      relocations.sh_size = relocations.sh_entsize;
+      image.resize(image.size() + relocations.sh_size, 0);
+      sections.push_back(relocations);
+      header.e_shoff = image.size();
+      header.e_shnum = static_cast<uint16_t>(sections.size());
+      image.resize(image.size() + sections.size() * sizeof(Elf64_Shdr));
+      std::memcpy(image.data() + header.e_shoff, sections.data(),
+                  sections.size() * sizeof(Elf64_Shdr));
+    } else {
+      std::vector<Elf64_Shdr> sections(header.e_shnum);
+      std::memcpy(sections.data(), image.data() + header.e_shoff,
+                  sections.size() * sizeof(Elf64_Shdr));
+      const auto symbols = std::find_if(sections.begin(), sections.end(), [](const auto &section) {
+        return section.sh_type == SHT_SYMTAB;
+      });
+      ASSERT_NE(symbols, sections.end());
+      const uint64_t old_offset = symbols->sh_offset;
+      const size_t count = symbols->sh_size / sizeof(Elf64_Sym);
+      constexpr uint64_t kStride = 2 * sizeof(Elf64_Sym);
+      image.resize(image.size() + count * kStride, 0);
+      for (size_t index = 0; index < count; ++index)
+        std::memcpy(image.data() + strided_offset + index * kStride,
+                    image.data() + old_offset + index * sizeof(Elf64_Sym), sizeof(Elf64_Sym));
+      symbols->sh_type = table == Table::DynamicSymbols ? SHT_DYNSYM : SHT_SYMTAB;
+      symbols->sh_offset = strided_offset;
+      symbols->sh_size = count * kStride;
+      symbols->sh_entsize = kStride;
+      std::memcpy(image.data() + header.e_shoff, sections.data(),
+                  sections.size() * sizeof(Elf64_Shdr));
+    }
+    std::memcpy(image.data(), &header, sizeof(header));
+
+    AmdGpuCodeObject obj(image.data(), image.size());
+    EXPECT_FALSE(obj.is_valid());
+    Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+    instrumentor.add_point_by_offset(0);
+    const auto result = instrumentor.patch();
+    EXPECT_TRUE(result.elf_bytes.empty());
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors.front(), "cannot instrument an invalid code object");
+  }
 }
 
 TEST(InstrumentorPatch, RejectsZeroQueuedPoints) {
@@ -2365,7 +2465,9 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
 namespace {
 
 // A probe declaring one argument sourced from the framework's entry storage,
-// which is what asks the instrumentor for a prologue.
+// which is what asks the instrumentor for a prologue. Patching one needs the
+// patch gates skipped; these tests inspect the planned prologue and never
+// dispatch it, so nothing needs the kernarg wrapper.
 InstrumentationPoint log_buffer_point(const AmdGpuCodeObject &probe_obj, uint64_t anchor_offset) {
   InstrumentationPoint pt;
   pt.anchor_offset = anchor_offset;
@@ -2404,8 +2506,10 @@ bool contains_words(const std::vector<uint32_t> &haystack, std::span<const uint3
 std::optional<uint16_t> storage_base_from_argument(const std::vector<uint32_t> &trampoline,
                                                    rj_code_arch_t arch) {
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
-    const uint32_t mov = build_v_mov_b32_src(/*vdst=*/0, sgpr, arch);
-    if (std::find(trampoline.begin(), trampoline.end(), mov) != trampoline.end())
+    const auto mov = build_v_mov_b32_src(/*vdst=*/0, sgpr, arch);
+    if (mov.failed())
+      return std::nullopt;
+    if (std::find(trampoline.begin(), trampoline.end(), mov.value()) != trampoline.end())
       return sgpr;
   }
   return std::nullopt;
@@ -2431,6 +2535,7 @@ InstrumentedCodeObjectDebug patch_five_log_buffer_args(const std::vector<uint8_t
   InstrumentationPoint pt = log_buffer_point(probe_obj, /*anchor_offset=*/0);
   pt.probe_args = five_log_buffer_args();
   instr.add_point(pt);
+  InstrumentorTestAccess::skip_patch_gates(instr);
   return instr.patch_with_debug_summaries();
 }
 
@@ -2484,6 +2589,7 @@ TEST(InstrumentorEntryPrologue, KernelWithoutAKernargPointerFailsClosed) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("ENABLE_SGPR_KERNARG_SEGMENT_PTR"), std::string::npos)
@@ -2505,6 +2611,7 @@ TEST(InstrumentorEntryPrologue, PointOnTheKernelEntryComposesWithThePrologue) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2548,6 +2655,7 @@ InstrumentedCodeObjectDebug patch_kernel_of_size(uint64_t text_bytes) {
 
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/text_bytes - 8));
+  InstrumentorTestAccess::skip_patch_gates(instr);
   return instr.patch_with_debug_summaries();
 }
 
@@ -2592,6 +2700,7 @@ TEST(InstrumentorEntryPrologue, StubKeepsANonzeroEntryResidue) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/12));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2625,6 +2734,7 @@ TEST(InstrumentorEntryPrologue, KernelEntryKeepsItsBytes) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2638,22 +2748,28 @@ TEST(InstrumentorEntryPrologue, KernelEntryKeepsItsBytes) {
 
 // patch() is the production entry point, and no runtime builds the kernarg
 // wrapper the prologue loads through, so it refuses before planning anything.
+// Both entry points run the patch gates, so neither patches a probe that reads
+// the framework's entry storage unless the test skips them.
 TEST(InstrumentorEntryPrologue, PatchRefusesEntryStorageWithoutAWrapper) {
   auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
 
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+  for (const bool with_summaries : {false, true}) {
+    SCOPED_TRACE(with_summaries ? "patch_with_debug_summaries()" : "patch()");
+    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+    instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
-  auto result = instr.patch();
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_NE(result.errors.front().find("kernarg wrapper"), std::string::npos)
-      << result.errors.front();
-  EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
-      << result.errors.front();
+    const InstrumentedCodeObject result =
+        with_summaries ? instr.patch_with_debug_summaries() : instr.patch();
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_NE(result.errors.front().find("kernarg wrapper"), std::string::npos)
+        << result.errors.front();
+    EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
+        << result.errors.front();
+  }
 }
 
 // Instrumentation does not support multi-kernel objects, so neither does the
@@ -2668,6 +2784,7 @@ TEST(InstrumentorEntryPrologue, MultipleKernelsFailClosed) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("multi-kernel code object"), std::string::npos)
@@ -2714,6 +2831,7 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2755,11 +2873,15 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
 
   // Both loads address through the kernarg pair at s[0:1], the only enabled
   // user SGPR in this descriptor.
-  const auto load_payload = build_s_load_dwordx2(
+  const auto load_payload_result = build_s_load_dwordx2(
       *storage_base, /*sbase=*/0, layout->payload_offsets.front(), ROCJITSU_CODE_ARCH_CDNA4);
-  const auto load_guest_ptr =
+  ASSERT_TRUE(load_payload_result.succeeded());
+  const auto load_payload = load_payload_result.value();
+  const auto load_guest_ptr_result =
       build_s_load_dwordx2(static_cast<uint16_t>(*storage_base + 2), /*sbase=*/0,
                            layout->original_kernarg_pointer_offset, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(load_guest_ptr_result.succeeded());
+  const auto load_guest_ptr = load_guest_ptr_result.value();
   EXPECT_TRUE(contains_words(prologue, load_payload))
       << "the prologue does not load the payload the record declares";
   EXPECT_TRUE(contains_words(prologue, load_guest_ptr));
@@ -2777,7 +2899,9 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
   // flight against, so a wait placed only ahead of the reads below it would be
   // too late. Both bounds are asserted, since either alone admits a placement
   // that would not work.
-  const uint32_t wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wait_result = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(wait_result.succeeded());
+  const auto wait = wait_result.value();
   const auto wait_it = std::find(prologue.begin(), prologue.end(), wait);
   ASSERT_NE(wait_it, prologue.end()) << "the prologue does not wait for its loads";
   const auto guest_ptr_load_it =
@@ -2809,6 +2933,7 @@ std::optional<uint16_t> patch_and_recover_storage(const std::vector<uint32_t> &p
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   if (!result.errors.empty()) {
     *error_out = result.errors.front();
@@ -2910,6 +3035,7 @@ TEST(InstrumentorEntryPrologue, StorageAvoidsAProbeThatDoesNotReadIt) {
   plain.probe_symbol = "rj_test_writer";
   instr.add_point(plain);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2943,6 +3069,7 @@ TEST(InstrumentorKernargRecord, DeclaresTheWrapperThePrologueReadsFrom) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -3010,6 +3137,7 @@ TEST(InstrumentorKernargRecord, ObjectAlreadyDeclaringAKernargExtensionFailsClos
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty()) << "a second kernarg record was appended";
   EXPECT_NE(result.errors.front().find("already carries"), std::string::npos)
