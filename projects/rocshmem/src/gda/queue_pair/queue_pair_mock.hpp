@@ -53,6 +53,10 @@ public:
   static __device__ inline size_t rma_inline_count{0};
   static __device__ inline size_t amo_count{0};
   static __device__ inline size_t quiet_count{0};
+  // Posts (RMA + AMO) made with PostOpt ThreadSafe==true, i.e. the SQ-locking path.
+  // THREAD resource-sharing elides the lock (ThreadSafe==false) so this stays 0,
+  // while GPU/CTA sharing keep it -- lets tests assert the mode reached the QP.
+  static __device__ inline size_t thread_safe_post_count{0};
 
 public:
   __host__ QueuePairMock()                                      = default;
@@ -163,6 +167,9 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma(
   if (wf_info.is_pe_group_first) {
     __scoped_atomic_fetch_add(&rma_count, wf_info.num_pe_group_lanes,
                               __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    if constexpr (PostOpt<Options...>::ThreadSafe) {
+      __scoped_atomic_fetch_add(&thread_safe_post_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    }
   }
 
   if (can_inline<Op>(size)) {
@@ -189,6 +196,9 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma_single(
   }
 
   __scoped_atomic_fetch_add(&rma_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  if constexpr (PostOpt<Options...>::ThreadSafe) {
+    __scoped_atomic_fetch_add(&thread_safe_post_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  }
 
   if (can_inline<Op>(size)) {
     __scoped_atomic_fetch_add(&rma_inline_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
@@ -218,6 +228,9 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
   if (wf_info.is_pe_group_first) {
     __scoped_atomic_fetch_add(&amo_count, wf_info.num_pe_group_lanes,
                               __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    if constexpr (PostOpt<Options...>::ThreadSafe) {
+      __scoped_atomic_fetch_add(&thread_safe_post_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    }
   }
 
   if constexpr (Op == OpCode::ATOMIC_CS) {
@@ -255,6 +268,9 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
   }
 
   __scoped_atomic_fetch_add(&amo_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  if constexpr (PostOpt<Options...>::ThreadSafe) {
+    __scoped_atomic_fetch_add(&thread_safe_post_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  }
 
   if constexpr (Op == OpCode::ATOMIC_CS) {
     // ATOMIC_CS: obj is raddr, expected is &compare, desired is swap_add

@@ -202,6 +202,20 @@ static size_t readSignalCount() {
   return s;
 }
 
+// Posts (RMA + AMO) the mock saw with the SQ lock engaged (PostOpt ThreadSafe).
+// THREAD resource-sharing elides the lock, so this is 0 in THREAD mode and > 0 in
+// GPU/CTA mode -- the assertion that proves the mode actually reached the QP.
+static void resetThreadSafePostCount() {
+  size_t z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::thread_safe_post_count), &z, sizeof(z)));
+}
+
+static size_t readThreadSafePostCount() {
+  size_t c = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(rocshmem::QueuePairMock::thread_safe_post_count), sizeof(c)));
+  return c;
+}
+
 static void resetThreadfenceCount() {
   size_t z = 0;
   HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaStubThreadfenceCount), &z, sizeof(z)));
@@ -730,10 +744,12 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_ThreadModeDataLandsAtRemote) {
   env.src.copyFrom(pat);
   env.dst.zero();
   env.build();
+  resetThreadSafePostCount();
   kernelPutDataThread<<<1, 1>>>(env.dHarness.ptr, kN);
   syncAndCheck();
   auto got = env.dst.copyTo();
   for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
+  EXPECT_EQ(readThreadSafePostCount(), 0ULL);  // THREAD elides the SQ lock -> callImpl<false>
 }
 
 __global__ void kernelPutSignalAddThread(GdaHarness* h) {
@@ -822,11 +838,13 @@ static auto expectModeDataLands = [](uint8_t mode) {
   env.src.copyFrom(pat);
   env.dst.zero();
   env.build();
+  resetThreadSafePostCount();
   kernelPutDataMode<<<1, 1>>>(env.dHarness.ptr, kN, mode);
   ASSERT_EQ(hipGetLastError(), hipSuccess);
   ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
   auto got = env.dst.copyTo();
   for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
+  EXPECT_GT(readThreadSafePostCount(), 0ULL);  // GPU/CTA keep the SQ lock -> callImpl<true>
 };
 
 TEST_F(GinRocshmemGdaTemplateTest, Put_GpuModeDataLandsAtRemote) {
