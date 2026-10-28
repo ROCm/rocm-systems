@@ -21,6 +21,16 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "StandaloneUtils.hpp"
 
+// NCCL 2.32 window flag; spelled out so this file also builds against older headers.
+#ifndef NCCL_WIN_GIN_ONLY
+#define NCCL_WIN_GIN_ONLY 0x04
+#endif
+
+// Declared by the device-API headers, whose layout differs between RCCL releases;
+// the symbols themselves are part of librccl's public API.
+extern "C" ncclResult_t ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, int lsaRank, void** outPtr);
+extern "C" ncclResult_t ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer, void** outPtr);
+
 namespace RcclUnitTesting
 {
 
@@ -600,6 +610,65 @@ static void testWindowRegisterSingleRankNonSymTeardown() {
     NCCLCHECK(ncclCommDestroy(comm));
 }
 
+/**
+ * @brief Registers an ordinary window and a second one that is GIN-only, or ordinary
+ *        too for the control, on a single-rank communicator.
+ *
+ * NCCL_WIN_GIN_ONLY keeps a window out of LSA mapping, CFT and RMA, so LSA pointer
+ * queries on it fail with ncclInvalidUsage, and it cannot be combined with
+ * NCCL_WIN_COLL_SYMMETRIC. Only symmetric (cuMem) windows answer LSA pointer
+ * queries, so that part runs where the ordinary window answers them.
+ * @param ginOnly If false, every check is one that holds without the flag.
+ */
+static void testWindowRegisterGinOnly(bool ginOnly) {
+    SKIP_IF_NO_GPU();
+
+    HIPCALL(hipSetDevice(0));
+
+    ncclComm_t comm;
+    ASSERT_EQ(ncclSuccess, initSingleRankComm(&comm));
+
+    const size_t bufferSize = NCCL_WIN_REQUIRED_ALIGNMENT;
+    void* bufs[2] = {nullptr, nullptr};
+    ncclWindow_t wins[2] = {nullptr, nullptr};
+    for (void*& buf : bufs) {
+        ASSERT_EQ(ncclSuccess, ncclMemAlloc(&buf, bufferSize));
+    }
+
+    if (ginOnly) {
+        // Rejected before any registration work, whatever the platform supports.
+        EXPECT_EQ(ncclInvalidArgument, ncclCommWindowRegister(comm, bufs[1], bufferSize, &wins[1],
+                                                              NCCL_WIN_COLL_SYMMETRIC | NCCL_WIN_GIN_ONLY));
+        if (wins[1] != nullptr) {
+            EXPECT_EQ(ncclSuccess, ncclCommWindowDeregister(comm, wins[1]));
+            wins[1] = nullptr;
+        }
+    }
+
+    // Registering hangs on GPUs without VMM (see testWindowRegisterSingleRankNonSymTeardown).
+    if (deviceSupportsCuMemVmm(0)) {
+        ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(comm, bufs[0], bufferSize, &wins[0], NCCL_WIN_COLL_SYMMETRIC));
+        ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(comm, bufs[1], bufferSize, &wins[1],
+                                                      ginOnly ? NCCL_WIN_GIN_ONLY : NCCL_WIN_DEFAULT));
+
+        void* ptr = nullptr;
+        if (wins[0] != nullptr && ncclGetLsaDevicePointer(wins[0], 0, 0, &ptr) == ncclSuccess) {
+            ASSERT_NE(nullptr, wins[1]);
+            const ncclResult_t expected = ginOnly ? ncclInvalidUsage : ncclSuccess;
+            EXPECT_EQ(expected, ncclGetLsaDevicePointer(wins[1], 0, /*lsaRank=*/0, &ptr));
+            EXPECT_EQ(expected, ncclGetPeerDevicePointer(wins[1], 0, /*peer=*/0, &ptr));
+        }
+    }
+
+    for (int i = 0; i < 2; i++) {
+        if (wins[i] != nullptr) {
+            EXPECT_EQ(ncclSuccess, ncclCommWindowDeregister(comm, wins[i]));
+        }
+        NCCLCHECK(ncclMemFree(bufs[i]));
+    }
+    NCCLCHECK(ncclCommDestroy(comm));
+}
+
 //==============================================================================
 // Test configuration helpers
 //==============================================================================
@@ -671,6 +740,31 @@ TEST(Register, ProcessIsolatedRegisterTests)
         ProcessIsolatedTestRunner::TestConfig("WindowRegisterSingleRankNonSymTeardown", testWindowRegisterSingleRankNonSymTeardown)
             .withEnvironment({{"NCCL_CUMEM_ENABLE", "0"}, {"NCCL_LOCAL_REGISTER", "1"}})
     );
+}
+
+// NCCL_CUMEM_ENABLE=1 takes the symmetric (cuMem) window path where the platform has it,
+// which is where a GIN-only window skips the LSA mapping.
+static ProcessIsolatedTestRunner::TestConfig
+makeCuMemConfig(const std::string& name, std::function<void()> testFn) {
+    return ProcessIsolatedTestRunner::TestConfig(name, testFn)
+        .withEnvironment({{"NCCL_CUMEM_ENABLE", "1"}})
+        .withTimeout(std::chrono::seconds(120));
+}
+
+/**
+ * @brief NCCL_WIN_GIN_ONLY registers a window for GIN only (NCCL 2.32)
+ */
+TEST(Register, WindowRegisterGinOnly)
+{
+    RUN_ISOLATED_TESTS(makeCuMemConfig("WindowRegisterGinOnly", []() { testWindowRegisterGinOnly(true); }));
+}
+
+/**
+ * @brief Control for WindowRegisterGinOnly: the same windows, all registered without the flag
+ */
+TEST(Register, WindowRegisterAllCapabilities)
+{
+    RUN_ISOLATED_TESTS(makeCuMemConfig("WindowRegisterAllCapabilities", []() { testWindowRegisterGinOnly(false); }));
 }
 
 } // namespace RcclUnitTesting
