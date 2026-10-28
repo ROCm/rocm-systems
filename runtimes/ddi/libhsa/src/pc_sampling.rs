@@ -47,6 +47,11 @@ impl PcSamplingState {
             || self.sessions.values().any(|owner| owner.agent == agent)
     }
 
+    /// Snapshots native sessions for callback quiescence outside the registry.
+    pub(crate) fn sessions_for_tool_unload(&self) -> Vec<Arc<SessionHandle>> {
+        self.sessions.values().cloned().collect()
+    }
+
     /// Quarantines all sessions whose native handler may still be installed.
     pub(crate) fn quarantine_all(&self) {
         for session in self.sessions.values() {
@@ -185,6 +190,9 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
         let Some(runtime) = guard.as_mut() else {
             return NOT_INITIALIZED;
         };
+        if runtime.stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         let Some(index) = runtime.gpu_index(args.agent) else {
             return INVALID_AGENT;
         };

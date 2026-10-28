@@ -1,19 +1,25 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Minimal declarations for the PyTorch RecordFunction ABI used by the
-// live-stack collector. Definitions resolve from the workload's libtorch.
+// Stub of the ATen RecordFunction observer API, so the collector builds with
+// no PyTorch install. name(), operator_name(), currentThreadId(), and
+// addGlobalCallback() are exported by libtorch_cpu and bind at load time.
+//
+// Layout is only needed where data crosses the boundary: RecordFunctionCallback
+// is passed by value, while scope(), seqNr(), inputs, and forwardThreadId()
+// require measured field offsets. Padding stands in for everything else.
 
 #pragma once
 
+#include <ATen/core/operator_name.h>
 #include <torch_abi.h>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <initializer_list>
 #include <memory>
+#include <optional>
 #include <type_traits>
 
 namespace at
@@ -40,6 +46,7 @@ using CallbackHandle = std::uint64_t;
 
 inline constexpr CallbackHandle INVALID_CALLBACK_HANDLE{0};
 
+// libtorch deletes this through the base pointer.
 struct ObserverContext
 {
     virtual ~ObserverContext() = default;
@@ -57,10 +64,10 @@ struct RecordFunction
 
     RecordFunction(const RecordFunction&)            = delete;
     RecordFunction& operator=(const RecordFunction&) = delete;
-    RecordFunction(RecordFunction&&)                 = delete;
-    RecordFunction& operator=(RecordFunction&&)      = delete;
 
     const char* name() const;
+
+    std::optional<c10::OperatorName> operator_name() const;
 
     [[nodiscard]] RecordScope scope() const noexcept
     {
@@ -91,10 +98,10 @@ private:
     std::byte abi_storage_[torch_abi::kRecordFunctionSize - sizeof(void*)];
 };
 
-// These assertions validate the replacement declaration, not PyTorch itself.
-// test_torch_trace_collector.cpp checks the constants against the real headers.
 static_assert(sizeof(RecordFunction) == torch_abi::kRecordFunctionSize);
 static_assert(alignof(RecordFunction) == torch_abi::kRecordFunctionAlignment);
+static_assert(sizeof(std::optional<c10::OperatorName>) == torch_abi::kOptionalOperatorNameSize);
+static_assert(alignof(std::optional<c10::OperatorName>) == torch_abi::kOptionalOperatorNameAlignment);
 
 class RecordFunctionCallback
 {
@@ -109,13 +116,9 @@ public:
         scopes_.fill(true);
     }
 
-    RecordFunctionCallback& scopes(std::initializer_list<RecordScope> scopes)
+    RecordFunctionCallback& needsInputs(bool needs_inputs)
     {
-        scopes_.fill(scopes.size() == 0);
-        for (RecordScope scope : scopes)
-        {
-            scopes_[static_cast<std::size_t>(scope)] = true;
-        }
+        needs_inputs_ = needs_inputs;
         return *this;
     }
 
@@ -139,7 +142,6 @@ static_assert(offsetof(RecordFunctionCallback, sampling_prob_) == torch_abi::kCa
 static_assert(offsetof(RecordFunctionCallback, scopes_) == torch_abi::kCallbackScopesOff);
 static_assert(offsetof(RecordFunctionCallback, needs_inputs_) == torch_abi::kCallbackNeedsInputsOff);
 
-CallbackHandle addGlobalCallback(RecordFunctionCallback callback);
-void           removeCallback(CallbackHandle handle);
+CallbackHandle addGlobalCallback(RecordFunctionCallback cb);
 
 }  // namespace at
