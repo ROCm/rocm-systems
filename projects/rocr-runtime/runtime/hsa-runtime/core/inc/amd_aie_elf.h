@@ -9,9 +9,9 @@
 // A full ELF carries the PDIs, the control code, and the relocations that say where addresses go
 // in the control code. The loader parses the full ELF found in a unified hsaco's AIE section,
 // places the PDIs in the agent's device memory and keeps the control code in host memory with the
-// PDI addresses written in. No address is patched here. At dispatch time the driver copies the
-// control code into a per-dispatch device buffer and patches the argument addresses into that copy,
-// so concurrent dispatches of the same kernel never share a patch site.
+// PDI and external-symbol addresses written in. No address is patched here. At dispatch time the
+// driver copies the control code into a per-dispatch device buffer and patches the argument
+// addresses into that copy, so concurrent dispatches of the same kernel never share a patch site.
 
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_ELF_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_ELF_H_
@@ -45,19 +45,42 @@ struct Pdi {
   std::vector<uint32_t> patch_offsets;
 };
 
+/// @brief A symbol the control code takes the address of but the ELF does not carry, such as the
+/// control scratchpad (`scratch-pad-ctrl`). The application allocates it and defines it with
+/// hsa_executable_agent_global_variable_define before loading.
+struct ExternalSymbol {
+  /// @brief Bytes the control code expects at the address: the symbol's `st_size`.
+  uint32_t size = 0;
+  /// @brief Places in the control code taking the symbol's device address; never empty.
+  std::vector<PatchSite> sites;
+};
+
 /// @brief A parsed full-ELF kernel: the bytes to load and where addresses go.
 struct Kernel {
   /// @brief "<kernel>:<instance>", e.g. "main:sequence".
   std::string name;
   /// @brief The PDIs the control code loads; empty if it loads none. A control code may load
   /// several PDIs, or one more than once (MLIR-AIR's loads an empty PDI before and after the
-  /// design runs). Each distinct PDI appears once: sites naming byte-identical PDIs share an
-  /// entry, so it is placed in device memory once.
+  /// design runs). Entries are keyed by the ELF *section* a patch site names, not by byte
+  /// content: two sites naming the same section share one entry and one device placement, but
+  /// two different sections are placed separately even when their bytes are identical.
+  ///
+  /// This was not always true: an earlier version keyed on byte content instead, so two sections
+  /// with identical bytes (e.g. an empty PDI loaded both before and after the design) collapsed to
+  /// one placement at one device address. A kernel built that way dispatched correctly once and
+  /// incorrectly on every dispatch after. Nothing in this reader explains why -- it does not touch
+  /// the firmware or driver layer that actually loads a PDI at an address -- so this is recorded as
+  /// an observed fix, not a diagnosed root cause. Keying by section instead of content does not
+  /// conflict with anything the format document requires: it never asked for content-based merging
+  /// across distinct sections, only that sites naming the *same* section (by name, resolved once by
+  /// `find_pdi_section`) share a copy.
   std::vector<Pdi> pdis;
   /// @brief Control-code bytes.
   std::vector<uint8_t> ctrl_code;
   /// @brief Patch sites per argument index. Entries may be empty for unused arguments.
   std::vector<std::vector<PatchSite>> arg_sites;
+  /// @brief External symbols the control code references, by name.
+  std::map<std::string, ExternalSymbol> external_symbols;
 
   /// @brief Number of arguments the control code references.
   uint32_t num_args() const { return static_cast<uint32_t>(arg_sites.size()); }
