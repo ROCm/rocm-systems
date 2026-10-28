@@ -555,10 +555,11 @@ def test_blob_row_is_unpacked_once(tmp_path, monkeypatch):
 
     class CountingStruct:
         def __init__(self, fmt):
+            self.format = fmt
             self.unpacker = original_struct(fmt)
 
         def unpack_from(self, *args):
-            unpack_calls.append(self.unpacker.format)
+            unpack_calls.append(self.format)
             return self.unpacker.unpack_from(*args)
 
     def count_unpack_from(fmt, *args):
