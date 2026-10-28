@@ -184,9 +184,6 @@ __launch_bounds__(512)
   if (k != 0) barrier.epochSignalWait(srcRank, peer, epoch);
 
   {
-    // The host never passes pieces == 0, so the kernel does not guard it. Adding a check inside the kernel (for example
-    // `pieces ? pieces : 1` in the divisions below) lowers the kernel from 80 to 64 VGPRs; neither version spills and
-    // the speed is the same, so the simpler form is kept.
     // Every thread has at most nRows rows; pieces are whole unroll groups of rows. All ranks derive the same piece
     // count, since it depends only on count, blocksPerPeer and blockDim.
     const size_t nRows = (nLines + stride - 1) / stride;
