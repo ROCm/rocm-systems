@@ -1505,7 +1505,7 @@ static void print_usage(const char* argv0) {
     "                        bytes. Default 17179869184 (16 GiB).\n"
     "  --max-wall-seconds S  End the run after S seconds, loading the archive\n"
     "                        included (0 = no limit; at most 31536000, 365 days).\n"
-    "                        Default 3600.\n"
+    "                        --repair is not limited. Default 3600.\n"
     "  --trace-kernels       Print one compact line before every kernel launch\n"
     "  --trace-sync          Print sync begin/done markers around kernel syncs\n"
     "  --progress-kernels N  Print heartbeat every N launched kernels\n"

@@ -30,7 +30,6 @@
 
 #include "hrr_test_process.hh"
 #include "hrr_reader.h"
-#include "hrr/hrr_api_args.h"
 
 #include <algorithm>
 #include <cctype>
