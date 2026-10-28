@@ -24,7 +24,7 @@ pub use allocation::{Allocation, RollbackReport, with_rollback_report};
 pub use registered_host::{RegisteredHostAllocation, RegisteredHostMemory};
 pub use types::{
     AllocationInfo, HostCacheability, HostMappingPolicy, MemoryKind, VirtualAddressInfo,
-    VirtualMemoryInfo, VirtualMemoryPlacement,
+    VirtualMemoryInfo, VirtualMemoryOptions, VirtualMemoryPlacement,
 };
 pub use virtual_memory::{VirtualAddress, VirtualDeviceMapping, VirtualHostMapping, VirtualMemory};
 

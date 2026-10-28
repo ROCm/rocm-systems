@@ -120,10 +120,18 @@ fn extended_coherence_rejects_uncached_request_from_either_source() {
         contiguous: false,
     };
     assert_eq!(
-        KfdVirtualMemory::create(vm.clone(), kind, page(), false, true)
-            .err()
-            .unwrap()
-            .kind(),
+        KfdVirtualMemory::create(
+            vm.clone(),
+            kind,
+            page(),
+            VirtualMemoryOptions {
+                pinned: false,
+                uncached: true,
+            },
+        )
+        .err()
+        .unwrap()
+        .kind(),
         ErrorKind::InvalidArgument
     );
     let kind_uncached = MemoryKind::DeviceLocal {
@@ -134,7 +142,7 @@ fn extended_coherence_rejects_uncached_request_from_either_source() {
         contiguous: false,
     };
     assert_eq!(
-        KfdVirtualMemory::create(vm, kind_uncached, page(), false, false)
+        KfdVirtualMemory::create(vm, kind_uncached, page(), VirtualMemoryOptions::default(),)
             .err()
             .unwrap()
             .kind(),

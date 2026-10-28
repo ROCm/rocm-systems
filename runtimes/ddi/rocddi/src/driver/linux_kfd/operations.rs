@@ -703,11 +703,10 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
         device: &DeviceState,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        KfdVirtualMemory::create(device.vm.clone(), kind, size, pinned, uncached)
+        KfdVirtualMemory::create(device.vm.clone(), kind, size, options)
     }
     fn free_virtual_memory(memory: &mut KfdVirtualMemory) -> Result<(), Error> {
         memory.free()

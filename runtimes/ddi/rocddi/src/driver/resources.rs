@@ -31,7 +31,7 @@ use crate::memory::{
     Allocation, AllocationInfo, DeviceAccess, DriverAllocation, DriverVirtualAddress,
     DriverVirtualDeviceMapping, DriverVirtualHostMapping, DriverVirtualMemory, HostRegistration,
     MemoryKind, VirtualAddressInfo, VirtualMapRequest, VirtualMemory, VirtualMemoryInfo,
-    set_device_access_for,
+    VirtualMemoryOptions, set_device_access_for,
 };
 
 #[cfg(test)]
@@ -397,13 +397,12 @@ impl DeviceDriverState {
         &self,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<VirtualMemory, Error> {
         match self {
             Self::LinuxKfd { driver, state } => {
                 let owner = Shared::try_new_uninit()?;
-                let inner = driver.create_virtual_memory(state, kind, size, pinned, uncached)?;
+                let inner = driver.create_virtual_memory(state, kind, size, options)?;
                 Ok(VirtualMemory::new(VirtualMemoryState::from_linux_kfd(
                     DriverVirtualMemory::new(driver.clone(), owner.write(inner)),
                 )))
