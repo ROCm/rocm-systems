@@ -13,10 +13,21 @@ from unittest.mock import patch
 import pytest
 from common import SUPPORTED_ARCHS
 
-from argparser import omniarg_parser
+from argparser import (
+    DEPRECATED_OPTIONS,
+    omniarg_parser,
+    warn_deprecated_options,
+)
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
+
+DEPRECATED_ALIASES = [
+    # (mode argv, old argv, new argv, dest, expected value)
+    (["profile"], ["--roof-only"], ["--roofline"], "roof_only", True),
+    (["profile"], ["--bench-only"], ["--roofline-bench-only"], "bench_only", True),
+    (["profile"], ["--device", "2"], ["--roofline-device", "2"], "device", 2),
+]  # fmt: skip
 
 # Options whose (Default: ...) describes the default in words
 DESCRIBED_DEFAULTS = {
@@ -257,6 +268,57 @@ def test_pc_sampling_analyze_options():
         with pytest.raises(SystemExit):
             build_args(["analyze", "--pc-sampling-rows", "-1"])
     mock_error.assert_called_once()
+
+
+# =============================================================================
+# Deprecated option names
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("mode", "old", "new", "dest", "expected"),
+    DEPRECATED_ALIASES,
+    ids=[alias[1][0] for alias in DEPRECATED_ALIASES],
+)
+def test_deprecated_alias_matches_new_name(mode, old, new, dest, expected):
+    assert getattr(build_args(mode), dest) != expected
+    assert getattr(build_args(mode + new), dest) == expected
+    assert getattr(build_args(mode + old), dest) == expected
+
+
+@pytest.mark.parametrize("mode", ["profile"])
+def test_deprecated_aliases_listed_in_help(mode, capsys):
+    with pytest.raises(SystemExit):
+        build_args([mode, "--help"])
+    out = capsys.readouterr().out
+    for alias_mode, old, new, _, _ in DEPRECATED_ALIASES:
+        if alias_mode == [mode]:
+            assert f"{new[0]}, {old[0]}" in out
+
+
+def test_deprecated_options_are_real_options():
+    option_strings = {
+        option for parser in all_parsers() for option in parser._option_string_actions
+    }
+    assert set(DEPRECATED_OPTIONS) <= option_strings
+
+
+@pytest.mark.parametrize(
+    ("argv", "warned"),
+    [
+        (["profile", "--roof-only"], ["--roof-only"]),
+        (["profile", "--retain-rocpd-output=1"], ["--retain-rocpd-output"]),
+        # Options of the workload belong to the workload
+        (["profile", "-n", "x", "--", "./app", "--device", "1"], []),
+        (["profile", "--roofline-device", "1"], []),
+    ],
+    ids=["old_name", "equals_form", "workload_options", "new_name"],
+)  # fmt: skip
+def test_warn_deprecated_options(argv, warned, caplog):
+    warn_deprecated_options(argv)
+    for option in warned:
+        assert f"{option} is deprecated" in caplog.text
+    assert caplog.text.count("is deprecated") == len(warned)
 
 
 # =============================================================================

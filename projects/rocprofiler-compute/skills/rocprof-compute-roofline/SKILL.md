@@ -33,12 +33,13 @@ Speed-of-Light and the `rocprof-compute-memory` skill instead. Confirm support
 for a new architecture against
 [compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst).
 
-`--device` selects the GPU for the roofline microbenchmarks. It does not
+`--roofline-device` selects the GPU for the roofline microbenchmarks. It does not
 choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
 
-See [standalone roofline](../../docs/how-to/profile/mode.rst) for `--roof-only`
-and `--bench-only`, which run the microbenchmarks without profiling an
-application.
+See [standalone roofline](../../docs/how-to/profile/mode.rst) for two more options:
+
+- `--roofline` collects only roofline data.
+- `--roofline-bench-only` runs only the microbenchmarks, without an application.
 
 ## 2. Read the table
 
