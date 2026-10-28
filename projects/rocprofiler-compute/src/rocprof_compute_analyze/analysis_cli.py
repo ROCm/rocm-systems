@@ -41,10 +41,10 @@ def _labels_for_backends(backends: list[str]) -> str:
     return ", ".join(_ML_API_LABELS.get(backend, backend) for backend in backends)
 
 
-def _operator_patterns_by_backend(
+def _restrict_patterns_to_operator_backends(
     selections: dict[str, list[str]],
 ) -> dict[str, list[str]]:
-    """Keep patterns whose prefix is torch, triton, or user."""
+    """Restrict pattern lists to keys in _OPERATOR_BACKENDS."""
     return {
         backend: list(patterns)
         for backend, patterns in selections.items()
@@ -52,12 +52,9 @@ def _operator_patterns_by_backend(
     }
 
 
-def _operator_display_backends(selections: dict[str, list[str]]) -> list[str]:
-    """Backends named by --operator."""
-    return list(_operator_patterns_by_backend(selections))
-
-
-def _unique_pattern_text(operator_patterns_by_backend: dict[str, list[str]]) -> str:
+def _join_unique_operator_patterns(
+    operator_patterns_by_backend: dict[str, list[str]],
+) -> str:
     """Join unique operator patterns."""
     seen: set[str] = set()
     ordered: list[str] = []
@@ -70,11 +67,11 @@ def _unique_pattern_text(operator_patterns_by_backend: dict[str, list[str]]) -> 
     return ", ".join(ordered)
 
 
-def _nodes_matching_operator_patterns(
+def _collect_nodes_matching_operator_patterns(
     forest: dict[str, list[CallTreeNode]],
     operator_patterns_by_backend: dict[str, list[str]],
 ) -> list[CallTreeNode]:
-    """Return nodes whose name or path matches a pattern for that node's backend."""
+    """Collect nodes whose name or path matches a pattern for that node's backend."""
     return [
         node
         for roots in forest.values()
@@ -215,7 +212,9 @@ class cli_analysis(OmniAnalyze_Base):
         filter_requested = operator_patterns is not None and not listing_requested
         list_backends = list_selectors if listing_requested else []
         filter_backends = (
-            _operator_display_backends(operator_patterns) if filter_requested else []
+            list(_restrict_patterns_to_operator_backends(operator_patterns))
+            if filter_requested
+            else []
         )
 
         for path_info in args.path:
@@ -343,7 +342,9 @@ class cli_analysis(OmniAnalyze_Base):
         list_selectors = getattr(args, "list_operators", None)
         operator_patterns = getattr(args, "operator_patterns", None)
         if operator_patterns is not None and list_selectors is None:
-            filter_backends = _operator_display_backends(operator_patterns)
+            filter_backends = list(
+                _restrict_patterns_to_operator_backends(operator_patterns)
+            )
             for path_info in args.path:
                 self.handle_operator(args, self._runs[path_info[0]], filter_backends)
 
@@ -454,28 +455,32 @@ class cli_analysis(OmniAnalyze_Base):
         backends: list[str],
     ) -> list[tuple]:
         """Filter the operator forest and return pmc group keys on the subtree."""
-        resolved = getattr(args, "operator_patterns", None)
-        if resolved is None:
+        operator_patterns = getattr(args, "operator_patterns", None)
+        if operator_patterns is None:
             return []
-        operator_patterns_by_backend = _operator_patterns_by_backend(resolved)
+        operator_patterns_by_backend = _restrict_patterns_to_operator_backends(
+            operator_patterns
+        )
         labels = _labels_for_backends(backends)
         if not operator_patterns_by_backend:
             console_error(
                 "ml api trace",
                 f"No {labels} operators matched the pattern(s).",
             )
-        collected_forest = workload.ml_api_call_trees
-        nodes_matching_operator_patterns = _nodes_matching_operator_patterns(
-            collected_forest, operator_patterns_by_backend
+        nodes_matching_operator_patterns = _collect_nodes_matching_operator_patterns(
+            workload.ml_api_call_trees, operator_patterns_by_backend
         )
         if not nodes_matching_operator_patterns:
-            all_patterns = _unique_pattern_text(operator_patterns_by_backend)
+            operator_pattern_text = _join_unique_operator_patterns(
+                operator_patterns_by_backend
+            )
             console_error(
                 "ml api trace",
-                f"No {labels} operators matched the pattern(s): {all_patterns}",
+                "No "
+                f"{labels} operators matched the pattern(s): {operator_pattern_text}",
             )
         workload.ml_api_call_trees = copy_matched_operator_subtree(
-            collected_forest, nodes_matching_operator_patterns
+            workload.ml_api_call_trees, nodes_matching_operator_patterns
         )
 
         pmc_group_keys: list[tuple] = list(
@@ -499,20 +504,23 @@ class cli_analysis(OmniAnalyze_Base):
         """Display the matched operator call tree."""
         if not workload.ml_api_call_trees:
             return
-        resolved = getattr(args, "operator_patterns", None)
-        if resolved is None:
+        operator_patterns = getattr(args, "operator_patterns", None)
+        if operator_patterns is None:
             return
-        operator_patterns_by_backend = _operator_patterns_by_backend(resolved)
-        patterns_str = _unique_pattern_text(operator_patterns_by_backend)
+        operator_patterns_by_backend = _restrict_patterns_to_operator_backends(
+            operator_patterns
+        )
+        operator_pattern_text = _join_unique_operator_patterns(
+            operator_patterns_by_backend
+        )
         labels = _labels_for_backends(backends)
-        subtree = workload.ml_api_call_trees
         print(f"\n{'=' * 80}")
-        print(f"Matched {labels} Operators: {patterns_str}")
+        print(f"Matched {labels} Operators: {operator_pattern_text}")
         print("Sorted by total GPU kernel duration.")
         print(f"{'=' * 80}")
-        for roots in subtree.values():
+        for roots in workload.ml_api_call_trees.values():
             for root in roots:
                 rollup_node_stats(root)
-        tty.show_call_tree(subtree)
-        tty.show_operator_summary(build_operator_summary(subtree))
+        tty.show_call_tree(workload.ml_api_call_trees)
+        tty.show_operator_summary(build_operator_summary(workload.ml_api_call_trees))
         print(f"{'=' * 80}")
