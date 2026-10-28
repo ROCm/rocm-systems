@@ -74,7 +74,7 @@ pub(crate) use lifecycle::{HsaLifecycle, LIFECYCLE};
 pub(crate) use lifecycle::{
     InFlightGeneration, InFlightToken, InFlightTracker, LifecycleTransition, ShutdownWork,
     VM_FAULT_CONDVAR, boundary, close_public_raw_handles, enter_public_raw_handle, initialized_mut,
-    lock, map_error, public_raw_handle_access_allowed, wait_public_raw_handles_idle,
+    lock, map_error, wait_public_raw_handles_idle,
 };
 #[cfg(test)]
 use logging::logging_flag_enabled;

@@ -485,12 +485,6 @@ impl RawHandleGate {
     fn is_closed_and_idle(&self) -> bool {
         self.state.load(Ordering::Acquire) == RAW_HANDLES_CLOSED
     }
-
-    #[cfg(not(test))]
-    /// Checks whether a signal wait may continue using its admitted handle.
-    fn is_open(&self) -> bool {
-        self.state.load(Ordering::Acquire) < RAW_HANDLES_CLOSED
-    }
 }
 
 /// Keeps public signal and queue storage alive for a complete raw operation.
@@ -530,17 +524,6 @@ pub(crate) fn enter_public_raw_handle() -> Option<RawHandleAdmission<'static>> {
 static TEST_RAW_HANDLES: RawHandleGate = RawHandleGate {
     state: AtomicUsize::new(0),
 };
-
-/// Admits raw-handle calls only while HSA owns live public storage.
-pub(crate) fn public_raw_handle_access_allowed() -> bool {
-    // Unit tests construct isolated signal and queue fixtures without
-    // publishing a process HSA generation. Integration tests exercise the
-    // production gate through the exported C ABI.
-    #[cfg(test)]
-    return true;
-    #[cfg(not(test))]
-    PUBLIC_RAW_HANDLES.is_open()
-}
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
