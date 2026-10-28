@@ -218,6 +218,50 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "NCCL_LAUNCH_MODE=GROUP"
       - "RCCL_PAT_SHARED_QPS=0"
+  quick_env_profiler_kernelch:
+    description: "KernelCh profiling from the per-communicator profiler thread, checked with a recorder plugin. RCCL settles which profiler plugin it uses on the first communicator in the process and never retries, so these run in a process of their own; the fixture points NCCL_PROFILER_PLUGIN at the recorder. DDA is disabled because DDA collectives raise no profiler events, and a full single-node communicator would take it for AllReduce."
+    test_patterns:
+      - "ProfilerKernelChMPITest.*"
+      - "Share/ProfilerKernelChSplitMPITest.*"
+    exclude:
+      - "ProfilerKernelChMPITest.ShmTransportIsTimed"
+      - "ProfilerKernelChMPITest.SymmetricKernelPhasesTileKernelCh"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_DDA_ENABLE=0"
+  quick_env_profiler_kernelch_shm:
+    description: "KernelCh profiling over the SHM transport. NCCL_P2P_DISABLE is cached for the process lifetime, so ShmTransportIsTimed only runs when it is set before launch. DDA is disabled as in quick_env_profiler_kernelch."
+    test_patterns:
+      - "ProfilerKernelChMPITest.ShmTransportIsTimed"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_P2P_DISABLE=1"
+      - "RCCL_DDA_ENABLE=0"
+  quick_env_profiler_kernelch_net:
+    description: "KernelCh profiling on a plan with proxy ops when every rank is on one node: P2P and SHM are disabled so the network transport carries the collective. Both variables are cached for the process lifetime, so they are set before launch. DDA is disabled as in quick_env_profiler_kernelch."
+    test_patterns:
+      - "ProfilerKernelChMPITest.ProxyPathKernelChOffProxyThread"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_P2P_DISABLE=1"
+      - "NCCL_SHM_DISABLE=1"
+      - "RCCL_DDA_ENABLE=0"
+  quick_env_profiler_kernelch_sym:
+    description: "KernelPhase events from the symmetric kernels, which are the only ones that stamp phase boundaries. A communicator only gets symmetric support with cuMem on, and NCCL_CUMEM_ENABLE is cached for the process lifetime, so it is set before launch. DDA is disabled as in quick_env_profiler_kernelch."
+    test_patterns:
+      - "ProfilerKernelChMPITest.SymmetricKernelPhasesTileKernelCh"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_CUMEM_ENABLE=1"
+      - "RCCL_DDA_ENABLE=0"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -226,6 +270,8 @@ test_categories:
       - "ShmMPITest.*"
       - "NetIbMPITest.*"
       - "GdrFlushTest.*"
+      # Only the flag-off case runs here; the flag-on cases skip without RCCL_IB_GDR_FLUSH_FLAG=1.
+      - "GdrFlushFlagTest.*"
       - "ImplicitLaunchOrderMPITest.*"
       - "UBR_AllReduce.*"
       - "UBR_AllGather.*"
@@ -245,6 +291,7 @@ test_categories:
       - "DdaFabricBarrierStress.*"
       # Skips under comprehensive: NCCL_LAUNCH_ORDER_IMPLICIT=1 disables DDA, so standard is where it runs.
       - "DdaIpcMPI_IndexData.*"
+      - "DdaMPI_CollOpCount.*"
     exclude_windows: *mpi_exclude_windows
     labels: &mpi_standard_labels
       - "rccl"
@@ -253,6 +300,64 @@ test_categories:
       - "mpi"
     env_variables:
       - "NCCL_DEBUG=INFO"
+  standard_env_gdr_flush_flag:
+    description: "Remote GDR flush flag. RCCL_PARAM caches RCCL_IB_GDR_FLUSH_FLAG for the process lifetime, so it is set before launch. GdrFlushFlagTest and GdrFlushTest need exactly 2 ranks, and GdrFlushFlagProtoSwitchMPITest needs 2 or more nodes; each skips otherwise. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag (2 ranks on 2 nodes)."
+    test_patterns:
+      - "GdrFlushFlagTest.*"
+      - "GdrFlushTest.*"
+      - "GdrFlushFlagProtoSwitchMPITest.*"
+    exclude:
+      - "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_IB_GDR_FLUSH_FLAG=1"
+  standard_env_gdr_flush_flag_fused_nic:
+    description: "Remote GDR flush flag over a fused (two-NIC) device, which keeps the RDMA read flush. Its own process: the vNIC it makes stays in the device list, and later comms in the process would use it and run without the flag. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag (2 ranks on 2 nodes)."
+    test_patterns:
+      - "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_IB_GDR_FLUSH_FLAG=1"
+  standard_env_gdr_flush_flag_4qps:
+    description: "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag_4qps (2 ranks on 2 nodes)."
+    test_patterns:
+      - "GdrFlushFlagTest.*"
+      - "GdrFlushFlagProtoSwitchMPITest.*"
+    exclude:
+      - "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_IB_GDR_FLUSH_FLAG=1"
+      - "NCCL_IB_QPS_PER_CONNECTION=4"
+  standard_env_gdr_flush_flag_4qps_split:
+    description: "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag_4qps_split (2 ranks on 2 nodes)."
+    test_patterns:
+      - "GdrFlushFlagTest.*"
+      - "GdrFlushFlagProtoSwitchMPITest.*"
+    exclude:
+      - "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_IB_GDR_FLUSH_FLAG=1"
+      - "NCCL_IB_QPS_PER_CONNECTION=4"
+      - "NCCL_IB_SPLIT_DATA_ON_QPS=1"
+  standard_env_netib_inline:
+    description: "InfiniBand CTS writes posted inline, including multi-receive irecv. NCCL_IB_USE_INLINE is cached for the process lifetime, so it is set before launch."
+    test_patterns:
+      - "NetIbMPITest.InlineSendBoundary"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_IB_USE_INLINE=1"
   # DDA fp8, one category per fabric tier. RCCL_PARAM caches the DDA thresholds for the process lifetime,
   # so each tier's settings are set before launch and each fixture runs in its own process.
   standard_env_dda_fp8_ll:
@@ -480,7 +585,15 @@ execution_settings:
     quick_env_netib_xfer_trace: 1200
     quick_env_netib_xfer_log_ranks: 1200
     quick_env_pat_shared_qps_off: 1200
+    quick_env_profiler_kernelch: 1200
+    quick_env_profiler_kernelch_shm: 1200
+    quick_env_profiler_kernelch_net: 1200
+    quick_env_profiler_kernelch_sym: 1200
     standard: 1200
+    standard_env_gdr_flush_flag: 1200
+    standard_env_gdr_flush_flag_4qps: 1200
+    standard_env_gdr_flush_flag_4qps_split: 1200
+    standard_env_netib_inline: 1200
     standard_env_dda_fp8_ll: 1200
     standard_env_dda_fp8_ll_twoshot: 1200
     standard_env_dda_fp8_ll128: 1200

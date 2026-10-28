@@ -52,7 +52,8 @@ enum class log_level_t
 
 extern log_level_t log_level;
 
-extern std::ofstream agent_out;
+/* The agent's output stream, constructed on first use.  */
+std::ofstream &agent_out ();
 
 namespace detail
 {

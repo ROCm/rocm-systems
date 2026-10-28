@@ -524,13 +524,18 @@ inline bool checkConcurrentKernels(int num_devices) {
   return true;
 }
 
+// The runtime reports pageable memory access iff XNACK is on; stall-only XNACK GPUs never
+// report xnack+ in gcnArchName.
 inline bool isXnackOn() {
-  hipDeviceProp_t prop;
+#if HT_AMD
   int device = 0;
+  int pageable = 0;
   HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
-  std::string gfxName(prop.gcnArchName);
-  return gfxName.find("xnack+") != std::string::npos;
+  HIP_CHECK(hipDeviceGetAttribute(&pageable, hipDeviceAttributePageableMemoryAccess, device));
+  return pageable != 0;
+#else
+  return false;
+#endif
 }
 
 inline bool areWarpMatchFunctionsSupported() {
@@ -637,6 +642,8 @@ inline constexpr char const kSdmaSwapUnsupported[] =
     "SDMA swap is not supported on this device.";
 inline constexpr char const kConcurrentManagedAccessUnsupported[] =
     "device does not support concurrent managed access.";
+inline constexpr char const kSdmaIndirectUnsupported[] =
+    "SDMA indirect copy is not supported on this device.";
 }  // namespace SkipReason
 
 /**

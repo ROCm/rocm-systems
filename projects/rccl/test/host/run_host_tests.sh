@@ -150,7 +150,11 @@ do_host_tests() {
   # rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
   local -a binaries=(
     "rccl-HostUnitTests:$XML_FILE"
+    "rccl-UnitTestsMicroBootstrap:$SCRIPT_DIR/host_tests_micro_bootstrap.xml"
     "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
+    "rccl-UnitTestsMicroCollectives:$SCRIPT_DIR/host_tests_micro_collectives.xml"
+    "rccl-UnitTestsMicroOnerank:$SCRIPT_DIR/host_tests_micro_onerank.xml"
+    "rccl-UnitTestsMicroMgmtTaskEnq:$SCRIPT_DIR/host_tests_micro_mgmt_task_enq.xml"
     "rccl-UnitTestsMicroWarpSpeed:$SCRIPT_DIR/host_tests_micro_warpspeed.xml"
     "rccl-UnitTestsMicroCrypt:$SCRIPT_DIR/host_tests_micro_crypt.xml"
     "rccl-UnitTestsMicroStrongstream:$SCRIPT_DIR/host_tests_micro_strongstream.xml"
@@ -159,22 +163,36 @@ do_host_tests() {
     "rccl-UnitTestsMicroCpuset:$SCRIPT_DIR/host_tests_micro_cpuset.xml"
     "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
     "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
+    "rccl-UnitTestsMicroDdaColl:$SCRIPT_DIR/host_tests_micro_dda_coll.xml"
     # FAULT_INJECTION defaults ON, so this variant is the arm that ships; init.cc
     # gates its fault-mask blocks on ENABLE_FAULT_INJECTION at the preprocessor,
     # so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroInit-faultinj:$SCRIPT_DIR/host_tests_micro_init_faultinj.xml"
+    "rccl-UnitTestsMicroCollTrace:$SCRIPT_DIR/host_tests_micro_coll_trace.xml"
+    "rccl-UnitTestsMicroRecorder:$SCRIPT_DIR/host_tests_micro_recorder.xml"
+    "rccl-UnitTestsMicroApiTrace:$SCRIPT_DIR/host_tests_micro_api_trace.xml"
+    "rccl-UnitTestsMicroDebug:$SCRIPT_DIR/host_tests_micro_debug.xml"
     "rccl-UnitTestsMicroEnqueue:$SCRIPT_DIR/host_tests_micro_enqueue.xml"
+    "rccl-UnitTestsMicroGinHostProxy:$SCRIPT_DIR/host_tests_micro_gin_host_proxy.xml"
     # ENABLE_DEVICE_LINKER defaults ON, so this variant is the arm that ships;
     # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
     # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
     "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
     "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
+    "rccl-UnitTestsMicroNvls:$SCRIPT_DIR/host_tests_micro_nvls.xml"
+    "rccl-UnitTestsMicroNcclDevice:$SCRIPT_DIR/host_tests_micro_nccl_device.xml"
+    "rccl-UnitTestsMicroCore:$SCRIPT_DIR/host_tests_micro_core.xml"
+    "rccl-UnitTestsMicroCftDevRuntime:$SCRIPT_DIR/host_tests_micro_cft_dev_runtime.xml"
     "rccl-UnitTestsMicroConnect:$SCRIPT_DIR/host_tests_micro_connect.xml"
+    "rccl-UnitTestsMicroParam:$SCRIPT_DIR/host_tests_micro_param.xml"
     "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
+    "rccl-UnitTestsMicroPlugin:$SCRIPT_DIR/host_tests_micro_plugin.xml"
     "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
+    "rccl-UnitTestsMicroProfiler:$SCRIPT_DIR/host_tests_micro_profiler.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
     "rccl-UnitTestsMicroGinHostFinalize:$SCRIPT_DIR/host_tests_micro_gin_host_finalize.xml"
+    "rccl-UnitTestsMicroProxy:$SCRIPT_DIR/host_tests_micro_proxy.xml"
     "rccl-UnitTestsMicroDdaIpc:$SCRIPT_DIR/host_tests_micro_dda_ipc.xml"
     "rccl-UnitTestsMicroRoctxNvml:$SCRIPT_DIR/host_tests_micro_roctx_nvml.xml"
     # Standalone-only: roctx.cc's ROCTX_ENABLE arm.
@@ -182,10 +200,15 @@ do_host_tests() {
     "rccl-UnitTestsMicroRocmwrap:$SCRIPT_DIR/host_tests_micro_rocmwrap.xml"
     "rccl-UnitTestsMicroAmdsmiWrap:$SCRIPT_DIR/host_tests_micro_amdsmi_wrap.xml"
     "rccl-UnitTestsMicroRomeModels:$SCRIPT_DIR/host_tests_micro_rome_models.xml"
+    "rccl-UnitTestsMicroTopo:$SCRIPT_DIR/host_tests_micro_topo.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
     "rccl-UnitTestsMicroGraph:$SCRIPT_DIR/host_tests_micro_graph.xml"
     "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
     "rccl-UnitTestsMicroDda:$SCRIPT_DIR/host_tests_micro_dda.xml"
+    "rccl-UnitTestsMicroNetIbCastInit:$SCRIPT_DIR/host_tests_micro_net_ib_cast_init.xml"
+    "rccl-UnitTestsMicroNetIbCastDataPath:$SCRIPT_DIR/host_tests_micro_net_ib_cast_data_path.xml"
+    "rccl-UnitTestsMicroNet:$SCRIPT_DIR/host_tests_micro_net.xml"
+    "rccl-UnitTestsMicroMisc:$SCRIPT_DIR/host_tests_micro_misc.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
   # GENERATE_SYM_KERNELS, off via install.sh --disable-sym-kernels); missing is a skip, not an error.

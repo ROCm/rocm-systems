@@ -6,6 +6,10 @@ test_categories:
     description: "Smoke - host-only src/algorithms/dda/ micro-tests, sub-second."
     test_patterns:
       - "FabricMemHandler*"
+      - "FabricGpuBarrier*"
+      - "FabricInit*"
+      - "HipVmmLedger*"
+      - "HostAllocLedger*"
     exclude_windows:
       - "*"
     labels:

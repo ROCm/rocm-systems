@@ -34,11 +34,23 @@ using namespace rocjitsu::plugins::race_detector;
 using namespace rocjitsu::test::execution_plugin;
 using mma_test::make_cdna4_mfma_scale_words;
 
-class TestWaitcntInstruction : public Instruction {
-public:
-  explicit TestWaitcntInstruction(std::string_view mnemonic = "s_waitcnt")
-      : Instruction(mnemonic, nullptr) {}
-};
+void execute_wait(ExecutionPluginGroup &plugins, Wavefront &wave, uint32_t word) {
+  auto decoder = Decoder::create(wave.cu().arch());
+  ASSERT_NE(decoder, nullptr);
+  util::StringDiagnostic error;
+  auto decoded = decoder->decode_window(std::span<const uint32_t>(&word, 1), 0, error.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error.message();
+  auto &inst = *decoded.value();
+  ASSERT_TRUE(inst.is_waitcnt());
+  inst.execute(inst, &wave);
+  plugins.onAmdgpuAfterExecuteInstruction(wave.pc, inst, wave);
+}
+
+uint32_t legacy_wait_word(rj_code_arch_t arch, uint8_t vmcnt, uint8_t lgkmcnt) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    return 0xbf890007u | (uint32_t{vmcnt} << 10) | (uint32_t{lgkmcnt} << 4);
+  return 0xbf8c0070u | (vmcnt & 0xfu) | ((vmcnt & 0x30u) << 10) | (uint32_t{lgkmcnt} << 8);
+}
 
 class MfmaRacePlugin : public ExecutionPlugin {
 public:
@@ -81,13 +93,14 @@ private:
 
 class FormattedLoadRaceTest : public ::testing::Test {
 protected:
-  PluginFixture fixture{1, "rdna4", 32, 128};
+  PluginFixture fixture;
   StringSink *sink = nullptr;
   Wavefront *wave = nullptr;
   RaceWavefrontState *plugin_state = nullptr;
   std::unique_ptr<Decoder> decoder;
 
   void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "rdna4", 32, 128));
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -130,11 +143,7 @@ protected:
     fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wave);
   }
 
-  void wait(uint32_t count) {
-    wave->set_wait_target_loadcnt(count);
-    TestWaitcntInstruction instruction("s_wait_loadcnt");
-    fixture.plugin_group_->onAmdgpuAfterExecuteInstruction(wave->pc + 4, instruction, *wave);
-  }
+  void wait(uint32_t count) { execute_wait(*fixture.plugin_group_, *wave, 0xbfc00000u | count); }
 
   bool probe(uint32_t destination, uint8_t byte_mask, bool write, uint64_t lanes = 1) {
     const size_t previous = sink->str().size();
@@ -223,8 +232,9 @@ protected:
   std::unique_ptr<Decoder> decoder;
 
   void SetUp() override {
-    fixture = std::make_unique<PluginFixture>(/*num_wf_slots=*/1, GetParam().arch,
-                                              /*wavefront_size=*/32, /*sgprs_per_wf=*/128);
+    fixture = std::make_unique<PluginFixture>();
+    ASSERT_NO_FATAL_FAILURE(fixture->initialize(/*num_wf_slots=*/1, GetParam().arch,
+                                                /*wavefront_size=*/32, /*sgprs_per_wf=*/128));
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture->plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -272,12 +282,8 @@ protected:
   }
 
   void wait() {
-    wave->set_wait_target_loadcnt(0);
-    TestWaitcntInstruction load_wait("s_wait_loadcnt");
-    fixture->plugin_group_->onAmdgpuAfterExecuteInstruction(wave->pc + 4, load_wait, *wave);
-    wave->set_wait_target_dscnt(0);
-    TestWaitcntInstruction ds_wait("s_wait_dscnt");
-    fixture->plugin_group_->onAmdgpuAfterExecuteInstruction(wave->pc + 8, ds_wait, *wave);
+    execute_wait(*fixture->plugin_group_, *wave, 0xbfc00000u); // s_wait_loadcnt 0.
+    execute_wait(*fixture->plugin_group_, *wave, 0xbfc60000u); // s_wait_dscnt 0.
   }
 
   bool probe(uint32_t destination, bool write, uint64_t lanes = 1) {
@@ -374,7 +380,10 @@ INSTANTIATE_TEST_SUITE_P(BlockLoads, BlockLoadRaceTest,
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,
                                             bool formatted) {
-    PluginFixture f(/*num_wf_slots=*/1, arch, wavefront_size);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/1, arch, wavefront_size);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -426,8 +435,11 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
 TEST(RaceDetectorPluginTest, InvalidVectorLoadDestinationIsRejectedBeforeWawChecks) {
   auto rejects_without_access = [](MemPipelineTag tag) {
     constexpr uint32_t kVgprsPerWave = 16;
-    PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                    /*sgprs_per_wf=*/128, kVgprsPerWave);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                 /*sgprs_per_wf=*/128, kVgprsPerWave);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -466,7 +478,8 @@ TEST(RaceDetectorPluginTest, InvalidVectorLoadDestinationIsRejectedBeforeWawChec
 }
 
 TEST(RaceDetectorPluginTest, WideVectorLoadTracksEveryDestinationVgpr) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -500,7 +513,8 @@ TEST(RaceDetectorPluginTest, WideVectorLoadTracksEveryDestinationVgpr) {
 }
 
 TEST(RaceDetectorPluginTest, DualOffsetLoadTracksBothDestinationRanges) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -537,7 +551,8 @@ TEST(RaceDetectorPluginTest, DualOffsetLoadTracksBothDestinationRanges) {
 }
 
 TEST(RaceDetectorPluginTest, DualOffsetStoreTracksSecondLdsRange) {
-  PluginFixture f(/*num_wf_slots=*/2);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -586,7 +601,10 @@ TEST(RaceDetectorPluginTest, DualOffsetStoreTracksSecondLdsRange) {
 
 TEST(RaceDetectorPluginTest, DualOffsetAccessValidatesSecondLdsRange) {
   const auto second_range_reports_race = [](bool dual_is_load) {
-    PluginFixture f(/*num_wf_slots=*/2);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/2);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -642,8 +660,9 @@ TEST(RaceDetectorPluginTest, DualOffsetAccessValidatesSecondLdsRange) {
 }
 
 TEST(RaceDetectorPluginTest, LocalMemoryUsesEffectiveIssueMask) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128));
   PluginSinkConfig sink_config;
   sink_config.emplace<StringSink>();
   auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -688,7 +707,8 @@ TEST(RaceDetectorPluginTest, LocalMemoryUsesEffectiveIssueMask) {
 }
 
 TEST(RaceDetectorPluginTest, MixedCounterClassesUseUnorderedEventOrdering) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   sink_config.emplace<StringSink>();
   auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -732,7 +752,10 @@ TEST(RaceDetectorPluginTest, MixedCounterClassesUseUnorderedEventOrdering) {
 
 TEST(RaceDetectorPluginTest, LdsRoutedFlatStoreDwordx2TracksTrailingDword) {
   auto trailing_access_reports_race = [](bool flat_store_first) {
-    PluginFixture f(/*num_wf_slots=*/2);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/2);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -821,8 +844,10 @@ TEST(RaceDetectorPluginTest, MixedFlatChecksAndRecordsOnlySharedLaneIntervals) {
         for (uint32_t probe : {0u, 1u, 2u}) {
           SCOPED_TRACE(testing::Message() << "local_lane=" << local_lane << " load=" << load
                                           << " flat_first=" << flat_first << " probe=" << probe);
-          PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32,
-                          /*sgprs_per_wf=*/128);
+          PluginFixture f;
+          ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, /*arch=*/"cdna5",
+                                               /*wavefront_size=*/32,
+                                               /*sgprs_per_wf=*/128));
           PluginSinkConfig sink_config;
           StringSink &sink = sink_config.emplace<StringSink>();
           auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -909,8 +934,10 @@ TEST(RaceDetectorPluginTest, MixedFlatChecksAndRecordsOnlySharedLaneIntervals) {
 
 TEST(RaceDetectorPluginTest, MixedFlatAtLdsBackingEndTracksExecutedElements) {
   for (bool load : {false, true}) {
-    PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32,
-                    /*sgprs_per_wf=*/128);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, /*arch=*/"cdna5",
+                                         /*wavefront_size=*/32,
+                                         /*sgprs_per_wf=*/128));
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -989,8 +1016,10 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
     for (bool load : {false, true}) {
       SCOPED_TRACE(testing::Message() << "first_address=" << test.addresses[0]
                                       << " exec=" << test.exec << " load=" << load);
-      PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32,
-                      /*sgprs_per_wf=*/128);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna5",
+                                           /*wavefront_size=*/32,
+                                           /*sgprs_per_wf=*/128));
       PluginSinkConfig sink_config;
       StringSink &sink = sink_config.emplace<StringSink>();
       auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -1049,8 +1078,9 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
 }
 
 TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -1083,9 +1113,7 @@ TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) 
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
   }
 
-  wf->set_wait_target_loadcnt(1);
-  TestWaitcntInstruction wait("s_wait_loadcnt");
-  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+  execute_wait(*f.plugin_group_, *wf, 0xbfc00001u); // s_wait_loadcnt 1.
 
   f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/1);
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
@@ -1094,8 +1122,9 @@ TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) 
 }
 
 TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -1148,9 +1177,7 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
   EXPECT_EQ(events.memoryOrder(EventId{0}), MemoryOrderClass::UNORDERED);
   EXPECT_EQ(events.memoryOrder(EventId{1}), MemoryOrderClass::UNORDERED);
 
-  wf->set_wait_target_loadcnt_dscnt(/*loadcnt=*/1, /*dscnt=*/1);
-  TestWaitcntInstruction wait("s_wait_loadcnt_dscnt");
-  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+  execute_wait(*f.plugin_group_, *wf, 0xbfc80101u); // s_wait_loadcnt_dscnt 0x101.
 
   // Both ordered counter domains prove the oldest mixed-order event complete.
   EXPECT_EQ(events.status(EventId{0}), EventStatus::WAVE_COMPLETE);
@@ -1163,8 +1190,10 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
 
 TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
   auto verify_wait_order = [](bool storecnt_first) {
-    PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                    /*sgprs_per_wf=*/128);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4",
+                                         /*wavefront_size=*/32,
+                                         /*sgprs_per_wf=*/128));
     PluginSinkConfig sink_config;
     sink_config.emplace<StringSink>();
     auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -1221,13 +1250,9 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
 
     const auto apply_wait = [&](WaitCounterType counter) {
       if (counter == WaitCounterType::STORECNT) {
-        wf->set_wait_target_storecnt(0);
-        TestWaitcntInstruction wait("s_wait_storecnt");
-        f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+        execute_wait(*f.plugin_group_, *wf, 0xbfc10000u); // s_wait_storecnt 0.
       } else {
-        wf->set_wait_target_dscnt(0);
-        TestWaitcntInstruction wait("s_wait_dscnt");
-        f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/8, wait, *wf);
+        execute_wait(*f.plugin_group_, *wf, 0xbfc60000u); // s_wait_dscnt 0.
       }
     };
 
@@ -1248,7 +1273,8 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
 }
 
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -1286,7 +1312,8 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
 }
 
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsWriteBeforeWait) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -1315,8 +1342,9 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsWriteBeforeWait) {
 }
 
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpHonorsSplitKmcntWait) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -1340,17 +1368,18 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpHonorsSplitKmcntWait) {
   TestMemoryInstruction load(std::move(state));
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
-  wf->set_wait_target_kmcnt(0);
-  TestWaitcntInstruction wait("s_wait_kmcnt");
-  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+  execute_wait(*f.plugin_group_, *wf, 0xbfc70000u); // s_wait_kmcnt 0.
   static_cast<void>(RegisterAccess(*wf).read_ttmp(0));
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
 TEST(RaceDetectorPluginTest, NamedVmcntWaitRetiresMonolithicAndSplitLoadEvents) {
   auto run = [](WaitCounterType event_counter) {
-    PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna3", /*wavefront_size=*/32,
-                    /*sgprs_per_wf=*/128);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna3", /*wavefront_size=*/32,
+                 /*sgprs_per_wf=*/128);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -1378,9 +1407,7 @@ TEST(RaceDetectorPluginTest, NamedVmcntWaitRetiresMonolithicAndSplitLoadEvents) 
     TestMemoryInstruction load(std::move(state));
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
-    wf->set_wait_target_loadcnt(0);
-    TestWaitcntInstruction wait("s_waitcnt_vmcnt");
-    f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+    execute_wait(*f.plugin_group_, *wf, 0xbcfc0000u); // s_waitcnt_vmcnt null, 0.
     f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/1);
     return sink.str().find("RACE ") == std::string::npos;
   };
@@ -1391,7 +1418,10 @@ TEST(RaceDetectorPluginTest, NamedVmcntWaitRetiresMonolithicAndSplitLoadEvents) 
 
 TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCounterDomains) {
   auto reports_race_after_wait = [](uint64_t shared_lanes, uint8_t vmcnt, uint8_t lgkmcnt) {
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/1);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -1446,9 +1476,7 @@ TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCou
     }
     f.plugin_group_->onAmdgpuMemoryAccessRouted(access, flat, *wf);
 
-    wf->set_wait_target(vmcnt, lgkmcnt, WaitCounters::EXPCNT_MAX);
-    TestWaitcntInstruction wait;
-    f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+    execute_wait(*f.plugin_group_, *wf, legacy_wait_word(wf->cu().arch(), vmcnt, lgkmcnt));
     f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/3);
     return sink.str().find("RACE ") != std::string::npos;
   };
@@ -1476,7 +1504,8 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           SCOPED_TRACE(static_cast<unsigned>(waited));
           const uint32_t wave_size = is_rdna4 ? 32 : 64;
           const uint32_t sgprs = is_rdna4 ? 128 : 104;
-          PluginFixture f(1, is_rdna4 ? "rdna4" : "cdna4", wave_size, sgprs);
+          PluginFixture f;
+          ASSERT_NO_FATAL_FAILURE(f.initialize(1, is_rdna4 ? "rdna4" : "cdna4", wave_size, sgprs));
           PluginSinkConfig sink_config;
           auto &sink = sink_config.emplace<StringSink>();
           f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -1549,18 +1578,9 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
                     [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
 
           const auto wait_zero = [&](bool lds) {
-            if (is_rdna4) {
-              if (lds)
-                wf->set_wait_target_dscnt(0);
-              else
-                wf->set_wait_target_loadcnt(0);
-              TestWaitcntInstruction wait(lds ? "s_wait_dscnt" : "s_wait_loadcnt");
-              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, wait, *wf);
-            } else {
-              wf->set_wait_target(lds ? 63 : 0, lds ? 0 : 15, 7);
-              TestWaitcntInstruction wait;
-              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, wait, *wf);
-            }
+            const uint32_t word =
+                is_rdna4 ? (lds ? 0xbfc60000u : 0xbfc00000u) : (lds ? 0xbf8cc07fu : 0xbf8c0f70u);
+            execute_wait(*f.plugin_group_, *wf, word);
             core.wait(lds ? WaitCounterKind::Ds : WaitCounterKind::Load, 0);
           };
           if (waited != Wait::None)
@@ -1608,7 +1628,8 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             SCOPED_TRACE(width);
             SCOPED_TRACE(exec);
             SCOPED_TRACE(waits);
-            PluginFixture f(1, std::string(arch), wave_size, sgprs);
+            PluginFixture f;
+            ASSERT_NO_FATAL_FAILURE(f.initialize(1, std::string(arch), wave_size, sgprs));
             PluginSinkConfig sink_config;
             auto &sink = sink_config.emplace<StringSink>();
             auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -1709,16 +1730,11 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             const uint8_t ds_max = cdna_legacy ? 15 : 63;
             const uint8_t lgkmcnt = waits == 4 ? 1 : (waits & 2) ? 0 : ds_max;
             if (split) {
-              wf->set_wait_target_loadcnt(vmcnt);
-              TestWaitcntInstruction vm_wait("s_wait_loadcnt");
-              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, vm_wait, *wf);
-              wf->set_wait_target_dscnt(lgkmcnt);
-              TestWaitcntInstruction ds_wait("s_wait_dscnt");
-              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x204, ds_wait, *wf);
+              execute_wait(*f.plugin_group_, *wf, 0xbfc00000u | vmcnt);
+              execute_wait(*f.plugin_group_, *wf, 0xbfc60000u | lgkmcnt);
             } else {
-              wf->set_wait_target(vmcnt, lgkmcnt, 7);
-              TestWaitcntInstruction wait;
-              f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, wait, *wf);
+              execute_wait(*f.plugin_group_, *wf,
+                           legacy_wait_word(wf->cu().arch(), vmcnt, lgkmcnt));
             }
             if (vmcnt != 63)
               core.wait(WaitCounterKind::Load, vmcnt);
@@ -1751,7 +1767,8 @@ TEST(RaceDetectorPluginTest, Gfx950FlatEmptyPortionDoesNotOrderAnOlderResult) {
     for (const int flat_count : {1, lds ? 64 : 16}) {
       SCOPED_TRACE(lds);
       SCOPED_TRACE(flat_count);
-      PluginFixture f(/*num_wf_slots=*/1);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
       PluginSinkConfig sink_config;
       auto &sink = sink_config.emplace<StringSink>();
       auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -1795,9 +1812,7 @@ TEST(RaceDetectorPluginTest, Gfx950FlatEmptyPortionDoesNotOrderAnOlderResult) {
       access.flat_local_lane_mask = lds ? 1 : 0;
 
       const auto apply_wait = [&](uint8_t vmcnt, uint8_t lgkmcnt) {
-        wf->set_wait_target(vmcnt, lgkmcnt, 7);
-        TestWaitcntInstruction wait;
-        f.plugin_group_->onAmdgpuAfterExecuteInstruction(0x200, wait, *wf);
+        execute_wait(*f.plugin_group_, *wf, legacy_wait_word(wf->cu().arch(), vmcnt, lgkmcnt));
       };
       for (int i = 0; i < flat_count; ++i) {
         f.plugin_group_->onAmdgpuMemoryAccessRouted(access, flat, *wf);
@@ -1829,7 +1844,8 @@ TEST(RaceDetectorPluginTest, FlatCounterCapacityRequiresResolvedDomain) {
           SCOPED_TRACE(requests);
           SCOPED_TRACE(flat_lds);
           SCOPED_TRACE(static_cast<int>(phase));
-          PluginFixture f(1);
+          PluginFixture f;
+          ASSERT_NO_FATAL_FAILURE(f.initialize(1));
           PluginSinkConfig sink_config;
           auto &sink = sink_config.emplace<StringSink>();
           auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -1931,8 +1947,9 @@ TEST(RaceDetectorPluginTest, FlatCounterCapacityRequiresResolvedDomain) {
 }
 
 TEST(RaceDetectorPluginTest, NamedLgkmcntWaitRetiresSplitScalarEvent) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna3", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna3", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -1956,16 +1973,14 @@ TEST(RaceDetectorPluginTest, NamedLgkmcntWaitRetiresSplitScalarEvent) {
   TestMemoryInstruction load(std::move(state));
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
-  const auto current_wait = wf->wait_target();
-  wf->set_wait_target(current_wait.vmcnt, 0, current_wait.expcnt);
-  TestWaitcntInstruction wait("s_waitcnt_lgkmcnt");
-  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+  execute_wait(*f.plugin_group_, *wf, 0xbdfc0000u); // s_waitcnt_lgkmcnt null, 0.
   static_cast<void>(RegisterAccess(*wf).read_ttmp(0));
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
 TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<MfmaRacePlugin>();
   auto *race_plugin = plugin.get();
@@ -2010,7 +2025,8 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
     } force_scalar_guard;
     util::set_force_scalar_for_testing(false);
 
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<MfmaRacePlugin>();
     auto *race_plugin = plugin.get();
@@ -2233,7 +2249,9 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {
 }
 
 TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -2282,7 +2300,9 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
 }
 
 TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -2333,7 +2353,9 @@ TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
 class IgnoredGlobalMemoryRaceTest : public ::testing::TestWithParam<AtomicOp> {};
 
 TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -2367,8 +2389,10 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
-TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
+TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeLoadcntOrderingSlot) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -2389,6 +2413,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
   load->elem_size = 4;
   load->num_elems = 1;
   load->is_load = true;
+  load->wait_counter_type = WaitCounterType::LOADCNT;
   load->exec_mask = 0x1u;
   load->lane_mask = 0x1u;
   load->wf_size = wf->wf_size();
@@ -2400,6 +2425,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
   ignored->elem_size = 4;
   ignored->num_elems = 1;
   ignored->is_load = false;
+  ignored->wait_counter_type = WaitCounterType::LOADCNT;
   ignored->atomic_op = GetParam();
   ignored->exec_mask = 0;
   ignored->lane_mask = 0;
@@ -2407,9 +2433,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
   TestMemoryInstruction ignored_inst(std::move(ignored));
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, ignored_inst, *wf);
 
-  wf->set_wait_target(/*vmcnt=*/1, /*lgkmcnt=*/0, /*expcnt=*/0);
-  TestWaitcntInstruction waitcnt;
-  f.plugin_group_->onAmdgpuAfterExecuteInstruction(wf->pc, waitcnt, *wf);
+  execute_wait(*f.plugin_group_, *wf, 0xbfc00001u); // s_wait_loadcnt 1.
 
   f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDestinationVgpr,
                                          /*lane_mask=*/0x1u, /*byte_mask=*/0xFu);
@@ -2423,7 +2447,8 @@ TEST(RaceDetectorPluginTest, DecodedDirectLdsLoadsDetectConflictingWaveStores) {
   for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {
     for (uint32_t store_address : {16u, 20u}) {
       SCOPED_TRACE(testing::Message() << arch << ',' << store_address);
-      PluginFixture fixture(2, arch, 32);
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(2, arch, 32));
       PluginSinkConfig sink_config;
       auto &sink = sink_config.emplace<StringSink>();
       fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));

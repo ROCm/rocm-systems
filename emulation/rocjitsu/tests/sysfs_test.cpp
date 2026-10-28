@@ -10,13 +10,21 @@
 /// architecture-specific "precise" debug bits are gated correctly. Also checks
 /// that IP discovery publishes the configured GC, SDMA, and NBIF versions.
 
+#include "config_test_util.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "scoped_temp.h"
+#include "util/diagnostic.h"
 
 #include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
+#include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
+#include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -29,18 +37,26 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace {
 
 using namespace rocjitsu;
+
+constexpr uint64_t kFramebufferPublicHeap = 1;
+constexpr uint64_t kFramebufferPrivateHeap = 2;
 
 // Reads a KFD sysfs "properties" file (space-separated "key value" lines)
 // into a lookup table.
@@ -85,10 +101,298 @@ TEST(SysfsTopologyTest, DefaultGpuInfoHasCoherentSdmaCounts) {
   EXPECT_EQ(props["num_sdma_queues_per_engine"], 0u);
 }
 
+TEST(SysfsTopologyTest, VisibleVramMatchesPciBarAndKfdBanks) {
+  for (const char *config_name : {"gfx1250_mi455x.json", "gfx942_cdna3_kmd.json"}) {
+    SCOPED_TRACE(config_name);
+    util::StringDiagnostic diagnostic;
+    auto identity_result = config::load_device_identity(std::string(CONFIG_DIR) + "/" + config_name,
+                                                        kEmbeddedSchema, diagnostic.emitter());
+    ASSERT_TRUE(identity_result.succeeded()) << diagnostic.message();
+    const auto &device = identity_result.value().device;
+    for (uint64_t aperture_override :
+         {uint64_t{0}, uint64_t{32} << 20, std::bit_ceil(device.local_mem_size + 1)}) {
+      SCOPED_TRACE(aperture_override);
+      auto pci = identity_result.value().pci;
+      pci.vram_aperture_bytes = aperture_override;
+      const auto info = gpu_info_from_config(device, 1, pci);
+      const uint64_t expected_visible = std::min(
+          aperture_override ? aperture_override : device.local_mem_size, device.local_mem_size);
+      // Only gfx1250 has a guest PCI discovery profile. gfx942 still
+      // exercises the KFD and DRM values without constructing a PCI device.
+      if (device.gfx_target_version == 120500 && aperture_override <= device.local_mem_size) {
+        const auto spec = gpu_pci_spec_from_config(device, pci);
+        GpuPciDevice gpu_device("topology", spec, nullptr);
+        ASSERT_TRUE(gpu_device.usable());
+        const auto bars = gpu_device.bars();
+        const auto bar = std::ranges::find(bars, GpuPciDevice::kVramBar, &simdojo::BarSpec::index);
+        ASSERT_NE(bar, bars.end());
+        if (aperture_override == 0) {
+          // PCI chooses its default BAR; KFD defaults to full CPU visibility.
+          EXPECT_EQ(bar->size, spec.vram_aperture_bytes);
+        } else {
+          EXPECT_EQ(bar->size, expected_visible);
+          EXPECT_EQ(bar->size, info.visible_vram_size);
+        }
+      }
+      // PCI rejects an aperture larger than physical VRAM, but GpuInfo must
+      // still clamp that input before it reaches its KFD and DRM consumers.
+      Sysfs sysfs;
+      const auto path = sysfs.generate(info);
+      ASSERT_FALSE(path.empty());
+      const auto props = read_properties(path + "/nodes/1/properties");
+      const auto bank = read_properties(path + "/nodes/1/mem_banks/0/properties");
+      const bool fully_visible = expected_visible == device.local_mem_size;
+      const uint64_t drm_visible = std::stoull(
+          read_sysfs_file(sysfs.drm_path() + "/renderD" + std::to_string(info.drm_render_minor) +
+                          "/device/mem_info_vis_vram_total"));
+      EXPECT_EQ(drm_visible, expected_visible);
+      EXPECT_EQ(info.visible_vram_size, expected_visible);
+      EXPECT_EQ(props.at("mem_banks_count"), 1u);
+      EXPECT_EQ(props.at("vram_public"), fully_visible);
+      EXPECT_EQ(bank.at("heap_type"),
+                fully_visible ? kFramebufferPublicHeap : kFramebufferPrivateHeap);
+      EXPECT_EQ(bank.at("size_in_bytes"), device.local_mem_size);
+      EXPECT_FALSE(std::filesystem::exists(path + "/nodes/1/mem_banks/1"));
+    }
+  }
+}
+
+TEST(SysfsTopologyTest, ShippedCdnaKfdDefaultsAreFullyCpuVisible) {
+  for (const char *config_name :
+       {"gfx942_cdna3_kmd.json", "gfx950_mi355x_kmd.json", "gfx1250_mi455x.json"}) {
+    SCOPED_TRACE(config_name);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(std::string(CONFIG_DIR) + "/" + config_name, loaded));
+    ASSERT_EQ(loaded.pci.vram_aperture_bytes, 0u);
+    const auto info = gpu_info_from_config(loaded.device, loaded.soc()->num_xcds(), loaded.pci);
+    EXPECT_EQ(info.visible_vram_size, loaded.device.local_mem_size);
+    Sysfs sysfs;
+    const auto path = sysfs.generate(info);
+    ASSERT_FALSE(path.empty());
+    const auto props = read_properties(path + "/nodes/1/properties");
+    const auto bank = read_properties(path + "/nodes/1/mem_banks/0/properties");
+    EXPECT_EQ(props.at("vram_public"), 1u);
+    EXPECT_EQ(props.at("mem_banks_count"), 1u);
+    EXPECT_EQ(bank.at("heap_type"), kFramebufferPublicHeap);
+    EXPECT_EQ(bank.at("size_in_bytes"), loaded.device.local_mem_size);
+  }
+}
+
+TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
+  struct Case {
+    const char *config_name;
+    rj_code_arch_t arch;
+    uint32_t max_vgprs;
+  };
+  for (const auto &[config_name, arch, max_vgprs] :
+       {Case{"gfx942_cdna3_kmd.json", ROCJITSU_CODE_ARCH_CDNA3, 256},
+        Case{"gfx950_mi355x_kmd.json", ROCJITSU_CODE_ARCH_CDNA4, 256},
+        Case{"gfx1250_mi455x.json", ROCJITSU_CODE_ARCH_CDNA5, 1024}}) {
+    SCOPED_TRACE(config_name);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(std::string(CONFIG_DIR) + "/" + config_name, loaded));
+    const uint32_t xcc_count = loaded.soc()->num_xcds();
+    const auto info = gpu_info_from_config(loaded.device, xcc_count, loaded.pci);
+    Sysfs sysfs;
+    const auto path = sysfs.generate(info);
+    ASSERT_FALSE(path.empty());
+    const auto props = read_properties(path + "/nodes/1/properties");
+    const uint64_t control = props.at("ctl_stack_size");
+    const uint64_t context = props.at("cwsr_size");
+    EXPECT_EQ(control, info.control_stack_size);
+    EXPECT_EQ(context, info.context_save_size);
+    // Use the CUs and wave slots from the CWSR producer's XCC, including
+    // simulated slots beyond the enabled SIMD count advertised by KFD.
+    uint64_t resident_waves = 0;
+    for (auto *cu : loaded.soc()->xcd(0)->command_processor()->compute_units())
+      resident_waves += cu->num_wf_slots();
+    EXPECT_EQ(control % 4096, 0u);
+    EXPECT_EQ(context % 4096, 0u);
+    ASSERT_GT(control, 0u);
+    ASSERT_GT(context, control);
+
+    // One high-VGPR wave sets the record stride for every resident wave.
+    // Verify the advertised area with the serializer itself, rather than a
+    // second size formula that could diverge from compute_geometry.
+    std::vector<kmd::CwsrWaveState> waves(resident_waves);
+    for (auto &wave : waves)
+      wave.num_vgprs = 8;
+    waves.front().num_vgprs = max_vgprs;
+    uint64_t writes = 0;
+    const auto layout = kmd::serialize_queue_cwsr(
+        0x100000, info.context_save_size, waves, [&](uint64_t, uint32_t) { ++writes; }, arch);
+    EXPECT_TRUE(layout.ok);
+    EXPECT_GT(writes, 0u);
+
+    // libhsakmt stores the total queue save allocation in uint32_t. One
+    // maximal LDS group per CU can coexist with the other resident waves.
+    const auto &cus = loaded.soc()->xcd(0)->command_processor()->compute_units();
+    for (auto &wave : waves)
+      wave.is_first_in_group = true;
+    for (uint64_t i = 0; i < cus.size(); ++i)
+      waves[i].lds.resize(cus[i]->config().lds_size_kb * 1024);
+    writes = 0;
+    const auto mixed = kmd::serialize_queue_cwsr(
+        0x100000, info.context_save_size, waves, [&](uint64_t, uint32_t) { ++writes; }, arch);
+    EXPECT_TRUE(mixed.ok);
+    EXPECT_GT(writes, 0u);
+    const uint64_t debugger_reserve = (resident_waves + 1) * 64;
+    EXPECT_LE((uint64_t{info.context_save_size} + debugger_reserve) * xcc_count,
+              std::numeric_limits<uint32_t>::max());
+
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      // A large LDS group alongside many empty groups must fit while
+      // preserving the independent record size of each group.
+      std::vector<kmd::CwsrWaveState> mixed_lds(512);
+      for (auto &wave : mixed_lds) {
+        wave.num_vgprs = 8;
+        wave.is_first_in_group = true;
+      }
+      mixed_lds.front().lds.resize(cus.front()->config().lds_size_kb * 1024);
+      writes = 0;
+      const auto padded = kmd::serialize_queue_cwsr(
+          0x100000, info.context_save_size, mixed_lds, [&](uint64_t, uint32_t) { ++writes; }, arch);
+      EXPECT_TRUE(padded.ok);
+      EXPECT_GT(writes, 0u);
+    }
+  }
+
+  config::LoadedConfig unsupported;
+  ASSERT_TRUE(
+      test::load_valid_config(std::string(CONFIG_DIR) + "/gfx942_cdna3_kmd.json", unsupported));
+  unsupported.device.gfx_target_version = 110000;
+  const auto info =
+      gpu_info_from_config(unsupported.device, unsupported.soc()->num_xcds(), unsupported.pci);
+  EXPECT_GE(info.control_stack_size, 40u);
+  EXPECT_GT(info.context_save_size, info.control_stack_size);
+  std::vector<kmd::CwsrWaveState> wave(1);
+  wave.front().num_vgprs = 8;
+  uint32_t writes = 0;
+  EXPECT_FALSE(kmd::serialize_queue_cwsr(
+                   0x100000, info.context_save_size, wave, [&](uint64_t, uint32_t) { ++writes; },
+                   ROCJITSU_CODE_ARCH_RDNA3)
+                   .ok);
+  EXPECT_EQ(writes, 0u);
+}
+
+TEST(SysfsTopologyTest, RejectsCuLdsCapacityBeyondAdvertisedCwsrBound) {
+  const std::string path = std::string(CONFIG_DIR) + "/gfx942_cdna3_kmd.json";
+  std::string config = read_sysfs_file(path);
+  const std::string configured_cu = "\"key\": \"lds_size_kb\", \"value\": \"64\"";
+  const auto location = config.find(configured_cu);
+  ASSERT_NE(location, std::string::npos);
+  config.replace(location, configured_cu.size(), "\"key\": \"lds_size_kb\", \"value\": \"160\"");
+
+  util::StringDiagnostic diagnostic;
+  const auto loaded =
+      config::load_config_from_string(config, kEmbeddedSchema, diagnostic.emitter());
+  EXPECT_TRUE(loaded.failed());
+  EXPECT_EQ(diagnostic.message(), "CWSR CU LDS capacity exceeds advertised device LDS capacity");
+
+  test::ScopedTempFile file("rocjitsu-cwsr-config-");
+  file.write(config);
+  util::StringDiagnostic validate_diagnostic;
+  EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(validate_diagnostic.message(), diagnostic.message());
+}
+
+TEST(SysfsTopologyTest, RejectsCuWaveSlotsBeyondAdvertisedCwsrBound) {
+  const std::string path = std::string(CONFIG_DIR) + "/gfx942_cdna3_kmd.json";
+  std::string config = read_sysfs_file(path);
+  for (const auto &[original, reduced] :
+       {std::pair{"\"max_waves_per_simd\": 8", "\"max_waves_per_simd\": 4"},
+        std::pair{"\"max_slots_scratch_cu\": 32", "\"max_slots_scratch_cu\": 16"}}) {
+    const auto location = config.find(original);
+    ASSERT_NE(location, std::string::npos);
+    config.replace(location, std::strlen(original), reduced);
+  }
+
+  util::StringDiagnostic diagnostic;
+  const auto loaded =
+      config::load_config_from_string(config, kEmbeddedSchema, diagnostic.emitter());
+  EXPECT_TRUE(loaded.failed());
+  EXPECT_EQ(diagnostic.message(), "CWSR CU wave slots exceed advertised device wave capacity");
+
+  test::ScopedTempFile file("rocjitsu-cwsr-config-");
+  file.write(config);
+  util::StringDiagnostic validate_diagnostic;
+  EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(validate_diagnostic.message(), diagnostic.message());
+}
+
+TEST(SysfsTopologyTest, RejectsCuCountBeyondAdvertisedCwsrBound) {
+  const std::string path = std::string(CONFIG_DIR) + "/gfx942_cdna3_kmd.json";
+  std::string config = read_sysfs_file(path);
+  // 44 CUs with eight slots each use fewer than the advertised 1,280 wave
+  // slots, but the CWSR area's per-CU LDS reserve only covers 40 CUs.
+  for (const auto &[original, updated] :
+       {std::pair{"\"name\": \"cu[0:10]\"", "\"name\": \"cu[0:11]\""},
+        std::pair{"\"key\": \"num_wf_slots\", \"value\": \"32\"",
+                  "\"key\": \"num_wf_slots\", \"value\": \"8\""}}) {
+    const auto location = config.find(original);
+    ASSERT_NE(location, std::string::npos);
+    config.replace(location, std::strlen(original), updated);
+  }
+
+  util::StringDiagnostic diagnostic;
+  const auto loaded =
+      config::load_config_from_string(config, kEmbeddedSchema, diagnostic.emitter());
+  EXPECT_TRUE(loaded.failed());
+  EXPECT_EQ(diagnostic.message(), "CWSR CU count exceeds advertised device CU capacity");
+
+  test::ScopedTempFile file("rocjitsu-cwsr-config-");
+  file.write(config);
+  util::StringDiagnostic validate_diagnostic;
+  EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(validate_diagnostic.message(), diagnostic.message());
+}
+
+TEST(SysfsTopologyTest, RejectsAdvertisedLdsBeyondCwsrRecordField) {
+  const std::string path = std::string(CONFIG_DIR) + "/gfx942_cdna3_kmd.json";
+  std::string config = read_sysfs_file(path);
+  const std::string advertised = "\"lds_size_kb\": 64";
+  const auto location = config.find(advertised);
+  ASSERT_NE(location, std::string::npos);
+  config.replace(location, advertised.size(), "\"lds_size_kb\": 256");
+
+  util::StringDiagnostic diagnostic;
+  const auto loaded =
+      config::load_config_from_string(config, kEmbeddedSchema, diagnostic.emitter());
+  EXPECT_TRUE(loaded.failed());
+  EXPECT_EQ(diagnostic.message(), "CWSR advertised LDS capacity exceeds the save record field");
+}
+
+TEST(SysfsTopologyTest, LegacyMultiGpuTopologyKeepsPeerLinks) {
+  auto first = make_gpu_info(120500);
+  auto second = first;
+  second.gpu_id = 2;
+  second.drm_render_minor = 129;
+
+  Sysfs sysfs;
+  const auto topology_dir = sysfs.generate(std::vector<Sysfs::GpuInfo>{first, second});
+  ASSERT_FALSE(topology_dir.empty());
+  for (const auto node : {"1", "2"}) {
+    const auto path = std::filesystem::path(topology_dir) / "nodes" / node;
+    const auto properties = read_properties((path / "properties").string());
+    ASSERT_TRUE(properties.contains("io_links_count"));
+    ASSERT_TRUE(properties.contains("p2p_links_count"));
+    EXPECT_EQ(properties.at("io_links_count"), 2u);
+    EXPECT_EQ(properties.at("p2p_links_count"), 1u);
+    EXPECT_TRUE(std::filesystem::exists(path / "io_links" / "1" / "properties"));
+    EXPECT_TRUE(std::filesystem::exists(path / "p2p_links" / "0" / "properties"));
+  }
+}
+
 TEST(SysfsTopologyTest, W7900PublishesComputeIpDiscoveryVersions) {
   Sysfs sysfs;
-  const auto identity = config::load_device_identity(
-      std::string(CONFIG_DIR) + "/gfx1100_w7900.json", kEmbeddedSchema);
+  util::StringDiagnostic diagnostic;
+  auto identity_result = config::load_device_identity(
+      std::string(CONFIG_DIR) + "/gfx1100_w7900.json", kEmbeddedSchema, diagnostic.emitter());
+  ASSERT_TRUE(identity_result.succeeded()) << diagnostic.message();
+  const auto &identity = identity_result.value();
   auto gpu = gpu_info_from_config(identity.device, 1);
   gpu.drm_render_minor = 129;
   ASSERT_FALSE(sysfs.generate(gpu).empty());
@@ -110,8 +414,11 @@ TEST(SysfsTopologyTest, W7900PublishesComputeIpDiscoveryVersions) {
 
 TEST(SysfsTopologyTest, R9700PublishesComputeIpDiscoveryVersions) {
   Sysfs sysfs;
-  const auto identity = config::load_device_identity(
-      std::string(CONFIG_DIR) + "/gfx1201_r9700.json", kEmbeddedSchema);
+  util::StringDiagnostic diagnostic;
+  auto identity_result = config::load_device_identity(
+      std::string(CONFIG_DIR) + "/gfx1201_r9700.json", kEmbeddedSchema, diagnostic.emitter());
+  ASSERT_TRUE(identity_result.succeeded()) << diagnostic.message();
+  const auto &identity = identity_result.value();
   auto gpu = gpu_info_from_config(identity.device, 1);
   gpu.drm_render_minor = 128;
   ASSERT_FALSE(sysfs.generate(gpu).empty());
@@ -145,8 +452,11 @@ TEST(SysfsTopologyTest, CdnaAndRdna35PublishComputeIpDiscoveryVersions) {
   for (const auto &profile : profiles) {
     SCOPED_TRACE(profile.filename);
     Sysfs sysfs;
-    const auto identity = config::load_device_identity(
-        std::string(CONFIG_DIR) + "/" + profile.filename, kEmbeddedSchema);
+    util::StringDiagnostic diagnostic;
+    auto identity_result = config::load_device_identity(
+        std::string(CONFIG_DIR) + "/" + profile.filename, kEmbeddedSchema, diagnostic.emitter());
+    ASSERT_TRUE(identity_result.succeeded()) << diagnostic.message();
+    const auto &identity = identity_result.value();
     auto gpu = gpu_info_from_config(identity.device, profile.num_xcc);
     gpu.drm_render_minor = 128;
     ASSERT_FALSE(sysfs.generate(gpu).empty());
@@ -163,17 +473,20 @@ TEST(SysfsTopologyTest, CdnaAndRdna35PublishComputeIpDiscoveryVersions) {
 }
 
 TEST(SysfsTopologyTest, IpDiscoveryUsesOwnedConfigVersions) {
+  util::StringDiagnostic diagnostic;
   const auto device = config::with_parsed_simulation_config_json(
       R"({"vm":{"gpu":{"device":{
         "gfx_target_version":110000, "num_sdma_engines":0,
         "ip_versions":[{"hardware_id":11,"major":11,"minor":0,"revision":7}]
       }}}})",
-      kEmbeddedSchema, [](const fb::SimulationConfig *parsed) {
-        return config::kfd_device_from_fb(parsed->vm()->gpu()->device(), "vm.gpu.device");
+      kEmbeddedSchema, diagnostic.emitter(), [&diagnostic](const fb::SimulationConfig *parsed) {
+        return config::kfd_device_from_fb(parsed->vm()->gpu()->device(), "vm.gpu.device",
+                                          diagnostic.emitter());
       });
+  ASSERT_TRUE(device.succeeded()) << diagnostic.message();
   // The parser and its storage have been destroyed before sysfs consumes the data.
   Sysfs sysfs;
-  ASSERT_FALSE(sysfs.generate(gpu_info_from_config(device, 1)).empty());
+  ASSERT_FALSE(sysfs.generate(gpu_info_from_config(device.value(), 1)).empty());
   const std::string base = sysfs.drm_path() + "/card0/device/ip_discovery/die/0/";
   EXPECT_EQ(read_sysfs_file(base + "11/0/revision"), "7\n");
   EXPECT_FALSE(std::filesystem::exists(base + "42"));
@@ -187,26 +500,43 @@ TEST(SysfsTopologyTest, OmittedIpVersionsDoNotInventDiscoveryBlocks) {
 }
 
 TEST(SysfsTopologyTest, RejectsInvalidIpVersionsInVmAndGuestConfigs) {
-  for (const std::string entries :
-       {R"({"hardware_id":0,"major":11})", R"({"hardware_id":11,"major":0})",
-        R"({"hardware_id":11,"major":256})", R"({"hardware_id":11,"major":11,"revision":256})",
-        R"({"hardware_id":11,"major":11},{"hardware_id":11,"major":12})"}) {
-    SCOPED_TRACE(entries);
+  struct InvalidVersions {
+    const char *entries;
+    const char *error;
+  };
+  const InvalidVersions cases[] = {
+      {R"({"hardware_id":0,"major":11})", ".ip_versions requires nonzero hardware_id and major"},
+      {R"({"hardware_id":11,"major":0})", ".ip_versions requires nonzero hardware_id and major"},
+      {R"({"hardware_id":11,"major":256})", nullptr},
+      {R"({"hardware_id":11,"major":11,"revision":256})", nullptr},
+      {R"({"hardware_id":11,"major":11},{"hardware_id":11,"major":12})",
+       ".ip_versions contains a duplicate hardware_id"},
+  };
+  for (const auto &invalid : cases) {
+    SCOPED_TRACE(invalid.entries);
     for (bool guest : {false, true}) {
       SCOPED_TRACE(guest);
+      const std::string json_path = guest ? "dbt_guest.guest_device" : "vm.gpu.device";
       const std::string json =
           (guest ? R"({"dbt_guest":{"guest_device":)" : R"({"vm":{"gpu":{"device":)") +
-          std::string(R"({"num_sdma_engines":0,"ip_versions":[)") + entries +
+          std::string(R"({"num_sdma_engines":0,"ip_versions":[)") + invalid.entries +
           (guest ? "]}}}" : "]}}}}");
-      EXPECT_THROW(config::with_parsed_simulation_config_json(
-                       json, kEmbeddedSchema,
-                       [guest](const fb::SimulationConfig *parsed) {
-                         const auto *device = guest ? parsed->dbt_guest()->guest_device()
-                                                    : parsed->vm()->gpu()->device();
-                         (void)config::kfd_device_from_fb(device, guest ? "dbt_guest.guest_device"
-                                                                        : "vm.gpu.device");
-                       }),
-                   std::runtime_error);
+      util::StringDiagnostic diagnostic;
+      auto result = config::with_parsed_simulation_config_json(
+          json, kEmbeddedSchema, diagnostic.emitter(),
+          [guest, &json_path, &diagnostic](const fb::SimulationConfig *parsed) {
+            const auto *device =
+                guest ? parsed->dbt_guest()->guest_device() : parsed->vm()->gpu()->device();
+            return config::kfd_device_from_fb(device, json_path, diagnostic.emitter());
+          });
+      EXPECT_TRUE(result.failed());
+      if (invalid.error) {
+        EXPECT_EQ(diagnostic.message(), json_path + invalid.error);
+      } else {
+        // Byte-valued version fields are rejected by FlatBuffers before conversion.
+        EXPECT_TRUE(diagnostic.message().starts_with("Failed to parse JSON config: "))
+            << diagnostic.message();
+      }
     }
   }
 }
@@ -387,8 +717,8 @@ TEST(SysfsTopologyDebugCapabilityTest, DefaultDebugPropMatchesHardware) {
 }
 
 TEST(SysfsTopologyDebugCapabilityTest, Mi455xConfigPublishesB0AsicRevision) {
-  auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx1250_mi455x.json",
-                                    rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(std::string(CONFIG_DIR) + "/gfx1250_mi455x.json", loaded));
   ASSERT_TRUE(loaded.device.present);
   ASSERT_EQ(loaded.device.revision_id, 1u);
 
@@ -454,7 +784,8 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
 
   for (const char *cfg : kMi300xConfigs) {
     SCOPED_TRACE(cfg);
-    auto loaded = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(config_dir + "/" + cfg, loaded));
     ASSERT_TRUE(loaded.device.present);
     const uint32_t num_xcc = loaded.soc()->num_xcds();
     ASSERT_EQ(num_xcc, 8u);
@@ -503,7 +834,8 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
 
   for (const char *cfg : kMi350xConfigs) {
     SCOPED_TRACE(cfg);
-    auto loaded = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(config_dir + "/" + cfg, loaded));
     ASSERT_TRUE(loaded.device.present);
     ASSERT_NE(loaded.soc(), nullptr);
     const uint32_t num_xcc = loaded.soc()->num_xcds();
@@ -550,7 +882,8 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
 // must not be treated as exact rocminfo parity.
 TEST(SysfsTopologyIdentityTest, Mi455xUsesPublishedPhysicalDeviceId) {
   const std::string config_dir = CONFIG_DIR;
-  auto loaded = config::load_config(config_dir + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(config_dir + "/gfx1250_mi455x.json", loaded));
   ASSERT_TRUE(loaded.device.present);
   ASSERT_NE(loaded.soc(), nullptr);
 
@@ -608,7 +941,12 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
       continue;
     SCOPED_TRACE(name);
 
-    auto loaded = config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    if (name == "gfx1250_mi455x_kmd_2node_net.json") {
+      ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), loaded, "node0"));
+    } else {
+      ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));
+    }
     if (!loaded.device.present || loaded.soc() == nullptr)
       continue;
     ++checked;
@@ -700,7 +1038,8 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   for (const char *cfg : kConfigs) {
     SCOPED_TRACE(cfg);
 
-    auto loaded = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(config_dir + "/" + cfg, loaded));
     ASSERT_TRUE(loaded.device.present);
 
     const DebugCapExpectation *e = find_expectation(loaded.device.gfx_target_version);
