@@ -82,7 +82,7 @@ __launch_bounds__(1024)
 
   for (size_t s = gwarp; s < slicesTotal; s += wstride)
     ddaLL128SendSlice(srcBytes + s * (size_t)kDdaLL128DataBytesPerSlice, ddaLL128SliceBytes(perChunkBytes, s),
-                             scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice, flag, lane, flagLane);
+                      scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice, flag, lane, flagLane);
 
   ddaGridCopy16B(reinterpret_cast<const int8_t*>(sendbuff) + (size_t)selfRank * perChunkBytes,
                  reinterpret_cast<int8_t*>(recvbuff) + (size_t)selfRank * perChunkBytes, perChunkBytes,
