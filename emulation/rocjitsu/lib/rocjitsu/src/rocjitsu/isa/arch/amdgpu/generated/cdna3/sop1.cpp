@@ -1346,6 +1346,10 @@ SCbranchJoinSop1::SCbranchJoinSop1(const MachineInst *inst)
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= INDIRECT_BRANCH;
+  flags_ |= BRANCH_STACK;
+  flags_ |= IGNORES_EXEC;
+  flags_ |= WRITES_EXEC;
 }
 
 namespace detail {
@@ -1358,6 +1362,11 @@ DecodeResult decodeSCbranchJoinSop1(const MachineInst *opcode,
   return std::make_unique<SCbranchJoinSop1>(opcode);
 }
 } // namespace detail
+
+void SCbranchJoinSop1::implicit_uses(RegisterSet &uses) const {
+  Sop1::implicit_uses(uses);
+  uses.expand(RegisterRef{RegClass::SGPR, 0, 32});
+}
 
 SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
     : Sop1("s_abs_i32", reinterpret_cast<const OpEncoding *>(inst),

@@ -16,6 +16,7 @@
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/os_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "transport/RmaSocketTest.h"
 
@@ -106,6 +107,7 @@ class RmaSocketSetupMicrotest : public ::testing::Test {
 
   void TearDown() override {
     ResetSocketFakes();
+    ResetOsFakes();
     ResetHipFakes();
     ResetNcclFakes();
   }
