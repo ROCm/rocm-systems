@@ -11,8 +11,8 @@ TEST(LaunchFlags, OmissionExplicitZeroAndRepeatedOverrides) {
   util::StringDiagnostic diagnostic;
   ASSERT_TRUE(flags.register_flags(command, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(parse(command, {}, diagnostic.emitter()).succeeded());
-  EXPECT_FALSE(flags.cpu_budget->value());
-  EXPECT_FALSE(flags.wait->value());
+  EXPECT_FALSE(flags.cpu_thread_budget->value());
+  EXPECT_FALSE(flags.wait_checking->value());
   const std::vector<std::string_view> args{"--node=node-0",
                                            "--vfio-socket",
                                            "/tmp/gpu0.sock",
@@ -29,8 +29,8 @@ TEST(LaunchFlags, OmissionExplicitZeroAndRepeatedOverrides) {
   EXPECT_EQ(flags.node->value(), "node-0");
   EXPECT_EQ(flags.vfio_socket->values(),
             (std::vector<std::string>{"/tmp/gpu0.sock", "/tmp/gpu1.sock"}));
-  EXPECT_EQ(flags.cpu_budget->value(), 0u);
-  EXPECT_EQ(flags.wait->value(), config::WaitChecking::On);
+  EXPECT_EQ(flags.cpu_thread_budget->value(), 0u);
+  EXPECT_EQ(flags.wait_checking->value(), config::WaitChecking::On);
   EXPECT_EQ(parsed.value().positional,
             (std::vector<std::string>{"application", "--wait-checking=all", ""}));
 }
@@ -42,17 +42,19 @@ TEST(LaunchFlags, GenericAndTypedUpdatesValidateTheSameStorage) {
   ASSERT_TRUE(flags.register_flags(command, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(
       command.find_flag("--wait-checking")->parse_and_set("all", diagnostic.emitter()).succeeded());
-  EXPECT_EQ(flags.wait->value(), config::WaitChecking::All);
+  EXPECT_EQ(flags.wait_checking->value(), config::WaitChecking::All);
   EXPECT_TRUE(
-      flags.wait->set_value(static_cast<config::WaitChecking>(99), diagnostic.emitter()).failed());
-  ASSERT_TRUE(flags.wait->set_value(std::nullopt, diagnostic.emitter()).succeeded());
-  EXPECT_FALSE(flags.wait->value());
-  EXPECT_TRUE(flags.cpu_budget->parse_and_set("4294967296", diagnostic.emitter()).failed());
-  EXPECT_TRUE(flags.cpu_budget->parse_and_set("-1", diagnostic.emitter()).failed());
-  ASSERT_TRUE(flags.cpu_budget->parse_and_set("4294967295", diagnostic.emitter()).succeeded());
-  EXPECT_EQ(flags.cpu_budget->value(), UINT32_MAX);
-  ASSERT_TRUE(flags.cpu_budget->set_value(std::nullopt, diagnostic.emitter()).succeeded());
-  EXPECT_FALSE(flags.cpu_budget->value());
+      flags.wait_checking->set_value(static_cast<config::WaitChecking>(99), diagnostic.emitter())
+          .failed());
+  ASSERT_TRUE(flags.wait_checking->set_value(std::nullopt, diagnostic.emitter()).succeeded());
+  EXPECT_FALSE(flags.wait_checking->value());
+  EXPECT_TRUE(flags.cpu_thread_budget->parse_and_set("4294967296", diagnostic.emitter()).failed());
+  EXPECT_TRUE(flags.cpu_thread_budget->parse_and_set("-1", diagnostic.emitter()).failed());
+  ASSERT_TRUE(
+      flags.cpu_thread_budget->parse_and_set("4294967295", diagnostic.emitter()).succeeded());
+  EXPECT_EQ(flags.cpu_thread_budget->value(), UINT32_MAX);
+  ASSERT_TRUE(flags.cpu_thread_budget->set_value(std::nullopt, diagnostic.emitter()).succeeded());
+  EXPECT_FALSE(flags.cpu_thread_budget->value());
   EXPECT_TRUE(flags.vfio_ready_fd->parse_and_set("2147483648", diagnostic.emitter()).failed());
   EXPECT_TRUE(flags.vfio_ready_fd->set_value(UINT32_MAX, diagnostic.emitter()).failed());
   EXPECT_TRUE(flags.config->set_value("", diagnostic.emitter()).failed());
@@ -66,8 +68,8 @@ TEST(LaunchFlags, IndependentInvocationsAndHelpMetadata) {
   LaunchFlags other;
   util::StringDiagnostic diagnostic;
   ASSERT_TRUE(flags.register_flags(command, diagnostic.emitter()).succeeded());
-  ASSERT_TRUE(flags.wait->parse_and_set("off", diagnostic.emitter()).succeeded());
-  EXPECT_FALSE(other.wait->value());
+  ASSERT_TRUE(flags.wait_checking->parse_and_set("off", diagnostic.emitter()).succeeded());
+  EXPECT_FALSE(other.wait_checking->value());
   const auto help = format_help(command);
   EXPECT_NE(help.find("Simulation configuration:"), std::string::npos);
   EXPECT_NE(help.find("--vfio-ready-fd VALUE"), std::string::npos);

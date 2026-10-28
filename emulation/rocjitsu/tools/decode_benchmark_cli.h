@@ -50,7 +50,8 @@ struct DecodeBenchmarkFlags {
       cli::FlagInfo{"--help", {"-h"}, "Show help", cli::ValueMode::Switch});
 };
 
-cli::Result register_decode_benchmark_flags(cli::Command &command, DecodeBenchmarkFlags &flags,
+cli::Result register_decode_benchmark_flags(cli::Command &command,
+                                            const DecodeBenchmarkFlags &flags,
                                             cli::DiagnosticEmitter diagnostic);
 
 } // namespace rocjitsu::tools

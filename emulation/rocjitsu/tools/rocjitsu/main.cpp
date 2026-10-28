@@ -423,7 +423,7 @@ int main(int argc, char *argv[]) {
     std::cout << rj_get_version_string() << '\n';
     return 0;
   }
-  if (flags.check_vfio->value()) {
+  if (flags.check_vfio_user->value()) {
 #if defined(RJ_ENABLE_VFIO_USER)
     std::cout << "vfio-user support enabled\n";
     return 0;
@@ -437,10 +437,10 @@ int main(int argc, char *argv[]) {
   const char *config_path = flags.config->value().empty() ? nullptr : flags.config->value().c_str();
   const std::string local_node = flags.node->value();
   std::vector<std::string> vfio_sockets = flags.vfio_socket->values();
-  const bool thread_budget_table = flags.thread_table->value();
+  const bool thread_budget_table = flags.thread_budget_table->value();
   config::LaunchOverrides overrides;
-  overrides.cpu_thread_budget = flags.cpu_budget->value();
-  overrides.wait_checking = flags.wait->value();
+  overrides.cpu_thread_budget = flags.cpu_thread_budget->value();
+  overrides.wait_checking = flags.wait_checking->value();
   overrides.local_node = local_node;
   const int vfio_ready_fd =
       flags.vfio_ready_fd->value() ? static_cast<int>(*flags.vfio_ready_fd->value()) : -1;

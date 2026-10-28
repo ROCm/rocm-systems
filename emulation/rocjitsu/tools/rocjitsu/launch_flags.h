@@ -136,19 +136,19 @@ struct LaunchFlags {
                "Select one local node from a system manifest. Required for multi-node launches. "
                "Not available with --attach"},
       "requires a nonempty ID");
-  std::shared_ptr<OptionalUInt32Flag> cpu_budget = std::make_shared<OptionalUInt32Flag>(
+  std::shared_ptr<OptionalUInt32Flag> cpu_thread_budget = std::make_shared<OptionalUInt32Flag>(
       FlagInfo{"--cpu-thread-budget",
                {},
                "Override CPU thread budget for this launch; zero selects automatic sizing. "
                "Omission preserves JSON and launch overrides do not rewrite the source "
                "config. Not available with --attach"});
-  std::shared_ptr<WaitCheckingFlag> wait = std::make_shared<WaitCheckingFlag>(FlagInfo{
+  std::shared_ptr<WaitCheckingFlag> wait_checking = std::make_shared<WaitCheckingFlag>(FlagInfo{
       "--wait-checking",
       {},
       "Override wait checks: off disables checks, on enables ordinary checks, and all includes "
       "gfx1250 XCNT. Omission preserves JSON and launch overrides do not rewrite the source "
       "config. Not available with --attach"});
-  std::shared_ptr<BoolFlag> thread_table =
+  std::shared_ptr<BoolFlag> thread_budget_table =
       std::make_shared<BoolFlag>(FlagInfo{"--thread-budget-table",
                                           {},
                                           "Print engine/dispatch allocations without running a VM",
@@ -166,7 +166,7 @@ struct LaunchFlags {
   std::shared_ptr<OptionalUInt32Flag> vfio_ready_fd = std::make_shared<OptionalUInt32Flag>(
       FlagInfo{"--vfio-ready-fd", {}, "Write readiness to this nonnegative file descriptor"},
       std::numeric_limits<int>::max());
-  std::shared_ptr<BoolFlag> check_vfio = std::make_shared<BoolFlag>(FlagInfo{
+  std::shared_ptr<BoolFlag> check_vfio_user = std::make_shared<BoolFlag>(FlagInfo{
       "--check-vfio-user", {}, "Report whether VFIO-user support is enabled", ValueMode::Switch});
   std::shared_ptr<BoolFlag> version =
       std::make_shared<BoolFlag>(FlagInfo{"--version", {"-v"}, "Print version", ValueMode::Switch});
@@ -175,13 +175,14 @@ struct LaunchFlags {
 
   Result register_flags(Command &command, DiagnosticEmitter diagnostic) const {
     if (command
-            .add_flags("Simulation configuration", {config, node, cpu_budget, wait, thread_table},
+            .add_flags("Simulation configuration",
+                       {config, node, cpu_thread_budget, wait_checking, thread_budget_table},
                        diagnostic)
             .failed() ||
         command.add_flags("Launch modes", {daemon, attach, vfio_socket, vfio_ready_fd}, diagnostic)
             .failed())
       return Result::failure();
-    return command.add_flags("Information", {check_vfio, version, help}, diagnostic);
+    return command.add_flags("Information", {check_vfio_user, version, help}, diagnostic);
   }
 };
 

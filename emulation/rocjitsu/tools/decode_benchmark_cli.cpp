@@ -70,7 +70,8 @@ cli::Result DecodeCountFlag::parse_value(std::string_view text, cli::DiagnosticE
   return set_value(parsed.value(), diagnostic);
 }
 
-cli::Result register_decode_benchmark_flags(cli::Command &command, DecodeBenchmarkFlags &flags,
+cli::Result register_decode_benchmark_flags(cli::Command &command,
+                                            const DecodeBenchmarkFlags &flags,
                                             cli::DiagnosticEmitter diagnostic) {
   if (command
           .add_flags("Decoder settings", {flags.target, flags.iterations, flags.invalid_limit},
