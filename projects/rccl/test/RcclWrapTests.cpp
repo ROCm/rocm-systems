@@ -3294,7 +3294,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 }
 
 // gfx1250, message just above the LL ceiling and within the LL128 band
-// (ddaLL128Max[A2A] = 1 MiB total):
+// (ddaLL128Max[A2A] = 8 MiB total):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
 // gfx1250, LL128 tier disabled (ddaLL128Max[A2A] = 0 after commit 363b197e):
 // a message just above the LL ceiling must fall to Direct p2p, not LL128.
@@ -3318,8 +3318,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
-// gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0, ddaLL128Max[A2A] = 1 MiB):
-// anything above the LL128 ceiling falls to Direct p2p.
+// gfx1250: above the 8 MiB LL128 cap (VMM off), AlltoAll falls to Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();

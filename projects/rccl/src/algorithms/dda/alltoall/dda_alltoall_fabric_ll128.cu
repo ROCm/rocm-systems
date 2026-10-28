@@ -12,7 +12,6 @@
 #include "algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h"
 #include "checks.h"
 #include "comm.h"
-#include "algorithms/dda/dda_init_detail.h" // nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "param.h"
@@ -28,7 +27,7 @@
 // Runtime-adjustable LL128 AllToAll block size (threads/block). Must be a
 // multiple of 16 (lanes per 128B line) in [16, 1024]; invalid values fall back
 // to the tuned default. Env: RCCL_DDA_LL128_A2A_THREADS.
-RCCL_PARAM(DdaLL128A2AThreads, "DDA_LL128_A2A_THREADS", 1024);
+RCCL_PARAM(DdaLL128A2AThreads, "DDA_LL128_A2A_THREADS", 256);
 
 namespace {
 
@@ -36,7 +35,6 @@ using dda::common::kDdaLL128A2AMaxPerChunkBytes;
 using dda::common::kDdaLL128A2ASlotStrideLines;
 using dda::common::kDdaLL128DataElems;
 using dda::common::LLLine128;
-using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
 
 // LL128 scratch: 2 banks * nRanks slots * kDdaLL128A2ASlotStrideLines * 128B.
 static inline size_t ddaLL128A2AScratchSize(int nRanks) {
@@ -45,6 +43,8 @@ static inline size_t ddaLL128A2AScratchSize(int nRanks) {
 
 // Grid-shape tuning knobs (env-overridable); defaults tuned for gfx1250.
 constexpr size_t kDdaLL128A2ALinesPerBlock = 4;
+// Many small blocks per peer keep more stores in flight.
+constexpr int kDdaLL128A2AMaxBlocksPerPeer = 64;
 
 static inline size_t ddaLL128A2ALinesPerBlockEnv(size_t dflt) {
   const char* s = getenv("RCCL_DDA_LL128_A2A_LPB");
@@ -76,7 +76,7 @@ static inline int ddaLL128A2ABlocksPerPeer(size_t perChunkBytes) {
   const size_t nWords = perChunkBytes >> 3;
   const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
   const size_t linesPerBlock = ddaLL128A2ALinesPerBlockEnv(kDdaLL128A2ALinesPerBlock);
-  const int maxBpp = ddaLL128A2AMaxBppEnv(kDdaLLAgMaxBlocksPerPeer);
+  const int maxBpp = ddaLL128A2AMaxBppEnv(kDdaLL128A2AMaxBlocksPerPeer);
   if (numLines <= linesPerBlock) {
     return 1;
   }
@@ -91,7 +91,7 @@ static inline int ddaLL128A2ABlocksPerPeer(size_t perChunkBytes) {
 // per-peer line split, clamped so flatBlockId (nRanks*bpp-1) stays within the
 // device epoch array.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricLL128Geom(ncclComm* comm, size_t perChunkBytes) {
-  const unsigned threads = ddaLL128A2AThreads(1024); // multiple of 16 (lanes/line)
+  const unsigned threads = ddaLL128A2AThreads(256); // multiple of 16 (lanes/line)
   int blocksPerPeer = ddaLL128A2ABlocksPerPeer(perChunkBytes);
   if (comm->nRanks * blocksPerPeer > comm->ddaLLEpochLen) {
     blocksPerPeer = comm->ddaLLEpochLen / comm->nRanks;
