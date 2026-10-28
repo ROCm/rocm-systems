@@ -7,7 +7,7 @@ namespace {
 
 enum class Format { Text, Json };
 
-class FormatFlag final : public util::cli::Flag {
+class FormatFlag final : public rocjitsu::cli::Flag {
 public:
   FormatFlag() : Flag({"--format", {"-f"}, "Output format: text or json"}) {}
   Format value() const { return value_; }
@@ -31,11 +31,9 @@ private:
   Format value_ = Format::Text;
 };
 
-} // namespace
-
-util::Result register_cli_plugin_impl(util::cli::Command &root, const PluginHost &host,
+util::Result register_cli_plugin_impl(rocjitsu::cli::Command &root, const PluginHost &host,
                                       util::DiagnosticEmitter diagnostic) {
-  using namespace util::cli;
+  using namespace rocjitsu::cli;
   auto plugin = root.add_command("plugin", diagnostic);
   if (plugin.failed())
     return Result::failure();
@@ -54,6 +52,8 @@ util::Result register_cli_plugin_impl(util::cli::Command &root, const PluginHost
   return inspect.value()->add_flags("Output formatting",
                                     {host.retain(host.context, new FormatFlag)}, diagnostic);
 }
+
+} // namespace
 
 extern "C" __attribute__((visibility("default"))) RegisterPlugin register_cli_plugin() {
   return register_cli_plugin_impl;

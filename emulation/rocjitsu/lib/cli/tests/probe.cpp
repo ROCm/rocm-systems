@@ -6,7 +6,7 @@
 #include <iostream>
 
 int main(int argc, char **argv) {
-  using namespace util::cli;
+  using namespace rocjitsu::cli;
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
   DiagnosticEmitter diagnostic(report);
   Command root{"rj_cli_probe"};

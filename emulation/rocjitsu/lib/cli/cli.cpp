@@ -1,14 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "util/cli.h"
+#include "rocjitsu/cli.h"
 
 #include <algorithm>
 #include <charconv>
 #include <sstream>
 #include <unordered_set>
 
-namespace util::cli {
+namespace rocjitsu::cli {
 namespace {
 
 bool valid_word(std::string_view word) {
@@ -239,7 +239,7 @@ FailureOr<ParsedArguments> parse(Command &root, std::span<const std::string_view
     if (arg.size() > 1 && arg.front() == '-') {
       const size_t equals = arg.find('=');
       const std::string_view spelling = arg.substr(0, equals);
-      auto flag = result.command->find_flag(spelling);
+      std::shared_ptr<Flag> flag = result.command->find_flag(spelling);
       if (!flag)
         return diagnostic.emit() << result.command->path() << ": unknown flag '" << spelling << "'";
       std::string_view value;
@@ -292,7 +292,8 @@ std::string format_help(const Command &command) {
       for (const auto &alias : flag->info().aliases)
         out << ", " << alias;
       if (flag->info().value_mode == ValueMode::Required)
-        out << " VALUE";
+        out << ' '
+            << (flag->info().value_placeholder.empty() ? "VALUE" : flag->info().value_placeholder);
       out << "\n      " << flag->info().description << '\n';
     }
   }
@@ -304,4 +305,4 @@ std::string format_help(const Command &command) {
   return out.str();
 }
 
-} // namespace util::cli
+} // namespace rocjitsu::cli

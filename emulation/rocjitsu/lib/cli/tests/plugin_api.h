@@ -3,15 +3,15 @@
 
 #pragma once
 
-#include "util/cli.h"
+#include "rocjitsu/cli.h"
 
 // Prototype-only, same-build plugin interface, not a public binary ABI.
 // The host owns the deleter so unloading occurs after plugin destruction returns.
 struct PluginHost {
   void *context;
-  std::shared_ptr<util::cli::Flag> (*retain)(void *, util::cli::Flag *);
+  std::shared_ptr<rocjitsu::cli::Flag> (*retain)(void *, rocjitsu::cli::Flag *);
 };
 
-using RegisterPlugin = util::Result (*)(util::cli::Command &, const PluginHost &,
+using RegisterPlugin = util::Result (*)(rocjitsu::cli::Command &, const PluginHost &,
                                         util::DiagnosticEmitter);
 using RegisterPluginEntry = RegisterPlugin (*)();
