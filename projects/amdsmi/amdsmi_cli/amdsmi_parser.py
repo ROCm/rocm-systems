@@ -1599,9 +1599,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
     def _add_list_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not (
-            self.helpers.is_amdgpu_initialized() or self.helpers.is_amd_hsmp_initialized()
-        ):
+        if not (self.helpers.is_amdgpu_initialized() or self.helpers.is_amd_hsmp_initialized()):
             return
 
         # Subparser help text

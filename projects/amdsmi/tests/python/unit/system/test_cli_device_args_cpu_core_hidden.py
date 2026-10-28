@@ -116,8 +116,7 @@ class TestCliDeviceArgsCpuCoreHidden(unittest.TestCase):
                 subparsers = parser.add_subparsers()
                 fake = types.SimpleNamespace(
                     helpers=types.SimpleNamespace(
-                        is_amdgpu_initialized=lambda: gpu,
-                        is_amd_hsmp_initialized=lambda: cpu,
+                        is_amdgpu_initialized=lambda: gpu, is_amd_hsmp_initialized=lambda: cpu
                     ),
                     description="AMD SMI",
                     _add_device_arguments=lambda *args, **kwargs: None,

@@ -438,8 +438,7 @@ class ListDevicesCommands:
             raise AmdSmiCommandNotSupportedException(
                 "list",
                 self.helpers.get_output_format(),
-                message="list reports GPU information. --core is not "
-                "supported for this command.",
+                message="list reports GPU information. --core is not supported for this command.",
             )
         if getattr(args, "cpu", None):
             self.list_cpu(args)
