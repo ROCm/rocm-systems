@@ -257,7 +257,8 @@ void CheckConcurrentAllocationsStayWithinTotal(AllocKind kind) {
     count += held[t]->Count();
   }
   INFO("Held : " << count * step / kOneMB << " MB, total : " << totalMem / kOneMB << " MB");
-  REQUIRE(count * step <= totalMem + kThreads * step);
+  // Reservations are taken under one lock, so concurrent allocations can't pass the total either
+  REQUIRE(count * step <= totalMem);
   for (const auto& h : held) {
     h->CheckUsable(step);
   }

@@ -2465,7 +2465,6 @@ bool ResourceCache::free(size_t minCacheEntries) {
   // Clear the cache. Concurrent callers drain it together until it is empty.
   while (removeLast()) {
   }
-  CondLog((cacheSize_ != 0), "Incorrect size for cache release!");
   return true;
 }
 
