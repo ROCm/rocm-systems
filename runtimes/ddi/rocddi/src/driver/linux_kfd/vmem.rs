@@ -24,6 +24,7 @@ use crate::memory::interop::linux::{DmaBuf, DmaBufInfo};
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, MemoryKind, VirtualMemoryInfo,
+    VirtualMemoryOptions,
 };
 use crate::{Error, ErrorKind};
 
@@ -395,9 +396,9 @@ impl KfdVirtualMemory {
         vm: Shared<DeviceVm>,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<Owned<Self>, Error> {
+        let VirtualMemoryOptions { pinned, uncached } = options;
         let host_page = os_memory::page_size()
             .map_err(|source| native_error("virtual-memory page size", source))?;
         let page = host_page as u64;

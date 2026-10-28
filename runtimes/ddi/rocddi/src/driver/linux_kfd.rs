@@ -44,7 +44,7 @@ use crate::memory::interop::linux::{
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, HostMappingPolicy, HostRegistration,
-    MemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
+    MemoryKind, VirtualAddressInfo, VirtualMemoryInfo, VirtualMemoryOptions,
 };
 use crate::os::native_error;
 use crate::session::DriverContextLifetime;
