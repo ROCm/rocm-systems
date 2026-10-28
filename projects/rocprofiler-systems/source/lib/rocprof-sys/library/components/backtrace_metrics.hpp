@@ -10,6 +10,7 @@
 #include "library/components/backtrace.hpp"
 #include "library/thread_data.hpp"
 
+#include <timemory/backends/papi.hpp>
 #include <timemory/components/base.hpp>
 #include <timemory/components/papi/papi_array.hpp>
 #include <timemory/components/papi/types.hpp>
@@ -148,21 +149,21 @@ backtrace_metrics::operator()(Tp) const
 // PAPI short description when the component map is filled, and an empty string
 // when it is not. The empty case keeps the configured symbol.
 inline std::string
-hardware_counter_track_name(const std::string& _label, std::int64_t _tid)
+hardware_counter_track_name(const std::string& label, std::int64_t tid)
 {
-    std::string _desc = tim::papi::get_event_info(_label).short_descr;
-    if(_desc.empty())
+    std::string descr = tim::papi::get_event_info(label).short_descr;
+    if(descr.empty())
     {
-        _desc = _label;
+        descr = label;
     }
-    if(_desc.empty())
+    if(descr.empty())
     {
-        throw std::runtime_error("Empty description for " + _label);
+        throw std::runtime_error("Empty description for " + label);
     }
 
-    std::stringstream _track_name;
-    _track_name << "Thread " << _desc << " [" << _tid << "] (S)";
-    return _track_name.str();
+    std::stringstream track_name;
+    track_name << "Thread " << descr << " [" << tid << "] (S)";
+    return track_name.str();
 }
 }  // namespace component
 }  // namespace rocprofsys
