@@ -54,7 +54,6 @@ __launch_bounds__(1024)
                                            int selfRank, int nRanks, uint32_t* __restrict__ epochDev, int epochLen,
                                            size_t slicesTotal, // slices per peer chunk
                                            size_t bankSize, DdaKernelParams params) {
-  constexpr DdaLL128UserAccess kUser = DdaLL128UserAccess::Cached;
   const int peer = (selfRank + (int)blockIdx.x + 1) % nRanks;
 
   const int tid = threadIdx.x;
@@ -66,7 +65,7 @@ __launch_bounds__(1024)
 
   const int flatBlockId = (int)(blockIdx.x * gridDim.y + blockIdx.y);
   const int total = (int)(gridDim.x * gridDim.y);
-  const uint32_t flag32 = ddaLLEpochLoad(epochDev, flatBlockId, 1u);
+  const uint32_t flag32 = ddaGetLLEpochInc(epochDev, flatBlockId, 1u);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
   const size_t slotWords = ddaLL128A2ASlotWords(bankSize, nRanks);
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
@@ -82,7 +81,7 @@ __launch_bounds__(1024)
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perChunkBytes;
 
   for (size_t s = gwarp; s < slicesTotal; s += wstride)
-    ddaLL128SendSlice<kUser>(srcBytes + s * (size_t)kDdaLL128DataBytesPerSlice, ddaLL128SliceBytes(perChunkBytes, s),
+    ddaLL128SendSlice(srcBytes + s * (size_t)kDdaLL128DataBytesPerSlice, ddaLL128SliceBytes(perChunkBytes, s),
                              scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice, flag, lane, flagLane);
 
   ddaGridCopy16B(reinterpret_cast<const int8_t*>(sendbuff) + (size_t)selfRank * perChunkBytes,
@@ -90,12 +89,12 @@ __launch_bounds__(1024)
                  (size_t)flatBlockId * (size_t)nthreads + (size_t)tid, (size_t)total * (size_t)nthreads);
 
   for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    if (!ddaLL128RecvSlice<kUser>(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice,
-                                  dstBytes + s * (size_t)kDdaLL128DataBytesPerSlice,
-                                  ddaLL128SliceBytes(perChunkBytes, s), flag, lane, flagLane, params))
-      break; // aborted; the epoch commit below still runs
+    if (!ddaLL128RecvSlice(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice,
+                           dstBytes + s * (size_t)kDdaLL128DataBytesPerSlice, ddaLL128SliceBytes(perChunkBytes, s),
+                           flag, lane, flagLane, params))
+      break; // aborted; the epoch update below still runs
   }
-  ddaLLEpochCommit(epochDev, epochLen, flatBlockId, total, flag32);
+  ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag32);
 }
 
 } // namespace dda::common
