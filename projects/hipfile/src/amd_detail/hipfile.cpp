@@ -530,9 +530,9 @@ catch (...) {
 }
 
 static hipFileError_t
-hipFileIOAsync(IoType io_type, hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *file_offset_p,
-               hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t hipStream,
-               const vector<shared_ptr<Backend>> &backends)
+hipFileIOAsync(IoType, hipFileHandle_t, void *buffer_base, size_t *size_p, hoff_t *file_offset_p,
+               hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t,
+               const vector<shared_ptr<Backend>> &)
 try {
     if (Context<DriverState>::get()->getRefCount() == 0) {
         ensureDriverInit();
@@ -541,28 +541,10 @@ try {
 
     checkNull({buffer_base, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p});
 
-    auto [file, buffer, stream] =
-        Context<DriverState>::get()->getFileBufferAndStream(fh, buffer_base, hipStream);
-
-    std::shared_ptr<Backend> backend{
-        selectBackend(backends, file, buffer, *size_p, *file_offset_p, *buffer_offset_p)};
-
-    backend->async_io(io_type, file, buffer, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p,
-                      stream);
-
-    return {hipFileSuccess, hipSuccess};
+    return {hipFileAsyncNotSupported, hipSuccess};
 }
 catch (hipFileError_t e) {
     return e;
-}
-catch (const std::invalid_argument &) {
-    return {hipFileInvalidValue, hipSuccess};
-}
-catch (const std::bad_alloc &) {
-    return {hipFileHipDriverError, hipErrorOutOfMemory};
-}
-catch (const FileNotRegistered &) {
-    return {hipFileHandleNotRegistered, hipSuccess};
 }
 catch (...) {
     return handle_exception();
