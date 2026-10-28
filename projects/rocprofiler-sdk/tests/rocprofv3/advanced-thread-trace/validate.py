@@ -696,7 +696,13 @@ def test_att_no_intercept_target_kernel(att_no_intercept_out_dir_path):
             rows = [row for row in csv.reader(f) if row and len(row) >= 3][1:]
         code_objs = {row[0].strip() for row in rows if row[0].strip()}
         kernels = {row[2][2:].strip() for row in rows if row[2].startswith("; ")}
-        assert rows, f"{stats_file.name} has no instruction rows"
+        assert any(
+            len(row) >= 4
+            and row[2].strip()
+            and not row[2].lstrip().startswith(";")
+            and int(row[3]) > 0
+            for row in rows
+        ), f"{stats_file.name} has no decoded instruction hits"
         assert (
             len(code_objs) == 1
         ), f"{stats_file.name} covers more than one code object: {sorted(code_objs)}"

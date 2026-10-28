@@ -67,13 +67,6 @@ wait_for_prior_chunks(agent_state_t& state, uint64_t chunk_index)
     }
 }
 
-struct dispatch_offset_t
-{
-    uint8_t  me_id       = 0;
-    uint8_t  pipe_id     = 0;
-    uint64_t byte_offset = 0;
-};
-
 struct scan_context_t
 {
     agent_state_t*                    state               = nullptr;
@@ -81,8 +74,7 @@ struct scan_context_t
     trace_range_t                     trace               = {};
     std::vector<trace_range_t>*       completed           = {};
 
-    // Dispatches in token order, used to bound a continuation from the previous chunk
-    // at the next dispatch on its me/pipe.
+    // Dispatches and selection decisions in token order for continuation replay.
     std::vector<dispatch_offset_t> dispatch_offsets = {};
 
     uint64_t chunk_index          = 0;
@@ -146,9 +138,7 @@ handle_dispatch(scan_context_t&                                    context,
 
     auto& state = *context.state;
 
-    // Record each dispatch so a continuation from the previous chunk can be bounded
-    // at the next dispatch on its me/pipe.
-    context.dispatch_offsets.push_back({dispatch.me_id, dispatch.pipe_id, dispatch.byte_offset});
+    auto record = dispatch_offset_t{dispatch.me_id, dispatch.pipe_id, dispatch.byte_offset};
 
     // Latch first valid dispatch, taking consecutive kernels into consideration
     if(--context.remaining_dispatches == 0) context.first_flush_count = 2;
@@ -163,48 +153,18 @@ handle_dispatch(scan_context_t&                                    context,
         // Block so we dont prematurely increment the iteration count
         wait_for_prior_chunks(state, context.chunk_index);
 
-        if(is_targeted_iteration(*iteration_count, *context.kernel_filter_range))
-        {
-            auto& trace = context.trace;
-            if(trace.active && trace.remaining_dispatches == 0 && dispatch.me_id == trace.me_id &&
-               dispatch.pipe_id == trace.pipe_id)
-            {
-                // The previous range is complete; this dispatch begins a new one.
-                ROCP_INFO << "End cut trace at dispatch byte: " << dispatch.byte_offset;
-                trace.offset_end = dispatch.byte_offset;
-                context.completed->emplace_back(trace);
-                trace = {};
-            }
-
-            if(!trace.active)
-            {
-                trace              = trace_range_t{};
-                trace.active       = true;
-                trace.offset_begin = dispatch.byte_offset;
-
-                ROCP_INFO << "Dispatch cut at byte " << dispatch.byte_offset;
-            }
-
-            trace.remaining_dispatches = std::max<uint64_t>(state.consecutive_kernels, 1);
-        }
+        record.selected = is_targeted_iteration(*iteration_count, *context.kernel_filter_range);
     }
 
-    auto& trace = context.trace;
-    if(trace.active && trace.remaining_dispatches > 0)
+    context.dispatch_offsets.emplace_back(record);
+    auto completed = advance_trace_range(context.trace, record, state.consecutive_kernels);
+    if(completed.active)
     {
-        trace.me_id   = dispatch.me_id;
-        trace.pipe_id = dispatch.pipe_id;
-        --trace.remaining_dispatches;
+        ROCP_INFO << "End cut trace at dispatch byte: " << completed.offset_end;
+        context.completed->emplace_back(completed);
     }
-    else if(trace.active && dispatch.me_id == trace.me_id && dispatch.pipe_id == trace.pipe_id)
-    {
-        // Tokens are ordered per me/pipe, so the next dispatch on this me/pipe is
-        // the end of the current trace range.
-        ROCP_INFO << "End cut trace at dispatch byte: " << dispatch.byte_offset;
-        trace.offset_end = dispatch.byte_offset;
-        context.completed->emplace_back(trace);
-        trace = {};
-    }
+    if(record.selected && context.trace.offset_begin == dispatch.byte_offset)
+        ROCP_INFO << "Dispatch cut at byte " << dispatch.byte_offset;
 }
 
 void
@@ -398,7 +358,7 @@ send_overlapping_requests(scan_context_t&             context,
     wait_for_prior_chunks(state, chunk_index);
 
     uint64_t offset    = 0;
-    bool     resolved  = false;
+    bool     continued = false;
     bool     requested = false;
     {
         auto lock = std::unique_lock{state.request_mutex};
@@ -406,26 +366,21 @@ send_overlapping_requests(scan_context_t&             context,
         {
             requested = true;
 
-            // A trace left active by the previous chunk ends at the next dispatch on
-            // its me/pipe; bound the appended bytes there so tokens of the following
-            // kernel are not appended to the previous capture.
             if(state.continuation_valid)
             {
-                uint64_t remaining = state.continuation_remaining;
+                auto trace                 = trace_range_t{};
+                trace.active               = true;
+                trace.me_id                = state.continuation_me_id;
+                trace.pipe_id              = state.continuation_pipe_id;
+                trace.remaining_dispatches = state.continuation_remaining;
+                continued                  = true;
+                // Keep the scanned tail if this range does not close in the chunk.
+                offset = scan_size;
                 for(auto const& record : context.dispatch_offsets)
                 {
-                    if(remaining > 0)
-                    {
-                        state.continuation_me_id   = record.me_id;
-                        state.continuation_pipe_id = record.pipe_id;
-                        --remaining;
-                        continue;
-                    }
-                    if(record.me_id != state.continuation_me_id ||
-                       record.pipe_id != state.continuation_pipe_id)
-                        continue;
-                    offset   = record.byte_offset;
-                    resolved = true;
+                    auto completed = advance_trace_range(trace, record, state.consecutive_kernels);
+                    if(!completed.active) continue;
+                    offset = completed.offset_end;
                     break;
                 }
                 state.continuation_valid = false;
@@ -440,7 +395,7 @@ send_overlapping_requests(scan_context_t&             context,
     if(requested)
     {
         state.pending_requests--;
-        if(!resolved)
+        if(!continued)
             offset = context.first_valid_offset != 0u ? context.first_valid_offset : scan_size;
         for(auto& range : ranges)
             if(range.offset_begin < offset) offset = std::max(offset, range.offset_end);

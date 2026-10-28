@@ -30,6 +30,7 @@ typedef uint64_t rocprof_trace_decoder_handle_t;
 #    include <rocprof_trace_decoder/rocprof_trace_decoder.h>
 #endif
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
@@ -89,6 +90,46 @@ struct trace_range_t
     uint64_t offset_end           = 0;
     uint64_t remaining_dispatches = 0;
 };
+
+struct dispatch_offset_t
+{
+    uint8_t  me_id       = 0;
+    uint8_t  pipe_id     = 0;
+    uint64_t byte_offset = 0;
+    bool     selected    = false;
+};
+
+// Returns the range closed by this dispatch, or an inactive range if none closes.
+inline trace_range_t
+advance_trace_range(trace_range_t& trace, const dispatch_offset_t& dispatch, uint64_t consecutive)
+{
+    auto completed = trace_range_t{};
+    if(trace.active && trace.remaining_dispatches == 0 && dispatch.me_id == trace.me_id &&
+       dispatch.pipe_id == trace.pipe_id)
+    {
+        completed            = trace;
+        completed.offset_end = dispatch.byte_offset;
+        trace                = {};
+    }
+
+    if(dispatch.selected)
+    {
+        if(!trace.active)
+        {
+            trace.active       = true;
+            trace.offset_begin = dispatch.byte_offset;
+        }
+        trace.remaining_dispatches = std::max<uint64_t>(consecutive, 1);
+    }
+
+    if(trace.active && trace.remaining_dispatches > 0)
+    {
+        trace.me_id   = dispatch.me_id;
+        trace.pipe_id = dispatch.pipe_id;
+        --trace.remaining_dispatches;
+    }
+    return completed;
+}
 
 struct agent_state_t
 {
