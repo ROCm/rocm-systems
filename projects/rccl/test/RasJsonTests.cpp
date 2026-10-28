@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <chrono>
@@ -47,11 +48,12 @@ static int pickFreePort() {
   return port;
 }
 
-// Connects to the local RAS server and runs one STATUS query in the requested
-// format ("text" or "json"). Returns the entire response body, or an empty
+// Connects to the local RAS server and runs one query (STATUS by default) in the
+// requested format ("text" or "json"). Returns the entire response body, or an empty
 // string on connection/protocol failure. Uses 127.0.0.1 (IPv4 loopback) to
 // match the address family used by pickFreePort() and NCCL_RAS_ADDR.
-static std::string queryRas(const std::string& format, const std::string& portStrIn) {
+static std::string queryRas(const std::string& format, const std::string& portStrIn,
+                            const std::string& command = "STATUS") {
   int sock = -1;
   addrinfo hints{};
   hints.ai_family   = AF_INET;
@@ -75,6 +77,9 @@ static std::string queryRas(const std::string& format, const std::string& portSt
     if (sock < 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
   if (sock < 0) return {};
+  // Bound each receive: a stuck server then fails the test with the reply so far.
+  timeval recvTimeout{60, 0};
+  ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &recvTimeout, sizeof(recvTimeout));
 
   if (format != "text") {
     std::string setFmt = "SET FORMAT " + format + "\n";
@@ -87,8 +92,8 @@ static std::string queryRas(const std::string& format, const std::string& portSt
     }
   }
 
-  const char* status = "STATUS\n";
-  ::send(sock, status, ::strlen(status), 0);
+  const std::string request = command + "\n";
+  ::send(sock, request.c_str(), request.size(), 0);
 
   std::string body;
   char buf[4096];
@@ -161,6 +166,93 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
         ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
       },
       {{"NCCL_RAS_ENABLE", "1"}});
+}
+
+static bool haveGpu() {
+  int devCount = 0;
+  return hipGetDeviceCount(&devCount) == hipSuccess && devCount > 0;
+}
+
+// Creates a one-rank communicator whose RAS server listens on a free port (in
+// the isolated child, for the reason given above) and returns the server's
+// reply to the DIAGNOSTICS command.
+static std::string queryRasDiagnostics() {
+  int port = pickFreePort();
+  std::string portStr = std::to_string(port);
+  std::string rasAddr = "127.0.0.1:" + portStr;
+  ncclUniqueId id;
+  ncclComm_t comm = nullptr;
+  if (port <= 0 || setenv("NCCL_RAS_ADDR", rasAddr.c_str(), /*overwrite=*/1) != 0 ||
+      hipSetDevice(0) != hipSuccess || ncclGetUniqueId(&id) != ncclSuccess ||
+      ncclCommInitRank(&comm, /*nranks=*/1, id, /*rank=*/0) != ncclSuccess) {
+    ADD_FAILURE() << "Could not create a one-rank communicator with a RAS server";
+    return {};
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  std::string reply = queryRas("text", portStr, "DIAGNOSTICS");
+  EXPECT_EQ(ncclCommDestroy(comm), ncclSuccess);
+  return reply;
+}
+
+// NCCL 2.32 adds PCI checks to the RAS diagnostics: rdma_topo check first, then
+// IOMMU and ATS fallbacks. rdma_topo reports on every rank, also where the tool
+// is missing or does not apply, and keeps the tool's own error text in the
+// debug log rather than in the report.
+TEST(RasDiagnostics, ReportIncludesPciChecks) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "RasDiagnostics_ReportIncludesPciChecks",
+      []() {
+        if (!haveGpu()) GTEST_SKIP() << "No HIP-visible GPU; skipping";
+        std::string reply = queryRasDiagnostics();
+        ASSERT_NE(reply.find("RAS diagnostics completed"), std::string::npos) << reply;
+        size_t pos = reply.find("rdma_topo check: ");
+        ASSERT_NE(pos, std::string::npos) << "RAS diagnostics ran no rdma_topo check:\n" << reply;
+        std::string line = reply.substr(pos, reply.find('\n', pos) - pos);
+        if (line.find("not usable") != std::string::npos) {
+          EXPECT_EQ(line.find("): "), std::string::npos) << "Tool output in the report: " << line;
+        }
+      },
+      {{"NCCL_RAS_ENABLE", "1"}});
+}
+
+// Control: the same DIAGNOSTICS request completes and reports the NCCL
+// environment check. It predates the PCI checks and is summarized right before
+// them, after the GPU checks; a failed summary stops at the failing check.
+TEST(RasDiagnostics, ReportIncludesNcclEnvironment) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "RasDiagnostics_ReportIncludesNcclEnvironment",
+      []() {
+        if (!haveGpu()) GTEST_SKIP() << "No HIP-visible GPU; skipping";
+        std::string reply = queryRasDiagnostics();
+        EXPECT_NE(reply.find("NCCL environment: "), std::string::npos) << reply;
+        EXPECT_NE(reply.find("RAS diagnostics completed"), std::string::npos) << reply;
+      },
+      {{"NCCL_RAS_ENABLE", "1"}});
+}
+
+// With RAS disabled, the NCCL_RUN_RAS_DIAGNOSTICS trigger in communicator init
+// says that it skipped the RAS diagnostics, instead of opening a report that
+// never arrives.
+TEST(RasDiagnostics, InitTriggerReportsRasDisabled) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "RasDiagnostics_InitTriggerReportsRasDisabled",
+      []() {
+        if (!haveGpu()) GTEST_SKIP() << "No HIP-visible GPU; skipping";
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        ncclUniqueId id;
+        ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
+        ncclComm_t comm = nullptr;
+        // Rank 0 prints the trigger's DIAG lines to stdout during init. Nothing
+        // may assert while the capture is active.
+        testing::internal::CaptureStdout();
+        ncclResult_t res = ncclCommInitRank(&comm, /*nranks=*/1, id, /*rank=*/0);
+        std::string out = testing::internal::GetCapturedStdout();
+        ASSERT_EQ(res, ncclSuccess);
+        ASSERT_NE(out.find("NCCL DIAG"), std::string::npos) << "The RAS diagnostics trigger did not run:\n" << out;
+        EXPECT_NE(out.find("RAS diagnostics skipped: NCCL_RAS_ENABLE=0"), std::string::npos) << out;
+        ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
+      },
+      {{"NCCL_RAS_ENABLE", "0"}, {"NCCL_RUN_RAS_DIAGNOSTICS", "1"}});
 }
 
 }  // namespace RcclUnitTesting
