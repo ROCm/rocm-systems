@@ -2,6 +2,12 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 7.18.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* A kernel launch that exceeds the device's `hipDeviceProp_t.maxGridSize` limits is now rejected. Launches report `hipErrorInvalidConfiguration`, matching `cudaErrorInvalidConfiguration`, except for `hipModuleLaunchKernel`, which reports `hipErrorInvalidValue` to match the CUDA driver API. The workgroup count is rounded up, so a non-uniform launch cannot bypass the limit with a partial final workgroup.
+
 ## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added
@@ -30,7 +36,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Fixed a host-blocking issue in `hipMemcpyBatchAsync` that could occur when the API was repeatedly issued on a stream containing a long-running kernel. The implementation now reserves only the total descriptor space required for each dispatch in the kernel argument pool, preventing pool exhaustion and eliminating unnecessary host waits for kernel completion.
 * Resolved a segmentation fault in `hipStreamEndCapture` during multi-stream capture caused by a bookkeeping cycle among capture participants. The fix tracks capture participants in a single origin-stream-owned set, eliminating recursive traversal of forked streams during capture finalization and improving stream capture stability.
 * Resolved a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
-* A kernel launch that exceeds the device's `hipDeviceProp_t.maxGridSize` limits is now rejected. Launches report `hipErrorInvalidConfiguration`, matching `cudaErrorInvalidConfiguration`, except for `hipModuleLaunchKernel`, which reports `hipErrorInvalidValue` to match the CUDA driver API. The workgroup count is rounded up, so a non-uniform launch cannot bypass the limit with a partial final workgroup.
 
 ### Optimized
 
