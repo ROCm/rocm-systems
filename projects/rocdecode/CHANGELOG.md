@@ -15,7 +15,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Fixed a stray RASL picture being output from the first CRA picture after an application signals end of sequence with the `ROCDEC_PKT_ENDOFSTREAM` packet flag. The flag now ends the coded video sequence the same way an in-band EOS NAL unit does, so the next IRAP picture gets `NoRaslOutputFlag` equal to 1.
 * Fixed out-of-bounds memory access issues in the HEVC, AVC, AV1, VP9 and base parsers.
 * Fixed `rocDecGetDecoderCaps` advertising 16-bit output surface formats for 8-bit content.
-* The `videoDecodeRaw` and `videoDecode` samples now exit with code 77 instead of 1 when the GPU doesn't support the stream's codec, and the `video_decodeRaw-*` and `video_decode-*` CTests report that as skipped instead of failed (e.g. the AV1 tests on gfx90a). A failed decoder capability query is still reported as an error.
+* The `videoDecodeRaw` and `videoDecode` samples now exit with code 77 instead of 1 when the GPU doesn't support the stream's codec, and the `video_decodeRaw-*` and `video_decode-*` CTests report it as skipped instead of failed.
 * The `videoDecodeBatch` sample now checks the GPU's decode capability for each input file first and decodes only the supported files rather than exiting when a file has an unsupported codec.
 
 ## rocDecode 1.10.0 for ROCm 10.1.0
