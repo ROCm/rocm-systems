@@ -1131,7 +1131,6 @@ struct gmock_buffer_storage
                  std::size_t timestamp_ns, std::string event_metadata,
                  std::uint32_t device_id, std::uint8_t device_type,
                  std::string pmc_info_name, double value));
-    MOCK_METHOD(bool, get_use_timemory, ());
     // NOLINTNEXTLINE(readability-function-size)
     MOCK_METHOD(void, store_region_sample,
                 (std::uint64_t thread_id, std::string region_name,
@@ -1701,7 +1700,7 @@ struct externals
         return s_storage;
     }
 
-    static bool get_use_timemory() { return g_buffer_storage_mock->get_use_timemory(); }
+    static bool get_use_timemory() { return false; }
 };
 
 // Every SdkBackend member on_tracing_api_enter/exit

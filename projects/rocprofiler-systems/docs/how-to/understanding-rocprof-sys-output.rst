@@ -505,278 +505,86 @@ write a simple Python script for post-processing using this format than with the
 Timemory JSON output sample
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In the following JSON data, the flat data starts at ``["timemory"]["wall_clock"]["ranks"]``
-and the hierarchical data starts at ``["timemory"]["wall_clock"]["graph"]``.
-To access the name (or prefix) of the nth entry in the flat data layout, use
-``["timemory"]["wall_clock"]["ranks"][0]["graph"][<N>]["prefix"]``. When full MPI
-support is enabled, the per-rank data in flat layout is represented
-as an entry in the ``ranks`` array. In the hierarchical data structure,
-the per-rank data is represented as an entry in the ``mpi`` array. However, ``graph``
-is used in lieu of ``mpi`` when full MPI support is enabled.
+The following ``wall_clock.json`` comes from the ``trace-time-window`` example. Its flat data
+starts at ``["rocprofiler-systems"]["wall_clock"]["ranks"]``. To access the name (or prefix)
+of the nth entry, use ``["rocprofiler-systems"]["wall_clock"]["ranks"][0]["graph"][<N>]["prefix"]``.
+
+The JSON of the other Timemory components uses the same flat layout under
+``["timemory"][<component>]["ranks"]``, and its hierarchical data starts at
+``["timemory"][<component>]["graph"]``. When full MPI support is enabled, the per-rank data
+in flat layout is represented as an entry in the ``ranks`` array. In the hierarchical data
+structure, the per-rank data is represented as an entry in the ``mpi`` array. However,
+``graph`` is used in lieu of ``mpi`` when full MPI support is enabled.
 In the hierarchical layout, all data for the process is a child of a dummy
 root node, which has the name ``unknown-hash=0``.
 
 .. code-block:: json
 
    {
-      "timemory": {
+      "rocprofiler-systems": {
          "wall_clock": {
-               "properties": {
-                  "cereal_class_version": 0,
-                  "value": 78,
-                  "enum": "WALL_CLOCK",
-                  "id": "wall_clock",
-                  "ids": [
-                     "real_clock",
-                     "virtual_clock",
-                     "wall_clock"
-                  ]
-               },
-               "type": "wall_clock",
-               "description": "Real-clock timer (i.e. wall-clock timer)",
-               "unit_value": 1000000000,
-               "unit_repr": "s",
-               "thread_scope_only": false,
-               "thread_count": 2,
-               "mpi_size": 1,
-               "upcxx_size": 1,
-               "process_count": 1,
-               "num_ranks": 1,
-               "concurrency": 2,
-               "ranks": [
-                  {
-                     "rank": 0,
-                     "graph_size": 112,
-                     "graph": [
-                           {
-                              "hash": 17481650134347108265,
-                              "prefix": "|0>>> main",
-                              "depth": 0,
-                              "entry": {
-                                 "cereal_class_version": 0,
-                                 "laps": 1,
-                                 "value": 894743517,
-                                 "accum": 894743517,
-                                 "repr_data": 0.894743517,
-                                 "repr_display": 0.894743517
-                              },
-                              "stats": {
-                                 "cereal_class_version": 0,
-                                 "sum": 0.894743517,
-                                 "count": 1,
-                                 "min": 0.894743517,
-                                 "max": 0.894743517,
-                                 "sqr": 0.8005659612135293,
-                                 "mean": 0.894743517,
-                                 "stddev": 0.0
-                              },
-                              "rolling_hash": 17481650134347108265
-                           },
-                           {
-                              "hash": 3455444288293231339,
-                              "prefix": "|0>>> |_read_input",
-                              "depth": 1,
-                              "entry": {
-                                 "laps": 1,
-                                 "value": 9808,
-                                 "accum": 9808,
-                                 "repr_data": 9.808e-06,
-                                 "repr_display": 9.808e-06
-                              },
-                              "stats": {
-                                 "sum": 9.808e-06,
-                                 "count": 1,
-                                 "min": 9.808e-06,
-                                 "max": 9.808e-06,
-                                 "sqr": 9.6196864e-11,
-                                 "mean": 9.808e-06,
-                                 "stddev": 0.0
-                              },
-                              "rolling_hash": 2490350348930787988
-                           },
-                           {
-                              "hash": 8456966793631718807,
-                              "prefix": "|0>>> |_setcoeff",
-                              "depth": 1,
-                              "entry": {
-                                 "laps": 1,
-                                 "value": 922,
-                                 "accum": 922,
-                                 "repr_data": 9.22e-07,
-                                 "repr_display": 9.22e-07
-                              },
-                              "stats": {
-                                 "sum": 9.22e-07,
-                                 "count": 1,
-                                 "min": 9.22e-07,
-                                 "max": 9.22e-07,
-                                 "sqr": 8.50084e-13,
-                                 "mean": 9.22e-07,
-                                 "stddev": 0.0
-                              },
-                              "rolling_hash": 7491872854269275456
-                           },
-                           {
-                              "hash": 6107876127803219007,
-                              "prefix": "|0>>> |_omp_thread_begin",
-                              "depth": 1,
-                              "entry": {
-                                 "laps": 1,
-                                 "value": 896506392,
-                                 "accum": 896506392,
-                                 "repr_data": 0.896506392,
-                                 "repr_display": 0.896506392
-                              },
-                              "stats": {
-                                 "sum": 0.896506392,
-                                 "count": 1,
-                                 "min": 0.896506392,
-                                 "max": 0.896506392,
-                                 "sqr": 0.8037237108968578,
-                                 "mean": 0.896506392,
-                                 "stddev": 0.0
-                              },
-                              "rolling_hash": 5142782188440775656
-                           },
-                           {
-                              "hash": 15402802091993617561,
-                              "prefix": "|0>>>   |_omp_implicit_task",
-                              "depth": 2,
-                              "entry": {
-                                 "laps": 1,
-                                 "value": 896479111,
-                                 "accum": 896479111,
-                                 "repr_data": 0.896479111,
-                                 "repr_display": 0.896479111
-                              },
-                              "stats": {
-                                 "sum": 0.896479111,
-                                 "count": 1,
-                                 "min": 0.896479111,
-                                 "max": 0.896479111,
-                                 "sqr": 0.8036747964593504,
-                                 "mean": 0.896479111,
-                                 "stddev": 0.0
-                              },
-                              "rolling_hash": 2098840206724841601                        },
-                           {
-                              "..." : "... etc. ..."
-                           }
-                     ]
-                  }
-               ],
-               "graph": [
-                  [
+            "concurrency": 1,
+            "description": "Real-clock timer (i.e. wall-clock timer)",
+            "mpi_size": 1,
+            "num_ranks": 1,
+            "process_count": 1,
+            "ranks": [
+               {
+                  "graph": [
                      {
-                           "cereal_class_version": 0,
-                           "node": {
-                              "hash": 0,
-                              "prefix": "unknown-hash=0",
-                              "tid": [
-                                 0
-                              ],
-                              "pid": [
-                                 2539175
-                              ],
-                              "depth": 0,
-                              "is_dummy": false,
-                              "inclusive": {
-                                 "entry": {
-                                       "laps": 0,
-                                       "value": 0,
-                                       "accum": 0,
-                                       "repr_data": 0.0,
-                                       "repr_display": 0.0
-                                 },
-                                 "stats": {
-                                       "sum": 0.0,
-                                       "count": 0,
-                                       "min": 0.0,
-                                       "max": 0.0,
-                                       "sqr": 0.0,
-                                       "mean": 0.0,
-                                       "stddev": 0.0
-                                 }
-                              },
-                              "exclusive": {
-                                 "entry": {
-                                       "laps": 0,
-                                       "value": -894743517,
-                                       "accum": -894743517,
-                                       "repr_data": -0.894743517,
-                                       "repr_display": -0.894743517
-                                 },
-                                 "stats": {
-                                       "sum": 0.0,
-                                       "count": 0,
-                                       "min": 0.0,
-                                       "max": 0.0,
-                                       "sqr": 0.0,
-                                       "mean": 0.0,
-                                       "stddev": 0.0
-                                 }
-                              }
-                           },
-                           "children": [
-                              {
-                                 "node": {
-                                       "hash": 17481650134347108265,
-                                       "prefix": "main",
-                                       "tid": [
-                                          0
-                                       ],
-                                       "pid": [
-                                          2539175
-                                       ],
-                                       "depth": 1,
-                                       "is_dummy": false,
-                                       "inclusive": {
-                                          "entry": {
-                                             "laps": 1,
-                                             "value": 894743517,
-                                             "accum": 894743517,
-                                             "repr_data": 0.894743517,
-                                             "repr_display": 0.894743517
-                                          },
-                                          "stats": {
-                                             "sum": 0.894743517,
-                                             "count": 1,
-                                             "min": 0.894743517,
-                                             "max": 0.894743517,
-                                             "sqr": 0.8005659612135293,
-                                             "mean": 0.894743517,
-                                             "stddev": 0.0
-                                          }
-                                       },
-                                       "exclusive": {
-                                          "entry": {
-                                             "laps": 1,
-                                             "value": -1773605,
-                                             "accum": -1773605,
-                                             "repr_data": -0.001773605,
-                                             "repr_display": -0.001773605
-                                          },
-                                          "stats": {
-                                             "sum": -0.001773605,
-                                             "count": 1,
-                                             "min": 9.22e-07,
-                                             "max": 0.896506392,
-                                             "sqr": -0.0031577497803754,
-                                             "mean": -0.001773605,
-                                             "stddev": 0.0
-                                          }
-                                       }
-                                 },
-                                 "children": [
-                                       {
-                                          "..." : "... etc. ..."
-                                       }
-                                 ]
-                              }
-                           ]
+                        "depth": 0,
+                        "entry": {
+                           "accum": 2573993124,
+                           "laps": 1,
+                           "repr_data": 2.573993124,
+                           "repr_display": 2.573993124,
+                           "value": 2573993124
+                        },
+                        "prefix": "|0>>> trace-time-window.inst",
+                        "stats": {
+                           "count": 1,
+                           "max": 2.573993124,
+                           "mean": 2.573993124,
+                           "min": 2.573993124,
+                           "sqr": 6.625440602399278,
+                           "stddev": 0.0,
+                           "sum": 2.573993124
+                        }
+                     },
+                     {
+                        "depth": 1,
+                        "entry": {
+                           "accum": 500471368,
+                           "laps": 1,
+                           "repr_data": 0.500471368,
+                           "repr_display": 0.500471368,
+                           "value": 500471368
+                        },
+                        "prefix": "|0>>> |_outer_a",
+                        "stats": {
+                           "count": 1,
+                           "max": 0.500471368,
+                           "mean": 0.500471368,
+                           "min": 0.500471368,
+                           "sqr": 0.25047159018779147,
+                           "stddev": 0.0,
+                           "sum": 0.500471368
+                        }
+                     },
+                     {
+                        "..." : "... etc. ..."
                      }
-                  ]
-               ]
+                  ],
+                  "graph_size": 4,
+                  "rank": 0
+               }
+            ],
+            "thread_count": 1,
+            "thread_scope_only": false,
+            "type": "wall_clock",
+            "unit_repr": "s",
+            "unit_value": 1000000000,
+            "upcxx_size": 1
          }
       }
    }
@@ -822,7 +630,9 @@ Timemory JSON output Python post-processing example
       input_data = [[x, read_json(x)] for x in sys.argv[1:]]
 
       for file, data in input_data:
-         for metric, metric_data in data["timemory"].items():
+         # wall_clock.json is under "rocprofiler-systems", other components under "timemory"
+         root = data.get("rocprofiler-systems", data.get("timemory", {}))
+         for metric, metric_data in root.items():
 
                print(f"[{file}] Found metric: {metric}")
 

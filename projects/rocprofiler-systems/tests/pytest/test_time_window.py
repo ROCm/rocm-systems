@@ -86,6 +86,7 @@ class TestTraceTimeWindow(RocprofsysTest):
             counts=[1, 1, 1, 1],
             depths=[0, 1, 1, 1],
             fail_regex=["outer_d"],  # time window should exclude this
+            root="rocprofiler-systems",
         )
         self.assert_perfetto(
             result,
@@ -116,6 +117,7 @@ class TestTraceTimeWindow(RocprofsysTest):
             labels=["outer_c", "outer_d"],
             counts=[1, 1],
             depths=[0, 0],
+            root="rocprofiler-systems",
         )
         self.assert_perfetto(
             result,

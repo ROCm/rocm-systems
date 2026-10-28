@@ -9,11 +9,9 @@
 
 #include <sys/types.h>
 
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 
 namespace rocprofsys
 {
@@ -69,12 +67,11 @@ public:
 private:
     void add_thread_lifetimes();
 
-    std::shared_ptr<metadata_registry>             m_metadata;
-    pid_t                                          m_pid;
-    std::shared_ptr<agent_manager>                 m_agents;
-    wall_clock_options                             m_options;
-    wall_clock_report                              m_report;
-    std::unordered_map<std::uint64_t, std::string> m_kernel_names;
+    std::shared_ptr<metadata_registry> m_metadata;
+    pid_t                              m_pid;
+    std::shared_ptr<agent_manager>     m_agents;
+    wall_clock_options                 m_options;
+    wall_clock_report                  m_report;
 };
 
 }  // namespace rocprofsys::trace_cache

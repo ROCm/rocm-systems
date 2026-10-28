@@ -65,6 +65,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Timemory component annotations (for example `thread_cpu_clock` and PAPI counter
   values) are no longer attached to Perfetto slices. They will be available through the
   timemory output formats.
+- The `--profile-diff` option of `rocprof-sys-run` and `rocprof-sys-sample`. It compared
+  timemory profiles against a previous run, and the `wall_clock` profile is no longer
+  produced by timemory. Passing `--profile-diff` is now an unknown-argument error.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
