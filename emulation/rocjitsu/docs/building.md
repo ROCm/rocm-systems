@@ -87,6 +87,11 @@ them only from its CDNA4-to-CDNA3 lowering, for the same reason. When
 `RJ_UBSAN_VPTR=ON`, the build compiles separate objects for that code, so the
 objects linked into the simulator and unit tests keep those checks.
 
+With `vptr` checks on, the UBSan runtime briefly opens pipes on emulator threads,
+so interposer tests that depend on specific file descriptor numbers or exhaust
+the descriptor table are not registered. They run in unsanitized builds and in
+UBSan builds with `RJ_UBSAN_VPTR=OFF`, including GCC's default.
+
 `AUTO` uses shared runtimes for ASan, UBSan, and TSan, and the only
 supported static runtime for MSan. `SHARED` rejects MSan explicitly because
 Clang does not provide a shared MSan runtime.

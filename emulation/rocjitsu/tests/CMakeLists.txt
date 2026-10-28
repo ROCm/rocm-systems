@@ -2083,12 +2083,6 @@ endfunction()
 
 set(_rj_interposer_dup_tests
     ConstructorPreservesDescriptorLimit
-    Dup2PreservesHiddenEventBacking
-    Dup3PreservesHiddenEventBacking
-    Dup2PreservesHiddenAllocationBacking
-    Dup3PreservesHiddenAllocationBacking
-    Dup2PreservesHiddenDoorbellBacking
-    Dup3PreservesHiddenDoorbellBacking
     DupKeepsKfdRoutingAfterPrimaryClose
     FcntlDupfdKeepsKfdRouting
     Dup2OverPrimaryInvalidatesKfdIdentity
@@ -2097,7 +2091,6 @@ set(_rj_interposer_dup_tests
     ReopenAfterPrimaryOverwriteKeepsBackend
     SerializedReopenUnderContentionStaysRoutable
     FcntlDupfdReplacesStaleDrmTracking
-    NonDrmDuplicatesClearStaleDrmTracking
     VforkChildCloseKeepsParentKfdRoutable
     ProcMapsNamesRemoteKfdMarker
 )
@@ -2111,11 +2104,9 @@ if(NOT RJ_ENABLE_TSAN)
         DrmCloseReuseRaceNeverMisclassifiesDuplicate
     )
 endif()
-rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 
 set(_rj_interposer_drm_tests
     CanonicalSysfsPathsRetainSimulatedDevice
-    CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
     DeviceInfoReportsActiveCuCount
     DeviceMappingsFollowGpuCoreDumpPolicyAcrossDescriptorAliases
     DeviceViewRetainsDumpIdentityAfterReleaseAndMove
@@ -2138,22 +2129,39 @@ set(_rj_interposer_drm_tests
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses
-    PrimeImportRejectsADescriptorThatIsNotADmabuf
     PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock
 )
-# These tests use every file descriptor while emulator threads run. A UBSan
-# vptr cache miss on one of those threads opens a pipe to probe the vtable
-# address, and the sanitizer aborts when that fails.
+# On a vptr check cache miss, the UBSan runtime briefly opens a pipe to test
+# whether a vtable address is readable. Emulator threads can miss at any time,
+# so the pipe can take a descriptor number that a test expects to be free, a
+# dup2 or dup3 onto that number can close the pipe while the runtime writes to
+# it, and the runtime aborts if no descriptor is available. Register tests that
+# depend on specific descriptor numbers or exhaust the table only when vptr
+# checks are off: in unsanitized builds, GCC UBSan builds by default, and builds
+# with RJ_UBSAN_VPTR=OFF.
 if(NOT (RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR))
+    list(
+        APPEND _rj_interposer_dup_tests
+        Dup2PreservesHiddenEventBacking
+        Dup3PreservesHiddenEventBacking
+        Dup2PreservesHiddenAllocationBacking
+        Dup3PreservesHiddenAllocationBacking
+        Dup2PreservesHiddenDoorbellBacking
+        Dup3PreservesHiddenDoorbellBacking
+        NonDrmDuplicatesClearStaleDrmTracking
+    )
     list(
         APPEND _rj_interposer_drm_tests
         AllocationFailsWhenBackingDescriptorsAreExhausted
+        CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
         MappingStillSucceedsAtTheDescriptorLimit
+        PrimeImportRejectsADescriptorThatIsNotADmabuf
     )
 endif()
+rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 rj_add_interposer_test_suite(InterposerDrmTest ${_rj_interposer_drm_tests})
 # Keep the partial-aperture regression on the shipped gfx1250 topology while
 # leaving its KFD visibility default unchanged. Reconfigure when that source
