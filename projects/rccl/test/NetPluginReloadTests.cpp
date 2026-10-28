@@ -23,6 +23,12 @@
 // only fills ncclNet.finalize once ncclNet_v10->init() has succeeded, so the call
 // went through a null function pointer. The guard must suppress finalize() after a
 // failed init() while still running it when init() succeeded and devices() failed.
+//
+// NetPluginSplitShare — NCCL 2.32.3 (a4792267, "net: share plugin lifecycle across
+// Linux and Windows"): a child split from a splitShare=1 parent skips ncclNetInit()
+// and takes the parent's plugin through ncclNetInitFromParent(), which must copy the
+// plugin version along with it. Before, the child kept the 0 it was calloc'd with, so
+// comm->ncclNetVer readers (ncclTopoGetSystem's vNIC width) saw an unversioned plugin.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
@@ -34,6 +40,7 @@
 #include <fstream>
 #include <string>
 
+#include "comm.h" // internal: struct ncclComm::ncclNet, ncclNetVer, netPluginIndex, sharedRes
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting {
@@ -92,6 +99,26 @@ void initAndDestroyComm() {
   ncclComm_t comm = nullptr;
   ASSERT_EQ(ncclCommInitRank(&comm, 1, id, 0), ncclSuccess);
   ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
+}
+
+// Splits a 1-rank splitShare=1 parent that runs on this binary's v12 plugin, so the
+// child takes the parent's net plugin through ncclNetInitFromParent().
+void initSplitShareChild(ncclComm_t* parent, ncclComm_t* child) {
+  ASSERT_EQ(setenv("NCCL_NET_PLUGIN", "STATIC_PLUGIN", 1), 0);
+  ncclUniqueId id;
+  ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
+
+  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+  config.splitShare = 1;
+  ASSERT_EQ(ncclCommInitRankConfig(parent, 1, id, 0, &config), ncclSuccess);
+  ASSERT_EQ(ncclCommSplit(*parent, 0, 0, child, nullptr), ncclSuccess);
+  ASSERT_NE(*child, nullptr);
+
+  // An external v12 plugin, so the version to inherit is not the 0 a child is
+  // calloc'd with, and a child that shares resources instead of running ncclNetInit().
+  ASSERT_STREQ((*parent)->ncclNet->name, "ReloadTest");
+  ASSERT_EQ((*parent)->ncclNetVer, 12);
+  ASSERT_EQ((*child)->sharedRes, (*parent)->sharedRes);
 }
 
 } // namespace
@@ -282,6 +309,37 @@ TEST(NetPluginInitFail, FinalizesWhenDevicesFailsAfterInit) {
         << "external plugin init must run before devices() is probed";
     EXPECT_EQ(countLines(finalizeFile.path()), 1)
         << "finalize() must release the context when devices() fails after a good init()";
+  });
+}
+
+TEST(NetPluginSplitShare, ChildInheritsNetPluginVersion) {
+  RUN_ISOLATED_TEST("NetPluginSplitShare.ChildInheritsNetPluginVersion", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    ncclComm_t parent = nullptr, child = nullptr;
+    ASSERT_NO_FATAL_FAILURE(initSplitShareChild(&parent, &child));
+    EXPECT_EQ(child->ncclNetVer, parent->ncclNetVer)
+        << "ncclNetInitFromParent() must copy the plugin version along with the plugin";
+
+    ASSERT_EQ(ncclCommDestroy(child), ncclSuccess);
+    ASSERT_EQ(ncclCommDestroy(parent), ncclSuccess);
+  });
+}
+
+TEST(NetPluginSplitShare, ChildSharesParentNetPlugin) {
+  RUN_ISOLATED_TEST("NetPluginSplitShare.ChildSharesParentNetPlugin", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    ncclComm_t parent = nullptr, child = nullptr;
+    ASSERT_NO_FATAL_FAILURE(initSplitShareChild(&parent, &child));
+    // What ncclNetInitFromParent() copied before it also copied the version.
+    EXPECT_EQ(child->ncclNet, parent->ncclNet);
+    EXPECT_EQ(child->netPluginIndex, parent->netPluginIndex);
+
+    ASSERT_EQ(ncclCommDestroy(child), ncclSuccess);
+    ASSERT_EQ(ncclCommDestroy(parent), ncclSuccess);
   });
 }
 
