@@ -19,7 +19,6 @@ from utils.utils_analysis import (
     CallTreeNode,
     build_operator_summary,
     copy_matched_operator_subtree,
-    filter_forest_by_backends,
     iter_call_tree_paths,
     process_ml_api_trace_output,
     rollup_node_stats,
@@ -428,14 +427,22 @@ class cli_analysis(OmniAnalyze_Base):
         backends: list[str],
     ) -> None:
         """Render the operator call tree for the given backends."""
-        forest_view = filter_forest_by_backends(
-            self._runs[workload_path].ml_api_call_trees, backends
-        )
+        operator_forest = self._runs[workload_path].ml_api_call_trees
+        if backends:
+            nodes_for_listed_backends = [
+                node
+                for roots in operator_forest.values()
+                for node, _path in iter_call_tree_paths(roots)
+                if node.backend in backends
+            ]
+            operator_forest = copy_matched_operator_subtree(
+                operator_forest, nodes_for_listed_backends
+            )
         name_to_id = {
             str(kernel_name).strip(): idx
             for idx, kernel_name in enumerate(kernel_top_df["Kernel_Name"].tolist())
         }
-        for roots in forest_view.values():
+        for roots in operator_forest.values():
             for root in roots:
                 _assign_kernel_ids_from_top(root, name_to_id)
         framework_labels = (
@@ -444,7 +451,7 @@ class cli_analysis(OmniAnalyze_Base):
             else ["ML API"]
         )
         tty.list_ml_operators(
-            workload_path, forest_view, framework_labels=framework_labels
+            workload_path, operator_forest, framework_labels=framework_labels
         )
 
     def apply_operator_filter(
