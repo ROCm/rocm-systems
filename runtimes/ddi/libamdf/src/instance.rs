@@ -774,9 +774,10 @@ pub(crate) unsafe extern "C" fn open(
                     // stale or vanished identity is simply absent from discovery.
                     if matches!(
                         error.kind(),
-                        rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::DeviceLost
-                    ) || error.native_error_code() == Some(2)
-                    {
+                        rocddi::ErrorKind::InvalidArgument
+                            | rocddi::ErrorKind::DeviceLost
+                            | rocddi::ErrorKind::NotFound
+                    ) {
                         NOT_FOUND
                     } else {
                         crate::support::native(&error)
