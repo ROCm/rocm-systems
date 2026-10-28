@@ -200,6 +200,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed the `amdsmi` Python module from TheRock's `rocm-sdk-core` wheel failing outside `share/amd_smi`**.  
+  - Copied into site-packages, the module could not load `libamd_smi.so.27` unless `torch` was imported first. It now loads the library from the `_rocm_sdk_core` package on `sys.path` when no system library is found, and reuses the copy PyTorch already loaded instead of mapping a second one.
+  - The copy TheRock ships in `rocm-sdk-core` loads only that wheel's library, never a system `libamd_smi.so` from another ROCm release.
+  - The module refuses a library newer than itself, whose structures can be larger than the module allocates, and warns about an older one. `AMDSMI_LIB_OVERRIDE` still loads any library.
+
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 

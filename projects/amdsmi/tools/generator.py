@@ -209,7 +209,7 @@ def main():
 # ---------------------------------------------------------------------------
 # Dynamic library loading
 # ---------------------------------------------------------------------------
-# This wrapper supports three self-contained install paths:
+# This wrapper supports four self-contained install paths:
 #
 #   1. pip wheel
 #      The wheel ships ``libamd_smi_python.so`` next to this file.
@@ -223,6 +223,10 @@ def main():
 #   3. relocatable ROCm tree (TheRock rocm-sdk wheels, portable tarball)
 #      Wrapper at ``<root>/share/amd_smi/amdsmi/``, library at
 #      ``<root>/lib/<SONAME>`` -- resolved by fixed relative path.
+#
+#   4. the copy TheRock ships in its rocm-sdk-core wheel, also once copied
+#      into site-packages: library at ``<_rocm_sdk_core>/lib/<SONAME>``.
+#      TheRock marks that copy by setting ``_AMDSMI_ROCM_SDK_CORE``.
 #
 # A user installs ONE of these packages. We never combine paths
 # from them -- no ROCM_HOME / ROCM_PATH ladders, no walking up to a
@@ -246,6 +250,108 @@ _AMDSMI_LIB_SONAME = "libamd_smi.so.{soname_major}"
 # system library (which would risk symbol conflicts inside PyTorch / JAX).
 _AMDSMI_ALLOW_SYSTEM_FALLBACK = True
 
+# TheRock flips this to True in the copy it ships in the rocm-sdk-core wheel
+# (build_tools/build_python_packages.py). That copy then loads only
+# rocm-sdk-core's library, never a system libamd_smi.so found by SONAME, so a
+# module from one ROCm release is not paired with another release's library.
+_AMDSMI_ROCM_SDK_CORE = False
+
+
+def _module_version():
+    \"\"\"(major, minor) of the build this module came from, read from the
+    _version.py that is configured beside it, or None when it is absent.\"\"\"
+    import re
+
+    try:
+        text = (Path(__file__).resolve().parent / "_version.py").read_text()
+    except OSError:
+        return None
+    m = re.search(r'__version__\\s*=\\s*["\\'](\\d+)\\.(\\d+)', text)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _check_library_version(lib, path):
+    \"\"\"Reject a library newer than this module: SONAME 27 has grown structs
+    between minor releases, and an older module's buffers are too small for
+    them. An older library only lacks newer functions, so it is a warning.\"\"\"
+    expected = _module_version()
+    if expected is None:
+        return
+    try:
+        get_lib_version = lib.amdsmi_get_lib_version
+    except AttributeError:
+        return
+    # amdsmi_version_t starts with uint32 major, minor; the buffer is larger
+    # than the struct so no future layout can overflow it.
+    version = (ctypes.c_uint32 * 64)()
+    if get_lib_version(version) != 0:
+        return
+    found = (version[0], version[1])
+    if found[0] != expected[0] or found[1] > expected[1]:
+        raise OSError(
+            "loading %s returned AMD SMI library %d.%d, which this %d.%d Python module cannot "
+            "use; set AMDSMI_LIB_OVERRIDE to a library path to load it anyway"
+            % ((path,) + found + expected)
+        )
+    if found[1] < expected[1]:
+        import warnings
+
+        warnings.warn(
+            "loading %s returned AMD SMI library %d.%d, older than this %d.%d Python module; "
+            "newer functions are unavailable" % ((path,) + found + expected),
+            stacklevel=3,
+        )
+
+
+def _unload(lib):
+    \"\"\"Drop the reference ctypes.CDLL took on a library the version check
+    rejected, so a later RTLD_NOLOAD lookup cannot return it.\"\"\"
+    import _ctypes
+
+    handle = getattr(lib, "_handle", None)
+    if handle is not None and hasattr(_ctypes, "dlclose"):
+        _ctypes.dlclose(handle)
+
+
+def _rocm_sdk_core_dir():
+    \"\"\"The _rocm_sdk_core package directory, found the way an import would
+    find it but without importing it, so import guards that reject third-party
+    packages cannot break the load.\"\"\"
+    import sys
+
+    module = sys.modules.get("_rocm_sdk_core")
+    if getattr(module, "__file__", None):
+        return Path(module.__file__).parent
+    for entry in sys.path:
+        if not entry:
+            continue
+        candidate = Path(entry) / "_rocm_sdk_core"
+        if (candidate / "__init__.py").is_file():
+            return candidate
+    return None
+
+
+def _open_library(path, mode, errors):
+    \"\"\"Open path, reusing it when it is already loaded. PyTorch's import hook
+    can redirect a plain load to another libamd_smi; with RTLD_NOLOAD the
+    redirect can only return a copy the process has already loaded.\"\"\"
+    noload = getattr(os, "RTLD_NOLOAD", 0)
+    for attempt in ([mode | noload] if noload else []) + [mode]:
+        try:
+            lib = ctypes.CDLL(str(path), mode=attempt)
+        except OSError as err:
+            if attempt == mode:
+                errors.append(str(err))
+            continue
+        try:
+            _check_library_version(lib, path)
+        except OSError as err:
+            errors.append(str(err))
+            _unload(lib)
+            return None
+        return lib
+    return None
+
 
 def _load_library():
     \"\"\"Load the AMD SMI shared library.
@@ -254,8 +360,10 @@ def _load_library():
       1. ``AMDSMI_LIB_OVERRIDE`` env var (ABI-test escape hatch).
       2. ``libamd_smi_python.so`` next to this file (pip wheel).
       3. ``<root>/lib/<SONAME>`` relative to this file (relocatable ROCm tree).
-      4. SONAME via the dynamic linker (system rpm / deb); skipped when
-         _AMDSMI_ALLOW_SYSTEM_FALLBACK is False (pip wheel).
+      4. In rocm-sdk-core's copy: ``_rocm_sdk_core/lib/<SONAME>``, then stop.
+      5. SONAME via the dynamic linker (system rpm / deb).
+      6. ``_rocm_sdk_core/lib/<SONAME>``, for a copy without TheRock's flag.
+    3-6 skip a library newer than this module.
     \"\"\"
     mode = getattr(ctypes, "RTLD_LOCAL", 0)
 
@@ -278,16 +386,49 @@ def _load_library():
     # amdsmi_interface.py resolves librocm-core.so the same way. A
     # present-but-unloadable file (missing deps) must not shadow the system
     # linker lookup, so fall through on OSError.
+    candidates = []
     here = Path(__file__).resolve()
     if len(here.parents) > 3:
-        relocatable = here.parents[3] / "lib" / _AMDSMI_LIB_SONAME
-        if relocatable.exists():
-            try:
-                return ctypes.CDLL(str(relocatable), mode=mode), str(relocatable)
-            except OSError:
-                pass
+        candidates.append(here.parents[3] / "lib" / _AMDSMI_LIB_SONAME)
+    if _AMDSMI_ROCM_SDK_CORE:
+        sdk_core = _rocm_sdk_core_dir()
+        if sdk_core is not None:
+            candidates.append(sdk_core / "lib" / _AMDSMI_LIB_SONAME)
 
-    return ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode), _AMDSMI_LIB_SONAME
+    errors = []
+    for path in candidates:
+        if path.exists():
+            lib = _open_library(path, mode, errors)
+            if lib is not None:
+                return lib, str(path)
+
+    if _AMDSMI_ROCM_SDK_CORE:
+        raise OSError(
+            "no usable %s from rocm-sdk-core: %s"
+            % (_AMDSMI_LIB_SONAME, "; ".join(errors) or "_rocm_sdk_core not found on sys.path")
+        )
+    try:
+        lib = ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode)
+    except OSError as err:
+        errors.append(str(err))
+    else:
+        try:
+            _check_library_version(lib, _AMDSMI_LIB_SONAME)
+            return lib, _AMDSMI_LIB_SONAME
+        except OSError as err:
+            errors.append(str(err))
+            _unload(lib)
+
+    # No system library: a module copied beside TheRock's rocm-sdk-core wheel
+    # by hand, without TheRock's flag, still finds that wheel's library.
+    sdk_core = _rocm_sdk_core_dir()
+    if sdk_core is not None:
+        path = sdk_core / "lib" / _AMDSMI_LIB_SONAME
+        if path.exists():
+            lib = _open_library(path, mode, errors)
+            if lib is not None:
+                return lib, str(path)
+    raise OSError("; ".join(errors))
 
 
 class _MissingLibrary:
