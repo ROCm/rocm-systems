@@ -272,7 +272,7 @@ static void test_health_multi_reporter_aggregate() {
         std::string("got '") + r.value.reporter + "'");
 }
 
-static void test_health_error_count_saturates_below_sentinel() {
+static void test_health_error_count_saturates_below_the_reserved_value() {
   std::cout << "\nHealth: overflowing error_count saturates below the unsupported reserved value\n";
   FakeNic nic;
 
@@ -964,7 +964,7 @@ int main() {
   test_health_reporter_name_varies();
   test_health_unhealthy();
   test_health_multi_reporter_aggregate();
-  test_health_error_count_saturates_below_sentinel();
+  test_health_error_count_saturates_below_the_reserved_value();
   test_health_no_reporter();
   test_health_devlink_failure();
   test_port_split_active();

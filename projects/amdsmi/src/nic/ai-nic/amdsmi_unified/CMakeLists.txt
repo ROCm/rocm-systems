@@ -38,8 +38,7 @@ set(NIC_LINKER_FLAGS "-Wl,-z,relro,-z,noexecstack,-z,noexecheap -Wl,--strip-debu
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${NIC_LINKER_FLAGS}")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${NIC_LINKER_FLAGS}")
 
-# Sources are enumerated explicitly (matching the top-level project's SRC_LIST
-# style) so adding a file is a deliberate act, not a silent GLOB pickup.
+# Sources are listed explicitly, like the top-level SRC_LIST, not globbed.
 set(CPP_SRCS
     "${NIC_SOURCE_DIR}/smi_ethtool_ioctl.cpp"
     "${NIC_SOURCE_DIR}/smi_nic.cpp"
@@ -63,11 +62,8 @@ set(CPP_SRCS
     "${NIC_SOURCE_DIR}/vendors/pensando/pensando_stats.cpp"
 )
 
-# Netlink transport backend requires libnl-3; gated by explicit membership, not a
-# filename regex, so a future non-libnl file with "netlink" in its name is not
-# excluded by accident.
+# Sources of the netlink transport backend, which requires libnl-3.
 set(CPP_SRCS_NETLINK
-    "${NIC_SOURCE_DIR}/netlink_ethtool.cpp"
     "${NIC_SOURCE_DIR}/netlink_generic.cpp"
     "${NIC_SOURCE_DIR}/netlink_wrapper.cpp"
     "${NIC_SOURCE_DIR}/smi_devlink_netlink.cpp"
@@ -77,6 +73,36 @@ set(CPP_SRCS_NETLINK
 if(NIC_HAS_LIBNL)
     list(APPEND CPP_SRCS ${CPP_SRCS_NETLINK})
     message(STATUS "libnl-3 found: building with netlink transport backend")
+
+    # Kernel UAPI headers older than a feature lack its symbols (Ubuntu 20.04 ships 5.4). Without
+    # ethtool netlink, FEC statistics are unavailable and the transport uses ioctl; without the two
+    # devlink attributes, the port split state and board serial read N/A.
+    include(CheckCXXSourceCompiles)
+    check_cxx_source_compiles(
+        "
+        #include <linux/ethtool_netlink.h>
+        int main() { return static_cast<int>(ETHTOOL_A_FEC_STAT_CORR_BITS) + ETHTOOL_FLAG_STATS; }"
+        NIC_HAS_ETHTOOL_NETLINK
+    )
+    check_cxx_source_compiles(
+        "
+        #include <linux/devlink.h>
+        int main() { return static_cast<int>(DEVLINK_ATTR_PORT_SPLITTABLE); }"
+        NIC_HAS_DEVLINK_PORT_SPLITTABLE
+    )
+    check_cxx_source_compiles(
+        "
+        #include <linux/devlink.h>
+        int main() { return static_cast<int>(DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER); }"
+        NIC_HAS_DEVLINK_BOARD_SERIAL
+    )
+
+    if(NIC_HAS_ETHTOOL_NETLINK)
+        list(APPEND CPP_SRCS "${NIC_SOURCE_DIR}/netlink_ethtool.cpp")
+    else()
+        message(WARNING "ethtool netlink UAPI header not usable: FEC statistics will be unavailable")
+        list(APPEND CPP_SRCS "${NIC_SOURCE_DIR}/netlink_ethtool_stub.cpp")
+    endif()
 else()
     message(STATUS "libnl-3 not found: building without netlink transport backend")
 endif()
@@ -102,6 +128,13 @@ target_link_libraries(amdsminic PRIVATE ${CMAKE_DL_LIBS})
 # Add compile definition if libnl-3 is available
 if(NIC_HAS_LIBNL)
     target_compile_definitions(amdsminic PRIVATE HAVE_LIBNL3)
+    # Negative macros: a build that never runs the probes above keeps the full code path.
+    if(NOT NIC_HAS_DEVLINK_PORT_SPLITTABLE)
+        target_compile_definitions(amdsminic PRIVATE NIC_NO_DEVLINK_PORT_SPLITTABLE)
+    endif()
+    if(NOT NIC_HAS_DEVLINK_BOARD_SERIAL)
+        target_compile_definitions(amdsminic PRIVATE NIC_NO_DEVLINK_BOARD_SERIAL)
+    endif()
     if(USING_BUNDLED_NETLINK)
         target_link_libraries(amdsminic PRIVATE libnl::genl)
     else()

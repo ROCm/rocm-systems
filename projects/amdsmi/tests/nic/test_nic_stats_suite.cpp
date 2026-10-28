@@ -880,6 +880,12 @@ static void test_interface_out_of_range_index_reads_the_same_from_count_and_list
   check("an rdma list past the last rdma port is not found",
         smi_get_nic_rdma_port_statistics_list(rdma_fixture.ctx, kFakeNicBdf, 0, 0, kPastLastPort,
                                               info.get()) == SMI_NIC_STATUS_NOT_FOUND);
+  check("an rdma count past the last rdma device is not found",
+        smi_get_nic_rdma_port_statistics_count(rdma_fixture.ctx, kFakeNicBdf, 0, kPastLastPort, 0,
+                                               &count) == SMI_NIC_STATUS_NOT_FOUND);
+  check("an rdma list past the last rdma device is not found",
+        smi_get_nic_rdma_port_statistics_list(rdma_fixture.ctx, kFakeNicBdf, 0, kPastLastPort, 0,
+                                              info.get()) == SMI_NIC_STATUS_NOT_FOUND);
 }
 
 // A counter the kernel stops exposing must not linger at its last value.

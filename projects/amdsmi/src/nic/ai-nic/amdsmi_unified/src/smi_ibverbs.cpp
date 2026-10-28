@@ -78,7 +78,7 @@ IbverbsLoader::IbverbsLoader() {
 
 std::optional<PortMtu> query_port_mtu_in_process(const std::string& rdma_dev, uint8_t port_num) {
   auto& ibv = IbverbsLoader::instance();
-  if (!ibv.available()) {
+  if (!ibv.is_available()) {
     return std::nullopt;
   }
 
@@ -211,7 +211,7 @@ std::optional<PortMtu> run_isolated(const MtuProbe_t& probe, std::chrono::millis
 std::optional<PortMtu> query_port_mtu(const std::string& rdma_dev, uint8_t port_num) {
 #ifdef LIBIBVERBS_INSTALLED
   // Load the library before forking so an absent one costs no child and the child reuses the map.
-  if (!IbverbsLoader::instance().available()) {
+  if (!IbverbsLoader::instance().is_available()) {
     return std::nullopt;
   }
   return run_isolated([&]() { return query_port_mtu_in_process(rdma_dev, port_num); },

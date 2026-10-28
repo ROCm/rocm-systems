@@ -34,9 +34,12 @@
 
 #include "smi_ethtool_ioctl.h"
 #include "smi_nic_driver_stats.h"
+#include "smi_nic_text.h"
 #include "smi_nic_transport.h"
 
 namespace amd::smi::nic::transport {
+
+namespace text = ::amd::smi::nic::text;
 
 namespace {
 
@@ -128,7 +131,8 @@ Result<VendorStatistics> read_driver_statistics(const DriverStatsIoctls_t& ioctl
 
     for (uint32_t i = 0; i < stats_num; i++) {
       const char* name_ptr = reinterpret_cast<const char*>(&strings->data[i * ETH_GSTRING_LEN]);
-      result.names.emplace_back(name_ptr, strnlen(name_ptr, ETH_GSTRING_LEN));
+      result.names.emplace_back(
+          text::printable_ascii(std::string(name_ptr, strnlen(name_ptr, ETH_GSTRING_LEN))));
       result.values.push_back(stats->data[i]);
     }
 
@@ -230,12 +234,10 @@ class IoctlBackend : public NicTransport {
       return {false, {}, errno};
     }
 
-    // The kernel null-terminates these fixed-size fields.
     return {true,
-            {std::string(reinterpret_cast<const char*>(drvinfo.driver)),
-             std::string(reinterpret_cast<const char*>(drvinfo.version)),
-             std::string(reinterpret_cast<const char*>(drvinfo.fw_version)),
-             std::string(reinterpret_cast<const char*>(drvinfo.bus_info)), drvinfo.n_stats},
+            {text::printable_field(drvinfo.driver), text::printable_field(drvinfo.version),
+             text::printable_field(drvinfo.fw_version), text::printable_field(drvinfo.bus_info),
+             drvinfo.n_stats},
             0};
   }
 

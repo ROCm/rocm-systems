@@ -73,7 +73,8 @@ class SmiInfiniBandPort {
   const std::string& name() const;
   std::optional<uint8_t> port_num() const;
   std::optional<std::string> state() const;
-  // libibverbs answers first; the sysfs files are the fallback for a driver that exposes them.
+  // libibverbs answers first; the sysfs files are the fallback for a driver that exposes them. The
+  // libibverbs answer is read once at discovery, so it does not follow a later MTU change.
   std::optional<uint16_t> max_mtu() const;
   std::optional<uint16_t> active_mtu() const;
   // const: counters are re-read on every query, so the map is a mutable cache.

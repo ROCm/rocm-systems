@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef __SMI_IBVERBS_H__
-#define __SMI_IBVERBS_H__
+#ifndef AMDSMI_UNIFIED_SMI_IBVERBS_H_
+#define AMDSMI_UNIFIED_SMI_IBVERBS_H_
 
 #include <chrono>
 #include <cstdint>
@@ -46,7 +46,7 @@ class IbverbsLoader {
  public:
   static IbverbsLoader& instance();
 
-  bool available() const { return available_; }
+  bool is_available() const { return available_; }
 
  private:
   IbverbsLoader();
@@ -119,4 +119,4 @@ std::optional<PortMtu> query_port_mtu(const std::string& rdma_dev, uint8_t port_
 
 }  // namespace smi_ibverbs
 
-#endif  // __SMI_IBVERBS_H__
+#endif  // AMDSMI_UNIFIED_SMI_IBVERBS_H_

@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "smi_nic_text.h"
+
 namespace amd::smi::nic::vpd {
 
 namespace {
@@ -25,9 +27,6 @@ constexpr uint8_t kSmallItemEnd = 0x0f;  // End Tag
 constexpr size_t kLargeHeaderLen = 3;    // tag + 2-byte little-endian length
 constexpr size_t kKeywordHeaderLen = 3;  // 2-char keyword + 1-byte length
 constexpr unsigned kLenHighByteShift = 8;
-constexpr char kPrintableAsciiMin = ' ';
-constexpr char kPrintableAsciiMax = '~';
-constexpr char kNonAsciiReplacement = '?';
 
 // VPD strings are ASCII, right-padded with spaces or NULs; drop that trailing
 // filler so callers see the bare value.
@@ -39,15 +38,7 @@ std::optional<std::string> trimmed(const uint8_t* data, size_t len) {
   if (end == 0) {
     return std::nullopt;
   }
-  // Raw device bytes would break UTF-8 decoding in callers and carry terminal escapes into
-  // output and logs.
-  auto text = std::string(reinterpret_cast<const char*>(data), end);
-  for (auto& ch : text) {
-    if ((ch < kPrintableAsciiMin) || (ch > kPrintableAsciiMax)) {
-      ch = kNonAsciiReplacement;
-    }
-  }
-  return text;
+  return text::printable_ascii(std::string(reinterpret_cast<const char*>(data), end));
 }
 
 // Decodes the { keyword[2], len[1], data[len] } entries inside a VPD-R block.

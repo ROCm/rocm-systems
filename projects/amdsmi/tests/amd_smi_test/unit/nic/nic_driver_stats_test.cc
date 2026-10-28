@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <utility>
 
 #include "nic_unit_fixture.h"
 #include "smi_nic_driver_stats.h"
@@ -38,6 +39,9 @@ class FakeDriver_t {
   auto grow_after_next_query() -> void { m_is_growing_once = true; }
   auto grow_after_every_query() -> void { m_is_growing_always = true; }
   auto fail_strings_with(int error) -> void { m_strings_error = error; }
+  auto name_stats_with(std::string name_template) -> void {
+    m_name_template = std::move(name_template);
+  }
 
   auto ioctls() -> ioctl_internal::DriverStatsIoctls_t {
     auto ioctls = ioctl_internal::DriverStatsIoctls_t{};
@@ -78,7 +82,7 @@ class FakeDriver_t {
     strings->len = m_count;
     m_has_overflowed = m_has_overflowed || (m_count > capacity);
     for (auto i = uint32_t{0}; (i < m_count) && (i < capacity); ++i) {
-      const auto name = std::string{kNameTemplate} + std::to_string(i);
+      const auto name = m_name_template + std::to_string(i);
       std::memcpy(&strings->data[i * ETH_GSTRING_LEN], name.c_str(), name.size() + 1);
     }
     return 0;
@@ -102,6 +106,7 @@ class FakeDriver_t {
   bool m_is_growing_once = false;
   bool m_is_growing_always = false;
   int m_strings_error = 0;
+  std::string m_name_template = kNameTemplate;
   int m_num_count_queries = 0;
   bool m_has_overflowed = false;
 };
@@ -175,6 +180,19 @@ TEST_F(NicUnit, DriverStatsRequestFailureKeepsItsErrno) {
 
   EXPECT_FALSE(result.success);
   EXPECT_EQ(result.error_code, EPERM);
+}
+
+// A driver names its counters; a control byte in one must not reach the output.
+TEST_F(NicUnit, DriverStatsNamesLoseControlBytes) {
+  auto driver = FakeDriver_t{2, /*is_input_checked=*/true};
+  driver.name_stats_with("rx\x1b[31m_");
+
+  const auto result = ioctl_internal::read_driver_statistics(driver.ioctls());
+
+  ASSERT_TRUE(result.success);
+  ASSERT_EQ(result.value.names.size(), size_t{2});
+  EXPECT_EQ(result.value.names[0], "rx?[31m_0");
+  EXPECT_EQ(result.value.names[1], "rx?[31m_1");
 }
 
 }  // namespace
