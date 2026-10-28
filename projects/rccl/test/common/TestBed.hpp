@@ -228,13 +228,8 @@ namespace RcclUnitTesting
     // of another active child whose pipe closed first, kChildWaitTimedOut, or -1.
     int WaitForChild(int childId);
 
-    // Called when a child stops answering (it crashed, hung, or broke the
-    // protocol), or fails while its peers may be blocked on it. Reports how it
-    // ended, kills and reaps every worker this TestBed owns or borrows, and
-    // resets it to no active children; the next InitComms starts fresh workers.
-    // waitForExit gives a dying child time to report its exit status; a hung
-    // child is killed immediately. what describes the child in the report.
-    // Returns the report for the test failure message.
+    // Kills and reaps every worker after lostChildId is lost (waitForExit: let it
+    // report its exit status first); returns the failure report.
     std::string AbandonChildren(int lostChildId, bool waitForExit = true,
                                 char const* what = "stopped responding");
 
@@ -243,16 +238,11 @@ namespace RcclUnitTesting
     bool PoolWorkersFor(std::vector<std::vector<int>> const& deviceIdsPerChild,
                         std::vector<int>& workers) const;
 
-    // Reads the pending WARMUP reply of a Warming pool worker. A worker that
-    // fails, dies or times out is killed and removed from the pool, and the
-    // current test fails.
-    bool FinishWarmup(int worker);
+    // Reads a Warming worker's reply by deadline; on failure removes it from the pool and fails the test.
+    bool FinishWarmup(int worker, std::chrono::steady_clock::time_point deadline);
 
-    // Reads one acknowledgement from each listed child (a child may appear once
-    // per command it was sent), then fails if any reported failure. With
-    // peersInterlocked (the command makes children wait on each other: init,
-    // collectives, window registration, destroy), a failure while other acks
-    // are still owed stops every worker at once instead of waiting on them.
+    // Reads one ack per listed child id and fails if any reported failure. peersInterlocked:
+    // children wait on each other, so a failure with acks still owed stops every worker.
     void CollectAcks(std::vector<int> const& childIds, bool* allSucceeded = nullptr,
                      bool peersInterlocked = false);
 

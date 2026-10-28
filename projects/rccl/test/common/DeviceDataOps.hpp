@@ -157,11 +157,8 @@ namespace RcclUnitTesting
     }
   }
 
-  // Counts j with !Matches(a[j], b[j]) into *mismatches and lowers *firstIdx to the
-  // earliest such j (*firstIdx must start >= n). Grid-stride, so any grid size covers n.
-  // vectorized (both buffers 16-byte aligned) reads 16 bytes per load. Counts are reduced
-  // per block before one atomic pair, so a fully mismatched buffer does not serialize on
-  // the atomics.
+  // Adds the count of j with !Matches(a[j], b[j]) to *mismatches and lowers *firstIdx (must
+  // start >= n) to the first; vectorized requires 16-byte aligned buffers.
   template <typename T>
   __global__ __launch_bounds__(kMismatchBlockSize)
   void MismatchReduceKernel(const T* a, const T* b, size_t n, bool vectorized,

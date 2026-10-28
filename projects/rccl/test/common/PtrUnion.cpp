@@ -22,10 +22,8 @@ namespace RcclUnitTesting
 
   namespace
   {
-    // IsEqualDevice scratch, reused across calls. Kept per thread (UT_MULTITHREAD ranks
-    // validate concurrently) and per device, and never freed: process exit releases it.
-    // Word layout: [0] mismatch count, [1] first divergent index, [2..3] expected/actual
-    // raw bits, [4..5] expected/actual as double.
+    // Per-thread, per-device IsEqualDevice scratch, freed at process exit. Words: [0] mismatch
+    // count, [1] first index, [2..3] expected/actual bits, [4..5] expected/actual as double.
     struct CompareScratch
     {
       unsigned long long* dev  = nullptr;

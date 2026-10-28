@@ -62,12 +62,7 @@
     if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d", retval, childId); \
     if (retval != static_cast<ssize_t>(sizeof(val)))                                    \
     {                                                                                   \
-      if (retval == -1)                                                                 \
-        TEST_ERROR("Unable to read from child %d: Error %s", childId, strerror(errno)); \
-      else if (retval == 0)                                                             \
-        TEST_ERROR("Child %d pipe closed unexpectedly", childId);                       \
-      else                                                                              \
-        TEST_ERROR("Child %d pipe read incomplete (%ld / %lu)", childId, retval, sizeof(val)); \
+      ReportReadFailure(childId, retval, sizeof(val));                                  \
       FAIL() << AbandonChildren(childId);                                               \
     }                                                                                   \
   }
@@ -118,6 +113,31 @@ namespace RcclUnitTesting
         waitResult = waitpid(pid, status, 0);
       } while (waitResult == -1 && errno == EINTR);
       return waitResult;
+    }
+
+    // poll() timeout for the time left until deadline; -1 (no limit) when timeoutSec is 0.
+    int PollTimeoutMs(int const timeoutSec, std::chrono::steady_clock::time_point const deadline)
+    {
+      if (timeoutSec <= 0) return -1;
+      auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+      return static_cast<int>(std::clamp<long long>(remaining.count(), 0, INT_MAX));
+    }
+
+    void ReportReadFailure(int const childId, ssize_t const retval, size_t const expectedBytes)
+    {
+      if (retval == -1)
+      {
+        TEST_ERROR("Unable to read from child %d: Error %s", childId, strerror(errno));
+      }
+      else if (retval == 0)
+      {
+        TEST_ERROR("Child %d pipe closed unexpectedly", childId);
+      }
+      else
+      {
+        TEST_ERROR("Child %d pipe read incomplete (%ld / %lu)", childId, retval, expectedBytes);
+      }
     }
   }
 
@@ -261,14 +281,7 @@ namespace RcclUnitTesting
 
     while (true)
     {
-      int pollTimeoutMs = -1;
-      if (timeoutSec > 0)
-      {
-        auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-          deadline - std::chrono::steady_clock::now());
-        pollTimeoutMs = static_cast<int>(std::clamp<long long>(remaining.count(), 0, INT_MAX));
-      }
-      int const pollResult = poll(fds.data(), fds.size(), pollTimeoutMs);
+      int const pollResult = poll(fds.data(), fds.size(), PollTimeoutMs(timeoutSec, deadline));
       if (pollResult < 0)
       {
         if (errno == EINTR) continue;
@@ -390,30 +403,34 @@ namespace RcclUnitTesting
     }
   }
 
-  bool TestBed::FinishWarmup(int const worker)
+  bool TestBed::FinishWarmup(int const worker, std::chrono::steady_clock::time_point const deadline)
   {
     TestBedChild* const child = this->poolChildren[worker];
     this->poolWorkerState[worker] = PoolWorkerState::Warm;
 
     int const timeoutSec = ChildReplyTimeoutSec();
-    int const pollTimeoutMs = timeoutSec > 0
-      ? static_cast<int>(std::min<long long>(timeoutSec * 1000LL, INT_MAX)) : -1;
     pollfd fd = {child->parentReadFd, POLLIN, 0};
     int pollResult;
     do
     {
-      pollResult = poll(&fd, 1, pollTimeoutMs);
+      pollResult = poll(&fd, 1, PollTimeoutMs(timeoutSec, deadline));
     } while (pollResult < 0 && errno == EINTR);
 
     std::string problem;
     int response = TEST_FAIL;
     if (pollResult == 0)
+    {
       problem = "did not reply within " + std::to_string(timeoutSec) + " s (UT_CHILD_TIMEOUT_S)";
+    }
     else if (RcclUnitTesting::safe_pipe_read(child->parentReadFd, &response, sizeof(response)) !=
              static_cast<ssize_t>(sizeof(response)))
+    {
       problem = "pipe closed";
+    }
     else if (response != TEST_SUCCESS)
+    {
       problem = "reported failure";
+    }
     if (problem.empty()) return true;
 
     std::string const reason = "Pool worker " + std::to_string(worker) + " (pid " +
@@ -522,10 +539,14 @@ namespace RcclUnitTesting
 
       std::vector<int> workers;
       bool mappable = PoolWorkersFor(deviceIdsPerProcess, workers);
+      // Workers warm in parallel, so they share one reply deadline.
+      auto const warmupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(ChildReplyTimeoutSec());
       for (int const worker : workers)
       {
-        if (this->poolWorkerState[worker] == PoolWorkerState::Warming && !FinishWarmup(worker))
+        if (this->poolWorkerState[worker] == PoolWorkerState::Warming && !FinishWarmup(worker, warmupDeadline))
+        {
           mappable = false;  // worker removed from the pool -> fork-fresh
+        }
       }
 
       if (mappable)
@@ -721,11 +742,8 @@ namespace RcclUnitTesting
   {
     if (allSucceeded) *allSucceeded = false;
 
-    // Read every acknowledgement before failing: stopping at the first failure
-    // leaves the remaining acks queued, and the next command on those children
-    // would consume them as its own. Acks are taken in arrival order, so a
-    // failure is seen even while an earlier child is still blocked on the
-    // failed one.
+    // Drain every ack before failing, or the next command reads a stale one. Arrival
+    // order lets a failure be seen while an earlier child is blocked on the failed one.
     using Clock = std::chrono::steady_clock;
     std::map<int, int> pendingAcks;
     for (int childId : childIds) ++pendingAcks[childId];
@@ -751,14 +769,7 @@ namespace RcclUnitTesting
         FAIL() << AbandonChildren(pending.first);
       }
 
-      int pollTimeoutMs = -1;
-      if (replyTimeoutSec > 0)
-      {
-        auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-          replyDeadline - Clock::now());
-        pollTimeoutMs = static_cast<int>(std::clamp<long long>(remaining.count(), 0, INT_MAX));
-      }
-      int const pollResult = poll(fds.data(), fds.size(), pollTimeoutMs);
+      int const pollResult = poll(fds.data(), fds.size(), PollTimeoutMs(replyTimeoutSec, replyDeadline));
       if (pollResult < 0)
       {
         if (errno == EINTR) continue;
@@ -785,10 +796,7 @@ namespace RcclUnitTesting
         ssize_t const retval = RcclUnitTesting::safe_pipe_read(fds[i].fd, &response, sizeof(response));
         if (retval != static_cast<ssize_t>(sizeof(response)))
         {
-          if (retval == -1)
-            TEST_ERROR("Unable to read from child %d: Error %s", childId, strerror(errno));
-          else
-            TEST_ERROR("Child %d pipe closed unexpectedly", childId);
+          ReportReadFailure(childId, retval, sizeof(response));
           FAIL() << AbandonChildren(childId);
         }
         if (--pendingAcks[childId] == 0) pendingAcks.erase(childId);
@@ -802,7 +810,9 @@ namespace RcclUnitTesting
           {
             std::string waiting;
             for (auto const& pending : pendingAcks)
+            {
               waiting += (waiting.empty() ? "" : ", ") + std::to_string(pending.first);
+            }
             TEST_ERROR("Not waiting for child(ren) %s after child %d failed", waiting.c_str(), childId);
             FAIL() << AbandonChildren(childId, /*waitForExit=*/false, "reported failure");
           }
@@ -1182,8 +1192,10 @@ namespace RcclUnitTesting
     // block them in the intranode barrier waiting for the failed rank.
     int const abortComms = this->childFailed ? 1 : 0;
     if (abortComms && this->numActiveChildren > 0)
+    {
       TEST_WARN("DestroyComms: aborting communicators on all %d children after a child failure",
                 this->numActiveChildren);
+    }
 
     // Send DestroyComms command to all active child processes first so they can
     // work in parallel, then collect acknowledgements in a second pass. Run the
@@ -1342,13 +1354,16 @@ namespace RcclUnitTesting
     if (this->poolChildren.empty())
       return;
 
-    // A warming worker writes its reply before it reads STOP; collect it so
-    // the reply does not hit a closed pipe.
+    // A warming worker writes its reply before it reads STOP; collect it so a
+    // failed warm-up is reported and the reply does not hit a closed pipe.
+    auto const warmupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(ChildReplyTimeoutSec());
     for (int worker = 0; worker < (int)this->poolWorkerState.size(); ++worker)
     {
       if (this->poolChildren[worker] != nullptr &&
           this->poolWorkerState[worker] == PoolWorkerState::Warming)
-        (void)FinishWarmup(worker);
+      {
+        (void)FinishWarmup(worker, warmupDeadline);
+      }
     }
 
     // Best-effort stop (avoid the ASSERT-based PIPE_WRITE during teardown), then reap.
@@ -1580,7 +1595,9 @@ namespace RcclUnitTesting
       // Two configs ahead: the next one alone (often single-process on warm
       // worker 0) is too short to hide a worker's ~2 s device-code load.
       for (size_t ahead = rcIdx + 1; ahead < rankConfigs.size() && ahead <= rcIdx + 2; ++ahead)
+      {
         this->WarmPoolWorkers(deviceIdsFor(rankConfigs[ahead]));
+      }
 
       // Symmetric sweeps only cover configurations where RCCL can select symmetric kernels
       if (memAllocType == MEM_ALLOC_SYMMETRIC_WIN)

@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstring>
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/wait.h>
@@ -33,6 +34,33 @@ namespace RcclUnitTesting
       std::vector<ncclDataType_t> dataTypes;
       testBed.GetSupportedDataTypes(dataTypes, {ncclFloat32});
       return !dataTypes.empty();
+    }
+
+    // Why this run cannot host a multi-process ncclFloat32 test on >= 2 GPUs
+    // (optionally pooled, with warm-ahead), or empty if it can.
+    std::string MultiProcessSkipReason(TestBed& testBed, bool const needPool = false,
+                                       bool const needWarmAhead = false)
+    {
+      if (needPool && !testBed.poolMode) return "Requires communicator pooling (UT_COMM_POOL=1)";
+      if (needWarmAhead && !testBed.ev.commWarmAhead) return "Requires UT_COMM_WARMAHEAD=1";
+      if (testBed.ev.maxGpus < 2)
+      {
+        return "Teardown stress requires at least 2 GPUs (detected " + std::to_string(testBed.ev.maxGpus) + ")";
+      }
+      if (!(testBed.ev.processMask & (1 << 1))) return "Teardown stress requires multi-process mode (UT_PROCESS_MASK)";
+      if (!float32Supported(testBed)) return "Teardown stress requires ncclFloat32 (excluded by UT_DATATYPES)";
+      return "";
+    }
+
+    // Runs body with this thread's gtest failures redirected into failures; returns its duration.
+    template <typename Body>
+    std::chrono::steady_clock::duration CaptureFailures(::testing::TestPartResultArray& failures, Body&& body)
+    {
+      auto const start = std::chrono::steady_clock::now();
+      ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+      body();
+      return std::chrono::steady_clock::now() - start;
     }
 
     // Run `iterations` init / collective / destroy cycles over `totalRanks`
@@ -76,13 +104,8 @@ namespace RcclUnitTesting
   TEST(Teardown, RepeatedDestroyComms)
   {
     TestBed testBed;
-    if (testBed.ev.maxGpus < 2)
-      GTEST_SKIP() << "Teardown stress requires at least 2 GPUs (detected "
-                   << testBed.ev.maxGpus << ")";
-    if (!(testBed.ev.processMask & (1 << 1)))
-      GTEST_SKIP() << "Teardown stress requires multi-process mode (UT_PROCESS_MASK)";
-    if (!float32Supported(testBed))
-      GTEST_SKIP() << "Teardown stress requires ncclFloat32 (excluded by UT_DATATYPES)";
+    std::string const skipReason = MultiProcessSkipReason(testBed);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
 
     bool isCorrect = true;
     for (bool useBlocking : {true, false})
@@ -98,13 +121,8 @@ namespace RcclUnitTesting
   TEST(Teardown, DestroyCommsVaryingChildCount)
   {
     TestBed testBed;
-    if (testBed.ev.maxGpus < 2)
-      GTEST_SKIP() << "Teardown stress requires at least 2 GPUs (detected "
-                   << testBed.ev.maxGpus << ")";
-    if (!(testBed.ev.processMask & (1 << 1)))
-      GTEST_SKIP() << "Teardown stress requires multi-process mode (UT_PROCESS_MASK)";
-    if (!float32Supported(testBed))
-      GTEST_SKIP() << "Teardown stress requires ncclFloat32 (excluded by UT_DATATYPES)";
+    std::string const skipReason = MultiProcessSkipReason(testBed);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
 
     bool isCorrect = true;
     for (int ranks = testBed.ev.maxGpus; ranks >= 2 && isCorrect; ranks /= 2)
@@ -170,18 +188,18 @@ namespace RcclUnitTesting
 
   namespace
   {
-    // Forks a worker that keeps its pipes open but never answers, as a worker
-    // wedged in a collective would, and makes it testBed's only child. The
-    // parent waits are limited to 1 s so the test runs quickly.
-    TestBedChild* InstallHungChild(TestBed& testBed)
+    void LimitParentWaitsToOneSecond(TestBed& testBed)
     {
-      testBed.poolMode = false;
-      testBed.configUsedPool = false;
       testBed.ev.debugPause = false;
       testBed.ev.timeoutUs = 0;
       testBed.ev.childTimeoutSec = 1;
+    }
 
-      TestBedChild* child = new TestBedChild(0, false, 0, false);
+    // Forks a worker that keeps its pipes open but never answers, as a worker
+    // wedged in a collective would.
+    TestBedChild* ForkHungChild(int const childId)
+    {
+      TestBedChild* child = new TestBedChild(childId, false, 0, false);
       if (child->InitPipes() != TEST_SUCCESS)
       {
         child->ClosePipes();
@@ -205,6 +223,17 @@ namespace RcclUnitTesting
       close(child->childReadFd);
       child->childWriteFd = -1;
       child->childReadFd = -1;
+      return child;
+    }
+
+    // Makes a hung worker testBed's only (non-pool) child, with 1 s parent waits.
+    TestBedChild* InstallHungChild(TestBed& testBed)
+    {
+      testBed.poolMode = false;
+      testBed.configUsedPool = false;
+      LimitParentWaitsToOneSecond(testBed);
+      TestBedChild* const child = ForkHungChild(0);
+      if (child == nullptr) return nullptr;
       testBed.childList = {child};
       testBed.numActiveChildren = 1;
       testBed.numActiveRanks = 1;
@@ -232,13 +261,7 @@ namespace RcclUnitTesting
     pid_t const childPid = child->pid;
 
     ::testing::TestPartResultArray failures;
-    auto const start = std::chrono::steady_clock::now();
-    {
-      ::testing::ScopedFakeTestPartResultReporter reporter(
-        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
-      testBed.DestroyComms();
-    }
-    auto const elapsed = std::chrono::steady_clock::now() - start;
+    auto const elapsed = CaptureFailures(failures, [&]() { testBed.DestroyComms(); });
 
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "stopped responding"));
@@ -261,13 +284,7 @@ namespace RcclUnitTesting
     pid_t const childPid = child->pid;
 
     ::testing::TestPartResultArray failures;
-    auto const start = std::chrono::steady_clock::now();
-    {
-      ::testing::ScopedFakeTestPartResultReporter reporter(
-        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
-      testBed.TeardownOwnedChildList();
-    }
-    auto const elapsed = std::chrono::steady_clock::now() - start;
+    auto const elapsed = CaptureFailures(failures, [&]() { testBed.TeardownOwnedChildList(); });
 
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "teardown deadline"));
@@ -284,15 +301,8 @@ namespace RcclUnitTesting
   TEST(Teardown, PoolAfterParentHipInitialization)
   {
     TestBed testBed;
-    if (!testBed.poolMode)
-      GTEST_SKIP() << "Requires communicator pooling (UT_COMM_POOL=1)";
-    if (testBed.ev.maxGpus < 2)
-      GTEST_SKIP() << "Teardown stress requires at least 2 GPUs (detected "
-                   << testBed.ev.maxGpus << ")";
-    if (!(testBed.ev.processMask & (1 << 1)))
-      GTEST_SKIP() << "Teardown stress requires multi-process mode (UT_PROCESS_MASK)";
-    if (!float32Supported(testBed))
-      GTEST_SKIP() << "Teardown stress requires ncclFloat32 (excluded by UT_DATATYPES)";
+    std::string const skipReason = MultiProcessSkipReason(testBed, /*needPool=*/true);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
 
     // Initialize HIP only once the test will run, so a skipped run leaves the
     // parent HIP-clean for later tests in this binary.
@@ -337,17 +347,15 @@ namespace RcclUnitTesting
       return poll(&fd, 1, waitMs) > 0 && (fd.revents & POLLIN);
     }
 
-    bool CanRunTwoProcessPool(TestBed& testBed, std::string& skipReason)
+    // Makes only rank 1 expect a wrong first element, so only that rank fails ValidateResults.
+    ErrCode WrongExpectedOnRank1(CollectiveArgs& collArgs)
     {
-      if (!testBed.poolMode || !testBed.ev.commWarmAhead)
-        skipReason = "Requires UT_COMM_POOL=1 and UT_COMM_WARMAHEAD=1";
-      else if (testBed.ev.maxGpus < 2)
-        skipReason = "Requires at least 2 GPUs";
-      else if (!(testBed.ev.processMask & (1 << 1)))
-        skipReason = "Requires multi-process mode (UT_PROCESS_MASK)";
-      else if (!float32Supported(testBed))
-        skipReason = "Requires ncclFloat32 (excluded by UT_DATATYPES)";
-      return skipReason.empty();
+      ErrCode const status = DefaultPrepData_Broadcast(collArgs);
+      if (status == TEST_SUCCESS && collArgs.globalRank == 1)
+      {
+        memset(collArgs.expected.ptr, 0xFF, DataTypeToBytes(collArgs.dataType));  // NaN for float32
+      }
+      return status;
     }
   }
 
@@ -357,8 +365,8 @@ namespace RcclUnitTesting
   TEST(Teardown, FailedCollectiveStopsBlockedPeers)
   {
     TestBed testBed;
-    std::string skipReason;
-    if (!CanRunTwoProcessPool(testBed, skipReason)) GTEST_SKIP() << skipReason;
+    std::string const skipReason = MultiProcessSkipReason(testBed);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
     testBed.ev.childTimeoutSec = 60;
     testBed.ev.timeoutUs = 5000000;
 
@@ -376,13 +384,7 @@ namespace RcclUnitTesting
     ASSERT_FALSE(testing::Test::HasFailure());
 
     ::testing::TestPartResultArray failures;
-    auto const start = std::chrono::steady_clock::now();
-    {
-      ::testing::ScopedFakeTestPartResultReporter reporter(
-        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
-      testBed.ExecuteCollectives();
-    }
-    auto const elapsed = std::chrono::steady_clock::now() - start;
+    auto const elapsed = CaptureFailures(failures, [&]() { testBed.ExecuteCollectives(); });
 
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "Child 0 reported failure"));
@@ -400,20 +402,14 @@ namespace RcclUnitTesting
   TEST(Teardown, FailedInitStopsWaitingPeers)
   {
     TestBed testBed;
-    std::string skipReason;
-    if (!CanRunTwoProcessPool(testBed, skipReason)) GTEST_SKIP() << skipReason;
+    std::string const skipReason = MultiProcessSkipReason(testBed);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
     int const replyTimeoutSec = 60;
     testBed.ev.childTimeoutSec = replyTimeoutSec;
     int const firstGpu = testBed.ev.GetGpuPriorityOrder()[0];
 
     ::testing::TestPartResultArray failures;
-    auto const start = std::chrono::steady_clock::now();
-    {
-      ::testing::ScopedFakeTestPartResultReporter reporter(
-        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
-      testBed.InitComms({{firstGpu}, {9999}});
-    }
-    auto const elapsed = std::chrono::steady_clock::now() - start;
+    auto const elapsed = CaptureFailures(failures, [&]() { testBed.InitComms({{firstGpu}, {9999}}); });
 
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "Child 1 reported failure"));
@@ -427,8 +423,8 @@ namespace RcclUnitTesting
   TEST(Teardown, WarmedPoolWorkerIsReused)
   {
     TestBed testBed;
-    std::string skipReason;
-    if (!CanRunTwoProcessPool(testBed, skipReason)) GTEST_SKIP() << skipReason;
+    std::string const skipReason = MultiProcessSkipReason(testBed, /*needPool=*/true, /*needWarmAhead=*/true);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
 
     std::vector<std::vector<int>> twoProcessIds;
     int const worker = StartWarmingSecondWorker(testBed, twoProcessIds);
@@ -440,24 +436,96 @@ namespace RcclUnitTesting
     EXPECT_TRUE(testBed.configUsedPool) << "Config was not served from the communicator pool";
     EXPECT_EQ(testBed.poolWorkerState[worker], TestBed::PoolWorkerState::Warm);
     for (auto const& deviceIds : twoProcessIds)
+    {
       EXPECT_FALSE(HasUnreadReply(testBed.poolChildren[deviceIds[0]], /*waitMs*/ 1000))
         << "Pool worker " << deviceIds[0] << " has a reply the parent never read";
+    }
     testBed.Finalize();
   }
 
-  // Finalize with a warm-up still running completes cleanly and reaps the pool.
-  TEST(Teardown, FinalizeCollectsPendingWarmup)
+  // Finalize collects a pending warm-up reply, so a worker that died while
+  // warming fails the test instead of being reaped silently.
+  TEST(Teardown, FinalizeReportsLostWarmupWorker)
   {
     TestBed testBed;
-    std::string skipReason;
-    if (!CanRunTwoProcessPool(testBed, skipReason)) GTEST_SKIP() << skipReason;
+    LimitParentWaitsToOneSecond(testBed);
+    TestBedChild* const child = ForkHungChild(0);
+    ASSERT_NE(child, nullptr);
+    pid_t const childPid = child->pid;
+    testBed.poolChildren = {child};
+    testBed.poolWorkerState = {TestBed::PoolWorkerState::Warming};
+    ASSERT_EQ(kill(childPid, SIGKILL), 0);
 
-    std::vector<std::vector<int>> twoProcessIds;
-    ASSERT_GE(StartWarmingSecondWorker(testBed, twoProcessIds), 0);
+    ::testing::TestPartResultArray failures;
+    CaptureFailures(failures, [&]() { testBed.Finalize(); });
 
-    testBed.Finalize();
+    EXPECT_EQ(failures.size(), 1);
+    EXPECT_TRUE(AnyFailureMentions(failures, "warm-up pipe closed"));
     EXPECT_TRUE(testBed.poolChildren.empty());
     EXPECT_TRUE(testBed.poolWorkerState.empty());
+    errno = 0;
+    EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
+    EXPECT_EQ(errno, ECHILD);
+  }
+
+  // Warm-ups run in parallel, so hung warming workers share one reply deadline
+  // instead of each waiting out its own UT_CHILD_TIMEOUT_S.
+  TEST(Teardown, HungWarmupsShareOneDeadline)
+  {
+    TestBed testBed;
+    LimitParentWaitsToOneSecond(testBed);
+    int const numWorkers = 3;
+    for (int worker = 0; worker < numWorkers; ++worker)
+    {
+      TestBedChild* const child = ForkHungChild(worker);
+      ASSERT_NE(child, nullptr);
+      testBed.poolChildren.push_back(child);
+      testBed.poolWorkerState.push_back(TestBed::PoolWorkerState::Warming);
+    }
+
+    ::testing::TestPartResultArray failures;
+    auto const elapsed = CaptureFailures(failures, [&]() { testBed.Finalize(); });
+
+    EXPECT_EQ(failures.size(), numWorkers);
+    EXPECT_TRUE(AnyFailureMentions(failures, "warm-up did not reply"));
+    EXPECT_LT(elapsed, std::chrono::seconds(numWorkers - 1)) << "Each warm-up waited out its own reply timeout";
+    EXPECT_TRUE(testBed.poolChildren.empty());
+  }
+
+  // When one rank fails ValidateResults it aborts its comms, so DestroyComms must
+  // abort its healthy peers too: finalizing would leave them waiting on that rank.
+  TEST(Teardown, DestroyCommsAbortsPeersAfterValidationFailure)
+  {
+    TestBed testBed;
+    std::string const skipReason = MultiProcessSkipReason(testBed);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
+    testBed.ev.childTimeoutSec = 20;
+
+    testBed.InitComms(TestBed::GetDeviceIdsList(2, 2, testBed.ev.GetGpuPriorityOrder()));
+    ASSERT_FALSE(testing::Test::HasFailure());
+    OptionalColArgs options;
+    options.root = 0;
+    testBed.SetCollectiveArgs(ncclCollBroadcast, ncclFloat32, 4096, 4096, options);
+    testBed.AllocateMem(/*inPlace*/ false, /*useManagedMem*/ false);
+    testBed.PrepareData(-1, -1, -1, WrongExpectedOnRank1);
+    testBed.ExecuteCollectives();
+    ASSERT_FALSE(testing::Test::HasFailure());
+
+    bool isCorrect = true;
+    ::testing::TestPartResultArray validateFailures;
+    CaptureFailures(validateFailures, [&]() { testBed.ValidateResults(isCorrect); });
+    ASSERT_FALSE(isCorrect) << "Rank 1 did not detect its corrupted expected value";
+    ASSERT_TRUE(testBed.childFailed);
+    testBed.DeallocateMem();
+    ASSERT_FALSE(testing::Test::HasFailure());
+
+    ::testing::TestPartResultArray failures;
+    auto const elapsed = CaptureFailures(failures, [&]() { testBed.DestroyComms(); });
+
+    EXPECT_EQ(failures.size(), 0) << (failures.size() > 0 ? failures.GetTestPartResult(0).message() : "");
+    EXPECT_LT(elapsed, std::chrono::seconds(testBed.ev.childTimeoutSec));
+    EXPECT_FALSE(testBed.childFailed);
+    testBed.Finalize();
   }
 
   // A worker lost during warm-up fails the test, leaves the pool, and the
@@ -465,8 +533,8 @@ namespace RcclUnitTesting
   TEST(Teardown, LostWarmupWorkerFallsBackToFreshWorkers)
   {
     TestBed testBed;
-    std::string skipReason;
-    if (!CanRunTwoProcessPool(testBed, skipReason)) GTEST_SKIP() << skipReason;
+    std::string const skipReason = MultiProcessSkipReason(testBed, /*needPool=*/true, /*needWarmAhead=*/true);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
 
     std::vector<std::vector<int>> twoProcessIds;
     int const worker = StartWarmingSecondWorker(testBed, twoProcessIds);
@@ -475,11 +543,7 @@ namespace RcclUnitTesting
     ASSERT_EQ(kill(workerPid, SIGKILL), 0);
 
     ::testing::TestPartResultArray failures;
-    {
-      ::testing::ScopedFakeTestPartResultReporter reporter(
-        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
-      testBed.InitComms(twoProcessIds);
-    }
+    CaptureFailures(failures, [&]() { testBed.InitComms(twoProcessIds); });
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "warm-up"));
     EXPECT_EQ(testBed.poolChildren[worker], nullptr);

@@ -107,7 +107,9 @@ namespace RcclUnitTesting
       ncclDataType_t const dataTypes[] = {ncclInt8,    ncclUint8,   ncclInt32,   ncclUint32,
                                           ncclInt64,   ncclUint64,  ncclFloat16, ncclFloat32,
                                           ncclFloat64, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
-      size_t const sizes[] = {1, 17, 4099, (size_t{1} << 20) + 5};
+      // At the largest size the last full 16-byte load lies past the first grid-stride pass
+      // for every dtype (the grid is 8 blocks of 256 threads per CU, up to 304 CUs).
+      size_t const sizes[] = {1, 17, 4099, (size_t{1} << 20) + 5, (size_t{1} << 24) + 5};
       for (ncclDataType_t const dataType : dataTypes)
       for (size_t const n : sizes)
       for (size_t const offset : {size_t{0}, size_t{1}})  // offset by one element: unaligned buffers
@@ -131,9 +133,14 @@ namespace RcclUnitTesting
 
         // All-0xFF bytes never match the rank-0 pattern: they are NaN or a negative value for
         // the float types, and differ from idx % 256 for the integer types unless that is 255.
+        // In one of the last two full loads; wraps past n (skipped) when n is that small.
+        size_t const elemsPerLoad = 16 / elemBytes;
+        size_t const nearLastLoadElem = n / elemsPerLoad * elemsPerLoad - 2;
         std::set<size_t> corrupted;
-        for (size_t const idx : {n - 1, n / 2, size_t{3}})
+        for (size_t const idx : {n - 1, n / 2, nearLastLoadElem, size_t{3}})
+        {
           if (idx < n && idx % 256 != 255) corrupted.insert(idx);
+        }
         for (size_t const idx : corrupted)
           ASSERT_EQ(hipMemset(actualPtr + idx * elemBytes, 0xFF, elemBytes), hipSuccess);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
