@@ -1411,6 +1411,39 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ContextCountNotAMultipleOfTheC
   EXPECT_EQ(4, devComm_.ginConnectionCount);
 }
 
+// AICOMRCCL-3181: ncclDevCommCreate corrupted the heap when a devComm was
+// requested with ginConnectionType=FULL and ginContextCount=0. The count flows
+// through ncclGinContextCount() = ROUNDUP(request, ginCommCount), which returned
+// 0 for a 0 request, so ginDevCommSetupWithBackend handed the backend a
+// zero-length context table and sized the per-context resource regions to 0,
+// while the live connection still wrote context slot 0. A 0 hint must promote
+// to one context per GIN connection. Two connections with exact asserts so a
+// clamp mistakenly applied after the round-up (0 contexts per comm) is caught.
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ZeroContextRequestWithFullConnection_PromotesToOnePerConnection) {
+  gin()->backends[0].ginCommCount = 2;
+  gin()->backends[0].ginComms[1] = fake_.collCommHandle(1);
+
+  auto reqs = proxyReqs();
+  reqs.ginContextCount = 0;  // the bug trigger (FULL connection is proxyReqs' default)
+  ASSERT_EQ(ncclSuccess, setup(reqs, &devComm_));
+
+  EXPECT_EQ(2u, devComm_.ginContextCount);  // one context per connection, never 0
+  EXPECT_EQ(1, lastConfig().nContexts);     // ... which is 1 per connection
+  EXPECT_EQ(2, fake_.createContextCalls);   // backend was never asked for 0 contexts
+  EXPECT_EQ(2, devComm_.ginConnectionCount);
+}
+
+// A positive ginContextCount is preserved exactly; the min-one-context clamp
+// only rescues the degenerate 0 request.
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_PositiveContextRequestIsUnchangedByTheClamp) {
+  auto reqs = proxyReqs();
+  reqs.ginContextCount = 3;  // ginCommCount == 1 in this fixture, so 3 stays 3
+  ASSERT_EQ(ncclSuccess, setup(reqs, &devComm_));
+
+  EXPECT_EQ(3u, devComm_.ginContextCount);
+  EXPECT_EQ(3, lastConfig().nContexts);
+}
+
 // Exclusive contexts are the point of the flag: a second request gets contexts
 // of its own from the plugin rather than being handed the first devComm's.
 TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ExclusiveContextsRequestedTwice_GivesEachDevCommItsOwnContexts) {
