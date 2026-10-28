@@ -1091,6 +1091,19 @@ static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   return (isGfx950 && !rcclUseAinic()) ? 1 : 0;
 }
 
+// Number of the p2pnChannelsPerPeer parts a task of collAPI uses and connects. Multi-node AINIC scatter
+// uses and connects only the most parts whose flows from the root still fit the pool; connecting more
+// slows it down. A user-set nChannelsPerNetPeer is kept, as in ncclTopoComputeP2pChannels. Depend only
+// on values both ends of a pair share, or they disagree on the parts.
+int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI) {
+  if (collAPI == ncclFuncScatter && comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT &&
+      rcclUseAinic()) {
+    int partsThatFit = comm->p2pnChannels / (comm->nRanks - 1);
+    return std::min(comm->p2pnChannelsPerPeer, partsThatFit >= 1 ? pow2Down(partsThatFit) : 1);
+  }
+  return comm->p2pnChannelsPerPeer;
+}
+
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
@@ -1113,6 +1126,11 @@ static ncclResult_t addP2pToPlan(
   bool network[2] = {false, false};
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
+  // Parts each direction's task uses; fewer than nChannelsMax also caps its channel count.
+  int taskParts[2];
+  for (int dir = 0; dir < 2; dir++)
+    taskParts[dir] =
+      p2pTasks[dir] ? std::min(nChannelsMax, rcclP2pTaskParts(comm, p2pTasks[dir]->collAPI)) : nChannelsMax;
   auto batchP2PEnableEnv = rcclEffectiveP2pBatchEnable(comm);
   auto p2pBatchThreshold = rcclParamP2pBatchThreshold();
   bool belowThreshold = (recvBytes <= p2pBatchThreshold) && (sendBytes <= p2pBatchThreshold);
@@ -1137,6 +1155,7 @@ static ncclResult_t addP2pToPlan(
       int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
       struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
       for (int dir=0; dir <= 1; dir++) {
+        if (part >= taskParts[dir]) continue;
         int peerRank = dir ? sendRank : recvRank;
         struct ncclConnector* conn = dir ? &channelPeers[peerRank]->send[connIndex[dir]]
                                          : &channelPeers[peerRank]->recv[connIndex[dir]];
@@ -1167,9 +1186,11 @@ static ncclResult_t addP2pToPlan(
     else {
       ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir]/2 : stepSize[dir]/8;
       ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir]*32;
-      nChannels[dir] = std::min<int>(nChannelsMin, divUp(bytes[dir], minPartSize));
+      int nChMax = taskParts[dir];
+      int nChStart = taskParts[dir] < nChannelsMax ? nChMax : nChannelsMin;
+      nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
-      while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax/2) {
+      while (partSize > maxPartSize && nChannels[dir] <= nChMax/2) {
         nChannels[dir] *= 2;
         partSize = divUp(bytes[dir], nChannels[dir]);
       }
@@ -1205,7 +1226,7 @@ static ncclResult_t addP2pToPlan(
       if (bytes[dir] > 0 && proxySameProcess[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && (!pxnUsed)) {
         int regFlag = 0;
         NCCLCHECKGOTO(ncclCalloc(&handles[dir], nChannelsMax), ret, cleanup);
-        for (int part = 0; part < nChannelsMax; part++) {
+        for (int part = 0; part < taskParts[dir]; part++) {
           int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
           struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
           int peerRank = dir ? sendRank : recvRank;
@@ -1241,9 +1262,11 @@ static ncclResult_t addP2pToPlan(
     else {
       ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir]/2 : stepSize[dir]/8;
       ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir]*32;
-      nChannels[dir] = std::min<int>(nChannelsMin, divUp(bytes[dir], minPartSize));
+      int nChMax = taskParts[dir];
+      int nChStart = taskParts[dir] < nChannelsMax ? nChMax : nChannelsMin;
+      nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
-      while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax/2) {
+      while (partSize > maxPartSize && nChannels[dir] <= nChMax/2) {
         nChannels[dir] *= 2;
         partSize = divUp(bytes[dir], nChannels[dir]);
       }
@@ -3131,8 +3154,12 @@ static ncclResult_t p2pTaskAppend(
   // Mark channels that need pre-connect
   if (comm->rank != peer) {
     if (!(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen)) {
+      int nParts = rcclP2pTaskParts(comm, collAPI);
       // planner->peers[peer].send/recvSeen is private to each comm, so we need to set it anyway.
-      (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
+      // Leave it clear when only some parts are connected, so a later task to this peer that uses
+      // all of them still connects the rest.
+      if (nParts == comm->p2pnChannelsPerPeer)
+        (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
       int round = 0;
       while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank
                                     : comm->p2pSchedule[round].recvRank)) {
@@ -3141,7 +3168,7 @@ static ncclResult_t p2pTaskAppend(
       uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
 
 
-      for (int c=0; c < comm->p2pnChannelsPerPeer; c++) {
+      for (int c=0; c < nParts; c++) {
         int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes, comm->p2pChannelShiftSize);
         if (isSendNotRecv) {
           if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) { // P2P uses only 1 connector

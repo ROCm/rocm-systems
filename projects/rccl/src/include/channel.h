@@ -12,6 +12,7 @@
 #include "param.h"
 
 bool rcclUseAinic();
+int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI);
 
 RCCL_PARAM_DECLARE(PxnOptQpUsage);  // RCCL_PXN_OPT_QP_USAGE: uses batch stride of comm->maxLocalRanks instead of 1 to reduce QP usage when p2p-batching is disabled
 

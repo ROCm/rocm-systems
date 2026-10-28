@@ -290,6 +290,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     return elt;
   }
 
+  // User buffers only. Comm FIFO stores must go through storeLL, which keeps
+  // the gfx950 hipHostMallocUncached fence for ROCm < 7.0.2.
   template<typename U>
   __device__ static void store(U *dst, U val) {
     union {
@@ -319,9 +321,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       __builtin_nontemporal_store(u4, (uint32_t*)dst);
     else
       __builtin_nontemporal_store(u8, (uint64_t*)dst);
-#if defined(__gfx950__) && ROCM_VERSION < 70002
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, ""); // flush cache on gfx950 if ROCr fix for hipHostMallocUncached is not available (ROCm version < 7.0.2)
-#endif
 #endif
 #else
     if(sizeof(U) == 1)
