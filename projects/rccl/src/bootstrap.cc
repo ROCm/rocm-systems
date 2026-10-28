@@ -1172,7 +1172,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
 
   uint64_t timers[BOOTSTRAP_INIT_TIME_N] = {0};
   // Multi-root rendezvous can't propagate revHandle cross-root; bidir requires nHandles==1.
-  bool wantNetBidir = (nHandles == 1) && bootstrapBidirEnabled(nranks, 1);
+  // Grow excluded too: ranks disagree on nHandles, and revHandle comes from rank+1, so the reverse ring would hang.
+  bool wantNetBidir = (nHandles == 1) && !comm->isGrow && bootstrapBidirEnabled(nranks, 1);
 
   NEW_NOTHROW(state, bootstrapState);
   ncclIntruQueueConstruct(&state->asyncSendQueue);
