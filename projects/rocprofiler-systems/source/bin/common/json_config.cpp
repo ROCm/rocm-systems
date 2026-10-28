@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "common/env_vars.hpp"
+#include "common/runtime_table.hpp"
 #include "common/string_utility.hpp"
 
 #include <algorithm>
@@ -627,41 +628,7 @@ expand_rocm_domains(const std::string& domains_str)
 std::map<std::string, std::string>
 expand_parallel_runtimes(const std::string& runtimes_str)
 {
-    std::map<std::string, std::string> result;
-
-    // If empty or "all", enable all runtimes
-    if(runtimes_str.empty() || runtimes_str == "all")
-    {
-        result[std::string{ env_vars::USE_MPIP }]    = "true";
-        result[std::string{ env_vars::USE_OMPT }]    = "true";
-        result[std::string{ env_vars::USE_KOKKOSP }] = "true";
-        result[std::string{ env_vars::USE_RCCLP }]   = "true";
-        return result;
-    }
-
-    using entry = std::pair<std::string_view, std::string_view>;
-    static constexpr std::array<entry, 9> shortcuts = { {
-        { "mpi", env_vars::USE_MPIP },
-        { "mpip", env_vars::USE_MPIP },
-        { "openmp", env_vars::USE_OMPT },
-        { "ompt", env_vars::USE_OMPT },
-        { "omp", env_vars::USE_OMPT },
-        { "kokkos", env_vars::USE_KOKKOSP },
-        { "kokkosp", env_vars::USE_KOKKOSP },
-        { "rccl", env_vars::USE_RCCLP },
-        { "rcclp", env_vars::USE_RCCLP },
-    } };
-
-    for(const auto& token : split_csv_lowercase(runtimes_str))
-    {
-        auto it = std::ranges::find_if(shortcuts,
-                                       [&](const entry& e) { return e.first == token; });
-        if(it != shortcuts.end())
-        {
-            result[std::string{ it->second }] = "true";
-        }
-    }
-    return result;
+    return runtime_table::expand_legacy_parallel(runtimes_str);
 }
 
 std::string
