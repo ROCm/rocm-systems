@@ -220,12 +220,13 @@ is_handled_signal(int signum)
 
 struct signal_worker_state
 {
-    int                     eventfd       = -1;   // handler -> worker wakeup fd
-    std::atomic<uint32_t>   finalize_done = {};   // worker sets when flush done (futex word)
-    std::atomic<uint32_t>   handling      = {0};  // 1 once our handler owns the path
-    tool::finalization_gate finalization  = {};   // runs finalization once; others wait
-    int                     signo         = {0};  // signal handled (0 == normal exit)
-    std::thread             thread        = {};   // the finalization worker
+    int                     eventfd              = -1;   // handler -> worker wakeup fd
+    std::atomic<uint32_t>   finalize_done        = {};   // worker sets when flush done (futex word)
+    std::atomic<uint32_t>   handling             = {0};  // 1 once our handler owns the path
+    tool::finalization_gate finalization_request = {};   // requests SDK finalization once
+    tool::finalization_gate tool_finalization    = {};   // tracks actual tool_fini completion
+    int                     signo                = {0};  // signal handled (0 == normal exit)
+    std::thread             thread               = {};   // the finalization worker
 
     ~signal_worker_state() { join(); }
 
@@ -2338,8 +2339,10 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
                                     dispatch_data->dispatch_info.dispatch_id);
     }
 }
-rocprofiler_client_finalize_t client_finalizer  = nullptr;
-rocprofiler_client_id_t*      client_identifier = nullptr;
+rocprofiler_client_finalize_t client_finalizer           = nullptr;
+rocprofiler_client_id_t*      client_identifier          = nullptr;
+std::mutex                    client_lifecycle_mutex     = {};
+std::atomic<bool>             tool_finalization_expected = {false};
 
 void
 initialize_logging()
@@ -2364,9 +2367,12 @@ initialize_rocprofv3()
                          "force configuration");
     }
 
-    ROCP_FATAL_IF(!client_identifier) << "nullptr to client identifier!";
-    ROCP_FATAL_IF(!client_finalizer && !tool::get_config().list_metrics)
-        << "nullptr to client finalizer!";  // exception for listing metrics
+    {
+        auto lock = std::lock_guard<std::mutex>{client_lifecycle_mutex};
+        ROCP_FATAL_IF(!client_identifier) << "nullptr to client identifier!";
+        ROCP_FATAL_IF(!client_finalizer && !tool::get_config().list_metrics)
+            << "nullptr to client finalizer!";  // exception for listing metrics
+    }
 }
 
 void
@@ -2485,19 +2491,41 @@ finalize_rocprofv3(std::string_view context)
 {
     using status_t = tool::finalization_gate::status;
 
-    // A caller waits for a finalization another thread started without a time limit, as it would
-    // for its own: a supervisor that will not wait that long kills the process anyway.
-    auto& sw     = get_signal_worker();
-    auto  status = sw.finalization.run_or_wait([context]() {
+    auto& sw = get_signal_worker();
+    if(!tool_finalization_expected.load(std::memory_order_acquire))
+    {
+        ROCP_INFO << "finalize_rocprofv3('" << context
+                  << "') ignored: tool finalization not expected";
+        sw.join();
+        return;
+    }
+
+    auto status = sw.finalization_request.run_or_wait([context]() {
+        auto finalizer = rocprofiler_client_finalize_t{};
+        auto client_id = std::optional<rocprofiler_client_id_t>{};
+        {
+            auto lock = std::lock_guard<std::mutex>{client_lifecycle_mutex};
+            if(tool_finalization_expected.load(std::memory_order_relaxed) && client_finalizer &&
+               client_identifier)
+            {
+                finalizer = client_finalizer;
+                client_id.emplace(*client_identifier);
+            }
+        }
+
         ROCP_INFO << "invoked: finalize_rocprofv3";
-        if(client_finalizer && client_identifier)
+        if(finalizer && client_id)
         {
             ROCP_INFO << "finalizing rocprofv3: caller='" << context << "'...";
-            client_finalizer(*client_identifier);
-            client_finalizer  = nullptr;
-            client_identifier = nullptr;
+            finalizer(*client_id);
         }
     });
+
+    if(status == status_t::reentered) return;
+
+    // SDK-driven shutdown may have started before this request and may not have reached tool_fini
+    // yet. Wait for the actual tool callback, not merely for the SDK request above to return.
+    if(sw.tool_finalization.wait_until_complete_or_reentered() == status_t::reentered) return;
 
     if(status != status_t::ran)
     {
@@ -3137,7 +3165,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     auto _init_timer = common::simple_timer{"[rocprofv3] tool initialization"};
 
-    client_finalizer = fini_func;
+    {
+        auto lock        = std::lock_guard<std::mutex>{client_lifecycle_mutex};
+        client_finalizer = fini_func;
+        tool_finalization_expected.store(true, std::memory_order_release);
+    }
 
     apply_core_capability_gates(tool::get_config());
 
@@ -4591,14 +4623,18 @@ tool_detach(void* /*tool_data*/)
 }
 
 void
-tool_fini(void* /*tool_data*/)
+tool_fini_impl()
 {
-    static bool _first = true;
-    if(!_first) return;
-    _first = false;
+    auto _mark_complete = common::scope_destructor{[]() {
+        auto lock = std::lock_guard<std::mutex>{client_lifecycle_mutex};
+        tool_finalization_expected.store(false, std::memory_order_release);
+    }};
 
-    client_identifier = nullptr;
-    client_finalizer  = nullptr;
+    {
+        auto lock         = std::lock_guard<std::mutex>{client_lifecycle_mutex};
+        client_identifier = nullptr;
+        client_finalizer  = nullptr;
+    }
 
     // Join the cleanup thread if it exists and is active
     ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
@@ -4641,6 +4677,14 @@ tool_fini(void* /*tool_data*/)
 #if defined(CODECOV) && CODECOV > 0
     __gcov_dump();
 #endif
+}
+
+void
+tool_fini(void* /*tool_data*/)
+{
+    auto status = get_signal_worker().tool_finalization.run_or_wait([]() { tool_fini_impl(); });
+    ROCP_INFO_IF(status != tool::finalization_gate::status::ran)
+        << "tool_fini ignored: finalization already running or complete";
 }
 
 std::vector<rocprofiler_counter_record_dimension_info_t>
@@ -5156,7 +5200,10 @@ rocprofiler_configure(uint32_t                 version,
     id->name = "rocprofv3";
 
     // store client info
-    client_identifier = id;
+    {
+        auto lock         = std::lock_guard<std::mutex>{client_lifecycle_mutex};
+        client_identifier = id;
+    }
 
     // note that rocprofv3 is not the primary tool
     ROCP_WARNING_IF(priority > 0) << id->name << " has a priority of " << priority

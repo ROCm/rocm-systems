@@ -100,20 +100,40 @@ TEST(finalization_gate, runs_the_finalization_once)
     EXPECT_EQ(runs, 1);
 }
 
-TEST(finalization_gate, exit_waits_for_the_finalization_a_signal_started)
+TEST(finalization_gate, wait_only_blocks_before_finalization_starts)
 {
     finalization_gate gate{};
-    slow_finalization signal_worker{gate};
+    auto              waiter_started = std::promise<void>{};
+    // Models SDK shutdown running earlier teardown steps before it reaches tool_fini.
+    auto waiter = std::async(std::launch::async, [&]() {
+        waiter_started.set_value();
+        return gate.wait_until_complete_or_reentered();
+    });
+    waiter_started.get_future().wait();
+    EXPECT_EQ(waiter.wait_for(still_blocked), std::future_status::timeout);
 
-    // rocprofv3_main after main() returns
+    slow_finalization tool_fini{gate};
+    EXPECT_EQ(waiter.wait_for(still_blocked), std::future_status::timeout);
+
+    tool_fini.release();
+    ASSERT_EQ(waiter.wait_for(wake_bound), std::future_status::ready);
+    EXPECT_EQ(waiter.get(), status::completed);
+}
+
+TEST(finalization_gate, wait_only_blocks_while_tool_finalization_runs)
+{
+    finalization_gate gate{};
+    slow_finalization tool_fini{gate};
+
+    // Models a signal request arriving while SDK-driven tool_fini is writing output.
     auto exit_path = std::async(std::launch::async, [&]() {
-        auto result = gate.run_or_wait([]() {});
-        return std::make_pair(result, signal_worker.finished());
+        auto result = gate.wait_until_complete_or_reentered();
+        return std::make_pair(result, tool_fini.finished());
     });
     EXPECT_EQ(exit_path.wait_for(still_blocked), std::future_status::timeout)
         << "returned while another thread was still finalizing";
 
-    signal_worker.release();
+    tool_fini.release();
     ASSERT_EQ(exit_path.wait_for(wake_bound), std::future_status::ready);
     auto [result, finished_before_return] = exit_path.get();
     EXPECT_EQ(result, status::completed);
@@ -145,7 +165,8 @@ TEST(finalization_gate, finalizing_thread_does_not_wait_on_itself)
     // e.g. the application calls exit() while this thread is finalizing
     finalization_gate gate{};
     auto              inner = status::ran;
-    EXPECT_EQ(gate.run_or_wait([&]() { inner = gate.run_or_wait([]() {}); }), status::ran);
+    EXPECT_EQ(gate.run_or_wait([&]() { inner = gate.wait_until_complete_or_reentered(); }),
+              status::ran);
     EXPECT_EQ(inner, status::reentered);
 }
 

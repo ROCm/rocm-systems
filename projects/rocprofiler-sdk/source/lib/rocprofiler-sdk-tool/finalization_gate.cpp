@@ -38,19 +38,14 @@ namespace tool
 namespace
 {
 void
-wait_until_set(std::atomic<uint32_t>& word)
+wait_while_equal(std::atomic<uint32_t>& word, uint32_t expected)
 {
-    while(word.load(std::memory_order_acquire) == 0)
-    {
-        syscall(SYS_futex, &word, FUTEX_WAIT, 0, nullptr, nullptr, 0);
-    }
+    syscall(SYS_futex, &word, FUTEX_WAIT, expected, nullptr, nullptr, 0);
 }
 
-// Wake every waiter: exit paths on several threads can be waiting at once.
 void
-set_and_wake_all(std::atomic<uint32_t>& word)
+wake_all(std::atomic<uint32_t>& word)
 {
-    word.store(1u, std::memory_order_release);
     syscall(SYS_futex, &word, FUTEX_WAKE, std::numeric_limits<int>::max(), nullptr, nullptr, 0);
 }
 }  // namespace
@@ -58,21 +53,41 @@ set_and_wake_all(std::atomic<uint32_t>& word)
 finalization_gate::status
 finalization_gate::run_or_wait(const std::function<void()>& func)
 {
-    if(m_started.test_and_set(std::memory_order_acq_rel))
+    auto expected = static_cast<uint32_t>(state::not_started);
+    if(!m_state.compare_exchange_strong(
+           expected, static_cast<uint32_t>(state::running), std::memory_order_acq_rel))
     {
-        if(m_complete.load(std::memory_order_acquire) != 0) return status::completed;
+        if(expected == static_cast<uint32_t>(state::complete)) return status::completed;
         if(m_finalizer.load(std::memory_order_acquire) == std::this_thread::get_id())
             return status::reentered;
-        wait_until_set(m_complete);
-        return status::completed;
+        return wait_until_complete_or_reentered();
     }
 
     m_finalizer.store(std::this_thread::get_id(), std::memory_order_release);
+    // A wait-only caller may already be sleeping on not_started.
+    wake_all(m_state);
 
     // Release the waiters even if `func` throws.
-    auto _release = common::scope_destructor{[this]() { set_and_wake_all(m_complete); }};
+    auto _release = common::scope_destructor{[this]() {
+        m_state.store(static_cast<uint32_t>(state::complete), std::memory_order_release);
+        wake_all(m_state);
+    }};
     if(func) func();
     return status::ran;
+}
+
+finalization_gate::status
+finalization_gate::wait_until_complete_or_reentered()
+{
+    while(true)
+    {
+        auto current = m_state.load(std::memory_order_acquire);
+        if(current == static_cast<uint32_t>(state::complete)) return status::completed;
+        if(current == static_cast<uint32_t>(state::running) &&
+           m_finalizer.load(std::memory_order_acquire) == std::this_thread::get_id())
+            return status::reentered;
+        wait_while_equal(m_state, current);
+    }
 }
 }  // namespace tool
 }  // namespace rocprofiler

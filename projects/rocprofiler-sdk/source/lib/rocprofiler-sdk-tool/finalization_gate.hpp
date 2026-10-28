@@ -50,9 +50,19 @@ public:
     // Runs `func` unless finalization has already started; otherwise waits for it to finish.
     status run_or_wait(const std::function<void()>& func);
 
+    // Waits for finalization to start and finish without claiming ownership. A same-thread call
+    // returns reentered so a finalizer cannot deadlock waiting on itself.
+    status wait_until_complete_or_reentered();
+
 private:
-    std::atomic_flag             m_started   = ATOMIC_FLAG_INIT;
-    std::atomic<uint32_t>        m_complete  = {0};  // futex word
+    enum class state : uint32_t
+    {
+        not_started = 0,
+        running,
+        complete,
+    };
+
+    std::atomic<uint32_t>        m_state     = {static_cast<uint32_t>(state::not_started)};
     std::atomic<std::thread::id> m_finalizer = {};
 };
 }  // namespace tool
