@@ -30,6 +30,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Fixed a host-blocking issue in `hipMemcpyBatchAsync` that could occur when the API was repeatedly issued on a stream containing a long-running kernel. The implementation now reserves only the total descriptor space required for each dispatch in the kernel argument pool, preventing pool exhaustion and eliminating unnecessary host waits for kernel completion.
 * Resolved a segmentation fault in `hipStreamEndCapture` during multi-stream capture caused by a bookkeeping cycle among capture participants. The fix tracks capture participants in a single origin-stream-owned set, eliminating recursive traversal of forked streams during capture finalization and improving stream capture stability.
 * Resolved a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
+* Fixed the host implementations of the OCP FP8 conversions (`__hipext_ocp_fp8_e4m3`, `__hipext_ocp_fp8_e5m2` and the `__amd_cvt_*` FP8 wrappers) so they match the device results (#13525, #13526, #13527). E4M3 overflow and infinity inputs now saturate to ±448 (`0x7e`/`0xfe`) instead of producing NaN; E5M2 `0x7b`/`0xfb` now decode to ±57344 instead of ±Infinity; fp16 subnormal inputs are no longer encoded about 2^-14 too small; and E5M2 subnormals now decode correctly to fp16. Code that relied on the previous host results may see different values.
 
 ### Optimized
 
