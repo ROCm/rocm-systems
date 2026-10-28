@@ -65,9 +65,7 @@ skills, so they keep working offline.
 ## Tests
 
 Structural checks for these skills run in the AMD skills repo with
-[skillscope v0.1.2](https://github.com/amd/skillscope/tree/v0.1.2).
-`.github/scripts/check.sh` there installs the CLI from
-`git+https://github.com/amd/skillscope@v0.1.2`. This repo does not run that
+[skillscope](https://github.com/amd/skillscope). This repo does not run that
 check. Routing needs a product-owned model API key, and behavior needs a
 supported GPU. Grade both with `run_evals.py`.
 
