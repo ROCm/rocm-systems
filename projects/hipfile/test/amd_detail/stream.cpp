@@ -467,4 +467,19 @@ TEST_F(HipFileStreamImplicit, implicitly_registered_stream_deregisters)
     EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
 }
 
+TEST_F(HipFileStreamImplicit, async_io_on_reserved_priority_stream_is_not_supported)
+{
+    EXPECT_CALL(mhip, hipStreamGetPriority(nonnull_stream)).WillRepeatedly(::testing::Return(-1));
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+    size_t  size{4096};
+    hoff_t  file_offset{0};
+    hoff_t  buf_offset{0};
+    ssize_t bytes{0};
+    EXPECT_EQ(hipFileReadAsync(fh, buf, &size, &file_offset, &buf_offset, &bytes, nonnull_stream),
+              HipFileOpError(hipFileAsyncNotSupported));
+    EXPECT_EQ(hipFileWriteAsync(fh, buf, &size, &file_offset, &buf_offset, &bytes, nonnull_stream),
+              HipFileOpError(hipFileAsyncNotSupported));
+    EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
+}
+
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

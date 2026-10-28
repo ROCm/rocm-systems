@@ -8,13 +8,25 @@ Known issues
 
 This page documents known issues with hipFile.
 
-Asynchronous operations that use the fastpath backend will not retry on the fallback backend
-============================================================================================
+.. _hipfile-greatest-priority-streams:
 
-If asynchronous operations satisfy fastpath prerequisites, they now run on the
-fastpath backend. If the fastpath device lookup fails or the p2pdma transfer
-is not supported between the devices, the asynchronous operation will now
-fail.
+Fallback I/O can hang behind an application's blocked greatest-priority stream
+==============================================================================
+
+The fallback path copies data through the GPU on streams that hipFile creates
+at the device's greatest priority, which gives them hardware queues that
+streams of other priorities don't use. If an application blocks a stream of its
+own at that priority, for example on a stream wait value, a hipFile call that
+uses the fallback path can hang: its copy can be queued behind the blocked
+stream on a shared hardware queue and never run.
+
+hipFile rejects asynchronous I/O on streams at the greatest priority (see
+:doc:`/reference/api-async`), so this cannot happen through the asynchronous
+API. It can still happen when an application blocks its own greatest-priority
+stream and then issues synchronous fallback I/O.
+
+To work around this issue, don't block a greatest-priority stream while hipFile
+I/O that may use the fallback path is in progress.
 
 Poor performance with GPU Virtual Functions
 ===========================================
