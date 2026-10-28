@@ -58,6 +58,10 @@ extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GI
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>
     g_devrGinRegister;
 extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_devrGinDeregister;
+// ncclDevrCommCreateInternal's GIN setup for one devcomm; the default does nothing.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
+                                  uint32_t)>
+    g_devrGinDevCommSetup;
 
 extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t, int, int64_t*)> g_devrSpaceAlloc;
 extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t)> g_devrSpaceFree;

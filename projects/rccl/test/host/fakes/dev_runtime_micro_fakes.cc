@@ -474,16 +474,22 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct nc
 // ---------------------------------------------------------------------------
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
+// Each zeroes its requirement, as the real builders do first:
+// ncclDevrCommCreateInternal links these stack requirements into its resource
+// list and sums every field, so one left untouched would feed it stack garbage.
 extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsaBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* outReq) {
+  memset(outReq, 0, sizeof(*outReq));
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* outReq) {
+  memset(outReq, 0, sizeof(*outReq));
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* outReq) {
+  memset(outReq, 0, sizeof(*outReq));
   return ncclSuccess;
 }
 
@@ -491,11 +497,19 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
-// Reached only once GIN is activated, which the GIN gate rejects for every
-// comm this binary builds.
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                 uint32_t) {
+// Seam: whether ncclDevrCommCreateInternal sets up GIN for a devcomm is only
+// observable by counting. Reached only on a comm a test has given GIN support,
+// since the GIN gate rejects GIN on every other comm this binary builds.
+static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
+                                           struct ncclDevComm*, uint32_t) {
   return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
+    g_devrGinDevCommSetup = DefaultGinDevCommSetup;
+
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+  return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
 }
 
 // The enqueue-rearch job path: collective_stubs.cc pins
@@ -529,6 +543,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapAllGather                      = DefaultAllGather;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
+  g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
   g_devrRmaProxyRegister                        = DefaultRmaProxyRegister;
   g_devrSpaceAlloc                              = DefaultSpaceAlloc;

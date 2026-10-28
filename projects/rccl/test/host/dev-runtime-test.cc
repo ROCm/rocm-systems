@@ -5458,10 +5458,12 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 // ---------------------------------------------------------------------------
 // ncclDevrCommCreateInternal is where a queued create is actually carried out.
 // This suite covers its GIN request validation, which runs before any resource
-// is touched and rejects combinations the communicator cannot serve.
+// is touched and rejects combinations the communicator cannot serve, and which
+// devcomms then get GIN set up.
 //
-// The body past that gate builds the whole devcomm -- GIN activation, resource
-// windows, barriers -- and is not covered here.
+// Past that gate the body builds the whole devcomm -- GIN activation, resource
+// windows, barriers. It is driven here only for devcomms that ask for no
+// resources, so no resource window is ever built.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -5485,11 +5487,36 @@ protected:
     comm = commStorage.get();
     comm->nRanks = 1;
     comm->devrState.lsaSize = 1;
+    // What ncclDevrInitOnce caches on a GPU without CFT; the devcomm build
+    // divides by it.
+    comm->devrState.cftMcSize = 1;
+  }
+
+  // A create that gets past the gate links a malloc'd LSA team and makes the
+  // window table, which the shadow-pool fake's reset frees.
+  void TearDown() override {
+    ncclDevrTeam* t = comm->devrState.teamHead;
+    while (t != nullptr) {
+      ncclDevrTeam* next = t->next;
+      free(t);
+      t = next;
+    }
+    comm->devrState.teamHead = nullptr;
+    comm->devrState.windowTable = nullptr;
+    NcclVersionCompatTest::TearDown();
   }
 
   ncclResult_t Create() {
     return ncclDevrCommCreateInternal(comm, &reqs, &outDevComm, /*isInternal=*/false,
                                       /*deviceCodeVersion=*/NCCL_VERSION_CODE);
+  }
+
+  // Stands in for the GIN setup's visible effect: the devcomm gets the GIN
+  // contexts it asked for, which ncclDevCommDestroy later frees.
+  static ncclResult_t GrantGinContexts(ncclComm*, ncclDevCommRequirements const* r, ncclDevComm* devComm,
+                                       uint32_t) {
+    devComm->ginContextCount = r->ginContextCount;
+    return ncclSuccess;
   }
 };
 
@@ -5524,14 +5551,49 @@ TEST_F(DevrCommCreateInternalTest, FullGinRequestedOnRailOnlyComm_ReturnsInvalid
 // connection, so it fails the same support check rather than being ignored.
 //
 // The counterpart -- the same requirements with the flag clear, which requests
-// nothing and passes the gate -- is not tested: it continues into the devcomm
-// build, which this fixture does not set up for.
+// nothing and passes the gate -- is the first create in
+// GinlessDevCommBeforeGinDevComm_SetsUpOnlyTheGinOne below.
 TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   reqs.ginForceEnable = true;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;  // overridden by the flag
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// Branch: GIN is set up for a devcomm only if it asks for GIN (NCCL 2.32). GIN
+// stays enabled on the comm once a devcomm has asked for it, and gating the
+// setup on that instead hands every later devcomm GIN contexts it never asked
+// for -- or fails it outright on a stride check it never asked to pass.
+TEST_F(DevrCommCreateInternalTest, GinlessDevCommAfterGinDevComm_SkipsGinSetup) {
+  ScopedHook setup(g_devrGinDevCommSetup, GrantGinContexts);
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  ASSERT_EQ(Create(), ncclSuccess);
+  ASSERT_EQ(setup.calls, 1);
+
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  ASSERT_EQ(Create(), ncclSuccess);
+  EXPECT_TRUE(comm->devrState.ginEnabled);  // still enabled on the comm
+  EXPECT_EQ(setup.calls, 1);
+  EXPECT_EQ(outDevComm.ginContextCount, 0u);
+}
+
+// The case above in the opposite order: before any devcomm has asked for GIN, a
+// devcomm that does not ask is built without it, and the one that asks next
+// gets GIN set up exactly once.
+TEST_F(DevrCommCreateInternalTest, GinlessDevCommBeforeGinDevComm_SetsUpOnlyTheGinOne) {
+  ScopedHook setup(g_devrGinDevCommSetup, GrantGinContexts);
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  ASSERT_EQ(Create(), ncclSuccess);  // the default requirements ask for no GIN
+  EXPECT_EQ(setup.calls, 0);
+  EXPECT_EQ(outDevComm.ginContextCount, 0u);
+
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  ASSERT_EQ(Create(), ncclSuccess);
+  EXPECT_TRUE(comm->devrState.ginEnabled);
+  EXPECT_EQ(setup.calls, 1);
+  EXPECT_NE(outDevComm.ginContextCount, 0u);
 }
 
 
