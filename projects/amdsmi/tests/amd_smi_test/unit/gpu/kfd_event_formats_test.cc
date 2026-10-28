@@ -1,24 +1,25 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Hardware-free tests for FormatEvtNotifMessage(), the parser behind
-// rsmi_event_notification_get(). Each payload is built with the kernel's own KFD_EVENT_FMT_*
-// macros (kfd_event_formats.h), so a parser format that drifts from them (wrong base, width, or
-// spacing) fails here instead of printing stale stack values. Two more tests compare that header,
-// and the event and trigger enums in rocm_smi's kfd_ioctl.h, with the kernel's upstream master, so
-// a kernel change is caught too. If upstream cannot be fetched, those comparisons are not run and
-// a message says why. The download uses the first of curl, wget and python3 found on PATH. The two
-// local headers are read from kfd_headers/ next to the test binary, where the tests package
-// installs them, and from the source tree when the tests run from the build directory.
+// Hardware-free tests for the KFD SMI event messages reported by the public
+// amdsmi_get_gpu_event_notification(). Each test registers a synthetic GPU and runs the same public
+// flow as the functional events test (init, set mask, get, stop) against a fake /dev/kfd and KFD
+// event stream (ScopedFakeKfdEventStream), queuing a kernel event line between the mask and get
+// calls. Each payload is built with the kernel's own KFD_EVENT_FMT_* macros (kfd_event_formats.h),
+// so a parser format that drifts from them (wrong base, width, or spacing) fails here instead of
+// printing stale stack values. Two more tests compare that header, and the event and trigger enums
+// in rocm_smi's kfd_ioctl.h, with the kernel's upstream master, so a kernel change is caught too.
+// If upstream cannot be fetched, those comparisons are not run and a message says why. The download
+// uses the first of curl, wget and python3 found on PATH. The two local headers are read from
+// kfd_headers/ next to the test binary, where the tests package installs them, and from the source
+// tree when the tests run from the build directory.
 //
-// TODO: these tests (named KFD_EVENT_FMT__<Case>) call the internal FormatEvtNotifMessage()
-// directly. Once PR #12494 (fake-interface test support) is merged, update them to call the
-// public amdsmi_get_gpu_event_notification() instead.
+// See docs/design/faking-external-interfaces.md for the fake-device pattern.
 //
 // Environment:
 //   AMDSMI_KFD_IOCTL_MAINLINE_FILE=<path> read upstream's kfd_ioctl.h from a local file
 
-#include "rocm_smi/rocm_smi_evt_notif.h"
+#include "kfd_event_formats.h"
 
 #include <gtest/gtest.h>
 #include <sys/wait.h>
@@ -40,14 +41,20 @@
 #include <utility>
 #include <vector>
 
+#include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_drm.h"
+#include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "kfd_event_formats.h"
-#include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "test_base.h"
 #include "test_common.h"
+#include "test_fixture_utils.h"
 
 namespace {
+
+using amd::smi::AMDSmiDrm;
+using amd::smi::AMDSmiGPUDevice;
+using amd::smi::testing::ScopedProcessorRegistration;
 
 constexpr size_t kPayloadBufferSize = 256;  // larger than any message the tests build
 constexpr size_t kDownloadChunkSize = 4096;
@@ -340,26 +347,116 @@ struct KfdPayload {
 #define KFD_PAYLOAD(call) \
   KfdPayload { Payload(call), #call, __FILE__, __LINE__ }
 
-// Runs the parser on `payload`; with verbose output on, prints what is verified, how, and whether
-// the parsed message matched.
-std::string ParseAndReport(const char* what, uint32_t event, const KfdPayload& payload,
-                           const std::string& expected) {
-  const std::string actual = amd::smi::FormatEvtNotifMessage(event, payload.text);
-  if (Verbose()) {
-    std::cout << "\t### " << what << "\n"
-              << "\t      built with               : " << payload.built_with << "\n"
-              << "\t      kernel line (input)      : " << payload.text << "\n"
-              << "\t      library message (output) : " << actual << "\n"
-              << "\t      test requires            : " << expected << "\n"
-              << "\t===> " << (actual == expected ? "VERIFIED" : "MISMATCH") << std::endl;
+// A synthetic GPU with a fake KFD event stream, reached by the public event APIs as a real one is.
+class FakeGpuWithKfdEvents {
+ public:
+  FakeGpuWithKfdEvents()
+      : rocm_device_(tree_.root() + "/card0"),
+        gpu_device_(rocm_device_.index(), "card0", amdsmi_bdf_t{}, drm_),
+        registration_(&gpu_device_),
+        stream_(rocm_device_.index()) {}
+
+  amdsmi_processor_handle handle() const { return registration_.handle(); }
+  ScopedFakeKfdEventStream& stream() { return stream_; }
+
+ private:
+  ScopedAmdsmiInit smi_init_;
+  FakeSysfsTree tree_;
+  ScopedRocmSmiDevice rocm_device_;
+  AMDSmiDrm drm_;
+  AMDSmiGPUDevice gpu_device_;
+  ScopedProcessorRegistration registration_;
+  ScopedFakeKfdEventStream stream_;
+};
+
+// Every event type, as the functional events test selects them.
+constexpr uint64_t AllEventsMask() {
+  uint64_t mask = 0;
+  for (int event = AMDSMI_EVT_NOTIF_FIRST; event <= AMDSMI_EVT_NOTIF_LAST; ++event) {
+    mask |= AMDSMI_EVENT_MASK_FROM_INDEX(event);
   }
-  return actual;
+  return mask;
 }
 
+amdsmi_status_t InitEventNotification(FakeGpuWithKfdEvents& gpu) {
+  const bool verbose = Verbose();
+  DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "gpu=0", verbose);
+  const amdsmi_status_t ret = amdsmi_init_gpu_event_notification(gpu.handle());
+  DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+  return ret;
+}
+
+amdsmi_status_t StopEventNotification(FakeGpuWithKfdEvents& gpu) {
+  const bool verbose = Verbose();
+  DISPLAY_AMDSMI_API("amdsmi_stop_gpu_event_notification", "gpu=0", verbose);
+  const amdsmi_status_t ret = amdsmi_stop_gpu_event_notification(gpu.handle());
+  DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+  return ret;
+}
+
+amdsmi_status_t SetEventMask(FakeGpuWithKfdEvents& gpu, uint64_t mask) {
+  const bool verbose = Verbose();
+  std::ostringstream desc;
+  desc << "mask=0x" << std::hex << mask;
+  DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", desc.str(), verbose);
+  const amdsmi_status_t ret = amdsmi_set_gpu_event_notification_mask(gpu.handle(), mask);
+  DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+  return ret;
+}
+
+// Reads the queued events without waiting, since they are already queued.
+amdsmi_status_t GetEvents(uint32_t capacity, std::vector<amdsmi_evt_notification_data_t>* data,
+                          uint32_t* num_elem, amdsmi_status_t expected) {
+  constexpr int kNoWaitMs = 0;
+  const bool verbose = Verbose();
+  data->assign(capacity, amdsmi_evt_notification_data_t{});
+  *num_elem = capacity;
+  DISPLAY_AMDSMI_API(
+      "amdsmi_get_gpu_event_notification",
+      "timeout_ms=" + std::to_string(kNoWaitMs) + ", num_elem=" + std::to_string(capacity),
+      verbose);
+  const amdsmi_status_t ret = amdsmi_get_gpu_event_notification(kNoWaitMs, num_elem, data->data());
+  DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, ret, expected);
+  return ret;
+}
+
+// Selects every event with amdsmi_set_gpu_event_notification_mask(), as a real caller must (the
+// kernel sends nothing until then), queues `payload` as kernel event number `event` on a synthetic
+// GPU's fake KFD event stream, and reads it back through amdsmi_get_gpu_event_notification().
+// Checks the event, the GPU handle and that the reported message equals `expected`. With verbose
+// output on, prints what is verified, how, the APIs called and their status, and whether the
+// message matched.
 void ExpectEvtMessage(const char* what, uint32_t event, const KfdPayload& payload,
                       const std::string& expected) {
   ::testing::ScopedTrace trace(payload.file, payload.line, what);
-  EXPECT_EQ(ParseAndReport(what, event, payload, expected), expected);
+  constexpr uint32_t kBufferSize = 4;  // room for more than the one event queued
+
+  FakeGpuWithKfdEvents gpu;
+  const bool verbose = Verbose();
+  if (verbose) {
+    std::cout << "\t### " << what << "\n"
+              << "\t      built with               : " << payload.built_with << "\n"
+              << "\t      kernel line (input)      : " << payload.text << " (event " << event << ")"
+              << std::endl;
+  }
+  ASSERT_EQ(InitEventNotification(gpu), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(SetEventMask(gpu, AllEventsMask()), AMDSMI_STATUS_SUCCESS);
+  gpu.stream().Write(event, payload.text);
+
+  uint32_t num_elem = 0;
+  std::vector<amdsmi_evt_notification_data_t> data;
+  ASSERT_EQ(GetEvents(kBufferSize, &data, &num_elem, AMDSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(num_elem, 1u);
+  EXPECT_EQ(data[0].event, static_cast<amdsmi_evt_notification_type_t>(event));
+  EXPECT_EQ(data[0].processor_handle, gpu.handle());
+  const std::string actual = data[0].message;
+  if (verbose) {
+    std::cout << "\t      library message (output) : " << actual << "\n"
+              << "\t      test requires            : " << expected << "\n"
+              << "\t===> " << (actual == expected ? "VERIFIED" : "MISMATCH") << std::endl;
+  }
+  EXPECT_EQ(actual, expected);
+  EXPECT_EQ(StopEventNotification(gpu), AMDSMI_STATUS_SUCCESS);
 }
 
 }  // namespace
@@ -368,11 +465,14 @@ void ExpectEvtMessage(const char* what, uint32_t event, const KfdPayload& payloa
 // (/*pid=*/...). The kernel sends most numbers in hex and the library reports some of them in
 // decimal, so a test notes both forms where they differ. Addresses and sizes are wider than 32
 // bits, so reading them into a 32-bit field would cut them.
+//
+// Keep these in step with FormatEvtNotifMessage() in rocm_smi_evt_notif.cc. For each event add a
+// test for a full line and, when older kernels send fewer fields, one for the older line.
 
 TEST(GpuUnit, KFD_EVENT_FMT__GpuPreResetReportsSequenceAndCause) {
   // Sequence number: sent as 0x1f, reported as 31.
   ExpectEvtMessage("GPU_PRE_RESET: reset sequence number (hex) and reset cause text",
-                   RSMI_EVT_NOTIF_GPU_PRE_RESET,
+                   AMDSMI_EVT_NOTIF_GPU_PRE_RESET,
                    KFD_PAYLOAD(KFD_EVENT_FMT_UPDATE_GPU_RESET(/*reset_seq_num=*/0x1fu,
                                                               /*reset_cause=*/"GPU hang")),
                    "reset sequence number: 31  reset cause: GPU hang");
@@ -380,7 +480,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__GpuPreResetReportsSequenceAndCause) {
 
 TEST(GpuUnit, KFD_EVENT_FMT__GpuPreResetWithEmptyCause) {
   ExpectEvtMessage("GPU_PRE_RESET: an empty reset cause still reports the sequence number",
-                   RSMI_EVT_NOTIF_GPU_PRE_RESET,
+                   AMDSMI_EVT_NOTIF_GPU_PRE_RESET,
                    KFD_PAYLOAD(KFD_EVENT_FMT_UPDATE_GPU_RESET(/*reset_seq_num=*/0x1fu,
                                                               /*reset_cause=*/"")),
                    "reset sequence number: 31  reset cause: ");
@@ -388,7 +488,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__GpuPreResetWithEmptyCause) {
 
 TEST(GpuUnit, KFD_EVENT_FMT__GpuPostResetReportsOnlySequence) {
   ExpectEvtMessage("GPU_POST_RESET: only the reset sequence number is reported",
-                   RSMI_EVT_NOTIF_GPU_POST_RESET,
+                   AMDSMI_EVT_NOTIF_GPU_POST_RESET,
                    KFD_PAYLOAD(KFD_EVENT_FMT_UPDATE_GPU_RESET(/*reset_seq_num=*/0x1fu,
                                                               /*reset_cause=*/"GPU hang")),
                    "reset sequence number: 31");
@@ -396,7 +496,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__GpuPostResetReportsOnlySequence) {
 
 TEST(GpuUnit, KFD_EVENT_FMT__ThermalThrottle) {
   ExpectEvtMessage("THERMAL_THROTTLE: 64-bit hex bitmask and counter",
-                   RSMI_EVT_NOTIF_THERMAL_THROTTLE,
+                   AMDSMI_EVT_NOTIF_THERMAL_THROTTLE,
                    KFD_PAYLOAD(KFD_EVENT_FMT_THERMAL_THROTTLING(/*bitmask=*/0xdeadbeefcafeULL,
                                                                 /*counter=*/0x10ULL)),
                    "bitmask: 0xdeadbeefcafe  counter: 0x10");
@@ -404,14 +504,21 @@ TEST(GpuUnit, KFD_EVENT_FMT__ThermalThrottle) {
 
 TEST(GpuUnit, KFD_EVENT_FMT__VmFault) {
   // Pid: sent as 0x1a2b, reported as 6699.
-  ExpectEvtMessage("VMFAULT: pid (hex) and task name", RSMI_EVT_NOTIF_VMFAULT,
+  ExpectEvtMessage("VMFAULT: pid (hex) and task name", AMDSMI_EVT_NOTIF_VMFAULT,
                    KFD_PAYLOAD(KFD_EVENT_FMT_VMFAULT(/*pid=*/0x1a2bu, /*task_name=*/"myapp")),
                    "PID: 6699  task name: myapp");
 }
 
+TEST(GpuUnit, KFD_EVENT_FMT__VmFaultWithEmptyTaskName) {
+  ExpectEvtMessage("VMFAULT: a process with an empty name reports an empty task name, not N/A",
+                   AMDSMI_EVT_NOTIF_VMFAULT,
+                   KFD_PAYLOAD(KFD_EVENT_FMT_VMFAULT(/*pid=*/0x1a2bu, /*task_name=*/"")),
+                   "PID: 6699  task name: ");
+}
+
 TEST(GpuUnit, KFD_EVENT_FMT__VmFaultTaskNameWithSpace) {
   ExpectEvtMessage("VMFAULT: a task name with a space is reported whole, not cut at the space",
-                   RSMI_EVT_NOTIF_VMFAULT,
+                   AMDSMI_EVT_NOTIF_VMFAULT,
                    KFD_PAYLOAD(KFD_EVENT_FMT_VMFAULT(/*pid=*/0x1a2bu, /*task_name=*/"Web Content")),
                    "PID: 6699  task name: Web Content");
 }
@@ -422,7 +529,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__MigrateStart) {
   ExpectEvtMessage(
       "MIGRATE_START: 64-bit hex start and size (not decimal, not truncated to 32 bits), "
       "from/to and locations",
-      RSMI_EVT_NOTIF_EVENT_MIGRATE_START,
+      AMDSMI_EVT_NOTIF_MIGRATE_START,
       KFD_PAYLOAD(KFD_EVENT_FMT_MIGRATE_START(
           /*ns=*/123456789012LL, /*pid=*/4321, /*start=*/0x7f12abcd1234UL, /*size=*/0x200001000UL,
           /*from=*/1u, /*to=*/2u, /*prefetch_loc=*/0xau, /*preferred_loc=*/0xbu,
@@ -436,7 +543,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__MigrateEndReportsNegativeErrorCode) {
   // (ENOMEM), so reading it as unsigned would print a huge number.
   ExpectEvtMessage(
       "MIGRATE_END: 64-bit hex start and size, and a negative error_code reported as signed",
-      RSMI_EVT_NOTIF_EVENT_MIGRATE_END,
+      AMDSMI_EVT_NOTIF_MIGRATE_END,
       KFD_PAYLOAD(KFD_EVENT_FMT_MIGRATE_END(
           /*ns=*/5LL, /*pid=*/77, /*start=*/0xabcdef012345UL, /*size=*/0x100000010UL, /*from=*/3u,
           /*to=*/0u, /*trigger=*/KFD_MIGRATE_TRIGGER_PAGEFAULT_CPU, /*error_code=*/-12)),
@@ -447,7 +554,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__MigrateEndReportsNegativeErrorCode) {
 TEST(GpuUnit, KFD_EVENT_FMT__PageFaultStart) {
   ExpectEvtMessage(
       "PAGE_FAULT_START: 64-bit hex fault address, node and read/write flag",
-      RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START,
+      AMDSMI_EVT_NOTIF_PAGE_FAULT_START,
       KFD_PAYLOAD(KFD_EVENT_FMT_PAGEFAULT_START(/*ns=*/9LL, /*pid=*/100,
                                                 /*addr=*/0x7ffd12345678UL, /*node=*/0xab12u,
                                                 /*rw=*/'W')),
@@ -458,7 +565,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__PageFaultEnd) {
   ExpectEvtMessage(
       "PAGE_FAULT_END: 64-bit hex fault address, node and the migrate_update flag (label "
       "spelled migrate_update)",
-      RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END,
+      AMDSMI_EVT_NOTIF_PAGE_FAULT_END,
       KFD_PAYLOAD(KFD_EVENT_FMT_PAGEFAULT_END(/*ns=*/9LL, /*pid=*/100, /*addr=*/0x7ffd12345678UL,
                                               /*node=*/0xab12u, /*migrate_update=*/'M')),
       "ns: 9  pid: 100  addr: 0x7ffd12345678  node: 0xab12  migrate_update: M");
@@ -467,7 +574,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__PageFaultEnd) {
 TEST(GpuUnit, KFD_EVENT_FMT__QueueEviction) {
   // The trigger is 3 (KFD_QUEUE_EVICTION_TRIGGER_SUSPEND), what a GPU reset reports.
   ExpectEvtMessage("QUEUE_EVICTION: pid, node and trigger are parsed, not left uninitialized",
-                   RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION,
+                   AMDSMI_EVT_NOTIF_QUEUE_EVICTION,
                    KFD_PAYLOAD(KFD_EVENT_FMT_QUEUE_EVICTION(
                        /*ns=*/42LL, /*pid=*/2057, /*node=*/0xabcu,
                        /*evict_trigger=*/KFD_QUEUE_EVICTION_TRIGGER_SUSPEND)),
@@ -477,7 +584,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__QueueEviction) {
 TEST(GpuUnit, KFD_EVENT_FMT__QueueRestore) {
   ExpectEvtMessage(
       "QUEUE_RESTORE: pid, node and rescheduled flag are parsed, not left uninitialized",
-      RSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE,
+      AMDSMI_EVT_NOTIF_QUEUE_RESTORE,
       KFD_PAYLOAD(KFD_EVENT_FMT_QUEUE_RESTORE(/*ns=*/42LL, /*pid=*/2057, /*node=*/0xabcu,
                                               /*rescheduled=*/'R')),
       "ns: 42  pid: 2057  node: 0xabc  rescheduled: R");
@@ -488,7 +595,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__UnmapFromGpu) {
   // (KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU).
   ExpectEvtMessage(
       "UNMAP_FROM_GPU: 64-bit hex address and size, node and unmap trigger",
-      RSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU,
+      AMDSMI_EVT_NOTIF_UNMAP_FROM_GPU,
       KFD_PAYLOAD(KFD_EVENT_FMT_UNMAP_FROM_GPU(
           /*ns=*/7LL, /*pid=*/8, /*addr=*/0x123456789abUL, /*size=*/0x1deadbeefUL, /*node=*/0xfu,
           /*unmap_trigger=*/KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU)),
@@ -497,21 +604,21 @@ TEST(GpuUnit, KFD_EVENT_FMT__UnmapFromGpu) {
 
 TEST(GpuUnit, KFD_EVENT_FMT__ProcessStartAndEnd) {
   // Pid: sent as 0x3039, reported as 12345.
-  ExpectEvtMessage("PROCESS_START: pid (hex) and task name", RSMI_EVT_NOTIF_EVENT_PROCESS_START,
+  ExpectEvtMessage("PROCESS_START: pid (hex) and task name", AMDSMI_EVT_NOTIF_PROCESS_START,
                    KFD_PAYLOAD(KFD_EVENT_FMT_PROCESS(/*pid=*/0x3039u, /*task_name=*/"bash")),
                    "PID: 12345  task: bash");
-  ExpectEvtMessage("PROCESS_END: pid (hex) and task name", RSMI_EVT_NOTIF_EVENT_PROCESS_END,
+  ExpectEvtMessage("PROCESS_END: pid (hex) and task name", AMDSMI_EVT_NOTIF_PROCESS_END,
                    KFD_PAYLOAD(KFD_EVENT_FMT_PROCESS(/*pid=*/0x3039u, /*task_name=*/"bash")),
                    "PID: 12345  task: bash");
 }
 
 TEST(GpuUnit, KFD_EVENT_FMT__ProcessTaskNameWithSpace) {
   ExpectEvtMessage("PROCESS_START: a task name with a space is reported whole",
-                   RSMI_EVT_NOTIF_EVENT_PROCESS_START,
+                   AMDSMI_EVT_NOTIF_PROCESS_START,
                    KFD_PAYLOAD(KFD_EVENT_FMT_PROCESS(/*pid=*/0x3039u, /*task_name=*/"Web Content")),
                    "PID: 12345  task: Web Content");
   ExpectEvtMessage("PROCESS_END: a task name with a space is reported whole",
-                   RSMI_EVT_NOTIF_EVENT_PROCESS_END,
+                   AMDSMI_EVT_NOTIF_PROCESS_END,
                    KFD_PAYLOAD(KFD_EVENT_FMT_PROCESS(/*pid=*/0x3039u, /*task_name=*/"Web Content")),
                    "PID: 12345  task: Web Content");
 }
@@ -523,21 +630,80 @@ TEST(GpuUnit, KFD_EVENT_FMT__ProcessTaskNameWithSpace) {
 //   GPU_PRE_RESET / GPU_POST_RESET  "<reset sequence hex> <cause>"
 TEST(GpuUnit, KFD_EVENT_FMT__LiteralPayloads) {
   ExpectEvtMessage("QUEUE_EVICTION: ns, pid, node (hex) and trigger, as seen in a reset run",
-                   RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION,
+                   AMDSMI_EVT_NOTIF_QUEUE_EVICTION,
                    {"510812858298103 -999198 56c7 3", "literal, modelled on a Navi 21 reset run"},
                    "ns: 510812858298103  pid: 999198  node: 0x56c7  evict_trigger: 3");
   ExpectEvtMessage("GPU_PRE_RESET: sequence number with an empty cause",
-                   RSMI_EVT_NOTIF_GPU_PRE_RESET, {"2 ", "literal, modelled on a Navi 21 reset run"},
+                   AMDSMI_EVT_NOTIF_GPU_PRE_RESET,
+                   {"2 ", "literal, modelled on a Navi 21 reset run"},
                    "reset sequence number: 2  reset cause: ");
-  ExpectEvtMessage("GPU_POST_RESET: the same sequence number", RSMI_EVT_NOTIF_GPU_POST_RESET,
+  ExpectEvtMessage("GPU_POST_RESET: the same sequence number", AMDSMI_EVT_NOTIF_GPU_POST_RESET,
                    {"2 ", "literal, modelled on a Navi 21 reset run"}, "reset sequence number: 2");
 }
 
+// Older kernels (checked against the 5.18 tree and the amdgpu 6.7.0 DKMS driver) send a prefix of
+// the current layout for two events. The fields they omit read as N/A instead of stray stack
+// values.
+//   MIGRATE_END    "<ns> -<pid> @<start>(<size>) <from>-><to> <trigger>"      (no error_code)
+//   QUEUE_RESTORE  "<ns> -<pid> <node>"                                      (no rescheduled)
+TEST(GpuUnit, KFD_EVENT_FMT__OlderKernelLayoutsReportNotAvailable) {
+  ExpectEvtMessage("MIGRATE_END: a kernel without error_code reports it as N/A",
+                   AMDSMI_EVT_NOTIF_MIGRATE_END,
+                   {"123 -45 @7f1234567000(200000) 1->2 3", "literal, older kernel layout"},
+                   "ns: 123  pid: 45  start: 0x7f1234567000  size: 0x200000  from: 0x1  to: 0x2  "
+                   "migrate_trigger: 3  error_code: N/A");
+  ExpectEvtMessage("QUEUE_RESTORE: a kernel without the rescheduled flag reports it as N/A",
+                   AMDSMI_EVT_NOTIF_QUEUE_RESTORE, {"42 -2057 abc", "literal, older kernel layout"},
+                   "ns: 42  pid: 2057  node: 0xabc  rescheduled: N/A");
+}
+
+// A line shorter than any known layout keeps the fields it does have and reports the rest as N/A.
+TEST(GpuUnit, KFD_EVENT_FMT__ShortOrUnparsablePayloadsReportNotAvailable) {
+  ExpectEvtMessage("QUEUE_EVICTION: a line cut after the pid keeps ns and pid",
+                   AMDSMI_EVT_NOTIF_QUEUE_EVICTION, {"42 -7", "literal, truncated line"},
+                   "ns: 42  pid: 7  node: N/A  evict_trigger: N/A");
+  ExpectEvtMessage("VMFAULT: an empty payload reports the pid as N/A and an empty task name",
+                   AMDSMI_EVT_NOTIF_VMFAULT, {"", "literal, empty payload"},
+                   "PID: N/A  task name: ");
+  ExpectEvtMessage("MIGRATE_START: text that is not a payload reports every field as N/A",
+                   AMDSMI_EVT_NOTIF_MIGRATE_START, {"not a payload", "literal, unparsable text"},
+                   "ns: N/A  pid: N/A  start: N/A  size: N/A  from: N/A  to: N/A  "
+                   "prefetch_loc: N/A  preferred_loc: N/A  migrate_trigger: N/A");
+}
+
+// Event 0 and 99 have no bit in the mask and the kernel never sends them; the fake passes them
+// through so the library's handling can be checked.
 TEST(GpuUnit, KFD_EVENT_FMT__NoneAndUnknownEvents) {
-  ExpectEvtMessage("NONE: reports its fixed text", RSMI_EVT_NOTIF_NONE,
+  ExpectEvtMessage("NONE: reports its fixed text", AMDSMI_EVT_NOTIF_NONE,
                    {"", "no kernel format (empty payload)"}, "Event type None received");
   ExpectEvtMessage("unknown event number: reports a fixed text", 99,
                    {"anything", "no kernel format (event number 99)"}, "Unknown event received");
+}
+
+// The kernel starts with an empty mask and queues only the events the mask selects.
+TEST(GpuUnit, KFD_EVENT_FMT__OnlyEventsInTheMaskAreReported) {
+  constexpr uint32_t kBufferSize = 4;
+  const std::string process = KFD_PAYLOAD(KFD_EVENT_FMT_PROCESS(/*pid=*/0x3039u, "bash")).text;
+  const std::string vmfault = KFD_PAYLOAD(KFD_EVENT_FMT_VMFAULT(/*pid=*/0x1a2bu, "myapp")).text;
+
+  FakeGpuWithKfdEvents gpu;
+  ASSERT_EQ(InitEventNotification(gpu), AMDSMI_STATUS_SUCCESS);
+  gpu.stream().Write(AMDSMI_EVT_NOTIF_PROCESS_START, process);  // no mask set yet
+  ASSERT_EQ(SetEventMask(gpu, AMDSMI_EVENT_MASK_FROM_INDEX(AMDSMI_EVT_NOTIF_VMFAULT)),
+            AMDSMI_STATUS_SUCCESS);
+  gpu.stream().Write(AMDSMI_EVT_NOTIF_PROCESS_START, process);  // not in the mask
+  gpu.stream().Write(AMDSMI_EVT_NOTIF_VMFAULT, vmfault);
+
+  uint32_t num_elem = 0;
+  std::vector<amdsmi_evt_notification_data_t> data;
+  ASSERT_EQ(GetEvents(kBufferSize, &data, &num_elem, AMDSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(num_elem, 1u);
+  EXPECT_EQ(data[0].event, AMDSMI_EVT_NOTIF_VMFAULT);
+  EXPECT_STREQ(data[0].message, "PID: 6699  task name: myapp");
+
+  // Everything queued has been read, so a second read finds nothing.
+  EXPECT_EQ(GetEvents(kBufferSize, &data, &num_elem, AMDSMI_STATUS_NO_DATA), AMDSMI_STATUS_NO_DATA);
+  EXPECT_EQ(StopEventNotification(gpu), AMDSMI_STATUS_SUCCESS);
 }
 
 TEST(GpuUnit, KFD_EVENT_FMT__MatchesMainlineKernelHeader) {

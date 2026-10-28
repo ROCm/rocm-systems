@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi64Config.h"
 #include "rocm_smi/rocm_smi_board_temp.h"
 #include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
@@ -7392,8 +7393,6 @@ static bool check_evt_notif_support(int kfd_fd) {
   return true;
 }
 
-static const char* kPathKFDIoctl = "/dev/kfd";
-
 rsmi_status_t rsmi_event_notification_init(uint32_t dv_ind) {
   TRY GET_DEV_FROM_INDX DEVICE_MUTEX
 
@@ -7406,7 +7405,7 @@ rsmi_status_t rsmi_event_notification_init(uint32_t dv_ind) {
 
   if (smi.kfd_notif_evt_fh() == -1) {
     assert(smi.kfd_notif_evt_fh_refcnt() == 0);
-    int kfd_fd = open(kPathKFDIoctl, O_RDWR | O_CLOEXEC);
+    int kfd_fd = open(amd::smi::test_hooks::KfdDevicePath().c_str(), O_RDWR | O_CLOEXEC);
 
     if (kfd_fd <= 0) {
       return RSMI_STATUS_FILE_ERROR;

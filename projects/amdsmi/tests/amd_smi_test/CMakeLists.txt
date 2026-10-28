@@ -138,6 +138,8 @@ target_link_libraries(
     ${AMDSMINIC_PATH}
     ${FILESYSTEM_LIB}
 )
+# Routes every ioctl() in the statically linked library to ScopedFakeIoctl (test_fixture_utils.h).
+target_link_options(${TEST} PRIVATE -Wl,--wrap=ioctl)
 
 # Install tests
 install(TARGETS ${TEST} DESTINATION ${SHARE_INSTALL_PREFIX}/tests COMPONENT ${TESTS_COMPONENT})
