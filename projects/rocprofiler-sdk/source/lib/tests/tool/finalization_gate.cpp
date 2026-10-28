@@ -170,6 +170,57 @@ TEST(finalization_gate, finalizing_thread_does_not_wait_on_itself)
     EXPECT_EQ(inner, status::reentered);
 }
 
+TEST(finalization_gate, serializes_joiners_after_worker_skips_self_join)
+{
+    finalization_gate join_gate{};
+    auto              worker_id         = std::atomic<std::thread::id>{};
+    auto              join_ready        = std::atomic<bool>{false};
+    auto              cleanup_count     = std::atomic<int>{0};
+    auto              self_result       = std::promise<status>{};
+    auto              release_worker    = std::promise<void>{};
+    auto              join_started      = std::promise<void>{};
+    auto              allow_join        = std::promise<void>{};
+    auto              release_future    = release_worker.get_future().share();
+    auto              allow_join_future = allow_join.get_future().share();
+    auto              worker            = std::thread{};
+    auto              join_worker       = std::function<status()>{};
+
+    worker = std::thread{[&]() {
+        worker_id.store(std::this_thread::get_id(), std::memory_order_release);
+        while(!join_ready.load(std::memory_order_acquire))
+            std::this_thread::yield();
+        self_result.set_value(join_worker());
+        release_future.wait();
+    }};
+
+    join_worker = [&]() {
+        if(worker_id.load(std::memory_order_acquire) == std::this_thread::get_id())
+            return status::reentered;
+        return join_gate.run_or_wait([&]() {
+            ++cleanup_count;
+            join_started.set_value();
+            allow_join_future.wait();
+            release_worker.set_value();
+            worker.join();
+        });
+    };
+    join_ready.store(true, std::memory_order_release);
+
+    EXPECT_EQ(self_result.get_future().get(), status::reentered);
+    auto first_joiner = std::async(std::launch::async, join_worker);
+    join_started.get_future().wait();
+    auto second_joiner = std::async(std::launch::async, join_worker);
+    EXPECT_EQ(second_joiner.wait_for(still_blocked), std::future_status::timeout);
+
+    allow_join.set_value();
+    ASSERT_EQ(first_joiner.wait_for(wake_bound), std::future_status::ready);
+    ASSERT_EQ(second_joiner.wait_for(wake_bound), std::future_status::ready);
+    EXPECT_EQ(first_joiner.get(), status::ran);
+    EXPECT_EQ(second_joiner.get(), status::completed);
+    EXPECT_EQ(cleanup_count, 1);
+    EXPECT_FALSE(worker.joinable());
+}
+
 TEST(finalization_gate, waiters_are_released_when_the_finalization_throws)
 {
     finalization_gate gate{};

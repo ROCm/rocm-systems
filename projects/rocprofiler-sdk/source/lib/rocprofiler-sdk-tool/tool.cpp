@@ -220,13 +220,15 @@ is_handled_signal(int signum)
 
 struct signal_worker_state
 {
-    int                     eventfd              = -1;   // handler -> worker wakeup fd
-    std::atomic<uint32_t>   finalize_done        = {};   // worker sets when flush done (futex word)
-    std::atomic<uint32_t>   handling             = {0};  // 1 once our handler owns the path
-    tool::finalization_gate finalization_request = {};   // requests SDK finalization once
-    tool::finalization_gate tool_finalization    = {};   // tracks actual tool_fini completion
-    int                     signo                = {0};  // signal handled (0 == normal exit)
-    std::thread             thread               = {};   // the finalization worker
+    int                          eventfd       = -1;   // handler -> worker wakeup fd
+    std::atomic<uint32_t>        finalize_done = {};   // worker sets when flush done (futex word)
+    std::atomic<uint32_t>        handling      = {0};  // 1 once our handler owns the path
+    tool::finalization_gate      finalization_request = {};  // requests SDK finalization once
+    tool::finalization_gate      tool_finalization    = {};  // tracks actual tool_fini completion
+    tool::finalization_gate      worker_join          = {};  // serializes join and eventfd cleanup
+    std::atomic<std::thread::id> worker_id            = {};
+    int                          signo                = {0};  // signal handled (0 == normal exit)
+    std::thread                  thread               = {};   // the finalization worker
 
     ~signal_worker_state() { join(); }
 
@@ -235,25 +237,31 @@ struct signal_worker_state
     // the destructor, so the worker is never left joinable at static destruction
     void join()
     {
-        if(thread.joinable() && thread.get_id() != std::this_thread::get_id())
-        {
-            // Wake the worker's blocking read() so it can exit
-            // closing the fd while read() blocks is UB.
-            if(eventfd >= 0)
+        // The worker reaches finalize_rocprofv3 itself. It must not claim the join gate: an
+        // external caller or the destructor still needs to join it and close the eventfd.
+        if(worker_id.load(std::memory_order_acquire) == std::this_thread::get_id()) return;
+
+        worker_join.run_or_wait([this]() {
+            if(thread.joinable())
             {
-                uint64_t val = 1;
-                if(write(eventfd, &val, sizeof(val)) < 0)
-                    ROCP_WARNING << "signal worker: eventfd wake before join failed: "
-                                 << strerror(errno);
+                // Wake the worker's blocking read() so it can exit. Closing the fd while read()
+                // blocks is undefined behavior.
+                if(eventfd >= 0)
+                {
+                    uint64_t val = 1;
+                    if(write(eventfd, &val, sizeof(val)) < 0)
+                        ROCP_WARNING << "signal worker: eventfd wake before join failed: "
+                                     << strerror(errno);
+                }
+                thread.join();
             }
-            thread.join();
             if(eventfd >= 0)
             {
                 if(close(eventfd) < 0)
                     ROCP_WARNING << "signal worker: close(eventfd) failed: " << strerror(errno);
                 eventfd = -1;
             }
-        }
+        });
     }
 };
 
@@ -4987,6 +4995,7 @@ void
 signal_finalization_worker()
 {
     auto& sw = get_signal_worker();
+    sw.worker_id.store(std::this_thread::get_id(), std::memory_order_release);
 
     sigset_t mask;
     sigemptyset(&mask);
