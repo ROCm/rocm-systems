@@ -13,6 +13,10 @@
 namespace rocjitsu::cli {
 namespace {
 
+using util::DiagnosticEmitter;
+using util::FailureOr;
+using util::Result;
+
 class CliTest : public testing::Test {
 protected:
   Command root{"tool"};
@@ -24,7 +28,7 @@ protected:
 };
 
 TEST_F(CliTest, TypedAndStringUpdatesShareOneValueAndAliases) {
-  auto count = std::make_shared<IntFlag>(FlagInfo{"--count", {"-c", "--limit"}, "Count"}, 64);
+  auto count = std::make_shared<Int64Flag>(FlagInfo{"--count", {"-c", "--limit"}, "Count"}, 64);
   ASSERT_TRUE(root.add_flag(count, diagnostic.emitter()).succeeded());
   EXPECT_EQ(root.find_flag("-c"), root.find_flag("--count"));
   EXPECT_EQ(root.flags().size(), 1u);
@@ -46,7 +50,7 @@ TEST_F(CliTest, NestedScopesPositionalsAndSeparators) {
   ASSERT_TRUE(inspect.succeeded());
   auto code = inspect.value()->add_command("code", diagnostic.emitter());
   ASSERT_TRUE(code.succeeded());
-  auto limit = std::make_shared<IntFlag>(FlagInfo{"--limit", {"-l"}, "Limit"});
+  auto limit = std::make_shared<Int64Flag>(FlagInfo{"--limit", {"-l"}, "Limit"});
   ASSERT_TRUE(code.value()->add_flag(limit, diagnostic.emitter()).succeeded());
   auto result =
       run({"--verbose", "inspect", "code", "first", "-l=-7", "second", "--", "--help", ""});
@@ -64,8 +68,8 @@ TEST_F(CliTest, SameSpellingInDifferentCommands) {
   auto a = root.add_command("a", diagnostic.emitter());
   auto b = root.add_command("b", diagnostic.emitter());
   ASSERT_TRUE(a.succeeded() && b.succeeded());
-  auto left = std::make_shared<IntFlag>(FlagInfo{"--x", {}, ""});
-  auto right = std::make_shared<IntFlag>(FlagInfo{"--x", {}, ""});
+  auto left = std::make_shared<Int64Flag>(FlagInfo{"--x", {}, ""});
+  auto right = std::make_shared<Int64Flag>(FlagInfo{"--x", {}, ""});
   ASSERT_TRUE(a.value()->add_flag(left, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(b.value()->add_flag(right, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(run({"a", "--x=5"}).succeeded());
@@ -77,7 +81,7 @@ TEST_F(CliTest, SameSpellingInDifferentCommands) {
 }
 
 TEST_F(CliTest, SharedFlagUsesLastAssignmentAcrossScopes) {
-  auto value = std::make_shared<IntFlag>(FlagInfo{"--count", {"-c"}, "Count"});
+  auto value = std::make_shared<Int64Flag>(FlagInfo{"--count", {"-c"}, "Count"});
   auto child = root.add_command("child", diagnostic.emitter());
   ASSERT_TRUE(child.succeeded());
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
@@ -89,7 +93,7 @@ TEST_F(CliTest, SharedFlagUsesLastAssignmentAcrossScopes) {
 }
 
 TEST_F(CliTest, RegisteringSameAddressIsANoopButSameNameIsAnError) {
-  auto value = std::make_shared<IntFlag>(FlagInfo{"--count", {"-c"}, "Count"}, 7);
+  auto value = std::make_shared<Int64Flag>(FlagInfo{"--count", {"-c"}, "Count"}, 7);
   ASSERT_TRUE(root.add_flags("Counts", {value, value}, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(root.add_flags("Other section", {value}, diagnostic.emitter()).succeeded());
@@ -98,7 +102,7 @@ TEST_F(CliTest, RegisteringSameAddressIsANoopButSameNameIsAnError) {
   EXPECT_EQ(root.flags(), (std::vector<std::shared_ptr<Flag>>{value}));
   EXPECT_EQ(root.find_flag("-c"), value);
   EXPECT_EQ(value->value(), 7);
-  auto duplicate = std::make_shared<IntFlag>(FlagInfo{"--count", {}, "Different flag"});
+  auto duplicate = std::make_shared<Int64Flag>(FlagInfo{"--count", {}, "Different flag"});
   EXPECT_TRUE(root.add_flag(duplicate, diagnostic.emitter()).failed());
   EXPECT_EQ(diagnostic.message(), "tool: spelling '--count' for --count conflicts with --count");
 }
@@ -106,7 +110,7 @@ TEST_F(CliTest, RegisteringSameAddressIsANoopButSameNameIsAnError) {
 TEST_F(CliTest, HelpSectionsPreserveOrderAndDoNotIntroduceScope) {
   auto help =
       std::make_shared<BoolFlag>(FlagInfo{"--help", {"-h"}, "Show help", ValueMode::Switch});
-  auto count = std::make_shared<IntFlag>(
+  auto count = std::make_shared<Int64Flag>(
       FlagInfo{"--count", {"-c"}, "Number of items", ValueMode::Required, "N"});
   auto output = std::make_shared<StringFlag>(
       FlagInfo{"--output", {"-o"}, "Output file", ValueMode::Required, "PATH"});
@@ -147,14 +151,14 @@ TEST_F(CliTest, HelpUsesCustomOrEmptyPositionalUsage) {
 }
 
 TEST_F(CliTest, BatchCollisionsDiagnoseAcrossAndWithinSections) {
-  auto first = std::make_shared<IntFlag>(FlagInfo{"--first", {"-f"}, ""});
-  auto fresh = std::make_shared<IntFlag>(FlagInfo{"--fresh", {}, ""});
-  auto conflict = std::make_shared<IntFlag>(FlagInfo{"--second", {"-f"}, ""});
+  auto first = std::make_shared<Int64Flag>(FlagInfo{"--first", {"-f"}, ""});
+  auto fresh = std::make_shared<Int64Flag>(FlagInfo{"--fresh", {}, ""});
+  auto conflict = std::make_shared<Int64Flag>(FlagInfo{"--second", {"-f"}, ""});
   ASSERT_TRUE(root.add_flags("First", {first}, diagnostic.emitter()).succeeded());
   EXPECT_TRUE(root.add_flags("Second", {fresh, conflict}, diagnostic.emitter()).failed());
   EXPECT_NE(diagnostic.message().find("conflicts with --first"), std::string::npos);
   EXPECT_EQ(root.find_flag("--fresh"), nullptr);
-  auto same_name = std::make_shared<IntFlag>(FlagInfo{"--fresh", {}, ""});
+  auto same_name = std::make_shared<Int64Flag>(FlagInfo{"--fresh", {}, ""});
   EXPECT_TRUE(root.add_flags("Third", {fresh, same_name}, diagnostic.emitter()).failed());
   EXPECT_NE(diagnostic.message().find("repeated spelling '--fresh'"), std::string::npos);
   EXPECT_TRUE(root.add_flags("Fourth", {fresh, nullptr}, diagnostic.emitter()).failed());
@@ -169,7 +173,7 @@ TEST_F(CliTest, LookupRetainsMetadataAndValueBeyondCommandLifetime) {
   std::weak_ptr<Flag> weak;
   {
     Command other{"other"};
-    auto flag = std::make_shared<IntFlag>(FlagInfo{"--count", {"-c"}, "Count"}, 3);
+    auto flag = std::make_shared<Int64Flag>(FlagInfo{"--count", {"-c"}, "Count"}, 3);
     weak = flag;
     ASSERT_TRUE(other.add_flag(flag, diagnostic.emitter()).succeeded());
     retained = other.find_flag("-c");
@@ -183,19 +187,19 @@ TEST_F(CliTest, LookupRetainsMetadataAndValueBeyondCommandLifetime) {
   EXPECT_EQ(retained->format_value(), "9");
   retained.reset();
   EXPECT_TRUE(weak.expired());
-  static_assert(!std::is_copy_assignable_v<IntFlag>);
-  static_assert(!std::is_move_assignable_v<IntFlag>);
+  static_assert(!std::is_copy_assignable_v<Int64Flag>);
+  static_assert(!std::is_move_assignable_v<Int64Flag>);
 }
 
 TEST_F(CliTest, RegistrationRejectsAllCollisionDirections) {
-  auto value = std::make_shared<IntFlag>(FlagInfo{"--first", {"-f"}, ""});
+  auto value = std::make_shared<Int64Flag>(FlagInfo{"--first", {"-f"}, ""});
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
   for (FlagInfo info :
        {FlagInfo{"--first", {}, ""}, FlagInfo{"-f", {}, ""}, FlagInfo{"--second", {"--first"}, ""},
         FlagInfo{"--second", {"-f"}, ""}, FlagInfo{"--second", {"-s", "-s"}, ""},
         FlagInfo{"--second", {"--second"}, ""}}) {
     EXPECT_TRUE(
-        root.add_flag(std::make_shared<IntFlag>(std::move(info)), diagnostic.emitter()).failed());
+        root.add_flag(std::make_shared<Int64Flag>(std::move(info)), diagnostic.emitter()).failed());
   }
   EXPECT_EQ(root.flags().size(), 1u);
   EXPECT_EQ(root.find_flag("--second"), nullptr);
@@ -206,7 +210,7 @@ TEST_F(CliTest, RegistrationRejectsAllCollisionDirections) {
 TEST_F(CliTest, InvalidDefinitionsAndNullFlagsFail) {
   for (const char *name : {"", "--", "-", "---x", "-long", "plain", "--a=b", "--two words"})
     EXPECT_TRUE(
-        root.add_flag(std::make_shared<IntFlag>(FlagInfo{name, {}, ""}), diagnostic.emitter())
+        root.add_flag(std::make_shared<Int64Flag>(FlagInfo{name, {}, ""}), diagnostic.emitter())
             .failed())
         << name;
   EXPECT_TRUE(root.add_flag(nullptr, diagnostic.emitter()).failed());
@@ -214,12 +218,26 @@ TEST_F(CliTest, InvalidDefinitionsAndNullFlagsFail) {
     EXPECT_TRUE(root.add_command(name, diagnostic.emitter()).failed());
 }
 
+TEST_F(CliTest, BuiltInValueFlagsRejectSwitchMode) {
+  const std::vector<std::shared_ptr<Flag>> flags{
+      std::make_shared<Int64Flag>(FlagInfo{"--count", {}, "", ValueMode::Switch}),
+      std::make_shared<UInt64Flag>(FlagInfo{"--size", {}, "", ValueMode::Switch}),
+      std::make_shared<StringFlag>(FlagInfo{"--path", {}, "", ValueMode::Switch}),
+  };
+  for (const std::shared_ptr<Flag> &flag : flags) {
+    EXPECT_TRUE(root.add_flag(flag, diagnostic.emitter()).failed());
+    EXPECT_NE(diagnostic.message().find("cannot use switch mode"), std::string::npos);
+  }
+  auto custom = std::make_shared<BoolFlag>(FlagInfo{"--custom", {}, "", ValueMode::Switch});
+  EXPECT_TRUE(root.add_flag(custom, diagnostic.emitter()).succeeded());
+}
+
 TEST_F(CliTest, ValueGrammarAndOwnedStrings) {
   auto text = std::make_shared<StringFlag>(FlagInfo{"--text", {"-t"}, ""});
   auto toggle = std::make_shared<BoolFlag>(FlagInfo{"--toggle", {}, "", ValueMode::Switch});
   ASSERT_TRUE(root.add_flag(text, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(root.add_flag(toggle, diagnostic.emitter()).succeeded());
-  ASSERT_TRUE(run({"--text=", "--toggle=false"}).succeeded());
+  ASSERT_TRUE(run({"--text=", "--toggle=off"}).succeeded());
   EXPECT_TRUE(text->value().empty());
   EXPECT_FALSE(toggle->value());
   ASSERT_TRUE(run({"--text", "--toggle"}).succeeded());
@@ -229,7 +247,15 @@ TEST_F(CliTest, ValueGrammarAndOwnedStrings) {
   EXPECT_TRUE(toggle->value());
   EXPECT_TRUE(run({"--text", "--"}).failed());
   EXPECT_TRUE(run({"--text"}).failed());
-  EXPECT_TRUE(run({"--toggle=1"}).failed());
+  for (std::string_view value : {"1", "yes", "y", "true", "t", "on"}) {
+    ASSERT_TRUE(toggle->parse_and_set(value, diagnostic.emitter()).succeeded()) << value;
+    EXPECT_TRUE(toggle->value()) << value;
+  }
+  for (std::string_view value : {"0", "no", "n", "false", "f", "off"}) {
+    ASSERT_TRUE(toggle->parse_and_set(value, diagnostic.emitter()).succeeded()) << value;
+    EXPECT_FALSE(toggle->value()) << value;
+  }
+  EXPECT_TRUE(toggle->parse_and_set("maybe", diagnostic.emitter()).failed());
   std::string argument = "--text=owned";
   const std::array<std::string_view, 1> args{argument};
   ASSERT_TRUE(parse(root, args, diagnostic.emitter()).succeeded());
@@ -239,8 +265,8 @@ TEST_F(CliTest, ValueGrammarAndOwnedStrings) {
 }
 
 TEST_F(CliTest, FailureStopsImmediatelyWithoutRollback) {
-  auto a = std::make_shared<IntFlag>(FlagInfo{"--a", {"-a"}, ""});
-  auto b = std::make_shared<IntFlag>(FlagInfo{"--b", {}, ""});
+  auto a = std::make_shared<Int64Flag>(FlagInfo{"--a", {"-a"}, ""});
+  auto b = std::make_shared<Int64Flag>(FlagInfo{"--b", {}, ""});
   ASSERT_TRUE(root.add_flag(a, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(root.add_flag(b, diagnostic.emitter()).succeeded());
   EXPECT_TRUE(run({"--a=3", "--unknown", "--b=4"}).failed());
@@ -302,13 +328,13 @@ TEST(CliValues, LauncherRequiresSeparatorAndOwnsForwardedArguments) {
 }
 
 TEST_F(CliTest, RegistrationSealsButValuesRemainWritable) {
-  auto value = std::make_shared<IntFlag>(FlagInfo{"--x", {}, ""});
+  auto value = std::make_shared<Int64Flag>(FlagInfo{"--x", {}, ""});
   auto child = root.add_command("child", diagnostic.emitter());
   ASSERT_TRUE(child.succeeded());
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(run({}).succeeded());
   EXPECT_TRUE(
-      root.add_flag(std::make_shared<IntFlag>(FlagInfo{"--y", {}, ""}), diagnostic.emitter())
+      root.add_flag(std::make_shared<Int64Flag>(FlagInfo{"--y", {}, ""}), diagnostic.emitter())
           .failed());
   EXPECT_TRUE(child.value()->add_command("late", diagnostic.emitter()).failed());
   EXPECT_TRUE(root.find_flag("--x")->parse_and_set("7", diagnostic.emitter()).succeeded());
@@ -316,7 +342,7 @@ TEST_F(CliTest, RegistrationSealsButValuesRemainWritable) {
 }
 
 TEST_F(CliTest, IndependentInstancesAndLifetime) {
-  auto value = std::make_shared<IntFlag>(FlagInfo{"--x", {}, ""});
+  auto value = std::make_shared<Int64Flag>(FlagInfo{"--x", {}, ""});
   std::weak_ptr<Flag> weak = value;
   {
     Command other{"tool"};
@@ -337,12 +363,12 @@ TEST_F(CliTest, IndependentInstancesAndLifetime) {
 }
 
 TEST_F(CliTest, MetadataAndHelpRemainStableWhileRegistering) {
-  auto value = std::make_shared<IntFlag>(FlagInfo{"--count", {"-c"}, "Item count"});
+  auto value = std::make_shared<Int64Flag>(FlagInfo{"--count", {"-c"}, "Item count"});
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
   auto first = root.find_flag("--count");
   for (int i = 0; i < 100; ++i)
     ASSERT_TRUE(
-        root.add_flag(std::make_shared<IntFlag>(FlagInfo{"--x" + std::to_string(i), {}, ""}),
+        root.add_flag(std::make_shared<Int64Flag>(FlagInfo{"--x" + std::to_string(i), {}, ""}),
                       diagnostic.emitter())
             .succeeded());
   EXPECT_EQ(root.find_flag("-c"), first);
@@ -353,8 +379,8 @@ TEST_F(CliTest, MetadataAndHelpRemainStableWhileRegistering) {
 }
 
 TEST(CliValues, IntegerBoundariesAndWholeInputConversion) {
-  IntFlag signed_value({"--signed", {}, ""});
-  UIntFlag unsigned_value({"--unsigned", {}, ""});
+  Int64Flag signed_value({"--signed", {}, ""});
+  UInt64Flag unsigned_value({"--unsigned", {}, ""});
   util::StringDiagnostic diagnostic;
   for (const char *text : {"-9223372036854775808", "9223372036854775807", "0"}) {
     ASSERT_TRUE(signed_value.parse_and_set(text, diagnostic.emitter()).succeeded());
@@ -383,14 +409,15 @@ public:
     return Result::success();
   }
   std::string format_value() const override { return std::to_string(value_); }
+
+private:
   Result parse_value(std::string_view text, DiagnosticEmitter diagnostic) override {
-    auto parsed = parse_int(text, diagnostic);
+    FailureOr<int64_t> parsed = parse_int(text, diagnostic);
     if (parsed.failed())
       return Result::failure();
     return set_value(parsed.value(), diagnostic);
   }
 
-private:
   int64_t value_ = 1;
 };
 
@@ -407,12 +434,13 @@ public:
     }
     return result;
   }
+
+private:
   Result parse_value(std::string_view text, DiagnosticEmitter) override {
     values_.emplace_back(text);
     return Result::success();
   }
 
-private:
   std::vector<std::string> values_;
 };
 
@@ -440,6 +468,8 @@ TEST_F(CliTest, SilentCustomFailureStillGetsContext) {
   public:
     using Flag::Flag;
     std::string format_value() const override { return {}; }
+
+  private:
     Result parse_value(std::string_view, DiagnosticEmitter) override { return Result::failure(); }
   };
   ASSERT_TRUE(
@@ -454,12 +484,13 @@ TEST_F(CliTest, RegistrationFromAParsingCallbackIsRejected) {
   public:
     explicit RegisteringFlag(Command &command) : Flag({"--register", {}, ""}), command_(command) {}
     std::string format_value() const override { return {}; }
+
+  private:
     Result parse_value(std::string_view, DiagnosticEmitter diagnostic) override {
       return command_.add_command("late", diagnostic).failed() ? Result::failure()
                                                                : Result::success();
     }
 
-  private:
     Command &command_;
   };
   ASSERT_TRUE(
@@ -473,14 +504,14 @@ TEST(CliValues, DeterministicRoundTripsAndMalformedArguments) {
   std::mt19937_64 random(0xC11);
   util::StringDiagnostic diagnostic;
   Command command{"fuzz"};
-  auto number = std::make_shared<UIntFlag>(FlagInfo{"--number", {"-n"}, ""});
+  auto number = std::make_shared<UInt64Flag>(FlagInfo{"--number", {"-n"}, ""});
   auto text = std::make_shared<StringFlag>(FlagInfo{"--text", {}, ""});
   ASSERT_TRUE(command.add_flag(number, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(command.add_flag(text, diagnostic.emitter()).succeeded());
   for (int iteration = 0; iteration < 4000; ++iteration) {
     const uint64_t expected = random();
     ASSERT_TRUE(number->set_value(expected).succeeded());
-    UIntFlag decoded({"--decoded", {}, ""});
+    UInt64Flag decoded({"--decoded", {}, ""});
     ASSERT_TRUE(decoded.parse_and_set(number->format_value(), diagnostic.emitter()).succeeded());
     EXPECT_EQ(decoded.value(), expected);
 

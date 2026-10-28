@@ -9,6 +9,11 @@
 #include <unordered_set>
 
 namespace rocjitsu::cli {
+
+using util::DiagnosticEmitter;
+using util::FailureOr;
+using util::Result;
+
 namespace {
 
 bool valid_word(std::string_view word) {
@@ -25,6 +30,16 @@ bool valid_spelling(std::string_view spelling) {
   }
   return spelling.size() == 2 && spelling.front() == '-' && valid_word(spelling.substr(1)) &&
          spelling.back() != '-';
+}
+
+bool equals_ignore_case(std::string_view lhs, std::string_view rhs) {
+  auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
+  return lhs.size() == rhs.size() && std::ranges::equal(lhs, rhs, {}, lower, lower);
+}
+
+bool is_value_only_builtin(const Flag &flag) {
+  return dynamic_cast<const Int64Flag *>(&flag) || dynamic_cast<const UInt64Flag *>(&flag) ||
+         dynamic_cast<const StringFlag *>(&flag);
 }
 
 template <typename T>
@@ -57,35 +72,39 @@ Result BoolFlag::set_value(bool value, DiagnosticEmitter) {
 std::string BoolFlag::format_value() const { return value_ ? "true" : "false"; }
 
 Result BoolFlag::parse_value(std::string_view text, DiagnosticEmitter diagnostic) {
-  if (text == "true")
+  if (equals_ignore_case(text, "1") || equals_ignore_case(text, "yes") ||
+      equals_ignore_case(text, "y") || equals_ignore_case(text, "true") ||
+      equals_ignore_case(text, "t") || equals_ignore_case(text, "on"))
     return set_value(true, diagnostic);
-  if (text == "false")
+  if (equals_ignore_case(text, "0") || equals_ignore_case(text, "no") ||
+      equals_ignore_case(text, "n") || equals_ignore_case(text, "false") ||
+      equals_ignore_case(text, "f") || equals_ignore_case(text, "off"))
     return set_value(false, diagnostic);
-  return diagnostic.emit() << "expected true or false, got '" << text << "'";
+  return diagnostic.emit() << "expected boolean value, got '" << text << "'";
 }
 
-Result IntFlag::set_value(int64_t value, DiagnosticEmitter) {
+Result Int64Flag::set_value(int64_t value, DiagnosticEmitter) {
   value_ = value;
   return Result::success();
 }
 
-std::string IntFlag::format_value() const { return std::to_string(value_); }
+std::string Int64Flag::format_value() const { return std::to_string(value_); }
 
-Result IntFlag::parse_value(std::string_view text, DiagnosticEmitter diagnostic) {
+Result Int64Flag::parse_value(std::string_view text, DiagnosticEmitter diagnostic) {
   FailureOr<int64_t> value = parse_int(text, diagnostic);
   if (value.failed())
     return Result::failure();
   return set_value(value.value(), diagnostic);
 }
 
-Result UIntFlag::set_value(uint64_t value, DiagnosticEmitter) {
+Result UInt64Flag::set_value(uint64_t value, DiagnosticEmitter) {
   value_ = value;
   return Result::success();
 }
 
-std::string UIntFlag::format_value() const { return std::to_string(value_); }
+std::string UInt64Flag::format_value() const { return std::to_string(value_); }
 
-Result UIntFlag::parse_value(std::string_view text, DiagnosticEmitter diagnostic) {
+Result UInt64Flag::parse_value(std::string_view text, DiagnosticEmitter diagnostic) {
   FailureOr<uint64_t> value = parse_uint(text, diagnostic);
   if (value.failed())
     return Result::failure();
@@ -147,6 +166,9 @@ Result Command::add_flags(std::string description, std::vector<std::shared_ptr<F
     if (!flag)
       return diagnostic.emit() << path() << ": null flag";
     const auto &info = flag->info();
+    if (info.value_mode == ValueMode::Switch && is_value_only_builtin(*flag))
+      return diagnostic.emit() << path() << ": " << info.name
+                               << " cannot use switch mode with this built-in flag type";
     if (find_flag(info.name).get() == flag.get() || !objects.insert(flag.get()).second)
       continue;
     additions.push_back(flag);
