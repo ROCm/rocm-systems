@@ -10,7 +10,8 @@
 // printing stale stack values. Two more tests compare that header, and the event and trigger enums
 // in rocm_smi's kfd_ioctl.h, with the kernel's upstream master, so a kernel change is caught too.
 // If upstream cannot be fetched, those comparisons are not run and a message says why. The download
-// uses the first of curl, wget and python3 found on PATH. The two local headers are read from
+// uses the first of curl, wget and python3 found on PATH, and tries again (up to 3 times) after a
+// rate limit (429) or server error (5xx). The two local headers are read from
 // kfd_headers/ next to the test binary, where the tests package installs them, and from the source
 // tree when the tests run from the build directory.
 //
@@ -21,7 +22,9 @@
 
 #include "kfd_event_formats.h"
 
+#include <fcntl.h>
 #include <gtest/gtest.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -50,6 +53,8 @@
 #include "test_common.h"
 #include "test_fixture_utils.h"
 
+extern char** environ;
+
 namespace {
 
 using amd::smi::AMDSmiDrm;
@@ -60,6 +65,8 @@ constexpr size_t kPayloadBufferSize = 256;  // larger than any message the tests
 constexpr size_t kDownloadChunkSize = 4096;
 constexpr int kConnectTimeoutSeconds = 5;
 constexpr int kDownloadTimeoutSeconds = 20;
+constexpr int kMaxDownloadAttempts = 3;
+constexpr int kRetryDelaySeconds = 5;  // doubles after each failed attempt
 
 // The reader strips the trailing newline before handing the payload to the parser.
 __attribute__((format(printf, 1, 2))) std::string Payload(const char* fmt, ...) {
@@ -77,6 +84,14 @@ __attribute__((format(printf, 1, 2))) std::string Payload(const char* fmt, ...) 
 
 constexpr const char* kMainlineHeaderUrl =
     "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/kfd_ioctl.h";
+
+// python3 fallback: argv[1] is the URL and argv[2] the timeout; refuses a redirect off https.
+constexpr const char* kPythonFetchScript =
+    "import sys, urllib.request\n"
+    "r = urllib.request.urlopen(sys.argv[1], timeout=float(sys.argv[2]))\n"
+    "if not r.geturl().startswith('https://'):\n"
+    "    sys.exit('redirected to a non-https URL: ' + r.geturl())\n"
+    "sys.stdout.write(r.read().decode())\n";
 
 std::string ReadFile(const std::string& path) {
   std::ifstream in(path);
@@ -101,6 +116,11 @@ struct FetchResult {
   std::string source;         // where text came from, for verbose output
 };
 
+struct DownloadTool {
+  std::string name;
+  std::vector<std::string> argv;  // run directly, never through a shell
+};
+
 bool OnPath(const std::string& tool) {
   const char* path = std::getenv("PATH");
   std::istringstream dirs(path != nullptr ? path : "");
@@ -113,6 +133,78 @@ bool OnPath(const std::string& tool) {
   return false;
 }
 
+struct CommandResult {
+  bool started = false;
+  int status = 0;      // as returned by pclose(); 0 on success
+  std::string output;  // the body on success; the tool's error text, or why it did not start
+};
+
+// Runs argv[0] (found on PATH) directly with no shell, stdin from /dev/null and stderr merged
+// into the captured output.
+CommandResult RunCommand(const std::vector<std::string>& argv) {
+  CommandResult result;
+  int fds[2];
+  if (pipe2(fds, O_CLOEXEC) != 0) {
+    result.output = std::strerror(errno);
+    return result;
+  }
+  posix_spawn_file_actions_t actions;
+  posix_spawn_file_actions_init(&actions);
+  posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+  posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO);
+  posix_spawn_file_actions_adddup2(&actions, fds[1], STDERR_FILENO);
+
+  std::vector<char*> args;
+  for (const std::string& arg : argv) {
+    args.push_back(const_cast<char*>(arg.c_str()));  // posix_spawnp does not modify it
+  }
+  args.push_back(nullptr);
+
+  pid_t pid = 0;
+  const int spawn_error = posix_spawnp(&pid, args[0], &actions, nullptr, args.data(), environ);
+  posix_spawn_file_actions_destroy(&actions);
+  close(fds[1]);  // the child holds the only write end now
+  if (spawn_error != 0) {
+    close(fds[0]);
+    result.output = std::strerror(spawn_error);
+    return result;
+  }
+
+  result.started = true;
+  char buf[kDownloadChunkSize];
+  for (;;) {
+    const ssize_t n = read(fds[0], buf, sizeof(buf));
+    if (n > 0) {
+      result.output.append(buf, static_cast<size_t>(n));
+    } else if (n == 0 || errno != EINTR) {
+      break;
+    }
+  }
+  close(fds[0]);
+  while (waitpid(pid, &result.status, 0) < 0) {
+    if (errno != EINTR) {
+      result.status = -1;
+      break;
+    }
+  }
+  return result;
+}
+
+// A python traceback ends with the exception, so the last line is the useful one.
+std::string LastLine(std::string text) {
+  while (!text.empty() && text.back() == '\n') {
+    text.pop_back();
+  }
+  const size_t last_newline = text.find_last_of('\n');
+  return last_newline == std::string::npos ? text : text.substr(last_newline + 1);
+}
+
+// A rate limit (429) or a server error (5xx) can pass on its own; any other failure will not.
+bool IsTransientHttpError(const std::string& error_text) {
+  static const std::regex kTransient(R"(\b(429|5[0-9]{2})\b)");
+  return std::regex_search(error_text, kTransient);
+}
+
 FetchResult FetchMainlineHeader() {
   if (const char* local = std::getenv("AMDSMI_KFD_IOCTL_MAINLINE_FILE")) {
     std::string text = ReadFile(local);
@@ -122,22 +214,23 @@ FetchResult FetchMainlineHeader() {
     }
     return {text, "", std::string("file ") + local};
   }
-  // Quiet modes print only errors, so 2>&1 keeps the failure reason without corrupting the body.
+  // Quiet modes print only errors, and stderr joins the output, so a failure keeps its reason.
+  // https only: curl and python3 refuse a redirect to http; wget (whose --https-only affects only
+  // recursive downloads) follows none, which is enough because the URL does not redirect.
   const std::string url = kMainlineHeaderUrl;
   const std::string connect_timeout = std::to_string(kConnectTimeoutSeconds);
   const std::string timeout = std::to_string(kDownloadTimeoutSeconds);
-  const std::pair<std::string, std::string> kTools[] = {
+  const std::vector<DownloadTool> kTools = {
       {"curl",
-       "curl -fsSL --connect-timeout " + connect_timeout + " --max-time " + timeout + " " + url},
-      {"wget", "wget -q -O - --timeout=" + timeout + " --tries=1 " + url},
-      {"python3",
-       "python3 -c 'import sys, urllib.request; "
-       "sys.stdout.write(urllib.request.urlopen(sys.argv[1], timeout=" +
-           timeout + ").read().decode())' " + url},
+       {"curl", "-fsSL", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout",
+        connect_timeout, "--max-time", timeout, url}},
+      {"wget",
+       {"wget", "-q", "-O", "-", "--max-redirect=0", "--timeout=" + timeout, "--tries=1", url}},
+      {"python3", {"python3", "-c", kPythonFetchScript, url, timeout}},
   };
-  const std::pair<std::string, std::string>* tool = nullptr;
-  for (const auto& candidate : kTools) {
-    if (OnPath(candidate.first)) {
+  const DownloadTool* tool = nullptr;
+  for (const DownloadTool& candidate : kTools) {
+    if (OnPath(candidate.name)) {
       tool = &candidate;
       break;
     }
@@ -145,34 +238,36 @@ FetchResult FetchMainlineHeader() {
   if (tool == nullptr) {
     return {"", "no download tool on PATH (tried curl, wget, python3)", ""};
   }
-  FILE* pipe = popen((tool->second + " 2>&1").c_str(), "r");
-  if (pipe == nullptr) {
-    return {"", "could not start " + tool->first + ": " + std::strerror(errno), ""};
-  }
-  std::string out;
-  char buf[kDownloadChunkSize];
-  size_t n;
-  while ((n = fread(buf, 1, sizeof(buf), pipe)) > 0) {
-    out.append(buf, n);
-  }
-  const int status = pclose(pipe);
-  if (status != 0) {
-    while (!out.empty() && out.back() == '\n') {
-      out.pop_back();
+  // Retry only a rate limit or server error, with a growing pause, so an offline run is not slowed.
+  CommandResult attempt;
+  int attempts = 0;
+  while (true) {
+    ++attempts;
+    attempt = RunCommand(tool->argv);
+    if (!attempt.started || attempt.status == 0 || attempts == kMaxDownloadAttempts ||
+        !IsTransientHttpError(LastLine(attempt.output))) {
+      break;
     }
-    // A python traceback ends with the exception; keep just that line.
-    const size_t last_line = out.find_last_of('\n');
-    if (last_line != std::string::npos) {
-      out = out.substr(last_line + 1);
+    sleep(static_cast<unsigned int>(kRetryDelaySeconds << (attempts - 1)));
+  }
+  if (!attempt.started) {
+    return {"", "could not start " + tool->name + ": " + attempt.output, ""};
+  }
+  if (attempt.status != 0) {
+    std::string reason =
+        tool->name + " exited with status " +
+        std::to_string(WIFEXITED(attempt.status) ? WEXITSTATUS(attempt.status) : attempt.status);
+    if (attempts > 1) {
+      reason += " after " + std::to_string(attempts) + " attempts";
     }
-    std::string reason = tool->first + " exited with status " +
-                         std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status);
-    if (!out.empty()) {
-      reason += ": " + out;
+    const std::string error_line = LastLine(attempt.output);
+    if (!error_line.empty()) {
+      reason += ": " + error_line;
     }
     return {"", reason, ""};
   }
-  return {out, "", url + " (via " + tool->first + ")"};
+  const std::string& out = attempt.output;
+  return {out, "", url + " (via " + tool->name + ")"};
 }
 
 // One download serves every upstream comparison in this binary.
@@ -704,6 +799,20 @@ TEST(GpuUnit, KFD_EVENT_FMT__OnlyEventsInTheMaskAreReported) {
   // Everything queued has been read, so a second read finds nothing.
   EXPECT_EQ(GetEvents(kBufferSize, &data, &num_elem, AMDSMI_STATUS_NO_DATA), AMDSMI_STATUS_NO_DATA);
   EXPECT_EQ(StopEventNotification(gpu), AMDSMI_STATUS_SUCCESS);
+}
+
+// The error text each download tool prints; only a rate limit or server error is worth retrying.
+TEST(GpuUnit, KFD_EVENT_FMT__DownloadRetriesOnlyTransientHttpErrors) {
+  EXPECT_TRUE(IsTransientHttpError("curl: (22) The requested URL returned error: 429"));
+  EXPECT_TRUE(IsTransientHttpError("curl: (22) The requested URL returned error: 503"));
+  EXPECT_TRUE(IsTransientHttpError("ERROR 429: Too Many Requests."));
+  EXPECT_TRUE(IsTransientHttpError("urllib.error.HTTPError: HTTP Error 502: Bad Gateway"));
+
+  EXPECT_FALSE(IsTransientHttpError("curl: (22) The requested URL returned error: 404"));
+  EXPECT_FALSE(IsTransientHttpError("curl: (6) Could not resolve host: raw.githubusercontent.com"));
+  EXPECT_FALSE(IsTransientHttpError("curl: (28) Operation timed out after 20001 milliseconds"));
+  EXPECT_FALSE(IsTransientHttpError("ERROR 403: Forbidden."));
+  EXPECT_FALSE(IsTransientHttpError(""));
 }
 
 TEST(GpuUnit, KFD_EVENT_FMT__MatchesMainlineKernelHeader) {
