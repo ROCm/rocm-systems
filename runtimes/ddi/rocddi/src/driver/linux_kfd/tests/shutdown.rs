@@ -50,6 +50,7 @@ fn scripted_driver() -> LinuxKfdDriver {
         sdma_next_engine: AtomicU32::new(0),
         scratch: Mutex::new(ScratchPool::new(sysfs::KfdQueueProperties {
             gfx_target: 120_001,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             xcc_count: 1,
             ..sysfs::KfdQueueProperties::default()
         })),

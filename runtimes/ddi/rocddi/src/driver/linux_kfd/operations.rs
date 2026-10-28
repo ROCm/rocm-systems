@@ -166,17 +166,18 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
     fn available_sdma_engines(&self, device: &DeviceState) -> Result<u32, Error> {
         self.ensure_open()?;
         if cfg!(target_arch = "x86_64")
-            && matches!(
-                device.native.queues.gfx_target,
-                90008 | 90010 | 90402 | 90500
-            )
+            && device.native.queues.target_profile == crate::topology::GpuTargetProfile::Gfx9
             && device.native.queues.sdma_qualified
         {
             let count = device.native.queues.sdma_engines.min(u32::BITS);
             return Ok(u32::MAX >> (u32::BITS - count));
         }
         if !cfg!(target_arch = "x86_64")
-            || !matches!(device.native.queues.gfx_target, 120_000 | 120_001 | 120_500)
+            || !device
+                .native
+                .queues
+                .target_profile
+                .supports_kernel_submission()
             || !device.native.queues.sdma_qualified
         {
             return Err(error(
@@ -197,7 +198,11 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
     ) -> Result<Owned<KfdKernelQueue>, Error> {
         self.ensure_open()?;
         if !cfg!(target_arch = "x86_64")
-            || !matches!(device.native.queues.gfx_target, 120_000 | 120_001 | 120_500)
+            || !device
+                .native
+                .queues
+                .target_profile
+                .supports_kernel_submission()
         {
             return Err(error(
                 ErrorKind::Unsupported,
@@ -590,7 +595,10 @@ impl AllocationOperations for LinuxKfdDriver {
             if policy == HostMappingPolicy::Extended
                 && std::iter::once(device)
                     .chain(peers.iter().copied())
-                    .any(|peer| peer.native.queues.gfx_target != 120_001)
+                    .any(|peer| {
+                        peer.native.queues.target_profile
+                            != crate::topology::GpuTargetProfile::Gfx1201
+                    })
             {
                 return Err(error(
                     ErrorKind::Unsupported,

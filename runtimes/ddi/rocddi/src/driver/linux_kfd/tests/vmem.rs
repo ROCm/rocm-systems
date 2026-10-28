@@ -58,6 +58,7 @@ fn fixture() -> (
         identity: [0; 16],
         queues: sysfs::KfdQueueProperties {
             gfx_target: 120_001,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             xcc_count: 1,
             ..sysfs::KfdQueueProperties::default()
         },

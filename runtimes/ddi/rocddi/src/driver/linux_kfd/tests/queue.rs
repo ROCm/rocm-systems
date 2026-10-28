@@ -71,6 +71,7 @@ fn native_node() -> sysfs::KfdNode {
         identity: [0; 16],
         queues: sysfs::KfdQueueProperties {
             gfx_target: 120_001,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             compute_units: 4,
             maximum_wave_count_per_compute_unit: 32,
             maximum_scratch_wave_count_per_compute_unit: 32,
@@ -1058,6 +1059,7 @@ fn targeted_sdma_local_ring_is_mapped_and_released() {
         ErrorKind::Unsupported
     );
     native.queues.gfx_target = 120_000;
+    native.queues.target_profile = crate::topology::GpuTargetProfile::Gfx1200;
     native.public_memory_bytes = 1 << 30;
     assert_eq!(
         Request::validate(&native, desc).err().unwrap().kind(),
@@ -1198,6 +1200,7 @@ fn host_visible_local_aql_ring_requires_sufficient_public_vram() {
     native.public_memory_bytes = os_memory::page_size().unwrap() as u64;
     assert!(Request::validate(&native, desc).is_ok());
     native.queues.gfx_target = 120_000;
+    native.queues.target_profile = crate::topology::GpuTargetProfile::Gfx1200;
     assert_eq!(
         Request::validate(&native, desc).err().unwrap().kind(),
         ErrorKind::Unsupported
@@ -1514,6 +1517,7 @@ fn unsupported_options_and_missing_context_sizes_fail_before_acquisition() {
     }
     let mut native = native_node();
     native.queues.gfx_target = 120_002;
+    native.queues.target_profile = crate::topology::GpuTargetProfile::Other;
     assert!(Request::validate(&native, pm4).is_err());
     assert_eq!(fixture.state.lock().unwrap().next_handle, 0);
 }
