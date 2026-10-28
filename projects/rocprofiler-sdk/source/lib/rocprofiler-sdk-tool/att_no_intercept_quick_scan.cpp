@@ -411,13 +411,19 @@ send_overlapping_requests(scan_context_t&             context,
             // kernel are not appended to the previous capture.
             if(state.continuation_valid)
             {
-                uint64_t consumed = state.continuation_remaining;
+                uint64_t remaining = state.continuation_remaining;
                 for(auto const& record : context.dispatch_offsets)
                 {
+                    if(remaining > 0)
+                    {
+                        state.continuation_me_id   = record.me_id;
+                        state.continuation_pipe_id = record.pipe_id;
+                        --remaining;
+                        continue;
+                    }
                     if(record.me_id != state.continuation_me_id ||
                        record.pipe_id != state.continuation_pipe_id)
                         continue;
-                    if(consumed-- > 0) continue;
                     offset   = record.byte_offset;
                     resolved = true;
                     break;
