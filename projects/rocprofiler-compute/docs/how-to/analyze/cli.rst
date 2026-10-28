@@ -35,21 +35,13 @@ Multiple debug flags can be combined:
 
 * ``--debug-table-view``: Print plain tables instead of the views specified by ``cli_style``.
 * ``--debug-single-metric``: Show metric evaluation and memory chart diagnostics.
-   Combine it with ``--block`` to
-   isolate a metric, for example ``--block 2.1.0 --debug --debug-single-metric``.
+  Combine it with ``--block`` to
+  isolate a metric, for example ``--block 2.1.0 --debug --debug-single-metric``.
 * ``--debug-verify-deps``: Check analyze-mode Python dependencies, then exit without
-   analyzing a workload; no ``--path`` is required.
+  analyzing a workload; no ``--path`` is required.
 
 The ``--debug-*`` flags require ``--debug``; their order does not matter.
 The enabling flag alone does not turn on metric diagnostics.
-
-The former ``--view table`` and standalone ``--verify-deps`` options have been
-replaced by ``--debug --debug-table-view`` and
-``--debug --debug-verify-deps``, respectively.
-``--specs-correction`` remains an Advanced Option for overriding captured system
-specifications without ``--debug``.
-Filtering, normalization, output formats, and ordinary baseline comparisons
-remain regular analysis options.
 
 .. _cli-walkthrough:
 
