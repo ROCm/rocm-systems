@@ -115,15 +115,6 @@ ncclResult_t bootstrapRecv(void* bs, int peer, int tag, void* data, int size) {
 }
 
 // ---------------------------------------------------------------------------
-// Arg checks / comm readiness.
-// ---------------------------------------------------------------------------
-ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSuccess; }
-ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
-// Seam: NCCLCHECK'd on entry to ncclCommWindowRegister_impl, so the
-// not-ready rejection is only reachable by driving it.
-
-
-// ---------------------------------------------------------------------------
 // Public registration API.
 // ---------------------------------------------------------------------------
 // Seams: ncclDevrWindowRegisterInGroup takes a local registration up front and
@@ -162,8 +153,6 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0
 // opt-out in ncclCommWindowRegister_impl.
 int64_t ncclParamWinEnable() { return g_loadParam("WIN_ENABLE", 1); }
-// Emitted by rocmwrap.cc; read by the host VMM GIN fail-closed check.
-int64_t ncclParamDmaBufEnable() { return g_loadParam("DMABUF_ENABLE", 1); }
 
 // ---------------------------------------------------------------------------
 // Proxy.

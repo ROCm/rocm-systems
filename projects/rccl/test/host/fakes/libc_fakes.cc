@@ -6,7 +6,7 @@
 
 #include "fakes/libc_fakes.h"
 
-// Puts the seam's 26 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
+// Puts the seam's micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
 // this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
 // cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
 #include "fakes/libc_seam.h"
@@ -36,6 +36,7 @@ std::vector<MicroFwriteCall> g_fwriteCalls;
 std::vector<MicroPerrorCall> g_perrorCalls;
 std::vector<int> g_closedFds;
 std::vector<void*> g_freedPointers;
+std::vector<void (*)(void)> g_atexitFns;
 std::vector<FILE*> g_fprintfCalls;
 std::vector<int> g_writtenFds;
 std::vector<int> g_readFds;
@@ -275,8 +276,6 @@ static int DefaultGethostname(char* name, size_t len) { return ::gethostname(nam
 
 static int DefaultAccess(const char* path, int mode) { return ::access(path, mode); }
 
-static int DefaultClockGettime(clockid_t clock, struct timespec* ts) { return ::clock_gettime(clock, ts); }
-
 static void* DefaultMalloc(size_t size) { return std::malloc(size); }
 
 static void* DefaultCalloc(size_t nmemb, size_t size) { return std::calloc(nmemb, size); }
@@ -285,6 +284,52 @@ static void DefaultFree(void* ptr) {
   g_freedPointers.push_back(ptr);
   std::free(ptr);
 }
+
+// Fails rather than forwarding: the default read and close are fakes, and real files would make results
+// host-dependent.
+static int DefaultOpen(const char*, int, mode_t) {
+  errno = ENOENT;
+  return -1;
+}
+
+// The filesystem and ioctl defaults below fail too, so a unit never sees the host.
+static FILE* DefaultFopen(const char*, const char*) {
+  errno = ENOENT;
+  return nullptr;
+}
+
+static DIR* DefaultOpendir(const char*) {
+  errno = ENOENT;
+  return nullptr;
+}
+
+// Only reached with a DIR* a test hook handed out, so forward to real libc.
+static struct dirent* DefaultReaddir(DIR* dir) { return ::readdir(dir); }
+static int DefaultClosedir(DIR* dir) { return ::closedir(dir); }
+
+static ssize_t DefaultReadlink(const char*, char*, size_t) {
+  errno = ENOENT;
+  return -1;
+}
+
+static int DefaultIoctl(int, unsigned long, void*) {
+  errno = ENOTTY;
+  return -1;
+}
+
+static int DefaultAtexit(void (*fn)(void)) {
+  g_atexitFns.push_back(fn);
+  return 0;
+}
+
+static int DefaultClockGettime(clockid_t clk, struct timespec* ts) { return ::clock_gettime(clk, ts); }
+static int DefaultPosixMemalign(void** ptr, size_t alignment, size_t size) {
+  return ::posix_memalign(ptr, alignment, size);
+}
+static int DefaultPthreadCreate(pthread_t* thread, const pthread_attr_t* attr, void* (*fn)(void*), void* arg) {
+  return ::pthread_create(thread, attr, fn, arg);
+}
+static int DefaultNanosleep(const struct timespec* req, struct timespec* rem) { return ::nanosleep(req, rem); }
 
 // ---------------------------------------------------------------------------
 
@@ -312,10 +357,22 @@ std::function<void(const char*)> g_perror = DefaultPerror;
 std::function<void(int)> g_exit = DefaultExit;
 std::function<int(char*, size_t)> g_gethostname = DefaultGethostname;
 std::function<int(const char*, int)> g_access = DefaultAccess;
-std::function<int(clockid_t, struct timespec*)> g_clockGettime = DefaultClockGettime;
+std::function<int(const char*, int, mode_t)> g_open = DefaultOpen;
 std::function<void*(size_t)> g_malloc = DefaultMalloc;
 std::function<void*(size_t, size_t)> g_calloc = DefaultCalloc;
 std::function<void(void*)> g_free = DefaultFree;
+std::function<FILE*(const char*, const char*)> g_fopen = DefaultFopen;
+std::function<DIR*(const char*)> g_opendir = DefaultOpendir;
+std::function<struct dirent*(DIR*)> g_readdir = DefaultReaddir;
+std::function<int(DIR*)> g_closedir = DefaultClosedir;
+std::function<ssize_t(const char*, char*, size_t)> g_readlink = DefaultReadlink;
+std::function<int(int, unsigned long, void*)> g_ioctl = DefaultIoctl;
+std::function<int(void (*)(void))> g_atexit = DefaultAtexit;
+std::function<int(clockid_t, struct timespec*)> g_clockGettime = DefaultClockGettime;
+std::function<int(void**, size_t, size_t)> g_posixMemalign = DefaultPosixMemalign;
+std::function<int(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*)> g_pthreadCreate =
+    DefaultPthreadCreate;
+std::function<int(const struct timespec*, struct timespec*)> g_nanosleep = DefaultNanosleep;
 
 ASSERT_HOOK_MATCHES_PROD(g_accept, ::accept);
 ASSERT_HOOK_MATCHES_PROD(g_recv, ::recv);
@@ -364,10 +421,21 @@ void ResetLibcFakes() {
   g_exit = DefaultExit;
   g_gethostname = DefaultGethostname;
   g_access = DefaultAccess;
-  g_clockGettime = DefaultClockGettime;
+  g_open = DefaultOpen;
   g_malloc = DefaultMalloc;
   g_calloc = DefaultCalloc;
   g_free = DefaultFree;
+  g_fopen = DefaultFopen;
+  g_opendir = DefaultOpendir;
+  g_readdir = DefaultReaddir;
+  g_closedir = DefaultClosedir;
+  g_readlink = DefaultReadlink;
+  g_ioctl = DefaultIoctl;
+  g_atexit = DefaultAtexit;
+  g_clockGettime = DefaultClockGettime;
+  g_posixMemalign = DefaultPosixMemalign;
+  g_pthreadCreate = DefaultPthreadCreate;
+  g_nanosleep = DefaultNanosleep;
 
   g_writtenData.clear();
   g_stdoutData.clear();
@@ -375,6 +443,7 @@ void ResetLibcFakes() {
   g_perrorCalls.clear();
   g_closedFds.clear();
   g_freedPointers.clear();
+  g_atexitFns.clear();
   g_fprintfCalls.clear();
   g_writtenFds.clear();
   g_readFds.clear();
@@ -460,10 +529,38 @@ int micro_fflush(FILE* stream) { return g_fflush(stream); }
 void micro_perror(const char* prefix) { g_perror(prefix); }
 int micro_gethostname(char* name, size_t len) { return g_gethostname(name, len); }
 int micro_access(const char* path, int mode) { return g_access(path, mode); }
-int micro_clock_gettime(clockid_t clock, struct timespec* ts) { return g_clockGettime(clock, ts); }
+int micro_open(const char* path, int flags, ...) {
+  mode_t mode = 0;
+  if ((flags & O_CREAT) || (flags & O_TMPFILE) == O_TMPFILE) {
+    va_list args;
+    va_start(args, flags);
+    mode = va_arg(args, mode_t);
+    va_end(args);
+  }
+  return g_open(path, flags, mode);
+}
 void* micro_malloc(size_t size) { return g_malloc(size); }
 void* micro_calloc(size_t nmemb, size_t size) { return g_calloc(nmemb, size); }
 void micro_free(void* ptr) { g_free(ptr); }
+FILE* micro_fopen(const char* path, const char* mode) { return g_fopen(path, mode); }
+DIR* micro_opendir(const char* path) { return g_opendir(path); }
+struct dirent* micro_readdir(DIR* dir) { return g_readdir(dir); }
+int micro_closedir(DIR* dir) { return g_closedir(dir); }
+ssize_t micro_readlink(const char* path, char* buf, size_t len) { return g_readlink(path, buf, len); }
+int micro_ioctl(int fd, unsigned long request, ...) {
+  va_list args;
+  va_start(args, request);
+  void* arg = va_arg(args, void*);
+  va_end(args);
+  return g_ioctl(fd, request, arg);
+}
+int micro_atexit(void (*fn)(void)) { return g_atexit(fn); }
+int micro_clock_gettime(clockid_t clk, struct timespec* ts) { return g_clockGettime(clk, ts); }
+int micro_posix_memalign(void** ptr, size_t alignment, size_t size) { return g_posixMemalign(ptr, alignment, size); }
+int micro_pthread_create(pthread_t* thread, const pthread_attr_t* attr, void* (*fn)(void*), void* arg) {
+  return g_pthreadCreate(thread, attr, fn, arg);
+}
+int micro_nanosleep(const struct timespec* req, struct timespec* rem) { return g_nanosleep(req, rem); }
 
 // Always forwards to the real vfprintf so stderr output still happens; records only the FILE* and never the
 // formatted text, since no test needs the diagnostic's wording, only whether and where one was printed.

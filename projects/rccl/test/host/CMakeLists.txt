@@ -20,6 +20,18 @@ rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
+rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
+  "RCCL_PARAM(ForceEnableDMABUF, \"FORCE_ENABLE_DMABUF\", 0);"
+  "fakes/rocmwrap_fakes.cc: rcclParamForceEnableDMABUF()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rocmwrap_fakes.cc"
+  "int64_t rcclParamForceEnableDMABUF() { return g_loadParam(\"RCCL_FORCE_ENABLE_DMABUF\", 0); }"
+  "the ForceEnableDMABUF fake default")
+rccl_assert_source_line("${_rccl_src_root}/transport/net.cc"
+  "NCCL_PARAM(GdrCopySyncEnable, \"GDRCOPY_SYNC_ENABLE\", 1);"
+  "fakes/transport_stubs.cc: ncclParamGdrCopySyncEnable()")
+rccl_assert_source_line("${_rccl_src_root}/transport/net.cc"
+  "NCCL_PARAM(GdrCopyFlushEnable, \"GDRCOPY_FLUSH_ENABLE\", 0);"
+  "fakes/transport_stubs.cc: ncclParamGdrCopyFlushEnable()")
 # src/enqueue/task_prep/*.cc declare these five but define none, and param_redirect.h only rewrites
 # NCCL_PARAM where it expands, so the hand-written bodies below are the only definitions on that link line.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
@@ -60,34 +72,6 @@ rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
   "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
   "the IbQpsPerConn fake default")
-rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/p2p.cc"
-  "NCCL_PARAM(IbReceiverSideMatchingScheme, \"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)"
-  "fakes/transport_net_ib_p2p_fakes.cc: ncclParamIbReceiverSideMatchingScheme()")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_p2p_fakes.cc"
-  "int64_t ncclParamIbReceiverSideMatchingScheme() {"
-  "the IbReceiverSideMatchingScheme fake signature")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_p2p_fakes.cc"
-  "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2);"
-  "the IbReceiverSideMatchingScheme fake default")
-rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/p2p.cc"
-  "NCCL_PARAM(IbArThreshold, \"IB_AR_THRESHOLD\", -2)"
-  "fakes/transport_net_ib_p2p_fakes.cc: ncclParamIbArThreshold()")
-rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/p2p.cc"
-  "int64_t ncclIbArThreshold = 8192;" "fakes/transport_net_ib_p2p_fakes.cc: ncclIbArThreshold")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_p2p_fakes.cc"
-  "int64_t ncclParamIbArThreshold() { return g_loadParam(\"IB_AR_THRESHOLD\", -2); }"
-  "the IbArThreshold fake default")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_p2p_fakes.cc"
-  "int64_t ncclIbArThreshold = 8192;" "the ncclIbArThreshold fake default")
-rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/p2p_resiliency.cc"
-  "NCCL_PARAM(IbResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)"
-  "fakes/transport_net_ib_resiliency_fakes.cc: ncclParamIbResiliencyPortFailover()")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_resiliency_fakes.cc"
-  "int64_t ncclParamIbResiliencyPortFailover() {"
-  "the IbResiliencyPortFailover fake signature")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_resiliency_fakes.cc"
-  "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0);"
-  "the IbResiliencyPortFailover fake default")
 # The net_ib_cast connect / qp_sharing fakes repeat these params; both copies must agree.
 foreach(_param
     "NCCL_PARAM(IbCastTimeout, \"IB_TIMEOUT\", 20)"
@@ -113,8 +97,18 @@ foreach(_param
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_qp_sharing_fakes.cc"
     "${_param}" "the qp_sharing.cc default")
 endforeach()
-# The net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
+# The net_ib, net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
 set(_rccl_cast_pins
+  "transport/net_ib/p2p.cc" "NCCL_PARAM(IbArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
+  "transport/net_ib/p2p.cc" "int64_t ncclIbArThreshold = 8192<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "int64_t ncclIbArThreshold = 8192<SEMI>"
+  "transport/net_ib/p2p.cc" "NCCL_PARAM(IbReceiverSideMatchingScheme, \"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
+  "transport/net_ib/p2p_resiliency.cc" "NCCL_PARAM(IbResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
+    "transport_net_ib_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
+  "misc/rocmwrap.cc" "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1)<SEMI>"
+    "rocmwrap_fakes.cc" "int64_t ncclParamDmaBufEnable() { return g_loadParam(\"DMABUF_ENABLE\", 1)<SEMI> }"
   "transport/net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
     "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
   "transport/net_ib_cast/p2p.cc" "int64_t IbCastArThreshold = 8192<SEMI>"
@@ -123,8 +117,8 @@ set(_rccl_cast_pins
     "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI> }"
   "transport/net_ib_cast/p2p.cc" "RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, \"GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING\", 1)<SEMI>"
     "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING\", 1)<SEMI>"
-  "transport/net_ib_cast/p2p.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\"}<SEMI>"
-    "net_ib_cast_p2p_fakes.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\"}<SEMI>"
+  "transport/net_ib_cast/p2p.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\", \"IGet\", \"Failed\"}<SEMI>"
+    "net_ib_cast_p2p_fakes.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\", \"IGet\", \"Failed\"}<SEMI>"
   "transport/net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
     "net_ib_cast_p2p_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI> }"
   "transport/net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailoverMaxAttempts, \"IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS\", 1)<SEMI>"
@@ -146,19 +140,6 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
-# rocmwrap_fakes.cc supplies these parameter bodies to targets that do not
-# compile real rocmwrap.cc; pin both names and defaults to production.
-rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
-  "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1)" "fakes/rocmwrap_fakes.cc: ncclParamDmaBufEnable()")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rocmwrap_fakes.cc"
-  "int64_t ncclParamDmaBufEnable() { return g_loadParam(\"DMABUF_ENABLE\", 1); }"
-  "the DmaBufEnable fake default")
-rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
-  "RCCL_PARAM(ForceEnableDMABUF, \"FORCE_ENABLE_DMABUF\", 0)"
-  "fakes/rocmwrap_fakes.cc: rcclParamForceEnableDMABUF()")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rocmwrap_fakes.cc"
-  "int64_t rcclParamForceEnableDMABUF() { return g_loadParam(\"RCCL_FORCE_ENABLE_DMABUF\", 0); }"
-  "the ForceEnableDMABUF fake default")
 # gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
 # keep its kRegAccessFlags and both reg.cc copies spelling the same set.
 set(_rccl_reg_access_flags
@@ -251,6 +232,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro -- the broad-coverage micro binary.
   set(TEST_MICRO_SOURCE_FILES
     p2p-test.cc
+    coll-net-test.cc                     # src/transport/coll_net.cc
     rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
     gin-plugin-init-test.cc
@@ -265,6 +247,8 @@ function(rccl_define_micro_source_lists)
     ras-peers-test.cc                    # src/ras/peers.cc
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
+    net-telemetry-test.cc                # src/transport/net_telemetry.cc, src/include/net_telemetry.h
+    net-socket-test.cc                   # src/transport/net_socket.cc, src/transport/net_socket/common.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
@@ -282,10 +266,15 @@ function(rccl_define_micro_source_lists)
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
     gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
     dv_symbols_test.cc                   # src/misc/ionicdvsymbols.cc, src/misc/mlx5dvsymbols.cc
+    register-test.cc                     # src/register/register.cc
+    coll-reg-test.cc                     # src/register/coll_reg.cc
+    sendrecv-reg-test.cc                 # src/register/sendrecv_reg.cc
     process-isolated-runner-test.cc
     rccl-graph-gen-test.cc               # src/graph/rccl_graph_gen.cc ring construction + cut balancing
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    fakes/channel_fakes.cc
+    fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
@@ -300,8 +289,13 @@ function(rccl_define_micro_source_lists)
     fakes/recorder_fakes.cc
     fakes/profiler_fakes.cc
     fakes/roctx_fakes.cc
+    fakes/hsa_fakes.cc                   # hsa_status_string (rocmwrap.h's HSACHECK)
+    fakes/rocmwrap_fakes.cc
+    fakes/topo_stubs.cc
     fakes/utils_fakes.cc
     fakes/collective_stubs.cc
+    fakes/os_fakes.cc
+    fakes/socket_fakes.cc
     fakes/devcomm_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
@@ -312,6 +306,8 @@ function(rccl_define_micro_source_lists)
     fakes/strongstream_stubs.cc
     fakes/sym_kernels_fakes.cc
     fakes/transport_stubs.cc
+    fakes/enqueue_fakes.cc               # ncclParamGraphRegister
+    fakes/transport_p2p_reg_fakes.cc     # p2p.cc registration, renamed in by transport_p2p_reg_seam.h
     fakes/tuning_fakes.cc
     fakes/wrap_fakes.cc
     ../common/main_altrsmi.cpp
@@ -339,6 +335,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes
@@ -417,6 +414,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
@@ -526,6 +524,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
@@ -598,6 +597,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/ce_reduce_fakes.cc             # src/device/ce_reduce.cc
@@ -608,7 +608,7 @@ function(rccl_define_micro_source_lists)
     fakes/env_fakes.cc
     fakes/os_fakes.cc
     fakes/profiler_fakes.cc
-    fakes/rccl_wrap_fakes.cc             # rcclParamCeAllReduce, rcclParamCeArStagingBytes
+    fakes/rccl_wrap_fakes.cc             # rcclParamCeAllReduce, rcclParamCeReduceScatter, rcclParamCeArStagingBytes
     fakes/recorder_fakes.cc
     fakes/rma_fakes.cc
     fakes/roctx_fakes.cc
@@ -669,6 +669,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
@@ -708,6 +709,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/collectives_fakes.cc
@@ -732,6 +734,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/collectives_fakes.cc
@@ -767,6 +770,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
@@ -930,12 +934,40 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroNet -- src/transport/net.cc. Own binary: transport_stubs.cc, which most
+  # targets link, defines rcclUseAinic and netTransport, and net.cc defines both.
+  set(TEST_MICRO_NET_SOURCE_FILES
+    net-test.cc
+    fakes/collectives_fakes.cc           # func/algo/proto name tables
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc                  # core floor, incl. proxy profiler hooks
+    fakes/channel_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc    # netIbCast
+    fakes/net_ib_cast_connect_fakes.cc   # rcclCastNetP2pPolicy
+    fakes/os_fakes.cc
+    fakes/proxy_fakes.cc
+    fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
+    fakes/hsa_fakes.cc                   # hsa_status_string (net.cc's HSACHECK)
+    fakes/rocmwrap_fakes.cc
+    fakes/topo_stubs.cc
+    fakes/transport_net_ib_common_fakes.cc  # src/transport/net_ib/common.cc ncclNetIb
+    fakes/transport_net_ib_connect_net_fakes.cc  # rcclNetP2pPolicy, GDR flush-flag accessors
+    fakes/transport_net_ib_fakes.cc
+    fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real parseStringList/matchIfList for NCCL_IB_HCA
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # src/diagnostics/p2p.cc; fakes transport/p2p.cc, which rccl-UnitTestsMicro compiles.
   set(TEST_MICRO_DIAGNOSTICS_SOURCE_FILES
     diag-p2p-test.cc
     diag-ib-write-bw-test.cc
     diagnostics-test.cc
     diag-p2p-device-test.cc
+    fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc     # bootstrap collectives
     fakes/diagnostics_fakes.cc           # src/diagnostics.cc external-tool runners
     fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
@@ -1019,13 +1051,13 @@ function(rccl_define_micro_source_lists)
     transport/rma-socket-mem-test.cc
     transport/rma-socket-progress-recver-test.cc
     transport/rma-socket-setup-test.cc
+    fakes/comm_fakes.cc                  # allocTracker, ncclGdrCopy
     fakes/env_fakes.cc
     fakes/gdr_peermem_fakes.cc
     fakes/gdr_probe_fakes.cc
     fakes/gdrwrap_fakes.cc
     fakes/hip_fakes.cc
     fakes/hsa_fakes.cc
-    fakes/ibv_ops_fakes.cc
     fakes/ibvwrap_fakes.cc
     fakes/libc_fakes.cc
     fakes/mlx5dvwrap_fakes.cc
@@ -1100,6 +1132,24 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc             # real parser for the multiplane map
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc            # real NCCL_IB_HCA parsing, pciPathToInt64
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc  # real, off unless RCCL_TELEMETRY_ENABLE=1
+    ../common/ProcessIsolatedTestRunner.cpp
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # src/misc/ IB verbs and direct-verbs loaders
+  set(TEST_MICRO_MISC_SOURCE_FILES
+    misc/gdr-peermem-test.cc
+    misc/ibvsymbols-test.cc
+    misc/dvsymbols-test.cc               # mlx5dvsymbols.cc + ionicdvsymbols.cc
+    misc/ibvwrap-test.cc
+    misc/ionicdvwrap-test.cc
+    misc/mlx5dvwrap-test.cc
+    fakes/dl_fakes.cc                    # dlopen/dlvsym
+    fakes/env_fakes.cc                   # NCCL_IBVERBS_LIB
+    fakes/libc_fakes.cc                  # gdr_peermem.cc opendir
+    fakes/nccl_fakes.cc
+    fakes/net_ib_ops_fault_fakes.cc      # ibvwrap.cc fault shims
+    fakes/transport_stubs.cc             # rcclUseAinic
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1589,6 +1639,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroBootstrap
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     BOOTSTRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/bootstrap.cc"
+    RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/bootstrap_micro_fakes.cc defines it
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_bootstrap.yaml")
 
 # ---------------------------------------------------------------------------
@@ -1602,6 +1653,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+    COLL_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/coll_net.cc"
+    RCCL_TRANSPORT_STUBS_OMIT_COLL_NET
+    RCCL_COLLECTIVE_STUBS_OMIT_COLL_NET
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
     # collectives_tmp.cc, not collectives.cc: src/CMakeLists.txt lists src/collectives.cc first,
@@ -1614,6 +1668,10 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
     RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
+    NET_TELEMETRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc"
+    NET_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket.cc"
+    # common_tmp.cc: src/CMakeLists.txt lists transport/net_ib/common.cc first.
+    NET_SOCKET_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket/common_tmp.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
@@ -1632,6 +1690,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DEVCOMM_V22902_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
+    REGISTER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/register.cc"
+    COLL_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/coll_reg.cc"
+    SENDRECV_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/sendrecv_reg.cc"
     RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
     RCCL_RMA_FAKES_OMIT_PROXY_LAUNCH_FLOOR
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
@@ -2196,6 +2257,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroProxy
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/proxy.cc"
+    RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/proxy_micro_fakes.cc defines it
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_proxy.yaml")
 
 # ---------------------------------------------------------------------------
@@ -2415,6 +2477,42 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastInit
     NET_IB_CAST_MULTIPLANE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/multiplane.cc"
     NET_IB_CAST_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_cast_gid_inspect.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_init.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNet
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNet
+  SOURCES ${TEST_MICRO_NET_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # the net_ib_cast fakes' headers
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_DMABUF_EXPORT_DEF}  # standalone: the cuMem DMA-BUF arms in-build gets from rccl
+    # net_tmp.cc, not net.cc: src/CMakeLists.txt lists plugin/net.cc first, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_tmp.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroMisc
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroMisc
+  SOURCES ${TEST_MICRO_MISC_SOURCE_FILES}
+  REMOVE_DEFS ENABLE_QP_TRACKING  # its create/destroy QP prologue dereferences the fake QP and PD
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # net_ib_ops_fault.h, included unqualified
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ENABLE_FAULT_INJECTION  # FAULT_INJECTION defaults ON, so this is the ibvwrap.cc arm that ships
+    GDR_PEERMEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_peermem.cc"
+    IBVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvsymbols.cc"
+    IBVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvwrap.cc"
+    IONICDVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvsymbols.cc"
+    IONICDVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvwrap.cc"
+    MLX5DVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
+    MLX5DVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvwrap.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_misc.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.

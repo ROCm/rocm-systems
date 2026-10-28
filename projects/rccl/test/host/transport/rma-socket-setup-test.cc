@@ -16,6 +16,7 @@
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/os_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "transport/RmaSocketTest.h"
 
@@ -106,6 +107,7 @@ class RmaSocketSetupMicrotest : public ::testing::Test {
 
   void TearDown() override {
     ResetSocketFakes();
+    ResetOsFakes();
     ResetHipFakes();
     ResetNcclFakes();
   }
@@ -126,6 +128,14 @@ ncclRmaSocketProxyCollComm* AllocateOwnedComm(int nranks) {
     return nullptr;
   }
   return comm;
+}
+
+// Frees AllocateOwnedComm's arrays and any send queue grown since, without the socket teardown CloseColl runs.
+void FreeOwnedComm(ncclRmaSocketProxyCollComm* comm) {
+  for (int peer = 0; peer < comm->nranks; ++peer) std::free(comm->peerSender[peer].tasks);
+  std::free(comm->peerSender);
+  std::free(comm->peerReceiver);
+  std::free(comm);
 }
 
 void FreeRejectedComm(ncclRmaSocketProxyCollComm* comm) {
@@ -150,12 +160,9 @@ TEST_F(RmaSocketSetupMicrotest, SetSendQueueCapacity_InvalidContextCountIsReject
 }
 
 TEST_F(RmaSocketSetupMicrotest, SetSendQueueCapacity_GrowthKeepsQueuedTasksInFifoOrder) {
-  ncclRmaSocketProxyCollComm comm{};
-  comm.nranks = 1;
-  comm.peerSender = static_cast<ncclRmaSocketProxyPeerSender*>(
-      std::calloc(1, sizeof(ncclRmaSocketProxyPeerSender)));
-  ASSERT_NE(comm.peerSender, nullptr);
-  auto* sender = comm.peerSender;
+  auto* comm = AllocateOwnedComm(1);
+  ASSERT_NE(comm, nullptr);
+  auto* sender = comm->peerSender;
   sender->capacity = 3;
   sender->tasks =
       static_cast<ncclRmaSocketProxySendTask*>(std::calloc(sender->capacity, sizeof(*sender->tasks)));
@@ -166,7 +173,7 @@ TEST_F(RmaSocketSetupMicrotest, SetSendQueueCapacity_GrowthKeepsQueuedTasksInFif
   sender->tasks[2].controlMsg.requestId = 41;
   sender->tasks[0].controlMsg.requestId = 42;
 
-  ASSERT_EQ(ncclRmaSocketProxySetSendQueueCapacity(&comm, 1), ncclSuccess);
+  ASSERT_EQ(ncclRmaSocketProxySetSendQueueCapacity(comm, 1), ncclSuccess);
 
   EXPECT_EQ(sender->capacity, 2 * NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER);
   EXPECT_EQ(sender->head, 0);
@@ -174,8 +181,7 @@ TEST_F(RmaSocketSetupMicrotest, SetSendQueueCapacity_GrowthKeepsQueuedTasksInFif
   EXPECT_EQ(sender->count, 2);
   EXPECT_EQ(sender->tasks[0].controlMsg.requestId, 41u);
   EXPECT_EQ(sender->tasks[1].controlMsg.requestId, 42u);
-  std::free(sender->tasks);
-  std::free(comm.peerSender);
+  FreeOwnedComm(comm);
 }
 
 TEST_F(RmaSocketSetupMicrotest, SetSendQueueCapacity_InvalidExistingQueueStateIsRejected) {
@@ -311,42 +317,35 @@ TEST_F(RmaSocketSetupMicrotest, CreateContext_InvalidConfigurationIsRejected) {
 }
 
 TEST_F(RmaSocketSetupMicrotest, CreateAndDestroyContext_PublishesRequestsAndUpdatesLiveCount) {
-  ncclRmaSocketProxyCollComm comm{};
-  comm.nranks = 2;
-  comm.peerSender = static_cast<ncclRmaSocketProxyPeerSender*>(
-      std::calloc(comm.nranks, sizeof(ncclRmaSocketProxyPeerSender)));
-  ASSERT_NE(comm.peerSender, nullptr);
+  auto* comm = AllocateOwnedComm(2);
+  ASSERT_NE(comm, nullptr);
   ncclRmaConfig_t config{};
   config.nContexts = 2;
   config.rankStride = 1;
   void* opaque = nullptr;
 
-  ASSERT_EQ(ncclRmaSocketProxyCreateContext(&comm, &config, &opaque), ncclSuccess);
+  ASSERT_EQ(ncclRmaSocketProxyCreateContext(comm, &config, &opaque), ncclSuccess);
   auto* contexts = static_cast<ncclRmaSocketProxyCtx*>(opaque);
   ASSERT_NE(contexts, nullptr);
-  EXPECT_EQ(comm.nContexts, 2);
+  EXPECT_EQ(comm->nContexts, 2);
   for (int c = 0; c < config.nContexts; ++c) {
-    EXPECT_EQ(contexts[c].collComm, &comm);
+    EXPECT_EQ(contexts[c].collComm, comm);
     EXPECT_EQ(contexts[c].nContexts, config.nContexts);
-    EXPECT_EQ(contexts[c].requestCount, NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER * comm.nranks);
+    EXPECT_EQ(contexts[c].requestCount, NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER * comm->nranks);
     EXPECT_NE(contexts[c].requests, nullptr);
   }
-  for (int peer = 0; peer < comm.nranks; ++peer) {
-    EXPECT_EQ(comm.peerSender[peer].capacity, 2 * NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER * config.nContexts);
+  for (int peer = 0; peer < comm->nranks; ++peer) {
+    EXPECT_EQ(comm->peerSender[peer].capacity, 2 * NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER * config.nContexts);
   }
 
   EXPECT_EQ(ncclRmaSocketProxyDestroyContext(contexts), ncclSuccess);
-  EXPECT_EQ(comm.nContexts, 0);
-  for (int peer = 0; peer < comm.nranks; ++peer) std::free(comm.peerSender[peer].tasks);
-  std::free(comm.peerSender);
+  EXPECT_EQ(comm->nContexts, 0);
+  FreeOwnedComm(comm);
 }
 
 TEST_F(RmaSocketSetupMicrotest, CreateContext_SuccessiveBatchesGrowCapacityFromCumulativeContextCount) {
-  ncclRmaSocketProxyCollComm comm{};
-  comm.nranks = 1;
-  comm.peerSender =
-      static_cast<ncclRmaSocketProxyPeerSender*>(std::calloc(1, sizeof(ncclRmaSocketProxyPeerSender)));
-  ASSERT_NE(comm.peerSender, nullptr);
+  auto* comm = AllocateOwnedComm(1);
+  ASSERT_NE(comm, nullptr);
   ncclRmaConfig_t firstConfig{};
   firstConfig.nContexts = 1;
   firstConfig.rankStride = 1;
@@ -356,19 +355,18 @@ TEST_F(RmaSocketSetupMicrotest, CreateContext_SuccessiveBatchesGrowCapacityFromC
   void* first = nullptr;
   void* second = nullptr;
 
-  ASSERT_EQ(ncclRmaSocketProxyCreateContext(&comm, &firstConfig, &first), ncclSuccess);
-  EXPECT_EQ(comm.nContexts, 1);
-  EXPECT_EQ(comm.peerSender[0].capacity, 2 * NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER);
-  ASSERT_EQ(ncclRmaSocketProxyCreateContext(&comm, &secondConfig, &second), ncclSuccess);
-  EXPECT_EQ(comm.nContexts, 3);
-  EXPECT_EQ(comm.peerSender[0].capacity, 2 * NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER * 3);
+  ASSERT_EQ(ncclRmaSocketProxyCreateContext(comm, &firstConfig, &first), ncclSuccess);
+  EXPECT_EQ(comm->nContexts, 1);
+  EXPECT_EQ(comm->peerSender[0].capacity, 2 * NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER);
+  ASSERT_EQ(ncclRmaSocketProxyCreateContext(comm, &secondConfig, &second), ncclSuccess);
+  EXPECT_EQ(comm->nContexts, 3);
+  EXPECT_EQ(comm->peerSender[0].capacity, 2 * NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER * 3);
 
   EXPECT_EQ(ncclRmaSocketProxyDestroyContext(second), ncclSuccess);
-  EXPECT_EQ(comm.nContexts, 1);
+  EXPECT_EQ(comm->nContexts, 1);
   EXPECT_EQ(ncclRmaSocketProxyDestroyContext(first), ncclSuccess);
-  EXPECT_EQ(comm.nContexts, 0);
-  std::free(comm.peerSender[0].tasks);
-  std::free(comm.peerSender);
+  EXPECT_EQ(comm->nContexts, 0);
+  FreeOwnedComm(comm);
 }
 
 TEST_F(RmaSocketSetupMicrotest, DestroyContext_ActiveOperationKeepsContextLive) {
@@ -440,9 +438,11 @@ TEST_F(RmaSocketSetupMicrotest, CloseColl_LiveResourcesOrOperationsAreRejected) 
 
   expectRejected([](auto* comm, auto*) { comm->nContexts = 1; });
   expectRejected([](auto* comm, auto* mr) { comm->mrHead = mr; });
-  expectRejected([](auto* comm, auto*) { comm->peerSender[0].count = 1; });
-  expectRejected([](auto* comm, auto*) { comm->peerReceiver[0].recvState = ncclRmaSocketProxyRecvStatePayload; });
-  expectRejected([](auto* comm, auto*) { comm->peerReceiver[0].controlMsgOffset = 1; });
+  // The last peer, so a check that stops at peer 0 is caught.
+  expectRejected([](auto* comm, auto*) { comm->peerSender[1].count = 1; });
+  expectRejected([](auto* comm, auto*) { comm->peerReceiver[1].recvState = ncclRmaSocketProxyRecvStateControlAck; });
+  expectRejected([](auto* comm, auto*) { comm->peerReceiver[1].recvState = ncclRmaSocketProxyRecvStatePayload; });
+  expectRejected([](auto* comm, auto*) { comm->peerReceiver[1].controlMsgOffset = 1; });
 }
 
 TEST_F(RmaSocketSetupMicrotest, CloseColl_QuiescentCommClosesPeerSocketsAndFreesComm) {

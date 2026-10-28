@@ -77,6 +77,9 @@ pub(crate) unsafe fn create_hardware_queue(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
+        if runtime.stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         let Some(index) = runtime.gpu_index(agent) else {
             return INVALID_AGENT;
         };
@@ -459,6 +462,9 @@ pub(crate) unsafe fn create_sdma_queue(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
+        if runtime.stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         let Some(index) = runtime.gpu_index(agent) else {
             return INVALID_AGENT;
         };
