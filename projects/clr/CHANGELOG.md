@@ -48,6 +48,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Known issues
 
 * A GPU Timeout Detection and Recovery (TDR) event may occur on ROCm 10.2 running under WSL 2 (Windows Subsystem for Linux 2) when executing the `vllm_rocm_gpt-oss-20b_default_inf_fp4` `vLLM` inference workload.
+* Setting `GPU_MAX_HW_QUEUES` above 4 may result in unpredictable performance.
 
 ## HIP 7.16.0 for ROCm 10.1.0
 
