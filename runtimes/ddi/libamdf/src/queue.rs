@@ -716,11 +716,20 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
             } else {
                 // SAFETY: Mapping preflight established that no public producer
                 // borrow remains; the caller has exclusive queue access.
-                queue
-                    .native
-                    .destroy()
-                    .map_err(|error| queue.observe_error(&error))
+                queue.native.destroy().map_err(|error| {
+                    if error.kind() == rocddi::ErrorKind::Busy
+                        && error.native_error_code().is_none()
+                    {
+                        // Native preflight left the queue and its public
+                        // producer contract intact for a later retry.
+                        queue.destroying.store(false, Ordering::Release);
+                    }
+                    queue.observe_error(&error)
+                })
             };
+            if result == Err(BUSY) && !queue.destroying.load(Ordering::Acquire) {
+                return result;
+            }
             unregister(&*queue.device_queues);
             let owner = Owned::from_raw(pointer.cast::<Queue>());
             if result.is_err() {

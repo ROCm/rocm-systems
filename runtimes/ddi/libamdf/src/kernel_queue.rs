@@ -291,7 +291,9 @@ pub(crate) unsafe extern "C" fn submit(
             .native
             .submit(command)
             .map_err(|error| queue.observe_error(&error))?;
-        queue.accepted.store(submission, Ordering::Release);
+        // Native submissions can complete their slot in a different order
+        // from the callers publishing their IDs here.
+        queue.accepted.fetch_max(submission, Ordering::AcqRel);
         out.write(submission);
         Ok(())
     })
@@ -310,10 +312,17 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_kernel_queue_t) -> u6
             }
             queue.destroying.store(true, Ordering::Release);
         }
-        let result = queue
-            .native
-            .destroy()
-            .map_err(|error| queue.observe_error(&error));
+        let result = queue.native.destroy().map_err(|error| {
+            if error.kind() == rocddi::ErrorKind::Busy && error.native_error_code().is_none() {
+                // Native preflight rejected destruction before releasing the
+                // queue. BUSY promises that this public handle can be retried.
+                queue.destroying.store(false, Ordering::Release);
+            }
+            queue.observe_error(&error)
+        });
+        if result == Err(BUSY) && !queue.destroying.load(Ordering::Acquire) {
+            return result;
+        }
         unregister(&(*queue.device).queues);
         let owner = Owned::from_raw(pointer.cast::<KernelQueue>());
         if result.is_err() {
