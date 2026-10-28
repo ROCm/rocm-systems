@@ -1,0 +1,50 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+
+set(_cpu_snap_supported_components core sampling processing)
+foreach(_comp ${${CMAKE_FIND_PACKAGE_NAME}_FIND_COMPONENTS})
+    if(NOT _comp IN_LIST _cpu_snap_supported_components)
+        set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+        set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+            "Unknown cpu_snap component: ${_comp}")
+        return()
+    endif()
+    set(${CMAKE_FIND_PACKAGE_NAME}_${_comp}_FOUND TRUE)
+endforeach()
+
+# libdw (elfutils) is a public transitive dep of cpu_snap::sampling:
+# the DWARF unwinder uses libdwfl. Re-export the same find logic the
+# in-tree build uses so downstream consumers do not have to know about
+# elfutils themselves. Only required when sampling is being imported
+# (either explicitly via COMPONENTS sampling or implicitly via the
+# default umbrella import).
+set(_cpu_snap_need_libdw FALSE)
+if(NOT ${CMAKE_FIND_PACKAGE_NAME}_FIND_COMPONENTS)
+    set(_cpu_snap_need_libdw TRUE)
+elseif("sampling" IN_LIST ${CMAKE_FIND_PACKAGE_NAME}_FIND_COMPONENTS)
+    set(_cpu_snap_need_libdw TRUE)
+endif()
+
+if(_cpu_snap_need_libdw)
+    find_path(LIBDW_INCLUDE_DIR elfutils/libdwfl.h
+        PATHS /usr/include /usr/include/x86_64-linux-gnu)
+    find_library(LIBDW_LIBRARY NAMES dw)
+    if(NOT LIBDW_INCLUDE_DIR OR NOT LIBDW_LIBRARY)
+        set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+        set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+            "cpu_snap::sampling requires libdw (elfutils). Install "
+            "libdw-dev (Debian/Ubuntu) or elfutils-devel (Fedora/RHEL).")
+        return()
+    endif()
+    if(NOT TARGET LibDw::LibDw)
+        add_library(LibDw::LibDw INTERFACE IMPORTED)
+        set_target_properties(LibDw::LibDw PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${LIBDW_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES       "${LIBDW_LIBRARY}")
+    endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/cpu_snapTargets.cmake")
+check_required_components(cpu_snap)

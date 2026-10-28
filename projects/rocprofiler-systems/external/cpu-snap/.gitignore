@@ -1,0 +1,22 @@
+build/
+build-*/
+.cache/
+.vscode/
+.clangd/
+.claude/
+planning/
+compile_commands.json
+
+# trace output
+/tmp/sampler_poc/
+
+# ELF/binary artifacts that might end up in tree
+*.o
+*.a
+*.so
+*.so.*
+
+# coverage artifacts that gcovr may dump in cwd
+*.gcov
+*.gcda
+*.gcno
