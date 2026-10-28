@@ -32,8 +32,11 @@ constexpr std::string_view rocprofsys_prefix = "ROCPROFSYS";
 [[nodiscard]] std::string_view
 env_key(std::string_view entry) noexcept
 {
-    const auto kv = utility::string::split_key_value(entry);
-    return kv ? kv->key : std::string_view{};
+    if(const auto parsed = utility::string::split_key_value(entry))
+    {
+        return parsed->key;
+    }
+    return {};
 }
 }  // namespace
 
@@ -426,33 +429,26 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
     std::unordered_map<std::string, std::string> initial_map;
     for(const auto& env_str : initial_envs)
     {
-        if(auto const kv = utility::string::split_key_value(env_str))
+        if(auto const parsed = utility::string::split_key_value(env_str))
         {
-            initial_map[std::string{ kv->key }] = std::string{ kv->value };
+            initial_map.insert_or_assign(std::string{ parsed->key },
+                                         std::string{ parsed->value });
         }
     }
 
     for(const auto& env_entry : current_env)
     {
-        const std::string_view entry{ env_entry };
-        auto const             kv = utility::string::split_key_value(entry);
-        if(!kv)
+        auto const parsed = utility::string::split_key_value(env_entry);
+        if(!parsed || !parsed->key.starts_with("ROCPROFSYS_"))
         {
             continue;
         }
 
-        const std::string key(kv->key);
-        const std::string val(kv->value);
-
-        if(!key.starts_with("ROCPROFSYS_"))
+        const std::string key{ parsed->key };
+        auto const        match = initial_map.find(key);
+        if(match == initial_map.end() || match->second != parsed->value)
         {
-            continue;
-        }
-
-        auto const match = initial_map.find(key);
-        if(match == initial_map.end() || match->second != val)
-        {
-            result[key] = val;
+            result[key] = std::string{ parsed->value };
         }
     }
     return result;

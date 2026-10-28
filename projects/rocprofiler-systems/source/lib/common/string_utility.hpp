@@ -12,7 +12,6 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -155,20 +154,22 @@ has_env_key(std::string_view entry, std::string_view key) noexcept
            entry[key.size()] == '=';
 }
 
-/// @brief Strictly parse a whole string as an integral Tp; nullopt on empty, partial or
+/// @brief Strictly parse a whole string as an arithmetic Tp; nullopt on empty, partial or
 ///        overflow.
-template <std::integral Tp>
+template <typename Tp>
+    requires std::integral<Tp> || std::floating_point<Tp>
 [[nodiscard]] inline std::optional<Tp>
-safe_from_chars(std::string_view s)
+safe_from_chars(std::string_view number_str)
 {
-    if(s.empty())
+    if(number_str.empty())
     {
         return std::nullopt;
     }
-    Tp         value  = 0;
-    const auto result = std::from_chars(s.data(), s.data() + s.size(), value);
+    const char* const end    = number_str.data() + number_str.size();
+    Tp                value  = 0;
+    const auto        result = std::from_chars(number_str.data(), end, value);
     // Reject partial parses (e.g. "12.5" -> 12) by checking entire string was consumed
-    if(result.ec != std::errc{} || result.ptr != s.data() + s.size())
+    if(result.ec != std::errc{} || result.ptr != end)
     {
         return std::nullopt;
     }
@@ -177,49 +178,23 @@ safe_from_chars(std::string_view s)
 
 /// @brief Strictly parse a whole string as an int; nullopt on empty, partial or overflow.
 [[nodiscard]] inline std::optional<int>
-safe_stoi(std::string_view s)
+safe_stoi(std::string_view number_str)
 {
-    return safe_from_chars<int>(s);
+    return safe_from_chars<int>(number_str);
 }
 
 /// @brief Strictly parse a whole string as a long; nullopt on empty, partial or overflow.
 [[nodiscard]] inline std::optional<long>
-safe_stol(std::string_view s)
+safe_stol(std::string_view number_str)
 {
-    return safe_from_chars<long>(s);
+    return safe_from_chars<long>(number_str);
 }
 
 /// @brief Strictly parse a whole string as a double; nullopt on empty or partial parse.
 [[nodiscard]] inline std::optional<double>
 safe_stod(std::string_view number_str)
 {
-    if(number_str.empty())
-    {
-        return std::nullopt;
-    }
-    double value = 0.0;
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-    // Prefer from_chars: locale-independent, zero-allocation
-    const auto result =
-        std::from_chars(number_str.data(), number_str.data() + number_str.size(), value);
-    if(result.ec != std::errc{} || result.ptr != number_str.data() + number_str.size())
-    {
-        return std::nullopt;
-    }
-#else
-    // Fallback for older compilers (GCC <11, Clang <16).
-    // Note: std::stod is locale-sensitive -assumes C/POSIX locale.
-    try
-    {
-        std::size_t pos = 0;
-        value           = std::stod(std::string{ s }, &pos);
-        if(pos != s.size()) return std::nullopt;
-    } catch(const std::exception&)
-    {
-        return std::nullopt;
-    }
-#endif
-    return value;
+    return safe_from_chars<double>(number_str);
 }
 
 /// @brief Parse a string into a boolean.

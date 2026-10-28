@@ -6,6 +6,8 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
+#include <string>
 
 using namespace rocprofsys::utility::string;
 
@@ -256,6 +258,10 @@ TEST(safe_stoi, parses_whole_string)
 {
     EXPECT_EQ(safe_stoi("42"), 42);
     EXPECT_EQ(safe_stoi("-7"), -7);
+    constexpr auto k_int_max = std::numeric_limits<int>::max();
+    constexpr auto k_int_min = std::numeric_limits<int>::min();
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_max)), k_int_max);
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_min)), k_int_min);
 }
 
 TEST(safe_stoi, rejects_invalid_input)
@@ -265,13 +271,18 @@ TEST(safe_stoi, rejects_invalid_input)
     EXPECT_FALSE(safe_stoi("12.5").has_value());
     EXPECT_FALSE(safe_stoi(" 1").has_value());
     EXPECT_FALSE(safe_stoi("99999999999").has_value());
+    constexpr auto k_int_max = static_cast<long long>(std::numeric_limits<int>::max());
+    constexpr auto k_int_min = static_cast<long long>(std::numeric_limits<int>::min());
+    EXPECT_FALSE(safe_stoi(std::to_string(k_int_max + 1)).has_value());
+    EXPECT_FALSE(safe_stoi(std::to_string(k_int_min - 1)).has_value());
 }
 
 TEST(safe_stol, parses_whole_string)
 {
     EXPECT_EQ(safe_stol("42"), 42L);
     EXPECT_EQ(safe_stol("-7"), -7L);
-    EXPECT_EQ(safe_stol("9223372036854775807"), 9223372036854775807L);
+    constexpr auto k_long_max = std::numeric_limits<long>::max();
+    EXPECT_EQ(safe_stol(std::to_string(k_long_max)), k_long_max);
 }
 
 TEST(safe_stol, rejects_invalid_input)
@@ -280,7 +291,9 @@ TEST(safe_stol, rejects_invalid_input)
     EXPECT_FALSE(safe_stol("12a").has_value());
     EXPECT_FALSE(safe_stol("12.5").has_value());
     EXPECT_FALSE(safe_stol(" 1").has_value());
-    EXPECT_FALSE(safe_stol("9223372036854775808").has_value());
+    constexpr auto k_long_max_plus_one =
+        static_cast<unsigned long>(std::numeric_limits<long>::max()) + 1UL;
+    EXPECT_FALSE(safe_stol(std::to_string(k_long_max_plus_one)).has_value());
 }
 
 TEST(safe_stod, parses_whole_string)
