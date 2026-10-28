@@ -106,6 +106,7 @@
 /// nothing here exercises a non-NULL value. Both need hardware.
 
 #include "../dbi_test_util.h"
+#include "../instrumentor_test_access.h"
 #include "dbi_sim.h"
 #include "scalar_builders.h"
 
@@ -194,10 +195,23 @@ protected:
     // Inline constant 0 is scalar-source code 128.
     const uint32_t clobber_s0 = build_s_mov_b32(0, 128, a_.arch);
     const uint32_t clobber_s1 = build_s_mov_b32(1, 128, a_.arch);
-    const uint32_t guest_anchor = build_v_mov_b32_src(1, kVgprSrcBase + 0, a_.arch);
+    const auto maybe_guest_anchor = build_v_mov_b32_src(1, kVgprSrcBase + 0, a_.arch);
+    ASSERT_TRUE(maybe_guest_anchor.succeeded());
+    const uint32_t guest_anchor = maybe_guest_anchor.value();
 
-    const std::vector<uint32_t> publish{build_v_mov_b32_src(2, kVgprSrcBase + 0, a_.arch),
-                                        build_v_mov_b32_src(3, kVgprSrcBase + 1, a_.arch), setpc};
+    const auto maybe_publish_lo = build_v_mov_b32_src(2, kVgprSrcBase + 0, a_.arch);
+    const auto maybe_publish_hi = build_v_mov_b32_src(3, kVgprSrcBase + 1, a_.arch);
+    const auto maybe_restore_lo = build_v_mov_b32_src(2, 0, a_.arch);
+    const auto maybe_restore_hi = build_v_mov_b32_src(3, 1, a_.arch);
+    ASSERT_TRUE(maybe_publish_lo.succeeded());
+    const uint32_t publish_lo = maybe_publish_lo.value();
+    ASSERT_TRUE(maybe_publish_hi.succeeded());
+    const uint32_t publish_hi = maybe_publish_hi.value();
+    ASSERT_TRUE(maybe_restore_lo.succeeded());
+    const uint32_t restore_lo = maybe_restore_lo.value();
+    ASSERT_TRUE(maybe_restore_hi.succeeded());
+    const uint32_t restore_hi = maybe_restore_hi.value();
+    const std::vector<uint32_t> publish{publish_lo, publish_hi, setpc};
     auto probe = test::make_amdgpu_probe_elf("rj_test_log_probe", publish, a_.e_flags);
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
     ASSERT_TRUE(probe_obj.is_valid());
@@ -205,8 +219,7 @@ protected:
     ASSERT_NO_FATAL_FAILURE(patch({clobber_s0, clobber_s1, guest_anchor, endpgm},
                                   /*anchor_offset=*/8, probe_obj, delivery_));
     ASSERT_NO_FATAL_FAILURE(
-        patch({build_s_nop(0, a_.arch), guest_anchor, build_v_mov_b32_src(2, 0, a_.arch),
-               build_v_mov_b32_src(3, 1, a_.arch), endpgm},
+        patch({build_s_nop(0, a_.arch), guest_anchor, restore_lo, restore_hi, endpgm},
               /*anchor_offset=*/4, probe_obj, restore_));
 
     // s_call_b64's immediate is a signed dword offset from the next instruction.
@@ -214,25 +227,23 @@ protected:
     ASSERT_NO_FATAL_FAILURE(
         patch({clobber_s0, clobber_s1, build_s_call_b64(4, 2, a_.arch), guest_anchor, endpgm, ret},
               /*anchor_offset=*/12, probe_obj, call_delivery_));
-    ASSERT_NO_FATAL_FAILURE(
-        patch({build_s_nop(0, a_.arch), build_s_call_b64(4, 4, a_.arch), guest_anchor,
-               build_v_mov_b32_src(2, 0, a_.arch), build_v_mov_b32_src(3, 1, a_.arch), endpgm, ret},
-              /*anchor_offset=*/8, probe_obj, call_restore_));
+    ASSERT_NO_FATAL_FAILURE(patch({build_s_nop(0, a_.arch), build_s_call_b64(4, 4, a_.arch),
+                                   guest_anchor, restore_lo, restore_hi, endpgm, ret},
+                                  /*anchor_offset=*/8, probe_obj, call_restore_));
 
     // A point on the entry itself: the stub runs the prologue, then branches to
     // the entry, which is spliced to the site's trampoline.
     ASSERT_NO_FATAL_FAILURE(
         patch({guest_anchor, endpgm}, /*anchor_offset=*/0, probe_obj, entry_point_delivery_));
-    ASSERT_NO_FATAL_FAILURE(patch({guest_anchor, build_v_mov_b32_src(2, 0, a_.arch),
-                                   build_v_mov_b32_src(3, 1, a_.arch), endpgm},
+    ASSERT_NO_FATAL_FAILURE(patch({guest_anchor, restore_lo, restore_hi, endpgm},
                                   /*anchor_offset=*/0, probe_obj, entry_point_restore_));
 
     // Re-entry kernels. s6 counts passes through the entry; the second pass
     // leaves the loop or skips the call or jump.
     const uint32_t count_pass = build_s_add_u32(6, 6, kInline1, a_.arch);
     const uint32_t second_pass = build_s_cmp_lg_u32(6, kInline2, a_.arch);
-    const uint32_t read_s0 = build_v_mov_b32_src(2, 0, a_.arch);
-    const uint32_t read_s1 = build_v_mov_b32_src(3, 1, a_.arch);
+    const uint32_t read_s0 = restore_lo;
+    const uint32_t read_s1 = restore_hi;
     const uint32_t loop_to_entry = test::build_s_cbranch_scc(/*scc1=*/true, -4, a_.arch);
     ASSERT_NO_FATAL_FAILURE(patch({count_pass, guest_anchor, second_pass, loop_to_entry, endpgm},
                                   /*anchor_offset=*/4, probe_obj, loop_delivery_));
@@ -308,6 +319,8 @@ protected:
     pt.probe_symbol = "rj_test_log_probe";
     pt.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}, {ProbeArgSource::LogBufferPtrHi, 0}};
     instr.add_point(pt);
+    // The harness hands the CP the kernarg wrapper itself.
+    InstrumentorTestAccess::skip_patch_gates(instr);
 
     auto result = instr.patch_with_debug_summaries();
     ASSERT_TRUE(result.errors.empty())
