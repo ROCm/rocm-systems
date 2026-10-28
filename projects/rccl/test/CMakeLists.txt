@@ -302,6 +302,8 @@ if(BUILD_TESTS)
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
+    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
+    device/DdaReduceScatterFabricLLTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp

@@ -5,12 +5,14 @@
  ************************************************************************/
 
 // ddaReduceScatterFabricLL on one GPU: the host plays the peers by writing LL lines into coherent host scratch.
-// This binary builds with DWORDX4_INTRINSICS_FORCE_OFF, so the phase-2 wait runs its dword-load re-read path.
+// Built twice: rccl-UnitTestsFixtures defines DWORDX4_INTRINSICS_FORCE_OFF (dword re-read), rccl-UnitTests not (b128).
 
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -34,6 +36,22 @@ constexpr unsigned kBlocks = (kPackets + kThreads - 1) / kThreads;
 constexpr uint32_t kFlag = 2;  // epoch cells start at 1, so the kernel uses flag 2 and bank 0
 constexpr float kUntouched = -1.0f;
 constexpr auto kWatchdog = std::chrono::seconds(30);
+constexpr auto kSettle = std::chrono::milliseconds(20);  // lets every thread finish its first read of the late lines
+#if defined(DWORDX4_INTRINSICS_FORCE_OFF)
+constexpr bool kForceOff = true;
+#else
+constexpr bool kForceOff = false;
+#endif
+
+// Writes the device-side RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS and whether the toolchain offers the b128 builtins.
+__global__ void reportReReadPath(int* out) {
+  out[0] = RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS;
+#if __has_builtin(__builtin_amdgcn_global_load_b128) && __has_builtin(__builtin_amdgcn_global_store_b128)
+  out[1] = 1;
+#else
+  out[1] = 0;
+#endif
+}
 
 float sendValue(int rank, size_t i) {
   return static_cast<float>(rank * 4096 + static_cast<int>(i % 4096));
@@ -209,9 +227,13 @@ TEST_F(DdaReduceScatterFabricLL, LateLinesAreReReadUntilFresh) {
     finishes();
     FAIL() << "phase 1 never stored its lines";
   }
+  // Every first read has returned stale lines by now, so only a real re-read can see what is published next.
+  std::this_thread::sleep_for(kSettle);
+  ASSERT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << "kernel finished on stale lines";
   // One peer at a time, so a batch first holds one fresh and one stale line.
   publishPeer((kSelf + 2) % kRanks);
-  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  std::this_thread::sleep_for(kSettle);
+  ASSERT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << "kernel finished with one peer still stale";
   publishPeer((kSelf + 1) % kRanks);
   ASSERT_TRUE(finishes()) << "kernel never saw the late lines";
   expectReduced();
@@ -226,6 +248,36 @@ TEST_F(DdaReduceScatterFabricLL, AbortExitsTheWaitAndAdvancesEpoch) {
     ASSERT_EQ(v, kUntouched) << "an aborted thread wrote recvbuff";
   }
   expectEpochAdvanced();
+}
+
+// Names the re-read path this build runs, so the test list shows which binary covers which path.
+#if defined(DWORDX4_INTRINSICS_FORCE_OFF)
+TEST_F(DdaReduceScatterFabricLL, ReReadPathIsDwordFallback) {
+#else
+TEST_F(DdaReduceScatterFabricLL, ReReadPathIsB128) {
+#endif
+  DeviceBuffer<int> out(2);
+  out.zero();
+  hipLaunchKernelGGL(reportReReadPath, dim3(1), dim3(1), 0, stream_, out.ptr);
+  ASSERT_EQ(hipGetLastError(), hipSuccess);
+  ASSERT_EQ(hipStreamSynchronize(stream_), hipSuccess);
+  const std::vector<int> got = out.copyTo();
+  hipDeviceProp_t prop{};
+  ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+  const std::string arch(prop.gcnArchName);
+  const bool b128 = got[0] != 0;
+  RecordProperty("rereadPath", b128 ? "b128" : "dword");
+  std::printf("[ INFO     ] DdaReduceScatterFabricLL re-read path on %s: %s\n", arch.c_str(), b128 ? "b128" : "dword");
+  const bool productionArch =
+    arch.rfind("gfx942", 0) == 0 || arch.rfind("gfx950", 0) == 0 || arch.rfind("gfx1250", 0) == 0;
+  if (kForceOff) {
+    EXPECT_FALSE(b128) << "DWORDX4_INTRINSICS_FORCE_OFF build still took the b128 path";
+    return;
+  }
+  if (!productionArch || got[1] == 0) {
+    GTEST_SKIP() << arch << " has no b128 builtin in this build, so the dword fallback ran";
+  }
+  EXPECT_TRUE(b128) << "b128 builtins are available on " << arch << " but the kernel took the dword path";
 }
 
 } // namespace RcclUnitTesting

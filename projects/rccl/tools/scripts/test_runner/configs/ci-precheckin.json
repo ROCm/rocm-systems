@@ -112,6 +112,7 @@
         {"name": "DoneEventOrdering.GroupedPathBaseline", "description": "DoneEventOrdering grouped path baseline", "test_filter": "DoneEventOrdering.GroupedPathBaseline", "timeout": 240},
         {"name": "DoneEventOrdering.DefaultStreamToNamedStream", "description": "DoneEventOrdering default to named stream", "test_filter": "DoneEventOrdering.DefaultStreamToNamedStream", "timeout": 240},
         {"name": "DoneEventOrdering.SameStreamThenSwitch", "description": "DoneEventOrdering same stream then switch", "test_filter": "DoneEventOrdering.SameStreamThenSwitch", "timeout": 240},
+        {"name": "DdaReduceScatterFabricLL", "description": "DDA fabric LL reduce-scatter wait on one GPU, b128 re-read path (no DWORDX4_INTRINSICS_FORCE_OFF)", "test_filter": "DdaReduceScatterFabricLL.*", "timeout": 180},
         {"name": "Recorder.ParseBinary", "description": "Recorder parse binary tests", "test_filter": "Recorder.ParseBinary", "timeout": 60},
         {"name": "Recorder.ParseJson", "description": "Recorder parse JSON tests", "test_filter": "Recorder.ParseJson", "timeout": 60},
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithread verification tests", "test_filter": "Recorder.VerifyMultithread", "timeout": 60},
