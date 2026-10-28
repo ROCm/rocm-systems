@@ -64,8 +64,12 @@ struct Pm4ExecutionContext {
 /// A VM must be attached before commands can execute; idle queues do not access it.
 /// Returns when idle, waiting for dispatch retirement, blocked, faulted, or at the
 /// packet budget. Retry and fault handling are reported through context callbacks.
-/// Standard exceptions during execution are translated to fault_queue(); exceptions
-/// from cancellation before execution or from the catch handler propagate.
+/// Packet admission failures emit a diagnostic and fault the queue without retiring
+/// the rejected packet. Valid register writes preceding a rejected entry are retained.
+/// Standard exceptions during execution (including allocations and effects) are still
+/// translated to fault_queue(); this function is not nonthrowing. Exceptions from
+/// cancellation before execution, after returned admission failure, or from the catch
+/// handler propagate.
 /// @param queue CP-owned queue whose command state and cursor are updated in place.
 /// @param gpu_vm Borrowed VM used to acquire pinned access to the queue address space.
 /// @param context Borrowed architecture and synchronous CP services for this turn.

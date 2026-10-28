@@ -480,6 +480,206 @@ TEST_F(Pm4PacketProcessorTest, CancellationFromTheCatchBlockIsNotCaughtAgain) {
   EXPECT_EQ(cancellations, 1u);
 }
 
+// Each case reaches a distinct admission check before its packet effect.
+struct RejectedPm4Packet {
+  const char *name;
+  std::vector<uint32_t> words;
+  const char *reason;
+  bool graphics = false;
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+};
+
+class Pm4AdmissionTest : public Pm4PacketProcessorTest,
+                         public ::testing::WithParamInterface<RejectedPm4Packet> {};
+
+TEST_P(Pm4AdmissionTest, FaultsWithoutRetirementOrSuccessCompletion) {
+  const auto &packet = GetParam();
+  constexpr uint64_t kInitialCursor = 3;
+  memory->store<uint32_t>(kReadPointer, kInitialCursor);
+  memory->store<uint32_t>(kOutput, 0x12345678);
+  submit(packet.words, true, kInitialCursor);
+  queue.commands.submissions.front().graphics_engine = packet.graphics;
+  context.arch = packet.arch;
+  uint32_t callbacks = 0;
+  queue.packet_callbacks.write_uconfig_register = [&](uint64_t, uint32_t) {
+    ++callbacks;
+    return Pm4RegisterWriteStatus::Complete;
+  };
+  testing::internal::CaptureStderr();
+  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  // A faulted queue must neither replay its packet nor repeat the diagnostic.
+  EXPECT_NO_THROW(service());
+  const auto diagnostic = testing::internal::GetCapturedStderr();
+  const auto reason_offset = diagnostic.find(packet.reason);
+  EXPECT_NE(reason_offset, std::string::npos) << diagnostic;
+  if (reason_offset != std::string::npos)
+    EXPECT_EQ(diagnostic.find(packet.reason, reason_offset + 1), std::string::npos) << diagnostic;
+  EXPECT_TRUE(queue.faulted);
+  EXPECT_FALSE(completed);
+  EXPECT_TRUE(dispatches.empty());
+  EXPECT_EQ(callbacks, 0u);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), kInitialCursor);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), kInitialCursor);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0x12345678u);
+  EXPECT_TRUE(std::ranges::all_of(queue.commands.sh_registers, [](auto value) { return !value; }));
+  EXPECT_TRUE(
+      std::ranges::all_of(queue.commands.context_registers, [](auto value) { return !value; }));
+  EXPECT_TRUE(
+      std::ranges::all_of(queue.commands.uconfig_registers, [](auto value) { return !value; }));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RejectedPackets, Pm4AdmissionTest,
+    ::testing::Values(
+        RejectedPm4Packet{"Type", {0u, 0u}, "invalid PM4 packet size or type"},
+        RejectedPm4Packet{"Count", {0xc0017900u, 0u}, "invalid PM4 packet size or type"},
+        RejectedPm4Packet{"RequireSize", {0xc0001500u, 0u}, "expects 4 payload words"},
+        RejectedPm4Packet{"Opcode", {0xc000ff00u, 0u}, "unsupported PM4 opcode"},
+        RejectedPm4Packet{"GraphicsEngine", {0xc0012800u, 0u, 0u}, "graphics state packet"},
+        RejectedPm4Packet{"ClearStateMode", {0xc0001200u, 4u}, "unsupported CLEAR_STATE", true},
+        RejectedPm4Packet{"ClearStatePop", {0xc0001200u, 2u}, "pop without a saved context", true},
+        RejectedPm4Packet{"PredExecControl", {0xc0002300u, 0u}, "unsupported PRED_EXEC"},
+        RejectedPm4Packet{"PredExecExtent",
+                          {0xc0002300u, 1u},
+                          "PRED_EXEC exceeds",
+                          false,
+                          ROCJITSU_CODE_ARCH_CDNA3},
+        RejectedPm4Packet{"CondExecExtent", {0xc0032200u, 0x800u, 0u, 0u, 1u}, "invalid COND_EXEC"},
+        RejectedPm4Packet{"PredicateControl",
+                          {0xc0022000u, 1u << 16, 0u, 0u},
+                          "unsupported SET_PREDICATION",
+                          true},
+        RejectedPm4Packet{"PredicateAlignment",
+                          {0xc0022000u, 3u << 16, 1u, 0u},
+                          "unaligned SET_PREDICATION",
+                          true},
+        RejectedPm4Packet{"BaseIndex", {0xc0021100u, 2u, 0u, 0u}, "unsupported SET_BASE", true},
+        RejectedPm4Packet{"WritePayload", {0xc0023700u, 0u, 0x800u, 0u}, "invalid WRITE_DATA"},
+        RejectedPm4Packet{
+            "WriteDestination", {0xc0033700u, 0u, 0x800u, 0u, 99u}, "unsupported WRITE_DATA"},
+        RejectedPm4Packet{"AtomicControl",
+                          {0xc0071e00u, 0x80u, 0x800u, 0u, 0u, 0u, 0u, 0u, 0u},
+                          "unsupported ATOMIC_MEM control"},
+        RejectedPm4Packet{"AtomicOperation",
+                          {0xc0071e00u, 0u, 0x800u, 0u, 0u, 0u, 0u, 0u, 0u},
+                          "unsupported ATOMIC_MEM operation"},
+        RejectedPm4Packet{"ReleaseSource",
+                          {0xc0064900u, 0u, 4u << 29, 0x800u, 0u, 99u, 0u, 0u},
+                          "unsupported RELEASE_MEM"},
+        RejectedPm4Packet{"CopyDestination",
+                          {0xc0044000u, 5u, 99u, 0u, 0x800u, 0u},
+                          "unsupported COPY_DATA destination"},
+        RejectedPm4Packet{"CopySource",
+                          {0xc0044000u, 0x103u, 0u, 0u, 0x800u, 0u},
+                          "unsupported COPY_DATA source"},
+        RejectedPm4Packet{"CopyRegister",
+                          {0xc0044000u, 0x100u, 0x3000u, 0u, 0x800u, 0u},
+                          "register outside modeled apertures",
+                          true},
+        RejectedPm4Packet{
+            "WaitOperation", {0xc0053c00u, 0u, 0x800u, 0u, 0u, 0u, 0u}, "unsupported WAIT_REG_MEM"},
+        RejectedPm4Packet{"WaitComparison",
+                          {0xc0053c00u, 0x17u, 0x800u, 0u, 0u, 0u, 0u},
+                          "invalid WAIT_REG_MEM comparison"},
+        RejectedPm4Packet{
+            "ShadowPayload", {0xc0035f00u, 1u, 0u, 0u, 1u}, "invalid shadow register load payload"},
+        RejectedPm4Packet{"ShadowRange",
+                          {0xc0035f00u, 0x800u, 0u, 0x400u, 1u},
+                          "invalid shadow register load range"},
+        RejectedPm4Packet{"IndexedLoadRange",
+                          {0xc0036300u, 0x800u, 0u, 0x3ffu, 2u},
+                          "unsupported register load range"},
+        RejectedPm4Packet{"ShaderRange", {0xc0017600u, 0x400u, 99u}, "invalid shader register"},
+        RejectedPm4Packet{
+            "ContextRmw", {0xc0025100u, 0x2000u, ~0u, 99u}, "invalid CONTEXT_REG_RMW", true},
+        RejectedPm4Packet{"PrimeControl", {0xc0035d00u, 0u, 1u, 0u, 1u}, "invalid PRIME_UTCL2"},
+        RejectedPm4Packet{
+            "ShaderPairPayload", {0xc000ba00u, 0u}, "invalid SET_SH_REG_PAIRS payload"},
+        RejectedPm4Packet{
+            "ShaderPairRegister", {0xc001ba00u, 0x400u, 99u}, "invalid SET_SH_REG_PAIRS register"},
+        RejectedPm4Packet{"ContextPairRegister",
+                          {0xc001b800u, 0x2000u, 99u},
+                          "graphics register outside aperture",
+                          true},
+        RejectedPm4Packet{"PackedPayload",
+                          {0xc003b900u, 3u, 0u, 99u, 99u},
+                          "invalid packed graphics register payload",
+                          true},
+        RejectedPm4Packet{"PackedRegister",
+                          {0xc003b900u, 2u, 0x2000u, 99u, 99u},
+                          "graphics register outside aperture",
+                          true},
+        RejectedPm4Packet{"GraphicsIndex",
+                          {0xc0016900u, 1u << 28, 99u},
+                          "unsupported graphics register index",
+                          true},
+        RejectedPm4Packet{"NativePairs", {0xc001be00u, 0u, 99u}, "unsupported on a native ring"},
+        RejectedPm4Packet{"Event", {0xc0004600u, 63u}, "unsupported PM4 EVENT_WRITE"},
+        RejectedPm4Packet{"Streamout",
+                          {0xc004c300u, 0x800u, 0u, 4u, 0x800u, 0u},
+                          "unsupported PM4 streamout statistics query",
+                          true},
+        RejectedPm4Packet{"DmaDestination",
+                          {0xc0055000u, 1u << 20, 0u, 0u, 0x800u, 0u, 4u},
+                          "unsupported PM4 DMA destination"},
+        RejectedPm4Packet{"DmaSource",
+                          {0xc0055000u, 1u << 29, 0u, 0u, 0x800u, 0u, 4u},
+                          "unsupported PM4 DMA source"},
+        RejectedPm4Packet{"IndirectAlignment",
+                          {0xc0023f00u, 1u, 0u, 1u},
+                          "invalid PM4 indirect buffer address or extent"},
+        RejectedPm4Packet{"IndirectOverflow",
+                          {0xc0023f00u, 0xfffffffcu, ~0u, 1u},
+                          "invalid PM4 indirect buffer address or extent"},
+        RejectedPm4Packet{
+            "InterleavedEngine", {0xc003a700u, 1u, 1u, 1u, 1u}, "interleaved dispatch requires"}),
+    [](const auto &info) { return info.param.name; });
+
+TEST_F(Pm4PacketProcessorTest, AdmissionCancellationRunsOnceOutsideExceptionContainment) {
+  const std::array words{0xc0001500u, 0u}; // DISPATCH_DIRECT requires four payload words.
+  submit(words, true);
+  uint32_t cancellations = 0;
+  context.fault_queue = [&] {
+    ++cancellations;
+    throw std::runtime_error("cancellation callback failed");
+  };
+  EXPECT_THROW(service(), std::runtime_error);
+  EXPECT_EQ(cancellations, 1u);
+  EXPECT_FALSE(completed);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+}
+
+TEST_F(Pm4PacketProcessorTest, RegisterPairFailurePreservesValidPrefixWithoutRetiring) {
+  const std::array words{0xc003b800u, 0u, 99u, 0x2000u, 100u};
+  submit(words, true);
+  queue.commands.submissions.front().graphics_engine = true;
+  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(queue.commands.context_registers[0], 99u);
+  EXPECT_EQ(queue.commands.context_registers[1], 0u);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+  EXPECT_FALSE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, RejectsCommandExtentOverflowBeforeFetching) {
+  const std::array words{0xffff1000u};
+  submit(words, true);
+  queue.commands.submissions.front().buffers.front().address = UINT64_MAX - 3;
+  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+  EXPECT_FALSE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, RejectsIndirectDispatchAddressOverflowBeforeDispatch) {
+  const std::array words{0xc0011600u, 4u, 1u};
+  submit(words, true);
+  queue.commands.submissions.front().graphics_engine = true;
+  queue.commands.indirect_base = UINT64_MAX - 3;
+  EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
+  EXPECT_TRUE(dispatches.empty());
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+  EXPECT_FALSE(completed);
+}
+
 TEST(Pm4ProducerCursorTest, NormalizesWrappedPointersAndRejectsOverruns) {
   EXPECT_EQ(normalize_pm4_producer_cursor(2, 3, 4), 6u);
   EXPECT_EQ(normalize_pm4_producer_cursor(6, 3, 4), 6u);
