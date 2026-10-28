@@ -13,8 +13,9 @@ namespace rocjitsu::test {
 inline constexpr uint32_t kUnimplementedInstruction = 0x95800000u;
 inline constexpr char kUnimplementedInstructionMnemonic[] = "s_rfe_restore_b64";
 inline constexpr uint32_t kUndecodableInstruction = 0xbfff0000u;
+// Formatted like the instruction words in the compute unit's decode diagnostic.
 inline const std::string kUndecodableInstructionText =
-    std::format("{:#010x}", kUndecodableInstruction);
+    std::format("{:#x}", kUndecodableInstruction);
 
 inline const std::string kUnimplementedInstructionDiagnostic =
     std::format("CU .*could not execute {}.*pc=.*pid=.*qid=.*dispatch=.*unimplemented instruction",
