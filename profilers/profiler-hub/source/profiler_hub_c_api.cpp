@@ -846,6 +846,54 @@ ph_lookup_text(ph_ctx_t ctx, uint64_t id, uint32_t kind, const char** text)
 }
 
 ph_result_t
+ph_visit_text(ph_ctx_t ctx, uint32_t kind, ph_text_visitor_t visitor, void* user_data)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(visitor == nullptr ||
+       (kind != PH_TEXT_KIND_STRING && kind != PH_TEXT_KIND_KERNEL_SYMBOL))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([ctx, kind, visitor, user_data]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        if(ctx->catalog() == nullptr)
+        {
+            return PH_RESULT_INVALID_CONTEXT;
+        }
+        const auto& catalog = *ctx->catalog();
+        if(kind == PH_TEXT_KIND_STRING)
+        {
+            for(const auto& entry : catalog.strings_by_id)
+            {
+                visitor(static_cast<uint64_t>(entry.first), entry.second.c_str(),
+                        user_data);
+            }
+            return PH_RESULT_SUCCESS;
+        }
+
+        for(const auto& entry : catalog.kernel_symbols_by_id)
+        {
+            if(!entry.second)
+            {
+                continue;
+            }
+            const auto& symbol = *entry.second;
+            const char* text   = symbol.display_name.empty() ? symbol.name.c_str()
+                                                             : symbol.display_name.c_str();
+            visitor(static_cast<uint64_t>(entry.first), text, user_data);
+        }
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
 ph_trim_trace(ph_ctx_t    ctx,
               uint64_t    start_ts,
               uint64_t    end_ts,

@@ -544,6 +544,29 @@ extern "C"
                                const char** text);
 
     /**
+     * @brief Receives one catalog entry from ph_visit_text.
+     * @param text Catalog memory owned by the context. Valid until that
+     *        context is freed.
+     * @param user_data The pointer passed to ph_visit_text.
+     */
+    typedef void (*ph_text_visitor_t)(uint64_t id, const char* text, void* user_data);
+
+    /**
+     * @brief Calls @p visitor once for each catalog entry of @p kind.
+     * @param kind PH_TEXT_KIND_STRING or PH_TEXT_KIND_KERNEL_SYMBOL.
+     * @param user_data Forwarded to every call. May be null.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
+     *         @p visitor is null or @p kind is unknown,
+     *         PH_RESULT_INVALID_CONTEXT if @p ctx is null or the trace is
+     *         not loaded.
+     * @note @p visitor must not free @p ctx or start another operation on it.
+     */
+    ph_result_t ph_visit_text(ph_ctx_t           ctx,
+                              uint32_t           kind,
+                              ph_text_visitor_t  visitor,
+                              void*              user_data);
+
+    /**
      * @brief Writes a trimmed copy of the trace opened in @p ctx.
      * @param start_ts Inclusive overlap start, in absolute trace nanoseconds.
      *        The caller adds the trace origin before calling.
