@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <optional>
 
@@ -160,6 +161,20 @@ __global__ void Iota(T* const out, size_t pitch, size_t w, size_t h, size_t d) {
     char* const row = slice + pitch * y;
     reinterpret_cast<T*>(row)[x] = z * w * h + y * w + x;
   }
+}
+
+// Calculate clock ticks per microsecond for device side clock. Use wall_clock64() on AMD as
+// fixed-rate and clock64() on NVIDIA as wall_clock64() unavailable.
+inline unsigned long long SpinTicksPerUs() {
+  int device = 0;
+  int clock_khz = 0;
+  HIP_CHECK(hipGetDevice(&device));
+#if HT_AMD
+  HIP_CHECK(hipDeviceGetAttribute(&clock_khz, hipDeviceAttributeWallClockRate, device));
+#else
+  HIP_CHECK(hipDeviceGetAttribute(&clock_khz, hipDeviceAttributeClockRate, device));
+#endif
+  return std::max(1ULL, static_cast<unsigned long long>(clock_khz) / 1000);
 }
 
 inline void LaunchDelayKernel(const std::chrono::milliseconds interval, const hipStream_t stream = nullptr) {

@@ -25,9 +25,9 @@
 
 __global__ void GraphExecUpdateStore(int* output, int value) { output[0] = value; }
 
-__global__ void GraphExecUpdateDelayStore(int* output, int value, unsigned long long cycles) {
-  const unsigned long long start = clock64();
-  while (clock64() - start < cycles) {
+__global__ void GraphExecUpdateDelayStore(int* output, int value, unsigned long long ticks) {
+  const unsigned long long start = wall_clock64();
+  while (wall_clock64() - start < ticks) {
   }
   output[0] = value;
 }
@@ -1416,7 +1416,7 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_CapturedMemcpyAndKernel) {
 HIP_TEST_CASE(Unit_hipGraphExecUpdate_RebuildWithDisabledNodeKeepsSync) {
   constexpr int kDiamonds = 3;
   constexpr int kProducerValue = 42;
-  constexpr unsigned long long kSpinCycles = 100000000ULL;
+  constexpr unsigned long long kSpinUs = 2000;  // 2 ms producer stall
   const int spin_branch = GENERATE(0, 1);
   LinearAllocGuard<int> output(LinearAllocs::hipMalloc, 8 * sizeof(int));
   LinearAllocGuard<int> copy_src(LinearAllocs::hipMalloc, sizeof(int));
@@ -1442,10 +1442,10 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_RebuildWithDisabledNodeKeepsSync) {
     HIP_CHECK(hipGraphAddKernelNode(node, graph, deps, num_deps, &params));
   };
   int one = 1, two = 2, five = 5, producer_value = kProducerValue;
-  unsigned long long spin_cycles = kSpinCycles;
+  unsigned long long spin_ticks = kSpinUs * SpinTicksPerUs();
   void* a_args[] = {&out, &one};
   void* branch_args[] = {&branch_out, &two};
-  void* producer_args[] = {&x, &producer_value, &spin_cycles};
+  void* producer_args[] = {&x, &producer_value, &spin_ticks};
   void* join_args[] = {&y, &x};
   void* f_args[] = {&f_out, &five};
   hipGraphNode_t prev = nullptr, producer = nullptr, f = nullptr, e = nullptr;
