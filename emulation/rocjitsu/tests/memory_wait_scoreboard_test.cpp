@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -764,21 +765,22 @@ TEST(MemoryWaitExecutionTest, NsaImageChecksOnlyItsDecodedCoordinateRegisters) {
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
 
-    std::array<uint32_t, 3> words{};
-    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-      const auto base =
-          rdna3::build_mimg(rdna3::kImageLoadMimg,
-                            {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .vaddr = 2, .vdata = 8});
-      words = {base[0], base[1], 6};
-    } else {
-      const auto base =
-          rdna3_5::build_mimg(rdna3_5::kImageLoadMimg,
-                              {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .vaddr = 2, .vdata = 8});
-      words = {base[0], base[1], 6};
-    }
     auto decoder = Decoder::create(arch);
     util::StringDiagnostic error;
-    auto decoded = decoder->decode_window(words, 0, error.emitter());
+    const test::Gfx11MimgEncoding mimg{.nsa = true,
+                                       .dim = amdgpu::kImageDim2d,
+                                       .unorm = true,
+                                       .dmask = 1,
+                                       .vaddr = 2,
+                                       .vdata = 8,
+                                       .nsa_word = 6};
+    auto decoded = [&]() -> DecodeResult {
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+        return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
+            *decoder, rdna3::build_mimg, rdna3::kImageLoadMimg, mimg, error.emitter());
+      return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
+          *decoder, rdna3_5::build_mimg, rdna3_5::kImageLoadMimg, mimg, error.emitter());
+    }();
     ASSERT_TRUE(decoded.succeeded()) << error.message();
 
     auto &state = wf->ensure_memory_wait_scoreboard();
@@ -827,7 +829,7 @@ TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitRea
     auto decode = [&](uint8_t dmask, uint8_t first_address = 2) -> DecodeResult {
       util::StringDiagnostic error;
       const test::Gfx11MimgEncoding mimg{.nsa = true,
-                                         .dim = 1,
+                                         .dim = amdgpu::kImageDim2d,
                                          .unorm = true,
                                          .dmask = dmask,
                                          .d16 = true,
@@ -842,9 +844,12 @@ TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitRea
         return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
             *decoder, rdna3_5::build_mimg, rdna3_5::kImageLoadMimg, mimg, error.emitter());
       }
-      const auto words = rdna4::build_vimage(
-          rdna4::kImageLoadVimage,
-          {.dim = 1, .d16 = 1, .dmask = dmask, .vdata = 8, .vaddr0 = first_address, .vaddr1 = 6});
+      const auto words = rdna4::build_vimage(rdna4::kImageLoadVimage, {.dim = amdgpu::kImageDim2d,
+                                                                       .d16 = 1,
+                                                                       .dmask = dmask,
+                                                                       .vdata = 8,
+                                                                       .vaddr0 = first_address,
+                                                                       .vaddr1 = 6});
       return decoder->decode_window(words, 0, error.emitter());
     };
 

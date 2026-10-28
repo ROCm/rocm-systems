@@ -23,6 +23,7 @@
 ///                                     (GFX11/12: op=1 is s_setkill; s_endpgm moved to op=48)
 
 #include "decode_test_util.h"
+#include "gfx11_mimg_test_common.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
@@ -1238,27 +1239,26 @@ TEST(RdnaMimgDecodeTest, BvhWidthsAndDependenciesIgnoreDimSizing) {
         for (const bool nsa : {false, true}) {
           SCOPED_TRACE(testing::Message() << "bvh64=" << bvh64 << " a16=" << a16 << " nsa=" << nsa);
           const uint8_t vaddr_words = bvh64 ? (a16 ? 9 : 12) : (a16 ? 8 : 11);
-          std::array<uint32_t, 3> words{};
-          if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-            const auto base = rdna3::build_mimg(
-                bvh64 ? rdna3::kImageBvh64IntersectRayMimg : rdna3::kImageBvhIntersectRayMimg,
-                {.nsa = nsa, .a16 = a16, .vaddr = 9, .vdata = 4, .srsrc = 1});
-            words[0] = base[0];
-            words[1] = base[1];
-          } else {
-            const auto base = rdna3_5::build_mimg(
+          // Canonical NSA groups that collectively name the same contiguous
+          // v[9:9+vaddr_words-1] control used by the non-NSA form.
+          const uint32_t nsa_word =
+              bvh64 ? (a16 ? 0x000f0c0b : 0x120f0c0b) : (a16 ? 0x000e0b0a : 0x110e0b0a);
+          const test::Gfx11MimgEncoding mimg{
+              .nsa = nsa, .a16 = a16, .vaddr = 9, .vdata = 4, .srsrc = 1, .nsa_word = nsa_word};
+          util::StringDiagnostic error;
+          auto decoded = [&]() -> DecodeResult {
+            if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+              return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
+                  *decoder, rdna3::build_mimg,
+                  bvh64 ? rdna3::kImageBvh64IntersectRayMimg : rdna3::kImageBvhIntersectRayMimg,
+                  mimg, error.emitter());
+            return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
+                *decoder, rdna3_5::build_mimg,
                 bvh64 ? rdna3_5::kImageBvh64IntersectRayMimg : rdna3_5::kImageBvhIntersectRayMimg,
-                {.nsa = nsa, .a16 = a16, .vaddr = 9, .vdata = 4, .srsrc = 1});
-            words[0] = base[0];
-            words[1] = base[1];
-          }
-          if (nsa) {
-            // Canonical groups that collectively name the same contiguous
-            // v[9:9+vaddr_words-1] control used by the non-NSA form.
-            words[2] = bvh64 ? (a16 ? 0x000f0c0b : 0x120f0c0b) : (a16 ? 0x000e0b0a : 0x110e0b0a);
-          }
-
-          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+                mimg, error.emitter());
+          }();
+          ASSERT_TRUE(decoded.succeeded()) << error.message();
+          std::unique_ptr<Instruction> inst = std::move(decoded).value();
           ASSERT_NE(inst, nullptr);
           EXPECT_EQ(inst->size(), nsa ? 12 : 8);
           ASSERT_EQ(inst->num_src_operands(), 2);
