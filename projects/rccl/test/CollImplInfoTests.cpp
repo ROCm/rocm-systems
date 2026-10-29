@@ -73,6 +73,7 @@ namespace RcclUnitTesting
       std::string protoName;             // e.g. "LL", "LL128", "SIMPLE"
       bool        hasChannels = false;
       int         channels = 0;
+      std::string symKernel;
     };
 
     std::string ReadFile(const std::string& path)
@@ -138,7 +139,7 @@ namespace RcclUnitTesting
           {
             proto = "LL";
           }
-          addon = {true, IsTdmSymmetricKernel(symKernel) ? "SymTDM" : "SYM", true, proto, false, 0};
+          addon = {true, IsTdmSymmetricKernel(symKernel) ? "SymTDM" : "SYM", true, proto, false, 0, symKernel};
         }
 
         if (func == "AllGather")
@@ -420,7 +421,7 @@ namespace RcclUnitTesting
           // never to the CU count. Was -1 before the model set maxChannels, which is the regression
           // this guards.
           const int maxSymkBlocks =
-            coll == ncclFuncAllGather ? std::max(ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks) : ncclSymkMaxBlocks;
+            sel.symKernel == "AllGather_HierLsaST" ? ncclSymkAgHierMaxBlocks : ncclSymkMaxBlocks;
           EXPECT_GE(symk.channels, 1)
             << "symk reported SYM without a channel count\nLOG:\n" << log;
           EXPECT_LE(symk.channels, maxSymkBlocks)

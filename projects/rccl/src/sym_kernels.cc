@@ -69,7 +69,7 @@ constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 <<
 
 constexpr uint32_t kernelMask_DynamicSmem = (kernelMask_Gin & kernelMask_RS) | kernelMask_Tma;
 
-// Needs the LSA team to factor into equal-size packages; see computeHierScaleInSize().
+// Needs the LSA team to factor into equal-size packages
 constexpr uint32_t kernelMask_HierLsaST = 1 << ncclSymkKernelId_AllGather_HierLsaST;
 
 int ncclSymkLLKernelMask() {
@@ -253,15 +253,22 @@ static int computeHierScaleInSize(struct ncclComm* comm) {
   for (int r = 1; r < comm->nRanks; r++) {
     if (sameCard(peerInfo[r], peerInfo[r - 1]) != (r % size != 0)) return 0;
   }
-  INFO(NCCL_INIT, "Symmetric hierarchical scale-in size = %d (nRanks %d)", size,
-         comm->nRanks);
+  INFO(NCCL_INIT, "Symmetric hierarchical scale-in size = %d (nRanks %d)", size, comm->nRanks);
   return size;
 }
 
-int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks) {
+// Packages the hierarchical AllGather spans, or 0 where it can't run: it needs gfx1250 in partition
+// mode and an LSA team of at least two equal packages, so there is a cross-package hop to save.
+static int ncclSymkAgHierGroups(struct ncclComm* comm) {
   int scaleIn = comm->symkState.kcomm.hierScaleInSize;
-  int nGroups = scaleIn > 0 ? ncclTeamLsa(comm).nRanks / scaleIn : 0;
-  if (nGroups < 2) return nBlocks;
+  int lsaRanks = ncclTeamLsa(comm).nRanks;
+  if (!ncclSymkAgHierAvailable(comm) || scaleIn <= 0 || lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) return 0;
+  return lsaRanks / scaleIn;
+}
+
+int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks) {
+  int nGroups = ncclSymkAgHierGroups(comm);
+  if (nGroups == 0) return nBlocks;
   int nUsed = ncclSymkAgHierG0Blocks(nBlocks, nGroups) + (nGroups - 1) * ncclSymkAgHierGroupBlocks(nBlocks, nGroups);
   return std::min(nBlocks, nUsed);
 }
@@ -274,18 +281,18 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   if (!symk->initialized) {
     symk->initialized = true;
     symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
-    if (ncclSymkAgHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0)
+    int agHierGroups = ncclSymkAgHierGroups(comm);
+    if (ncclSymkAgHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0) {
       INFO(NCCL_INIT,
            "Symmetric hierarchical AllGather off: ranks do not form two or more consecutive, equal-size groups "
-           "per physical device (nRanks %d)",
-           comm->nRanks);
+           "per physical device (nRanks %d)", comm->nRanks);
+    }
     struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     // Disable LSA multicast for cross-clique since NVLS isn't available across cliques
     symk->hasLsaMultimem =
       ncclNvlsSymmetricMultimemEnabled(comm) && ncclTeamLsa(comm).nRanks > 2 && !comm->p2pCrossClique;
     reqs.lsaMultimem = symk->hasLsaMultimem;
-    reqs.lsaBarrierCount =
-      ncclSymkAgHierAvailable(comm) ? std::max(ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks) : ncclSymkMaxBlocks;
+    reqs.lsaBarrierCount = agHierGroups > 0 ? std::max(ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks) : ncclSymkMaxBlocks;
     reqs.ginStrongSignalsRequired = false;
     reqs.ginVaSignalsRequired = false;
 
@@ -304,10 +311,8 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     reqs.resourceRequirementsList = &lla2aReq;
 
     struct ncclDevResourceRequirements hierPushFlagsReq = {};
-    int scaleIn = symk->kcomm.hierScaleInSize;
-    if (ncclSymkAgHierAvailable(comm) && scaleIn > 0 && ncclTeamLsa(comm).nRanks % scaleIn == 0) {
-      hierPushFlagsReq.bufferSize =
-        size_t(ncclSymkAgHierMaxBlocks) * (ncclTeamLsa(comm).nRanks / scaleIn) * sizeof(uint64_t);
+    if (agHierGroups > 0) {
+      hierPushFlagsReq.bufferSize = size_t(ncclSymkAgHierMaxBlocks) * agHierGroups * sizeof(uint64_t);
       hierPushFlagsReq.bufferAlign = 128;
       hierPushFlagsReq.outBufferHandle = &symk->kcomm.hierPushFlags;
       hierPushFlagsReq.next = reqs.resourceRequirementsList;
@@ -467,11 +472,7 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
   kmask &= needGin ? kernelMask_Gin : ~kernelMask_Gin;
 
-  // Needs at least two packages of equal size to have a cross-package hop worth saving.
-  int scaleIn = comm->symkState.kcomm.hierScaleInSize;
-  int lsaRanks = ncclTeamLsa(comm).nRanks;
-  if (!ncclSymkAgHierAvailable(comm) || scaleIn <= 0 || lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2)
-    kmask &= ~kernelMask_HierLsaST;
+  if (ncclSymkAgHierGroups(comm) == 0) kmask &= ~kernelMask_HierLsaST;
   return kmask;
 }
 

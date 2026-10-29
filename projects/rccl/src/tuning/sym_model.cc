@@ -62,8 +62,10 @@ static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* con
   constexpr int hier = ncclSymkKernelId_AllGather_HierLsaST;
   struct ncclComm* comm = inputs->comm;
   if (inputs->func != ncclFuncAllGather || !ncclSymkIsGfx1250(comm) || !comm->hasMloPart ||
-      comm->tuningContext.forced[inputs->func] || inputs->winRegType != ncclSymSendRegRecvReg)
+      comm->tuningContext.forced[inputs->func] ||
+      (inputs->winRegType != ncclSymSendRegRecvReg && inputs->winRegType != ncclSymSendNonregRecvReg)) {
     return false;
+  }
   bool hasSt = (valid_kmask >> st & 1) && (inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + st) & 1);
   bool hasHier = (valid_kmask >> hier & 1) && (inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + hier) & 1);
   if (!hasSt && !hasHier) return false;
