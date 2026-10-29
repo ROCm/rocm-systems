@@ -2642,7 +2642,7 @@
       "num_nodes": 2,
       "num_gpus": 2,
       "timeout": 300,
-      "description": "Forced PAT at 4 ranks on 2 nodes: RCCL_TEST_PAT_HOST_PER_RANK=1 gives each rank its own host id, so RCCL counts one node per rank, refuses SHM and P2P between ranks on one node, and every PAT pair crosses the network. Each row runs in its own process because the profiler plugin and host id settle on the first communicator. The PAT rows set HSA_DISABLE_CACHE=1 (AICOMRCCL-2275); the avg row runs with the stock cache configuration.",
+      "description": "Forced PAT at 4 ranks on 2 nodes: RCCL_TEST_PAT_HOST_PER_RANK=1 gives each rank its own host id, so RCCL counts one node per rank, refuses SHM and P2P between ranks on one node, and every PAT pair crosses the network. Each row runs in its own process because the profiler plugin and host id settle on the first communicator. The PAT rows set HSA_DISABLE_CACHE=1 to work around AICOMRCCL-2275, silent data corruption on gfx950: without it they left sentinel values in their output in some stock repeats (AllGather 1 of 10, ReduceScatter 4 of 20) and none failed with it. Added 2026-10-24; drop those env_variables entries once AICOMRCCL-2275 is fixed below RCCL. The avg row runs with the stock cache configuration.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "RCCL_MPI_LOG_ALL_RANKS": "1",
@@ -2658,7 +2658,7 @@
       "tests": [
         {
           "name": "PatForcedMPITests_ReduceScatterTakesPat",
-          "description": "Forced PAT ReduceScatter (sum, prod, max, min; four types; five counts; in and out of place) is correct and the profiler reports algo PAT, proto SIMPLE on every call. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: without it the PAT rows left sentinel values in their output in some stock repeats (AllGather 1 of 10, ReduceScatter 4 of 20) and none failed with it. Added 2026-10-24; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
+          "description": "Forced PAT ReduceScatter (sum, prod, max, min; four types; five counts; in and out of place) is correct and the profiler reports algo PAT, proto SIMPLE on every call. Sets HSA_DISABLE_CACHE=1, see the pat_forced_mpi_tests description.",
           "test_filter": "PatForcedMPITest.ReduceScatterTakesPat",
           "timeout": 300,
           "env_variables": {
@@ -2667,7 +2667,7 @@
         },
         {
           "name": "PatForcedMPITests_AllGatherTakesPat",
-          "description": "Forced PAT AllGather (four types; five counts; in and out of place) is correct and the profiler reports algo PAT, proto SIMPLE on every call. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: without it the PAT rows left sentinel values in their output in some stock repeats (AllGather 1 of 10, ReduceScatter 4 of 20) and none failed with it. Added 2026-10-24; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
+          "description": "Forced PAT AllGather (four types; five counts; in and out of place) is correct and the profiler reports algo PAT, proto SIMPLE on every call. Sets HSA_DISABLE_CACHE=1, see the pat_forced_mpi_tests description.",
           "test_filter": "PatForcedMPITest.AllGatherTakesPat",
           "timeout": 300,
           "env_variables": {
@@ -2682,7 +2682,7 @@
         },
         {
           "name": "PatForcedMPITests_ReduceScatterAllGatherInterleaveTakesPat",
-          "description": "ReduceScatter, AllGather and ReduceScatter on one communicator take PAT and are correct, so shared connections carry state from one collective into the next. HSA_DISABLE_CACHE=1 works around AICOMRCCL-2275, silent data corruption on gfx950: without it the PAT rows left sentinel values in their output in some stock repeats (AllGather 1 of 10, ReduceScatter 4 of 20) and none failed with it. Added 2026-10-24; drop this env_variables entry once AICOMRCCL-2275 is fixed below RCCL",
+          "description": "ReduceScatter, AllGather and ReduceScatter on one communicator take PAT and are correct, so shared connections carry state from one collective into the next. Sets HSA_DISABLE_CACHE=1, see the pat_forced_mpi_tests description.",
           "test_filter": "PatForcedMPITest.ReduceScatterAllGatherInterleaveTakesPat",
           "timeout": 300,
           "env_variables": {

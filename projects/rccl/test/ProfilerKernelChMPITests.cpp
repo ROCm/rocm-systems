@@ -934,18 +934,15 @@ TEST_F(ProfilerKernelChMPITest, SymmetricKernelPhasesTileKernelCh)
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
 
     // The recorder reads its mask when the communicator initializes it.
-    const char* prevMask = getenv("RCCL_TEST_KCH_EVENT_MASK");
-    const std::string savedMask = prevMask ? prevMask : "";
     const int mask = ncclProfileGroup | ncclProfileColl | ncclProfileP2p | ncclProfileKernelCh | ncclProfileProxyOp |
                      ncclProfileKernelPhase;
-    setenv("RCCL_TEST_KCH_EVENT_MASK", std::to_string(mask).c_str(), 1);
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
-    std::string reason = createCommWithRecorder(&comm, &stream);
-    if(prevMask)
-        setenv("RCCL_TEST_KCH_EVENT_MASK", savedMask.c_str(), 1);
-    else
-        unsetenv("RCCL_TEST_KCH_EVENT_MASK");
+    std::string reason;
+    {
+        MPIHelpers::MpiEnvGuard maskGuard("RCCL_TEST_KCH_EVENT_MASK", std::to_string(mask).c_str());
+        reason = createCommWithRecorder(&comm, &stream);
+    }
     KCH_SKIP_IF_NEEDED(reason);
 
     ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;

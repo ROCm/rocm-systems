@@ -40,8 +40,13 @@ struct PatModelConfig
     int    maxParallelFactor;
 };
 
+// patInput packs one hex digit per rank into Elem, which caps the model sweep at 16 ranks.
+constexpr int kMaxModelRanks = 16;
+static_assert(kMaxModelRanks * 4 <= sizeof(Elem) * 8,
+              "one hex digit per rank must fit in Elem");
+
 // Rank q owns hex digit q (1..15, varying with j), so a lost, doubled or moved block changes the value.
-Elem patInput(int q, size_t j, int /*nranks*/)
+Elem patInput(int q, size_t j)
 {
     return static_cast<Elem>(1 + (j + 7 * q) % 15) << (4 * q);
 }
@@ -64,7 +69,7 @@ public:
         {
             for(size_t j = 0; j < inLen; ++j)
             {
-                in_[q][j] = patInput(q, j, cfg.nranks);
+                in_[q][j] = patInput(q, j);
             }
         }
     }
@@ -72,7 +77,7 @@ public:
     // Empty when every channel ran to completion without a model violation.
     std::string run()
     {
-        // Even split; the device aligns channel bounds to chunks, which moves starts, not the schedule.
+        // Even split, not the device's chunk-aligned one; channel size sets aggFactor, so it may pick another schedule.
         const size_t perCh = (cfg_.count + cfg_.nChannels - 1) / cfg_.nChannels;
         for(int c = 0; c < cfg_.nChannels; ++c)
         {
@@ -472,7 +477,7 @@ private:
 std::vector<PatModelConfig> patModelConfigs()
 {
     std::vector<PatModelConfig> cfgs;
-    for(int nranks = 3; nranks <= 16; ++nranks)
+    for(int nranks = 3; nranks <= kMaxModelRanks; ++nranks)
     {
         for(size_t count : {size_t{1}, size_t{5}, size_t{64}, size_t{129}})
         {
@@ -519,7 +524,7 @@ TEST(PatRSAlgorithmTests, StepStreamsReduceScatterEveryBlock)
                 Elem want = 0;
                 for(int q = 0; q < cfg.nranks; ++q)
                 {
-                    want += patInput(q, r * cfg.count + i, cfg.nranks);
+                    want += patInput(q, r * cfg.count + i);
                 }
                 ASSERT_EQ(want, out[i])
                     << describe(cfg) << " rank=" << r << " i=" << i;
@@ -545,7 +550,7 @@ TEST(PatAGAlgorithmTests, StepStreamsAllGatherEveryBlock)
                 for(size_t j = 0; j < out.size(); ++j)
                 {
                     Elem want =
-                        patInput(j / cfg.count, j % cfg.count, cfg.nranks);
+                        patInput(j / cfg.count, j % cfg.count);
                     ASSERT_EQ(want, out[j])
                         << describe(cfg) << " shared=" << shared
                         << " rank=" << r << " j=" << j;

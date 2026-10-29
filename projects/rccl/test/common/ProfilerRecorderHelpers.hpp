@@ -109,9 +109,6 @@ class ProfilerRecorder {
   const std::string& failReason() const {
     return failReason_;
   }
-  void Reset() const {
-    reset_();
-  }
   uint64_t ProxyOpCount() const {
     return proxyOps_();
   }

@@ -193,7 +193,8 @@ class PatForcedMPITest : public MPITestBase {
     const std::string notLoaded = recorder_.NotLoadedOnAnyRank();
     ASSERT_TRUE(notLoaded.empty()) << notLoaded;
     const char* qps = getenv("RCCL_PAT_SHARED_QPS");
-    const bool wantShared = qps == nullptr || atoi(qps) != 0;
+    const bool wantShared =
+        MPIHelpers::getEnvParam<int64_t>("RCCL_PAT_SHARED_QPS", 1) != 0;
     ASSERT_FALSE(MPIHelpers::anyRankTrue(comm_->patSharedQps != wantShared))
         << "comm->patSharedQps does not match RCCL_PAT_SHARED_QPS="
         << (qps ? qps : "unset (default 1)") << " on at least one rank";
@@ -440,7 +441,7 @@ TEST_F(PatForcedMPITest, AllGatherTakesPat) {
   expectNoFailuresOnAnyRank(kNumTypes * kNumCounts * kNumPlacements);
 }
 
-// PAT ReduceScatter has no scaling step, so avg runs elsewhere and stays right.
+// PAT ReduceScatter has no scaling step, so the PAT filter in enqueue.cc routes avg elsewhere; the rearch tuner (pat.cc) has no such filter yet.
 TEST_F(PatForcedMPITest, ReduceScatterAvgRunsWithoutPat) {
   PAT_FORCED_REQUIRE();
   ASSERT_NO_FATAL_FAILURE(createPatComm());
