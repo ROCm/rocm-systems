@@ -24,9 +24,13 @@
 #include "hrr_region_map.h"
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace {
+
+namespace fs = std::filesystem;
 
 struct FileCapGuard {
   uint64_t saved = hrr::max_file_bytes();
