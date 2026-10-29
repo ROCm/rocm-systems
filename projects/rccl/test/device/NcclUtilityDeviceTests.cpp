@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <thread>
@@ -537,50 +538,73 @@ TEST_F(NcclUtilityDeviceTest, LoadConstLdgScalars) {
 }
 
 // ---------------------------------------------------------------------------
-// ncclCoopWarpSpan::sync (software sense-reversing barrier on AMD): two concurrent 2-warp spans with distinct
-// warp0/id in one CTA; every round one warp per span is delayed, then both must see each other's write.
+// ncclCoopWarpSpan::sync, the software barrier on AMD: two 2-warp spans with distinct warp0 and id in one CTA.
+// Every round one warp per span is delayed, then both must see each other's write. The spans run one after the
+// other, so a barrier that waits on the whole CTA fails too.
 // ---------------------------------------------------------------------------
 
+constexpr int kNumSpans = 2;
+constexpr int kWarpsPerSpan = 2;
+constexpr int kNumWarps = kNumSpans * kWarpsPerSpan;
 constexpr int kSpanRounds = 64;
-constexpr long long kSpanDelayCycles = 100000;
+// wall_clock64, not clock64: gfx11's clock64 is a 20-bit counter, so a delay that straddles its wrap never ends.
+constexpr uint64_t kSpanDelayTicks = 10000;
+constexpr uint64_t kSpanStartWaitTicks = 200000000;
 
 __global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone) {
-  __shared__ int slot[4];
+  __shared__ int slot[kNumWarps];
+  __shared__ int span0Done;
   const int w = threadIdx.x / warpSize;
   const int lane = threadIdx.x % warpSize;
-  const int spanId = w / 2;
-  const int idx = w & 1;
-  if (threadIdx.x < 4) slot[threadIdx.x] = 0;
+  const int spanId = w / kWarpsPerSpan;
+  const int idx = w % kWarpsPerSpan;
+  if (threadIdx.x < kNumWarps) slot[threadIdx.x] = 0;
+  if (threadIdx.x == 0) span0Done = 0;
   ncclCoopNamedBarrierInit();
-  ncclCoopWarpSpan span(/*warp0=*/2 * spanId, /*nWarps=*/2, /*id=*/spanId);
+  __syncthreads();
+  ncclCoopWarpSpan span(/*warp0=*/kWarpsPerSpan * spanId, /*nWarps=*/kWarpsPerSpan, /*id=*/spanId);
   volatile int* vslot = slot;
+  volatile int* vdone = &span0Done;
   int bad = 0;
+  // Span 1 starts only after span 0 has finished all its rounds. That only happens if span 0's sync()
+  // waits for span 0 alone, so a CTA-wide barrier times out here and counts as a mismatch.
+  if (spanId == 1) {
+    const uint64_t t0 = wall_clock64();
+    while (*vdone == 0 && wall_clock64() - t0 < kSpanStartWaitTicks) {}
+    if (*vdone == 0) bad += kSpanRounds;
+  }
+  int rounds = 0;
   for (int r = 1; r <= kSpanRounds; ++r) {
     if (idx == (r & 1)) {
-      const long long t0 = clock64();
-      while (clock64() - t0 < kSpanDelayCycles) {}
+      const uint64_t t0 = wall_clock64();
+      while (wall_clock64() - t0 < kSpanDelayTicks) {}
     }
     if (lane == 0) vslot[w] = r;
     span.sync();
     if (lane == 0 && vslot[w ^ 1] != r) ++bad;
     span.sync();
+    ++rounds;
+  }
+  if (spanId == 0 && lane == 0) {
+    __threadfence_block();
+    *vdone = 1;
   }
   if (lane == 0) {
     atomicAdd(&mismatches[spanId], bad);
-    roundsDone[w] = kSpanRounds;
+    roundsDone[w] = rounds;
   }
 }
 
 TEST_F(NcclUtilityDeviceTest, CoopWarpSpanSplitSpansSyncReleasesAfterAllArriveAndIsReusable) {
-  DeviceBuffer<int> d_bad(2);
-  DeviceBuffer<int> d_rounds(4);
+  DeviceBuffer<int> d_bad(kNumSpans);
+  DeviceBuffer<int> d_rounds(kNumWarps);
   ASSERT_NO_FATAL_FAILURE(d_bad.zero());
   ASSERT_NO_FATAL_FAILURE(d_rounds.zero());
   int warpSz = 0;
   ASSERT_EQ(hipDeviceGetAttribute(&warpSz, hipDeviceAttributeWarpSize, 0), hipSuccess);
   hipEvent_t done;
   ASSERT_EQ(hipEventCreate(&done), hipSuccess);
-  kernelWarpSpanSync<<<1, 4 * warpSz>>>(d_bad.ptr, d_rounds.ptr);
+  kernelWarpSpanSync<<<1, kNumWarps * warpSz>>>(d_bad.ptr, d_rounds.ptr);
   ASSERT_EQ(hipGetLastError(), hipSuccess);
   ASSERT_EQ(hipEventRecord(done, 0), hipSuccess);
 
@@ -601,10 +625,10 @@ TEST_F(NcclUtilityDeviceTest, CoopWarpSpanSplitSpansSyncReleasesAfterAllArriveAn
 
   const std::vector<int> bad = d_bad.copyTo();
   const std::vector<int> rounds = d_rounds.copyTo();
-  for (int s = 0; s < 2; ++s) {
+  for (int s = 0; s < kNumSpans; ++s) {
     EXPECT_EQ(bad[s], 0) << "span " << s << ": partner write not visible/ordered after sync()";
   }
-  for (int w = 0; w < 4; ++w) {
+  for (int w = 0; w < kNumWarps; ++w) {
     EXPECT_EQ(rounds[w], kSpanRounds) << "warp " << w << " did not complete all rounds";
   }
 }
