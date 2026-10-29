@@ -152,11 +152,15 @@ class TestCpuClock(unittest.TestCase):
                         f"\t### amdsmi_set_cpu_df_pstate_range(cpu={i}, "
                         f"min_pstate=1, max_pstate={DF_PSTATE_MAX}):"
                     )
+                    val = "N/A"
                     with self.common.expect_status(set_msg, self.common.CPU_CORRECT_ACCEPT):
-                        amdsmi.amdsmi_set_cpu_df_pstate_range(cpu, 1, DF_PSTATE_MAX)
+                        val = amdsmi.amdsmi_set_cpu_df_pstate_range(cpu, 1, DF_PSTATE_MAX)
+                    self.common.print(f"\t    data: {val}")
                     restore_msg = f"\t### amdsmi_cpu_apb_enable(cpu={i}):"
+                    val = "N/A"
                     with self.common.expect_status(restore_msg, self.common.CPU_CORRECT_ACCEPT):
-                        amdsmi.amdsmi_cpu_apb_enable(cpu)
+                        val = amdsmi.amdsmi_cpu_apb_enable(cpu)
+                    self.common.print(f"\t    data: {val}")
 
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_df_pstate_range,
@@ -199,16 +203,20 @@ class TestCpuClock(unittest.TestCase):
                         msg = (
                             f"\t### amdsmi_set_cpu_pcie_link_rate(cpu={i}, rate_ctrl={rate_ctrl}):"
                         )
+                        ret = "N/A"
                         with self.common.expect_status(msg, self.common.CPU_CORRECT_ACCEPT):
                             ret = amdsmi.amdsmi_set_cpu_pcie_link_rate(cpu, rate_ctrl)
                             if prev_mode is None:
                                 prev_mode = int(ret)
+                        self.common.print(f"\t    data: {ret}")
                     if prev_mode is not None:
                         msg = (
                             f"\t### amdsmi_set_cpu_pcie_link_rate(cpu={i}, rate_ctrl={prev_mode}):"
                         )
+                        ret = "N/A"
                         with self.common.expect_status(msg, self.common.CPU_CORRECT_ACCEPT):
-                            amdsmi.amdsmi_set_cpu_pcie_link_rate(cpu, prev_mode)
+                            ret = amdsmi.amdsmi_set_cpu_pcie_link_rate(cpu, prev_mode)
+                        self.common.print(f"\t    data: {ret}")
 
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_pcie_link_rate,
@@ -231,10 +239,12 @@ class TestCpuClock(unittest.TestCase):
                             f"\t### amdsmi_get_cpu_socket_lclk_dpm_level(cpu={i}, "
                             f"nbio_id={nbio_id}):"
                         )
+                        dpm = "N/A"
                         with self.common.expect_status(get_msg, self.common.CPU_CORRECT_ACCEPT):
                             dpm = amdsmi.amdsmi_get_cpu_socket_lclk_dpm_level(cpu, nbio_id)
                             bounds["min"] = dpm["nbio_min_dpm_level"]
                             bounds["max"] = dpm["nbio_max_dpm_level"]
+                        self.common.print(f"\t    data: {dpm}")
                         if "max" not in bounds:
                             continue  # getter did not succeed; nothing to set/restore
                         min_orig, max_orig = bounds["min"], bounds["max"]
@@ -244,10 +254,12 @@ class TestCpuClock(unittest.TestCase):
                                 f"\t### amdsmi_set_cpu_socket_lclk_dpm_level(cpu={i}, "
                                 f"nbio_id={nbio_id}, min_val={min_val}, max_val={max_val}):"
                             )
+                            val = "N/A"
                             with self.common.expect_status(set_msg, self.common.CPU_CORRECT_ACCEPT):
-                                amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level(
+                                val = amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level(
                                     cpu, nbio_id, min_val, max_val
                                 )
+                            self.common.print(f"\t    data: {val}")
 
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level,

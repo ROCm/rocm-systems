@@ -48,20 +48,25 @@ class TestCpuPower(unittest.TestCase):
                 for i, cpu in enumerate(handles):
                     # Write an invalid boostlimit (0); firmware may reject or clamp.
                     inval_msg = f"\t### amdsmi_set_cpu_core_boostlimit(cpu={i}, boost_limit=0):"
+                    val = "N/A"
                     with self.common.expect_status(inval_msg, INVALID_SET_ACCEPT):
-                        amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, 0)
+                        val = amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, 0)
+                    self.common.print(f"\t    data: {val}")
                     # Read the current boostlimit so it can be restored.
                     orig = {}
                     get_msg = f"\t### amdsmi_get_cpu_core_boostlimit(cpu={i}):"
                     with self.common.expect_status(get_msg, self.common.CPU_CORRECT_ACCEPT):
                         orig["val"] = amdsmi.amdsmi_get_cpu_core_boostlimit(cpu)
+                    self.common.print(f"\t    data: {orig.get('val', 'N/A')}")
                     if "val" not in orig:
                         continue  # getter did not succeed; nothing to restore
                     set_msg = (
                         f"\t### amdsmi_set_cpu_core_boostlimit(cpu={i}, boost_limit={orig['val']}):"
                     )
+                    val = "N/A"
                     with self.common.expect_status(set_msg, self.common.CPU_CORRECT_ACCEPT):
-                        amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, orig["val"])
+                        val = amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, orig["val"])
+                    self.common.print(f"\t    data: {val}")
 
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_core_boostlimit,
@@ -72,8 +77,6 @@ class TestCpuPower(unittest.TestCase):
         )
         return
 
-    # integration
-
     def test_cpu_socket_power_cap(self):
         self.common.print_func_name("")
 
@@ -82,29 +85,37 @@ class TestCpuPower(unittest.TestCase):
                 for i, cpu in enumerate(handles):
                     # Write an invalid power cap (0); firmware may reject or clamp.
                     inval_msg = f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap=0):"
+                    val = "N/A"
                     with self.common.expect_status(inval_msg, INVALID_SET_ACCEPT):
-                        amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, 0)
+                        val = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, 0)
+                    self.common.print(f"\t    data: {val}")
                     # Read the current cap and the max so the cap can be exercised
                     # and then restored.
                     vals = {}
                     get_msg = f"\t### amdsmi_get_cpu_socket_power_cap(cpu={i}):"
                     with self.common.expect_status(get_msg, self.common.CPU_CORRECT_ACCEPT):
                         vals["orig"] = amdsmi.amdsmi_get_cpu_socket_power_cap(cpu)
+                    self.common.print(f"\t    data: {vals.get('orig', 'N/A')}")
                     max_msg = f"\t### amdsmi_get_cpu_socket_power_cap_max(cpu={i}):"
                     with self.common.expect_status(max_msg, self.common.CPU_CORRECT_ACCEPT):
                         vals["max"] = amdsmi.amdsmi_get_cpu_socket_power_cap_max(cpu)
+                    self.common.print(f"\t    data: {vals.get('max', 'N/A')}")
                     if "orig" not in vals or "max" not in vals:
                         continue  # a getter did not succeed; nothing to set/restore
                     set_max_msg = (
                         f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={vals['max']}):"
                     )
+                    val = "N/A"
                     with self.common.expect_status(set_max_msg, self.common.CPU_CORRECT_ACCEPT):
-                        amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, vals["max"])
+                        val = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, vals["max"])
+                    self.common.print(f"\t    data: {val}")
                     restore_msg = (
                         f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={vals['orig']}):"
                     )
+                    val = "N/A"
                     with self.common.expect_status(restore_msg, self.common.CPU_CORRECT_ACCEPT):
-                        amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, vals["orig"])
+                        val = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, vals["orig"])
+                    self.common.print(f"\t    data: {val}")
 
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_socket_power_cap,
@@ -113,8 +124,6 @@ class TestCpuPower(unittest.TestCase):
             positive=positive,
         )
         return
-
-    # integration
 
     def test_cpu_socket_boostlimit(self):
         self.common.print_func_name("")
