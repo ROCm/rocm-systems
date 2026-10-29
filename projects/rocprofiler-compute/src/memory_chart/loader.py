@@ -164,6 +164,11 @@ class PanelConfigs:
         return cls._by_arch[arch]
 
 
+def has_layout(gpu_arch: Optional[str]) -> bool:
+    """Return whether a usable memory-chart layout is available for gpu_arch."""
+    return Layouts.for_arch(gpu_arch) is not None
+
+
 def is_memory_chart_panel(panel: dict[str, Any]) -> bool:
     """True when every table of a panel config is drawn as the memory chart."""
     sources = panel.get("data source") or []
