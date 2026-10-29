@@ -233,34 +233,12 @@ endif()
 set(DL_DEVICE_COVERAGE_FLAGS ${DL_COVERAGE_FLAGS} ${DL_DEVICE_PROFILE_RT_LINK_FLAGS})
 
 # ---------------------------------------------------------------------------
-# Main-module coverage drain: deterministic compilation-unit ID (-cuid).
-#
-# The device profile runtime drains a per-arch device.elf by looking up a host
-# "shadow" variable __llvm_profile_sections_<CUIDHash> (registered from the host
-# TU via __hipRegisterVar) and resolving it to the identically-named device
-# global with hipGetSymbolAddress. The device global points at the module-wide
-# __start/__stop___llvm_prf_{cnts,data,names} boundaries, so draining through
-# ANY ONE descriptor drains the entire linked device.elf.
-#
-# The main RDC module is compiled in two separate steps: the device side
-# (dispatcher common.cu.cpp inside --link, plus the per-kernel TUs) and the host
-# side (common.cu.cpp --offload-host-only). With the default -fuse-cuid=hash each
-# step derives a different CUID from its own file path + command line, so the
-# host shadow name (e.g. a2f3...) never matches any of the device descriptors and
-# hipGetSymbolAddress fails -> device counters read back as zero.
-#
-# Pin BOTH the dispatcher device compile and the host common.cu.cpp compile to
-# the same explicit -cuid so their __llvm_profile_sections_<CUIDHash> names match
-# (CUIDHash = MD5(cuid), identical across separate invocations). This is the
-# compiler's intended lever for split host/device compilation (see the codegen
-# test clang/test/CodeGenHIP/offload-pgo-sections.hip, which passes -cuid=abc to
-# both cc1 jobs). It must NOT be applied to the per-kernel device TUs: they are
-# distinct compilation units and a shared CUID would collide on the (non-weak)
-# __llvm_profile_sections_<CUIDHash> device global at link time.
-set(DL_MAIN_MODULE_CUID_FLAGS "")
+# Main-module coverage: the host common.cu.cpp compile emits no profile shadow (-fuse-cuid=none), so the HSA drain copies all of device.elf.
+# A host shadow drains only its own kernels' entry counters, then marks device.elf drained, and every device function record is lost.
+set(DL_MAIN_MODULE_HOST_CUID_FLAGS "")
 if(ENABLE_FULL_COVERAGE)
-  set(DL_MAIN_MODULE_CUID_FLAGS -cuid=rccl_main_module)
-  message(STATUS "Device Linker: main-module coverage CUID pinned = rccl_main_module")
+  set(DL_MAIN_MODULE_HOST_CUID_FLAGS -fuse-cuid=none)
+  message(STATUS "Device Linker: main-module host shadow disabled; device.elf drains via HSA")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -540,7 +518,6 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${DL_OPT_FLAGS}
       ${DL_LINK_INHERITED_FLAGS}
       ${DL_COVERAGE_FLAGS}
-      ${DL_MAIN_MODULE_CUID_FLAGS}
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
@@ -677,7 +654,7 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
     ${DL_COVERAGE_FLAGS}
-    ${DL_MAIN_MODULE_CUID_FLAGS}
+    ${DL_MAIN_MODULE_HOST_CUID_FLAGS}
     -std=c++17
     -fPIC
     ${DL_HOST_COMPRESS}
