@@ -605,16 +605,26 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedSync(RocJpegImage *destinations, int 
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
 
+    if (batch_size <= 0) {
+        ErrorLog(g_rocjpeg_logger, "Invalid batch_size: " + ROCJPEG_TOSTR(batch_size));
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+
     std::vector<AsyncDecodeState> states(batch_size);
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        // Check every destination before taking any of them, so an invalid one does not leave the earlier ones
+        // removed from pending_decodes_ but never finished, which would leak their surfaces.
         for (int i = 0; i < batch_size; i++) {
-            auto it = pending_decodes_.find(&destinations[i]);
-            if (it == pending_decodes_.end()) {
+            if (pending_decodes_.count(&destinations[i]) == 0) {
                 ErrorLog(g_rocjpeg_logger, "No asynchronous decode is pending for destination at index " + ROCJPEG_TOSTR(i));
                 FunctionExitLog(g_rocjpeg_logger);
                 return ROCJPEG_STATUS_INVALID_PARAMETER;
             }
+        }
+        for (int i = 0; i < batch_size; i++) {
+            auto it = pending_decodes_.find(&destinations[i]);
             states[i] = std::move(it->second);
             pending_decodes_.erase(it);
         }
