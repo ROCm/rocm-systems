@@ -37,17 +37,23 @@ __managed__ int g_managed_nonblocking[kN];
 
 static __global__ void AddConst(int* value, int n, int addend) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) value[i] += addend;
+  if (i < n) {
+    value[i] += addend;
+  }
 }
 
 static __global__ void SumTwo(int* a, int* b, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) a[i] += b[i];
+  if (i < n) {
+    a[i] += b[i];
+  }
 }
 
 static __global__ void WriteManagedNonBlocking(int v) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < kN) g_managed_nonblocking[i] = v;
+  if (i < kN) {
+    g_managed_nonblocking[i] = v;
+  }
 }
 
 // Tests that deferred loading works as expected when hipMemcpy
@@ -80,7 +86,9 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyHtoD) {
 
   SECTION("Sync") {
     std::vector<int> host(kN);
-    for (int i = 0; i < kN; ++i) host[i] = i + kSeed;
+    for (int i = 0; i < kN; ++i) {
+      host[i] = i + kSeed;
+    }
     HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(g_managed_a),
                             host.data(), kN * sizeof(int)));
 
@@ -97,7 +105,9 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyHtoD) {
 
   SECTION("Async") {
     std::vector<int> host(kN);
-    for (int i = 0; i < kN; ++i) host[i] = i * kSeedMul;
+    for (int i = 0; i < kN; ++i) {
+      host[i] = i * kSeedMul;
+    }
     hipStream_t stream = nullptr;
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(hipMemcpyHtoDAsync(
@@ -194,7 +204,9 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyWithStream) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
   std::vector<int> host(kN);
-  for (int i = 0; i < kN; ++i) host[i] = i * kSeedMul;
+  for (int i = 0; i < kN; ++i) {
+    host[i] = i * kSeedMul;
+  }
 
   SECTION("NullStream") {
     HIP_CHECK(hipMemcpyWithStream(g_managed_a, host.data(),
@@ -277,6 +289,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D) {
   };
 
   int host[k3dDim][k3dDim][k3dDim];
+  static_assert(k3dDim*k3dDim*k3dDim < 8192, "Large array, may not be suitable for the stack");
   for (int z = 0; z < k3dDim; ++z) {
     for (int y = 0; y < k3dDim; ++y) {
       for (int x = 0; x < k3dDim; ++x) {
@@ -394,7 +407,9 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeer) {
   }
 
   HIP_CHECK(hipSetDevice(0));
-  for (int i = 0; i < kN; ++i) g_managed_a[i] = i;
+  for (int i = 0; i < kN; ++i) {
+    g_managed_a[i] = i;
+  }
 
   HIP_CHECK(hipMemcpyPeer(g_managed_b, /*dstDevice=*/1, g_managed_a,
                           /*srcDevice=*/0, kN * sizeof(int)));
@@ -475,7 +490,7 @@ static __global__ void ReadManagedInitialized(int* value) {
   *value = g_managed_initialized[0];
 }
 
-// Regression test for previous CLR implementation. 
+// Regression test for previous CLR implementation.
 //
 // Deferred managed-variable initialization must not be ordered behind the null stream.
 // The kernel references the managed symbol by name as the first managed-touching operation
@@ -524,7 +539,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_InitIndependentOfNullStream) {
 #endif  // HT_AMD
 
 // Sanity check test for the windows implementation.
-// 
+//
 // Proves the device-side pointer slot of a managed symbol was filled: a kernel reads
 // the symbol by name and reports what it found through ordinary device memory.
 //
