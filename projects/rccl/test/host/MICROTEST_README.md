@@ -588,8 +588,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     suites `NetIbInitMicrotest.*`.
   - `net_ib/reg.cc` (`NET_IB_REG_CC_PATH`, from `net_ib/reg-test.cc`);
     suites `NetIbRegMicrotest.*`.
+  - `net_ib/gin.cc` (`NET_IB_GIN_CC_PATH`, from `net_ib/gin-test.cc`);
+    suites `NetIbGinMicrotest.*`.
   - `net_ib/gdr.cc` (`NET_IB_GDR_CC_PATH`, from `net_ib/gdr-test.cc`);
     suites `NetIbGdrMicrotest.*`.
+  - `net_ib/wqe_lat_mon.cc` and `net_ib/wqe_lat_mon.h`
+    (`NET_IB_WQE_LAT_MON_CC_PATH`, from `net_ib/wqe-lat-mon-test.cc`);
+    suites `NetIbWqeLatMonMicrotest.*`.
   - `net_ib/net_ib_gid_inspect.cc` (`NET_IB_GID_INSPECT_CC_PATH`, from
     `net_ib/net-ib-gid-inspect-test.cc`); suites
     `NetIbGidInspectMicrotest.*`.
@@ -838,7 +843,7 @@ symbol.
 | `src/transport/coll_net.cc` registration entry points, macro-renamed via `fakes/transport_collnet_reg_seam.h` when the real file shares the binary | `fakes/transport_stubs.cc` |
 | selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
-| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`; `open`/`read`/`close` for `transport/net_socket.cc`) | `fakes/libc_fakes.cc` |
+| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`; `open`/`read`/`close` for `transport/net_socket.cc`; `clock_gettime` for `transport/net_ib/wqe_lat_mon.cc` and `transport/net_ib_cast/scheduler.cc`) | `fakes/libc_fakes.cc` |
 | libdl macro-renamed in one unit via `fakes/dl_seam.h` (the `misc/*symbols.cc` builders) | `fakes/dl_fakes.cc` |
 | reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
