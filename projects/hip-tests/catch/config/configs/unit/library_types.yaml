@@ -1,0 +1,11 @@
+---
+library_types:
+  Unit_hipEmulationStrategy_Values:
+    <<: *level_default
+    tags: [types]
+  Unit_hipEmulationMantissaControl_Values:
+    <<: *level_default
+    tags: [types]
+  Unit_hipEmulationSpecialValuesSupport_Values:
+    <<: *level_default
+    tags: [types]

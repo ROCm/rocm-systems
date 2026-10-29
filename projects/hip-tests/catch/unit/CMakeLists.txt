@@ -60,6 +60,7 @@ add_subdirectory(assertion)
 add_subdirectory(library)
 add_subdirectory(sanityTests)
 add_subdirectory(executionContext)
+add_subdirectory(library_types)
 
 if(ENABLE_OOB_TESTS AND HIP_PLATFORM STREQUAL "amd" AND NOT (ENABLE_SANITIZER STREQUAL "ASAN") AND UNIX)
   add_subdirectory(oob)
