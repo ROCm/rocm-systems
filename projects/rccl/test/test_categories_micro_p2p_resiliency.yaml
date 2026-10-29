@@ -1,0 +1,47 @@
+# rccl-UnitTestsMicroP2pResiliency — shared/ctest schema.
+# Host-only micro-tests for src/transport/net_ib_cast/p2p_resiliency*.cc -- port failover, the port
+# recovery protocol and its AINIC variant (no GPU, no librccl).
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+
+test_categories:
+  quick: &micro_p2p_resiliency_quick
+    description: "Smoke — host-only net_ib_cast resiliency micro-tests, sub-second."
+    test_patterns:
+      - "P2pResiliency*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_p2p_resiliency_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_p2p_resiliency_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_p2p_resiliency_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600
