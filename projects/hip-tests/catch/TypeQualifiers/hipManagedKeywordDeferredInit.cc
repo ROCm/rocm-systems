@@ -279,6 +279,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D) {
   };
 
   int host[k3dDim][k3dDim][k3dDim];
+  static_assert(k3dDim*k3dDim*k3dDim < 8192, "Large array, may not be suitable for the stack");
   for (int z = 0; z < k3dDim; ++z) {
     for (int y = 0; y < k3dDim; ++y) {
       for (int x = 0; x < k3dDim; ++x) {
