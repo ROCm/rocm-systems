@@ -25,7 +25,6 @@
 #include <new>
 #include <sstream>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include "rocm_smi/rocm_smi64Config.h"
@@ -69,13 +68,6 @@ static const std::map<rsmi_clk_type_t, amd::smi::DevInfoTypes> kClkTypeMap = {
 
 // declare pm metrics and register table function
 namespace amd::smi {
-static void CopyLegacyString(const std::string& source, char* destination, size_t capacity) {
-  if (capacity == 0) return;
-  const size_t count = std::min(source.find('\0'), std::min(source.size(), capacity - 1));
-  std::copy_n(source.data(), count, destination);
-  std::fill(destination + count, destination + capacity, '\0');
-}
-
 int present_pmmetrics(const char* sysfs_file_name, rsmi_name_value_t** kv, uint32_t* kvnum);
 int present_reg_state(const char* fname, rsmi_reg_type_t reg_type, rsmi_name_value_t** kv,
                       uint32_t* kvnum);
@@ -2411,9 +2403,9 @@ rsmi_status_t rsmi_dev_xgmi_plpd_get(uint32_t dv_ind, rsmi_dpm_policy_t* policy)
       policy->current = policy->num_supported;
       see_current = true;
     }
-    amd::smi::CopyLegacyString(description,
-                               policy->policies[policy->num_supported].policy_description,
-                               RSMI_MAX_POLICY_NAME);
+    strncpy(policy->policies[policy->num_supported].policy_description, description.c_str(),
+            RSMI_MAX_POLICY_NAME - 1);
+    policy->policies[policy->num_supported].policy_description[RSMI_MAX_POLICY_NAME - 1] = '\0';
     policy->num_supported++;
   }  //  end for
 
@@ -2517,9 +2509,9 @@ rsmi_status_t rsmi_dev_soc_pstate_get(uint32_t dv_ind, rsmi_dpm_policy_t* policy
       policy->current = policy->num_supported;
       see_current = true;
     }
-    amd::smi::CopyLegacyString(description,
-                               policy->policies[policy->num_supported].policy_description,
-                               RSMI_MAX_POLICY_NAME);
+    strncpy(policy->policies[policy->num_supported].policy_description, description.c_str(),
+            RSMI_MAX_POLICY_NAME - 1);
+    policy->policies[policy->num_supported].policy_description[RSMI_MAX_POLICY_NAME - 1] = '\0';
     policy->num_supported++;
   }  //  end for
 
@@ -2876,7 +2868,8 @@ rsmi_status_t rsmi_dev_pcie_vendor_name_get(uint32_t dv_ind, char* name, size_t 
     return RSMI_STATUS_NOT_FOUND;
   }
   memset(name, 0, len);
-  amd::smi::CopyLegacyString(vendor_name, name, len);
+  strncpy(name, vendor_name.c_str(), len - 1);
+  name[len - 1] = '\0';
   return ret;
   CATCH
 }
@@ -7513,172 +7506,6 @@ rsmi_status_t rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask) {
   CATCH
 }
 
-namespace amd::smi {
-
-template <typename Value>
-bool ReadNotificationField(std::istream& input, Value* value) {
-  input >> std::ws;
-  if (std::is_unsigned<Value>::value && input.peek() == '-') {
-    return false;
-  }
-  return static_cast<bool>(input >> *value);
-}
-
-static bool ReadNotificationField(std::istream& input, char expected) {
-  char actual;
-  return static_cast<bool>(input >> actual) && actual == expected;
-}
-
-static bool ReadNotificationField(std::istream& input, std::ios_base& (*base)(std::ios_base&)) {
-  input >> base;
-  return static_cast<bool>(input);
-}
-
-template <typename... Fields>
-bool ReadNotificationFields(std::istream& input, Fields... fields) {
-  return (ReadNotificationField(input, fields) && ...);
-}
-
-static bool ParseLegacyNotification(const std::string& line,
-                                    rsmi_evt_notification_data_t* data_item) {
-  std::istringstream input(line);
-  uint32_t event;
-  if (!ReadNotificationFields(input, std::hex, &event)) {
-    return false;
-  }
-  if (!input.eof() && !std::isspace(static_cast<unsigned char>(input.peek()))) {
-    return false;
-  }
-  std::ostringstream output;
-  uint32_t pid;
-  uint32_t sequence;
-  int64_t ns;
-  int32_t process;
-  uint32_t address;
-  uint32_t size;
-  uint32_t node;
-  uint32_t trigger;
-  char flag;
-  std::string text;
-  bool require_end = true;
-  switch (event) {
-    case RSMI_EVT_NOTIF_NONE:
-      require_end = false;
-      output << "Event type None received";
-      break;
-    case RSMI_EVT_NOTIF_VMFAULT:
-      if (!ReadNotificationFields(input, &pid, ':', &text)) return false;
-      require_end = false;
-      output << "PID: " << pid << "  task name: " << text;
-      break;
-    case RSMI_EVT_NOTIF_THERMAL_THROTTLE: {
-      uint64_t bitmask;
-      uint64_t counter;
-      if (!ReadNotificationFields(input, &bitmask, ':', &counter)) return false;
-      output << "bitmask: 0x" << std::hex << bitmask << "  counter: 0x" << counter;
-      break;
-    }
-    case RSMI_EVT_NOTIF_GPU_PRE_RESET:
-    case RSMI_EVT_NOTIF_GPU_POST_RESET:
-      if (!ReadNotificationFields(input, &sequence)) return false;
-      std::getline(input >> std::ws, text);
-      if (event == RSMI_EVT_NOTIF_GPU_PRE_RESET && text.empty()) return false;
-      output << "reset sequence number: " << sequence;
-      if (event == RSMI_EVT_NOTIF_GPU_PRE_RESET) output << "  reset cause: " << text;
-      break;
-    case RSMI_EVT_NOTIF_EVENT_MIGRATE_START:
-    case RSMI_EVT_NOTIF_EVENT_MIGRATE_END: {
-      uint32_t from;
-      uint32_t to;
-      if (!ReadNotificationFields(input, std::dec, &ns, '-', &process, '@', &address, '(', &size,
-                                  ')', std::hex, &from, '-', '>', &to))
-        return false;
-      output << "nd: " << ns << "  pid: " << process << "  start: 0x" << std::hex << address
-             << "  size: 0x" << size << "  from: 0x" << from << "  to: 0x" << to;
-      if (event == RSMI_EVT_NOTIF_EVENT_MIGRATE_START) {
-        uint32_t prefetch;
-        uint32_t preferred;
-        int32_t migrate_trigger;
-        if (!ReadNotificationFields(input, &prefetch, ':', &preferred, std::dec, &migrate_trigger))
-          return false;
-        output << "  prefetch_loc: 0x" << prefetch << "  preferred_loc: 0x" << preferred
-               << "  migrate_trigger: " << std::dec << migrate_trigger;
-      } else {
-        uint32_t error;
-        if (!ReadNotificationFields(input, std::dec, &trigger, &error)) return false;
-        output << "  migrate_trigger: " << std::dec << trigger << "  error_code: " << error;
-      }
-      break;
-    }
-    case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START:
-    case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END:
-      if (!ReadNotificationFields(input, std::dec, &ns, '-', &process, '@', std::hex, &address, '(',
-                                  &node, ')', &flag))
-        return false;
-      output << "ns: " << ns << "  pid: " << process << "  addr: 0x" << std::hex << address
-             << "  node: 0x" << node;
-      output << (event == RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START ? "  rw: " : "  migrate_udpate: ")
-             << flag;
-      break;
-    case RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION:
-    case RSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE:
-      if (!ReadNotificationFields(input, std::dec, &ns, '-', &process, std::hex, &node))
-        return false;
-      output << "ns: " << ns << "  pid: " << process << "  node: 0x" << std::hex << node;
-      if (event == RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION) {
-        if (!ReadNotificationFields(input, std::dec, &trigger)) return false;
-        output << "  evict_trigger: " << std::dec << trigger;
-      } else {
-        if (!ReadNotificationFields(input, &flag)) return false;
-        output << "  rescheduled: " << flag;
-      }
-      break;
-    case RSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU:
-      if (!ReadNotificationFields(input, std::dec, &ns, '-', &process, '@', std::hex, &address, '(',
-                                  &size, ')', &node, std::dec, &trigger))
-        return false;
-      output << "ns: " << ns << "  pid: " << process << "  addr: 0x" << std::hex << address
-             << "  size: 0x" << size << "  node: 0x" << node << "  unmap_trigger: " << std::dec
-             << trigger;
-      break;
-    case RSMI_EVT_NOTIF_EVENT_PROCESS_START:
-    case RSMI_EVT_NOTIF_EVENT_PROCESS_END:
-      require_end = false;
-      if (ReadNotificationFields(input, &pid, &text)) {
-        output << "PID: " << pid << "  task: " << text;
-      } else {
-        output << "PID:UNKNOWN  task:UNKNOWN";
-      }
-      break;
-    default:
-      require_end = false;
-      output << "Unknown event received";
-      break;
-  }
-  if (require_end) {
-    input >> std::ws;
-    if (!input.eof()) return false;
-  }
-  const std::string message = output.str();
-  CopyLegacyString(message, data_item->message, sizeof(data_item->message));
-  data_item->event = static_cast<rsmi_evt_notification_type_t>(event);
-  return true;
-}
-
-#ifdef BUILD_TESTS
-extern "C" bool amdsmi_test_parse_legacy_notification(const std::string& line,
-                                                      rsmi_evt_notification_data_t* data_item) {
-  return ParseLegacyNotification(line, data_item);
-}
-
-extern "C" void amdsmi_test_copy_legacy_string(const std::string& source, char* destination,
-                                               size_t capacity) {
-  CopyLegacyString(source, destination, capacity);
-}
-#endif
-
-}  // namespace amd::smi
-
 rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
                                           rsmi_evt_notification_data_t* data) {
   TRY
@@ -7740,12 +7567,230 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
 
       data_item = reinterpret_cast<rsmi_evt_notification_data_t*>(&data[*num_elem]);
 
+      uint32_t event;
       char event_in[MAX_EVENT_NOTIFICATION_MSG_SIZE];
       memset(event_in, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
       while (fgets(event_in, MAX_EVENT_NOTIFICATION_MSG_SIZE, anon_fp)) {
-        if (!amd::smi::ParseLegacyNotification(event_in, data_item)) {
-          continue;
+        /* Output is in format as "event_number message_information\n"
+         * Both event are expressed in hex.
+         * information is a string
+         */
+        char message[MAX_EVENT_NOTIFICATION_MSG_SIZE] = {0};
+        // parse the line here for event_number and rest of message_information
+        // sscanf(event_in, "%x %[^\n]\n", &event, message); // This is unsafe code and flagged by
+        // codeql. Replace with iss below:
+        std::istringstream iss(event_in);
+        iss >> std::hex >> event;
+        std::string message_str;
+        std::getline(iss >> std::ws, message_str);
+        snprintf(message, sizeof(message), "%s", message_str.c_str());
+
+        // parse message based on event received
+        switch (event) {
+          case RSMI_EVT_NOTIF_NONE:
+            strncpy(reinterpret_cast<char*>(&data_item->message), "Event type None received",
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+            break;
+          case RSMI_EVT_NOTIF_VMFAULT: {
+            uint32_t pid;
+            char task_name[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+            memset(task_name, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
+
+            sscanf(message, "%x:%255s\n", &pid, task_name);
+            std::stringstream final_message;
+            final_message << "PID: " << std::to_string(pid).c_str() << "  task name: " << task_name;
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_THERMAL_THROTTLE: {
+            uint64_t bitmask;
+            uint64_t counter;
+
+            sscanf(message, "%" PRIx64 ":%" PRIx64 "\n", &bitmask, &counter);
+            std::stringstream final_message;
+            final_message << "bitmask: 0x" << std::hex << bitmask << "  counter: 0x" << std::hex
+                          << counter;
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_GPU_PRE_RESET: {
+            uint32_t reset_seq_num;
+            char reset_cause[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+            memset(reset_cause, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
+
+            sscanf(message, "%x %255[^\n]\n", &reset_seq_num, reset_cause);
+            std::stringstream final_message;
+            final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str()
+                          << "  reset cause: " << reset_cause;
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_GPU_POST_RESET: {
+            uint32_t reset_seq_num;
+
+            char tmp[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+            sscanf(message, "%x %255[^\n]\n", &reset_seq_num, tmp);
+            std::stringstream final_message;
+            final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str();
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_MIGRATE_START: {
+            int64_t ns;
+            int32_t pid;
+            uint32_t start;
+            uint32_t size;
+            uint32_t from;
+            uint32_t to;
+            uint32_t prefetch_loc;
+            uint32_t preferred_loc;
+            int32_t migrate_trigger;
+
+            sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %x:%x %d\n", &ns,
+                   &pid, &start, &size, &from, &to, &prefetch_loc, &preferred_loc,
+                   &migrate_trigger);
+            std::stringstream final_message;
+            final_message << "nd: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str() << "  start: 0x" << std::hex
+                          << start << "  size: 0x" << std::hex << size << "  from: 0x" << std::hex
+                          << from << "  to: 0x" << std::hex << to << "  prefetch_loc: 0x"
+                          << std::hex << prefetch_loc << "  preferred_loc: 0x" << std::hex
+                          << preferred_loc
+                          << "  migrate_trigger: " << std::to_string(migrate_trigger).c_str();
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_MIGRATE_END: {
+            int64_t ns;
+            int32_t pid;
+            uint32_t start;
+            uint32_t size;
+            uint32_t from;
+            uint32_t to;
+            uint32_t migrate_trigger;
+            uint32_t error_code;
+
+            sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %d %d\n", &ns, &pid,
+                   &start, &size, &from, &to, &migrate_trigger, &error_code);
+            std::stringstream final_message;
+            final_message << "nd: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str() << "  start: 0x" << std::hex
+                          << start << "  size: 0x" << std::hex << size << "  from: 0x" << std::hex
+                          << from << "  to: 0x" << std::hex << to
+                          << "  migrate_trigger: " << std::to_string(migrate_trigger).c_str()
+                          << "  error_code: " << std::to_string(error_code).c_str();
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START: {
+            int64_t ns;
+            int32_t pid;
+            uint32_t addr;
+            uint32_t node;
+            char rw = '\0';
+
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, &rw);
+            std::stringstream final_message;
+            final_message << "ns: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str() << "  addr: 0x" << std::hex
+                          << addr << "  node: 0x" << std::hex << node << "  rw: " << rw;
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END: {
+            int64_t ns;
+            int32_t pid;
+            uint32_t addr;
+            uint32_t node;
+            char migrate_update = '\0';
+
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node,
+                   &migrate_update);
+            std::stringstream final_message;
+            final_message << "ns: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str() << "  addr: 0x" << std::hex
+                          << addr << "  node: 0x" << std::hex << node
+                          << "  migrate_udpate: " << migrate_update;
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION: {
+            int64_t ns;
+            int32_t pid;
+            uint32_t node;
+            uint32_t evict_trigger;
+
+            sscanf(message, "%" PRId64 "-%d %x %d\n", &ns, &pid, &node, &evict_trigger);
+            std::stringstream final_message;
+            final_message << "ns: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str() << "  node: 0x" << std::hex
+                          << node << "  evict_trigger: " << std::to_string(evict_trigger).c_str();
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE: {
+            int64_t ns;
+            int32_t pid;
+            uint32_t node;
+            char rescheduled = '\0';
+
+            sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, &rescheduled);
+            std::stringstream final_message;
+            final_message << "ns: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str() << "  node: 0x" << std::hex
+                          << node << "  rescheduled: " << rescheduled;
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU: {
+            int64_t ns;
+            int32_t pid;
+            uint32_t addr;
+            uint32_t size;
+            uint32_t node;
+            uint32_t unmap_trigger;
+
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%" PRIx32 ") %x %d\n", &ns, &pid, &addr,
+                   &size, &node, &unmap_trigger);
+            std::stringstream final_message;
+            final_message << "ns: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str() << "  addr: 0x" << std::hex
+                          << addr << "  size: 0x" << std::hex << size << "  node: 0x" << std::hex
+                          << node << "  unmap_trigger: " << std::to_string(unmap_trigger).c_str();
+
+            strncpy(reinterpret_cast<char*>(&data_item->message), final_message.str().c_str(),
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+          } break;
+          case RSMI_EVT_NOTIF_EVENT_PROCESS_START:
+          case RSMI_EVT_NOTIF_EVENT_PROCESS_END: {
+            uint32_t pid;
+            char task[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+            int rc = sscanf(message, "%x %255s", &pid, task);
+            std::stringstream msg;
+            if (rc == 2) {
+              msg << "PID: " << pid << "  task: " << task;
+            } else {
+              LOG_ERROR("Failed to parse process event payload");
+              msg << "PID:UNKNOWN  task:UNKNOWN";
+            }
+            snprintf(data_item->message, MAX_EVENT_NOTIFICATION_MSG_SIZE, "%s", msg.str().c_str());
+          } break;
+          default:
+            strncpy(reinterpret_cast<char*>(&data_item->message), "Unknown event received",
+                    MAX_EVENT_NOTIFICATION_MSG_SIZE - 1);
+            break;
         }
+        data_item->event = (rsmi_evt_notification_type_t)event;
         data_item->dv_ind = fd_indx_to_dev_id[i];
         ++(*num_elem);
 
@@ -7914,7 +7959,8 @@ rsmi_status_t rsmi_read_supported_ptl_formats(uint32_t dv_ind, char* supported, 
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
-  amd::smi::CopyLegacyString(line, supported, length);
+  std::strncpy(supported, line.c_str(), length);
+  supported[length - 1] = '\0';
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -7982,7 +8028,8 @@ rsmi_status_t rsmi_get_gpu_ptl_formats(uint32_t dv_ind, char* format, size_t len
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
-  amd::smi::CopyLegacyString(line, format, length);
+  std::strncpy(format, line.c_str(), length);
+  format[length - 1] = '\0';
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
