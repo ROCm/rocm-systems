@@ -149,10 +149,12 @@ void Device::Reset() {
   auto* dev = devices()[0];
   dev->ClearHostcallMemories();
   amd::MemObjMap::Purge(dev);
-  Create();
-  // Must follow the purge above, which released the memory backing __managed__
-  // globals: re-arms their lazy init so the next launch re-allocates them.
+  // Between the purge and this call nothing may register new memory: the reset
+  // decides a managed var survived by finding its address still in MemObjMap, so
+  // an unrelated allocation reusing that address would make a dangling slot look
+  // live. Keep this ahead of Create(), which populates the memory pools.
   PlatformState::Instance().StatCO().ResetManagedVarDevicePtr();
+  Create();
 }
 
 // ================================================================================================
