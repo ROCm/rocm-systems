@@ -38,7 +38,8 @@ namespace rocjitsu {
 
 namespace amdgpu {
 class Wavefront;
-}
+enum class VmAccessOutcome : uint8_t;
+} // namespace amdgpu
 
 namespace kmd {
 struct CwsrWaveState;
@@ -708,11 +709,14 @@ private:
   bool on_wave_alu_exception(amdgpu::Wavefront &wf);
 
   /// @brief Retain and report a memory fault to its debugger or runtime owner.
-  /// @details Sets TRAPSTS.xnack_error and uses the issuing PC for XNACK mode.
-  /// Returns true when an owner claims the wave; otherwise CU cancellation applies.
+  /// @details A translation fault sets TRAPSTS.xnack_error, reports a memory
+  /// violation and uses the issuing PC for XNACK mode. MEMVIOL without a
+  /// translation fault sets TRAPSTS.mem_viol and reports an aperture violation,
+  /// matching ROCr's trap handler. Returns true when an owner claims the wave;
+  /// otherwise CU cancellation applies.
   /// @param issue_pc Address of the memory instruction that caused the fault.
   bool on_wave_memory_violation(amdgpu::Wavefront &wf, uint64_t addr, bool is_write,
-                                uint64_t issue_pc);
+                                uint64_t issue_pc, amdgpu::VmAccessOutcome outcome);
 
   /// @brief Toggle per-access debugger checks on every compute unit.
   void set_debug_active_on_all_cus(bool active);

@@ -122,7 +122,7 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
     return VmAccessOutcome::Complete;
   }
   if (access != VmAccessOutcome::Complete) {
-    if (access == VmAccessOutcome::Faulted) {
+    if (access != VmAccessOutcome::Unavailable) {
       // An immediate fault can be retained by the same exception owner as a
       // retry fault. Discard its diagnostic producer before losing the instruction.
       [[maybe_unused]] const bool cancelled =
@@ -131,7 +131,7 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                                    .counters = counters,
                                    .wave_generation = wf.dispatch_generation(),
                                    .issue_pc = wf.pc});
-      assert(cancelled && "Faulted memory issue has no matching wait-check producer");
+      assert(cancelled && "Terminal memory issue has no matching wait-check producer");
     }
     release_wait_counters(wf, counters);
     delete inst;
@@ -607,6 +607,8 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       ((d.elem_size != sizeof(uint32_t) && d.elem_size != sizeof(uint64_t)) ||
        d.num_dwords * sizeof(uint32_t) != d.elem_size))
     return VmAccessOutcome::Malformed;
+  if (d.memviol)
+    return VmAccessOutcome::ApertureViolation;
   // Masked loads still write the zero response, without taking a VM snapshot or
   // touching backing memory, including byte and halfword requests.
   // Fully masked stores likewise perform no VM or backing-memory access.
@@ -619,7 +621,7 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     if (!d.translated.initialized || may_refresh_unready) {
       d.translated.access = wf.snapshot_vm_access();
       if (!d.translated.access)
-        return VmAccessOutcome::Faulted;
+        return VmAccessOutcome::Revoked;
       d.translated.initialized = true;
     }
     if (!d.translated.access->info().legacy_cache_compatible) {
@@ -692,7 +694,7 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     // width. VMID 0 reaches physical memory without it, so reject here to match; a
     // misaligned X2 atomic was observed to fault without updating memory on gfx90a.
     if (wf.process_id() == 0 && d.addr % d.elem_size != 0)
-      return VmAccessOutcome::Malformed;
+      return VmAccessOutcome::ApertureViolation;
     L2Cache &l2 = *wf.raw_cu().l2();
     return d.elem_size == sizeof(uint32_t)
                ? execute_cached_scalar_atomic_rmw<uint32_t>(d, l2, wf.process_id())
@@ -960,7 +962,7 @@ VmAccessOutcome execute_translated_transfer(VectorMemState &d) {
 VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d, uint64_t lane_mask) {
   if (d.atomic_op == AtomicOp::APPEND || d.atomic_op == AtomicOp::CONSUME ||
       d.atomic_op == AtomicOp::BARRIER_ARRIVE) {
-    return VmAccessOutcome::Malformed;
+    return VmAccessOutcome::Unsupported;
   }
 
   const uint32_t width = d.elem_size;
@@ -1284,6 +1286,31 @@ bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t req
 
 } // namespace
 
+// RDNA3/3.5 section 12.7, RDNA4 section 3.3.5.1 and CDNA5 section 3.3.4.1
+// require payload-aligned LDS atomics. Validate every requesting LDS lane
+// before a mixed FLAT instruction can commit global or LDS side effects.
+bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf, uint64_t lds_lanes,
+                                   uint64_t address_bias) {
+  if (d.atomic_op == AtomicOp::NONE || d.elem_size <= 1)
+    return false;
+  switch (wf.cu().arch()) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    break;
+  default:
+    return false;
+  }
+  const auto misaligned = [&](const std::array<uint64_t, 64> &addresses) {
+    for (uint64_t lanes = lds_lanes; lanes; lanes &= lanes - 1)
+      if ((addresses[std::countr_zero(lanes)] + address_bias) % d.elem_size != 0)
+        return true;
+    return false;
+  };
+  return misaligned(d.per_lane_addr) || (d.ds2_active && misaligned(d.ds2_per_lane_addr));
+}
+
 VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
   d.wg_id = wf.wg_id();
@@ -1292,9 +1319,14 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   // instruction before global or LDS side effects rather than narrowing a
   // DDS address into another workgroup's LDS allocation.
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
+  // Address-formation violations must precede all transport and LDS side effects.
+  if (d.memviol_lane_mask & request_lanes)
+    return VmAccessOutcome::ApertureViolation;
   if (rejects_flat_dds(inst, wf, request_lanes))
-    return VmAccessOutcome::Faulted;
+    return VmAccessOutcome::Unsupported;
   const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
+  if (rejects_misaligned_lds_atomic(d, wf, shared_lanes))
+    return VmAccessOutcome::ApertureViolation;
   const VmAccessOutcome outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
   if (outcome != VmAccessOutcome::Complete || shared_lanes == 0)
     return outcome;
@@ -1308,9 +1340,6 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
 VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wavefront &wf,
                                                           uint64_t request_lanes) {
   const uint64_t swizzled_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
-  if (d.requires_scratch_backing && swizzled_lanes != 0 && wf.scratch_base() == 0)
-    return VmAccessOutcome::Faulted;
-
   if (wf.address_space()) {
     const bool has_progress = d.translated.request_index != 0 ||
                               d.translated.completed_bytes != 0 || d.translated.atomic_lane != 0 ||
@@ -1320,9 +1349,20 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
     if (!d.translated.initialized || may_refresh_unready) {
       d.translated.access = wf.snapshot_vm_access();
       if (!d.translated.access)
-        return VmAccessOutcome::Faulted;
+        return VmAccessOutcome::Revoked;
       d.translated.initialized = true;
     }
+  }
+  if (d.requires_scratch_backing && swizzled_lanes != 0 && wf.scratch_base() == 0) {
+    // ROCr needs the VM fault event as well as the queue's memory-violation status.
+    if (d.translated.access) {
+      const VmAccessKind kind = d.atomic_op != AtomicOp::NONE ? VmAccessKind::Atomic
+                                : d.is_load                   ? VmAccessKind::Read
+                                                              : VmAccessKind::Write;
+      return d.translated.access->report_translation_fault(
+          d.per_lane_addr[std::countr_zero(swizzled_lanes)], kind);
+    }
+    return VmAccessOutcome::Faulted;
   }
   const bool translated_address_space =
       d.translated.access && !d.translated.access->info().legacy_cache_compatible;
@@ -1409,8 +1449,13 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   d.wf_size = wf.wf_size();
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   // Uniform shared-aperture FLAT must reject unsupported DDS too.
+  // Address-formation violations must precede all transport and LDS side effects.
+  if (d.memviol_lane_mask & request_lanes)
+    return VmAccessOutcome::ApertureViolation;
   if (rejects_flat_dds(inst, wf, request_lanes))
-    return VmAccessOutcome::Faulted;
+    return VmAccessOutcome::Unsupported;
+  if (rejects_misaligned_lds_atomic(d, wf, request_lanes))
+    return VmAccessOutcome::ApertureViolation;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   if (d.lds_stack_inputs) {

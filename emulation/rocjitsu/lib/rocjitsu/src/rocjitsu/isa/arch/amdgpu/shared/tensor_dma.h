@@ -667,7 +667,7 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   if (wf.address_space()) {
     state.access = wf.snapshot_vm_access();
     if (!state.access)
-      state.outcome = VmAccessOutcome::Faulted;
+      state.outcome = VmAccessOutcome::Revoked;
   }
   return util::Result::success();
 }
@@ -801,7 +801,7 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
       (state.elements.empty() || state.elements.front().completed_bytes == 0)) {
     state.access = wf.snapshot_vm_access();
     if (!state.access)
-      return state.outcome = VmAccessOutcome::Faulted;
+      return state.outcome = VmAccessOutcome::Revoked;
   }
 
   while (state.next_element < state.elements.size()) {

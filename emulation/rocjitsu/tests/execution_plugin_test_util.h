@@ -68,6 +68,11 @@ public:
                                                    amdgpu::Wavefront &wf) {
     return cu.route_memory_inst(inst, wf);
   }
+
+  static void handle_memory_access_failure(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wf,
+                                           amdgpu::VmAccessOutcome outcome, uint64_t issue_pc) {
+    cu.handle_memory_access_failure(wf, outcome, issue_pc);
+  }
 };
 
 } // namespace rocjitsu::test

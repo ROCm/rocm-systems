@@ -1336,6 +1336,25 @@ TEST(GpuVmTranslation, RevokedSnapshotIsDistinctFromTransientUnavailability) {
             VmAccessOutcome::Revoked);
 }
 
+TEST(GpuVmTranslation, ExplicitTranslationFaultDoesNotNotifyARetiredOwner) {
+  GpuVm gpu_vm;
+  auto physical = std::make_shared<TestPhysicalMemory>();
+  std::vector<std::pair<uint64_t, VmAccessKind>> faults;
+  const auto handle = gpu_vm.register_address_space(
+      7, std::make_shared<ByteTranslator>(), physical,
+      [&](uint64_t address, VmAccessKind kind) { faults.emplace_back(address, kind); });
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  EXPECT_EQ(access->report_translation_fault(0x40, VmAccessKind::Write), VmAccessOutcome::Faulted);
+  EXPECT_EQ(faults, (std::vector<std::pair<uint64_t, VmAccessKind>>{{0x40, VmAccessKind::Write}}));
+  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+  EXPECT_EQ(access->report_translation_fault(0x80, VmAccessKind::Atomic), VmAccessOutcome::Revoked);
+  EXPECT_EQ(faults.size(), 1u);
+  EXPECT_EQ(physical->read_calls, 0u);
+  EXPECT_TRUE(physical->system.empty());
+}
+
 TEST(GpuVmTranslation, DeviceGartPublishesOnInvalidateAndRejectsItsHandleAfterReset) {
   GpuVm gpu_vm;
   auto physical = std::make_shared<TestPhysicalMemory>();

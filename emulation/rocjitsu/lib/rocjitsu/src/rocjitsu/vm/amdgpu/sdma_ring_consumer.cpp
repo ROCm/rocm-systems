@@ -19,8 +19,10 @@ SdmaRingStatus map(VmAccessOutcome outcome) {
   case VmAccessOutcome::Unavailable:
     return SdmaRingStatus::Blocked;
   case VmAccessOutcome::Faulted:
+  case VmAccessOutcome::ApertureViolation:
     return SdmaRingStatus::Faulted;
   case VmAccessOutcome::Malformed:
+  case VmAccessOutcome::Unsupported:
     return SdmaRingStatus::Malformed;
   case VmAccessOutcome::Revoked:
     return SdmaRingStatus::Faulted;

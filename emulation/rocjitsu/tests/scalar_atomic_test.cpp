@@ -485,7 +485,7 @@ TEST_P(ScalarAtomicTest, MisalignedTwoDwordAtomicFaultsWithoutUpdate) {
   write_sgprs(4, 2, 9);
   auto inst = prepare({.sdata = 4, .glc = 1, .imm = 1, .offset = 4}, cdna3::kSAtomicDecX2Smem);
   ASSERT_NE(inst, nullptr);
-  EXPECT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Malformed);
+  const VmAccessOutcome outcome = pipeline->issue(inst.release(), *wf);
   EXPECT_TRUE(wf->wait_counters().empty());
   EXPECT_EQ(memory.read64(kAddress), 0x5'0000'0005u);
   EXPECT_EQ(memory.read64(kAddress + 8), 0x5'0000'0005u);
@@ -493,11 +493,13 @@ TEST_P(ScalarAtomicTest, MisalignedTwoDwordAtomicFaultsWithoutUpdate) {
   if (backing) {
     EXPECT_EQ(backing->load_attempts, 0u);
     EXPECT_EQ(backing->update_attempts, 0u);
-    // GpuVmAccess reports the violation to the runtime.
+    // GpuVmAccess rejects the misaligned atomic and reports it to the runtime.
+    EXPECT_EQ(outcome, VmAccessOutcome::Malformed);
     EXPECT_EQ(vm_faults, (std::vector<std::pair<uint64_t, VmAccessKind>>{
                              {kAddress + 4, VmAccessKind::Atomic}}));
   } else {
-    // Physical memory has no fault reporter.
+    // Physical memory has no fault reporter, so VMID 0 publishes the violation itself.
+    EXPECT_EQ(outcome, VmAccessOutcome::ApertureViolation);
     EXPECT_TRUE(vm_faults.empty());
   }
 }

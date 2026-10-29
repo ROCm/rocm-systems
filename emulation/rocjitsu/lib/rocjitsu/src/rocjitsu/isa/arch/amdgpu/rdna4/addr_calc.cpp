@@ -75,9 +75,11 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   // RDNA4 section 8.1.1 restricts the immediate for buffer loads, the sum otherwise.
   const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
   const bool ordinary_load = amdgpu::addr_calc::gfx12_smem_is_ordinary_load_op(inst.op);
-  if ((buffer_load && immediate < 0) || (ordinary_load && immediate + *soffset < 0))
-    wf.report_undefined_behavior(buffer_load ? "negative scalar-buffer load immediate"
-                                             : "negative combined scalar-memory offset");
+  if (ordinary_load && immediate + *soffset < 0)
+    wf.report_undefined_behavior("negative combined scalar-memory offset");
+  // A negative IOFFSET applied to S_BUFFER returns MEMVIOL (section 8.1, SMEM fields).
+  if (state && buffer_load && immediate < 0)
+    state->memviol = true;
   if (buffer_load) {
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state, align_mask,
                                                     align_mask);
@@ -114,8 +116,19 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
     } else {
       vaddr = vaddr_region.lane64(0, lane);
     }
-    uint64_t addr = saddr_val + vaddr + offset;
-    addr = amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Linear).value;
+    // RDNA4 section 11.3 checks the aperture before adding IOFFSET.
+    const uint64_t base_address = saddr_val + vaddr;
+    if (amdgpu::flat_address_in_hole(wf, base_address, amdgpu::FlatPrivateLayout::Linear))
+      d.memviol_lane_mask |= uint64_t{1} << lane;
+    uint64_t addr = base_address + offset;
+    const auto translated =
+        amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Linear);
+    // IOFFSET crossing into another aperture is undefined on RDNA.
+    // For defined accesses, final-address translation preserves private provenance.
+    if (translated.private_address && d.atomic_op != amdgpu::AtomicOp::NONE &&
+        d.elem_size == sizeof(uint64_t))
+      d.memviol_lane_mask |= uint64_t{1} << lane;
+    addr = translated.value;
     d.per_lane_addr[lane] = addr;
   }
 }

@@ -44,6 +44,23 @@ inline FlatAddress translate_flat_address(const Wavefront &wf, uint64_t address,
           true, true};
 }
 
+// Global FLAT addresses are sign-extended from 48 bits on RDNA3-4 and
+// 57 bits on CDNA5. Shared and private apertures are valid exceptions.
+inline bool flat_address_in_hole(const Wavefront &wf, uint64_t address, FlatPrivateLayout layout) {
+  const uint64_t high48 = address >> 47;
+  if (high48 == 0 || high48 == (UINT64_MAX >> 47))
+    return false;
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+    const uint64_t high57 = address >> 56;
+    if (high57 == 0 || high57 == (UINT64_MAX >> 56))
+      return false;
+  }
+  if (wf.shared_aperture_base() != 0 && address >= wf.shared_aperture_base() &&
+      address <= wf.shared_aperture_limit())
+    return false;
+  return !translate_flat_address(wf, address, 0, layout).private_address;
+}
+
 inline uint64_t flat_vector_offset(uint64_t value, bool signed_offset, unsigned scale = 1) {
   return signed_offset ? static_cast<uint64_t>(int64_t{static_cast<int32_t>(value)} * scale)
                        : value;

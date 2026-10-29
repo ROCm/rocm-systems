@@ -63,6 +63,10 @@ enum class VmAccessOutcome : uint8_t {
   Faulted,     ///< The mapping is absent or rejects the requested access.
   Malformed,   ///< The address, page-table encoding, or request is invalid.
   Revoked,     ///< This snapshot was retired; the owner must recapture or terminate.
+  /// The instruction raised MEMVIOL without a translation fault. No transport
+  /// reported it, so the issuer must publish it.
+  ApertureViolation,
+  Unsupported, ///< The emulator cannot execute this access.
 };
 
 /// @brief Memory domain selected by a translation.
@@ -713,6 +717,10 @@ public:
                       uint32_t &next_lane) const;
   [[nodiscard]] std::byte *resolve_host_pointer(uint64_t address, std::size_t size = 1) const;
   [[nodiscard]] std::pair<uint64_t, uint64_t> host_range(uint64_t address) const;
+  /// @brief Report a translation fault for an access rejected before a memory walk.
+  /// @details A retired snapshot returns Revoked without notifying its former owner.
+  [[nodiscard]] VmAccessOutcome report_translation_fault(uint64_t address,
+                                                         VmAccessKind access) const;
 
 private:
   friend class GpuVm;

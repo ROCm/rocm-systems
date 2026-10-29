@@ -510,11 +510,20 @@ VmAccessOutcome GpuVmAccess::probe_impl(uint64_t address, std::size_t size, VmAc
   return VmAccessOutcome::Complete;
 }
 
+VmAccessOutcome GpuVmAccess::report_translation_fault(uint64_t address, VmAccessKind access) const {
+  if (!access_state_)
+    return VmAccessOutcome::Unavailable;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  report_terminal_fault(address, access, VmAccessOutcome::Faulted);
+  return VmAccessOutcome::Faulted;
+}
+
 void GpuVmAccess::report_terminal_fault(uint64_t address, VmAccessKind access,
                                         VmAccessOutcome outcome) const {
   if (access_state_ && access_state_->fault_reporter && *access_state_->fault_reporter &&
-      outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable &&
-      outcome != VmAccessOutcome::Revoked) {
+      (outcome == VmAccessOutcome::Faulted || outcome == VmAccessOutcome::Malformed)) {
     (*access_state_->fault_reporter)(address, access);
   }
 }

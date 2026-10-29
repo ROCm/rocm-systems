@@ -436,9 +436,11 @@ public:
   /// Deferred data and tensor-DMA faults supply zero/false when lane metadata is
   /// unavailable. The issue PC identifies the faulting instruction in all cases;
   /// data-fault callbacks see the advanced resume PC and may rewind it for XNACK.
+  /// outcome distinguishes translation faults (Faulted) from instruction
+  /// MEMVIOL (ApertureViolation); only translation faults can replay under XNACK.
   /// @returns True if the frontend owns the fault and retains the wave.
-  using MemoryViolationHandler =
-      std::function<bool(Wavefront &wf, uint64_t address, bool is_write, uint64_t issue_pc)>;
+  using MemoryViolationHandler = std::function<bool(Wavefront &wf, uint64_t address, bool is_write,
+                                                    uint64_t issue_pc, VmAccessOutcome outcome)>;
   void set_memory_violation_handler(MemoryViolationHandler cb) {
     memory_violation_handler_ = std::move(cb);
   }
@@ -1474,6 +1476,8 @@ protected:
   void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
   void fail_gws_wait(Wavefront &wf, std::string_view reason);
+  /// @brief Fail a dispatch and notify its owner of a non-architectural failure.
+  void fail_wave_execution(Wavefront &wf, std::string_view reason);
 
   mutable std::recursive_mutex wave_state_mutex_;
   /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.

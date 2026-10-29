@@ -152,9 +152,14 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     }
     uint64_t addr = saddr_val + vaddr + offset;
     if (decode_flat_private) {
+      // CDNA5 section 10.1.1 checks the final address, including IOFFSET.
+      if (amdgpu::flat_address_in_hole(wf, addr, amdgpu::FlatPrivateLayout::EncodedLane))
+        d.memviol_lane_mask |= uint64_t{1} << lane;
       const auto translated =
           amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane);
       if (translated.private_address) {
+        if (d.atomic_op != amdgpu::AtomicOp::NONE && d.elem_size == sizeof(uint64_t))
+          d.memviol_lane_mask |= uint64_t{1} << lane;
         addr = translated.value;
         d.scratch_swizzle = true;
         d.requires_scratch_backing = true;
@@ -196,9 +201,10 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
     return std::nullopt;
   int64_t off = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
-  // CDNA5 section 8.1.1 allows negative ordinary-load offsets, but not buffer IOFFSET.
-  if (buffer_load && off < 0)
-    wf.report_undefined_behavior("negative scalar-buffer load immediate");
+  // CDNA5 section 8.1.1 allows negative ordinary-load offsets; a negative buffer
+  // IOFFSET returns MEMVIOL.
+  if (state && buffer_load && off < 0)
+    state->memviol = true;
   const uint64_t align_mask = std::min<uint64_t>(access_size_bytes, 4u) - 1;
   const uint32_t scale = inst.scale_offset && !buffer_load ? access_size_bytes : 1;
   off &= ~static_cast<int64_t>(align_mask);
