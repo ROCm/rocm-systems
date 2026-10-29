@@ -566,7 +566,21 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroTransport`** — `src/transport/`, one binary for units
   sharing the socket, network-plugin and GDRCopy seams; tests mirror the source
   tree under `test/host/transport/`. See
-  `test_categories_micro_transport.yaml`.
+  `test_categories_micro_transport.yaml`. The target defines
+  `ENABLE_FAULT_INJECTION` in both build modes so `net_ib_gid_inspect.cc` is
+  present consistently.
+  - `net_ib/common.cc` and host helpers in `net_ib/common.h`
+    (`NET_IB_COMMON_CC_PATH`, from `net_ib/common-test.cc`); suites
+    `NetIbCommonMicrotest.*`.
+  - `net_ib/init.cc` (`NET_IB_INIT_CC_PATH`, from `net_ib/init-test.cc`);
+    suites `NetIbInitMicrotest.*`.
+  - `net_ib/reg.cc` (`NET_IB_REG_CC_PATH`, from `net_ib/reg-test.cc`);
+    suites `NetIbRegMicrotest.*`.
+  - `net_ib/gdr.cc` (`NET_IB_GDR_CC_PATH`, from `net_ib/gdr-test.cc`);
+    suites `NetIbGdrMicrotest.*`.
+  - `net_ib/net_ib_gid_inspect.cc` (`NET_IB_GID_INSPECT_CC_PATH`, from
+    `net_ib/net-ib-gid-inspect-test.cc`); suites
+    `NetIbGidInspectMicrotest.*`.
   - `rma_socket.cc` (`RMA_SOCKET_CC_PATH`, from `rma-socket-test.cc`);
     suites `RmaSocketMicrotest.*`.
   - `rma_socket_mem.cc` (`RMA_SOCKET_MEM_CC_PATH`, from
@@ -576,6 +590,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `RmaSocketProgressRecverMicrotest.*`.
   - `rma_socket_setup.cc` (`RMA_SOCKET_SETUP_CC_PATH`, from
     `rma-socket-setup-test.cc`); suites `RmaSocketSetupMicrotest.*`.
+
+  The `net_ib` tests share three headers in `transport/net_ib/`:
+  `NetIbGlobals.h` (`NetIbResetGlobals()`, which every fixture's TearDown
+  calls because the device tables are process-wide), `NetIbSupportSeams.h`
+  (the `gdr.cc` capability probes a unit is renamed onto, since `gdr-test.cc`
+  compiles the real `gdr.cc`) and `NetIbDmaBufProbe.h`. Device discovery runs
+  against `IbVerbsWorld.h`, the fake HCAs and verbs libraries that
+  `FakeIbWorld` in `net-ib-cast-test-common.h` also builds on.
 
 - **`rccl-UnitTestsMicroNetIbCastDataPath`** — the net_ib_cast data path in
   `src/transport/net_ib_cast/`: `p2p.cc` (`NET_IB_CAST_P2P_CC_PATH`, suites
@@ -779,8 +801,12 @@ symbol.
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
-| `src/transport/net_ib/` (`ncclParamIbQpsPerConn`, `ncclIbGidInfoQuery`, `ncclNetIb`, GDR flush-flag support and enable) | `fakes/transport_net_ib_fakes.cc` |
+| `src/transport/net_ib/common.cc` (`ncclNetIb`, targets that do not compile the real file) | `fakes/transport_net_ib_common_fakes.cc` |
+| `src/transport/net_ib/connect.cc` (`ncclParamIbQpsPerConn`, `ncclIbGidInfoQuery`, GDR flush-flag support and enable; listen, connect, accept and close fail loudly) | `fakes/transport_net_ib_fakes.{h,cc}` |
 | `src/transport/net_ib/connect.cc`'s `rcclNetP2pPolicy` and GDR flush-flag accessors (targets that do not compile the real file) | `fakes/transport_net_ib_connect_net_fakes.cc` |
+| `src/transport/net_ib/p2p.cc` | `fakes/transport_net_ib_p2p_fakes.{h,cc}` |
+| `src/transport/net_ib/p2p_resiliency.cc` | `fakes/transport_net_ib_resiliency_fakes.{h,cc}` |
+| `src/transport/net_ib/p2p_resiliency_recovery.cc` | `fakes/transport_net_ib_recovery_fakes.{h,cc}` |
 | `src/transport/net_ib_cast/common.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_common_fakes.cc` |
 | `src/transport/net_ib_cast/{connect,p2p,p2p_resiliency,p2p_resiliency_recovery,qp_sharing,scheduler}.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_<file>_fakes.cc` |
 | `src/transport/net_ib_cast/init.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_init_fakes.cc` |

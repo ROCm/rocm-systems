@@ -97,6 +97,18 @@ ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, cha
   return g_ncclOsTopoGetStrFromSys(path, fileName, strValue, maxLen);
 }
 
+std::function<ncclResult_t(const char*, const char*, char*, int)> SysfsAnswers(const char* bios,
+                                                                              const char* numaBalancing) {
+  return [=](const char*, const char* file, char* value, int maxLen) {
+    const char* answer = std::strcmp(file, "bios_version") == 0     ? bios
+                         : std::strcmp(file, "numa_balancing") == 0 ? numaBalancing
+                                                                     : nullptr;
+    if (answer == nullptr) return ncclSystemError;
+    std::snprintf(value, maxLen, "%s", answer);
+    return ncclSuccess;
+  };
+}
+
 // fillInfo MLOPart PCI-function fallback (init.cc ~1093). The default models what sysfs actually
 // reports for a GPU's own BDF -- an accelerator class -- rather than an empty string. An empty
 // default is what let the mloPart=0 stamp on non-partitioned GPUs ship green: with it, isGpu is 0
