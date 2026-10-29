@@ -126,19 +126,6 @@ testing::AssertionResult load_system_graph_from_string_valid(config::SystemGraph
 }
 
 // Call with ASSERT_TRUE so failed setup stops the consuming test.
-testing::AssertionResult load_config_for_node_valid(config::LoadedConfig &output,
-                                                    const std::string &path,
-                                                    const std::string &schema,
-                                                    std::string_view node_id,
-                                                    uint32_t host_threads) {
-  util::StringDiagnostic diagnostic;
-  return require_config_value(
-      output,
-      config::load_config_for_node(path, schema, node_id, diagnostic.emitter(), host_threads),
-      diagnostic);
-}
-
-// Call with ASSERT_TRUE so failed setup stops the consuming test.
 testing::AssertionResult
 load_config_from_string_for_node_valid(config::LoadedConfig &output, const std::string &json,
                                        const std::string &schema, std::string_view node_id,
@@ -1036,9 +1023,9 @@ TEST(SystemGraphTest, ProjectsGfx1250TwoNodeNetFixture) {
 
   config::LoadedConfig first;
 
-  ASSERT_TRUE(load_config_for_node_valid(first, path, rocjitsu::kEmbeddedSchema, "node0", 8));
+  ASSERT_TRUE(test::load_valid_config_for_node(path, first, "node0", 8));
   config::LoadedConfig second;
-  ASSERT_TRUE(load_config_for_node_valid(second, path, rocjitsu::kEmbeddedSchema, "node1", 8));
+  ASSERT_TRUE(test::load_valid_config_for_node(path, second, "node1", 8));
   EXPECT_EQ(first.local_node_id, "node0");
   EXPECT_EQ(second.local_node_id, "node1");
   ASSERT_EQ(first.devices.size(), 1u);

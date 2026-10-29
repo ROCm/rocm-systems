@@ -20,7 +20,7 @@ namespace rocjitsu::test {
 
 /// Resolve expected-valid settings, preserving output on failure.
 /// Call with ASSERT_TRUE before consuming output.
-inline testing::AssertionResult
+[[nodiscard]] inline testing::AssertionResult
 resolve_valid_execution_threads(config::ExecutionThreadAllocation &output,
                                 const config::ExecutionThreadSettings &settings,
                                 uint32_t host_threads) {
