@@ -116,8 +116,9 @@ struct FunctionalQuantumResult {
 /// hardware reclaims a wave's resources at termination (there is no separate lazy
 /// retirement pass).
 ///
-/// Each step() call picks the next active wavefront (round-robin) and executes
-/// one instruction using the ISA-specific decoder.
+/// Each step() call issues one instruction from every RUNNING wavefront, in slot
+/// order, using the ISA-specific decoder. A clocked driver that issues from only
+/// some of them uses run_issue_cycle().
 ///
 /// The execution shell (event scheduling, activation, idle detection) is
 /// provided by ExecComputeUnit<Mode> below. ISA-specific parts (VGPR register
@@ -243,6 +244,37 @@ public:
   /// @retval false No wavefronts remain resident (the CU is idle).
   bool step() override;
 
+  /// @brief Run one cycle for a clocked driver that chooses which waves issue.
+  /// @details Does what step() does each cycle -- retries pipeline work,
+  /// applies WAITCNT, barrier, and ending transitions, and counts down every
+  /// running wave's S_SLEEP -- but issues an instruction only from the waves in
+  /// @p selected_slots, in slot order. A selected wave that is not RUNNING, is
+  /// debug-paused, or spends this cycle sleeping does not issue. Nor does one
+  /// whose instruction fetch must be retried, or whose vector instruction VSKIP
+  /// skips. A driver with nothing to issue still runs the cycle so waiting waves
+  /// can wake. Call on this CU's engine thread. Completions reach the CP once
+  /// the cycle releases the wave-state lock.
+  ///
+  /// The driver must own this CU's execution: neither the CU's serial tick nor
+  /// the command processor's dispatch pool may issue for it while the driver
+  /// calls this. To take ownership, call set_pool_driven(true), which retires
+  /// the serial tick and routes the CU's wakeups to its pool-ready callback,
+  /// then replace that callback with set_on_pool_ready(). Do both after
+  /// CommandProcessor::add_compute_unit(), which sets both itself. This holds
+  /// only while the command processor keeps one dispatch thread: with more, its
+  /// dispatch pool can run run_quantum() on pool-driven CUs, and changing the
+  /// count with set_dispatch_threads() rewrites every CU's pool-driven mode.
+  /// Debug builds assert both conditions; the replaced callback and the
+  /// deferred cycle below remain the driver's responsibility.
+  ///
+  /// Dispatch invokes the pool-ready callback synchronously, before the command
+  /// processor has finished initializing the wave, so the callback must only
+  /// schedule a later cycle and return. Calling this from it can execute a wave
+  /// whose EXEC, identity and initial registers are not yet set.
+  /// @param selected_slots Bit i selects the wave in slot i.
+  /// @returns The selected slots whose wave issued an instruction.
+  uint64_t run_issue_cycle(uint64_t selected_slots);
+
   /// @brief Free a halted wavefront's register allocations and reset its slot.
   /// @details Called from Wavefront::halt() at s_endpgm so a terminated wave
   /// releases its SGPR/VGPR blocks immediately, exactly as hardware reclaims
@@ -300,7 +332,7 @@ public:
   /// @brief Execute up to one functional quantum of step() iterations on this CU.
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
-    const GpuVmAccessBatchGuard vm_access_batch;
+    const InstructionFetchScope fetch_scope(*this);
     // Publish progress once per process per quantum, outside the instruction hot path.
     class ProgressBatch {
     public:
@@ -318,11 +350,6 @@ public:
       ComputeUnitCore &cu_;
       bool nested_;
     } progress_batch{*this};
-    // Reuse instruction-fetch snapshots only within this execution quantum.
-    // Restore the outer scope on exceptions and nested quantum execution too.
-    InstructionVmSnapshot snapshot;
-    snapshot.compute_unit = this;
-    ScopedInstructionVmSnapshot scope(&snapshot);
     // A request left by direct step() execution must not shorten this quantum.
     functional_yield_requested_ = false;
     gws_wait_yield_requested_ = false;
@@ -444,6 +471,26 @@ public:
   }
   using AluExceptionHandler = std::function<bool(Wavefront &wf)>;
   void set_alu_exception_handler(AluExceptionHandler cb) { alu_exception_handler_ = std::move(cb); }
+
+  /// @brief Notify a clocked driver when a dispatch reserves a wave slot.
+  /// @details Install before execution. Called on the dispatching engine thread,
+  /// under the CU wave-state lock, before the CU schedules work. The wave's slot,
+  /// PC, wave size, register allocation and dispatch generation are set. Its
+  /// dispatch and process identity, EXEC, MODE, address space and initial
+  /// registers are not: the command processor and checkpoint restore apply them
+  /// after this returns.
+  ///
+  /// A reservation is not a launch. A command-processor dispatch that fails
+  /// after this call frees the slot without halting the wave, and a wave in
+  /// ENDING can retire in a cycle that selects nothing. Track occupancy from
+  /// each slot's state and dispatch generation after dispatch and after every
+  /// cycle, not from this callback, halts or issued bits. The handler must not
+  /// take locks or dispatch.
+  using WaveReservationHandler = std::function<void(Wavefront &wf)>;
+  void set_wave_reservation_handler(WaveReservationHandler cb) {
+    wave_reservation_handler_ = std::move(cb);
+  }
+
   /// @brief Mark a debug session as attached to or detached from this CU.
   /// @details Every transition publishes an I$ invalidation. A debugger writes
   /// breakpoints straight into code memory with none of the maintenance that
@@ -1213,6 +1260,11 @@ public:
   /// @returns Const pointer to the ISA decoder.
   const Decoder *decoder() const { return decoder_.get(); }
 
+  /// @brief Create a decoder for the ISA a CU with @p config executes.
+  /// @details For components that decode the CU's code themselves, such as a
+  /// timing model looking ahead, so both decode the same target.
+  static std::unique_ptr<Decoder> create_decoder(const Config &config);
+
   /// @brief Replace the concrete decoder in scheduler-level tests.
   /// @details Some concrete targets intentionally remain unavailable to full
   /// simulator configuration while individual instructions acquire execution
@@ -1309,8 +1361,15 @@ protected:
   /// @brief Update wavefront states (WAITCNT, BARRIER, ENDING transitions).
   void update_wf_states();
 
+  /// @brief Whether issue_instruction() issued an instruction. One that issues
+  /// and then fails, faults or halts the wave still issued.
+  enum class IssueOutcome : uint8_t {
+    /// None was fetched and decoded, or VSKIP skipped it.
+    NotIssued,
+    Issued,
+  };
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
-  void issue_instruction(Wavefront *wf);
+  IssueOutcome issue_instruction(Wavefront *wf);
   /// @brief Try the diagnostic adjacent-MMA batch modes before ordinary issue.
   /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
   void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
@@ -1320,15 +1379,20 @@ protected:
                              InstructionExecutionError error, std::string_view failure_detail = {});
   struct NoAsyncWindow {};
   /// @brief Share ordinary instruction execution with the optional scoreboard adapter.
+  /// @returns Whether an instruction issued, as for issue_instruction().
   template <bool EnableAsync>
-  void issue_instruction_impl(
+  IssueOutcome issue_instruction_impl(
       Wavefront *wf,
       std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {},
       std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
   /// @brief Advance CU scheduling with compile-time selection of the issue adapter.
+  /// @param selected_slots Slots whose running wave may issue; every slot by default.
+  /// @param issued If set, receives the selected slots that issued an instruction.
+  /// Only the ordinary issue path reports them.
   template <bool EnableAsync>
   bool step_impl(MmaAdmissionCache *admission = nullptr, uint32_t async_wave_size = 0,
-                 bool has_accvgprs = false);
+                 bool has_accvgprs = false, uint64_t selected_slots = ~uint64_t{0},
+                 uint64_t *issued = nullptr);
 
   /// @brief Apply any I$ invalidation a debug attach or detach published.
   /// @details Runs on this CU's own thread, which is the I$'s sole accessor.
@@ -1540,21 +1604,24 @@ protected:
   ExecutionFailureHandler execution_failure_handler_;
   MemoryViolationHandler memory_violation_handler_;
   AluExceptionHandler alu_exception_handler_;
+  WaveReservationHandler wave_reservation_handler_;
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
   GpuVm *gpu_vm_ = nullptr;
 
-  /// @brief Instruction-fetch access retained for one CU's functional quantum.
+  /// @brief Instruction-fetch access retained for one run of issue: a CU's
+  /// functional quantum or clocked issue cycle.
   /// @details CU, VM and address-space identity prevent reuse across nested dispatches.
   struct InstructionVmSnapshot {
     ComputeUnitCore *compute_unit = nullptr;
     GpuVm *owner = nullptr;
-    AddressSpaceHandle address_space;
+    AddressSpaceHandle address_space{};
     uint32_t vmid = 0;
-    std::optional<GpuVmAccess> access;
+    std::optional<GpuVmAccess> access{};
   };
-  /// Only the scope pointer is thread-local; the snapshot itself lives on the
-  /// quantum's stack and releases all backing references before returning.
+  /// Only the scope pointer is thread-local; the snapshot itself lives in the
+  /// InstructionFetchScope of the running quantum or issue cycle and releases
+  /// all backing references before that returns.
   static constinit thread_local InstructionVmSnapshot *instruction_vm_snapshot_;
   /// @brief Restore the enclosing fetch scope after a quantum or nested issue.
   /// @details A null scope prevents nested memory requests from borrowing fetch access.
@@ -1568,6 +1635,19 @@ protected:
 
   private:
     InstructionVmSnapshot *previous_;
+  };
+  /// @brief Batch VM accesses and reuse instruction-fetch snapshots for one run
+  /// of issue: a functional quantum or a clocked issue cycle. Restores the outer
+  /// scope on exceptions and nested runs too.
+  class InstructionFetchScope {
+  public:
+    explicit InstructionFetchScope(ComputeUnitCore &cu)
+        : snapshot_{.compute_unit = &cu}, scope_(&snapshot_) {}
+
+  private:
+    const GpuVmAccessBatchGuard vm_access_batch_;
+    InstructionVmSnapshot snapshot_;
+    ScopedInstructionVmSnapshot scope_;
   };
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
