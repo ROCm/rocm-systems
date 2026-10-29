@@ -667,6 +667,10 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   if(DL_DEVICE_PROFILE_RT)
     set(_dl_profile_rt_arg "--profile-rt=${DL_DEVICE_PROFILE_RT}")
   endif()
+  set(_dl_dasan_rt_arg "")
+  if(BUILD_DEVICE_ADDRESS_SANITIZER)
+    set(_dl_dasan_rt_arg "--dasan-rt=${RCCL_DASAN_DEVICE_RT}")
+  endif()
 
   add_custom_command(
     OUTPUT  ${ARCH_DEVICE_ELF}
@@ -679,6 +683,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
       ${_rocshmem_bitcode_arg}
       ${_dl_profile_rt_arg}
+      ${_dl_dasan_rt_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}

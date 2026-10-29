@@ -591,7 +591,7 @@ def device_compile_cmd(clang, target_id, forwarded_flags, asm_out, source):
     ]
 
 
-def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
+def build_link_cmd(lld, output, rsp_path, arch, profile_rt, dasan_rt=None):
     """Assemble the ld.lld argv for the per-arch device.elf link.
 
     When a device profile-runtime archive is given (ENABLE_FULL_COVERAGE), it
@@ -608,14 +608,22 @@ def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
     hand-invoked; fail loudly instead of falling through to a link that leaves
     __llvm_profile_runtime / __start___llvm_prf_* unresolved as an opaque lld
     dump.
+
+    The device address sanitizer runtime (--dasan-rt, also bitcode) is linked
+    the way clang links it: whole-archive, with dynamic symbols exported so the
+    host runtime can look them up in the loaded image.
     """
     link_cmd = [lld, '-shared', '-o', output, f'@{rsp_path}']
+    for flag, rt in (('--profile-rt', profile_rt), ('--dasan-rt', dasan_rt)):
+        if rt and not os.path.exists(rt):
+            raise SystemExit(f"ERROR: {flag}={rt} not found for {arch}")
+    if profile_rt or dasan_rt:
+        link_cmd.append(f'--plugin-opt=mcpu={arch}')
     if profile_rt:
-        if not os.path.exists(profile_rt):
-            raise SystemExit(
-                f"ERROR: --profile-rt={profile_rt} not found; cannot resolve "
-                f"the device profile runtime for {arch}")
-        link_cmd.extend([f'--plugin-opt=mcpu={arch}', profile_rt])
+        link_cmd.append(profile_rt)
+    if dasan_rt:
+        link_cmd.extend(['--whole-archive', dasan_rt, '--no-whole-archive',
+                         '--export-dynamic'])
     return link_cmd
 
 
@@ -629,6 +637,7 @@ def do_link(args, forwarded_flags):
     keep_temps = args.keep_temps
     rocshmem_bitcode = getattr(args, 'rocshmem_bitcode', None)
     profile_rt = getattr(args, 'profile_rt', None)
+    dasan_rt = getattr(args, 'dasan_rt', None)
 
     if not dispatcher:
         raise SystemExit("ERROR: --link requires --dispatcher=<source>")
@@ -718,7 +727,8 @@ def do_link(args, forwarded_flags):
         # from the per-arch libclang_rt.profile.a (see build_link_cmd for the
         # --plugin-opt=mcpu rationale). lld pulls in only the members referenced
         # by the instrumented TUs; host-only members stay unreferenced.
-        link_cmd = build_link_cmd(lld, output, rsp_path, arch, profile_rt)
+        link_cmd = build_link_cmd(lld, output, rsp_path, arch, profile_rt,
+                                  dasan_rt)
         run(link_cmd, f"link device.elf for {arch}")
 
     finally:
@@ -769,6 +779,11 @@ def parse_compiler_flags(argv):
         elif arg.startswith('--profile-rt='):
             our_args.append(arg)
         elif arg == '--profile-rt' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
+        elif arg.startswith('--dasan-rt='):
+            our_args.append(arg)
+        elif arg == '--dasan-rt' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
         elif arg == '-o' and i + 1 < len(argv):
@@ -829,6 +844,7 @@ def main():
     parser.add_argument('--dispatcher', default=None)
     parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
     parser.add_argument('--profile-rt', default=None, dest='profile_rt')
+    parser.add_argument('--dasan-rt', default=None, dest='dasan_rt')
     parser.add_argument('-o', '--output', required=False)
     parser.add_argument('--keep-temps', action='store_true')
     parser.add_argument('--version', action='store_true')

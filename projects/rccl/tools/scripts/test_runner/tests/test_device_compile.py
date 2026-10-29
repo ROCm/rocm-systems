@@ -128,6 +128,15 @@ class ParseCompilerFlagsTest(unittest.TestCase):
         self.assertEqual(forwarded, ["-DFOO=1", "-Iinc"])
         self.assertEqual(sources, ["b.o"])
 
+    def test_dasan_rt_both_forms_are_our_args(self):
+        our, forwarded, sources = driver.parse_compiler_flags(
+            ["--dasan-rt=/opt/rt/a.a", "--dasan-rt", "/opt/rt/b.a", "c.o"])
+
+        self.assertEqual(our, ["--dasan-rt=/opt/rt/a.a",
+                               "--dasan-rt", "/opt/rt/b.a"])
+        self.assertEqual(forwarded, [])
+        self.assertEqual(sources, ["c.o"])
+
 
 class BuildLinkCmdTest(unittest.TestCase):
     def test_without_profile_rt_omits_mcpu(self):
@@ -154,6 +163,37 @@ class BuildLinkCmdTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
                                   "gfx942", "/nonexistent/lib.a")
+
+    def test_dasan_rt_is_whole_archive_with_exported_symbols(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            archive = Path(temp_dir) / "libclang_rt.dasan.a"
+            archive.touch()
+
+            cmd = driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
+                                        "gfx942", None, str(archive))
+
+        self.assertEqual(cmd[-5:], ["--plugin-opt=mcpu=gfx942",
+                                    "--whole-archive", str(archive),
+                                    "--no-whole-archive", "--export-dynamic"])
+
+    def test_profile_and_dasan_rt_share_one_mcpu(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile = Path(temp_dir) / "libclang_rt.profile.a"
+            dasan = Path(temp_dir) / "libclang_rt.dasan.a"
+            profile.touch()
+            dasan.touch()
+
+            cmd = driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
+                                        "gfx942", str(profile), str(dasan))
+
+        self.assertEqual(cmd.count("--plugin-opt=mcpu=gfx942"), 1)
+        self.assertLess(cmd.index("--plugin-opt=mcpu=gfx942"),
+                        cmd.index(str(profile)))
+
+    def test_missing_dasan_rt_raises(self):
+        with self.assertRaises(SystemExit):
+            driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
+                                  "gfx942", None, "/nonexistent/dasan.a")
 
 
 class TargetIdTest(unittest.TestCase):

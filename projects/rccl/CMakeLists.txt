@@ -80,6 +80,7 @@ include(cmake/NcclCompat.cmake)
 rccl_define_nccl_compat_options()
 
 option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${RCCL_DEFAULT_BUILD_ADDRESS_SANITIZER})
+option(BUILD_DEVICE_ADDRESS_SANITIZER          "Enable the device address sanitizer (-fsanitize=daddress)" OFF)
 option(BUILD_ALL_UNROLLS                       "Also generate unroll factors 8 and 16 on top of the per-arch default set" OFF)
 option(BUILD_BFD                               "Enable custom backtrace (if bfd.h exists)"     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
@@ -232,6 +233,30 @@ if (BUILD_ADDRESS_SANITIZER)
     rccl_asan_adjust_gpu_targets(GPU_TARGETS ${GPU_TARGETS})
     message(STATUS "ASAN: GPU targets = ${GPU_TARGETS}")
   endif()
+endif()
+
+# Device address sanitizer: needs no xnack+ target or instrumented host. The
+# host runtime is linked into librccl.so; the device runtime goes into the
+# per-arch device link (cmake/DeviceLinker.cmake).
+if(BUILD_DEVICE_ADDRESS_SANITIZER)
+  if(BUILD_ADDRESS_SANITIZER)
+    message(FATAL_ERROR "BUILD_DEVICE_ADDRESS_SANITIZER and BUILD_ADDRESS_SANITIZER are mutually exclusive")
+  endif()
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.dasan.so
+    OUTPUT_VARIABLE _dasan_host_rt OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} --target=amdgcn-amd-amdhsa -print-file-name=libclang_rt.dasan.a
+    OUTPUT_VARIABLE RCCL_DASAN_DEVICE_RT OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if(NOT IS_ABSOLUTE "${_dasan_host_rt}" OR NOT EXISTS "${_dasan_host_rt}" OR
+     NOT IS_ABSOLUTE "${RCCL_DASAN_DEVICE_RT}" OR NOT EXISTS "${RCCL_DASAN_DEVICE_RT}")
+    message(FATAL_ERROR
+      "BUILD_DEVICE_ADDRESS_SANITIZER: ${CMAKE_CXX_COMPILER} has no device address "
+      "sanitizer runtime (libclang_rt.dasan.so / amdgcn libclang_rt.dasan.a)")
+  endif()
+  get_filename_component(DASAN_RUNTIME_DIR "${_dasan_host_rt}" DIRECTORY)
+  message(STATUS "DASAN host runtime directory: ${DASAN_RUNTIME_DIR}")
+  message(STATUS "DASAN device runtime: ${RCCL_DASAN_DEVICE_RT}")
 endif()
 
 # Check if clang compiler can offload to GPU_TARGETS
