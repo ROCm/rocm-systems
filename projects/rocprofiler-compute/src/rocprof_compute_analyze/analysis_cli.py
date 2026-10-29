@@ -277,7 +277,11 @@ class cli_analysis(OmniAnalyze_Base):
                     _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"]
                     for backend in active_operator_filters
                 )
-                workload.raw_pmc, slot_to_id = file_io.create_df_pmc_with_slot_ids(
+                (
+                    workload.raw_pmc,
+                    slot_to_id,
+                    workload.pmc_pass_layout,
+                ) = file_io.create_df_pmc_with_slot_ids(
                     path_info[0],
                     args.verbose,
                 )

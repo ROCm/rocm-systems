@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from utils import utils_analysis
-from utils.file_io import load_df_pmc
+from utils.file_io import create_df_pmc_with_slot_ids, load_df_pmc
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.pass_layout import PassLayout
 from utils.metrics.pass_provenance import (
@@ -63,6 +63,8 @@ DUPLICATED_COUNTER_EXPR = (
     "to_avg((raw_pmc_df['TA_BUSY'] + raw_pmc_df['TD_BUSY'])"
     " / raw_pmc_df['GRBM_GUI_ACTIVE'])"
 )
+PER_WAVE_EXPR = "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['SQ_WAVES'])"
+PER_CYCLE_SUM_EXPR = "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['GRBM_GUI_ACTIVE_sum'])"
 
 
 def _counter_row(
@@ -89,6 +91,45 @@ def _counter_row(
         "Counter_Value": counter_value,
         "Pass_Key": pass_key,
     }
+
+
+def _layout_with_divisor_on_another_pass(divisor: str) -> PassLayout:
+    """TA_BUSY is copied across two passes. ``divisor`` is only on a third."""
+    return PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1", "pmc_perf_2"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY"}),
+            "pmc_perf_1": frozenset({"TA_BUSY"}),
+            "pmc_perf_2": frozenset({divisor}),
+        },
+        duplicated=frozenset({"TA_BUSY"}),
+    )
+
+
+def _assert_normalization_metric_stays_unset(
+    expression: str,
+    divisor: str,
+    gpu_series: str,
+) -> None:
+    layout = _layout_with_divisor_on_another_pass(divisor)
+    selected, relaxed = select_pass_with_normalization_fallback(
+        frozenset({"TA_BUSY", divisor}),
+        layout,
+        gpu_series,
+    )
+    assert selected is None
+    assert not relaxed
+
+    metric_df = pd.DataFrame({"Avg": [expression], "Min": ["None"]})
+    used = bind_metric_tables_to_passes(
+        {1: metric_df},
+        {1: "metric_table"},
+        layout,
+        gpu_series,
+        frozenset({"Avg", "Min"}),
+    )
+    assert used == set()
+    assert metric_df.loc[0].tolist() == ["None", "None"]
 
 
 def _write_gzip_csv(path, text: str) -> None:
@@ -132,6 +173,33 @@ def test_load_df_pmc_shadow_columns_for_duplicates(tmp_path) -> None:
     assert df["GRBM_GUI_ACTIVE@pass:pmc_perf_1"].iloc[0] == 200
     assert df["TA_BUSY"].iloc[0] == 50
     assert df["SQ_WAVES"].iloc[0] == 4
+
+
+def test_operator_loader_keeps_duplicated_counter_pass_columns(tmp_path) -> None:
+    """Operator filtering must keep the same shadow columns as the kernel path."""
+    _write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        ROCPD_COUNTER_HEADER
+        + ROCPD_COUNTER_ROW_PREFIX
+        + "GRBM_GUI_ACTIVE,100\n"
+        + ROCPD_COUNTER_ROW_PREFIX
+        + "TA_BUSY,50\n",
+    )
+    _write_gzip_csv(
+        tmp_path / "results_pmc_perf_1.csv.gz",
+        ROCPD_COUNTER_HEADER
+        + ROCPD_COUNTER_ROW_PREFIX
+        + "GRBM_GUI_ACTIVE,200\n"
+        + ROCPD_COUNTER_ROW_PREFIX
+        + "SQ_WAVES,4\n",
+    )
+
+    df, slot_to_id, layout = create_df_pmc_with_slot_ids(str(tmp_path), verbose=0)
+
+    assert layout.duplicated == frozenset({"GRBM_GUI_ACTIVE"})
+    assert df["GRBM_GUI_ACTIVE"].iloc[0] == 100
+    assert df["GRBM_GUI_ACTIVE@pass:pmc_perf_1"].iloc[0] == 200
+    assert len(slot_to_id) == 1
 
 
 def test_load_df_pmc_no_duplicates_matches_unique_columns(tmp_path) -> None:
@@ -324,6 +392,20 @@ def test_select_pass_does_not_relax_sq_waves() -> None:
 
     assert selected is None
     assert not relaxed
+
+
+def test_per_wave_metric_is_unset_when_sq_waves_is_on_another_pass() -> None:
+    """A per-wave result stays N/A instead of borrowing SQ_WAVES from another pass."""
+    _assert_normalization_metric_stays_unset(PER_WAVE_EXPR, "SQ_WAVES", "MI300")
+
+
+def test_per_cycle_metric_is_unset_when_gui_active_sum_is_on_another_pass() -> None:
+    """gfx1250 per-cycle stays N/A instead of borrowing GRBM_GUI_ACTIVE_sum."""
+    _assert_normalization_metric_stays_unset(
+        PER_CYCLE_SUM_EXPR,
+        "GRBM_GUI_ACTIVE_sum",
+        "GFX1250_SERIES",
+    )
 
 
 def test_normalization_fallback_reports_failure_when_formula_still_spans_passes():
