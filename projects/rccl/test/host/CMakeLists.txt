@@ -72,7 +72,7 @@ rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
   "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
   "the IbQpsPerConn fake default")
-# The net_ib_cast connect / qp_sharing fakes repeat these params; both copies must agree.
+# The net_ib_cast connect fakes repeat these params; both copies must agree.
 foreach(_param
     "NCCL_PARAM(IbCastTimeout, \"IB_TIMEOUT\", 20)"
     "NCCL_PARAM(IbCastRetryCnt, \"IB_RETRY_CNT\", 7)"
@@ -88,15 +88,6 @@ foreach(_param
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_connect_fakes.cc"
     "${_param}" "the connect.cc default")
 endforeach()
-foreach(_param
-    "RCCL_PARAM(IbCastQpSharingEnable, \"IB_QP_SHARING_ENABLE\", 0)"
-    "RCCL_PARAM(IbCastCommNGroups, \"IB_COMM_NGROUPS\", 4)"
-    "RCCL_PARAM(IbCastQpSharingValidatePool, \"IB_QP_SHARING_VALIDATE_POOL\", 0)")
-  rccl_assert_source_line("${_rccl_src_root}/transport/net_ib_cast/qp_sharing.cc"
-    "${_param}" "fakes/net_ib_cast_qp_sharing_fakes.cc")
-  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_qp_sharing_fakes.cc"
-    "${_param}" "the qp_sharing.cc default")
-endforeach()
 # The net_ib, net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
 set(_rccl_cast_pins
   "transport/net_ib/p2p.cc" "NCCL_PARAM(IbArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
@@ -109,16 +100,6 @@ set(_rccl_cast_pins
     "transport_net_ib_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
   "misc/rocmwrap.cc" "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1)<SEMI>"
     "rocmwrap_fakes.cc" "int64_t ncclParamDmaBufEnable() { return g_loadParam(\"DMABUF_ENABLE\", 1)<SEMI> }"
-  "transport/net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
-    "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
-  "transport/net_ib_cast/p2p.cc" "int64_t IbCastArThreshold = 8192<SEMI>"
-    "net_ib_cast_p2p_fakes.cc" "int64_t IbCastArThreshold = 8192<SEMI>"
-  "transport/net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastReceiverSideMatchingScheme, \"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
-    "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI> }"
-  "transport/net_ib_cast/p2p.cc" "RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, \"GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING\", 1)<SEMI>"
-    "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING\", 1)<SEMI>"
-  "transport/net_ib_cast/p2p.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\", \"IGet\", \"Failed\"}<SEMI>"
-    "net_ib_cast_p2p_fakes.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\", \"IGet\", \"Failed\"}<SEMI>"
   "transport/net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
     "net_ib_cast_p2p_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI> }"
   "transport/net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailoverMaxAttempts, \"IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS\", 1)<SEMI>"
@@ -207,13 +188,8 @@ foreach(_path_cc "${_rccl_src_root}/graph/topo.cc" "${CMAKE_CURRENT_LIST_DIR}/fa
 endforeach()
 rccl_assert_source_line("${_rccl_src_root}/transport/net_ib_cast/p2p.cc"
   "int cqMaxPollEvent = 4;" "net-ib-cast-p2p-test.cc: kPollBatch")
-# fakes/net_ib_cast_common_fakes.cc copies IbCastStatsCheckFatalCount's gate from common.cc.
-foreach(_common_cc "${_rccl_src_root}/transport/net_ib_cast/common.cc"
-    "${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_common_fakes.cc")
-  rccl_assert_source_line("${_common_cc}"
-    "if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {"
-    "fakes/net_ib_cast_common_fakes.cc: DefaultIbCastStatsCheckFatalCount")
-endforeach()
+rccl_assert_source_line("${_rccl_src_root}/transport/net_ib_cast/p2p.cc"
+  "int64_t IbCastArThreshold = 8192;" "net-ib-cast-init-test.cc: NetIbCastResetGlobals")
 foreach(_path_cc "${_rccl_src_root}/transport/net_ib_cast/p2p_resiliency_recovery.cc"
                  "${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_p2p_resiliency_recovery_fakes.cc")
   rccl_assert_source_line("${_path_cc}" "NCCL_PARAM(IbCastResiliencyPortRecovery, \"IB_RESILIENCY_PORT_RECOVERY\", 0);"
@@ -1021,7 +997,10 @@ function(rccl_define_micro_source_lists)
     transport/net_ib_cast/net-ib-cast-gin-test.cc
     transport/net_ib_cast/net-ib-cast-init-test.cc
     transport/net_ib_cast/net-ib-cast-multiplane-test.cc
+    transport/net_ib_cast/net-ib-cast-p2p-test.cc
     transport/net_ib_cast/net-ib-cast-reg-test.cc
+    transport/net_ib_cast/net-ib-cast-scheduler-test.cc
+    transport/net_ib_cast/net-ib-ops-fault-test.cc
     transport/nvls-test.cc
     transport/p2p-test.cc
     transport/rma-socket-test.cc
@@ -1073,29 +1052,6 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc
     ../common/main_altrsmi.cpp
     ../common/ProcessIsolatedTestRunner.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroNetIbCastDataPath -- src/transport/net_ib_cast/{p2p,scheduler,net_ib_ops_fault}.cc. Own
-  # binary: it compiles the real ibvwrap.cc, which rccl-UnitTestsMicro replaces with fakes/ibvwrap_fakes.cc.
-  set(TEST_MICRO_NET_IB_CAST_DATA_PATH_SOURCE_FILES
-    net-ib-cast-p2p-test.cc
-    net-ib-cast-scheduler-test.cc
-    net-ib-ops-fault-test.cc
-    fakes/env_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/libc_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/net_ib_cast_common_fakes.cc
-    fakes/net_ib_cast_connect_fakes.cc
-    fakes/net_ib_cast_init_fakes.cc
-    fakes/net_ib_cast_p2p_resiliency_fakes.cc
-    fakes/socket_fakes.cc
-    fakes/transport_stubs.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvsymbols.cc   # buildIbvSymbols, never called
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvwrap.cc      # real verbs wrappers; tests set the ibvSymbols slots
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc  # real commId routing table
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc         # real telemetry counters
-    ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
   # src/misc/ IB verbs and direct-verbs loaders
@@ -2358,8 +2314,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     ${_MICRO_MODE_DEFS}
     ${_MICRO_DMABUF_EXPORT_DEF}  # standalone: the cuMem DMA-BUF arms in-build gets from rccl
     ${_MICRO_AMDSMI_DEF}         # graph/xml.cc
-    # Shipping builds set it. It gates the *gid_inspect.cc units whole, plus cast common.cc's GID-change
-    # hook and fields of net_ib_cast's ncclIbNetCommBase, so every TU must agree on it.
+    # Shipping builds set it. It gates the *gid_inspect.cc units and net_ib_ops_fault.cc whole, plus fault
+    # hooks in cast common.cc, p2p.cc and scheduler.cc and fields of net_ib_cast's ncclIbNetCommBase, so
+    # every TU must agree on it.
     ENABLE_FAULT_INJECTION
     COLL_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/coll_net.cc"
     NET_IB_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc"
@@ -2385,6 +2342,12 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     NET_IB_CAST_CAPABILITY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc"
     NET_IB_CAST_MULTIPLANE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/multiplane.cc"
     NET_IB_CAST_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_cast_gid_inspect.cc"
+    # p2p_tmp.cc, not p2p.cc: src/CMakeLists.txt lists transport/net_ib/p2p.cc first, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    NET_IB_CAST_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_tmp.cc"
+    NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
+    NET_IB_CAST_SCHEDULER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/scheduler.cc"
+    NET_IB_OPS_FAULT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_ops_fault.cc"
     NET_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket.cc"
     # common_tmp.cc: src/CMakeLists.txt lists transport/net_ib/common.cc first.
     NET_SOCKET_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket/common_tmp.cc"
@@ -2403,31 +2366,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     RCCL_TRANSPORT_STUBS_OMIT_NET
     RCCL_TRANSPORT_STUBS_OMIT_NVLS
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_transport.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroNetIbCastDataPath
-# ---------------------------------------------------------------------------
-set_source_files_properties(
-  ${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvsymbols.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvwrap.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc
-  PROPERTIES GENERATED TRUE)
-rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastDataPath
-  SOURCES ${TEST_MICRO_NET_IB_CAST_DATA_PATH_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h, included unqualified
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    # Shipping librccl builds with FAULT_INJECTION=ON, and net_ib_ops_fault.cc is all under it.
-    ENABLE_FAULT_INJECTION
-    # p2p_tmp.cc, not p2p.cc: src/CMakeLists.txt lists transport/net_ib/p2p.cc first, so
-    # add_file_unique() renames this one. Re-check after any source-list reorder.
-    NET_IB_CAST_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_tmp.cc"
-    NET_IB_CAST_SCHEDULER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/scheduler.cc"
-    NET_IB_OPS_FAULT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_ops_fault.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_data_path.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroMisc

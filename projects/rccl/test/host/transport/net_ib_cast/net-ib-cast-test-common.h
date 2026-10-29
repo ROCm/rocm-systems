@@ -38,7 +38,7 @@
 #include "fakes/signature-drift.h"
 #include "fakes/socket_fakes.h"
 
-// Puts every net_ib_cast global back to its load-time value. Defined in
+// Puts the net_ib_cast globals init.cc writes back to their load-time values. Defined in
 // net-ib-cast-init-test.cc, the TU that can reach init.cc's file-scope state.
 void NetIbCastResetGlobals();
 

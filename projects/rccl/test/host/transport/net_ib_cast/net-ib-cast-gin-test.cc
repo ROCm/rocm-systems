@@ -28,7 +28,9 @@
 #include "net-ib-cast-test-common.h"
 #include "fakes/param_redirect.h"
 
+#include "fakes/net_ib_cast_p2p_seam.h"
 #include NET_IB_CAST_GIN_CC_PATH
+#include "fakes/net_ib_cast_p2p_seam_undef.h"
 
 namespace {
 

@@ -12,7 +12,7 @@
 #include <cerrno>
 #include <string>
 
-#include "../common/LogCapture.hpp"
+#include "../../../common/LogCapture.hpp"
 #include "IbVerbsScene.h"
 
 #include NET_IB_OPS_FAULT_CC_PATH

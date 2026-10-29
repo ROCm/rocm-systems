@@ -1,13 +1,15 @@
 # CTest categories for host-only src/transport/ microtests.
 #
 # Suites start with their source unit's stem. The exceptions are p2p.cc's
-# ConnStepAcquire* and FreshRegistration* suites and its parameterized
-# GuardOperands/ and MappingStages/ instantiations.
+# ConnStepAcquire* and FreshRegistration* suites, its parameterized
+# GuardOperands/ and MappingStages/ instantiations, and
+# net_ib_cast/scheduler.cc's parameterized Colls/ instantiation.
 test_categories:
   quick: &micro_transport_quick
     description: "Smoke - host-only src/transport/ micro-tests, sub-second."
     test_patterns:
       - "CollNet*"
+      - "Colls/NetIbCastSchedulerCollNameMicrotest.*"
       - "ConnStepAcquire*"
       - "FreshRegistration*"
       - "GuardOperands/P2pAllocateSkipMarkExport.*"
