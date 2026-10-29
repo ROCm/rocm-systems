@@ -1318,6 +1318,55 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainIsNonZeroForTheFixture) {
          "WarpSize, ll128ShmemElemsPerThread or ll128DataElems makes calcCollChunking:3302 SIGFPE";
 }
 
+TEST_F(EnqueueMicrotest, OneRpnNetRegChannelCap_GatesOnlyAllGatherOnOffloadCapability) {
+  EXPECT_TRUE(ncclUseOneRpnNetRegChannelCap(ncclFuncBroadcast));
+  EXPECT_EQ(bool(NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED), ncclUseOneRpnNetRegChannelCap(ncclFuncAllGather));
+  for (int i = 0; i < int(ncclNumFuncs); ++i) {
+    const auto func = static_cast<ncclFunc_t>(i);
+    if (func == ncclFuncBroadcast || func == ncclFuncAllGather) continue;
+    EXPECT_FALSE(ncclUseOneRpnNetRegChannelCap(func)) << "func=" << i;
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_NetOffloadUnsupportedOneRpnRegisteredAllGatherUsesKernelSchedule) {
+#if !NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
+  // ROCM-33020: without device net offload, registered one-RPN AllGather must
+  // retain the ordinary proxy schedule. NCCL_LOCAL_REGISTER=0 and the legacy
+  // torch process group both reach the unregistered baseline below.
+  constexpr size_t kPerRankBytes = 11 * 1024 * 1024;
+  constexpr size_t kGlobalBytes = 2 * kPerRankBytes;
+  ChunkComm cc(/*protoSimpleBuf=*/1 << 22);
+  cc.comm.nRanks = 2;
+  cc.comm.nNodes = 2;
+  cc.comm.isOneRPN = true;
+
+  auto unregistered = MakeTask(ncclFuncAllGather, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  unregistered.chunkSteps = ALLGATHER_CHUNKSTEPS;
+  unregistered.sliceSteps = ALLGATHER_SLICESTEPS;
+  auto registered = unregistered;
+  registered.regBufType = NCCL_NET_REG_BUFFER;
+
+  auto workaround = RunChunking(cc, unregistered, /*nChannels=*/1, kGlobalBytes);
+  auto zeroCopy = RunChunking(cc, registered, /*nChannels=*/1, kGlobalBytes);
+  ASSERT_EQ(ncclSuccess, workaround.rc);
+  ASSERT_EQ(ncclSuccess, zeroCopy.rc);
+  ASSERT_EQ(0, workaround.proxyOp.reg);
+  ASSERT_EQ(1, zeroCopy.proxyOp.reg);
+
+  EXPECT_EQ(workaround.chunkSize, zeroCopy.chunkSize);
+  EXPECT_EQ(workaround.proxyOp.chunkSize, zeroCopy.proxyOp.chunkSize);
+  EXPECT_EQ(workaround.proxyOp.sliceSize, zeroCopy.proxyOp.sliceSize);
+  EXPECT_EQ(workaround.proxyOp.chunkSteps, zeroCopy.proxyOp.chunkSteps);
+  EXPECT_EQ(workaround.proxyOp.sliceSteps, zeroCopy.proxyOp.sliceSteps);
+  EXPECT_EQ(workaround.proxyOp.loopSize, zeroCopy.proxyOp.loopSize);
+  EXPECT_EQ(workaround.proxyOp.loopOffset, zeroCopy.proxyOp.loopOffset);
+  EXPECT_EQ(workaround.proxyOp.nsteps, zeroCopy.proxyOp.nsteps);
+  EXPECT_NE(size_t(NCCL_MAX_NET_SIZE), size_t(zeroCopy.proxyOp.chunkSize));
+#else
+  GTEST_SKIP() << "This build supports the matching host/device net-offload schedule";
+#endif
+}
+
 TEST_F(EnqueueMicrotest, CalcCollChunking_ChunkSizeIsAlwaysWritten) {
   // The out-param is poisoned to 0xFFFFFFFF before every call; a path that
   // returns success without writing it would show up as the poison value.
