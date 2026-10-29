@@ -526,6 +526,7 @@ private:
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
+  // Owns the complete text index. text_edits_ borrows it and is destroyed first.
   InstructionBoundaries instruction_boundaries_;
   std::unique_ptr<CheckedTextEditContext> text_edits_;
   bool blocks_built_ = false;

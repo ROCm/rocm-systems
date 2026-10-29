@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/code/patch/checked_text_edits.h"
+
 #include "../dbi_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
-#include "rocjitsu/code/patch/checked_text_edits.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 
@@ -129,8 +130,9 @@ TEST(CheckedTextEdits, ThreeNonadjacentCompleteExtentsPreserveAllOtherImageBytes
   FailureOr<CheckedTextEditResult> result = apply_checked_text_edits(object, requests, error);
   ASSERT_TRUE(result.succeeded()) << error.message;
   std::vector<uint8_t> expected = image;
+  const Section &text = *object.text_sections().front();
   for (const CheckedTextEdit &edit : requests)
-    std::memcpy(expected.data() + 0x100 + edit.offset, edit.replacement.data(),
+    std::memcpy(expected.data() + text.sectionOffset() + edit.offset, edit.replacement.data(),
                 edit.replacement.size());
   EXPECT_EQ(result.value().image, expected);
   EXPECT_EQ(result.value().edits, requests);

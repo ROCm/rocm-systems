@@ -16,6 +16,7 @@
 namespace rocjitsu {
 
 class AmdGpuCodeObject;
+class InstructionBoundaries;
 
 enum class TextEditErrorCode {
   None,
@@ -81,13 +82,22 @@ public:
   ~CheckedTextEditContext();
   const TextSectionIdentity &section() const;
   std::span<const Elf64_Shdr> section_headers() const;
+  /// @brief Authoritative instruction, clause and reference facts for the complete source text.
+  /// @details The returned reference is borrowed and must not outlive this context.
+  const InstructionBoundaries &instruction_boundaries() const;
   CheckedTextEditContext(const CheckedTextEditContext &) = delete;
   CheckedTextEditContext &operator=(const CheckedTextEditContext &) = delete;
 
 private:
   class State;
   explicit CheckedTextEditContext(const AmdGpuCodeObject &source);
-  Result initialize(const class InstructionBoundaries *boundaries, TextEditError &error);
+  Result initialize(const InstructionBoundaries *boundaries, TextEditError &error);
+  /// @brief Reuse Instrumentor's trusted full-text index without decoding it again.
+  /// @details The index must describe this exact source using its source-derived decoder
+  /// features, including concrete target identity. It must cover the complete text, not just
+  /// reachable instructions. Initialization checks coverage but trusts decoded instruction,
+  /// clause and reference facts. Both source and index are borrowed; they must remain immutable
+  /// and outlive the returned context.
   static FailureOr<std::unique_ptr<CheckedTextEditContext>>
   from_instructions(const AmdGpuCodeObject &source, const InstructionBoundaries &boundaries,
                     TextEditError &error);

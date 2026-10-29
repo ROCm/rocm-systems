@@ -15,6 +15,7 @@
 
 namespace rocjitsu {
 class BasicBlock;
+class InstructionBoundaries;
 
 enum class StaticBarrierForm { BuiltinSplitPair, FullSingleton };
 
@@ -45,15 +46,21 @@ public:
   bool operator==(const StaticBarrier &) const = default;
 };
 
+struct StaticBarrierBuiltin {
+  int32_t id;
+  StaticBarrierScope scope;
+};
+
 /// @brief Bounded mutation policy for a registry-bound ISA family.
-/// @details Supplies form, admitted wave sizes and the lowest semantic builtin ID.
-/// Split forms use -1/-2 for workgroup scope; CDNA5 also admits -3/-4 for cluster
-/// scope. Full singleton barriers have logical ID -1 without a split selector.
+/// @details Supplies form, admitted wave sizes and explicit user barrier IDs/scopes.
+/// Split forms use -1 for workgroup scope; CDNA5 also admits -3 for cluster scope.
+/// Trap-only IDs -2/-4 are not admitted. Full singleton barriers have logical ID -1
+/// without a split selector. A cluster barrier is inert outside a clustered dispatch.
 /// This is not CFG ownership, a selection heuristic or an execution qualification.
 struct StaticBarrierPolicy {
   StaticBarrierForm form;
   std::span<const uint32_t> wave_sizes;
-  int32_t minimum_builtin_id;
+  std::span<const StaticBarrierBuiltin> builtins;
 };
 
 /// @brief Query family policy only for a concrete binding present in the registry.
@@ -62,12 +69,13 @@ static_barrier_policy(rj_code_target_id_t target,
                       const IsaTargetRegistry &registry = default_isa_target_registry());
 
 /// @brief Qualify complete builtin split pairs or full singleton barriers.
-/// @details RDNA4 accepts immediate IDs -1/-2; CDNA5 also accepts -3/-4 (cluster).
+/// @details RDNA4 accepts immediate ID -1; CDNA5 also accepts -3 (cluster).
 /// RDNA3/CDNA3/CDNA4 accept full s_barrier. Named lifecycle, dynamic operands, isfirst
-/// (SCC side effect), interleaved and cross-block pairs fail closed. Ownership
-/// and closed CFG checks belong to the caller. No convergence or race verdict.
+/// (SCC side effect), trap IDs, interleaved and cross-block pairs fail closed.
+/// Boundaries supply the same full-text instruction/clause facts used by checked edits.
+/// Ownership and closed CFG checks belong to the caller. No convergence or race verdict.
 [[nodiscard]] FailureOr<std::vector<StaticBarrier>>
 qualify_static_barriers(std::span<BasicBlock *const> blocks, rj_code_target_id_t target,
-                        StaticBarrierError &error);
+                        const InstructionBoundaries &boundaries, StaticBarrierError &error);
 
 } // namespace rocjitsu

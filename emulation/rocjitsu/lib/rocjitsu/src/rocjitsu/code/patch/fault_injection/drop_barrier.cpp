@@ -7,6 +7,7 @@
 #include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -112,13 +113,13 @@ bool DropBarrierSelection::belongs_to(const FaultMutationContext &context) const
 }
 
 Result DropBarrierSelection::resolve(FaultMutationError &error) const {
-  if (kind != FaultMutationKind::DropBarrier)
+  if (kind_ != FaultMutationKind::DropBarrier)
     return reject(error, FaultMutationErrorCode::InvalidParameters, "unknown mutation kind");
   const std::shared_ptr<const FaultBarrierRecord> record = record_.lock();
   if (source_.expired() || !record)
     return reject(error, FaultMutationErrorCode::BadIdentity, "expired or unbound selection");
-  if (owner != record->owner || ordinal_ >= record->barriers.size() ||
-      barrier != record->barriers[ordinal_])
+  if (owner_ != record->owner || ordinal_ >= record->barriers.size() ||
+      barrier_ != record->barriers[ordinal_])
     return reject(error, FaultMutationErrorCode::IncompleteSelection,
                   "selection differs from its complete qualified record");
   return Result::success();
@@ -153,16 +154,16 @@ FailureOr<DropBarrierSelection> select_drop_barrier(const FaultBarrierInventory 
     return reject(error, FaultMutationErrorCode::OrdinalOutOfRange,
                   "logical barrier ordinal out of range");
   DropBarrierSelection selection;
-  selection.owner = record->owner;
-  selection.barrier = record->barriers[selector.ordinal];
+  selection.owner_ = record->owner;
+  selection.barrier_ = record->barriers[selector.ordinal];
   selection.source_ = record->source;
   selection.record_ = record;
   selection.ordinal_ = selector.ordinal;
   return selection;
 }
 
-std::vector<FaultMutationCapability>
-fault_mutation_capabilities(const IsaTargetRegistry &registry) {
+std::vector<FaultMutationCapability> fault_mutation_capabilities() {
+  const IsaTargetRegistry &registry = default_isa_target_registry();
   std::vector<FaultMutationCapability> capabilities;
   for (const IsaTargetDescriptor &family : registry.targets()) {
     for (const IsaGpuTargetDescription &binding : family.gpu_targets) {
@@ -406,8 +407,8 @@ Result FaultMutationContext::analyze() const {
                        .message = "descriptor wave mode is not admitted by this barrier family"};
     } else {
       StaticBarrierError barrier_error;
-      FailureOr<std::vector<StaticBarrier>> barriers =
-          qualify_static_barriers(scope, target, barrier_error);
+      FailureOr<std::vector<StaticBarrier>> barriers = qualify_static_barriers(
+          scope, target, state_->edits->instruction_boundaries(), barrier_error);
       if (barriers.failed()) {
         record->error = {.code = barrier_error.code == StaticBarrierErrorCode::IncompleteBarrier
                                      ? FaultMutationErrorCode::IncompleteSelection
@@ -474,7 +475,7 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
   if (selection.resolve(error).failed())
     return Result::failure();
   const std::shared_ptr<const FaultBarrierRecord> record = selection.record_.lock();
-  // resolve checked the private ordinal and public facts; the matching live
+  // resolve checked the private ordinal and fact snapshots; the matching live
   // context retains this immutable record throughout apply.
   assert(record && selection.ordinal_ < record->barriers.size());
   const StaticBarrier &barrier = record->barriers[selection.ordinal_];
@@ -506,6 +507,9 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
       "Static mutation affects every executed occurrence of the selected logical barrier.",
       "Same-block membership does not prove barrier convergence.",
       "Execution and detector qualification have not been performed."};
+  if (barrier.scope == StaticBarrierScope::Cluster)
+    result.assumptions.emplace_back(
+        "Cluster barrier -3 only synchronizes a clustered dispatch; it is inert otherwise.");
   return result;
 }
 } // namespace rocjitsu

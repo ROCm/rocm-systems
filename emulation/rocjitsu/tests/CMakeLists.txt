@@ -1010,8 +1010,7 @@ if(RJ_BUILD_CONSAN_ANALYZER)
     endif()
 endif()
 
-# These existing suites exercise ELF inspection, CFG construction, kernel
-# reachability, and register queries using only the static-analysis composition.
+# Host-only mutation and checked-edit tests use the model ISA providers.
 add_executable(
     rocjitsu_fault_injection_tests
     patch/checked_text_edits_test.cpp
@@ -1033,7 +1032,7 @@ rj_configure_target(rocjitsu_fault_injection_tests PRIVATE_INCLUDES WARNINGS)
 set(RJ_FAULT_INJECTION_CORPUS_OBJECT
     ""
     CACHE FILEPATH
-    "Pinned fa_barrier_epoch device ELF for host mutation qualification"
+    "Optional compiled fa_barrier_epoch device ELF for host mutation tests"
 )
 if(RJ_FAULT_INJECTION_CORPUS_OBJECT)
     if(NOT EXISTS "${RJ_FAULT_INJECTION_CORPUS_OBJECT}")
@@ -1057,6 +1056,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
+# These existing suites exercise ELF inspection, CFG construction, kernel
+# reachability, and register queries using only the static-analysis composition.
 add_executable(
     rocjitsu_analysis_tests
     analysis/decoder_window_test.cpp

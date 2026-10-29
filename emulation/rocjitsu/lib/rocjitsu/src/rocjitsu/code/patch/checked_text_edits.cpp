@@ -112,6 +112,9 @@ const TextSectionIdentity &CheckedTextEditContext::section() const { return stat
 std::span<const Elf64_Shdr> CheckedTextEditContext::section_headers() const {
   return state_->sections;
 }
+const InstructionBoundaries &CheckedTextEditContext::instruction_boundaries() const {
+  return *state_->boundaries;
+}
 
 FailureOr<std::unique_ptr<CheckedTextEditContext>>
 CheckedTextEditContext::create(const AmdGpuCodeObject &source, TextEditError &error) {

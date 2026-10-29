@@ -5,7 +5,11 @@
 
 #include "rocjitsu/code/analysis/static_barriers.h"
 #include "rocjitsu/code/patch/checked_text_edits.h"
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/result.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -14,6 +18,8 @@
 #include <vector>
 
 namespace rocjitsu {
+
+class AmdGpuCodeObject;
 
 enum class FaultMutationKind { DropBarrier };
 enum class FaultMutationErrorCode {
@@ -80,16 +86,20 @@ private:
 };
 
 /// @brief Context-bound exact handle with inspectable selection facts.
-/// @details Apply checks value facts against the immutable private record, without
-/// rediscovery. Mutating the public facts cannot authorize different members.
+/// @details Read-only fact snapshots belong to this handle; inspecting them does not
+/// extend the source lifetime. References remain valid while this selection is alive.
+/// Apply checks the snapshots against the immutable private record without rediscovery.
 class DropBarrierSelection {
 public:
-  FaultMutationKind kind = FaultMutationKind::DropBarrier;
-  FaultMutationOwner owner;
-  StaticBarrier barrier;
+  FaultMutationKind kind() const { return kind_; }
+  const FaultMutationOwner &owner() const { return owner_; }
+  const StaticBarrier &barrier() const { return barrier_; }
   bool belongs_to(const FaultMutationContext &context) const;
 
 private:
+  FaultMutationKind kind_ = FaultMutationKind::DropBarrier;
+  FaultMutationOwner owner_;
+  StaticBarrier barrier_;
   std::weak_ptr<const AmdGpuCodeObject> source_;
   std::weak_ptr<const FaultBarrierRecord> record_;
   size_t ordinal_ = 0;
@@ -152,9 +162,9 @@ struct DropBarrierResult {
   std::vector<std::string> assumptions;
 };
 
-/// @brief Enumerate transformation admission; no execution or detector claim.
-[[nodiscard]] std::vector<FaultMutationCapability>
-fault_mutation_capabilities(const IsaTargetRegistry &registry = default_isa_target_registry());
+/// @brief Enumerate transformation admission from the registry used by discovery and apply.
+/// @details Uses the default registry; no execution or detector claim.
+[[nodiscard]] std::vector<FaultMutationCapability> fault_mutation_capabilities();
 
 /// @brief Inventory one exact kernel, allowing independent siblings in one .text.
 /// @details ABI admission follows the shared ELF reader and DBI patcher. Requires an admitted

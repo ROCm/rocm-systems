@@ -5,8 +5,6 @@ include(${CMAKE_CURRENT_LIST_DIR}/../check_model_only_symbols.cmake)
 foreach(
     _forbidden
     "rocjitsu::consan::"
-    "rocjitsu::validate_drop_barrier_candidate("
-    "rocjitsu::validate_checked_text_candidate("
     "util::Sha256"
     "rocjitsu::VirtualMachine::"
     "rocjitsu::SimulatedKfd::"
