@@ -136,8 +136,8 @@ public:
     orderDestWrites();
     __syncthreads();
     if (threadIdx.x == 0) {
-      putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock));
-      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, blockIdx.x));
+      putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock), params_);
+      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, blockIdx.x), params_);
     }
     __syncthreads();
   }
@@ -149,13 +149,13 @@ public:
     orderDestWrites();
     __syncthreads();
     if (threadIdx.x == 0) {
-      putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock));
+      putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock), params_);
     }
   }
   // srcBlock: the block of rank srcRank whose token is consumed (a drain block waits for the push block it serves).
   __device__ __forceinline__ void waitPeer(int srcRank, int srcBlock) {
     if (threadIdx.x == 0) {
-      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, srcBlock));
+      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, srcBlock), params_);
     }
     __syncthreads();
   }
@@ -187,7 +187,9 @@ public:
       __scoped_atomic_store_n(peerFlags_[to] + getEpochFlagIdx(selfRank_, blockIdx.x), epoch, __ATOMIC_RELEASE,
                               __MEMORY_SCOPE_SYSTEM);
       const FlagType* flag = epochFlagFrom(from);
+      int spins = 0;
       while (static_cast<int32_t>(__scoped_atomic_load_n(flag, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - epoch) < 0) {
+        if (params_.abortSpinTick(spins)) break;
       }
     }
     __syncthreads();
@@ -212,7 +214,9 @@ public:
   __device__ __forceinline__ void epochWaitPiece(const FlagType* ready, FlagType epoch, unsigned piece) {
     if (threadIdx.x == 0) {
       const FlagType want = epoch + 2 + piece;
+      int spins = 0;
       while (static_cast<int32_t>(__scoped_atomic_load_n(ready, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - want) < 0) {
+        if (params_.abortSpinTick(spins)) break;
       }
       cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
     }
