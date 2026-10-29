@@ -1,0 +1,239 @@
+txa.async_barrier_inst:
+  name: TXA Async Barrier Instruction
+  formula: SUM(TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of async barrier instructions processed by TXA.
+txa.async_cluster_load_inst:
+  name: TXA Async Cluster Load Instruction
+  formula: SUM(TX_VCA_ASYNC_CLUSTER_LOAD_WAVEFRONT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of async cluster load instructions processed by TXA.
+txa.async_load_bw:
+  name: TXA Async Load Bandwidth
+  formula: SUM(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total async load bandwidth.
+txa.async_load_inst:
+  name: TXA Async Load Instruction
+  formula: SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of async load requests.
+txa.async_store_bw:
+  name: TXA Async Store Bandwidth
+  formula: SUM(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total async store bandwidth.
+txa.async_store_inst:
+  name: TXA Async Store Instruction
+  formula: SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of async store requests.
+txa.block_load_inst:
+  name: TXA Block Load Instruction
+  formula: SUM(TX_VCA_BLOCK_LOAD_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of block load instructions processed by TXA.
+txa.block_store_inst:
+  name: TXA Block Store Instruction
+  formula: SUM(TX_VCA_BLOCK_STORE_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of block store instructions processed by TXA.
+txa.buffer_atomics_insts:
+  name: TXA Buffer Atomics Instructions
+  formula: SUM(TX_VCA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of buffer atomic instructions processed by TXA.
+txa.buffer_insts:
+  name: TXA Buffer Instructions
+  formula: SUM(TX_VCA_BUFFER_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total buffer VMEM instructions processed by TXA.
+txa.buffer_load_insts:
+  name: TXA Buffer Load Instructions
+  formula: SUM(TX_VCA_BUFFER_LOAD_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of buffer load instructions processed by TXA.
+txa.buffer_store_insts:
+  name: TXA Buffer Store Instructions
+  formula: SUM(TX_VCA_BUFFER_STORE_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of buffer store instructions processed by TXA.
+txa.bus_util_buffer_req:
+  name: TXA Bus Utilization - Buffer Requests
+  formula: 100 * SUM(TX_VCA_BUFFER_TOTAL_CYCLES_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
+  unit: Percent
+  description: >-
+    Percentage of cycles the TXA-to-GL0 bus is carrying buffer (descriptor-based)
+    VMEM requests.
+txa.bus_util_flat_req:
+  name: TXA Bus Utilization - Flat Requests
+  formula: 100 * SUM(TX_VCA_FLAT_TOTAL_CYCLES_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
+  unit: Percent
+  description: >-
+    Percentage of cycles the TXA-to-GL0 bus is carrying flat-addressed VMEM requests.
+txa.bus_util_lds_req:
+  name: TXA Bus Utilization - LDS Requests
+  formula: 100 * SUM(TX_VCA_LDS_TOTAL_CYCLES_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
+  unit: Percent
+  description: >-
+    Percentage of cycles the TXA-to-GL0 bus is carrying LDS requests.
+txa.cluster_load_inst:
+  name: TXA Cluster Load Instruction
+  formula: SUM(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of cluster load instructions processed by TXA.
+txa.command_bus_stall_rate:
+  name: TXA Command Bus Stall Rate
+  formula: 100 * SUM(TX_VMW_VMW_VCA_REQ_STALL_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
+  unit: Percent
+  description: Percentage of cycles the TXA-to-GL0 command bus is stalled.
+txa.command_bus_util:
+  name: TXA Command Bus Utilization
+  formula: 100 * SUM(TX_VCA_VMEMCMD_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of cycles the TXA-to-GL0 command bus is carrying a memory command.
+txa.flat_atomics_insts:
+  name: TXA Flat Atomics Instructions
+  formula: SUM(TX_VCA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of flat-addressed atomic instructions processed by TXA.
+txa.flat_insts:
+  name: TXA Flat Instructions
+  formula: SUM(TX_VCA_FLAT_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total flat-addressed VMEM instructions processed by TXA.
+txa.flat_load_insts:
+  name: TXA Flat Load Instructions
+  formula: SUM(TX_VCA_FLAT_LOAD_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of flat-addressed load instructions processed by TXA.
+txa.flat_store_insts:
+  name: TXA Flat Store Instructions
+  formula: SUM(TX_VCA_FLAT_STORE_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of flat-addressed store instructions processed by TXA.
+txa.gl0_atomics_bw:
+  name: GL0 Atomics Bandwidth
+  formula: SUM(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total GL0 atomics bandwidth from WGP.
+txa.gl0_load_bw:
+  name: GL0 Load Bandwidth
+  formula: SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total GL0 load bandwidth from WGP.
+txa.gl0_store_bw:
+  name: GL0 Store Bandwidth
+  formula: SUM(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total GL0 store bandwidth from WGP.
+txa.lds_atomics_insts:
+  name: LDS Atomics Instructions
+  formula: SUM(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of LDS atomic requests.
+txa.lds_bw_atomics:
+  name: LDS Bandwidth - Atomics
+  formula: SUM(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total LDS atomic bandwidth.
+txa.lds_bw_load:
+  name: LDS Bandwidth - Load
+  formula: SUM(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total LDS read bandwidth.
+  peak: $max_sclk * $cu_per_gpu * 512 / 1000
+txa.lds_bw_store:
+  name: LDS Bandwidth - Store
+  formula: SUM(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total LDS write bandwidth.
+  peak: $max_sclk * $cu_per_gpu * 256 / 1000
+txa.lds_insts:
+  name: LDS Instructions
+  formula: SUM(TX_VCA_LDS_TOTAL_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total LDS instructions processed by TXA.
+txa.lds_load_insts:
+  name: LDS Load Instructions
+  formula: SUM(TX_VCA_LDS_LOAD_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of LDS load requests.
+txa.lds_store_insts:
+  name: LDS Store Instructions
+  formula: SUM(TX_VCA_LDS_STORE_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of LDS store requests.
+txa.req_bus_stall_rate:
+  name: TXA Request Bus Stall Rate
+  formula: 100 * SUM(TX_VMW_DATA_FIFO_STALL_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
+  unit: Percent
+  description: >-
+    Percentage of cycles the TXA-to-GL0 request data bus is stalled.
+txa.req_bus_util:
+  name: Shader-TXA Request Bus Utilization
+  formula: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of cycles the Shader-to-TXA request bus is carrying a request.
+txa.req_bus_util_atomic_data:
+  name: TXA Request Bus Utilization - Atomic Data
+  formula: 100 * SUM(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of cycles the Shader-to-TXA request bus is carrying atomic write data.
+txa.stall_rate:
+  name: TXA Stall Rate
+  formula: 100 * SUM(TX_VCA_ADDRESSER_STALLED_CYCLES_sum) / SUM(TX_VMW_GATE_EN1_sum)
+  unit: Percent
+  description: Percentage of cycles the TXA is stalled by the GL0 cache.
+txa.tdm_async_barrier_inst:
+  name: TDM Async Barrier Instruction
+  formula: SUM(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of TDM async barrier instructions processed by TXA.
+txa.tdm_async_cluster_load_insts:
+  name: TDM Async Cluster Load Instructions
+  formula: SUM(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of TDM async cluster load instructions processed by TXA.
+txa.tdm_async_load_insts:
+  name: TDM Async Load Instructions
+  formula: SUM(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total TDM load requests.
+txa.tdm_async_store_insts:
+  name: TDM Async Store Instructions
+  formula: SUM(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total TDM store requests.
+txa.tdm_insts:
+  name: TDM Instructions
+  formula: SUM(TX_VCA_TENSOR_DMA_WAVEFRONT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total TDM instructions processed by TXA.
+txa.tdm_load_bw:
+  name: TDM Load Bandwidth
+  formula: SUM(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total TDM load bandwidth.
+txa.tdm_store_bw:
+  name: TDM Store Bandwidth
+  formula: SUM(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total TDM store bandwidth.
+txa.util:
+  name: TXA Utilization
+  formula: 100 * SUM(TX_VCA_VCA_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  unit: Percent
+  description: Percentage of cycles the TXA is processing memory requests.
+txa.vmw_req_bus_util:
+  name: TXA-VMW Request Bus Utilization
+  formula: 100 * SUM(TX_VCA_VMEMREQ_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of cycles the TXA-to-GL0 request data bus is carrying data.
