@@ -259,6 +259,25 @@
         { "name": "Log_ReportsBackendPerComm", "description": "Two comms bind different GIN backends (anvil-sdma, proxy) and each DevComm line names its own comm", "test_filter": "GinMPIDeviceTests.Log_ReportsBackendPerComm" }
       ]
     },
+    "gin_devmpi_mixed_2node": {
+      "extends": "default",
+      "description": "AICOMRCCL-3450: Anvil SDMA and the proxy are both eligible, so NCCL_GIN_TYPE must stay unset (an empty value disables Anvil SDMA). 2 ranks on 2 hosts. Copies the gin_devmpi_common launch settings without its test list: every other GinMPIDeviceTests case skips when the type is unset.",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "NCCL_DMABUF_ENABLE": "1"
+      },
+      "tests": [
+        { "name": "MixedBackends_TwoNodeUnsetType", "description": "Multi-host comm drops Anvil SDMA: PROXY is the default, an explicit Anvil DevComm is rejected, and default and PROXY DevComms complete a cross-host put/signal (AICOMRCCL-3417)", "test_filter": "GinMPIDeviceTests.MixedBackends_TwoNodeUnsetType" }
+      ]
+    },
 
     "gin_a2a_eligibility": {
       "extends": "default",
@@ -323,6 +342,12 @@
       "name": "GIN Device MPI Tests - mixed backends (single node)",
       "description": "Per-comm GIN backend logging with anvil-sdma and the proxy both active, single node",
       "config": "gin_devmpi_mixed",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI Tests - mixed backends (2 nodes, type unset)",
+      "description": "NCCL_GIN_TYPE unset on a 2-host comm: Anvil SDMA is dropped and the proxy is the default",
+      "config": "gin_devmpi_mixed_2node",
       "enabled": true
     },
     {
