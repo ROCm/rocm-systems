@@ -2617,12 +2617,12 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
                     f" static_cast<size_t>(_n) * sizeof({d.ctype}));")
             if d.content:
                 lines.append("      // Application data: withheld in metadata-only capture.")
-                lines.append("      if (HIP_HRR_CAPTURE_CONTENT)")
+                lines.append("      if (hip_capture_content_enabled())")
                 lines.append(f"        {copy}")
             else:
                 lines.append(f"      {copy}")
             lines.append(f"      a.{d.count_field}   = _n;")
-            present = "HIP_HRR_CAPTURE_CONTENT ? 1 : HRR_PRESENT_WITHHELD" if d.content else "1"
+            present = "hip_capture_content_enabled() ? 1 : HRR_PRESENT_WITHHELD" if d.content else "1"
             lines.append(f"      a.{d.present_field} = {present};")
             lines.append(f"    }}")
         elif d.capability:

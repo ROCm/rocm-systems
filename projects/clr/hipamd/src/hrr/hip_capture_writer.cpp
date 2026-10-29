@@ -1250,7 +1250,7 @@ bool open(const char* output_dir) {
     // Pitched host copies record only their copied rows (hip_capture.cpp,
     // write_host_rect_blob), which replay reads back by this flag.
     uint16_t flags = HRR_FILE_FLAG_PACKED_HOST_RECTS;
-    if (!HIP_HRR_CAPTURE_CONTENT) flags |= HRR_FILE_FLAG_METADATA_ONLY;
+    if (!hip_capture_content_enabled()) flags |= HRR_FILE_FLAG_METADATA_ONLY;
     hrr_file_header fh{HRR_MAGIC, HRR_VERSION, flags};
     buffer_append_locked(&fh, sizeof(fh));
   }
@@ -1717,7 +1717,7 @@ Hash128 write_blob(const void* data, size_t len) {
   }
   // Metadata-only: not even the hash, since a hash of a four-byte token
   // identifier is as good as the identifier.
-  if (!HIP_HRR_CAPTURE_CONTENT) return kWithheld;
+  if (!hip_capture_content_enabled()) return kWithheld;
 
   Hash128 h = hash_buffer(data, len);
 
@@ -1779,7 +1779,7 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     std::lock_guard<std::mutex> lk(g_file_mu);
     if (g_events_fd < 0 || g_events_finalized) return {};  // not open, or past the trailer
   }
-  if (!HIP_HRR_CAPTURE_CONTENT) return kWithheld;  // as in write_blob()
+  if (!hip_capture_content_enabled()) return kWithheld;  // as in write_blob()
 
   // The stored bytes, and so the hash, are the image with its .comment and
   // debug sections zeroed (see hip_capture_scrub.h).
