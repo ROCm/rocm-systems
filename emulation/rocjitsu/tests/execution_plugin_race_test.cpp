@@ -1311,6 +1311,86 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
   EXPECT_NE(sink.str().find("type=TTMP"), std::string::npos);
 }
 
+TEST(RaceDetectorPluginTest, DebuggerReadsIgnorePendingLoads) {
+  for (bool scalar : {false, true}) {
+    for (bool advance_pc : {false, true}) {
+      SCOPED_TRACE(std::format("scalar={}, advance_pc={}", scalar, advance_pc));
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "rdna4", 32, 128));
+      PluginSinkConfig sink_config;
+      auto &sink = sink_config.emplace<StringSink>();
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+      auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+      auto *race = race_plugin.get();
+      ASSERT_TRUE(fixture.plugin_group_->add(std::move(race_plugin)));
+      auto ordering_plugin = std::make_unique<OrderingPlugin>();
+      auto *ordering = ordering_plugin.get();
+      ASSERT_TRUE(fixture.plugin_group_->add(std::move(ordering_plugin)));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      fixture.plugin_group_->onInit();
+
+      auto *cu = fixture.cu();
+      auto *wave = cu->dispatch_wf(0, 0x1000, 128, 256, 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      std::array<Wavefront *, 1> waves{wave};
+      fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
+      auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(race->slot_index()));
+
+      const auto sbase = wave->sgpr_alloc().base;
+      const auto vbase = wave->vgpr_alloc().base;
+      cu->write_sgpr(sbase, 0x2000);
+      cu->write_sgpr(sbase + 1, 0);
+      cu->write_sgpr(sbase + 4, 0x2000);
+      cu->write_sgpr(sbase + 5, 0);
+      cu->write_sgpr(sbase + 6, 64);
+      cu->write_sgpr(sbase + 7, 4 | (5 << 3) | (6 << 6) | (7 << 9) | (46 << 12) | (1u << 28));
+      cu->write_sgpr(sbase + 8, 42);
+      cu->write_vgpr(vbase + 8, 0, 43);
+      cu->write_vgpr(vbase + 8, 31, 44);
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+      ASSERT_NE(decoder, nullptr);
+      util::StringDiagnostic error;
+      auto load =
+          scalar
+              ? decoder->decode_window(rdna4::build_smem(rdna4::kSLoadB32Smem,
+                                                         {.sbase = 0, .sdata = 8, .soffset = 124}),
+                                       wave->pc, error.emitter())
+              : decoder->decode_window(
+                    rdna4::build_vbuffer(
+                        rdna4::kBufferLoadFormatXVbuffer,
+                        {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4, .format = 46}),
+                    wave->pc, error.emitter());
+      ASSERT_TRUE(load.succeeded()) << error.message();
+      fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *load.value(), *wave);
+      ASSERT_TRUE(cu->execute_instruction(load.value().get(), *wave).succeeded());
+      fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load.value(), *wave);
+      ASSERT_EQ(state->race_state->getWaveMemoryEvents().size(), 1u);
+      if (advance_pc)
+        wave->pc += 4;
+
+      ordering->events.clear();
+      const auto output = sink.str();
+      EXPECT_NO_THROW({
+        EXPECT_EQ(wave->debug_read_sgpr(8), 42u);
+        EXPECT_EQ(wave->debug_read_vgpr(8, 0), 43u);
+        EXPECT_EQ(wave->debug_read_vgpr(8, 31), 44u);
+      });
+      EXPECT_TRUE(ordering->events.empty());
+      EXPECT_EQ(sink.str(), output);
+      EXPECT_EQ(state->race_state->getWaveMemoryEvents().size(), 1u);
+
+      RegisterAccess registers(*wave);
+      if (scalar)
+        EXPECT_EQ(registers.read_sgpr(sbase + 8), 42u);
+      else
+        EXPECT_EQ(registers.read_vgpr(vbase + 8, 0), 43u);
+      EXPECT_EQ(ordering->events.size(), 1u);
+      EXPECT_NE(sink.str().find(scalar ? "type=SGPR" : "type=VGPR"), std::string::npos);
+    }
+  }
+}
+
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsWriteBeforeWait) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
@@ -1649,6 +1729,9 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             auto *wf = cu->dispatch_wf(0, 0x100, sgprs, 256, wave_size);
             ASSERT_NE(wf, nullptr);
             wf->set_exec(exec);
+            const uint32_t lds_size = wave_size * 16;
+            wf->set_lds_base(cu->allocate_lds(lds_size));
+            wf->set_lds_size(lds_size);
             wf->set_scratch_base(kScratch);
             wf->set_scratch_lane_size(256);
             std::array<amdgpu::Wavefront *, 1> waves{wf};

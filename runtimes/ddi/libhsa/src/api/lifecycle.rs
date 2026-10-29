@@ -6,12 +6,15 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
 use crate::api_trace;
 use crate::ffi::*;
-use crate::runtime::{HsaState, LifecycleTransition, ShutdownWork, boundary, lock};
+use crate::runtime::{
+    HsaState, LifecycleCallScope, LifecycleTransition, ShutdownWork, boundary, lock,
+};
 use crate::{runtime, signal};
 
 /// Quiesces tool callbacks while HSA storage is still published, then retires
 /// the prepared generation. Callback workers may enter this on a helper thread.
 fn finish_prepared_shutdown(generation: u64) -> Status {
+    let _entry = LifecycleCallScope::enter_helper();
     let mut transition = LifecycleTransition::preparing(generation);
     // Operations admitted before Preparing may still publish a queue or PC
     // sampling session after leaving the lifecycle lock. Stop new workers and
@@ -100,12 +103,16 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
 /// Initializes the process HSA runtime and increments its reference count.
 pub extern "C" fn hsa_init() -> Status {
     boundary(|| {
+        let _entry = match LifecycleCallScope::enter() {
+            Ok(entry) => entry,
+            Err(status) => return status,
+        };
         let generation = {
-            let mut guard = match lock() {
+            let guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
             };
-            match guard.begin_init() {
+            match runtime::begin_init_waiting(guard, &runtime::LIFECYCLE_CONDVAR) {
                 Ok(None) => return SUCCESS,
                 Ok(Some(generation)) => generation,
                 Err(status) => return status,
@@ -163,6 +170,10 @@ pub extern "C" fn hsa_init() -> Status {
 /// Releases one HSA initialization reference and tears down the final state.
 pub extern "C" fn hsa_shut_down() -> Status {
     boundary(|| {
+        let _entry = match LifecycleCallScope::enter() {
+            Ok(entry) => entry,
+            Err(status) => return status,
+        };
         if runtime::LogWriteScope::active() {
             return INVALID_RUNTIME_STATE;
         }
