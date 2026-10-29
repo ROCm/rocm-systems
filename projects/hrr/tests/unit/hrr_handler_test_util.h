@@ -13,6 +13,7 @@
 #include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
 #include "hrr_reader.h"
+#include "hrr_launch_event.h"
 
 #include <cstdint>
 #include <cstdio>
