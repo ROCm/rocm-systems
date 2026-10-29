@@ -100,6 +100,8 @@ CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
 ARCH_CEILINGS_WITHOUT_METRIC = {
     # The roofline shows the combined F6F4 MFMA rate.
     "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
+    # The roofline shows the F32 and F64 VALU rates only.
+    "gfx115x": ("FP16Flops", "BF16Flops"),
 }
 VARIABLE_FIELDS = ("formula",)
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
@@ -264,6 +266,18 @@ DISPLAY_VARIANTS["gfx942"] = {
         "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
     ),
 }
+DISPLAY_VARIANTS["gfx115x"] = {
+    "4.1.0": (
+        "VALU FLOPs",
+        "compute.valu_flops",
+        "SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)",
+    ),
+    "4.1.1": (
+        "VALU FLOPs (F64)",
+        "compute.valu_flops_f64",
+        "SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)",
+    ),
+}
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
 UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942")}
@@ -275,6 +289,21 @@ _GFX940_UNIT_VARIANTS = {
 }
 UNIT_VARIANTS["gfx940"] = _GFX940_UNIT_VARIANTS
 UNIT_VARIANTS["gfx941"] = _GFX940_UNIT_VARIANTS
+UNIT_VARIANTS["gfx115x"] = {
+    "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
+    "7.2.4": ("LDS Allocation", "Bytes"),
+    "9.2.0": ("Total Requests", "(Count + $normUnit)"),
+    "9.2.1": ("Read Requests", "(Count + $normUnit)"),
+    "9.2.2": ("Write Requests", "(Count + $normUnit)"),
+    "9.4.0": ("GL1 Read Requests", "(Count + $normUnit)"),
+    "9.4.2": ("GL1 Write Requests", "(Count + $normUnit)"),
+    "11.2.0": ("Total Requests", "(Count + $normUnit)"),
+    "11.2.1": ("Read Requests", "(Count + $normUnit)"),
+    "11.2.2": ("Write Requests", "(Count + $normUnit)"),
+    "11.4.0": ("GL2 Read Requests", "(Count + $normUnit)"),
+    "11.4.1": ("GL2 Read 128B Requests", "(Count + $normUnit)"),
+    "11.4.2": ("GL2 Write Requests", "(Count + $normUnit)"),
+}
 UNIT_VARIANTS["gfx950"] = {
     **_CDNA_UNIT_VARIANTS,
     "30.3.6": ("TD - atomic wavefronts", "(Wavefronts + $normUnit)"),
