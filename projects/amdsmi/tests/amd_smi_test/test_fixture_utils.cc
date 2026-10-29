@@ -166,6 +166,22 @@ void ScopedFakeIoctl::RegisterHandler(unsigned long request, Handler handler) {
   handlers_[request] = std::move(handler);
 }
 
+void ScopedFakeIoctl::RegisterFailure(unsigned long request, int error) {
+  RegisterHandler(request, Handler([error](void*) {
+                    errno = error;
+                    return -1;
+                  }));
+}
+
+void RegisterFakeKfdVersion(ScopedFakeIoctl& ioctl, uint32_t major, uint32_t minor) {
+  ioctl.RegisterHandler<kfd_ioctl_get_version_args>(AMDKFD_IOC_GET_VERSION,
+                                                    [major, minor](auto& args) {
+                                                      args.major_version = major;
+                                                      args.minor_version = minor;
+                                                      return 0;
+                                                    });
+}
+
 int ScopedFakeIoctl::CallCount(unsigned long request) const {
   const auto call = calls_.find(request);
   return call == calls_.end() ? 0 : call->second;
@@ -208,11 +224,8 @@ ScopedFakeKfdEventStream::ScopedFakeKfdEventStream(uint32_t rocm_smi_device_inde
   kfd_tree_.WriteFile("kfd", "");
   path_override_.emplace(amd::smi::test_hooks::KfdDevicePath,
                          amd::smi::test_hooks::SetKfdDevicePath, kfd_tree_.root() + "/kfd");
-  ioctl_.RegisterHandler<kfd_ioctl_get_version_args>(AMDKFD_IOC_GET_VERSION, [](auto& args) {
-    args.major_version = KFD_IOCTL_MAJOR_VERSION;
-    args.minor_version = KFD_IOCTL_MINOR_VERSION;
-    return 0;
-  });
+  amd::smi::testing::RegisterFakeKfdVersion(ioctl_, KFD_IOCTL_MAJOR_VERSION,
+                                            KFD_IOCTL_MINOR_VERSION);
   ioctl_.RegisterHandler<kfd_ioctl_smi_events_args>(AMDKFD_IOC_SMI_EVENTS, [this](auto& args) {
     if (device_fd_ < 0) {
       errno = EIO;
@@ -243,6 +256,10 @@ ScopedFakeKfdEventStream::~ScopedFakeKfdEventStream() {
   }
   if (device_fd_ >= 0) close(device_fd_);  // never handed to the library
   if (stream_fd_ >= 0) close(stream_fd_);
+}
+
+int ScopedFakeKfdEventStream::VersionQueryCount() const {
+  return ioctl_.CallCount(AMDKFD_IOC_GET_VERSION);
 }
 
 void ScopedFakeKfdEventStream::Write(uint32_t event, const std::string& payload) {

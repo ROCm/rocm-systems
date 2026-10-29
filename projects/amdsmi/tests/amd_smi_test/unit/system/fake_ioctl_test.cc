@@ -36,12 +36,9 @@ TEST(SystemUnit, FAKE_IOCTL__HandlerFillsTypedArgsAndIsCounted) {
   EXPECT_EQ(fake.CallCount(kDouble), 1);
 }
 
-TEST(SystemUnit, FAKE_IOCTL__HandlerCanFailWithErrno) {
+TEST(SystemUnit, FAKE_IOCTL__FailureReturnsMinusOneWithErrno) {
   ScopedFakeIoctl fake;
-  fake.RegisterHandler(kDouble, [](void*) {
-    errno = EACCES;
-    return -1;
-  });
+  fake.RegisterFailure(kDouble, EACCES);
 
   EXPECT_EQ(ioctl(-1, kDouble, nullptr), -1);
   EXPECT_EQ(errno, EACCES);
