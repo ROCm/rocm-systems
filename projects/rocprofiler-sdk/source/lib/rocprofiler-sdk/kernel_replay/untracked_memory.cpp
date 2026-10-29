@@ -61,7 +61,9 @@ read_writable_host_mappings()
         unsigned long long end      = 0;
         char               perms[8] = {};
         if(std::sscanf(line.c_str(), "%llx-%llx %7s", &begin, &end, perms) != 3) continue;
-        if(perms[0] != 'r' || perms[1] != 'w') continue;
+        // Write permission is enough. A PROT_WRITE mapping is `-w-` here, and this check never
+        // reads the page: it only asks whether a pointer lands in host memory the snapshot misses.
+        if(perms[1] != 'w') continue;
         if(line.find("/dev/kfd") != std::string::npos || line.find("/dev/dri") != std::string::npos)
             continue;
         // vvar, vdso and vsyscall hold scalars and host-only pointers, not memory a kernel is
@@ -80,10 +82,11 @@ read_writable_host_mappings()
 
 namespace
 {
-// Anything below the first page or above the canonical 47-bit user range is a scalar, not an
-// address a kernel can dereference.
+// Anything below the first page, or above the 56-bit user range ROCr accepts, is a scalar rather
+// than an address a kernel can dereference. That range includes addresses above the 47-bit
+// canonical limit, such as an SVM aperture at 0x800000010000.
 constexpr uint64_t min_candidate = 0x10000;
-constexpr uint64_t max_candidate = 0x00007fffffffffffULL;
+constexpr uint64_t max_candidate = (uint64_t{1} << 56) - 1;
 
 bool
 in_spans(const std::vector<address_span_t>& sorted, uint64_t address)
