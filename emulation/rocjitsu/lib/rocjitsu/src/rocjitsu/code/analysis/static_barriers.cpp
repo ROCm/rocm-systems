@@ -89,7 +89,7 @@ qualify_static_barriers(std::span<BasicBlock *const> blocks, rj_code_target_id_t
         continue;
       const uint64_t offset = instruction.src_loc();
       const InstructionBoundaries::Entry *boundary = boundaries.find(offset);
-      if (!boundary || boundary->size != instruction.size())
+      if (!boundary || !std::cmp_equal(boundary->size, instruction.size()))
         return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                       "barrier does not match the full-text instruction boundaries");
       if (boundary->clause_member || boundary->clause || instruction.size() != 4)

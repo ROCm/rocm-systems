@@ -103,6 +103,7 @@ public:
   InstructionBoundaries owned_boundaries;
   const InstructionBoundaries *boundaries = nullptr;
   std::vector<uint64_t> symbol_endpoints;
+  std::vector<uint64_t> relative_text_references;
 };
 
 CheckedTextEditContext::CheckedTextEditContext(const AmdGpuCodeObject &source)
@@ -183,6 +184,7 @@ Result CheckedTextEditContext::initialize(const InstructionBoundaries *boundarie
       patcher.has_rocr_rejected_none_relocation() || patcher.has_unsupported_relocation_to_text())
     return reject(error, TextEditErrorCode::UnsupportedReferences,
                   "unsupported relocation place or reference to .text");
+  state_->relative_text_references = patcher.relative_text_addend_offsets();
   state_->section = {.index = *text.sectionHeaderIndex(),
                      .file_offset = text.sectionOffset(),
                      .vaddr = text.vaddr(),
@@ -303,6 +305,11 @@ FailureOr<CheckedTextEditResult> apply_checked_text_edits(const CheckedTextEditC
     if (reference_enters_edit(endpoint, edits))
       return reject(error, TextEditErrorCode::UnsupportedReferences,
                     "symbol endpoint lies inside an edited instruction", endpoint);
+  }
+  for (const uint64_t reference : state.relative_text_references) {
+    if (reference_enters_edit(reference, edits))
+      return reject(error, TextEditErrorCode::UnsupportedReferences,
+                    "relocation reference enters an edited instruction", reference);
   }
   CodeObjectPatcher patcher(source);
   for (const CheckedTextEdit &edit : sorted)

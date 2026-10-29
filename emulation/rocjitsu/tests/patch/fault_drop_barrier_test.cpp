@@ -1402,7 +1402,11 @@ TEST(FaultDropBarrier, TrapFormsCannotConsumeDefaultUserBarrierSelection) {
       EXPECT_TRUE(discover_drop_barriers(context, "test_kernel", error).failed());
       EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
       EXPECT_EQ(error.offset, 0u);
-      EXPECT_NE(error.message.find("trap-only"), std::string::npos);
+      // RDNA4 has no -4 signal operand; decoding rejects it before qualification.
+      const std::string_view diagnostic = row.arch == ROCJITSU_CODE_ARCH_RDNA4 && id == -4
+                                              ? "invalid scalar source selector"
+                                              : "trap-only";
+      EXPECT_NE(error.message.find(diagnostic), std::string::npos) << error.message;
     }
   }
 }

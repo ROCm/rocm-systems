@@ -75,6 +75,7 @@ struct CheckedTextEditResult {
 /// It fixes concrete decoder features, the entire text range and linear clause/reference
 /// policy. It does not contain kernel roots or prove execution ownership. No caller can
 /// supply replacement source facts; Instrumentor alone can reuse its private full-text index.
+/// Symbol endpoints and supported relocation destinations are cached independently of that index.
 class CheckedTextEditContext {
 public:
   static FailureOr<std::unique_ptr<CheckedTextEditContext>> create(const AmdGpuCodeObject &source,
@@ -82,7 +83,7 @@ public:
   ~CheckedTextEditContext();
   const TextSectionIdentity &section() const;
   std::span<const Elf64_Shdr> section_headers() const;
-  /// @brief Authoritative instruction, clause and reference facts for the complete source text.
+  /// @brief Instruction, clause and direct-branch facts for the complete source text.
   /// @details The returned reference is borrowed and must not outlive this context.
   const InstructionBoundaries &instruction_boundaries() const;
   CheckedTextEditContext(const CheckedTextEditContext &) = delete;
@@ -113,6 +114,8 @@ private:
 /// Checks source format, aliases, instruction extents, clauses, references, stale bytes
 /// and replacement encoding before writing. Other sections may be executable. Concrete
 /// bindings select concrete decoders; known legacy non-variant ELF architectures also work.
+/// Branch destinations, symbol endpoints and supported ET_DYN RELATIVE64 destinations
+/// may name edit boundaries, but must not enter an edited instruction's interior.
 /// Equal-length writes leave ELF layout unchanged under the patcher's existing contract.
 /// No post-emission expected-delta or recipe analysis runs here; emitter tests establish
 /// output semantics. PT_LOAD, descriptors and ownership remain consumer preconditions.

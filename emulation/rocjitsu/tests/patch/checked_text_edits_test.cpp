@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <optional>
 
 namespace rocjitsu {
 namespace {
@@ -57,6 +58,80 @@ std::vector<CheckedTextEdit> make_mixed_width_nop_edits() {
       {8, make_instruction_bytes({0xbe8000ffu, 0x12345678u}), make_instruction_bytes({nop, nop})},
       {20, make_instruction_bytes({0xee068002u, 0x00800000u, 0}),
        make_instruction_bytes({nop, nop, nop})}};
+}
+
+// Keep the kernel descriptor intact and put a symbol-less pointer in separate
+// loaded data. No text symbol or direct branch names its target. nullopt names
+// the data slot itself instead; nonallocated metadata retains the same r_offset.
+std::vector<uint8_t> with_relative64_reference(std::vector<uint8_t> image,
+                                               std::optional<uint64_t> text_offset,
+                                               bool nonallocated_metadata = false,
+                                               bool trailing_partial_record = false) {
+  const AmdGpuCodeObject original(image.data(), image.size());
+  const Section &text = *original.text_sections().front();
+  std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  auto segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  EXPECT_TRUE(segments);
+  if (!segments)
+    return {};
+  const auto data_load = std::ranges::find_if(*segments, [](const Elf64_Phdr &segment) {
+    return segment.p_type == PT_LOAD && (segment.p_flags & PF_X) == 0;
+  });
+  const auto symbols = std::ranges::find(sections, SHT_SYMTAB, &Elf64_Shdr::sh_type);
+  EXPECT_NE(data_load, segments->end());
+  EXPECT_NE(symbols, sections.end());
+  if (data_load == segments->end() || symbols == sections.end())
+    return {};
+  const uint32_t symbol_index = static_cast<uint32_t>(symbols - sections.begin());
+  const uint64_t data_offset = header.e_shoff;
+  const uint64_t data_vaddr = data_load->p_vaddr + data_offset - data_load->p_offset;
+  const uint64_t rela_offset = data_offset + sizeof(uint64_t);
+  const uint64_t rela_vaddr = data_vaddr + sizeof(uint64_t);
+  header.e_shoff = rela_offset + sizeof(Elf64_Rela);
+  // Keep the section table aligned while admitting one incomplete tail byte.
+  if (trailing_partial_record)
+    header.e_shoff += alignof(Elf64_Shdr);
+  image.resize(header.e_shoff);
+  const uint64_t slot = 0;
+  std::memcpy(image.data() + data_offset, &slot, sizeof(slot));
+  const Elf64_Rela relocation = {
+      .r_offset = data_vaddr,
+      .r_info = R_AMDGPU_RELATIVE64,
+      .r_addend = static_cast<int64_t>(text_offset ? text.vaddr() + *text_offset : data_vaddr)};
+  std::memcpy(image.data() + rela_offset, &relocation, sizeof(relocation));
+  sections.push_back({.sh_name = 0,
+                      .sh_type = SHT_PROGBITS,
+                      .sh_flags = SHF_ALLOC | SHF_WRITE,
+                      .sh_addr = data_vaddr,
+                      .sh_offset = data_offset,
+                      .sh_size = sizeof(uint64_t),
+                      .sh_link = 0,
+                      .sh_info = 0,
+                      .sh_addralign = alignof(uint64_t),
+                      .sh_entsize = 0});
+  sections.push_back({.sh_name = 0,
+                      .sh_type = SHT_RELA,
+                      .sh_flags = SHF_ALLOC,
+                      .sh_addr = rela_vaddr,
+                      .sh_offset = rela_offset,
+                      .sh_size = sizeof(Elf64_Rela) + (trailing_partial_record ? 1u : 0u),
+                      .sh_link = symbol_index,
+                      .sh_info = nonallocated_metadata ? header.e_shstrndx : SHN_UNDEF,
+                      .sh_addralign = alignof(Elf64_Rela),
+                      .sh_entsize = sizeof(Elf64_Rela)});
+  data_load->p_flags |= 0x2u; // PF_W
+  data_load->p_filesz = header.e_shoff - data_load->p_offset;
+  data_load->p_memsz = data_load->p_filesz;
+  header.e_shnum = static_cast<uint16_t>(sections.size());
+  image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::memcpy(image.data() + header.e_phoff, segments->data(),
+              segments->size() * sizeof(Elf64_Phdr));
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  return image;
 }
 
 // Test-side exact-image oracle, independent of the production transaction.
@@ -382,6 +457,111 @@ TEST(CheckedTextEdits, RejectsRelocationWritesAndInteriorSymbolEndpoints) {
       EXPECT_EQ(error.code, TextEditErrorCode::UnsupportedReferences) << error.message;
     }
   }
+}
+
+TEST(CheckedTextEdits, RejectsRelativeReferencesInsideInstructionsAtomically) {
+  for (const uint64_t target_offset : {12u, 13u, 24u, 28u}) {
+    SCOPED_TRACE(target_offset);
+    const std::vector<uint8_t> image =
+        with_relative64_reference(make_mixed_width_kernel_elf(), target_offset);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    const CodeObjectPatcher patcher(object);
+    ASSERT_FALSE(patcher.has_relocations_within_text());
+    ASSERT_FALSE(patcher.has_malformed_rocr_relocation_section());
+    ASSERT_FALSE(patcher.has_rocr_rejected_none_relocation());
+    ASSERT_FALSE(patcher.has_unsupported_relocation_to_text());
+    TextEditError error;
+    const FailureOr<std::unique_ptr<CheckedTextEditContext>> context =
+        CheckedTextEditContext::create(object, error);
+    ASSERT_TRUE(context.succeeded()) << error.message;
+    const std::vector<uint8_t> original_image = image;
+    const std::vector<CheckedTextEdit> edits = make_mixed_width_nop_edits();
+    EXPECT_TRUE(apply_checked_text_edits(*context.value(), edits, error).failed());
+    EXPECT_EQ(error.code, TextEditErrorCode::UnsupportedReferences) << error.message;
+    EXPECT_EQ(error.offset, target_offset);
+    EXPECT_EQ(image, original_image);
+    EXPECT_EQ(std::memcmp(object.image_data(), original_image.data(), original_image.size()), 0);
+
+    // The unrelated first edit remains usable after the rejected transaction.
+    const std::span<const CheckedTextEdit> first(edits.data(), 1);
+    const FailureOr<CheckedTextEditResult> result =
+        apply_checked_text_edits(*context.value(), first, error);
+    ASSERT_TRUE(result.succeeded()) << error.message;
+    EXPECT_TRUE(matches_checked_output(object, first, result.value().image));
+  }
+}
+
+TEST(CheckedTextEdits, RejectsRelativeReferenceBeforePartialRelocationTail) {
+  // Shared admission accepts the complete record before this incomplete tail.
+  const std::vector<uint8_t> image =
+      with_relative64_reference(make_mixed_width_kernel_elf(), 12, false, true);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const CodeObjectPatcher patcher(object);
+  ASSERT_FALSE(patcher.has_relocations_within_text());
+  ASSERT_FALSE(patcher.has_malformed_rocr_relocation_section());
+  ASSERT_FALSE(patcher.has_rocr_rejected_none_relocation());
+  ASSERT_FALSE(patcher.has_unsupported_relocation_to_text());
+  TextEditError error;
+  const FailureOr<std::unique_ptr<CheckedTextEditContext>> context =
+      CheckedTextEditContext::create(object, error);
+  ASSERT_TRUE(context.succeeded()) << error.message;
+  const std::vector<CheckedTextEdit> edits = make_mixed_width_nop_edits();
+  EXPECT_TRUE(apply_checked_text_edits(*context.value(), edits, error).failed());
+  EXPECT_EQ(error.code, TextEditErrorCode::UnsupportedReferences) << error.message;
+  EXPECT_EQ(error.offset, 12u);
+}
+
+TEST(CheckedTextEdits, PreservesRelativeReferencesAtRetainedBoundaries) {
+  for (const uint64_t target_offset : {0u, 4u, 8u, 16u, 20u, 32u, 36u}) {
+    SCOPED_TRACE(target_offset);
+    const std::vector<uint8_t> image =
+        with_relative64_reference(make_mixed_width_kernel_elf(), target_offset);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    TextEditError error;
+    const std::vector<CheckedTextEdit> edits = make_mixed_width_nop_edits();
+    const FailureOr<CheckedTextEditResult> result = apply_checked_text_edits(object, edits, error);
+    ASSERT_TRUE(result.succeeded()) << error.message;
+    EXPECT_TRUE(matches_checked_output(object, edits, result.value().image));
+  }
+}
+
+TEST(CheckedTextEdits, PreservesUnrelatedDataAndNonallocatedRelativeReferences) {
+  for (const bool nonallocated_metadata : {false, true}) {
+    SCOPED_TRACE(nonallocated_metadata);
+    const std::vector<uint8_t> image = with_relative64_reference(
+        make_mixed_width_kernel_elf(),
+        nonallocated_metadata ? std::optional<uint64_t>(12) : std::nullopt, nonallocated_metadata);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    TextEditError error;
+    const std::vector<CheckedTextEdit> edits = make_mixed_width_nop_edits();
+    const FailureOr<CheckedTextEditResult> result = apply_checked_text_edits(object, edits, error);
+    ASSERT_TRUE(result.succeeded()) << error.message;
+    EXPECT_TRUE(matches_checked_output(object, edits, result.value().image));
+  }
+}
+
+TEST(CheckedTextEdits, InstrumentorRejectsRelativeReferenceInsideAnchor) {
+  const std::vector<uint8_t> image = with_relative64_reference(make_mixed_width_kernel_elf(), 12);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  Instrumentor instrumentor(object, kArch);
+  instrumentor.add_point_by_offset(8);
+  const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+  ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+  ASSERT_EQ(validated.sites.size(), 1u);
+  ASSERT_EQ(validated.sites.front().original_size, 8u);
+  const std::vector<uint8_t> original_image = image;
+  const InstrumentedCodeObject result = instrumentor.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("anchor edit transaction:"), std::string::npos);
+  EXPECT_NE(result.errors.front().find("relocation"), std::string::npos);
+  EXPECT_EQ(image, original_image);
+  EXPECT_EQ(std::memcmp(object.image_data(), original_image.data(), original_image.size()), 0);
 }
 
 TEST(CheckedTextEdits, PreservesAdditionalExecutableSection) {

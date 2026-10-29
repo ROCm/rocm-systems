@@ -5,10 +5,11 @@ for experiments with synchronization failures. It runs offline on the host:
 callers supply an image, select a qualified operation, and receive a mutant
 image or a typed error. It neither initializes HSA nor dispatches GPU work.
 
-The current interface is an internal C++ library. A mutation CLI, durable
-selection files, and replay bundles are planned but not implemented. ConSan is
-an optional consumer of the output; the library builds and runs its host tests
-with the ConSan compiler, runtime, and analyzer disabled.
+The current interface is an internal C++ library. A mutation CLI is planned
+separately. Persistent selection files and replay bundles are not provided and
+have no committed delivery scope. ConSan is an optional consumer of the output;
+the library builds and runs its host tests with the ConSan compiler, runtime,
+and analyzer disabled.
 
 ## Architecture and lifetime
 
@@ -83,7 +84,8 @@ Generic mechanics and recipe semantics have separate responsibilities:
 | Exact and logical-ordinal selection | Implemented. Exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Default ordinal zero deterministically chooses the first barrier in first-member source order; there is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [selection regressions](../tests/patch/fault_drop_barrier_test.cpp) |
 | Multiple kernels in one text section | Limited support for independent sibling kernels. Discovery checks all entries before exposing one exact kernel's inventory; shared blocks, calls, aliased entries, and unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [sibling preservation tests](../tests/patch/fault_drop_barrier_test.cpp) |
 | Shared checked text edits | Implemented. One transaction handles nonoverlapping, equal-length replacements of complete 4/8/12-byte instructions. This does not widen Instrumentor's trampoline-anchor admission. | [contract](../lib/rocjitsu/src/rocjitsu/code/patch/checked_text_edits.h), [implementation](../lib/rocjitsu/src/rocjitsu/code/patch/checked_text_edits.cpp), [edit tests](../tests/patch/checked_text_edits_test.cpp), [Instrumentor tests](../tests/patch/instrumentor_test.cpp) |
-| CLI, durable replay and artifact publication | Planned; no executable, persistent selection format, or cross-context replay is provided by this library. | — |
+| Mutation CLI | Planned separately; this library does not provide an executable. | — |
+| Persistent selection files and replay bundles | Not provided; no durable replay format is committed. | — |
 | Helper, indirect-flow and firmware-preload ownership | Planned extensions; these inputs are not admitted by the current ownership profile. | — |
 | Other mutation recipes and composition | Planned. Barrier movement, address/order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here. | — |
 | Multiple text sections or dynamic occurrence selection | Unsupported. | — |
@@ -150,6 +152,14 @@ text. Non-aliasing unselected sections are preserved; their executable flag alon
 does not imply another text section. Detailed admission and diagnostics are in
 the [frontend](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp)
 and [checked-edit contract](../lib/rocjitsu/src/rocjitsu/code/patch/checked_text_edits.h).
+
+Barrier qualification is all-or-nothing for a kernel's analyzed reachable
+scope: an unsupported form or incomplete barrier rejects that kernel's entire
+inventory, even when other complete barriers are present. This is the current
+Drop admission policy. Per-kernel wave or barrier qualification failures leave
+independent sibling kernels available. Failures in the shared structural or
+ownership checks reject the whole image profile, including unknown flow in an
+unselected owner.
 
 A split pair must complete in the same basic block, although ordinary
 instructions may separate its members. Partial, interleaved, cross-block,
