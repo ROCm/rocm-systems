@@ -66,6 +66,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
     `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
+  - `plugin/rma.cc` (`RMA_PLUGIN_CC_PATH`, from `rma-plugin-init-test.cc`); suite
+    `RmaPluginInitTest.*`. NVIDIA/nccl@8136781a37 RMA init-context leak
+    (AICOMRCCL-3322), the RMA counterpart of the GIN fix above.
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
     `GroupEndInternalTest.*`, `GroupCommHeadChainTest.*`,
     `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`, `GroupJobAbortTest.*`,
