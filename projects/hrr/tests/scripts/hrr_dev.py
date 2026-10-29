@@ -35,7 +35,7 @@ EMULATOR_JOBS = (
     {
         "family": "gfx950",
         "arch": "gfx950",
-        "config": "emulation/rocjitsu/configs/gfx950_mi355x_kmd_2gpu.json",
+        "config": "emulation/rocjitsu/configs/gfx950_mi350x_kmd_2gpu.json",
     },
     {
         "family": "gfx125x",
@@ -53,20 +53,39 @@ class DockerState:
 
 def docker_build_command(repo: Path) -> list[str]:
     return [
-        "docker", "build", "-t", IMAGE,
-        "-f", str(repo / "projects/hrr/tests/docker/Dockerfile"),
+        "docker",
+        "build",
+        "-t",
+        IMAGE,
+        "-f",
+        str(repo / "projects/hrr/tests/docker/Dockerfile"),
         str(repo),
     ]
 
 
 def docker_run_command(repo: Path, backend: str) -> list[str]:
     command = [
-        "docker", "run", "-d", "--name", CONTAINER,
-        "-v", f"{repo}:{repo}", "-w", str(repo),
-        "--user", f"{os.getuid()}:{os.getgid()}",
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        CONTAINER,
+        "-v",
+        f"{repo}:{repo}",
+        "-w",
+        str(repo),
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
     ]
     if backend == "gpu":
-        command += ["--device", "/dev/kfd", "--device", "/dev/dri", "--group-add", "video"]
+        command += [
+            "--device",
+            "/dev/kfd",
+            "--device",
+            "/dev/dri",
+            "--group-add",
+            "video",
+        ]
     command += [IMAGE, "sleep", "infinity"]
     return command
 
@@ -87,11 +106,13 @@ def plan_docker(repo: Path, backend: str, state: DockerState) -> list[list[str]]
 def inspect_docker(runner=subprocess.run) -> DockerState:
     image = runner(
         ["docker", "image", "inspect", IMAGE],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     container = runner(
         ["docker", "inspect", "-f", "{{.State.Status}}", CONTAINER],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     status = container.stdout.strip() if container.returncode == 0 else None
     return DockerState(image.returncode == 0, status or None)
@@ -104,8 +125,8 @@ def container_script(repo: Path, backend: str) -> str:
     if backend == "gpu":
         # Build for the GPUs actually present, not the emulator targets.
         targets = (
-            "$(ROCM_SDK=\"$ROCM_PATH\" python3 -c 'import sys; sys.path.insert(0, \"projects/hrr/tests/scripts\"); "
-            "import hrr_test_config as c; print(\";\".join(c.detect_archs()))')"
+            '$(ROCM_SDK="$ROCM_PATH" python3 -c \'import sys; sys.path.insert(0, "projects/hrr/tests/scripts"); '
+            'import hrr_test_config as c; print(";".join(c.detect_archs()))\')'
         )
     else:
         targets = ";".join(job["arch"] for job in EMULATOR_JOBS)
@@ -153,11 +174,13 @@ def container_script(repo: Path, backend: str) -> str:
     ]
     binary = f"{repo}/build/hrr-dev/integration/tests/integration/hrr-integration-tests"
     if backend == "emulator":
-        lines[lines.index("set +e"):lines.index("set +e")] = [
+        lines[lines.index("set +e") : lines.index("set +e")] = [
             "cmake -S emulation/rocjitsu -B build/hrr-dev/rocjitsu -G Ninja "
             "-DCMAKE_BUILD_TYPE=Release",
             "cmake --build build/hrr-dev/rocjitsu --target rocjitsu_bin -j",
-            'export PATH="' + str(repo) + '/build/hrr-dev/rocjitsu/tools/rocjitsu:${PATH}"',
+            'export PATH="'
+            + str(repo)
+            + '/build/hrr-dev/rocjitsu/tools/rocjitsu:${PATH}"',
         ]
         for job in EMULATOR_JOBS:
             launcher = f"rocjitsu --daemon --config {repo}/{job['config']} --"

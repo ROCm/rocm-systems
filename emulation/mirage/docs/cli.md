@@ -728,8 +728,9 @@ gfx1100_w7900            rocjitsu         AMD Radeon Pro W7900 (rdna3), from Roc
 gfx1151                  rocjitsu         AMD Radeon Graphics (rdna3_5), from RocJITsu's configs/gfx1151.json
 gfx1201_r9700            rocjitsu         AMD Radeon AI PRO R9700 (rdna4), from RocJITsu's configs/gfx1201_r9700.json
 gfx90a_mi210_kmd         rocjitsu         AMD Instinct MI210 (cdna2), from RocJITsu's configs/gfx90a_mi210_kmd.json
+gfx950_mi355x            rocjitsu         AMD Instinct MI355X (cdna4), from RocJITsu's configs/gfx950_mi355x.json
 mi300x                   rocjitsu         AMD Instinct MI300X (cdna3), from RocJITsu's configs/gfx942_cdna3.json
-mi350x                   rocjitsu         AMD Instinct MI350X (cdna4), from RocJITsu's configs/gfx950_mi355x.json
+mi350x                   rocjitsu         AMD Instinct MI350X (cdna4), from RocJITsu's configs/gfx950_mi350x.json
 mi450x                   rocjitsu         AMD Instinct MI455X (cdna5), from RocJITsu's configs/gfx1250_mi455x.json
 ```
 
@@ -790,13 +791,14 @@ mirage topology delete <name> [-f|--force]
 
 Agents are hardware GPU definitions. Mirage ships one per GPU RocJITsu
 has a config for — `mi300x`, `mi350x`, `mi450x`, `gfx90a_mi210_kmd`,
-`gfx1100_w7900`, `gfx1151`, `gfx1201_r9700` — each being the `vm` and
+`gfx950_mi355x`, `gfx1100_w7900`, `gfx1151`, `gfx1201_r9700` — each being the `vm` and
 `topology` of the matching `rocjitsu/configs/*.json`, and each written to
 disk on first run. Where RocJITsu ships several configs for one GPU (a
 `_kmd` variant, an `_Ngpu` one), mirage takes the plainest: the GPU count
 is a mirage topology setting (`--gpus-per-node`) and would be overwritten
-anyway. `mirage agent list` is therefore a list of machines, not of
-files. Names are case-insensitive.
+anyway. GPUs are distinguished by ISA plus PCI vendor and device IDs.
+`mirage agent list` is therefore a list of machines, not of files. Names are
+case-insensitive.
 
 ```text
 mirage agent list

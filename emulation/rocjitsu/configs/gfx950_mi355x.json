@@ -22,10 +22,10 @@
           {"hardware_id": 108, "major": 7, "minor": 9, "revision": 0}
         ],
         "vendor_id": 4098,
-        "device_id": 30112,
+        "device_id": 30115,
         "family_id": 160,
         "unique_id": 5929628898254127105,
-        "marketing_name": "AMD Instinct MI350X",
+        "marketing_name": "AMD Instinct MI355X",
         "simd_count": 1024,
         "max_waves_per_simd": 8,
         "num_shader_engines": 4,

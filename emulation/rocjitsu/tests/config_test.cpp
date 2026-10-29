@@ -1082,7 +1082,7 @@ run_two_spi_dispatch(util::DiagnosticEmitter emit_error) {
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
-  std::string json = CONFIG_DIR_PATH + "/gfx950_mi355x.json";
+  std::string json = CONFIG_DIR_PATH + "/gfx950_mi350x.json";
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(json, loaded));
   auto *soc = loaded.soc();
@@ -1543,7 +1543,7 @@ TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
 
 TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
   config::LoadedConfig loaded;
-  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", loaded));
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi350x.json", loaded));
   auto *soc = loaded.soc();
 
   soc->set_dispatch_threads(8);
@@ -1557,7 +1557,7 @@ TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
 
 TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTopology) {
   config::LoadedConfig loaded;
-  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", loaded));
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi350x.json", loaded));
   auto *soc = loaded.soc();
   soc->set_dispatch_threads(8);
   const auto *pool = test::SoCTestAccess::dispatch_pool(*soc);

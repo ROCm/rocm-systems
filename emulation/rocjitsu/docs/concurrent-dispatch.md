@@ -163,8 +163,8 @@ build/tests/rocjitsu_tests --gtest_filter=CpuDispatchPoolBenchmark.SparseConcurr
 Inspect a preset's effective allocations without constructing the simulated GPU:
 
 ```sh
-build/tools/rocjitsu/rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
-build/tools/rocjitsu/rocjitsu --config configs/gfx950_mi355x.json --cpu-thread-budget 64 --thread-budget-table
+build/tools/rocjitsu/rocjitsu --config configs/gfx950_mi350x.json --thread-budget-table
+build/tools/rocjitsu/rocjitsu --config configs/gfx950_mi350x.json --cpu-thread-budget 64 --thread-budget-table
 ```
 
 The [configuration reference](configuration.md#thread-accounting-and-preferred-allocations)
@@ -186,7 +186,7 @@ Each entry is E/D followed by dispatch speedup over E=1/D=1 on that same
 topology. Speedups are medians of ratios paired by round. The budget is a
 ceiling; multi-GPU pools retain E + GPUs*(D-1) threads.
 
-| Budget | MI210 | CDNA3 | MI355X, 2 GPUs | MI455X, 4 GPUs |
+| Budget | MI210 | CDNA3 | MI350X, 2 GPUs | MI455X, 4 GPUs |
 |---:|---:|---:|---:|---:|
 | 1 | 1/1: 1.00x | 1/1: 1.00x | 1/1: 1.00x | 1/1: 1.00x |
 | 2 | 1/2: 1.88x | 1/2: 1.92x | 1/1: 1.00x | 1/1: 1.00x |
@@ -198,7 +198,7 @@ ceiling; multi-GPU pools retain E + GPUs*(D-1) threads.
 
 At the 32-thread ceiling, median dispatch / process wall times are
 0.056 / 0.314 s for MI210, 0.063 / 0.364 s for CDNA3,
-0.267 / 0.715 s for two MI355X GPUs, and 1.080 / 2.417 s for four MI455X GPUs.
+0.267 / 0.715 s for two MI350X GPUs, and 1.080 / 2.417 s for four MI455X GPUs.
 The multi-GPU cases retain 31 and 29 execution threads respectively; with one
 engine, each batch uses its owning GPU pool. The data supports dispatch
 parallelism, without implying all GPU pools execute simultaneously.

@@ -774,7 +774,7 @@ convenience wrapper that releases the last reference and tears down the VM.
 #include <rocjitsu/rocjitsu.h>
 
 rj_vm_t *vm = NULL;
-rj_vm_create("configs/gfx950_mi355x.json", &vm);
+rj_vm_create("configs/gfx950_mi350x.json", &vm);
 
 uint64_t ticks = 0;
 rj_vm_run(vm, &ticks);
