@@ -29,11 +29,16 @@ constexpr int kDdaLL128AGDefaultMaxBlocks = 75;
 // Total message size above which the budget applies. At 2 MiB and below it only
 // binds across hosts, where it costs more time than the CUs it saves.
 constexpr size_t kDdaLL128AGMaxBlocksAboveBytes = (size_t)2 * 1024 * 1024;
+// Peers one block serves. 0 or less, or the peer count and above, has every block
+// serve every peer, so the grid size does not depend on the peer count; 1 gives every
+// peer its own column of blocks.
+constexpr int kDdaLL128AGDefaultPeersPerBlock = 0;
 
 RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", kDdaLL128AGDefaultThreads);
 RCCL_PARAM(DdaLL128AGMaxBlocks, "DDA_LL128_AG_MAXBLOCKS", kDdaLL128AGDefaultMaxBlocks);
 RCCL_PARAM(DdaLL128AGMaxBlocksAboveBytes, "DDA_LL128_AG_MAXBLOCKS_ABOVE_BYTES",
            (int64_t)kDdaLL128AGMaxBlocksAboveBytes);
+RCCL_PARAM(DdaLL128AGPeersPerBlock, "DDA_LL128_AG_PEERS_PER_BLOCK", kDdaLL128AGDefaultPeersPerBlock);
 
 namespace {
 
@@ -67,34 +72,41 @@ size_t ddaLL128AGMaxBlocksAboveBytes() {
   return UserInput >= 0 ? (size_t)UserInput : kDdaLL128AGMaxBlocksAboveBytes;
 }
 
-// Blocks in one peer column: a warp per slice, capped by the column's share of
-// the grid budget.
-unsigned ddaLL128AGBlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t totalBlockCap) {
-  const size_t cap = totalBlockCap / (size_t)nPeers;
-  size_t blocksPerPeer = (slices + warps - 1) / warps;
-  if (blocksPerPeer > cap) {
-    blocksPerPeer = cap;
+int ddaLL128AGPeersPerBlock(int nPeers) {
+  const int64_t UserInput = rcclParamDdaLL128AGPeersPerBlock();
+  return (UserInput <= 0 || UserInput >= nPeers) ? nPeers : (int)UserInput;
+}
+// Blocks in one group column: a warp per (slice, peer) item, capped by the column's
+// share of the grid budget.
+unsigned ddaLL128AGBlocksPerGroup(size_t items, size_t warps, int nGroups, size_t totalBlockCap) {
+  const size_t cap = totalBlockCap / (size_t)nGroups;
+  size_t blocksPerGroup = (items + warps - 1) / warps;
+  if (blocksPerGroup > cap) {
+    blocksPerGroup = cap;
   }
-  return blocksPerPeer < 1 ? 1u : (unsigned)blocksPerPeer;
+  return blocksPerGroup < 1 ? 1u : (unsigned)blocksPerGroup;
 }
 
-// Single source of the launch geometry: grid.x = one column per remote peer,
-// grid.y = the per-peer slice split, capped by the tier's grid budget.
-static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, size_t perRankBytes) {
+// Single source of the launch geometry: grid.x = one column per group of
+// peersPerBlock peers, grid.y = the group's item split, capped by the tier's grid
+// budget.
+static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, size_t perRankBytes,
+                                                                int peersPerBlock) {
   const size_t totalBytes = perRankBytes * (size_t)comm->nRanks;
   const unsigned threads = ddaLL128AGThreads(kDdaLL128AGDefaultThreads);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
+  const int nGroups = (nPeers + peersPerBlock - 1) / peersPerBlock;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   const int64_t agMaxBlocks = rcclParamDdaLL128AGMaxBlocks();
   if (totalBytes > ddaLL128AGMaxBlocksAboveBytes() && agMaxBlocks > 0 && agMaxBlocks < nBlocksMax) {
     nBlocksMax = (int)agMaxBlocks;
   }
   if (nBlocksMax < 1) nBlocksMax = 1;
-  if (nBlocksMax < nPeers) nBlocksMax = nPeers;
-  const unsigned blocksPerPeer =
-    ddaLL128AGBlocksPerPeer(ddaLL128Slices(perRankBytes), warps, nPeers, (size_t)nBlocksMax);
-  return std::make_pair(dim3((unsigned)nPeers, blocksPerPeer), dim3(threads));
+  if (nBlocksMax < nGroups) nBlocksMax = nGroups;
+  const size_t items = ddaLL128Slices(perRankBytes) * (size_t)peersPerBlock;
+  const unsigned blocksPerGroup = ddaLL128AGBlocksPerGroup(items, warps, nGroups, (size_t)nBlocksMax);
+  return std::make_pair(dim3((unsigned)nGroups, blocksPerGroup), dim3(threads));
 }
 
 template <typename T>
@@ -107,10 +119,11 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   const size_t slices = ddaLL128Slices(perRankBytes);
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
-  auto gridBlock = ddaAllGatherFabricLL128Geom(comm, perRankBytes);
+  const int peersPerBlock = ddaLL128AGPeersPerBlock(nRanks - 1);
+  auto gridBlock = ddaAllGatherFabricLL128Geom(comm, perRankBytes, peersPerBlock);
   const dim3 grid = gridBlock.first;
   const dim3 block = gridBlock.second;
-  const unsigned blocksPerPeer = grid.y;
+  const unsigned blocksPerGroup = grid.y;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
@@ -118,15 +131,16 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
 
   INFO(NCCL_COLL,
        "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
-       "(warp-per-slice, bpp=%u, slotWords=%zu)",
-       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
+       "(warp-per-item, peersPerBlock=%d, bpg=%u, slotWords=%zu)",
+       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, peersPerBlock, blocksPerGroup,
        ddaLL128AgSlotWords(bankSize, nRanks));
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T>), grid, block, 0, stream, /*startEvent=*/nullptr,
                         stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                        perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+                        perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, peersPerBlock,
+                        params);
 
   CUDACHECK(cudaGetLastError());
 
@@ -176,7 +190,9 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
 }
 
 uint32_t ncclAllGatherDdaFabricLL128Blocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
-  const auto grid = ddaAllGatherFabricLL128Geom(comm, sendcount * ncclTypeSize(datatype)).first;
+  const auto grid =
+    ddaAllGatherFabricLL128Geom(comm, sendcount * ncclTypeSize(datatype), ddaLL128AGPeersPerBlock(comm->nRanks - 1))
+      .first;
   return grid.x * grid.y;
 }
 

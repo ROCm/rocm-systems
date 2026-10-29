@@ -86,10 +86,41 @@ __device__ __forceinline__ bool ddaLL128AgRecvSlices(const uint64_t* gatherSlot,
   return true;
 }
 
-// LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
-// peer; grid.y splits that peer's slices across blocks, and a warp takes one of
-// its slices at a time. Each column packs this rank's payload into its peer's
-// slot, then polls its own slot for that peer's payload and unpacks it.
+// Rank of the peer peerOff (0 .. nRanks - 2) places after selfRank.
+__device__ __forceinline__ int ddaLL128AgPeer(int selfRank, int peerOff, int nRanks) {
+  const int peer = selfRank + peerOff + 1;
+  return peer < nRanks ? peer : peer - nRanks;
+}
+
+// Runs body(s, peerOff) on items first, first + step, ... below end, stopping early if
+// body returns false. Items are the (slice, peer) pairs of a group in peer-major
+// order, item = (peerOff - group0) * slicesTotal + s; the slice and the peer step
+// without a division per item.
+template <typename Body>
+__device__ __forceinline__ void ddaLL128AgForEachItem(size_t slicesTotal, int group0, size_t first, size_t end,
+                                                      size_t step, Body&& body) {
+  size_t s = first % slicesTotal;
+  int j = (int)(first / slicesTotal);
+  const size_t ds = step % slicesTotal;
+  const int dj = (int)(step / slicesTotal);
+  for (size_t it = first; it < end; it += step) {
+    if (!body(s, group0 + j)) return;
+    s += ds;
+    j += dj;
+    if (s >= slicesTotal) {
+      s -= slicesTotal;
+      ++j;
+    }
+  }
+}
+
+// LL128 all-gather. 2D grid: grid.x places one column per group of up to
+// peersPerBlock consecutive peers. Each block of a column takes an equal contiguous
+// range of the group's (slice, peer) items in peer-major order, so a block works for
+// one peer at a time while the column's blocks spread over all of the group's peers;
+// a warp takes one item at a time. With peersPerBlock == 1 a column serves a single
+// peer. Each item packs a slice of this rank's payload into that peer's slot; the
+// same items then poll this rank's slot for the peer's payload and unpack it.
 template <typename T>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
@@ -103,10 +134,12 @@ __launch_bounds__(1024)
                                           int epochLen, // number of cells in epochDev
                                           size_t slicesTotal, // slices this call uses
                                           size_t bankSize, // scratch bank size (from host)
+                                          int peersPerBlock, // peers one column serves
                                           DdaKernelParams params) {
 
-  const int nPeers = (int)blockIdx.x;
-  const int peer = (selfRank + nPeers + 1) % nRanks;
+  const int nPeers = nRanks - 1;
+  const int group0 = (int)blockIdx.x * peersPerBlock;
+  const int groupPeers = peersPerBlock < nPeers - group0 ? peersPerBlock : nPeers - group0;
 
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
@@ -124,21 +157,24 @@ __launch_bounds__(1024)
   // tier sharing this scratch and epoch counter banks at the same byte offsets.
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
 
-  // Slices stride by warp within this peer's column only.
-  const size_t gwarp = (size_t)blockIdx.y * (size_t)nwarps + (size_t)warp;
-  const size_t wstride = (size_t)gridDim.y * (size_t)nwarps;
+  // This block's range of the group's items; its warps take every nwarps-th item.
+  const size_t items = slicesTotal * (size_t)groupPeers;
+  const size_t perBlock = (items + gridDim.y - 1) / gridDim.y;
+  const size_t rangeEnd = ((size_t)blockIdx.y + 1) * perBlock;
+  const size_t itemEnd = rangeEnd < items ? rangeEnd : items;
+  const size_t itemFirst = (size_t)blockIdx.y * perBlock + (size_t)warp;
 
   const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff);
-  uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
-    (uint64_t)selfRank * (uint64_t)slotWords;
-  const uint64_t* gatherSlot = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords +
-    (uint64_t)peer * (uint64_t)slotWords;
-  int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perRankBytes;
+  const uint64_t selfSlot = bankWords + (uint64_t)selfRank * (uint64_t)slotWords;
+  const uint64_t* gatherBase = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords;
 
-  // Phase 1: pack and push this column's slices to the one peer it owns.
-  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    ddaLL128AgSendSlices<1>(srcBytes, scatterSlot, perRankBytes, s, wstride, flag, lane, flagLane);
-  }
+  // Phase 1: pack and push the group's slices to its peers.
+  ddaLL128AgForEachItem(slicesTotal, group0, itemFirst, itemEnd, nwarps, [&](size_t s, int peerOff) {
+    const int peer = ddaLL128AgPeer(selfRank, peerOff, nRanks);
+    uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + selfSlot;
+    ddaLL128AgSendSlices<1>(srcBytes, scatterSlot, perRankBytes, s, 0, flag, lane, flagLane);
+    return true;
+  });
 
   // Local copy sendbuff -> recvbuff[selfRank].
   {
@@ -152,12 +188,14 @@ __launch_bounds__(1024)
     }
   }
 
-  // Phase 2: poll the same slices in that peer's slot and unpack.
-  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    if (!ddaLL128AgRecvSlices<1>(gatherSlot, dstBytes, perRankBytes, s, wstride, flag, lane, flagLane, params)) {
-      break; // not return: every thread must reach the __syncthreads below
-    }
-  }
+  // Phase 2: poll the same items in this rank's slots and unpack. An abort ends the
+  // loop, not the kernel: every thread must reach the __syncthreads below.
+  ddaLL128AgForEachItem(slicesTotal, group0, itemFirst, itemEnd, nwarps, [&](size_t s, int peerOff) {
+    const int peer = ddaLL128AgPeer(selfRank, peerOff, nRanks);
+    const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
+    int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perRankBytes;
+    return ddaLL128AgRecvSlices<1>(gatherSlot, dstBytes, perRankBytes, s, 0, flag, lane, flagLane, params);
+  });
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
   asm volatile("s_wait_storecnt 0x0" ::: "memory");
 #endif
