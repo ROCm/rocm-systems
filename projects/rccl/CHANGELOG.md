@@ -11,6 +11,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 
 ### Known issues
 
@@ -45,7 +46,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_CE_AR_2SHOT_MAX_BYTES` (default `-1`): overrides the 2-shot AllReduce size cap from the arch table. Set to a positive value to override `ceNonRegMax[AR]`. Renamed from `RCCL_CE_AR_MAX_MSG_BYTES`.
 * `RCCL_CE_AR_2SHOT_MIN_BYTES` (default `-1`): overrides the minimum message size for the CE 2-shot AllReduce path. When `-1`, resolved from `ceNonRegMin[AllReduce]` in the per-arch table.
 * `RCCL_CE_AR_REG_MAX_MSG_BYTES` (default `-1`): overrides the registered CE AllReduce size cap from the arch table.
-* `RCCL_CE_AR_STAGING_BYTES` (default `-1`): overrides the CE AllReduce staging buffer allocation size; when unset, `NCCL_CE_AR_STAGING_BYTES` is used.
+* `RCCL_CE_AR_STAGING_BYTES` (default `-1`): overrides the CE AllReduce staging buffer allocation size; when unset, `NCCL_CE_AR_STAGING_BYTES` is used. CE ReduceScatter shares this buffer.
+* `RCCL_CE_REDUCESCATTER` (default `0`): opt-in Copy Engine ReduceScatter on a single-node symmetric communicator with `CTA_POLICY_ZERO`. Always stages through `ceARTmpBuf`; user-buffer registration is not required. No message-size cap (large messages are pipelined).
 * `RCCL_CE_COLL_MAX_BYTES` (default `-1`): overrides the CE registered-window and 2-shot size cap for all non-AllReduce collectives (AllGather, AlltoAll, etc.). When `-1`, resolved from `ceRegMax[func]` or `ceNonRegMax[func]` in the per-arch table.
 * `RCCL_CE_COLL_MIN_BYTES` (default `-1`): overrides the minimum message size for CE non-AllReduce paths (both registered-window and scratch). When `-1`, resolved from `ceNonRegMin[func]` in the per-arch table.
 * `RCCL_SYM_K_MAX_BYTES` (default `-1`): overrides the symmetric-kernel upper bound for all collectives. When `-1`, resolved from `symMaxR2[func]` (eager) or `symMaxR2Graph[func]` (graph-capture) in the per-arch table. `kThreshUnlimited` (SIZE_MAX) in the table means no suppression.
@@ -181,6 +183,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Enabled the Copy-Engine profiler path (`ncclProfiler_v6`): Copy-Engine events are emitted for CE collectives, and the example profiler plugin reports them.
 
 ### Changed
+* `hipcc` is no longer accepted as the CMake CXX compiler for RCCL builds. Use `amdclang++` directly (`-DCMAKE_CXX_COMPILER=amdclang++` or set `ROCM_PATH`). `hipcc` was a wrapper around `amdclang++` that is being phased out across the ROCm stack.
 * Adapted the device-initiated GIN backends (Anvil SDMA and rocSHMEM GDA) to the NCCL 2.30.7 GIN API v14: added the new `getGinProperties` host op, dropped the data-path ops (`iput`/`iputSignal`/`iget`/`iflush`/`test`) that moved out of GIN under the GIN/RMA split, switched `createContext` to `ncclGinConfig_v14_t`, updated the device dispatch signatures, and matched the GIN type renumbering (`ROCSHMEM_GDA` and `ANVIL_SDMA` shifted after the new `GIN_GPI` type). The plugins now use the generic (unversioned) `ncclGin_t` / `ncclGinConfig_t` / `ncclGinProperties_t` typedefs so future ABI bumps do not require touching call sites.
 * Updated the ROCSHMEM GIN plugin registration to the v14 layout (corrected struct field names and the conditional that previously only compiled without ROCSHMEM GIN).
 * Adapted the InfiniBand transports (`net_ib` and `net_ib_cast`) to the v14 GIN/RMA split: the host/proxy backend is now registered as an `ncclRma_t` vtable (`RMA_IB_PROXY`) that owns the `iput`/`iputSignal`/`iget`/`iflush`/`test` data-path ops, with GIN layered on top through the generic `ncclGinProxy`.

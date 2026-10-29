@@ -5,6 +5,53 @@
 
 use super::*;
 
+thread_local! {
+    static LIFECYCLE_ENTRY: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Rejects recursive public lifecycle calls from tool callbacks while a
+/// transition runs on this thread.
+pub(crate) struct LifecycleCallScope {
+    /// Whether this scope set and must clear the thread-local entry flag.
+    owns_flag: bool,
+}
+
+impl LifecycleCallScope {
+    /// Enters one public lifecycle call, rejecting same-thread recursion.
+    pub(crate) fn enter() -> Result<Self, Status> {
+        LIFECYCLE_ENTRY.with(|active| {
+            if active.get() {
+                Err(INVALID_RUNTIME_STATE)
+            } else {
+                active.set(true);
+                Ok(Self { owns_flag: true })
+            }
+        })
+    }
+
+    /// A shutdown helper inherits the public call's transition when it runs
+    /// on the same thread and establishes one when dispatched elsewhere.
+    pub(crate) fn enter_helper() -> Self {
+        let owns_flag = LIFECYCLE_ENTRY.with(|active| {
+            if active.get() {
+                false
+            } else {
+                active.set(true);
+                true
+            }
+        });
+        Self { owns_flag }
+    }
+}
+
+impl Drop for LifecycleCallScope {
+    fn drop(&mut self) {
+        if self.owns_flag {
+            LIFECYCLE_ENTRY.with(|active| active.set(false));
+        }
+    }
+}
+
 /// Counts calls that must finish before shutdown releases runtime storage.
 pub(crate) struct InFlightTracker {
     /// Number of native operations currently holding a token.
@@ -244,6 +291,17 @@ impl HsaLifecycle {
         }
     }
 
+    /// Reports a transition that another `hsa_init` caller must await.
+    fn init_transition_in_progress(&self) -> bool {
+        matches!(
+            self.phase,
+            LifecyclePhase::Starting(_)
+                | LifecyclePhase::LoadingTools(_)
+                | LifecyclePhase::Preparing(_)
+                | LifecyclePhase::Stopping(_)
+        )
+    }
+
     /// Publishes fully initialized HSA state for the active generation.
     pub(crate) fn publish_init(
         &mut self,
@@ -268,6 +326,7 @@ impl HsaLifecycle {
             return Err(ERROR);
         }
         self.phase = LifecyclePhase::Active(generation);
+        LIFECYCLE_CONDVAR.notify_all();
         Ok(())
     }
 
@@ -276,6 +335,16 @@ impl HsaLifecycle {
         &mut self,
         generation: u64,
         cleanup_failed: bool,
+    ) -> Result<(), Status> {
+        self.cancel_init_with_notification(generation, cleanup_failed, &LIFECYCLE_CONDVAR)
+    }
+
+    /// Cancels initialization and wakes callers waiting on this lifecycle.
+    pub(super) fn cancel_init_with_notification(
+        &mut self,
+        generation: u64,
+        cleanup_failed: bool,
+        changed: &Condvar,
     ) -> Result<(), Status> {
         if self.phase != LifecyclePhase::Starting(generation) {
             return Err(ERROR);
@@ -287,7 +356,14 @@ impl HsaLifecycle {
         };
         PUBLIC_RAW_HANDLES.close();
         self.references = 0;
+        changed.notify_all();
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn prepare_without_runtime_for_test(&mut self, generation: u64) {
+        assert_eq!(self.phase, LifecyclePhase::Starting(generation));
+        self.phase = LifecyclePhase::Preparing(generation);
     }
 
     /// Detaches final teardown work, or releases one of several references.
@@ -326,6 +402,7 @@ impl HsaLifecycle {
         }
         self.references = 1;
         self.phase = LifecyclePhase::Active(generation);
+        LIFECYCLE_CONDVAR.notify_all();
         Ok(())
     }
 
@@ -361,6 +438,7 @@ impl HsaLifecycle {
         if outcome.status != SUCCESS {
             self.retired_session = outcome.pending_session.take();
         }
+        LIFECYCLE_CONDVAR.notify_all();
         Ok(())
     }
 }
@@ -429,6 +507,7 @@ impl Drop for LifecycleTransition {
             // those entry points when a failed transition retains live state.
             PUBLIC_RAW_HANDLES.close();
             registry.phase = LifecyclePhase::Quarantined;
+            LIFECYCLE_CONDVAR.notify_all();
         }
     }
 }
@@ -485,12 +564,6 @@ impl RawHandleGate {
     fn is_closed_and_idle(&self) -> bool {
         self.state.load(Ordering::Acquire) == RAW_HANDLES_CLOSED
     }
-
-    #[cfg(not(test))]
-    /// Checks whether a signal wait may continue using its admitted handle.
-    fn is_open(&self) -> bool {
-        self.state.load(Ordering::Acquire) < RAW_HANDLES_CLOSED
-    }
 }
 
 /// Keeps public signal and queue storage alive for a complete raw operation.
@@ -531,17 +604,6 @@ static TEST_RAW_HANDLES: RawHandleGate = RawHandleGate {
     state: AtomicUsize::new(0),
 };
 
-/// Admits raw-handle calls only while HSA owns live public storage.
-pub(crate) fn public_raw_handle_access_allowed() -> bool {
-    // Unit tests construct isolated signal and queue fixtures without
-    // publishing a process HSA generation. Integration tests exercise the
-    // production gate through the exported C ABI.
-    #[cfg(test)]
-    return true;
-    #[cfg(not(test))]
-    PUBLIC_RAW_HANDLES.is_open()
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod raw_handle_tests {
@@ -572,12 +634,35 @@ mod raw_handle_tests {
 
 /// Process-global gate owning the active HSA generation.
 pub(crate) static LIFECYCLE: Mutex<HsaLifecycle> = Mutex::new(HsaLifecycle::new());
+/// Wakes concurrent init callers after an initialization or final shutdown.
+pub(crate) static LIFECYCLE_CONDVAR: Condvar = Condvar::new();
 /// Wakes callers waiting for a VM fault or lifecycle transition.
 pub(crate) static VM_FAULT_CONDVAR: Condvar = Condvar::new();
 
 /// Locks the process-global lifecycle state, handling poisoned locks.
 pub(crate) fn lock() -> Result<MutexGuard<'static, HsaLifecycle>, Status> {
     LIFECYCLE.lock().map_err(|_| ERROR)
+}
+
+/// Waits for another thread's lifecycle transition before adding an init
+/// reference or starting a new generation.
+pub(crate) fn begin_init_waiting(
+    mut guard: MutexGuard<'_, HsaLifecycle>,
+    changed: &Condvar,
+) -> Result<Option<u64>, Status> {
+    while guard.init_transition_in_progress() {
+        // A deferred final shutdown must join callbacks and workers before
+        // it can leave Preparing. A borrowed logging write may also hold the
+        // config mutex that shutdown needs, so none of these callers can wait.
+        if CallbackScope::active()
+            || LogWriteScope::active()
+            || guard.as_ref().is_some_and(HsaState::running_on_worker)
+        {
+            return Err(INVALID_RUNTIME_STATE);
+        }
+        guard = changed.wait(guard).map_err(|_| ERROR)?;
+    }
+    guard.begin_init()
 }
 
 #[allow(clippy::needless_pass_by_value)]
