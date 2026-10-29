@@ -35,15 +35,19 @@ TEST(MfmaLazyStorageTest, F16SpecInputCrossesChunkBoundary) {
   ASSERT_NE(fixture.wf, nullptr);
   fixture.seed(source_a, input_regs, Fmt::F16, Mode::RandomInt, 88);
   fixture.seed(source_b, input_regs, Fmt::F16, Mode::RandomInt, 99);
-  auto reseed_accumulator = [&] { fixture.seed(accumulator, 32, Fmt::F32, Mode::RandomInt, 111); };
+  // Overwrite the scalar result so that a missing SIMD store cannot match it.
+  auto reseed = [&] {
+    fixture.seed_words(destination, 32, 777);
+    fixture.seed(accumulator, 32, Fmt::F32, Mode::RandomInt, 111);
+  };
   auto kernel = [&] {
     amdgpu::exec_f32_mfma_f16_spec<32, 32, 16>(
         *fixture.cu, fixture.vbase + destination, fixture.vbase + source_a,
         fixture.vbase + source_b, fixture.vbase + accumulator, amdgpu::ACC_FROM_VGPR, 0, 0, 0);
   };
 
-  expect_bit_exact("f16 cross-chunk input", Mode::RandomInt, fixture, reseed_accumulator, kernel,
-                   destination, 32);
+  expect_bit_exact("f16 cross-chunk input", Mode::RandomInt, fixture, reseed, kernel, destination,
+                   32);
 }
 
 TEST(MfmaLazyStorageTest, F16SpecOutputCrossesChunksAndOverlapsInput) {
@@ -57,7 +61,9 @@ TEST(MfmaLazyStorageTest, F16SpecOutputCrossesChunksAndOverlapsInput) {
   constexpr uint32_t accumulator = 128;
   ExactFixture fixture(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
   ASSERT_NE(fixture.wf, nullptr);
+  // Overwrite the whole scalar result before restoring the overlapping source.
   auto reseed = [&] {
+    fixture.seed_words(destination_and_source_a, 32, 777);
     fixture.seed(destination_and_source_a, 2, Fmt::F16, Mode::RandomInt, 88);
     fixture.seed(source_b, 2, Fmt::F16, Mode::RandomInt, 99);
     fixture.seed(accumulator, 32, Fmt::F32, Mode::RandomInt, 111);
