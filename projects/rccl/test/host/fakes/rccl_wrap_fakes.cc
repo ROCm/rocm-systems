@@ -413,6 +413,12 @@ void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
 }
 void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
+bool rcclCeAllReduceEnabled(const struct ncclComm*) {
+  if (g_rcclParamCeAllReduce >= 0) return g_rcclParamCeAllReduce != 0;
+  return true;  // arch default: enabled
+}
+bool rcclForceCeAllReduceEnabled(const struct ncclComm*) { return false; }
+
 // ===========================================================================
 // Fail-loud floor -- rccl_wrap.cc entry points no host-only microtest executes.
 // Reaching one aborts AND names itself on stderr, which is the point: an unfaked

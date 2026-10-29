@@ -40,7 +40,7 @@ test_categories:
       - "RcclAllGatherCeRegisteredWindow.*"
       - "RcclCeGraphLatch.*"
       - "RcclAlltoAllDecision.*"
-      - "RcclCeAr2ShotMax.*"
+      - "RcclCeNonRegMax.*"
       - "RcclCeArGrownBuffer.*"
       - "SkipPresetTopoMatching.*"
       - "CeAlltoAllvEligibilityTest.*"
