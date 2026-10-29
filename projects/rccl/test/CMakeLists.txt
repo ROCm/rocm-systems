@@ -84,15 +84,14 @@ if(BUILD_TESTS)
   endif()
 
   # add_rocshmem_targets() exports these with PARENT_SCOPE from src/, so re-derive them here.
+  # Only the include dirs are needed now; no test links librocshmem.a (GIN is
+  # self-contained in librccl.so; ENABLE_ROCSHMEM links via the rocshmem_static target).
   if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
     if(NOT ROCSHMEM_INSTALL_DIR)
       set(ROCSHMEM_INSTALL_DIR "${CMAKE_SOURCE_DIR}/ext/rocshmem")
     endif()
     if(NOT ROCSHMEM_INCLUDE_DIR)
       set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INSTALL_DIR}/include")
-    endif()
-    if(NOT ROCSHMEM_LIBRARY)
-      set(ROCSHMEM_LIBRARY "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a")
     endif()
   endif()
 
@@ -641,16 +640,16 @@ if(BUILD_TESTS)
     # anvil.cpp links HSAKMT which transitively needs drm/drm_amdgpu/numa.
     # Reuse the same cache variables as the MPI test block — find_library is
     # a no-op when the result is already cached.
-    find_library(_ROCSHMEM_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-    find_library(_ROCSHMEM_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-    if(NOT _ROCSHMEM_DRM)
-      set(_ROCSHMEM_DRM drm)
+    find_library(_GIN_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+    find_library(_GIN_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+    if(NOT _GIN_DRM)
+      set(_GIN_DRM drm)
     endif()
-    if(NOT _ROCSHMEM_DRM_AMDGPU)
-      set(_ROCSHMEM_DRM_AMDGPU drm_amdgpu)
+    if(NOT _GIN_DRM_AMDGPU)
+      set(_GIN_DRM_AMDGPU drm_amdgpu)
     endif()
     target_link_libraries(rccl-UnitTestsGinAnvilSdmaFactory PRIVATE
-      hsakmt numa ${_ROCSHMEM_DRM} ${_ROCSHMEM_DRM_AMDGPU})
+      hsakmt numa ${_GIN_DRM} ${_GIN_DRM_AMDGPU})
   endif()
   endif()
 
@@ -1265,76 +1264,26 @@ if(BUILD_TESTS)
       target_link_libraries(${test_executable} PRIVATE dl rt numa -lrccl -L${CMAKE_BINARY_DIR} -lrocm_smi64 -L${ROCM_PATH}/lib -L${ROCM_PATH}/rocm_smi/lib)
     endif()
 
-    # Link the GIN device backend library and device-link its rdc code (-fgpu-rdc
-    # --hip-link --offload-arch=... -rdynamic) so GIN device tests can run.
-    # GDA only. SDMA host code already lives in librccl.so and its device code is header-only.
-    if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_LIBRARY AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
-      set(_ROCSHMEM_OFFLOAD_FLAGS "")
-      foreach(_g IN LISTS GPU_TARGETS)
-        if(_g)
-          list(APPEND _ROCSHMEM_OFFLOAD_FLAGS "--offload-arch=${_g}")
-        endif()
-      endforeach()
+    # GIN device code is header-only (inlined into the test kernels), so the MPI
+    # test TU needs no -fgpu-rdc device link and nothing rocSHMEM. It just opts
+    # back in to the GIN backends (the blanket force-off above keeps them out of
+    # host-only TUs) and links the system libs librccl leaves undefined.
+    if(ENABLE_ROCSHMEM_GIN AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
       # Fall back to linking by bare name if the hint lookup misses (avoids injecting <VAR>-NOTFOUND into the link line).
-      find_library(_ROCSHMEM_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-      find_library(_ROCSHMEM_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-      if(NOT _ROCSHMEM_DRM)
-        set(_ROCSHMEM_DRM drm)
+      find_library(_GIN_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      find_library(_GIN_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+      if(NOT _GIN_DRM)
+        set(_GIN_DRM drm)
       endif()
-      if(NOT _ROCSHMEM_DRM_AMDGPU)
-        set(_ROCSHMEM_DRM_AMDGPU drm_amdgpu)
+      if(NOT _GIN_DRM_AMDGPU)
+        set(_GIN_DRM_AMDGPU drm_amdgpu)
       endif()
-      # Enable the rocshmem-gda GIN backend in the test kernels so ncclGinCall
-      # has a dispatch case for it.
-      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ROCSHMEM_GDA_ENABLE=1)
-
-      # Enable anvil-sdma only for the TU that launches its kernels; the rocSHMEM
-      # sdma headers are on that TU's include path alone.
-      set(_ANVIL_SDMA_INCLUDES "")
-      if(ROCSHMEM_SOURCE_DIR)
-        list(APPEND _ANVIL_SDMA_INCLUDES ${ROCSHMEM_SOURCE_DIR}/src ${ROCSHMEM_SOURCE_DIR}/include)
-      endif()
-      if(ROCSHMEM_INCLUDE_DIR)
-        list(APPEND _ANVIL_SDMA_INCLUDES ${ROCSHMEM_INCLUDE_DIR})
-      endif()
-      # -U first because the target opted out with =0, and a second -D warns under -Wmacro-redefined.
+      # Re-enable the GIN backends in the TU that launches their kernels (-U first
+      # since the target opted out with =0; a second -D warns under -Wmacro-redefined).
       set_source_files_properties(transport/GinDeviceMPITests.cpp PROPERTIES
-          COMPILE_OPTIONS "-UNCCL_GIN_ANVIL_SDMA_ENABLE;-DNCCL_GIN_ANVIL_SDMA_ENABLE=1"
-          INCLUDE_DIRECTORIES "${_ANVIL_SDMA_INCLUDES}")
-      target_compile_options(${test_executable} PRIVATE ${RCCL_TEST_GPU_RDC_COMPILE_OPTIONS})
-      if(TARGET rocshmem_static)
-        add_dependencies(${test_executable} rocshmem_static)
-      endif()
+          COMPILE_OPTIONS "-UNCCL_GIN_ANVIL_SDMA_ENABLE;-DNCCL_GIN_ANVIL_SDMA_ENABLE=1;-UNCCL_GIN_ROCSHMEM_GDA_ENABLE;-DNCCL_GIN_ROCSHMEM_GDA_ENABLE=1")
       target_link_libraries(${test_executable} PRIVATE
-          ${ROCSHMEM_LIBRARY}
-          ibverbs hsa-runtime64 hsakmt numa ${_ROCSHMEM_DRM} ${_ROCSHMEM_DRM_AMDGPU})
-      # ROCm < 7.14 emits cooperative_groups::this_cluster() as a non-inline stub, so -fgpu-rdc device TUs collide; keep one copy. Fixed (inline) in 7.14.
-      set(_ROCSHMEM_DEVLINK_EXTRA "")
-      if(ROCM_VERSION VERSION_LESS "71400")
-        set(_ROCSHMEM_DEVLINK_EXTRA "SHELL:-Xoffload-linker --allow-multiple-definition")
-      endif()
-      target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic ${_ROCSHMEM_DEVLINK_EXTRA})
-    endif()
-
-    # librccl.so built with ENABLE_ROCSHMEM_GIN but without host librocshmem
-    # (ENABLE_ROCSHMEM=OFF, e.g. gin CI --rocshmem-gin) leaves
-    # rocshmem::envvar::log_flags undefined at load time. Link host rocSHMEM
-    # into the Fixtures binary so the executable satisfies those symbols when
-    # the dynamic loader brings in librccl.so.
-    if(ENABLE_ROCSHMEM_GIN AND GIN_ANVIL_UNIT_TESTS AND NOT ENABLE_ROCSHMEM
-       AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsFixtures")
-      find_library(_ROCSHMEM_FIXTURES_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-      find_library(_ROCSHMEM_FIXTURES_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-      if(NOT _ROCSHMEM_FIXTURES_DRM)
-        set(_ROCSHMEM_FIXTURES_DRM drm)
-      endif()
-      if(NOT _ROCSHMEM_FIXTURES_DRM_AMDGPU)
-        set(_ROCSHMEM_FIXTURES_DRM_AMDGPU drm_amdgpu)
-      endif()
-      target_link_libraries(${test_executable} PRIVATE
-        ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
-        ibverbs hsa-runtime64 hsakmt numa
-        ${_ROCSHMEM_FIXTURES_DRM} ${_ROCSHMEM_FIXTURES_DRM_AMDGPU})
+          ibverbs hsa-runtime64 hsakmt numa ${_GIN_DRM} ${_GIN_DRM_AMDGPU})
     endif()
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
@@ -1366,14 +1315,14 @@ if(BUILD_TESTS)
     # build and only the IPC test and the counter TU compile relocatable there.
     # The fixtures binary must still device-link here or g_sdmaStubQuietCount
     # is unresolved.
-    set(_ROCSHMEM_FIXTURES_RDC_OFFLOAD_FLAGS "")
+    set(_GIN_FIXTURES_RDC_OFFLOAD_FLAGS "")
     foreach(_g IN LISTS GPU_TARGETS)
       if(_g)
-        list(APPEND _ROCSHMEM_FIXTURES_RDC_OFFLOAD_FLAGS "--offload-arch=${_g}")
+        list(APPEND _GIN_FIXTURES_RDC_OFFLOAD_FLAGS "--offload-arch=${_g}")
       endif()
     endforeach()
     target_link_options(rccl-UnitTestsFixtures PRIVATE
-      -fgpu-rdc --hip-link ${_ROCSHMEM_FIXTURES_RDC_OFFLOAD_FLAGS} -rdynamic)
+      -fgpu-rdc --hip-link ${_GIN_FIXTURES_RDC_OFFLOAD_FLAGS})
     foreach(_gin_plugin_test rccl-UnitTestsGinAnvilPlugin rccl-UnitTestsGinRocshmemGdaPlugin)
       if(TARGET ${_gin_plugin_test})
         target_include_directories(${_gin_plugin_test} BEFORE PRIVATE
