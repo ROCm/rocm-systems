@@ -83,7 +83,7 @@ extern char **environ;
 
 namespace {
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi350x.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
 constexpr uint32_t kGpuId = 38144;
 const std::string CDNA2_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx90a_mi210_kmd.json";
 constexpr uint32_t kCdna2GpuId = 50149;
@@ -1273,9 +1273,9 @@ TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
 }
 
 INSTANTIATE_TEST_SUITE_P(KfdMasks, KfdCuMaskPlacementTest,
-                         ::testing::Values(CuMaskPlacementCase{"gfx950_mi350x.json", 0, 0, 0, 0},
-                                           CuMaskPlacementCase{"gfx950_mi350x.json", 1, 1, 0, 0},
-                                           CuMaskPlacementCase{"gfx950_mi350x.json", -1, 0, 0, 0},
+                         ::testing::Values(CuMaskPlacementCase{"gfx950_mi355x.json", 0, 0, 0, 0},
+                                           CuMaskPlacementCase{"gfx950_mi355x.json", 1, 1, 0, 0},
+                                           CuMaskPlacementCase{"gfx950_mi355x.json", -1, 0, 0, 0},
                                            CuMaskPlacementCase{"gfx1201_r9700.json", 8, 0, 0, 8},
                                            CuMaskPlacementCase{"gfx1201_r9700.json", 18, 0, 1, 2}));
 
@@ -1343,7 +1343,7 @@ protected:
 INSTANTIATE_TEST_SUITE_P(
     KfdTargets, KfdAqlPm4Test,
     ::testing::Values(KfdNativePm4Target{"gfx942", "gfx942_cdna3_kmd.json", 50148},
-                      KfdNativePm4Target{"gfx950", "gfx950_mi350x_kmd.json", kGpuId}),
+                      KfdNativePm4Target{"gfx950", "gfx950_mi355x_kmd.json", kGpuId}),
     [](const ::testing::TestParamInfo<KfdNativePm4Target> &info) { return info.param.name; });
 
 TEST_P(KfdAqlPm4Test, ExecutesEveryXcdAndRetainsBlockedIndirectBuffer) {

@@ -35,7 +35,7 @@ rocjitsu --config <config.json> [--node <id>] --vfio-socket <path> [--vfio-socke
 ### Local mode
 
 ``` bash
-rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./app
+rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./app
 ```
 
 The simulator runs in-process. `rocjitsu` sets `LD_PRELOAD` and calls `execve` on the target application. The interposer routes `/dev/kfd` operations to a `SimulatedDriver` within the same process, and a background thread runs the simulation engine.
@@ -46,10 +46,10 @@ This mode corresponds to `RJ_VM_MODE_LOCAL` in the C API.
 
 ``` bash
 # Fork daemon + launch application
-rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...
 
 # Daemon-only (no application launched)
-rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json
 ```
 
 A child daemon process is forked to host the simulation engine and `SimulatedDriver`. The parent then `execve`'s the target application with `LD_PRELOAD` set. Client processes communicate with the daemon over a Unix domain socket using the RPC protocol described below.
@@ -61,7 +61,7 @@ This mode corresponds to `RJ_VM_MODE_DAEMON` in the C API. It supports multi-pro
 ### Attach mode
 
 ``` bash
-rocjitsu --attach --config configs/gfx950_mi350x_kmd.json -- ./app
+rocjitsu --attach --config configs/gfx950_mi355x_kmd.json -- ./app
 ```
 
 Connects to an already-running daemon. The socket path is resolved using the environment variables described in [Environment variables and socket path resolution](#socket-path-resolution).

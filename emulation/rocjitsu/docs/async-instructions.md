@@ -56,8 +56,8 @@ tables in its rocjitsu backend and exposes the helper option alongside the
 engine, dispatch and total-budget options.
 
 ```sh
-rocjitsu --config configs/gfx950_mi350x.json --thread-budget-table
-rocjitsu --config configs/gfx950_mi350x.json --cpu-thread-budget 64 --thread-budget-table
+rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
+rocjitsu --config configs/gfx950_mi355x.json --cpu-thread-budget 64 --thread-budget-table
 ```
 
 ## Execution and ownership

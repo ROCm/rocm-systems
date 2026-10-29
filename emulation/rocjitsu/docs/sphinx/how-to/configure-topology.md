@@ -20,11 +20,11 @@ Pre-built configurations ship in the `configs/` directory:
 | `gfx90a_mi210_kmd.json` | Single CDNA2 GPU (daemon or KFD mode) |
 | `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon or KFD mode) |
-| `gfx950_mi350x.json` | Single MI350X, PCI `0x75a0` (standalone simulation) |
-| `gfx950_mi350x_kmd.json` | Single MI350X, PCI `0x75a0` (daemon or KFD mode) |
-| `gfx950_mi350x_kmd_2gpu.json` | Two MI350X GPUs (multi-GPU daemon mode) |
-| `gfx950_mi355x.json` | Single MI355X, PCI `0x75a3` (standalone simulation) |
-| `gfx950_mi355x_kmd.json` | Single MI355X, PCI `0x75a3` (daemon or KFD mode) |
+| `gfx950_mi355x.json` | Single MI350X, PCI `0x75a0` (standalone simulation; legacy filename) |
+| `gfx950_mi355x_kmd.json` | Single MI350X, PCI `0x75a0` (daemon or KFD mode; legacy filename) |
+| `gfx950_mi355x_kmd_2gpu.json` | Two MI350X GPUs (multi-GPU daemon mode; legacy filename) |
+| `gfx950_mi355x_pci75a3.json` | Single MI355X, PCI `0x75a3` (standalone simulation) |
+| `gfx950_mi355x_pci75a3_kmd.json` | Single MI355X, PCI `0x75a3` (daemon or KFD mode) |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs (multi-GPU daemon mode) |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
@@ -113,7 +113,7 @@ KFD-mode configs include a `vm.gpu.device` section that defines the properties r
 
 Multi-GPU configs define multiple SoCs, each with a distinct GPU ID and location ID. Every GPU receives its own command processor, memory model, and cache hierarchy. The daemon manages all GPUs and routes KFD ioctls to the correct device based on `gpu_id`.
 
-The file `configs/gfx950_mi350x_kmd_2gpu.json` is a working two-GPU
+The file `configs/gfx950_mi355x_kmd_2gpu.json` is a working two-GPU
 configuration used by the RCCL collective tests. To extend it:
 
 1.  Duplicate the SoC subtree in the `topology.root.children` array.
@@ -151,7 +151,7 @@ initialization depth:
 #include "rocjitsu/vm/rj_vm.h"
 
 rj_vm_t *vm = NULL;
-rj_status_t status = rj_vm_create("configs/gfx950_mi350x_kmd.json",
+rj_status_t status = rj_vm_create("configs/gfx950_mi355x_kmd.json",
                                    RJ_VM_MODE_LOCAL, &vm);
 if (status != ROCJITSU_STATUS_SUCCESS) {
     fprintf(stderr, "rj_vm_create failed: %d\n", status);
