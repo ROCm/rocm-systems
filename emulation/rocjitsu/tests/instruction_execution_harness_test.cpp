@@ -1166,6 +1166,110 @@ TEST(Gfx1250MemoryExecutionHarness, MisalignedLdsAtomicLanesDoNotBlockOtherLanes
       });
 }
 
+// KFD programs SH_MEM_CONFIG.alignment_mode = UNALIGNED, the only mode the
+// emulator implements: non-atomic, non-formatted VMEM accepts any alignment,
+// including across a 128-byte line and a 4 KiB page. gfx1201 and gfx1100
+// return and write exactly these bytes (ROCm 7.2.4); memory starts as dword
+// i = 0x10000 + i, and stores write 0x77777777 then 0x66666666.
+template <typename Isa, typename Encode>
+void check_unaligned_global_accesses(rj_code_arch_t arch, Encode encode) {
+  struct Case {
+    uint32_t dwords;
+    bool store;
+    uint32_t offset;
+    std::array<uint32_t, 4> loaded; // Unused for stores.
+  };
+  const std::array cases{
+      Case{1, false, 0x201, {0x81000100}},
+      Case{1, false, 0x202, {0x00810001}},
+      Case{1, false, 0x27e, {0x00a00001}},
+      Case{1, false, 0xffe, {0x04000001}},
+      Case{2, false, 0x203, {0x01008100, 0x01008200}},
+      Case{2, false, 0xffc, {0x000103ff, 0x00010400}},
+      Case{4, false, 0x201, {0x81000100, 0x82000100, 0x83000100, 0x84000100}},
+      Case{1, true, 0x201, {}},
+      Case{1, true, 0xffe, {}},
+      Case{2, true, 0x204, {}},
+  };
+  for (const Case &test : cases) {
+    SCOPED_TRACE(testing::Message() << "dwords=" << test.dwords << " store=" << test.store
+                                    << " offset=" << std::hex << test.offset);
+    amdgpu::GpuMemory memory("unaligned_global");
+    amdgpu::L2Cache cache("unaligned_global_cache");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    MemoryTestCu<Isa> cu("unaligned_global", config, &memory, &cache);
+    auto *wave = cu.dispatch_wf(0, 0, 128, 256, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    constexpr uint64_t base = 0x10000;
+    for (uint32_t i = 0; i < 0x2000 / 4; ++i)
+      memory.write32(base + i * 4, 0x10000 + i);
+    const uint32_t vb = wave->vgpr_alloc().base;
+    const uint64_t address = base + test.offset;
+    cu.write_vgpr(vb, 0, static_cast<uint32_t>(address));
+    cu.write_vgpr(vb + 1, 0, static_cast<uint32_t>(address >> 32));
+    cu.write_vgpr(vb + 4, 0, 0x77777777);
+    cu.write_vgpr(vb + 5, 0, 0x66666666);
+    const auto words = encode(test.dwords, test.store);
+    auto decoder = Decoder::create(arch);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
+    ASSERT_EQ(cu.route_memory_inst(inst.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+    cu.flush_all();
+    if (!test.store) {
+      for (uint32_t i = 0; i < test.dwords; ++i)
+        EXPECT_EQ(cu.read_vgpr(vb + 8 + i, 0), test.loaded[i]) << i;
+    } else {
+      std::array<uint8_t, 8> bytes{};
+      for (uint32_t i = 0; i < 8; ++i)
+        bytes[i] = static_cast<uint8_t>((i < 4 ? 0x77777777u : 0x66666666u) >> (8 * (i % 4)));
+      for (uint32_t i = 0; i < 0x2000; ++i) {
+        const uint32_t original = (0x10000 + i / 4) >> (8 * (i % 4)) & 0xff;
+        const bool written = i >= test.offset && i < test.offset + 4 * test.dwords;
+        EXPECT_EQ(memory.read8(base + i), written ? bytes[i - test.offset] : original)
+            << std::hex << i;
+      }
+    }
+    EXPECT_TRUE(wave->wait_counters().empty());
+    wave->halt();
+  }
+}
+
+TEST(Rdna3MemoryExecutionHarness, UnalignedGlobalAccessesMatchHardware) {
+  check_unaligned_global_accesses<rdna3::Isa>(ROCJITSU_CODE_ARCH_RDNA3, [](uint32_t dwords,
+                                                                           bool store) {
+    const uint16_t op = store ? (dwords == 1 ? rdna3::kFlatStoreB32Flat : rdna3::kFlatStoreB64Flat)
+                              : (dwords == 1   ? rdna3::kFlatLoadB32Flat
+                                 : dwords == 2 ? rdna3::kFlatLoadB64Flat
+                                               : rdna3::kFlatLoadB128Flat);
+    std::array<uint32_t, 3> words{};
+    std::ranges::copy(
+        rdna3::build_flat(
+            op, {.seg = 2, .addr = 0, .data = 4, .saddr = 127, .vdst = uint8_t(store ? 0 : 8)}),
+        words.begin());
+    return words;
+  });
+}
+
+TEST(Rdna4MemoryExecutionHarness, UnalignedGlobalAccessesMatchHardware) {
+  check_unaligned_global_accesses<rdna4::Isa>(
+      ROCJITSU_CODE_ARCH_RDNA4, [](uint32_t dwords, bool store) {
+        const uint16_t op =
+            store ? (dwords == 1 ? rdna4::kGlobalStoreB32Vglobal : rdna4::kGlobalStoreB64Vglobal)
+                  : (dwords == 1   ? rdna4::kGlobalLoadB32Vglobal
+                     : dwords == 2 ? rdna4::kGlobalLoadB64Vglobal
+                                   : rdna4::kGlobalLoadB128Vglobal);
+        return rdna4::build_vglobal(
+            op, {.saddr = 124, .vdst = uint8_t(store ? 0 : 8), .vsrc = 4, .vaddr = 0});
+      });
+}
+
 // CDNA5 sections 6.10 and 10.2: the private aperture is the address prefix
 // [63:58], and a wave32 private pointer is {prefix, 0, lane[4:0],
 // SCRATCH_BASE[56:7] + dword, byte}. Computed here from the manual rather than

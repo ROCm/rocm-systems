@@ -32,6 +32,10 @@ class Lds;
 /// @brief Lanes whose atomic is not aligned to its access width.
 /// @details Non-atomics, byte atomics and architectures other than RDNA3/3.5/4
 /// and CDNA5 have none. Two-address DS atomics check both addresses.
+/// SH_MEM_CONFIG.alignment_mode is not modelled: the emulator implements
+/// UNALIGNED, the mode KFD programs, in which non-atomic, non-formatted VMEM
+/// accepts any alignment (measured on gfx1100 and gfx1201) while atomics must
+/// be payload aligned. The DWORD, DWORD_STRICT and STRICT modes are unsupported.
 /// @param lanes Lanes to check; others are ignored.
 /// @param address_bias Added to each lane address before checking alignment.
 ///        Pre-routing callers pass `lds_base - shared_aperture_base` for FLAT

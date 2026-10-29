@@ -923,6 +923,47 @@ TEST(GpuVmPipeline, MisalignedTranslatedAtomicLanesRaiseMemviol) {
   }
 }
 
+// Unaligned non-atomic accesses that cross a translation page split into one
+// request per page and read or write exactly the requested bytes, as gfx1201
+// and gfx1100 do in the UNALIGNED alignment mode KFD programs.
+TEST(GpuVmPipeline, UnalignedAccessesSplitAcrossTranslationPages) {
+  for (const bool store : {false, true}) {
+    SCOPED_TRACE(store);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    context.external->translation_granule = 4096;
+    constexpr uint64_t kCode = 0x1000, kAddress = 0x2ffd;
+    const auto words =
+        cdna5::build_vglobal(store ? cdna5::kGlobalStoreB64Vglobal : cdna5::kGlobalLoadB64Vglobal,
+                             {.saddr = 124, .vdst = uint8_t(store ? 0 : 8), .vsrc = 4, .vaddr = 0});
+    context.external->store(kCode, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+    for (uint64_t address = 0x2ff0; address < 0x3010; address += 4)
+      context.external->store<uint32_t>(address, static_cast<uint32_t>(address));
+    context.wf->pc = kCode;
+    context.wf->set_exec(1);
+    const uint32_t vb = context.wf->vgpr_alloc().base;
+    context.cu->write_vgpr(vb, 0, static_cast<uint32_t>(kAddress));
+    context.cu->write_vgpr(vb + 1, 0, 0);
+    context.cu->write_vgpr(vb + 4, 0, 0x77777777);
+    context.cu->write_vgpr(vb + 5, 0, 0x66666666);
+    context.cu->step();
+    for (unsigned i = 0; i < 8 && !context.wf->wait_counters().empty(); ++i)
+      context.cu->step();
+    EXPECT_TRUE(context.reported_faults.empty());
+    if (store) {
+      // Bytes 0x2ffd..0x3004 become 77 77 77 77 66 66 66 66.
+      EXPECT_EQ(context.external->load<uint32_t>(0x2ffc), 0x777777fcu);
+      EXPECT_EQ(context.external->load<uint32_t>(0x3000), 0x66666677u);
+      EXPECT_EQ(context.external->load<uint32_t>(0x3004), 0x00003066u);
+    } else {
+      // Bytes 0x2ffd..0x3004 are 2f 00 00 00 30 00 00 04.
+      EXPECT_EQ(context.cu->read_vgpr(vb + 8, 0), 0x0000002fu);
+      EXPECT_EQ(context.cu->read_vgpr(vb + 9, 0), 0x04000030u);
+    }
+  }
+}
+
 // S_BUFFER descriptor bounds mask whole dwords. Masked dwords request no
 // memory, so the debugger preflight must not probe them: a fully masked load
 // is a legal zeroing load, and a partially masked one may end at the last
