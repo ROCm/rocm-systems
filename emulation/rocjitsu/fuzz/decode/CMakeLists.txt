@@ -27,3 +27,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/check_model_only_symbols.cmake
     )
 endif()
+
+if(RJ_INSTALL_TESTS)
+    rj_install_test_target(rj_decode_fuzz)
+endif()

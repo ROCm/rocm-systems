@@ -86,5 +86,11 @@ if(BUILD_TESTING)
     )
     rj_configure_target(rocjitsu_launch_flags_test TOOL)
     include(GoogleTest)
-    gtest_discover_tests(rocjitsu_launch_flags_test TEST_PREFIX "cli.")
+    rj_add_gtest_tests(rocjitsu_launch_flags_test TEST_PREFIX "cli.")
+    if(RJ_INSTALL_TESTS)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"rocjitsu_launch_flags_test.cmake\")\n"
+        )
+    endif()
 endif()

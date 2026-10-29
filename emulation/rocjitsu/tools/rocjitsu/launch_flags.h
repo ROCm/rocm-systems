@@ -14,7 +14,7 @@
 #include <string_view>
 #include <vector>
 
-namespace rocjitsu::launcher {
+namespace rocjitsu::tools {
 namespace ucli = ::rocjitsu::cli;
 
 class NonEmptyStringFlag final : public ucli::Flag {
@@ -94,6 +94,12 @@ private:
   uint32_t maximum_;
 };
 
+} // namespace rocjitsu::tools
+
+namespace rocjitsu::launcher {
+namespace rjtools = ::rocjitsu::tools;
+namespace ucli = ::rocjitsu::cli;
+
 class WaitCheckingFlag final : public ucli::Flag {
 public:
   using ucli::Flag::Flag;
@@ -131,22 +137,24 @@ private:
 };
 
 struct LaunchFlags {
-  std::shared_ptr<NonEmptyStringFlag> config = std::make_shared<NonEmptyStringFlag>(
-      ucli::FlagInfo{"--config", {}, "Simulation config JSON (required)"},
-      "requires a nonempty path");
-  std::shared_ptr<NonEmptyStringFlag> node = std::make_shared<NonEmptyStringFlag>(
+  std::shared_ptr<rjtools::NonEmptyStringFlag> config =
+      std::make_shared<rjtools::NonEmptyStringFlag>(
+          ucli::FlagInfo{"--config", {}, "Simulation config JSON (required)"},
+          "requires a nonempty path");
+  std::shared_ptr<rjtools::NonEmptyStringFlag> node = std::make_shared<rjtools::NonEmptyStringFlag>(
       ucli::FlagInfo{
           "--node",
           {},
           "Select one local node from a system manifest. Required for multi-node launches. "
           "Not available with --attach"},
       "requires a nonempty ID");
-  std::shared_ptr<OptionalUInt32Flag> cpu_thread_budget = std::make_shared<OptionalUInt32Flag>(
-      ucli::FlagInfo{"--cpu-thread-budget",
-                     {},
-                     "Override CPU thread budget for this launch; zero selects automatic sizing. "
-                     "Omission preserves JSON and launch overrides do not rewrite the source "
-                     "config. Not available with --attach"});
+  std::shared_ptr<rjtools::OptionalUInt32Flag> cpu_thread_budget =
+      std::make_shared<rjtools::OptionalUInt32Flag>(ucli::FlagInfo{
+          "--cpu-thread-budget",
+          {},
+          "Override CPU thread budget for this launch; zero selects automatic sizing. "
+          "Omission preserves JSON and launch overrides do not rewrite the source "
+          "config. Not available with --attach"});
   std::shared_ptr<WaitCheckingFlag> wait_checking =
       std::make_shared<WaitCheckingFlag>(ucli::FlagInfo{
           "--wait-checking",
@@ -166,16 +174,18 @@ struct LaunchFlags {
                      ucli::ValueMode::Switch});
   std::shared_ptr<ucli::BoolFlag> attach = std::make_shared<ucli::BoolFlag>(ucli::FlagInfo{
       "--attach", {}, "Attach the application to a running daemon", ucli::ValueMode::Switch});
-  std::shared_ptr<StringListFlag> vfio_socket = std::make_shared<StringListFlag>(
+  std::shared_ptr<rjtools::StringListFlag> vfio_socket = std::make_shared<rjtools::StringListFlag>(
       ucli::FlagInfo{
           "--vfio-socket",
           {},
           "Serve a VMM on this AF_UNIX socket. Requires ROCJITSU_ENABLE_VFIO=ON. Repeat once "
           "per local GPU in ordinal order"},
       "requires a nonempty path");
-  std::shared_ptr<OptionalUInt32Flag> vfio_ready_fd = std::make_shared<OptionalUInt32Flag>(
-      ucli::FlagInfo{"--vfio-ready-fd", {}, "Write readiness to this nonnegative file descriptor"},
-      std::numeric_limits<int>::max());
+  std::shared_ptr<rjtools::OptionalUInt32Flag> vfio_ready_fd =
+      std::make_shared<rjtools::OptionalUInt32Flag>(
+          ucli::FlagInfo{
+              "--vfio-ready-fd", {}, "Write readiness to this nonnegative file descriptor"},
+          std::numeric_limits<int>::max());
   std::shared_ptr<ucli::BoolFlag> check_vfio_user =
       std::make_shared<ucli::BoolFlag>(ucli::FlagInfo{"--check-vfio-user",
                                                       {},

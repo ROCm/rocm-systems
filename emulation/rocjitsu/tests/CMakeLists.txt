@@ -1268,10 +1268,8 @@ add_dependencies(
 if(TARGET rj_pretranslate)
     add_dependencies(rj_dbt_translate_smoke_test rj_pretranslate)
     set(RJ_DBT_SMOKE_PRETRANSLATE "$<TARGET_FILE:rj_pretranslate>")
-    _rj_path_from_installed_test_bin(
-        RJ_DBT_SMOKE_INSTALLED_PRETRANSLATE
-        "${CMAKE_INSTALL_BINDIR}"
-        "rj_pretranslate"
+    set(RJ_DBT_SMOKE_INSTALLED_PRETRANSLATE
+        "\${RJ_INSTALLED_BINDIR}/rj_pretranslate"
     )
 endif()
 if(RJ_INSTALL_TESTS)

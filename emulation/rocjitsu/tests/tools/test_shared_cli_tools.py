@@ -10,7 +10,9 @@ import tempfile
 
 from cli_fixtures import write_code_object
 
-translate, pretranslate, discovery, fuzz, launcher = map(Path, sys.argv[1:])
+translate, pretranslate, discovery, fuzz, launcher = (
+    Path(arg).resolve() for arg in sys.argv[1:]
+)
 
 
 def invoke(tool, *args, status=0, cwd=None):
@@ -93,13 +95,21 @@ with tempfile.TemporaryDirectory(prefix="rj-cli-tools-") as directory:
         pretranslate, "--store-root", root / "store", root / "absent.co", status=1
     )
     assert b"cannot read" in failed, failed
-    # Equals syntax and repeated options exercise the full decoder path too.
+    # Repeated options exercise the full decoder path and prove the last value wins.
     sample = root / "sample.bin"
     sample.write_bytes(bytes.fromhex("000080bf") + bytes(12))
     replay = invoke(
-        fuzz, f"--input={sample}", "--json", "--target=gfx942", "--target=gfx950"
+        fuzz, f"--input={sample}", "--json", "--target=bogus", "--target=gfx950"
     )
     assert b'"mnemonic":"s_nop"' in replay.replace(b" ", b""), replay
+    assert b"unsupported decoder target: bogus" in invoke(
+        fuzz,
+        f"--input={sample}",
+        "--json",
+        "--target=gfx950",
+        "--target=bogus",
+        status=2,
+    )
     # A leading-dash input reaches domain validation. This minimal fixture
     # intentionally has no kernel descriptor; full translation is covered by the smoke suite.
     translated = invoke(

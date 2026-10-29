@@ -193,12 +193,12 @@ struct DbtFlags {
                     {},
                     "Preserve failed kernels and continue other kernels",
                     cli::ValueMode::Switch});
-  std::shared_ptr<cli::BoolFlag> idempotence = std::make_shared<cli::BoolFlag>(
+  std::shared_ptr<cli::BoolFlag> verify_idempotence = std::make_shared<cli::BoolFlag>(
       cli::FlagInfo{"--verify-idempotence",
                     {},
                     "Require a same-architecture second pass to be unchanged",
                     cli::ValueMode::Switch});
-  std::shared_ptr<cli::BoolFlag> discharge = std::make_shared<cli::BoolFlag>(
+  std::shared_ptr<cli::BoolFlag> verify_rewrite_discharge = std::make_shared<cli::BoolFlag>(
       cli::FlagInfo{"--verify-rewrite-discharge",
                     {},
                     "Require no registered rewrite trigger in final output",
@@ -246,8 +246,8 @@ struct DbtFlags {
             .failed() ||
         command
             .add_flags("Validation and diagnostics",
-                       {debug_min_free_vgpr, keep_going, skip_failed, idempotence, discharge,
-                        show_all_translations},
+                       {debug_min_free_vgpr, keep_going, skip_failed, verify_idempotence,
+                        verify_rewrite_discharge, show_all_translations},
                        diagnostic)
             .failed())
       return util::Result::failure();
@@ -311,8 +311,8 @@ void print_help(const cli::Command &command) {
         static_cast<uint16_t>(*flags.debug_min_free_vgpr->value());
   options.translate.debug_continue_after_failure = flags.keep_going->value();
   options.translate.skip_failed_kernels = flags.skip_failed->value();
-  options.translate.verify_idempotence = flags.idempotence->value();
-  options.translate.verify_rewrite_discharge = flags.discharge->value();
+  options.translate.verify_idempotence = flags.verify_idempotence->value();
+  options.translate.verify_rewrite_discharge = flags.verify_rewrite_discharge->value();
   options.output_mode = *flags.output_mode->value();
   options.show_all_translations = flags.show_all_translations->value();
   options.list_code_objects = flags.list_code_objects->value();

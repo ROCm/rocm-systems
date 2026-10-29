@@ -68,15 +68,35 @@ if(BUILD_TESTING)
         PRIVATE rocjitsu_cli GTest::gtest_main
     )
     rj_configure_target(rocjitsu_benchmark_cli_test PRIVATE_INCLUDES WARNINGS)
-    gtest_discover_tests(rocjitsu_benchmark_cli_test TEST_PREFIX "cli.")
+    rj_add_gtest_tests(rocjitsu_benchmark_cli_test TEST_PREFIX "cli." TEST_FILTER "*")
+    if(RJ_INSTALL_TESTS)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"rocjitsu_benchmark_cli_test.cmake\")\n"
+        )
+    endif()
 
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    add_test(
+    if(RJ_INSTALL_TESTS)
+        install(
+            FILES
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/cli_fixtures.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_decode_benchmark_cli.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_shared_cli_tools.py
+            DESTINATION ${RJ_INSTALL_TEST_DIR}/tools
+        )
+        rj_install_test_target(rj_decode_benchmark)
+    endif()
+    rj_add_test(
         NAME cli.decode_benchmark_process
         COMMAND
             ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_decode_benchmark_cli.py
             $<TARGET_FILE:rj_decode_benchmark>
+        INSTALL_COMMAND
+            ${Python3_EXECUTABLE}
+            tools/test_decode_benchmark_cli.py
+            bin/rj_decode_benchmark
     )
 endif()
 
@@ -114,10 +134,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rj_pretranslate
         PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
     )
+    install(TARGETS rj_pretranslate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_test(
+    if(RJ_INSTALL_TESTS)
+        rj_install_test_target(rj_dbt_translate)
+    endif()
+    rj_add_test(
         NAME cli.tools_process
         COMMAND
             ${Python3_EXECUTABLE}
@@ -125,5 +149,13 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
             $<TARGET_FILE:rj_dbt_translate> $<TARGET_FILE:rj_pretranslate>
             $<TARGET_FILE:rj_ip_discovery> $<TARGET_FILE:rj_decode_fuzz>
             $<TARGET_FILE:rocjitsu_bin>
+        INSTALL_COMMAND
+            ${Python3_EXECUTABLE}
+            tools/test_shared_cli_tools.py
+            bin/rj_dbt_translate
+            \${RJ_INSTALLED_BINDIR}/rj_pretranslate
+            bin/rj-ip-discovery
+            bin/rj_decode_fuzz
+            \${RJ_INSTALLED_BINDIR}/rocjitsu
     )
 endif()
