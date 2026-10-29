@@ -1744,7 +1744,8 @@ TEST(ConfigLoaderTest, Gfx1151HighSgprsAndVccStayWithinTheirWave) {
   EXPECT_FALSE(cu->owns_sgpr_range(*wf, base + 106, 1));
   amdgpu::RegisterAccess registers(*wf);
   EXPECT_EQ(registers.read_sgpr(neighbor_base), 0u);
-  registers.write_sgpr(neighbor_base, 0xDEADBEEFu);
+  // Ownership rejection is checked through unchanged storage below.
+  (void)registers.write_sgpr(neighbor_base, 0xDEADBEEFu);
   EXPECT_EQ(cu->read_sgpr(neighbor_base), sentinel);
   wf->halt();
   neighbor->halt();

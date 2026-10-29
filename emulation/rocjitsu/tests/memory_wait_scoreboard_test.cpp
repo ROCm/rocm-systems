@@ -1349,7 +1349,7 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
                                                    : 127;
           // 127 is a second NULL selector on RDNA; CDNA5 rejects it during decode.
           const bool has_scalar = scalar_mode == 1 || scalar_mode == 2;
-          RegisterAccess(*wf).write_sgpr64(wf->sgpr_alloc().base, shared);
+          ASSERT_TRUE(RegisterAccess(*wf).write_sgpr64(wf->sgpr_alloc().base, shared).succeeded());
           const uint64_t addresses[] = {
               shared + 0x100, shared + (uint64_t{1} << 31) + 0x100, uint64_t{8} << 32,
               cdna5 ? 0x400080 | (uint64_t{3} << 52) : private_base + 0x80};
@@ -3273,8 +3273,8 @@ TEST(MemoryWaitFootprintTest, ValuPermutationsCheckConsumedLanesBeforeExecution)
     auto cu = ComputeUnitCore::create("permlane_cu", config, &memory, &l2);
     auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, test.arch == ROCJITSU_CODE_ARCH_RDNA3 ? 64 : 32);
     ASSERT_NE(wf, nullptr);
-    RegisterAccess(*wf).write_sgpr(wf->sgpr_alloc().base + 4, 0x55555555);
-    RegisterAccess(*wf).write_sgpr(wf->sgpr_alloc().base + 5, 0x55555555);
+    ASSERT_TRUE(RegisterAccess(*wf).write_sgpr(wf->sgpr_alloc().base + 4, 0x55555555).succeeded());
+    ASSERT_TRUE(RegisterAccess(*wf).write_sgpr(wf->sgpr_alloc().base + 5, 0x55555555).succeeded());
     for (unsigned lane = 0; lane < wf->wf_size(); ++lane)
       cu->write_vgpr(wf->vgpr_alloc().base + 4, lane, 5);
     auto decoder = Decoder::create(config.arch);

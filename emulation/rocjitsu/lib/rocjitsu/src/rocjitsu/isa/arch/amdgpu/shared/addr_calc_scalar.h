@@ -149,7 +149,7 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   auto maybe_addresses = addr_region.lanes();
   if (maybe_addresses.failed())
     return;
-  const auto addresses = maybe_addresses.value();
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

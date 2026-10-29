@@ -351,7 +351,7 @@ void DsStore2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
   if (maybe_addresses.failed())
     return;
-  const auto addresses = maybe_addresses.value();
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
   auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
   if (maybe_data0_0.failed())
     return;
@@ -393,7 +393,7 @@ void DsStore2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
   if (maybe_addresses.failed())
     return;
-  const auto addresses = maybe_addresses.value();
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
   auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
   if (maybe_data0_0.failed())
     return;
@@ -1053,7 +1053,7 @@ void DsLoad2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
     auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
     if (maybe_addresses.failed())
       return;
-    const auto addresses = maybe_addresses.value();
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -1090,7 +1090,7 @@ void DsLoad2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
     auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
     if (maybe_addresses.failed())
       return;
-    const auto addresses = maybe_addresses.value();
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -1540,7 +1540,7 @@ void DsStore2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
   if (maybe_addresses.failed())
     return;
-  const auto addresses = maybe_addresses.value();
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
   auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
   if (maybe_data0_0.failed())
     return;
@@ -1594,7 +1594,7 @@ void DsStore2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
   if (maybe_addresses.failed())
     return;
-  const auto addresses = maybe_addresses.value();
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
   auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
   if (maybe_data0_0.failed())
     return;
@@ -2250,7 +2250,7 @@ void DsLoad2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
     auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
     if (maybe_addresses.failed())
       return;
-    const auto addresses = maybe_addresses.value();
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -2287,7 +2287,7 @@ void DsLoad2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
     auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
     if (maybe_addresses.failed())
       return;
-    const auto addresses = maybe_addresses.value();
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));

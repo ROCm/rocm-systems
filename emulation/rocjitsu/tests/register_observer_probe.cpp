@@ -10,7 +10,8 @@ extern "C" RJ_API_EXPORT void rj_probe_register_observer(rocjitsu::amdgpu::Wavef
   if (!wf)
     return;
   const rocjitsu::amdgpu::RegisterAccess registers(*wf);
-  registers.write_sgpr(sgpr, registers.read_sgpr(sgpr));
+  if (registers.write_sgpr(sgpr, registers.read_sgpr(sgpr)).failed())
+    return;
   const auto value = registers.read_vgpr_region(vgpr, 1, 1).lane(0, 0);
   registers.write_vgpr_region(vgpr, 1, 1).set_lane(0, 0, value);
 }

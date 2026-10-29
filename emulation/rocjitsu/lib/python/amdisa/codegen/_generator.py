@@ -10067,7 +10067,9 @@ class CodeGenerator:
             '    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
         )
         L.append('    if (maybe_addresses.failed()) return;')
-        L.append('    const auto addresses = maybe_addresses.value();')
+        L.append(
+            '    const std::span<const uint32_t> addresses = maybe_addresses.value();'
+        )
         L.append(
             '    calculate_addresses([&](uint32_t lane) { return addresses[lane]; });'
         )
@@ -10121,7 +10123,9 @@ class CodeGenerator:
             '  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
         )
         L.append('  if (maybe_addresses.failed()) return;')
-        L.append('  const auto addresses = maybe_addresses.value();')
+        L.append(
+            '  const std::span<const uint32_t> addresses = maybe_addresses.value();'
+        )
         for group in (0, 1):
             for i in range(dwords_per_access):
                 L.append(

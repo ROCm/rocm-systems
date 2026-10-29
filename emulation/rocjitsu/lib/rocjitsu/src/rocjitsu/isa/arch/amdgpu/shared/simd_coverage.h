@@ -492,7 +492,7 @@ template <bool Extended, typename Slot>
   };
   if (!compute(x, xr) || !compute(y, yr))
     return false;
-  auto store = [&](const Slot &slot, const Results &result) {
+  auto store = [&](const Slot &slot, const Results &result) -> Result {
     if constexpr (Extended) {
       if (slot.op >= 32) {
         auto dst = regs.write_operand64(*slot.dst, exec);
@@ -502,8 +502,8 @@ template <bool Extended, typename Slot>
                      base, util::native<uint64_t>(result.pairs + base, util::stdx::vector_aligned),
                      (exec >> base) & util::mask<uint64_t>(W))
                   .failed())
-            return;
-        return;
+            return Result::failure();
+        return Result::success();
       }
     }
     auto dst = regs.write_operand(*slot.dst, exec);
@@ -513,12 +513,11 @@ template <bool Extended, typename Slot>
                  base, util::native<uint32_t>(result.words + base, util::stdx::vector_aligned),
                  (exec >> base) & util::mask<uint64_t>(W))
               .failed())
-        return;
+        return Result::failure();
+    return Result::success();
   };
-  store(x, xr);
-  if (wf.instruction_execution_failed())
+  if (store(x, xr).failed() || store(y, yr).failed())
     return true;
-  store(y, yr);
   detail::record_simd_fast_path(SimdFastPath::VOPD);
   return true;
 }

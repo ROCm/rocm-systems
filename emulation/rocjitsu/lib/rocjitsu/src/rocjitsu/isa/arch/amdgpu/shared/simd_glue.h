@@ -411,10 +411,13 @@ inline void write_explicit_lane_mask(const Operand &dst, Wavefront &wf, uint64_t
 
 inline void write_explicit_lane_mask(uint32_t physical_dst, Wavefront &wf, uint64_t mask) {
   amdgpu::RegisterAccess regs(wf);
-  if (wf.wf_size() <= 32)
-    regs.write_sgpr(physical_dst, static_cast<uint32_t>(mask));
-  else
-    regs.write_sgpr64(physical_dst, mask);
+  if (wf.wf_size() <= 32) {
+    if (regs.write_sgpr(physical_dst, static_cast<uint32_t>(mask)).failed())
+      return;
+  } else {
+    if (regs.write_sgpr64(physical_dst, mask).failed())
+      return;
+  }
 }
 
 inline util::native<uint32_t> simd_sign_extend_u32(util::native<uint32_t> v, unsigned bits) {

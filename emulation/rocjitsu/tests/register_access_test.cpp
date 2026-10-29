@@ -368,13 +368,11 @@ TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
   EXPECT_TRUE((region.copy_dwords_lane_major(std::span(bytes).first(bytes.size() - 1), lane_mask))
                   .failed());
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
-  fx.wf->clear_instruction_execution_error();
   EXPECT_EQ(bytes, original);
   EXPECT_EQ(fx.plugin->reads.size(), read_count);
   fx.wf->clear_instruction_execution_error();
   EXPECT_TRUE((region.copy_dwords_lane_major(bytes, uint64_t{1} << 32)).failed());
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
-  fx.wf->clear_instruction_execution_error();
   EXPECT_EQ(bytes, original);
   EXPECT_EQ(fx.plugin->reads.size(), read_count);
 }
@@ -431,7 +429,6 @@ TEST(RegisterAccessTest, PartialByteReadRegionMasksReturnedValues) {
   fx.wf->clear_instruction_execution_error();
   EXPECT_TRUE((region.lanes()).failed());
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
-  fx.wf->clear_instruction_execution_error();
 }
 
 TEST(RegisterAccessTest, WriteRegionObservesWritesAndHonorsLaneMask) {
@@ -582,7 +579,7 @@ TEST(RegisterAccessTest, Sgpr64ReadObservesBothRegisters) {
   EXPECT_EQ(fx.plugin->sgpr_reads[1], base + 18);
   EXPECT_EQ(fx.plugin->scalar_reads, (std::vector<RegisterRef>{{RegClass::SGPR, 17, 2}}));
 
-  regs.write_sgpr64(base + 19, 0xABCDEF0123456789ull);
+  ASSERT_TRUE(regs.write_sgpr64(base + 19, 0xABCDEF0123456789ull).succeeded());
   ASSERT_EQ(fx.plugin->sgpr_writes.size(), 2u);
   EXPECT_EQ(fx.plugin->sgpr_writes[0], base + 19);
   EXPECT_EQ(fx.plugin->sgpr_writes[1], base + 20);
@@ -779,13 +776,11 @@ TEST(RegisterAccessTest, CuBoundSgprWritesCannotBypassObservation) {
 
   RegisterAccess registers(*fx.cu);
   fx.wf->clear_instruction_execution_error();
-  EXPECT_NO_THROW(registers.write_sgpr(reg, 0x33334444u));
+  EXPECT_NO_THROW(EXPECT_TRUE(registers.write_sgpr(reg, 0x33334444u).failed()));
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
   fx.wf->clear_instruction_execution_error();
-  fx.wf->clear_instruction_execution_error();
-  EXPECT_NO_THROW(registers.write_sgpr64(reg, 0x5555666677778888ull));
+  EXPECT_NO_THROW(EXPECT_TRUE(registers.write_sgpr64(reg, 0x5555666677778888ull).failed()));
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
-  fx.wf->clear_instruction_execution_error();
 
   EXPECT_EQ(fx.cu->read_sgpr_storage(reg), 0x11112222u);
   EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
@@ -805,7 +800,8 @@ TEST(RegisterAccessTest, Sgpr64AccessDoesNotCrossPhysicalBlockBoundary) {
   fx.cu->write_sgpr(adjacent_wave->sgpr_alloc().base, kAdjacentSentinel);
 
   RegisterAccess registers(*fx.wf);
-  registers.write_sgpr64(boundary, 0x3333444455556666ull);
+  // Ownership rejection is checked through unchanged storage below.
+  (void)registers.write_sgpr64(boundary, 0x3333444455556666ull);
 
   EXPECT_EQ(fx.cu->read_sgpr_storage(boundary), kLowSentinel);
   EXPECT_EQ(fx.cu->read_sgpr_storage(adjacent_wave->sgpr_alloc().base), kAdjacentSentinel);
@@ -977,7 +973,7 @@ TEST(RegisterAccessTest, ExplicitWaveSgprAccessUsesReservedPhysicalBlock) {
   EXPECT_EQ(fx.plugin->sgpr_reads[0], compiler_temporary);
   EXPECT_EQ(fx.plugin->sgpr_read_wavefronts[0], fx.wf);
 
-  regs.write_sgpr(compiler_temporary, 0x55667788u);
+  ASSERT_TRUE(regs.write_sgpr(compiler_temporary, 0x55667788u).succeeded());
   ASSERT_EQ(fx.plugin->sgpr_writes.size(), 1u);
   EXPECT_EQ(fx.plugin->sgpr_writes[0], compiler_temporary);
   EXPECT_EQ(fx.plugin->sgpr_write_wavefronts[0], fx.wf);
@@ -1010,7 +1006,8 @@ TEST(RegisterAccessTest, ReleasedWaveCannotOwnReallocatedRegisterBlock) {
   ASSERT_EQ(released_wave->vgpr_alloc().count, 0u);
 
   RegisterAccess released_access(*released_wave);
-  released_access.write_sgpr(live_sgpr, 0xAABBCCDDu);
+  // Ownership rejection is checked through unchanged storage below.
+  (void)released_access.write_sgpr(live_sgpr, 0xAABBCCDDu);
   released_access.write_vgpr(live_vgpr, kLane, 0xDDEEFF00u);
 
   EXPECT_EQ(fx.cu->read_sgpr_storage(live_sgpr), kSgprSentinel);
@@ -1202,6 +1199,7 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
     constexpr uint64_t later_lanes = 0b0001;
 
     auto acquire = [&](auto make_view) {
+      fx.wf->clear_instruction_execution_error();
       amdgpu::dpp::ScopedVgprWriteMask scope;
       scope.bind(*fx.wf, acquired_lanes);
       return make_view();
@@ -1234,7 +1232,6 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
 
     cdna4::Operand dst64(64, cdna4::OperandType::OPR_VGPR, 32);
     first_write = fx.plugin->writes.size();
@@ -1253,7 +1250,6 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
             .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
 
     cdna4::Operand dst_pair32(64, cdna4::OperandType::OPR_VGPR, 34);
     first_write = fx.plugin->writes.size();
@@ -1277,7 +1273,6 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
 
     cdna4::Operand acc32(32, cdna4::OperandType::OPR_VGPR, 36);
     const size_t first_read = fx.plugin->reads.size();
@@ -1299,7 +1294,6 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
             .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
 
     cdna4::Operand acc64(64, cdna4::OperandType::OPR_VGPR, 38);
     const size_t first_read64 = fx.plugin->reads.size();
@@ -1322,7 +1316,6 @@ TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
             .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
   }
 }
 
@@ -1561,7 +1554,6 @@ TEST(RegisterAccessTest, OperandWriteViewRejectsStoreWindowPastWaveEnd) {
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
   }
 }
 
@@ -1638,7 +1630,6 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
 
     cdna4::Operand dst64(64, cdna4::OperandType::OPR_VGPR, 20);
     auto write64 = regs.write_operand64(dst64, observed_lane_mask);
@@ -1648,7 +1639,6 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
 
     cdna4::Operand dst_pair32(64, cdna4::OperandType::OPR_VGPR, 22);
     auto write_pair32 = regs.write_operand_pair32(dst_pair32, observed_lane_mask);
@@ -1659,7 +1649,6 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
 
     cdna4::Operand acc32(32, cdna4::OperandType::OPR_VGPR, 24);
     auto readwrite32 = regs.readwrite_operand(acc32, observed_lane_mask);
@@ -1669,7 +1658,6 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
 
     cdna4::Operand acc64(64, cdna4::OperandType::OPR_VGPR, 26);
     auto readwrite64 = regs.readwrite_operand64(acc64, observed_lane_mask);
@@ -1679,7 +1667,6 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
                     .failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
-    fx.wf->clear_instruction_execution_error();
 
     for (uint32_t reg : {18u, 20u, 21u, 22u, 23u, 24u, 26u, 27u})
       EXPECT_EQ(fx.cu->read_vgpr(base + reg, lane_base + 1), 0u);
@@ -1730,8 +1717,6 @@ TEST(RegisterAccessTest, OperandReadViewsMaskUnobservedBytes) {
     EXPECT_EQ(pair.load_hi_native<uint32_t>(0)[0], 0x11220000u);
   }
 }
-
-} // namespace
 
 TEST(RegisterAccessTest, PartialByteRawRegionOperationsRejectBeforeSideEffects) {
   Fixture fx;
@@ -1824,3 +1809,74 @@ TEST(RegisterAccessTest, ConstPhysicalReadWriteAcquisitionRejectsBeforeObservati
   region.set_linear_word(0, 1);
   EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), 0u);
 }
+
+TEST(RegisterAccessTest, RejectedReadRegionsReportIssuingWaveAtInstructionBoundary) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, 2);
+  ASSERT_NE(fx.wf, nullptr);
+  Wavefront *neighbor = fx.cu->dispatch_wf(1, 0, kSgprsPerWave, kVgprsPerWave);
+  ASSERT_NE(neighbor, nullptr);
+  const uint32_t destination = fx.vgpr_base() + 4;
+  const uint32_t neighbor_base = neighbor->vgpr_alloc().base;
+  const uint32_t issuer_last = fx.vgpr_base() + fx.cu->vgpr_allocation_block_size() - 1;
+  ASSERT_EQ(issuer_last + 1, neighbor_base);
+  ASSERT_TRUE(fx.cu->owns_vgpr_range(*fx.wf, issuer_last, 1));
+  ASSERT_TRUE(fx.cu->owns_vgpr_range(*neighbor, neighbor_base, 1));
+  ASSERT_FALSE(RegisterAccess(*fx.cu).read_vgpr_region(issuer_last, 2, 1).valid());
+  fx.cu->write_vgpr(destination, 0, 0xAABBCCDDu);
+  fx.cu->write_vgpr(neighbor_base, 0, 0x11223344u);
+
+  struct RejectedRead : Instruction {
+    uint32_t source_base;
+    bool snapshot;
+    std::array<uint8_t, 1> bytes{0xA5};
+    RejectedRead(uint32_t source_base, bool snapshot)
+        : Instruction("rejected_read",
+                      [](Instruction &inst, void *ctx) {
+                        auto &self = static_cast<RejectedRead &>(inst);
+                        auto &wf = *static_cast<Wavefront *>(ctx);
+                        RegisterAccess regs(wf);
+                        auto region = regs.read_vgpr_region(self.source_base, self.snapshot ? 2 : 1,
+                                                            1, self.snapshot ? 0xF : 0b0011);
+                        if (self.snapshot) {
+                          if (region.copy_dwords_lane_major(self.bytes, 1).failed())
+                            return;
+                        } else if (region.lanes().failed()) {
+                          return;
+                        }
+                        regs.write_vgpr(wf.vgpr_alloc().base + 4, 0, 1);
+                      }),
+          source_base(source_base), snapshot(snapshot) {}
+  };
+  Instruction valid_store("valid_store", [](Instruction &, void *ctx) {
+    auto &wf = *static_cast<Wavefront *>(ctx);
+    RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + 4, 0, 0x55667788u);
+  });
+  for (bool snapshot : {false, true}) {
+    fx.cu->write_vgpr(destination, 0, 0xAABBCCDDu);
+    // The snapshot range crosses the allocation boundary; neither physical
+    // owner lookup can identify a single wave for it.
+    const uint32_t source = snapshot ? issuer_last : neighbor_base;
+    RejectedRead instruction(source, snapshot);
+    std::string detail;
+    EXPECT_NO_THROW(
+        EXPECT_TRUE(fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed()));
+    EXPECT_EQ(fx.wf->instruction_execution_error(),
+              InstructionExecutionError::InvalidRegisterAccess);
+    const char *expected = snapshot ? "VGPR snapshot destination is smaller than the wave region"
+                                    : "partial-byte VgprReadRegion does not expose raw lane spans";
+    EXPECT_STREQ(fx.wf->instruction_execution_error_detail(), expected);
+    EXPECT_EQ(detail, expected);
+    EXPECT_EQ(instruction.bytes[0], 0xA5);
+    EXPECT_EQ(fx.cu->read_vgpr(destination, 0), 0xAABBCCDDu);
+    EXPECT_EQ(fx.cu->read_vgpr(neighbor_base, 0), 0x11223344u);
+    EXPECT_FALSE(neighbor->instruction_execution_failed());
+    EXPECT_EQ(neighbor->instruction_execution_error_detail(), nullptr);
+    EXPECT_TRUE(fx.cu->execute_instruction(&valid_store, *fx.wf).succeeded());
+    EXPECT_FALSE(fx.wf->instruction_execution_failed());
+    EXPECT_EQ(fx.wf->instruction_execution_error_detail(), nullptr);
+    EXPECT_EQ(fx.cu->read_vgpr(destination, 0), 0x55667788u);
+    EXPECT_EQ(fx.cu->read_vgpr(neighbor_base, 0), 0x11223344u);
+  }
+}
+
+} // namespace

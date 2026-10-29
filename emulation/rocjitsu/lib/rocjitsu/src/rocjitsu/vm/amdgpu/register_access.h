@@ -108,10 +108,18 @@ enum class ScalarPairMode { Preserve, Replicate32 };
 ///
 /// View stores and raw read-region operations return failures for unsupported
 /// byte modes, lane windows, and snapshot bounds, before modifying storage or
-/// calling a visitor. They also retain InvalidRegisterAccess on the owning
-/// wavefront for the instruction execution boundary. Acquisition notifications
-/// that preceded the failed operation are not repeated. Logical APIs require
+/// calling a visitor. They also retain InvalidRegisterAccess on the acquiring
+/// wavefront (or the physical owner for CU-bound access) for the instruction
+/// execution boundary. Acquisition notifications that preceded the failed
+/// operation are not repeated. Logical APIs require
 /// a wavefront-bound facade; logical writes require a mutable wavefront.
+///
+/// Operand-view stores also refuse writes after any pending instruction error,
+/// including errors unrelated to register access. This guard is local to those
+/// stores: other write APIs, including VgprWriteRegion::set_lane(), do not promise
+/// instruction-wide suppression or rollback. Callers must check returned results
+/// before dependent work. Public raw-region operations validate full-byte requests
+/// in release builds; private reg_data() asserts that already-checked invariant.
 ///
 /// Logical operand APIs require construction from a Wavefront. Physical VGPR
 /// APIs may use a CU-bound compatibility path, but a complete region must map
@@ -127,10 +135,8 @@ class RegisterAccess {
     return bit_mask;
   }
 
-  template <typename T>
-  static T require_scalar_fallback(const std::optional<T> &fallback, const char *view_name) {
+  template <typename T> static T require_scalar_fallback(const std::optional<T> &fallback) {
     // Private view constructors initialize fallback whenever storage is absent.
-    (void)view_name;
     assert(fallback && "register read view has no scalar fallback");
     return *fallback;
   }
@@ -209,7 +215,7 @@ public:
     }
 
     uint32_t scalar_fallback() const {
-      return RegisterAccess::require_scalar_fallback(scalar_fallback_, "OperandReadView");
+      return RegisterAccess::require_scalar_fallback(scalar_fallback_);
     }
 
     ConstVgprStorage storage_{};
@@ -502,7 +508,7 @@ public:
     }
 
     uint32_t scalar_fallback() const {
-      return RegisterAccess::require_scalar_fallback(scalar_fallback_, "OperandReadWriteView");
+      return RegisterAccess::require_scalar_fallback(scalar_fallback_);
     }
 
     const Operand *op_ = nullptr;
@@ -580,7 +586,7 @@ public:
     }
 
     uint64_t scalar_fallback() const {
-      return RegisterAccess::require_scalar_fallback(scalar_fallback_, "OperandReadWrite64View");
+      return RegisterAccess::require_scalar_fallback(scalar_fallback_);
     }
 
     const Operand *op_ = nullptr;
@@ -633,7 +639,7 @@ public:
     }
 
     uint64_t scalar_fallback() const {
-      return RegisterAccess::require_scalar_fallback(scalar_fallback_, "OperandRead64View");
+      return RegisterAccess::require_scalar_fallback(scalar_fallback_);
     }
 
     ConstVgprStoragePair64 storage_{};
@@ -683,8 +689,7 @@ public:
     }
 
     uint32_t scalar_fallback(bool high) const {
-      const OperandPair32 pair =
-          RegisterAccess::require_scalar_fallback(scalar_fallback_, "OperandReadPair32View");
+      const OperandPair32 pair = RegisterAccess::require_scalar_fallback(scalar_fallback_);
       return high ? pair.hi : pair.lo;
     }
 
@@ -854,8 +859,8 @@ public:
     friend class RegisterAccess;
 
     Result reject(const char *reason) const {
-      if (const Wavefront *owner = cu_->vgpr_owner_for_range(base_, reg_count_))
-        return RegisterAccess::reject(*owner, reason);
+      if (wf_)
+        return RegisterAccess::reject(*wf_, reason);
       return Result::failure();
     }
 
@@ -875,12 +880,14 @@ public:
       return reinterpret_cast<const uint32_t *>(cu_->raw_vgpr_data(base_ + relative_reg));
     }
 
-    VgprReadRegion(const ComputeUnitCore &cu, uint32_t base, uint32_t reg_count, uint32_t wave_size,
-                   uint8_t byte_mask, bool valid = true, bool observed = true)
-        : cu_(&cu), base_(base), reg_count_(reg_count), wf_size_(wave_size), byte_mask_(byte_mask),
-          valid_(valid), observed_(observed) {}
+    VgprReadRegion(const ComputeUnitCore &cu, const Wavefront *wf, uint32_t base,
+                   uint32_t reg_count, uint32_t wave_size, uint8_t byte_mask, bool valid = true,
+                   bool observed = true)
+        : cu_(&cu), wf_(wf), base_(base), reg_count_(reg_count), wf_size_(wave_size),
+          byte_mask_(byte_mask), valid_(valid), observed_(observed) {}
 
     const ComputeUnitCore *cu_ = nullptr;
+    const Wavefront *wf_ = nullptr;
     uint32_t base_ = 0;
     uint32_t reg_count_ = 0;
     uint32_t wf_size_ = 0;
@@ -929,10 +936,15 @@ public:
         : cu_(valid ? &cu : nullptr), base_(base), reg_count_(reg_count), wf_size_(wave_size),
           lane_mask_(lane_mask), byte_mask_(byte_mask) {}
 
-    VgprWriteRegion(const ComputeUnitCore &, uint32_t base, uint32_t reg_count, uint32_t wave_size,
-                    uint64_t lane_mask, uint8_t byte_mask)
+    VgprWriteRegion(uint32_t base, uint32_t reg_count, uint32_t wave_size, uint64_t lane_mask,
+                    uint8_t byte_mask)
         : base_(base), reg_count_(reg_count), wf_size_(wave_size), lane_mask_(lane_mask),
           byte_mask_(byte_mask) {}
+
+    static VgprWriteRegion rejected(uint32_t base, uint32_t reg_count, uint32_t wave_size,
+                                    uint8_t byte_mask) {
+      return VgprWriteRegion(base, reg_count, wave_size, 0, byte_mask);
+    }
 
     uint32_t *reg_data(uint32_t relative_reg = 0) const {
       assert(cu_ && "VgprWriteRegion is empty");
@@ -1522,22 +1534,24 @@ public:
     return read_sgpr_region(physical_reg, 2).qword();
   }
 
-  void write_sgpr(uint32_t physical_reg, uint32_t value) const {
+  Result write_sgpr(uint32_t physical_reg, uint32_t value) const {
     if (!mutable_wf_) {
       if (const Wavefront *owner = sgpr_owner_for_range(physical_reg, 1))
-        (void)reject(*owner, "RegisterAccess was not constructed from mutable Wavefront");
-      return;
+        return reject(*owner, "RegisterAccess was not constructed from mutable Wavefront");
+      return Result::failure();
     }
     mutable_cu().write_sgpr(mutable_wavefront(), physical_reg, value);
+    return Result::success();
   }
 
-  void write_sgpr64(uint32_t physical_reg, uint64_t value) const {
+  Result write_sgpr64(uint32_t physical_reg, uint64_t value) const {
     if (!mutable_wf_) {
       if (const Wavefront *owner = sgpr_owner_for_range(physical_reg, 2))
-        (void)reject(*owner, "RegisterAccess was not constructed from mutable Wavefront");
-      return;
+        return reject(*owner, "RegisterAccess was not constructed from mutable Wavefront");
+      return Result::failure();
     }
     mutable_cu().write_sgpr64(mutable_wavefront(), physical_reg, value);
+    return Result::success();
   }
 
   // Physical VGPR access. These APIs are for helpers that already know the
@@ -1568,11 +1582,13 @@ public:
     const uint32_t wave_size = vgpr_region_wave_size(physical_base, reg_count);
     const Wavefront *owner = vgpr_owner_for_range(physical_base, reg_count);
     if (!owner)
-      return VgprReadRegion(*cu_, physical_base, reg_count, wave_size, byte_mask, false, false);
+      return VgprReadRegion(*cu_, wf_ ? wf_ : owner, physical_base, reg_count, wave_size, byte_mask,
+                            false, false);
     if (lane_mask == 0)
-      return VgprReadRegion(*cu_, physical_base, reg_count, wave_size, byte_mask, true, false);
+      return VgprReadRegion(*cu_, wf_ ? wf_ : owner, physical_base, reg_count, wave_size, byte_mask,
+                            true, false);
     observe_vgpr_region(*owner, physical_base, reg_count, lane_mask, byte_mask);
-    return VgprReadRegion(*cu_, physical_base, reg_count, wave_size, byte_mask);
+    return VgprReadRegion(*cu_, wf_ ? wf_ : owner, physical_base, reg_count, wave_size, byte_mask);
   }
 
   [[nodiscard]] VgprWriteRegion write_vgpr_region(uint32_t physical_base, uint32_t reg_count,
@@ -1582,8 +1598,8 @@ public:
       if (const Wavefront *owner = vgpr_owner_for_range(physical_base, reg_count))
         (void)reject(*owner,
                      "RegisterAccess constructed from const CU cannot write physical VGPRs");
-      return VgprWriteRegion(*cu_, physical_base, reg_count,
-                             vgpr_region_wave_size(physical_base, reg_count), 0, byte_mask);
+      return VgprWriteRegion::rejected(physical_base, reg_count,
+                                       vgpr_region_wave_size(physical_base, reg_count), byte_mask);
     }
     if (mutable_wf_)
       lane_mask &= mutable_wf_->vgpr_write_mask();
@@ -1608,9 +1624,9 @@ public:
                                                           uint8_t write_byte_mask) const {
     if (!mutable_cu_)
       return VgprReadWriteRegion(
-          VgprReadRegion(*cu_, physical_base, reg_count,
-                         vgpr_region_wave_size(physical_base, reg_count), read_byte_mask, false,
-                         false),
+          VgprReadRegion(*cu_, wf_ ? wf_ : vgpr_owner_for_range(physical_base, reg_count),
+                         physical_base, reg_count, vgpr_region_wave_size(physical_base, reg_count),
+                         read_byte_mask, false, false),
           write_vgpr_region(physical_base, reg_count, lane_mask, write_byte_mask));
     return VgprReadWriteRegion(
         read_vgpr_region(physical_base, reg_count, lane_mask, read_byte_mask),
