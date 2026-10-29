@@ -31,10 +31,12 @@
 // wait on the replay lock, but host stores to this memory do not, so a host thread must not write
 // it while the dispatch is being replayed. Any other such memory (host-pinned, managed, locked or
 // pageable host memory, another agent's memory, virtual-memory mappings) means the dispatch runs
-// once without replay. Only pointer-sized words of the explicit kernel arguments are examined: a
-// pointer stored inside other memory, or packed into a by-value struct at an unaligned offset, is
-// not seen.
+// once without replay. Which words of the kernarg segment hold a pointer comes from the kernel's
+// own `amdhsa` metadata, so a scalar the width of a pointer is not read as one; without that
+// metadata every word is a candidate. What is not seen is a pointer the kernel finds inside memory
+// it was handed, or one stored in a by-value argument too small to be told from a scalar.
 
+#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 
 #include <hsa/hsa.h>
@@ -114,7 +116,9 @@ const char*
 to_string(kind_t kind);
 
 // Writable mappings of this process that hold host memory, sorted by address. Device mappings and
-// the pages the kernel manages itself (vvar, vdso, vsyscall) are left out.
+// the pages the kernel manages itself (vvar, vdso, vsyscall) are left out. Read once per dispatch
+// that needs it, not cached across dispatches: this is the application's address space, and it
+// changes as the application maps and unmaps.
 std::vector<address_span_t>
 read_writable_host_mappings();
 
@@ -122,10 +126,12 @@ pointer_facts_fn_t
 make_hsa_pointer_facts();
 
 // The runtime's own copy and fill kernels. They are handed HIP's staging and scratch memory rather
-// than application data, and writing the same value again in a later pass is harmless, so they are
-// replayed without the check below. Only these are exempt: the other __amd_rocclr_ kernels
-// (streamOpsIncrement, streamOpsWait, scheduler, initHeap, ...) change runtime state on every
-// execution, and replaying those would corrupt it. Anything not listed takes the strict path.
+// than application data, and writing the same value again in a later pass is harmless -- provided a
+// copy's source and destination do not overlap, which is not detected here, since nothing restores
+// the staging memory between passes. They are replayed without the check below. Only these are
+// exempt: the other __amd_rocclr_ kernels (streamOpsIncrement, streamOpsWait, scheduler, initHeap,
+// ...) change runtime state on every execution, and replaying those would corrupt it. Anything not
+// listed takes the strict path.
 // `kernel_name` is the name the code object registry holds, with or without the ".kd" suffix its
 // kernel descriptors carry.
 bool
@@ -142,23 +148,19 @@ classify_pointer(const pointer_facts_t& facts);
 region_t
 region_of(kind_t kind, const pointer_facts_t& facts);
 
-// Leading bytes of a kernarg segment that hold the kernel's own arguments. `metadata_size` is where
-// that kernel's own metadata says its arguments end, or nullopt when no metadata was read for it.
-// Assuming a fixed block of hidden arguments at the end of the segment would hide pointers the
-// passes write through, because a kernel's own arguments can run past such a block; an unknown
-// boundary leaves the whole segment to scan, which costs a replay rather than correctness.
-size_t
-explicit_arg_size(size_t segment_size, std::optional<size_t> metadata_size);
-
-// Kernarg words that point at untracked memory, scanning the first `explicit_size` bytes of the
-// segment. `seen` holds values already looked up, so a buffer passed in several arguments is
-// classified once.
+// Kernarg words that point at untracked memory. `pointer_regions` holds the ranges of the segment
+// that can carry a pointer, or is null when nothing describes them and every word of the segment is
+// a candidate. Only whole aligned words inside the segment are read; a region is widened to the
+// words overlapping it, so a pointer at an offset the metadata reports as unaligned is still read.
+// `seen` holds values already looked up, so a buffer passed in several arguments is classified
+// once.
 std::vector<hit_t>
-scan_kernarg(const uint8_t*                     kernarg,
-             size_t                             explicit_size,
-             const std::vector<address_span_t>& covered,
-             const pointer_facts_fn_t&          facts,
-             std::unordered_set<uint64_t>&      seen);
+scan_kernarg(const uint8_t*                                    kernarg,
+             size_t                                            segment_size,
+             const std::vector<code_object::kernarg_region_t>* pointer_regions,
+             const std::vector<address_span_t>&                covered,
+             const pointer_facts_fn_t&                         facts,
+             std::unordered_set<uint64_t>&                     seen);
 
 // Saved copies of untracked allocations, taken before the first replayed pass.
 class region_set_t
@@ -202,20 +204,20 @@ private:
     uint64_t             m_bytes = 0;
 };
 
-// Saves the untracked memory one dispatch's explicit kernel arguments point at into `saved`.
-// `explicit_size` is the part of the segment holding the kernel's own arguments (see
-// explicit_arg_size). Returns false, after logging why, when an argument points at memory that
-// cannot be saved or belongs to another agent; the dispatch must then run once without replay.
+// Saves the untracked memory one dispatch's kernel arguments point at into `saved`, reading the
+// words scan_kernarg would. Returns false, after logging why, when an argument points at memory
+// that cannot be saved or belongs to another agent; the dispatch must then run once without replay.
 bool
-save_dispatch_memory(region_set_t&                             saved,
-                     const uint8_t*                            kernarg,
-                     size_t                                    explicit_size,
-                     const memory_snapshot::device_snapshot_t& snapshot,
-                     hsa_agent_t                               agent,
-                     const pointer_facts_fn_t&                 facts);
+save_dispatch_memory(region_set_t&                                     saved,
+                     const uint8_t*                                    kernarg,
+                     size_t                                            segment_size,
+                     const std::vector<code_object::kernarg_region_t>* pointer_regions,
+                     const memory_snapshot::device_snapshot_t&         snapshot,
+                     hsa_agent_t                                       agent,
+                     const pointer_facts_fn_t&                         facts);
 
-// The same for a dispatch packet, with the argument layout taken from the loaded kernel. A kernel
-// the code object registry does not know about also runs once.
+// The same for a dispatch packet, with the kernel and its pointer ranges found by the packet's
+// kernel_object; a kernel the code object registry does not know about also runs once.
 bool
 save_dispatch_memory(region_set_t&                             saved,
                      const hsa_kernel_dispatch_packet_t&       packet,

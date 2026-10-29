@@ -164,9 +164,27 @@ Stated plainly, because each one has a concrete cause in the mechanism above.
   [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#what-is-not-isolated).
 - **Coarse-grained device memory only in the tracker.** Kernarg, host, fine-grained and executable
   allocations are excluded by design, as is unified and managed memory. Before the first pass, the
-  dispatch's explicit kernel arguments are checked: fine-grained device memory of the replaying
-  agent is saved and restored between passes, and any other memory outside the snapshot runs the
-  dispatch once without replay. A pointer stored inside other memory is not seen.
+  words the kernel's own `amdhsa` metadata identifies as pointer arguments are followed:
+  fine-grained device memory of the replaying agent is saved and restored between passes, and any
+  other memory outside the snapshot runs the dispatch once without replay. Two things are therefore
+  not seen: a pointer the kernel finds inside memory it was handed (a device-side linked list, say),
+  and a value the metadata describes as a scalar the width of a pointer, whose bits are not read as
+  an address even when they happen to fall in a range the process has mapped. For a kernel whose
+  metadata cannot be read, every word of its kernarg segment is followed instead.
+- **Fine-grained memory named by an argument is saved under a cap** of 512 MiB per dispatch
+  (`region_set_t::max_total_bytes`), on top of the whole-device snapshot. A dispatch whose arguments
+  name more than that runs once instead of being replayed, and the save is a copy of the full extent
+  HSA reports for the allocation, not only the bytes the kernel touches.
+- **Fine-grained memory saved for one dispatch is not isolated from other writers.** Save and
+  restore bracket the passes of that dispatch on that agent. A host thread, or a kernel on another
+  queue, writing the same memory while the dispatch is being replayed has its update reverted along
+  with the pass's own -- the same undefined ordering that keeps async SDMA copies out of the replay
+  window.
+- **The runtime's copy and fill kernels are replayed without the check above,** because they are
+  handed the runtime's own staging memory rather than application data, and writing the same value
+  again in a later pass is harmless. That holds only while a copy's source and destination do not
+  overlap; overlapping ranges are not detected, and the exemption covers only the copy and fill
+  kernels named in `is_idempotent_runtime_kernel`.
 - **HIP graph launches are not replayed** (warn once, run once), as described above.
 - **Only single-packet, single-dispatch submissions are replayed.** The replay gate requires exactly
   one packet in the batch and exactly one dispatch packet in it; anything else takes the normal path.
@@ -191,6 +209,8 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Allocation recording | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `record_alloc()`, `record_free()` |
 | Agent-scoped inventory | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `snap_inventory()` |
 | Trackability classifier | `source/lib/rocprofiler-sdk/kernel_replay/utils.cpp` | `query_alloc()` |
+| Untracked-argument guard | `source/lib/rocprofiler-sdk/kernel_replay/untracked_memory.cpp` | `save_dispatch_memory()`, `scan_kernarg()`, `region_set_t` |
+| Argument layout from metadata | `source/lib/rocprofiler-sdk/code_object/hip/code_object.cpp` | `get_metadata_from_executable()` |
 | Tracking activation | `source/lib/rocprofiler-sdk/callback_tracing.cpp` | `rocprofiler_configure_callback_tracing_service()` |
 | Snapshot-declined fallback | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `snapshot.ok` branch in `WriteInterceptor` |
 | HIP graph warn-once + run-once | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `_warned_graph_replay`; `graph_launch_active` excluded from the replay gate |
