@@ -6584,7 +6584,7 @@ void check_float_compare_swap_policy(std::initializer_list<FloatCompareSwapCase>
 }
 
 #ifndef NDEBUG
-TEST(FpModePolicyTest, ScalarAtomicAssertsUnsupportedOperations) {
+TEST(FpModePolicyDeathTest, ScalarAtomicAssertsUnsupportedOperations) {
   const auto invalid = static_cast<amdgpu::fp_mode::ScalarAtomicOp>(0xff);
   EXPECT_DEATH(amdgpu::fp_mode::atomic_scalar<uint32_t>(invalid, 0x3f800000, 0x40000000, 0, 3,
                                                         /*legacy_minmax=*/true),

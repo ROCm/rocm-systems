@@ -425,7 +425,7 @@ TEST(CpuDispatchPoolTest, ZeroFunctionalQuantumRunsUntilWavefrontHalts) {
 }
 
 #ifndef NDEBUG
-TEST(CpuDispatchPoolTest, AssertsMismatchedResultCount) {
+TEST(CpuDispatchPoolDeathTest, AssertsMismatchedResultCount) {
   DispatchPoolFixture fixture(/*cu_count=*/2);
   amdgpu::CpuDispatchPool pool(/*threads=*/1);
   std::array<amdgpu::FunctionalQuantumResult, 1> wrong_size{};
