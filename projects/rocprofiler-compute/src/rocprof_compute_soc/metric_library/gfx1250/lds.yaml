@@ -1,0 +1,92 @@
+lds.access_lat:
+  name: LDS Access Latency
+  formula: SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS_sum)
+  unit: Cycles
+  description: Average LDS access latency in cycles.
+lds.address_conflict_stall_rate:
+  name: LDS Address Conflict Stall Rate
+  formula: 100 * SUM(TX_VMW_LDS_ADDR_CONFLICT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled due to an LDS address conflict.
+lds.bank_conflict_stall_rate:
+  name: LDS Bank Conflict Stall Rate
+  formula: 100 * SUM(TX_VMW_LDS_BANK_CONFLICT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles LDS is stalled due to bank conflict.
+lds.bank_conflict_stall_rate_atomic:
+  name: LDS Bank Conflict Stall Rate - Atomic
+  formula: 100 * SUM(TX_VMW_LDS_BANKCONF_ATOMIC_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled due to an LDS atomic bank conflict.
+lds.bank_conflict_stall_rate_rd:
+  name: LDS Bank Conflict Stall Rate - Read
+  formula: 100 * SUM(TX_VMW_LDS_BANKCONF_LOAD_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled due to an LDS read bank conflict.
+lds.bank_conflict_stall_rate_wr:
+  name: LDS Bank Conflict Stall Rate - Write
+  formula: 100 * SUM(TX_VMW_LDS_BANKCONF_STORE_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled due to an LDS write bank conflict.
+lds.bank_conflicts_access:
+  name: LDS Bank Conflicts per Access
+  formula: SUM(TX_VMW_LDS_BANK_CONFLICT_sum) / SUM(TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum)
+  unit: Conflicts per Access
+  description: >-
+    The ratio of the number of cycles spent in the LDS scheduler due to bank conflicts
+    (as determined by the conflict resolution hardware) to the base number of cycles
+    that would be spent in the LDS scheduler in a completely uncontended case. This
+    is the unnormalized form of the Bank Conflict Rate.
+  peak: 64
+lds.segment_conflict_stall_rate_lds:
+  name: LDS Segment Conflict Stall Rate
+  formula: 100 * SUM(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled due to a cross-port LDS segment conflict.
+lds.stall_rate:
+  name: LDS Stall Rate
+  formula: 100 * SUM(TX_VMW_LDS_LDS_EXECUTION_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles the LDS is stalled for any reason.
+lds.theoretical_bw:
+  name: Theoretical LDS Bandwidth
+  formula: SUM((TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Indicates the maximum amount of bytes that could have been loaded from, stored
+    to, or atomically updated in the LDS per unit time (see LDS Bandwidth example
+    for more detail). Does not take into account the execution mask of the wavefront
+    when the instruction was executed.
+  peak_empirical: $LDSBw_empirical_peak
+lds.util:
+  name: LDS Utilization
+  formula: 100 * SUM(TX_VMW_LDS_INPUT_ACTIVE_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Indicates what percent of the total CU cycles the LDS was actively executing instructions
+    (including, but not limited to, load, store, atomic and HIP's __shfl operations).
+    Calculated as the ratio of the total number of cycles LDS was active over the
+    total CU cycles.
+lds.util_atomics:
+  name: LDS Utilization - Atomics
+  formula: 100 * SUM(TX_VMW_LDS_ACTIVE_ATOMIC_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles the LDS is executing an atomic.
+lds.util_load:
+  name: LDS Utilization - Load
+  formula: 100 * SUM(TX_VMW_LDS_ACTIVE_LOAD_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: Percentage of VMW-busy cycles the LDS is executing a load.
+lds.util_store:
+  name: LDS Utilization - Store
+  formula: 100 * SUM(TX_VMW_LDS_ACTIVE_STORE_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: Percentage of VMW-busy cycles the LDS is executing a store.
