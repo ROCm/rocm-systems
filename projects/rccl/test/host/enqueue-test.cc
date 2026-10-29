@@ -4497,15 +4497,17 @@ TEST_F(EnqueueMicrotest, RawTaskAppend_Fp8ReductionBelowSm90_IsRejectedButFp8Cop
     bool rejected;
   } const cases[] = {{ncclFuncAllReduce, 89, true}, {ncclFuncReduce, 89, true}, {ncclFuncReduceScatter, 89, true},
                      {ncclFuncAllGather, 89, false}, {ncclFuncAllReduce, 90, false}};
-  for (const auto& c : cases) {
-    RawTaskScene sc;
-    sc.cc.get()->minCompCap = c.minCompCap;
-    ncclInfo info = sc.Info(c.func);
-    info.datatype = ncclFloat8e4m3;
-    std::string log;
-    EXPECT_EQ(c.rejected ? ncclInvalidArgument : ncclSuccess, sc.Append(info, &log)) << c.func;
-    EXPECT_EQ(c.rejected, RcclUnitTesting::LogHas(log, "FP8 reduction support begins with sm90")) << log;
-    EXPECT_EQ(c.rejected, sc.Generic() == nullptr) << c.func;
+  for (ncclDataType_t fp8 : {ncclFloat8e4m3, ncclFloat8e5m2}) {
+    for (const auto& c : cases) {
+      RawTaskScene sc;
+      sc.cc.get()->minCompCap = c.minCompCap;
+      ncclInfo info = sc.Info(c.func);
+      info.datatype = fp8;
+      std::string log;
+      EXPECT_EQ(c.rejected ? ncclInvalidArgument : ncclSuccess, sc.Append(info, &log)) << c.func << " " << fp8;
+      EXPECT_EQ(c.rejected, RcclUnitTesting::LogHas(log, "FP8 reduction support begins with sm90")) << log;
+      EXPECT_EQ(c.rejected, sc.Generic() == nullptr) << c.func << " " << fp8;
+    }
   }
 }
 
@@ -4626,9 +4628,14 @@ struct RmaArgsScene : RawTaskScene {
         *win = (ptr >= srcBuf && ptr < srcBuf + sizeof(srcBuf)) ? &srcWin : nullptr;
         return ncclSuccess;
       }};
+  std::vector<ncclIntruQueue<ncclTaskRma, &ncclTaskRma::next>> rmaQueues{2};
   ncclInfo info;
   RmaArgsScene() : info(Info(ncclFuncPutSignal)) {
     cc.get()->hostRmaSupport = true;
+    cc.get()->planner.rmaTaskQueues = rmaQueues.data();
+    for (auto& queue : rmaQueues) {
+      ncclIntruQueueConstruct(&queue);
+    }
     peerVidmem.winHost = &peerWin;
     peerWin.size = 4096;
     peerWin.winFlags = kRmaRegistered;
@@ -4652,6 +4659,71 @@ struct BadRmaCase {
   int findWindowCalls = -1;
 };
 }  // namespace
+
+TEST_F(EnqueueMicrotest, RmaTaskAppend_ValidPutSignal_QueuesOneTaskOnItsContext) {
+  for (int symmetric : {0, 1}) {
+    RmaArgsScene sc;
+    sc.cc.get()->symmetricSupport = symmetric;
+    sc.info.count = 4;
+    sc.info.root = 2;
+    sc.info.ctx = 1;
+    sc.info.sigIdx = 2;
+    sc.info.peerWinOffset = 64;
+    std::string log;
+    ASSERT_EQ(ncclSuccess, sc.Run(&log)) << log;
+    EXPECT_TRUE(ncclIntruQueueEmpty(&sc.rmaQueues[0]));
+    ncclTaskRma* t = ncclIntruQueueHead(&sc.rmaQueues[1]);
+    ASSERT_NE(nullptr, t);
+    EXPECT_EQ(nullptr, t->next);
+    EXPECT_EQ(ncclFuncPutSignal, t->func);
+    EXPECT_EQ(static_cast<const void*>(sc.srcBuf + 8), t->srcBuff);
+    EXPECT_EQ(8u, t->srcWinOffset);
+    EXPECT_EQ(&sc.srcWin, t->srcWinHost);
+    EXPECT_EQ(4u, t->count);
+    EXPECT_EQ(ncclFloat32, t->datatype);
+    EXPECT_EQ(16u, t->bytes);
+    EXPECT_EQ(1, t->ctx);
+    EXPECT_EQ(2, t->signalIdx);
+    EXPECT_EQ(2, t->peer);
+    EXPECT_EQ(64u, t->peerWinOffset);
+    EXPECT_EQ(&sc.peerWin, t->peerWinHost);
+    EXPECT_EQ(NCCL_SIGNAL, t->signalMode);
+    EXPECT_EQ(1, sc.cc.get()->planner.nTasksRma);
+    EXPECT_EQ(sc.cc.get(), ncclGroupCommHead[ncclGroupTaskTypeCollective]);
+  }
+}
+
+TEST_F(EnqueueMicrotest, RmaTaskAppend_ValidWaitSignal_QueuesOneTaskPerContext) {
+  RmaArgsScene sc;
+  ScopedHook rmaReady(g_rmaInitialized, [](ncclComm*) { return true; });
+  ncclWaitSignalDesc_t descs[3] = {{/*opCnt=*/2, /*peer=*/1, /*sigIdx=*/0, /*ctx=*/1},
+                                   {5, 3, 2, 0},
+                                   {7, 2, 1, 1}};
+  sc.info.coll = ncclFuncWaitSignal;
+  sc.info.nDesc = 3;
+  sc.info.signalDescs = descs;
+  std::string log;
+  ASSERT_EQ(ncclSuccess, sc.Run(&log)) << log;
+  EXPECT_EQ(2, sc.cc.get()->planner.nTasksRma);
+  struct {
+    int ctx;
+    std::vector<int> peers;
+    std::vector<int> nsignals;
+    std::vector<int> signalIdxs;
+  } const want[] = {{0, {3}, {5}, {2}}, {1, {1, 2}, {2, 7}, {0, 1}}};
+  for (const auto& w : want) {
+    ncclTaskRma* t = ncclIntruQueueHead(&sc.rmaQueues[w.ctx]);
+    ASSERT_NE(nullptr, t) << w.ctx;
+    EXPECT_EQ(nullptr, t->next) << w.ctx;
+    EXPECT_EQ(ncclFuncWaitSignal, t->func);
+    EXPECT_EQ(w.ctx, t->ctx);
+    EXPECT_EQ(NCCL_SIGNAL, t->signalMode);
+    ASSERT_EQ(static_cast<int>(w.peers.size()), t->npeers) << w.ctx;
+    EXPECT_EQ(w.peers, std::vector<int>(t->peers, t->peers + t->npeers)) << w.ctx;
+    EXPECT_EQ(w.nsignals, std::vector<int>(t->nsignals, t->nsignals + t->npeers)) << w.ctx;
+    EXPECT_EQ(w.signalIdxs, std::vector<int>(t->signalIdxs, t->signalIdxs + t->npeers)) << w.ctx;
+  }
+}
 
 TEST_F(EnqueueMicrotest, RmaTaskAppend_EachInvalidArgument_IsRejectedWithItsOwnWarning) {
   const char* const kNeedsRma = "ncclPutSignal requires a window registered for RMA";
@@ -4804,6 +4876,7 @@ TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_UnpairedSelfSendOrRecv_IsInvalid
 // ===========================================================================
 
 TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ThreePivotBiRings_PicksTreeLlUpToTheCutoffThenRingSimple) {
+  // Each case seeds the opposite pick as cheapest, so the override must replace both fields.
   struct {
     size_t nBytes;
     int algo;
@@ -4816,7 +4889,8 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ThreePivotBiRings_PicksTreeLlUpToTheCut
     cc.base.topo().pivotA2ANumBiRings = 3;
     auto task = CostTask(ncclFuncAllReduce);
     CostTable tbl;
-    tbl.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = 0.5f;
+    const bool wantTree = c.algo == NCCL_ALGO_TREE;
+    tbl.t[wantTree ? NCCL_ALGO_RING : NCCL_ALGO_TREE][wantTree ? NCCL_PROTO_SIMPLE : NCCL_PROTO_LL] = 0.5f;
     ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, c.nBytes, tbl.ptr(), /*simInfo=*/nullptr));
     EXPECT_EQ(c.algo, task.algorithm) << c.nBytes;
     EXPECT_EQ(c.proto, task.protocol) << c.nBytes;
