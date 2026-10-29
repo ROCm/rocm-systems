@@ -40,7 +40,7 @@ function fixture() {
   return { args, comments, writes };
 }
 
-test('creates one PR report with dashboard link and navigation instructions', async () => {
+test('creates one PR report with direct dashboard and workflow links', async () => {
   const { args, comments, writes } = fixture();
   await reportBenchmark(args);
   assert.equal(writes.length, 1);
@@ -50,8 +50,11 @@ test('creates one PR report with dashboard link and navigation instructions', as
   assert.match(body, /<!-- rocjitsu-benchmark-report:42 -->/);
   assert.match(body, /Results published/);
   assert.match(body, /https:\/\/rocm.github.io\/rocm-systems\/rocjitsu-dashboard\//);
-  assert.match(body, /Left sidebar: \*\*Branch Runs\*\* → \*\*Search branch, PR or SHA\*\*/);
-  assert.match(body, /Search for \*\*#42\*\*/);
+  const dashboardLink = body.match(/\[Open the dashboard\]\(([^)]+)\)/)[1];
+  const dashboardUrl = new URL(dashboardLink);
+  assert.equal(dashboardUrl.searchParams.get('view'), 'branch');
+  assert.equal(dashboardUrl.searchParams.get('branch'), 'feature/source');
+  assert.match(body, /\[Open the dashboard\]\([^\n]+\)\n\n\[View the workflow run\]/);
   assert.match(body, /https:\/\/github.com\/ROCm\/rocm-systems\/actions\/runs\/123/);
 });
 

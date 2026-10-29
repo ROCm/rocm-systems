@@ -6,7 +6,7 @@
 async function previousOrder(github, context, body) {
   const identity = body.match(/<!-- rocjitsu-benchmark-report-run:\d+:(\d+):(\d+) -->/);
   if (identity) {
-    return { number: BigInt(identity[1]), attempt: BigInt(identity[2]) };
+    return { runNumber: BigInt(identity[1]), runAttempt: BigInt(identity[2]) };
   }
   // Pre-ordering comments only stored a run link. Resolve it before replacing
   // them, rather than letting an older completion claim the first upgrade.
@@ -21,7 +21,7 @@ async function previousOrder(github, context, body) {
   const run = url.pathname.slice(prefix.length).match(/^(\d+)(?:\/attempts\/(\d+))?$/);
   if (!run) throw new Error('Existing benchmark report has an invalid workflow run URL.');
   const { data } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: run[1] });
-  return { number: BigInt(data.run_number), attempt: BigInt(run[2] || data.run_attempt) };
+  return { runNumber: BigInt(data.run_number), runAttempt: BigInt(run[2] || data.run_attempt) };
 }
 
 async function reportBenchmark({ github, context, benchmarkResult, publishResult, runNumber, runAttempt, headSha }) {
@@ -39,8 +39,8 @@ async function reportBenchmark({ github, context, benchmarkResult, publishResult
   );
   if (existing) {
     const previous = await previousOrder(github, context, existing.body);
-    if (BigInt(runNumber) < previous.number ||
-        (BigInt(runNumber) === previous.number && BigInt(runAttempt) < previous.attempt)) {
+    if (BigInt(runNumber) < previous.runNumber ||
+        (BigInt(runNumber) === previous.runNumber && BigInt(runAttempt) < previous.runAttempt)) {
       return;
     }
   }
@@ -62,9 +62,6 @@ async function reportBenchmark({ github, context, benchmarkResult, publishResult
     `- Publication job: **${publishResult}**`,
     '',
     `[Open the dashboard](${dashboardUrl.href})`,
-    '',
-    'Left sidebar: **Branch Runs** → **Search branch, PR or SHA**.',
-    `Search for **#${number}** to find this PR's published runs.`,
     '',
     `[View the workflow run](${runUrl}).`,
   ].join('\n');
