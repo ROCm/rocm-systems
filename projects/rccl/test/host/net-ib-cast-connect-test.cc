@@ -40,6 +40,7 @@
 #include "fakes/net_ib_cast_init_fakes.h"
 #include "fakes/net_ib_cast_multiplane_fakes.h"
 #include "fakes/net_ib_cast_p2p_resiliency_fakes.h"
+#include "fakes/os_fakes.h"
 #include "fakes/rocmwrap_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "../common/LogCapture.hpp"
