@@ -6,7 +6,7 @@
 use super::*;
 use crate::isa::gfx_target_name;
 use rocddi::topology::host::{HostCaches, HostTopologySnapshot};
-use rocddi::topology::{MemoryBankKind, NativeNodeId, NodeKind, TopologySnapshot};
+use rocddi::topology::{MemoryBankKind, NodeKind, TopologySnapshot};
 
 /// A transient native query failure leaves support undecided so public calls
 /// can retry after the underlying condition clears.
@@ -96,9 +96,7 @@ pub(super) fn cpu_agents(
         .iter()
         .filter_map(|node| {
             let cpu = node.cpu?;
-            let NativeNodeId::LinuxKfd(native_node) = node.native_id else {
-                return None;
-            };
+            let native_node = crate::platform::native_cpu_node_ordinal(node)?;
             let memory_bytes = topology
                 .banks_for_node(node.id)
                 .find(|bank| bank.kind == MemoryBankKind::System && bank.capacity_bytes != 0)
@@ -112,7 +110,7 @@ pub(super) fn cpu_agents(
                 compute_units: cpu.core_count,
                 maximum_clock_mhz: cpu.maximum_clock_mhz.unwrap_or(0),
                 memory_bytes,
-                apu: node.kind == NodeKind::KfdGpu,
+                apu: node.kind == NodeKind::Gpu,
             })
         })
         .collect::<Vec<_>>();
