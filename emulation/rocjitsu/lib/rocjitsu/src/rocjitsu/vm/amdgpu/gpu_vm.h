@@ -57,6 +57,10 @@ private:
 enum class VmAccessKind : uint8_t { Read, Write, Execute, Atomic };
 
 /// @brief Typed result shared by translation and physical-memory operations.
+/// @details ApertureViolation and Unsupported are instruction-only: compute-unit
+/// memory pipelines raise them and own their notification. Transports and
+/// their adapters (AQL admission, SDMA, HBM, memory-side caches) never produce
+/// them and assert if they receive one.
 enum class VmAccessOutcome : uint8_t {
   Complete,    ///< The requested operation completed.
   Unavailable, ///< The transport/backing is temporarily unavailable; retry may succeed.

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -112,10 +113,14 @@ SdmaPacketExecutionOutcome map_outcome(VmAccessOutcome outcome) {
   case VmAccessOutcome::Unavailable:
     return SdmaPacketExecutionOutcome::Unavailable;
   case VmAccessOutcome::Faulted:
-  case VmAccessOutcome::ApertureViolation:
     return SdmaPacketExecutionOutcome::Faulted;
   case VmAccessOutcome::Malformed:
+    return SdmaPacketExecutionOutcome::Malformed;
+  case VmAccessOutcome::ApertureViolation:
   case VmAccessOutcome::Unsupported:
+    // Instruction-only outcomes: the issuing compute unit publishes them and
+    // no transport produces them. Malformed claims no reported VM fault.
+    assert(false && "transport received an instruction-only VM access outcome");
     return SdmaPacketExecutionOutcome::Malformed;
   case VmAccessOutcome::Revoked:
     return SdmaPacketExecutionOutcome::Faulted;

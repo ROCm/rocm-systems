@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "simdojo/sim/component.h"
 
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -132,10 +133,14 @@ private:
     case VmAccessOutcome::Unavailable:
       return simdojo::MessageStatus::Unavailable;
     case VmAccessOutcome::Faulted:
-    case VmAccessOutcome::ApertureViolation:
       return simdojo::MessageStatus::Faulted;
     case VmAccessOutcome::Malformed:
+      return simdojo::MessageStatus::Malformed;
+    case VmAccessOutcome::ApertureViolation:
     case VmAccessOutcome::Unsupported:
+      // Instruction-only outcomes: the issuing compute unit publishes them and
+      // no transport produces them. Malformed claims no reported VM fault.
+      assert(false && "transport received an instruction-only VM access outcome");
       return simdojo::MessageStatus::Malformed;
     case VmAccessOutcome::Revoked:
       return simdojo::MessageStatus::Faulted;

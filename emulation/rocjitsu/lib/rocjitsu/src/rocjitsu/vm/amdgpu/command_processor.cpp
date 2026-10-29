@@ -256,10 +256,14 @@ AqlAdmissionResult admission_from_vm_outcome(VmAccessOutcome outcome) {
   case VmAccessOutcome::Unavailable:
     return {.status = AqlAdmissionStatus::Blocked};
   case VmAccessOutcome::Faulted:
-  case VmAccessOutcome::ApertureViolation:
     return {.status = AqlAdmissionStatus::Faulted};
   case VmAccessOutcome::Malformed:
+    return {.status = AqlAdmissionStatus::Malformed};
+  case VmAccessOutcome::ApertureViolation:
   case VmAccessOutcome::Unsupported:
+    // Instruction-only outcomes: the issuing compute unit publishes them and
+    // no transport produces them. Malformed claims no reported VM fault.
+    assert(false && "transport received an instruction-only VM access outcome");
     return {.status = AqlAdmissionStatus::Malformed};
   case VmAccessOutcome::Revoked:
     return {.status = AqlAdmissionStatus::Faulted};

@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/sdma_ring_consumer.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <limits>
 #include <span>
@@ -19,10 +20,14 @@ SdmaRingStatus map(VmAccessOutcome outcome) {
   case VmAccessOutcome::Unavailable:
     return SdmaRingStatus::Blocked;
   case VmAccessOutcome::Faulted:
-  case VmAccessOutcome::ApertureViolation:
     return SdmaRingStatus::Faulted;
   case VmAccessOutcome::Malformed:
+    return SdmaRingStatus::Malformed;
+  case VmAccessOutcome::ApertureViolation:
   case VmAccessOutcome::Unsupported:
+    // Instruction-only outcomes: the issuing compute unit publishes them and
+    // no transport produces them. Malformed claims no reported VM fault.
+    assert(false && "transport received an instruction-only VM access outcome");
     return SdmaRingStatus::Malformed;
   case VmAccessOutcome::Revoked:
     return SdmaRingStatus::Faulted;
