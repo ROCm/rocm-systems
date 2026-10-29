@@ -1230,7 +1230,8 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
     const std::string target_name = fb_config->vm()->target()->str();
     target = registry.find_gpu_target_by_code_object_id(target_name);
     if (target == nullptr)
-      return emit_error.emit() << "Missing or invalid 'target' in vm configuration: " + target_name;
+      return emit_error.emit() << "Missing or invalid 'target' in vm configuration: "
+                               << target_name;
   } else if (architecture != nullptr &&
              architecture->default_gpu_target != ROCJITSU_CODE_TARGET_INVALID) {
     target = registry.find_default_gpu_target(*architecture);

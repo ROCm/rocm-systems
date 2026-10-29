@@ -3697,13 +3697,35 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
 }
 
-TEST(ConfigLoaderTest, RejectsTargetFromDifferentArchitecture) {
-  util::StringDiagnostic config_diagnostic;
-  const char *json = R"({"vm":{"arch":"cdna4","target":"gfx1250"}})";
+void expect_config_target_failure(const std::string &json, const char *message) {
+  SCOPED_TRACE(json);
+  util::StringDiagnostic diagnostic;
   EXPECT_TRUE(
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, config_diagnostic.emitter())
-          .failed());
-  EXPECT_EQ(config_diagnostic.message(), "vm target does not belong to the selected architecture");
+      config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), message);
+
+  const auto file = write_temp_config(json);
+  util::StringDiagnostic validation_diagnostic;
+  EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validation_diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(validation_diagnostic.message(), message);
+}
+
+TEST(ConfigLoaderTest, RejectsMissingOrInvalidArchitecture) {
+  const std::array<const char *, 3> configs{R"({})", R"({"vm":{}})",
+                                            R"({"vm":{"arch":"invalid"}})"};
+  for (const char *json : configs)
+    expect_config_target_failure(json, "Missing or invalid 'arch' in vm configuration");
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidTarget) {
+  expect_config_target_failure(R"({"vm":{"arch":"cdna4","target":"invalid"}})",
+                               "Missing or invalid 'target' in vm configuration: invalid");
+}
+
+TEST(ConfigLoaderTest, RejectsTargetFromDifferentArchitecture) {
+  expect_config_target_failure(R"({"vm":{"arch":"cdna4","target":"gfx1250"}})",
+                               "vm target does not belong to the selected architecture");
 }
 
 TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
@@ -3730,13 +3752,8 @@ TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
   ASSERT_TRUE(
       replace_exactly_once(mismatches[0], R"("target": "gfx1251")", R"("target": "gfx1250")"));
   ASSERT_TRUE(replace_exactly_once(mismatches[1], "120501", "120500"));
-  for (const std::string &json : mismatches) {
-    util::StringDiagnostic diagnostic;
-    EXPECT_TRUE(
-        config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter())
-            .failed());
-    EXPECT_EQ(diagnostic.message(), "vm target does not match device.gfx_target_version");
-  }
+  for (const std::string &json : mismatches)
+    expect_config_target_failure(json, "vm target does not match device.gfx_target_version");
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {

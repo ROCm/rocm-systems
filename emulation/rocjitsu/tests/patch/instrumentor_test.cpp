@@ -24,6 +24,7 @@
 #include "rocjitsu/isa/register_set.h"
 
 #include "../dbi_test_util.h"
+#include "../instrumentor_test_access.h"
 
 #include <gtest/gtest.h>
 
@@ -2464,7 +2465,9 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
 namespace {
 
 // A probe declaring one argument sourced from the framework's entry storage,
-// which is what asks the instrumentor for a prologue.
+// which is what asks the instrumentor for a prologue. Patching one needs the
+// patch gates skipped; these tests inspect the planned prologue and never
+// dispatch it, so nothing needs the kernarg wrapper.
 InstrumentationPoint log_buffer_point(const AmdGpuCodeObject &probe_obj, uint64_t anchor_offset) {
   InstrumentationPoint pt;
   pt.anchor_offset = anchor_offset;
@@ -2503,8 +2506,10 @@ bool contains_words(const std::vector<uint32_t> &haystack, std::span<const uint3
 std::optional<uint16_t> storage_base_from_argument(const std::vector<uint32_t> &trampoline,
                                                    rj_code_arch_t arch) {
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
-    const uint32_t mov = build_v_mov_b32_src(/*vdst=*/0, sgpr, arch);
-    if (std::find(trampoline.begin(), trampoline.end(), mov) != trampoline.end())
+    const auto mov = build_v_mov_b32_src(/*vdst=*/0, sgpr, arch);
+    if (mov.failed())
+      return std::nullopt;
+    if (std::find(trampoline.begin(), trampoline.end(), mov.value()) != trampoline.end())
       return sgpr;
   }
   return std::nullopt;
@@ -2530,6 +2535,7 @@ InstrumentedCodeObjectDebug patch_five_log_buffer_args(const std::vector<uint8_t
   InstrumentationPoint pt = log_buffer_point(probe_obj, /*anchor_offset=*/0);
   pt.probe_args = five_log_buffer_args();
   instr.add_point(pt);
+  InstrumentorTestAccess::skip_patch_gates(instr);
   return instr.patch_with_debug_summaries();
 }
 
@@ -2583,6 +2589,7 @@ TEST(InstrumentorEntryPrologue, KernelWithoutAKernargPointerFailsClosed) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("ENABLE_SGPR_KERNARG_SEGMENT_PTR"), std::string::npos)
@@ -2604,6 +2611,7 @@ TEST(InstrumentorEntryPrologue, PointOnTheKernelEntryComposesWithThePrologue) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2647,6 +2655,7 @@ InstrumentedCodeObjectDebug patch_kernel_of_size(uint64_t text_bytes) {
 
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/text_bytes - 8));
+  InstrumentorTestAccess::skip_patch_gates(instr);
   return instr.patch_with_debug_summaries();
 }
 
@@ -2691,6 +2700,7 @@ TEST(InstrumentorEntryPrologue, StubKeepsANonzeroEntryResidue) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/12));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2724,6 +2734,7 @@ TEST(InstrumentorEntryPrologue, KernelEntryKeepsItsBytes) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2737,22 +2748,28 @@ TEST(InstrumentorEntryPrologue, KernelEntryKeepsItsBytes) {
 
 // patch() is the production entry point, and no runtime builds the kernarg
 // wrapper the prologue loads through, so it refuses before planning anything.
+// Both entry points run the patch gates, so neither patches a probe that reads
+// the framework's entry storage unless the test skips them.
 TEST(InstrumentorEntryPrologue, PatchRefusesEntryStorageWithoutAWrapper) {
   auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
 
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+  for (const bool with_summaries : {false, true}) {
+    SCOPED_TRACE(with_summaries ? "patch_with_debug_summaries()" : "patch()");
+    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+    instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
-  auto result = instr.patch();
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_NE(result.errors.front().find("kernarg wrapper"), std::string::npos)
-      << result.errors.front();
-  EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
-      << result.errors.front();
+    const InstrumentedCodeObject result =
+        with_summaries ? instr.patch_with_debug_summaries() : instr.patch();
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_NE(result.errors.front().find("kernarg wrapper"), std::string::npos)
+        << result.errors.front();
+    EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
+        << result.errors.front();
+  }
 }
 
 // Instrumentation does not support multi-kernel objects, so neither does the
@@ -2767,6 +2784,7 @@ TEST(InstrumentorEntryPrologue, MultipleKernelsFailClosed) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("multi-kernel code object"), std::string::npos)
@@ -2813,6 +2831,7 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2914,6 +2933,7 @@ std::optional<uint16_t> patch_and_recover_storage(const std::vector<uint32_t> &p
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   if (!result.errors.empty()) {
     *error_out = result.errors.front();
@@ -3015,6 +3035,7 @@ TEST(InstrumentorEntryPrologue, StorageAvoidsAProbeThatDoesNotReadIt) {
   plain.probe_symbol = "rj_test_writer";
   instr.add_point(plain);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -3048,6 +3069,7 @@ TEST(InstrumentorKernargRecord, DeclaresTheWrapperThePrologueReadsFrom) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -3115,6 +3137,7 @@ TEST(InstrumentorKernargRecord, ObjectAlreadyDeclaringAKernargExtensionFailsClos
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty()) << "a second kernarg record was appended";
   EXPECT_NE(result.errors.front().find("already carries"), std::string::npos)
