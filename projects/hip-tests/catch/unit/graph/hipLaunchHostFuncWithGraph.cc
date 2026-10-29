@@ -193,8 +193,11 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
   double* d_arrayA = nullptr;
   std::vector<double> h_array(arraySize);
 
-  hipStream_t captureStream{};
-  HIP_CHECK(hipStreamCreate(&captureStream));
+  // Guarded so the stream is destroyed during unwind if a check below throws.
+  // Global-mode capture blocks allocation process-wide, so a leaked capture
+  // fails every later test that allocates.
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t captureStream = stream_guard.stream();
 
   // Begin stream capture
   HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal));
@@ -241,7 +244,6 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
 
   // Cleanup
   HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(captureStream));
 }
 
 
