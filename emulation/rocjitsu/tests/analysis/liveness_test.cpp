@@ -8178,7 +8178,7 @@ TEST(ExplicitOrdinarySgprBound, ReportsZeroForAScopeNamingNoScalars) {
   std::vector<BasicBlock *> scope;
   for (const auto &b : blocks)
     scope.push_back(b.get());
-  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 0u);
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 0u);
 }
 
 // The bound is one past the highest index, and an operand's width counts: the
@@ -8198,7 +8198,41 @@ TEST(ExplicitOrdinarySgprBound, CountsOperandWidthNotJustTheBase) {
   std::vector<BasicBlock *> scope;
   for (const auto &b : blocks)
     scope.push_back(b.get());
-  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 22u);
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 22u);
+}
+
+// RDNA decoders name v_cmp_eq_u32_e64 s1's mask as s[1:2]. In Wave32 the mask
+// is s1 alone, so s2 stays free for a caller placing storage.
+TEST(ExplicitOrdinarySgprBound, CountsAWave32MaskAsOneSgpr) {
+  constexpr auto compare =
+      rdna4::build_vop3(rdna4::kVCmpEqU32Vop3, {.vdst = 1, .src0 = 128, .src1 = 128});
+  constexpr auto end = rdna4::build_sopp(rdna4::kSEndpgmSopp);
+  TestCodeObject co({compare[0], compare[1], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  const auto scope = block_scope(blocks);
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), 32), 2u);
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), 64), 3u);
+}
+
+// The decoder also names v_cndmask_b32_e64's selector s2 as s[2:3]. In Wave32
+// it is s2 alone.
+TEST(ExplicitOrdinarySgprBound, CountsAWave32MaskSourceAsOneSgpr) {
+  constexpr auto select =
+      rdna4::build_vop3(rdna4::kVCndmaskB32Vop3, {.vdst = 0, .src0 = 128, .src1 = 128, .src2 = 2});
+  constexpr auto end = rdna4::build_sopp(rdna4::kSEndpgmSopp);
+  TestCodeObject co({select[0], select[1], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  const auto scope = block_scope(blocks);
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), 32), 3u);
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), 64), 4u);
 }
 
 // RDNA exposes 106 ordinary SGPRs against CDNA's 102, and both consumers bound
@@ -8219,7 +8253,7 @@ TEST(ExplicitOrdinarySgprBound, IgnoresIndicesPastTheAllocatableMaximum) {
   std::vector<BasicBlock *> scope;
   for (const auto &b : blocks)
     scope.push_back(b.get());
-  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 13u);
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 13u);
 }
 
 // s_and_saveexec_b64 s[0:1], s[0:1] names one pair twice and additionally
@@ -8240,7 +8274,7 @@ TEST(ExplicitOrdinarySgprBound, SpecialRegisterEffectsDoNotRaiseTheBound) {
   std::vector<BasicBlock *> scope;
   for (const auto &b : blocks)
     scope.push_back(b.get());
-  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 2u);
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 2u);
 }
 
 // FLAT/GLOBAL saddr appears in both the explicit operand list and
@@ -8263,7 +8297,7 @@ TEST(ExplicitOrdinarySgprBound, SeesAnSgprThatIsAlsoAnImplicitUse) {
   std::vector<BasicBlock *> scope;
   for (const auto &b : blocks)
     scope.push_back(b.get());
-  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 12u);
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 12u);
 }
 
 } // namespace

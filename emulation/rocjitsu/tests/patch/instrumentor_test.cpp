@@ -2454,8 +2454,8 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
       << result.errors.front();
 }
 
-// Liveness takes one wave size per code object, and kernels that mix Wave32 and
-// Wave64 have none. Two Wave32 kernels are the control.
+// DBI analyzes kernels and probes at one wave size per code object, and kernels
+// that mix Wave32 and Wave64 have none. Two Wave32 kernels are the control.
 TEST(InstrumentorProbePatch, MixedWaveSizesFailClosed) {
   for (const std::array<bool, 2> wave32 : {std::array{true, false}, std::array{true, true}}) {
     const bool mixed = !wave32[1];
@@ -2548,10 +2548,12 @@ TEST(InstrumentorProbePatch, ProbeReadingAboveAWave32CompareIsRefused) {
       rdna4::build_sop1(rdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 4})[0],
       build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4),
   };
+  const std::vector<uint32_t> text = {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+                                      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4)};
   for (const bool wave32 : {true, false}) {
     SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
-    auto target = wave32 ? make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u}, 0)
-                         : make_gfx1200_kernel_elf({0xBF800000u, 0xBF800000u}, 0);
+    auto target = wave32 ? make_gfx1200_wave32_kernel_elf(text, /*private_bytes=*/0)
+                         : make_gfx1200_kernel_elf(text, /*private_bytes=*/0);
     auto probe = make_gfx1200_probe_elf("rj_test_probe", body);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -2580,7 +2582,7 @@ TEST(InstrumentorProbePatch, ProbeReadingAboveAWave32CompareIsRefused) {
 TEST(InstrumentorProbePatch, ProbeCompareClobbersTheSgprAboveOnlyInWave64) {
   const std::vector<uint32_t> text = {
       build_s_mov_b32(/*sdst=*/3, scalar_positive_inline_u32(42), ROCJITSU_CODE_ARCH_RDNA4),
-      0xBF800000u, // s_nop 0, the anchor.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4), // The anchor.
       rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 3, .vdst = 3})[0],
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
   };

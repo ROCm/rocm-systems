@@ -640,8 +640,9 @@ private:
   Operand *delegate_ = nullptr;
 };
 
-/// @brief Size @p ref, a register reference of @p op, for @p wave_size.
-/// @details A wave mask is one SGPR in Wave32, where RDNA decoders name the
+/// @brief Return the register reference with a Wave32 SGPR wave mask narrowed
+///        to one register.
+/// @details A wave mask is one SGPR in Wave32, where decoders may name the
 /// Wave64 pair. Every other operand, and every operand in Wave64, keeps its
 /// decoded width.
 [[nodiscard]] inline RegisterRef wave_sized_register(const Operand &op, RegisterRef ref,

@@ -1070,7 +1070,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       if (!out.wave_size) {
         out.errors.push_back("probe call at anchor_offset " + std::to_string(pt.anchor_offset) +
                              " is in a code object whose kernels mix Wave32 and Wave64; "
-                             "liveness supports one wave size per code object");
+                             "DBI currently analyzes kernels and probes at one wave size "
+                             "per code object");
         continue;
       }
       auto index = resolve_probe_index(pt, perr);

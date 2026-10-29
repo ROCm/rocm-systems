@@ -170,7 +170,7 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
 namespace {
 
 // Raises bound past operand if it names an allocatable ordinary SGPR.
-void raise_sgpr_bound_for_operand(uint32_t &bound, const Operand *operand) {
+void raise_sgpr_bound_for_operand(uint32_t &bound, const Operand *operand, uint8_t wave_size) {
   if (operand == nullptr)
     return;
   const auto ref = operand->to_register_ref();
@@ -178,22 +178,23 @@ void raise_sgpr_bound_for_operand(uint32_t &bound, const Operand *operand) {
     return;
   if (ref->index >= REGISTER_SET_ALLOCATABLE_SGPRS)
     return;
-  bound = std::max<uint32_t>(bound, static_cast<uint32_t>(ref->index) + ref->width);
+  const RegisterRef sized = wave_sized_register(*operand, *ref, wave_size);
+  bound = std::max<uint32_t>(bound, static_cast<uint32_t>(sized.index) + sized.width);
 }
 
 } // namespace
 
 // Syntactic scan over explicit operands; see liveness.h for what is excluded.
-uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks) {
+uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks, uint8_t wave_size) {
   uint32_t bound = 0;
   for (BasicBlock *block : blocks) {
     if (block == nullptr)
       continue;
     for (const Instruction &inst : block->instructions()) {
       for (int i = 0; i < inst.num_src_operands(); ++i)
-        raise_sgpr_bound_for_operand(bound, inst.src_operand(i));
+        raise_sgpr_bound_for_operand(bound, inst.src_operand(i), wave_size);
       for (int i = 0; i < inst.num_dst_operands(); ++i)
-        raise_sgpr_bound_for_operand(bound, inst.dst_operand(i));
+        raise_sgpr_bound_for_operand(bound, inst.dst_operand(i), wave_size);
     }
   }
   return bound;
