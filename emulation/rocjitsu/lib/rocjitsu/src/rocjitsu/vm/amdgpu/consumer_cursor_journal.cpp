@@ -12,7 +12,7 @@ ConsumerCursorJournal::ConsumerCursorJournal(uint64_t address,
                                              std::optional<uint64_t> initial_cursor, uint32_t width)
     : address_(address), width_(width) {
   assert((width_ == sizeof(uint32_t) || width_ == sizeof(uint64_t)) &&
-         "consumer cursor width must be 32 or 64 bits");
+         "consumer cursor width must be 4 or 8 bytes");
   reset(initial_cursor);
 }
 
