@@ -348,6 +348,7 @@ class TestIsFatBinary:
         """A zero-sized SHT_PROGBITS .hip_fatbin is not device code."""
         source = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
         assert source.exists(), f"Test asset not found: {source}"
+        assert is_fat_binary(source, toolchain) is True
 
         empty_fatbin = patch_hip_fatbin_size(
             source, tmp_path / "test_kernel_single.exe.empty", 0
