@@ -495,8 +495,21 @@ LDS-base arithmetic, but identify neither a DDS backing location nor a valid
 LDS allocation address. Requesting DDS lanes emit a warning naming the instruction
 and PC, then fault before any memory effects because DDS backing is unimplemented.
 On other architectures the shared aperture remains LDS; out-of-backing accesses
-read zero and discard writes. RDNA4 FLAT low-17-bit address truncation remains
-a separate follow-up.
+read zero and discard writes.
+
+For RDNA4 FLAT LDS requests, the offset wraps to 17 bits before adding the
+workgroup base. `flat_local_allocation_end` captures the exclusive modeled
+`lds_base + lds_size` limit and remains fixed across retries. This includes the
+current 256-byte scheduler rounding; PM4 sizes may already be 512-byte multiples
+before that rounding. Target allocation and encoding granules remain unmodeled.
+A lane whose first memory element does not fit is rejected in full and appears
+in `flat_local_oob_lane_mask`. Other lanes retain only complete elements below
+the allocation end (DWORDs for multiword transfers); atomics require their whole
+element. Rejected reads return zero and rejected writes are discarded. These
+bounds leave `valid_lane_mask`, `request_lane_mask` and nominal counter
+participation unchanged, so those masks describe requests rather than bytes
+actually accessed.
+
 Observers must inspect `flat_local_lane_mask` and `flat_dds_lane_mask` to account
 for LDS and DDS lanes; choosing a backing store
 from `route` alone misses the shared-aperture portion of a mixed request.

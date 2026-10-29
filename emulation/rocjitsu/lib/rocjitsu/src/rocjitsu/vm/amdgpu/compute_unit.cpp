@@ -1007,14 +1007,29 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
     d.flat_local_lane_mask = flat_local_lane_mask & request_lanes;
     d.flat_dds_lane_mask = flat_dds_lane_mask & request_lanes;
+    d.flat_local_oob_lane_mask = 0;
+    d.flat_local_allocation_end.reset();
+    // Snapshot the current modeled allocation, including its 256-byte scheduler
+    // rounding; per-target allocation and encoding granules remain unmodeled.
+    if (arch() == ROCJITSU_CODE_ARCH_RDNA4 && d.flat_local_lane_mask != 0)
+      d.flat_local_allocation_end = uint64_t{wf.lds_base()} + wf.lds_size();
     if (flat_shared_lane_mask != 0) {
       if (observe_routed_access) {
         std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
       }
       for (uint32_t lane = 0; lane < wf_size; ++lane) {
-        if (flat_shared_lane_mask & (uint64_t{1} << lane))
-          d.per_lane_addr[lane] = d.per_lane_addr[lane] - shared_aperture_base_ + wf.lds_base();
+        if (flat_shared_lane_mask & (uint64_t{1} << lane)) {
+          uint64_t offset = d.per_lane_addr[lane] - shared_aperture_base_;
+          // RDNA4 FLAT uses unsigned 17-bit LDS address math. Keep the
+          // workgroup LDS base outside that wrapping calculation.
+          if (arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+            offset &= 0x1FFFFu;
+            if (offset >= wf.lds_size() || d.elem_size > wf.lds_size() - offset)
+              d.flat_local_oob_lane_mask |= (uint64_t{1} << lane) & request_lanes;
+          }
+          d.per_lane_addr[lane] = offset + wf.lds_base();
+        }
       }
     }
     if (request_lanes != 0 && (request_lanes & ~flat_shared_lane_mask) == 0) {
@@ -1563,6 +1578,8 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.request_lane_mask = transpose_request_lane_mask(state, wf_size);
     access.flat_local_lane_mask = flat_local_lane_mask & access.request_lane_mask;
     access.flat_dds_lane_mask = flat_dds_lane_mask & access.request_lane_mask;
+    access.flat_local_oob_lane_mask = state.flat_local_oob_lane_mask;
+    access.flat_local_allocation_end = state.flat_local_allocation_end;
     // Intersected with the requesting lanes, which is how the global pipeline
     // splits the wave: a swizzled lane that never requests costs nothing.
     access.scratch_lane_mask =
