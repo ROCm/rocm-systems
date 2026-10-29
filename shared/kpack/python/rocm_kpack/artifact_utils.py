@@ -101,21 +101,22 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
     For ELF binaries, checks for .hip_fatbin section.
     For PE/COFF binaries, checks for .hip_fat section.
 
-    An ELF whose .hip_fatbin section is SHT_NOBITS, or whose section size is
-    zero, is *not* a fat binary: the header survives but the contents do not
-    live in the file. SHT_NOBITS is the shape of a separated debug file
-    produced by `objcopy --only-keep-debug` (TheRock's `*_dbg` artifacts).
-    A zero-sized SHT_PROGBITS section is what `hipcc --offload-host-only`
-    leaves in host-only test binaries. Neither has device code to split, and
-    parsing the empty payload fails with "Unrecognized fatbin format".
+    ELF cases:
+    - Regular fat binary: ``.hip_fatbin`` is present, is not ``SHT_NOBITS``,
+      and ``sh_size > 0``. This is the only case that returns True.
+    - Debug artifact: ``.hip_fatbin`` is ``SHT_NOBITS``, from
+      ``objcopy --only-keep-debug`` (TheRock ``*_dbg`` artifacts). The header
+      survives but the contents are not in the file.
+    - Host-only binary: ``.hip_fatbin`` is ``SHT_PROGBITS`` with ``sh_size == 0``,
+      left by ``hipcc --offload-host-only``. Parsing that empty payload fails
+      with "Unrecognized fatbin format".
+    - Already-split binary: a ``.rocm_kpack_ref`` marker is present (COFF:
+      ``.kpackrf``). Device code has already been moved into a ``.kpack``
+      archive. The ``.hip_fatbin`` / ``.hip_fat`` header remains, so a name
+      check alone would send it back through the splitter and ``add_section()``
+      would fail with "Section '.rocm_kpack_ref' already exists".
 
-    A binary that already carries a kpack marker section (.rocm_kpack_ref for
-    ELF, .kpackrf for COFF) is likewise *not* a fat binary: its device code has
-    already been moved into a .kpack archive. Such a binary keeps its
-    .hip_fatbin/.hip_fat section header, so the name check alone would send it
-    back through the splitter and `add_section()` would then fail with
-    "Section '.rocm_kpack_ref' already exists". Reporting False here is what
-    makes re-splitting an already-split tree a no-op instead of a hard error.
+    The last three return False. A missing ``.hip_fatbin`` also returns False.
 
     Args:
         file_path: Path to the file to check
