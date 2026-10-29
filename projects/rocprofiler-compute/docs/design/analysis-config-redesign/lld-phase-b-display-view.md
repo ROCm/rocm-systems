@@ -293,7 +293,7 @@ backward compatibility.
 
 | Tool | What changes |
 |---|---|
-| `validate_sets_metric_ids.py` | Remove numeric ID validation path. Only string IDs. |
+| `validate_sets_metric_ids.py` | Delete it with the numeric set files; `tools/validate_metric_library.py` checks the string-ID sets. |
 | `verify_against_config_template.py` | Remove Panel Config template validation. Only Layer 2 schema validation. Remove `gfx9_config_template.yaml` and `gfx11_config_template.yaml`. |
 | `metric_description_manager.py` | Remove old panel config reading path. |
 | `hash_manager.py` | Remove old per-arch directory entries from hash database. Only base arch dirs and `views/`. |
