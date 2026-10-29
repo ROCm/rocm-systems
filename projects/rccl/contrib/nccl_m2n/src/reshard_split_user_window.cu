@@ -62,6 +62,16 @@
 #define NCCLM2N_RESHARD_GIN_FINAL_FENCE ncclGinFenceLevel::Relaxed
 #endif
 
+/* Warp partitioning must use the target's native warp/wavefront size (64 on AMD
+ * GFX9, 32 on NVIDIA). A ncclCoopWarpSpan built from 32-thread warps on a 64-lane
+ * wave claims twice as many warps as it holds leaders for and its sync() deadlocks
+ * on AMD. Key off the real warp size (WARP_SIZE from nccl_device/coop.h). */
+#if defined(WARP_SIZE)
+#define NCCLM2N_RESHARD_WARP_SIZE WARP_SIZE
+#else
+#define NCCLM2N_RESHARD_WARP_SIZE 32
+#endif
+
 // ============================================================================
 // Dual-DevComm RING kernel (contiguous PACK staging only).
 // ============================================================================
@@ -70,8 +80,12 @@ __global__ __launch_bounds__(DEFAULT_KERNEL_MAX_NTHREADS, 1) void reshardKernelU
   const bool inA = (params.myRankInA >= 0);
   const bool inB = (params.myRankInB >= 0);
 
-  const int warpId = threadIdx.x / 32;
-  const int laneId = threadIdx.x % 32;
+  const int warpId = threadIdx.x / NCCLM2N_RESHARD_WARP_SIZE;
+  const int laneId = threadIdx.x % NCCLM2N_RESHARD_WARP_SIZE;
+
+  /* Zero the emulated named-barrier slots before the first ncclCoopWarpSpan::sync()
+   * (no-op where the target has hardware named barriers). */
+  ncclCoopNamedBarrierInit();
 
   // GIN context index.  commA (per-parent, FULL) maps this CTA over the
   // whole devCommA context pool.  commB is the SHARED DevComm: it carries
@@ -124,7 +138,7 @@ __global__ __launch_bounds__(DEFAULT_KERNEL_MAX_NTHREADS, 1) void reshardKernelU
 
     // SOURCE (trainer): contiguous puts to the first-domain leaders.
     if (params.isSource) {
-      int activeSrcWarps = min(MAX_SRC_WARPS, (int)(blockDim.x / 32));
+      int activeSrcWarps = min(MAX_SRC_WARPS, (int)(blockDim.x / NCCLM2N_RESHARD_WARP_SIZE));
       if (warpId < activeSrcWarps) {
         for (int t = warpId; t < params.numTargets; t += activeSrcWarps) {
           ncclReshardTargetInfo& target = params.targets[t];
@@ -170,7 +184,7 @@ __global__ __launch_bounds__(DEFAULT_KERNEL_MAX_NTHREADS, 1) void reshardKernelU
     // DEST (first-domain leaders): wait for the trainer data on commA.
     // Ring forward + LSA fan-out happen later, in Phase B (commB).
     if (params.isDest && params.destRecvViaCommA && params.numSources > 0) {
-      int warpsPerCta = blockDim.x / 32;
+      int warpsPerCta = blockDim.x / NCCLM2N_RESHARD_WARP_SIZE;
       int activeSources = min(params.numSources, min(warpsPerCta, (int)MAX_WARP_GROUPS));
       int warpsPerSource = warpsPerCta / activeSources;
       if (warpsPerSource < 1) {
@@ -253,7 +267,7 @@ __global__ __launch_bounds__(DEFAULT_KERNEL_MAX_NTHREADS, 1) void reshardKernelU
     }
 
     if (params.isDest && params.numSources > 0) {
-      int warpsPerCta = blockDim.x / 32;
+      int warpsPerCta = blockDim.x / NCCLM2N_RESHARD_WARP_SIZE;
       int activeSources = min(params.numSources, min(warpsPerCta, (int)MAX_WARP_GROUPS));
       int warpsPerSource = warpsPerCta / activeSources;
       if (warpsPerSource < 1) {
@@ -324,8 +338,8 @@ __global__ __launch_bounds__(DEFAULT_KERNEL_MAX_NTHREADS, 1) void reshardKernelU
 
         // LSA fan-out within this leader's NVL domain (commB LSA team).
         if (params.numLocalFollowers > 0 && myStart < totalSize) {
-          int threadsInGroup = warpsPerSource * 32;
-          int threadInGroup = warpInGroup * 32 + laneId;
+          int threadsInGroup = warpsPerSource * NCCLM2N_RESHARD_WARP_SIZE;
+          int threadInGroup = warpInGroup * NCCLM2N_RESHARD_WARP_SIZE + laneId;
 
           char* srcPtr = localBuffer + plan.dstBaseOffset + myStart;
           size_t chunkSize = myEnd - myStart;
