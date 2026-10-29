@@ -151,20 +151,24 @@ TEST(IntrusiveSharedPtr, ConstConversionRetainsOrTransfersOwnership) {
 
 struct CustomCounted final {
   explicit CustomCounted(std::atomic<int> &destroyed) : destroyed_(destroyed) {}
-  ~CustomCounted() { destroyed_.fetch_add(1, std::memory_order_relaxed); }
 
 private:
   template <typename> friend class util::IntrusiveSharedPtr;
-  std::atomic<uint32_t> &ref_count() const noexcept { return refs_; }
+  ~CustomCounted() { destroyed_.fetch_add(1, std::memory_order_relaxed); }
+  void add_ref() const noexcept { ++refs_; }
+  void release_ref() const noexcept {
+    if (--refs_ == 0)
+      delete this;
+  }
   std::atomic<int> &destroyed_;
-  mutable std::atomic<uint32_t> refs_{1};
+  mutable uint32_t refs_ = 1;
 };
 
-TEST(IntrusiveSharedPtr, SupportsPrivateObjectProvidedCounter) {
+TEST(IntrusiveSharedPtr, SupportsPrivateOwnershipHooksWithNonAtomicCounter) {
   std::atomic<int> destroyed{0};
   {
     auto owner = util::IntrusiveSharedPtr<CustomCounted>::make(destroyed);
-    auto copy = owner;
+    util::IntrusiveSharedPtr<const CustomCounted> copy = owner;
     owner.reset();
     EXPECT_EQ(destroyed.load(), 0);
   }

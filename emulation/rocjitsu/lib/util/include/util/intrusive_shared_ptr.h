@@ -12,11 +12,12 @@
 
 namespace util {
 
-/// @brief Strong-only shared ownership using an object-provided atomic counter.
-/// @details T must initialize its counter to one and expose it through ref_count(),
-/// accessible to this class. The last owner deletes T. Separate handles can be
-/// copied and destroyed concurrently; accessing the same handle requires external
-/// synchronization. Does not provide weak ownership or custom deleters.
+/// @brief Strong-only shared ownership using object-provided ownership hooks.
+/// @details T must provide noexcept add_ref() and release_ref() hooks accessible
+/// to this class. make() adopts the initial reference of the newly constructed
+/// object; release_ref() handles destruction on the final release. The hooks
+/// determine thread safety. Concurrent mutation of the same handle requires
+/// external synchronization. Does not provide weak ownership.
 template <typename T> class IntrusiveSharedPtr {
   template <typename> friend class IntrusiveSharedPtr;
 
@@ -50,8 +51,8 @@ public:
   }
 
   ~IntrusiveSharedPtr() {
-    if (ptr_ && ptr_->ref_count().fetch_sub(1, std::memory_order_acq_rel) == 1)
-      delete ptr_;
+    if (ptr_)
+      ptr_->release_ref();
   }
 
   [[nodiscard]] T *get() const noexcept { return ptr_; }
@@ -68,7 +69,7 @@ private:
 
   void retain() noexcept {
     if (ptr_)
-      ptr_->ref_count().fetch_add(1, std::memory_order_relaxed);
+      ptr_->add_ref();
   }
 
   T *ptr_ = nullptr;
@@ -76,8 +77,14 @@ private:
 
 namespace detail {
 
-class ReferenceCount {
+template <typename Derived> class ReferenceCount {
 public:
+  void add_ref() const noexcept { refs_.fetch_add(1, std::memory_order_relaxed); }
+  void release_ref() const noexcept {
+    if (refs_.fetch_sub(1, std::memory_order_acq_rel) == 1)
+      delete static_cast<const Derived *>(this);
+  }
+
   [[nodiscard]] std::atomic<uint32_t> &ref_count() const noexcept { return refs_; }
 
 private:
@@ -104,9 +111,9 @@ inline constexpr std::size_t kDestructiveInterferenceSize = 128;
 
 } // namespace detail
 
-/// @brief Compact counter and value storage for IntrusiveSharedPtr.
+/// @brief Compact atomic counter and value storage for IntrusiveSharedPtr.
 /// @details This is the owned object, not a pointer. Access the wrapped T via value.
-template <typename T> struct RefCounted : detail::ReferenceCount {
+template <typename T> struct RefCounted final : detail::ReferenceCount<RefCounted<T>> {
   template <typename... Args>
   explicit RefCounted(Args &&...args) : value(std::forward<Args>(args)...) {}
 
@@ -123,7 +130,8 @@ template <typename T> struct RefCounted : detail::ReferenceCount {
 /// destructive interference size (128 bytes if the standard constant is absent).
 /// Stronger alignment required by T is preserved. All translation units sharing
 /// this type must use consistent target/compiler settings so its layout agrees.
-template <typename T> struct RefCountedCacheAligned : detail::ReferenceCount {
+template <typename T>
+struct RefCountedCacheAligned final : detail::ReferenceCount<RefCountedCacheAligned<T>> {
   template <typename... Args>
   explicit RefCountedCacheAligned(Args &&...args) : value(std::forward<Args>(args)...) {}
 
