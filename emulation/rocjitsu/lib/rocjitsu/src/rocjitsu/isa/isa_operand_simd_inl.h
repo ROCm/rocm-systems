@@ -79,8 +79,7 @@ void AmdgpuIsaOperand<Isa>::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_
     std::ranges::copy_n(region.lanes().begin() + lane_base, count, out);
     return;
   }
-  std::ranges::fill_n(out, count,
-                      Isa::simd_broadcast_value(wf, this->opr_type_, this->encoding_value_));
+  std::ranges::fill_n(out, count, this->read_lane(wf, lane_base));
 }
 
 template <typename Isa>
