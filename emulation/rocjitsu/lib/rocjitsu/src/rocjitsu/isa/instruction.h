@@ -435,8 +435,7 @@ public:
         first = false;
       }
       for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
-        if (src_operands_[operand_index]->size_bits() == 0 ||
-            src_operands_[operand_index]->is_fieldless())
+        if (!should_print_src_operand(operand_index))
           continue;
         if (omit_repeated_destination_sources_) {
           bool repeats_dst = false;
@@ -510,6 +509,12 @@ protected:
   /// @brief Append one destination operand to textual disassembly.
   virtual void append_dst_operand(std::string &out, uint8_t operand_index) const {
     out += dst_operands_[operand_index]->name();
+  }
+  /// @brief Whether a source has its own textual operand.
+  /// Encoding-specific overrides may expose a decoded view of a fieldless source.
+  virtual bool should_print_src_operand(uint8_t operand_index) const {
+    return src_operands_[operand_index]->size_bits() != 0 &&
+           !src_operands_[operand_index]->is_fieldless();
   }
   /// @brief Append one source operand to textual disassembly.
   virtual void append_src_operand(std::string &out, uint8_t operand_index) const {

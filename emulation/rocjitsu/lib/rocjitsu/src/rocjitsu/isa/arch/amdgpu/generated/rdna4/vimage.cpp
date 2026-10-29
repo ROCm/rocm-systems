@@ -53,6 +53,26 @@ ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
+bool ImageLoadVimage::should_print_src_operand(uint8_t operand_index) const {
+  return src_operands_[operand_index] == &vaddr || Vimage::should_print_src_operand(operand_index);
+}
+
+void ImageLoadVimage::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr) {
+    Vimage::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
 void ImageLoadVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
@@ -243,6 +263,26 @@ ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+bool ImageStoreVimage::should_print_src_operand(uint8_t operand_index) const {
+  return src_operands_[operand_index] == &vaddr || Vimage::should_print_src_operand(operand_index);
+}
+
+void ImageStoreVimage::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr) {
+    Vimage::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
 }
 
 void ImageStoreVimage::implicit_uses(RegisterSet &uses) const {

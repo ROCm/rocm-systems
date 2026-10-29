@@ -743,6 +743,26 @@ TEST_P(RdnaDecodedImageAccessTest, LinearR32DescriptorsPrepareTheExpectedMemoryA
   EXPECT_EQ(state.buffer_format, kR32Uint);
 }
 
+TEST_P(RdnaDecodedImageAccessTest, DecodedLoadAndStorePrintNoncontiguousCoordinates) {
+  for (const bool load : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "load=" << load);
+    auto decoded = decode(load);
+    ASSERT_TRUE(decoded.succeeded());
+    const std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    ASSERT_NE(inst, nullptr);
+    std::string expected =
+        load ? "image_load v8, [v2, v6], s[8:15]" : "image_store v8, [v2, v6], s[8:15]";
+    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5)
+      expected += " dmask:0x1 dim:SQ_RSRC_IMG_2D unorm";
+    EXPECT_EQ(inst->disassemble(), expected);
+
+    const InstDefUse def_use(*inst);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 2, 1}));
+    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 6, 1}));
+    EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 3, 1}));
+  }
+}
+
 TEST_P(RdnaDecodedImageAccessTest,
        StoreThenLoadUsesPaddedRowsNonconsecutiveCoordinatesAndExecMask) {
   const uint32_t vb = wf_->vgpr_alloc().base;

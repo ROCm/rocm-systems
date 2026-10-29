@@ -865,6 +865,7 @@ public:
     return !mnemonic_.starts_with("image_atomic_") &&
            Instruction::should_print_dst_operand(operand_index);
   }
+  void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
     if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
@@ -876,9 +877,32 @@ public:
                            : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";
       return;
     }
-    Instruction::append_src_operand(out, operand_index);
+    if (!inst_.nsa || operand != nsa_vaddr_operand_ ||
+        (!mnemonic_.starts_with("image_load") && !mnemonic_.starts_with("image_store"))) {
+      Instruction::append_src_operand(out, operand_index);
+      return;
+    }
+    const uint32_t vaddr_words = (operand->size_bits() + 31) / 32;
+    out += "[";
+    uint32_t consumed_words = 0;
+    for (uint32_t index = 0; index < 5 && consumed_words < vaddr_words; ++index) {
+      const uint32_t group_words = 1;
+      if (group_words == 0)
+        break;
+      if (index != 0)
+        out += ", ";
+      const uint32_t selector =
+          index == 0 ? inst_.vaddr : (raw_words_[2] >> ((index - 1) * 8)) & 0xffu;
+      if (group_words > 1) {
+        out += "v[" + std::to_string(selector) + ":";
+        out += std::to_string(selector + group_words - 1) + "]";
+      } else {
+        out += "v" + std::to_string(selector);
+      }
+      consumed_words += group_words;
+    }
+    out += "]";
   }
-  void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
   bool has_nsa();
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;

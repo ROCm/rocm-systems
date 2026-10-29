@@ -4333,7 +4333,10 @@ class CodeGenerator:
                         '    return;\n'
                         '  }\n'
                     )
-                    if not profile.renders_gfx11_image_syntax:
+                    if not profile.renders_gfx11_image_syntax and not (
+                        profile.has_gfx11_image_address_extension
+                        and enc_upper == 'ENC_MIMG'
+                    ):
                         public_members.append(
                             cgen.Line(
                                 'void append_src_operand(std::string &out, uint8_t operand_index) const override {\n'
@@ -4350,39 +4353,49 @@ class CodeGenerator:
                         'const Operand *vaddr);'
                     )
                 )
-                if profile.renders_gfx11_image_syntax:
-                    public_members.append(
-                        cgen.Line(
-                            'void append_src_operand(std::string &out, '
-                            'uint8_t operand_index) const override {\n'
-                            '  const ::rocjitsu::Operand *operand = src_operands_[operand_index];\n'
-                            + image_atomic_source_display
-                            + '  if (!inst_.nsa || operand != nsa_vaddr_operand_) {\n'
-                            '    Instruction::append_src_operand(out, operand_index);\n'
-                            '    return;\n'
-                            '  }\n'
-                            '  const uint32_t vaddr_words = (operand->size_bits() + 31) / 32;\n'
-                            '  out += "[";\n'
-                            '  uint32_t consumed_words = 0;\n'
-                            '  for (uint32_t index = 0; index < 5 && consumed_words < vaddr_words; ++index) {\n'
-                            '    const uint32_t group_words = gfx11_mimg_nsa_group_width(index, vaddr_words);\n'
-                            '    if (group_words == 0) break;\n'
-                            '    if (index != 0) out += ", ";\n'
-                            '    const uint32_t selector = index == 0\n'
-                            '        ? inst_.vaddr\n'
-                            '        : (raw_words_[2] >> ((index - 1) * 8)) & 0xffu;\n'
-                            '    if (group_words > 1) {\n'
-                            '      out += "v[" + std::to_string(selector) + ":";\n'
-                            '      out += std::to_string(selector + group_words - 1) + "]";\n'
-                            '    } else {\n'
-                            '      out += "v" + std::to_string(selector);\n'
-                            '    }\n'
-                            '    consumed_words += group_words;\n'
-                            '  }\n'
-                            '  out += "]";\n'
-                            '}'
-                        )
+                nsa_fallback = '!inst_.nsa || operand != nsa_vaddr_operand_'
+                if not profile.renders_gfx11_image_syntax:
+                    nsa_fallback += (
+                        ' || (!mnemonic_.starts_with("image_load") && '
+                        '!mnemonic_.starts_with("image_store"))'
                     )
+                nsa_group_width = (
+                    'gfx11_mimg_nsa_group_width(index, vaddr_words)'
+                    if profile.renders_gfx11_image_syntax
+                    else '1'
+                )
+                public_members.append(
+                    cgen.Line(
+                        'void append_src_operand(std::string &out, '
+                        'uint8_t operand_index) const override {\n'
+                        '  const ::rocjitsu::Operand *operand = src_operands_[operand_index];\n'
+                        + image_atomic_source_display
+                        + f'  if ({nsa_fallback}) {{\n'
+                        '    Instruction::append_src_operand(out, operand_index);\n'
+                        '    return;\n'
+                        '  }\n'
+                        '  const uint32_t vaddr_words = (operand->size_bits() + 31) / 32;\n'
+                        '  out += "[";\n'
+                        '  uint32_t consumed_words = 0;\n'
+                        '  for (uint32_t index = 0; index < 5 && consumed_words < vaddr_words; ++index) {\n'
+                        f'    const uint32_t group_words = {nsa_group_width};\n'
+                        '    if (group_words == 0) break;\n'
+                        '    if (index != 0) out += ", ";\n'
+                        '    const uint32_t selector = index == 0\n'
+                        '        ? inst_.vaddr\n'
+                        '        : (raw_words_[2] >> ((index - 1) * 8)) & 0xffu;\n'
+                        '    if (group_words > 1) {\n'
+                        '      out += "v[" + std::to_string(selector) + ":";\n'
+                        '      out += std::to_string(selector + group_words - 1) + "]";\n'
+                        '    } else {\n'
+                        '      out += "v" + std::to_string(selector);\n'
+                        '    }\n'
+                        '    consumed_words += group_words;\n'
+                        '  }\n'
+                        '  out += "]";\n'
+                        '}'
+                    )
+                )
                 class_func_impls.append(
                     cgen.Line(
                         f'void {inst_enc.fmt_enc_name}::capture_nsa_words('
@@ -11631,6 +11644,19 @@ class CodeGenerator:
                         and any(o.name == 'sdst' and o.is_output for o in inst.operands)
                     )
                     if _image_address_metadata:
+                        if self.isa_spec.arch_name == 'rdna4':
+                            public_members.append(
+                                cgen.Statement(
+                                    'bool should_print_src_operand('
+                                    'uint8_t operand_index) const override'
+                                )
+                            )
+                            public_members.append(
+                                cgen.Statement(
+                                    'void append_src_operand(std::string &out, '
+                                    'uint8_t operand_index) const override'
+                                )
+                            )
                         public_members.append(
                             cgen.Statement(
                                 'void implicit_uses(RegisterSet &uses) const override'
@@ -14120,6 +14146,39 @@ class CodeGenerator:
                             if _image_d16_preserves_destination
                             else ''
                         )
+                        if self.isa_spec.arch_name == 'rdna4':
+                            inst_impls.append(
+                                cgen.Line(
+                                    f'bool {inst.fmt_name}::should_print_src_operand'
+                                    '(uint8_t operand_index) const {\n'
+                                    '  return src_operands_[operand_index] == &vaddr ||\n'
+                                    f'         {inst.fmt_true_enc_name}::should_print_src_operand('
+                                    'operand_index);\n'
+                                    '}'
+                                )
+                            )
+                            inst_impls.append(
+                                cgen.Line(
+                                    f'void {inst.fmt_name}::append_src_operand'
+                                    '(std::string &out, uint8_t operand_index) const {\n'
+                                    '  if (src_operands_[operand_index] != &vaddr) {\n'
+                                    f'    {inst.fmt_true_enc_name}::append_src_operand('
+                                    'out, operand_index);\n'
+                                    '    return;\n'
+                                    '  }\n'
+                                    f'  const auto registers = {address_registers};\n'
+                                    '  const uint32_t count = '
+                                    'amdgpu::image_coordinate_register_count(\n'
+                                    '      inst_.dim, bool(inst_.a16));\n'
+                                    '  out += "[";\n'
+                                    '  for (uint32_t index = 0; index < count; ++index) {\n'
+                                    '    if (index != 0) out += ", ";\n'
+                                    '    out += "v" + std::to_string(registers[index]);\n'
+                                    '  }\n'
+                                    '  out += "]";\n'
+                                    '}'
+                                )
+                            )
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::implicit_uses'
