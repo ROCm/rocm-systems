@@ -472,7 +472,7 @@ TEST_F(ompt_test, emit_region_builds_expected_region_sample)
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(2));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(3));
     EXPECT_CALL(*g_metadata_registry_mock,
-                add_thread_info(Eq(thread_info_data_t{ 2, 3, 7, 0, 0, "{}" })));
+                ensure_thread(Eq(thread_info_data_t{ 2, 3, 7, 0, 0, "{}" })));
     EXPECT_CALL(*g_buffer_storage_mock,
                 store_region_sample(7, std::string{ "operation" }, 9, 55, 10, 20,
                                     std::string{}, std::string{ "rocm_ompt_api" }));
@@ -497,7 +497,7 @@ TEST_F(ompt_test, instant_region_uses_same_begin_and_end_timestamp)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 15, 15, _, _));
 
     auto payload   = sdk::callback_tracing_ompt_data_t{};
@@ -521,7 +521,7 @@ TEST_F(ompt_test, instant_region_pushes_and_pops_timemory_when_enabled)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _));
 
     auto payload   = sdk::callback_tracing_ompt_data_t{};
@@ -553,7 +553,7 @@ TEST_F(ompt_test, begin_then_end_standard_region_uses_stored_begin_timestamp)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 100, 200, _, _));
 
     auto backtrace_data = std::optional<int>{};
@@ -572,7 +572,7 @@ TEST_F(ompt_test, end_region_without_matching_begin_emits_orphan_instant_event)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 300, 300, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -608,7 +608,7 @@ TEST_F(ompt_test, begin_then_end_parallel_region_matches_by_parallel_data)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 10, 20, _, _));
 
     auto pop_payload                            = sdk::callback_tracing_ompt_data_t{};
@@ -633,7 +633,7 @@ TEST_F(ompt_test, end_region_parallel_without_matching_begin_emits_orphan)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 50, 50, _, _));
 
     int  unmatched                          = 0;
@@ -672,7 +672,7 @@ TEST_F(ompt_test, on_ompt_finalize_emits_and_clears_both_maps)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_)).Times(2);
     EXPECT_CALL(*g_externals_mock, get_ppid()).Times(2).WillRepeatedly(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).Times(2).WillRepeatedly(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_)).Times(2);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_)).Times(2);
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _))
         .Times(2);
 
@@ -697,7 +697,7 @@ TEST_F(ompt_test, on_ompt_finalize_flushes_orphan_standard_callback)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _));
 
     on_ompt_finalize<sdk, ext, ompt_api_category>();
@@ -745,7 +745,7 @@ TEST_F(ompt_test, end_region_pops_timemory_when_enabled)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _));
 
     auto payload   = sdk::callback_tracing_ompt_data_t{};
@@ -826,7 +826,7 @@ TEST_F(ompt_test, exit_pops_found_standard_callback_and_emits_span)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 10, 20, _, _));
 
     auto exit_record =
@@ -851,7 +851,7 @@ TEST_F(ompt_test, exit_without_matching_enter_emits_orphan_event)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 60, 60, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -949,7 +949,7 @@ TEST_F(ompt_test, none_dispatches_parallel_end_and_pops_parallel_callback)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 5, 15, _, _));
 
     auto pop_payload                            = sdk::callback_tracing_ompt_data_t{};
@@ -976,7 +976,7 @@ TEST_F(ompt_test, none_dispatches_instant_event_for_lock_init)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 30, 30, _, _));
 
     auto payload   = sdk::callback_tracing_ompt_data_t{};
@@ -1002,7 +1002,7 @@ TEST_F(ompt_test, none_dispatches_instant_event_for_thread_begin)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 12, 12, _, _));
 
     auto payload                          = sdk::callback_tracing_ompt_data_t{};

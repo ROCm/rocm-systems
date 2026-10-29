@@ -11,9 +11,6 @@ config = {}
 config["vseq"] = ["./tests/vsequential_access"]
 config["vrand"] = ["./tests/vrandom_access"]
 config["cleanup"] = True
-config["COUNTER_LOGGING"] = False
-config["METRIC_COMPARE"] = False
-config["METRIC_LOGGING"] = False
 
 
 def load_metrics(csv_file_path):

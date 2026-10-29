@@ -3,6 +3,7 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/isa_features.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
@@ -10,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/target_provider.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "util/host_target.h"
 
@@ -216,6 +218,72 @@ TEST(Gfx1250ExecutionTest, GlobalTransposePreservesZeroExecAndDestination) {
   for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
     EXPECT_EQ(compute_unit->read_vgpr(wave->vgpr_alloc().base + kDestination, lane), kSentinel);
     EXPECT_EQ(compute_unit->read_vgpr(wave->vgpr_alloc().base + kDestination + 1, lane), kSentinel);
+  }
+}
+
+TEST(Gfx1250ExecutionTest, ArchitectureDecoderScalarOffsetFailureDoesNotThrowOrCreateMemoryState) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wave = sim.dispatch_scratch_wf();
+  ASSERT_NE(wave, nullptr);
+  constexpr uint32_t kSentinel = 0xa5a55a5au;
+  write_wave_sgpr(*cu, *wave, 0, 0x4000);
+  write_wave_sgpr(*cu, *wave, 1, 0);
+  write_wave_sgpr(*cu, *wave, 4, kSentinel);
+  for (uint8_t selector : {amdgpu::kExecSelectorFirst, amdgpu::kExecSelectorLast}) {
+    SCOPED_TRACE(selector);
+    const auto words =
+        cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = 4, .soffset = selector});
+    // The architecture decoder precedes the factory decoder's operand validation.
+    DecodeResult decoded = cdna5::Decoder::decode(words.data(), {});
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> &load = decoded.value();
+    ASSERT_NE(load->execute, nullptr);
+    wave->clear_instruction_execution_error();
+    // Bypass the CU's legacy catch so restoring the throw fails this test.
+    ASSERT_NO_THROW(load->execute(*load, wave));
+    EXPECT_EQ(wave->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(load->data(), nullptr);
+    EXPECT_EQ(read_wave_sgpr(*cu, *wave, 4), kSentinel);
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wave).failed());
+  }
+}
+
+TEST(Gfx1250ExecutionTest, ArchitectureDecoderVectorScalarSourceFailureRejectsMemoryState) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wave = sim.dispatch_scratch_wf();
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  for (bool scratch : {false, true}) {
+    SCOPED_TRACE(scratch ? "VSCRATCH direct scalar read" : "VGLOBAL split 64-bit scalar read");
+    const auto words =
+        scratch ? cdna5::build_vscratch(cdna5::kScratchLoadB32Vscratch,
+                                        {.saddr = amdgpu::kExecSelectorFirst, .vdst = 4, .sve = 1})
+                : cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                       {.saddr = amdgpu::kModernM0Selector, .vdst = 4});
+    // Bypass factory operand validation to exercise the shared resolver's callers.
+    DecodeResult decoded = cdna5::Decoder::decode(words.data(), {});
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> &load = decoded.value();
+    ASSERT_NE(load->execute, nullptr);
+    wave->clear_instruction_execution_error();
+    ASSERT_NO_THROW(load->execute(*load, wave));
+    EXPECT_EQ(wave->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    ASSERT_NE(load->data(), nullptr);
+    const auto *state = load->data_as<amdgpu::VectorMemState>();
+    EXPECT_EQ(state->lane_mask, 0u);
+    wave->clear_instruction_execution_error();
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wave).failed());
+    EXPECT_EQ(wave->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    ASSERT_NE(load->data(), nullptr);
+    state = load->data_as<amdgpu::VectorMemState>();
+    EXPECT_EQ(state->lane_mask, 0u);
   }
 }
 
@@ -1322,7 +1390,7 @@ TEST(Gfx1250ExecutionTest, VbufferB128LoadsZeroAndStoresDropPartialOobDwords) {
   pipeline.issue(load, *wf);
 
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 0, 0), kInitial[0]);
-  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 1, 0), kInitial[1]);
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 1, 0), 0u);
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 2, 0), 0u);
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 3, 0), 0u);
 
@@ -1335,9 +1403,146 @@ TEST(Gfx1250ExecutionTest, VbufferB128LoadsZeroAndStoresDropPartialOobDwords) {
   pipeline.issue(store, *wf);
 
   EXPECT_EQ(sim.memory->read32(kAddr), kStored[0]);
-  EXPECT_EQ(sim.memory->read32(kAddr + 4), kStored[1]);
+  EXPECT_EQ(sim.memory->read32(kAddr + 4), kInitial[1]);
   EXPECT_EQ(sim.memory->read32(kAddr + 8), kInitial[2]);
   EXPECT_EQ(sim.memory->read32(kAddr + 12), kInitial[3]);
+}
+
+TEST(Gfx1250ExecutionTest, VbufferRawBoundsDistinguishWholeAndCrossingAccesses) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint32_t kLastLane = 31;
+  wf->set_exec(1u | (uint64_t{1} << kLastLane));
+
+  constexpr uint64_t kBaseAddress = 0xD000;
+  constexpr uint32_t kResourceSgpr = 4;
+  constexpr uint32_t kSoffsetSgpr = 12;
+  constexpr uint32_t kAddressVgpr = 4;
+  constexpr uint32_t kDataVgpr = 8;
+  constexpr uint32_t kUntouched = 0xdeadbeef;
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  // Counts for 0..20 remaining bytes, measured at the instruction's start.
+  // Triton PR 12512's hardware cases witness the aligned B128 crossings with
+  // 4/8 remaining bytes and whole-access fits. Other crossing cells follow
+  // the PR's stated rule as a model choice, pending gfx1250 measurements.
+  constexpr std::array<std::array<uint32_t, 21>, 3> kValidDwords = {{
+      {0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
+      {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3},
+      {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4},
+  }};
+  struct Offsets {
+    uint32_t scalar;
+    uint32_t vector;
+    uint32_t immediate;
+  };
+  constexpr Offsets kOffsets[] = {
+      {},
+      {.scalar = 40, .vector = 0, .immediate = 0},
+      {.scalar = 4, .vector = 8, .immediate = 12},
+      {.scalar = 0xFFFF'FFF0u, .vector = 16, .immediate = 4},
+  };
+  constexpr uint32_t kHighBoundCase = 21;
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  for (uint32_t width = 2; width <= 4; ++width) {
+    for (const Offsets &offsets : kOffsets) {
+      const uint64_t start = uint64_t{offsets.scalar} + offsets.vector + offsets.immediate;
+      for (uint32_t raw_stride : {0u, 16u}) {
+        for (uint32_t remaining = 0; remaining <= kHighBoundCase; ++remaining) {
+          // The last case exercises all high NUM_RECORDS fields without a
+          // large allocation; only the small addressed range is backed.
+          const uint64_t bound =
+              remaining == kHighBoundCase ? uint64_t{1} << 44 : start + remaining;
+          SCOPED_TRACE(testing::Message()
+                       << "width=" << width << " scalar=" << offsets.scalar
+                       << " vector=" << offsets.vector << " immediate=" << offsets.immediate
+                       << " stride=" << raw_stride << " bound=" << bound);
+          const std::array<uint32_t, 4> resource = {
+              static_cast<uint32_t>(kBaseAddress),
+              static_cast<uint32_t>((kBaseAddress >> 32) & 0x01FF'FFFFu) |
+                  static_cast<uint32_t>((bound & 0x7Fu) << 25),
+              static_cast<uint32_t>(bound >> 7),
+              static_cast<uint32_t>((bound >> 39) & 0x3Fu) | (raw_stride << 12),
+          };
+          for (uint32_t i = 0; i < resource.size(); ++i)
+            cu->write_sgpr(sbase + kResourceSgpr + i, resource[i]);
+          cu->write_sgpr(sbase + kSoffsetSgpr, offsets.scalar);
+          cu->write_vgpr(vbase + kAddressVgpr, 0, offsets.vector);
+          cu->write_vgpr(vbase + kAddressVgpr, kLastLane, offsets.vector + 4);
+          cu->write_vgpr(vbase + kAddressVgpr, 1, offsets.vector + 256);
+          for (uint32_t i = 0; i <= width; ++i)
+            sim.memory->write32(kBaseAddress + start + i * 4, 0x100u + i);
+          sim.memory->write32(kBaseAddress + start + 256, kUntouched);
+          for (uint32_t i = 0; i < width; ++i) {
+            for (uint32_t lane : {0u, 1u, kLastLane})
+              cu->write_vgpr(vbase + kDataVgpr + i, lane, kUntouched);
+          }
+
+          const uint32_t valid_first =
+              remaining == kHighBoundCase ? width : kValidDwords[width - 2][remaining];
+          const uint32_t valid_last = remaining == kHighBoundCase ? width
+                                      : remaining < 4             ? 0
+                                                      : kValidDwords[width - 2][remaining - 4];
+          cdna5::VbufferMachineInst machine{};
+          machine.rsrc = kResourceSgpr;
+          machine.soffset = kSoffsetSgpr;
+          machine.ioffset = offsets.immediate;
+          machine.vaddr = kAddressVgpr;
+          machine.offen = 1;
+          machine.vdata = kDataVgpr;
+          machine.scope = 3;
+          auto check = [&]<typename Load, typename Store>() {
+            wf->set_exec(1u | (uint64_t{1} << kLastLane));
+            auto load =
+                std::make_unique<Load>(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+            ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+            ASSERT_EQ(pipeline.issue(load.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+            for (uint32_t i = 0; i < width; ++i) {
+              EXPECT_EQ(cu->read_vgpr(vbase + kDataVgpr + i, 0), i < valid_first ? 0x100u + i : 0u);
+              EXPECT_EQ(cu->read_vgpr(vbase + kDataVgpr + i, kLastLane),
+                        i < valid_last ? 0x101u + i : 0u);
+              EXPECT_EQ(cu->read_vgpr(vbase + kDataVgpr + i, 1), kUntouched);
+              cu->write_vgpr(vbase + kDataVgpr + i, 0, 0x200u + i);
+              cu->write_vgpr(vbase + kDataVgpr + i, kLastLane, 0x201u + i);
+            }
+            // Check each store independently so an in-bounds lane cannot hide
+            // an illegal write from the overlapping, crossing access.
+            for (uint32_t lane : {0u, kLastLane}) {
+              SCOPED_TRACE(testing::Message() << "store lane=" << lane);
+              for (uint32_t i = 0; i <= width; ++i)
+                sim.memory->write32(kBaseAddress + start + i * 4, 0x100u + i);
+              wf->set_exec(uint64_t{1} << lane);
+              auto store =
+                  std::make_unique<Store>(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+              ASSERT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+              ASSERT_EQ(pipeline.issue(store.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+              const uint32_t first = lane == 0 ? 0 : 1;
+              const uint32_t valid = lane == 0 ? valid_first : valid_last;
+              for (uint32_t i = 0; i <= width; ++i) {
+                const bool stored = i >= first && i - first < valid;
+                EXPECT_EQ(sim.memory->read32(kBaseAddress + start + i * 4),
+                          (stored ? 0x200u : 0x100u) + i);
+              }
+              EXPECT_EQ(sim.memory->read32(kBaseAddress + start + 256), kUntouched);
+            }
+          };
+          if (width == 2) {
+            ASSERT_NO_FATAL_FAILURE((check.template operator()<cdna5::BufferLoadB64Vbuffer,
+                                                               cdna5::BufferStoreB64Vbuffer>()));
+          } else if (width == 3) {
+            ASSERT_NO_FATAL_FAILURE((check.template operator()<cdna5::BufferLoadB96Vbuffer,
+                                                               cdna5::BufferStoreB96Vbuffer>()));
+          } else {
+            ASSERT_NO_FATAL_FAILURE((check.template operator()<cdna5::BufferLoadB128Vbuffer,
+                                                               cdna5::BufferStoreB128Vbuffer>()));
+          }
+        }
+      }
+    }
+  }
 }
 
 TEST(Gfx1250ExecutionTest, VbufferB64B96MixedLanesHonorStructuredPartialOob) {
