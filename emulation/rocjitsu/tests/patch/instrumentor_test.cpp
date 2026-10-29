@@ -1966,7 +1966,7 @@ TEST(InstrumentorSpill, PlanAccSpillsRejectsUnsupportedArch) {
 
 // AccVGPR spilling is CDNA-only. RDNA4 has a scratch emitter (nonzero offset cap)
 // but no AccVGPR file, so plan_acc_spills rejects it up front with a CDNA-only
-// diagnostic instead of letting emission throw UnimplementedInst later.
+// diagnostic instead of deferring the rejection to emission.
 TEST(InstrumentorSpill, PlanAccSpillsRejectsNonCdnaArch) {
   SpillManager spills(0, 4096);
   std::vector<SpillSlot> out;
@@ -2018,6 +2018,38 @@ TEST(InstrumentorProbePatch, RejectsGfx1251ProbeForGfx1250Destination) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("concrete target"), std::string::npos)
       << "error was: " << result.errors.front();
+}
+
+// Normal planning needs no spills for this probe, but emission must still reject
+// RDNA3's unsupported boundary drain without publishing a partial patch or ELF.
+TEST(InstrumentorProbePatch, RejectsNoSpillRdna3BoundaryDrainWithoutOutput) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  const uint32_t nop = build_s_nop(0, arch);
+  auto target = make_amdgpu_kernel_elf({nop, nop}, /*private_bytes=*/0,
+                                       /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  auto probe = make_amdgpu_probe_elf("rj_test_probe", {build_s_setpc_b64(30, arch)},
+                                     EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  Instrumentor instr(obj, arch);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  EXPECT_NO_THROW({
+    const auto result = instr.patch_with_debug_summaries();
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors.front(),
+              "probe-call emission: boundary drain: Unimplemented instruction: "
+              "all-loads wait for target architecture");
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.patches.empty());
+  });
 }
 
 TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
@@ -3686,7 +3718,10 @@ protected:
   // pending is stored final-valued, not stale.
   void expect_drain_before_store(const std::vector<uint32_t> &cave,
                                  const std::vector<uint32_t> &first_spill_op) {
-    const auto drain = build_wait_all_loads_complete(a_.arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_drain =
+        build_wait_all_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_drain.succeeded());
+    const auto &drain = maybe_drain.value();
     auto op = std::ranges::search(cave, first_spill_op).begin();
     ASSERT_NE(op, cave.end());
     EXPECT_NE(std::ranges::search(std::ranges::subrange(cave.begin(), op), drain).begin(), op)
@@ -3702,7 +3737,10 @@ protected:
   void expect_drain_after_return(const std::vector<uint32_t> &cave,
                                  const std::vector<uint32_t> &first_spill_op,
                                  const std::vector<uint32_t> &first_fill_load) {
-    const auto drain = build_wait_all_loads_complete(a_.arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_drain =
+        build_wait_all_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_drain.succeeded());
+    const auto &drain = maybe_drain.value();
     auto op = std::ranges::search(cave, first_spill_op).begin();
     ASSERT_NE(op, cave.end());
     auto fill = std::ranges::search(std::ranges::subrange(op, cave.end()), first_fill_load).begin();
@@ -3715,8 +3753,14 @@ protected:
   // (epilogue) at slot `off`. Checks the words appear, not their order or the
   // descriptor size -- callers assert the load wait, drain, and scratch growth.
   void expect_vgpr_spill_present(const std::vector<uint32_t> &cave, uint16_t vgpr, uint32_t off) {
-    const auto store = build_scratch_store_dword(vgpr, off, a_.arch);
-    const auto load = build_scratch_load_dword(vgpr, off, a_.arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(vgpr, off, a_.arch);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const auto &store = maybe_store.value();
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(vgpr, off, a_.arch);
+    ASSERT_TRUE(maybe_load.succeeded());
+    const auto &load = maybe_load.value();
     EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
         << "missing store for v" << vgpr;
     EXPECT_NE(std::ranges::search(cave, load).begin(), cave.end()) << "missing load for v" << vgpr;
@@ -3727,10 +3771,22 @@ protected:
   // the words appear, not their order or the descriptor size -- callers assert the
   // load wait, drain, and scratch growth.
   void expect_sgpr_spill_present(const std::vector<uint32_t> &cave, uint16_t sgpr, uint32_t off) {
-    const auto writelane = build_v_writelane_b32(/*bridge=*/0, sgpr, /*lane=*/0, a_.arch);
-    const auto store = build_scratch_store_dword(/*bridge=*/0, off, a_.arch);
-    const auto load = build_scratch_load_dword(/*bridge=*/0, off, a_.arch);
-    const auto readlane = build_v_readlane_b32(sgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_writelane =
+        build_v_writelane_b32(/*bridge=*/0, sgpr, /*lane=*/0, a_.arch);
+    ASSERT_TRUE(maybe_writelane.succeeded());
+    const auto &writelane = maybe_writelane.value();
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(/*bridge=*/0, off, a_.arch);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const auto &store = maybe_store.value();
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(/*bridge=*/0, off, a_.arch);
+    ASSERT_TRUE(maybe_load.succeeded());
+    const auto &load = maybe_load.value();
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_readlane =
+        build_v_readlane_b32(sgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    ASSERT_TRUE(maybe_readlane.succeeded());
+    const auto &readlane = maybe_readlane.value();
     EXPECT_NE(std::ranges::search(cave, writelane).begin(), cave.end())
         << "missing writelane for s" << sgpr;
     EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
@@ -3744,8 +3800,14 @@ protected:
   // load (epilogue) at slot `off`, both carrying the `acc` bit (a direct accumulator-file
   // spill, no bridge). Checks the words appear, not their order or the descriptor size.
   void expect_acc_spill_present(const std::vector<uint32_t> &cave, uint16_t acc, uint32_t off) {
-    const auto store = build_scratch_store_dword(acc, off, a_.arch, /*acc=*/true);
-    const auto load = build_scratch_load_dword(acc, off, a_.arch, /*acc=*/true);
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(acc, off, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const auto &store = maybe_store.value();
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(acc, off, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_load.succeeded());
+    const auto &load = maybe_load.value();
     EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
         << "missing store for acc" << acc;
     EXPECT_NE(std::ranges::search(cave, load).begin(), cave.end()) << "missing load for acc" << acc;
@@ -3757,11 +3819,18 @@ protected:
   void expect_vgpr_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_vgpr_spill_present(cave, /*vgpr=*/2, /*off=*/64);
-    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
-    const auto store = build_scratch_store_dword(/*vgpr=*/2, /*off=*/64, a_.arch);
+    const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+    EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(/*vgpr=*/2, /*off=*/64, a_.arch);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const auto &store = maybe_store.value();
     expect_drain_before_store(cave, store);
-    expect_drain_after_return(cave, store,
-                              build_scratch_load_dword(/*vgpr=*/2, /*off=*/64, a_.arch));
+    const util::FailureOr<std::vector<uint32_t>> maybe_scratch_load_dword =
+        build_scratch_load_dword(/*vgpr=*/2, /*off=*/64, a_.arch);
+    ASSERT_TRUE(maybe_scratch_load_dword.succeeded());
+    expect_drain_after_return(cave, store, maybe_scratch_load_dword.value());
     EXPECT_EQ(caved.scratch, 68u);
   }
 
@@ -3772,12 +3841,19 @@ protected:
   void expect_sgpr_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_sgpr_spill_present(cave, /*sgpr=*/8, /*off=*/64);
-    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
-    const auto writelane = build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, a_.arch);
+    const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+    EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_writelane =
+        build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, a_.arch);
+    ASSERT_TRUE(maybe_writelane.succeeded());
+    const auto &writelane = maybe_writelane.value();
     const std::vector<uint32_t> writelane_words{writelane.begin(), writelane.end()};
     expect_drain_before_store(cave, writelane_words);
-    expect_drain_after_return(cave, writelane_words,
-                              build_scratch_load_dword(/*bridge=*/0, /*off=*/64, a_.arch));
+    const util::FailureOr<std::vector<uint32_t>> maybe_scratch_load_dword =
+        build_scratch_load_dword(/*bridge=*/0, /*off=*/64, a_.arch);
+    ASSERT_TRUE(maybe_scratch_load_dword.succeeded());
+    expect_drain_after_return(cave, writelane_words, maybe_scratch_load_dword.value());
     EXPECT_EQ(caved.scratch, 68u);
   }
 
@@ -3790,11 +3866,18 @@ protected:
   void expect_acc_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_acc_spill_present(cave, /*acc=*/0, /*off=*/64);
-    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
-    const auto store = build_scratch_store_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true);
+    const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+    EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(/*vdata=*/0, /*off=*/64, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const auto &store = maybe_store.value();
     expect_drain_before_store(cave, store);
-    expect_drain_after_return(
-        cave, store, build_scratch_load_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true));
+    const util::FailureOr<std::vector<uint32_t>> maybe_scratch_load_dword =
+        build_scratch_load_dword(/*vdst=*/0, /*off=*/64, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_scratch_load_dword.succeeded());
+    expect_drain_after_return(cave, store, maybe_scratch_load_dword.value());
     EXPECT_EQ(caved.scratch, 68u);
   }
 
@@ -3808,7 +3891,9 @@ protected:
     expect_acc_spill_present(cave, /*acc=*/1, /*off=*/68);
     expect_acc_spill_present(cave, /*acc=*/2, /*off=*/72);
     expect_acc_spill_present(cave, /*acc=*/3, /*off=*/76);
-    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
+    const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+    EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
     EXPECT_EQ(caved.scratch, 80u);
   }
 
@@ -3883,7 +3968,10 @@ protected:
     ASSERT_TRUE(maybe_nop.succeeded());
     const std::vector<uint32_t> cave = patch_probe_clobbering(maybe_nop.value());
     ASSERT_FALSE(cave.empty());
-    const auto drain = build_wait_all_loads_complete(arch());
+    const util::FailureOr<std::vector<uint32_t>> maybe_drain =
+        build_wait_all_loads_complete(arch());
+    ASSERT_TRUE(maybe_drain.succeeded());
+    const auto &drain = maybe_drain.value();
     size_t count = 0;
     for (auto it = std::ranges::search(cave, drain).begin(); it != cave.end();
          it = std::ranges::search(std::ranges::subrange(it + drain.size(), cave.end()), drain)
@@ -3964,9 +4052,16 @@ protected:
     // (256 on both CDNA and RDNA).
     constexpr uint16_t kVgprFileSize = 256;
     return wait_gap_before_anchor(cave, anchor, [&](std::span<const uint32_t> words) {
-      for (uint16_t bridge = 0; bridge < kVgprFileSize; ++bridge)
-        if (std::ranges::equal(words, build_v_readlane_b32(sgpr, bridge, /*lane=*/0, a_.arch)))
+      for (uint16_t bridge = 0; bridge < kVgprFileSize; ++bridge) {
+        const util::FailureOr<std::array<uint32_t, 2>> readlane =
+            build_v_readlane_b32(sgpr, bridge, /*lane=*/0, a_.arch);
+        if (readlane.failed()) {
+          ADD_FAILURE() << "could not build the SGPR restore instruction";
+          return false;
+        }
+        if (std::ranges::equal(words, readlane.value()))
           return true;
+      }
       return false;
     });
   }
@@ -4047,11 +4142,18 @@ TEST_F(Rdna4ProbeSpill, SpillsLiveClobberedVgpr) {
   expect_vgpr_spill(caved);
 
   const std::vector<uint32_t> &cave = caved.cave;
-  const auto store = build_scratch_store_dword(2, 64, arch());
-  const auto load = build_scratch_load_dword(2, 64, arch());
+  const util::FailureOr<std::vector<uint32_t>> maybe_store =
+      build_scratch_store_dword(2, 64, arch());
+  ASSERT_TRUE(maybe_store.succeeded());
+  const auto &store = maybe_store.value();
+  const util::FailureOr<std::vector<uint32_t>> maybe_load = build_scratch_load_dword(2, 64, arch());
+  ASSERT_TRUE(maybe_load.succeeded());
+  const auto &load = maybe_load.value();
   const auto store_it = std::ranges::search(cave, store).begin();
   const auto load_it = std::ranges::search(cave, load).begin();
-  const uint32_t store_wait = build_wait_stores_complete(arch());
+  const util::FailureOr<uint32_t> maybe_store_wait = build_wait_stores_complete(arch());
+  ASSERT_TRUE(maybe_store_wait.succeeded());
+  const uint32_t store_wait = maybe_store_wait.value();
   const auto store_wait_it = std::ranges::find(cave, store_wait);
   ASSERT_NE(store_wait_it, cave.end()) << "missing RDNA4 store-counter fence before the reload";
   EXPECT_LT(store_it, store_wait_it) << "store-counter fence must follow the store";
@@ -4339,7 +4441,9 @@ TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgprSgprAndAccVgpr) {
   expect_sgpr_spill_present(cave, /*sgpr=*/8, /*off=*/68);
   // AccVGPR acc0 -> slot 72, straight to scratch via the acc bit.
   expect_acc_spill_present(cave, /*acc=*/0, /*off=*/72);
-  EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(arch())), cave.end());
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(arch());
+  ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+  EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
 
   // Three 4-byte slots on top of the 16-aligned base: 64 -> 76.
   EXPECT_EQ(caved.scratch, 76u);
@@ -4370,7 +4474,9 @@ TEST_F(Cdna4ProbeSpill, SpillsMultipleLiveClobberedSgprs) {
       patch_spill({kMovV3S8, kMovV4S9, endpgm()}, {kMovS8Zero, kMovS9Zero, setpc()}, 64);
   expect_sgpr_spill_present(caved.cave, /*sgpr=*/8, /*off=*/64);
   expect_sgpr_spill_present(caved.cave, /*sgpr=*/9, /*off=*/68);
-  EXPECT_NE(std::ranges::find(caved.cave, build_wait_loads_complete(arch())), caved.cave.end());
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(arch());
+  ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+  EXPECT_NE(std::ranges::find(caved.cave, maybe_wait_loads_complete.value()), caved.cave.end());
   EXPECT_EQ(caved.scratch, 72u);
 }
 

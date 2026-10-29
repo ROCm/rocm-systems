@@ -79,10 +79,11 @@ struct SpillBracket {
   uint32_t instructions_after_sgpr_restore = 0;
 };
 
-[[nodiscard]] SpillBracket build_spill_bracket(const std::vector<SpillSlot> &vgpr_spills,
-                                               const std::vector<SpillSlot> &sgpr_spills,
-                                               const std::vector<SpillSlot> &acc_spills,
-                                               uint16_t bridge_vgpr, rj_code_arch_t arch) {
+util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &vgpr_spills,
+                                                  const std::vector<SpillSlot> &sgpr_spills,
+                                                  const std::vector<SpillSlot> &acc_spills,
+                                                  uint16_t bridge_vgpr, rj_code_arch_t arch,
+                                                  const util::DiagnosticEmitter *error) {
   constexpr uint16_t kUniformLane = 0; // An SGPR is uniform; one lane suffices.
   SpillBracket bracket;
 
@@ -97,7 +98,11 @@ struct SpillBracket {
 
   // VGPRs: batch stores in the prologue.
   for (const SpillSlot &slot : vgpr_spills) {
-    const std::vector<uint32_t> store = build_scratch_store_dword(slot.reg, slot.byte_offset, arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/false);
+    if (maybe_store.failed())
+      return util::Result::failure();
+    const auto &store = maybe_store.value();
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
   }
 
@@ -105,22 +110,36 @@ struct SpillBracket {
   // the CDNA scratch `acc` bit -- no writelane/readlane bridge needed. Stores batch
   // with the VGPR stores; loads batch with the VGPR loads under the shared wait below.
   for (const SpillSlot &slot : acc_spills) {
-    const auto store = build_scratch_store_dword(slot.reg, slot.byte_offset, arch, /*acc=*/true);
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/true);
+    if (maybe_store.failed())
+      return util::Result::failure();
+    const auto &store = maybe_store.value();
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
   }
 
   // Drain the VGPR stores before the writelane phase whenever both classes spill --
   // the only time the bridge could be a just-stored VGPR (WAR, see above).
-  if (has_vgpr && has_sgpr)
-    bracket.prologue.push_back(build_wait_stores_complete(arch));
+  if (has_vgpr && has_sgpr) {
+    const util::FailureOr<uint32_t> wait = build_wait_stores_complete(arch, error);
+    if (wait.failed())
+      return util::Result::failure();
+    bracket.prologue.push_back(wait.value());
+  }
 
   // SGPRs: writelane into the bridge then store.
   for (const SpillSlot &slot : sgpr_spills) {
-    const std::array<uint32_t, 2> wl =
-        build_v_writelane_b32(bridge_vgpr, slot.reg, kUniformLane, arch);
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_wl =
+        build_v_writelane_b32(bridge_vgpr, slot.reg, kUniformLane, arch, error);
+    if (maybe_wl.failed())
+      return util::Result::failure();
+    const auto &wl = maybe_wl.value();
     bracket.prologue.insert(bracket.prologue.end(), wl.begin(), wl.end());
-    const std::vector<uint32_t> store =
-        build_scratch_store_dword(bridge_vgpr, slot.byte_offset, arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(bridge_vgpr, slot.byte_offset, arch, error, /*acc=*/false);
+    if (maybe_store.failed())
+      return util::Result::failure();
+    const auto &store = maybe_store.value();
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
   }
 
@@ -132,34 +151,58 @@ struct SpillBracket {
   // Epilogue: restore SGPRs first (load/wait/readlane each, since the single bridge
   // is reused), then the VGPRs and AccVGPRs, so a reused bridge's reload lands last.
   for (const SpillSlot &slot : sgpr_spills) {
-    const std::vector<uint32_t> load =
-        build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch, error, /*acc=*/false);
+    if (maybe_load.failed())
+      return util::Result::failure();
+    const auto &load = maybe_load.value();
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
-    bracket.epilogue.push_back(build_wait_loads_complete(arch));
-    const std::array<uint32_t, 2> rl =
-        build_v_readlane_b32(slot.reg, bridge_vgpr, kUniformLane, arch);
+    const util::FailureOr<uint32_t> wait = build_wait_loads_complete(arch, error);
+    if (wait.failed())
+      return util::Result::failure();
+    bracket.epilogue.push_back(wait.value());
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_rl =
+        build_v_readlane_b32(slot.reg, bridge_vgpr, kUniformLane, arch, error);
+    if (maybe_rl.failed())
+      return util::Result::failure();
+    const auto &rl = maybe_rl.value();
     bracket.epilogue.insert(bracket.epilogue.end(), rl.begin(), rl.end());
   }
   for (const SpillSlot &slot : vgpr_spills) {
-    const std::vector<uint32_t> load = build_scratch_load_dword(slot.reg, slot.byte_offset, arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/false);
+    if (maybe_load.failed())
+      return util::Result::failure();
+    const auto &load = maybe_load.value();
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
     ++bracket.instructions_after_sgpr_restore;
   }
   for (const SpillSlot &slot : acc_spills) {
-    const auto load = build_scratch_load_dword(slot.reg, slot.byte_offset, arch, /*acc=*/true);
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/true);
+    if (maybe_load.failed())
+      return util::Result::failure();
+    const auto &load = maybe_load.value();
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
     ++bracket.instructions_after_sgpr_restore;
   }
   if (has_vgpr || has_acc) {
-    bracket.epilogue.push_back(build_wait_loads_complete(arch));
+    const util::FailureOr<uint32_t> wait = build_wait_loads_complete(arch, error);
+    if (wait.failed())
+      return util::Result::failure();
+    bracket.epilogue.push_back(wait.value());
     ++bracket.instructions_after_sgpr_restore;
   }
 
   // Drain all scratch stores before the call: the store's async read of the source
   // register must finish before the probe clobbers it, which also orders each store
   // ahead of its reload. RDNA4 stores live on STORECNT, which s_wait_loadcnt misses.
-  if (has_vgpr || has_sgpr || has_acc)
-    bracket.prologue.push_back(build_wait_stores_complete(arch));
+  if (has_vgpr || has_sgpr || has_acc) {
+    const util::FailureOr<uint32_t> wait = build_wait_stores_complete(arch, error);
+    if (wait.failed())
+      return util::Result::failure();
+    bracket.prologue.push_back(wait.value());
+  }
 
   return bracket;
 }
@@ -486,6 +529,42 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     return std::nullopt;
   }
 
+  const uint16_t link = plan.link_pair_base;
+  const uint16_t target_lo = plan.target_pair_base;
+  const uint16_t target_hi = static_cast<uint16_t>(plan.target_pair_base + 1);
+  // Literal-constant scalar source code; the 32-bit literal follows the word.
+  constexpr uint16_t kLiteralConstant = 0xFF;
+
+  auto report_spill_error = [error_out](std::string_view message) {
+    if (error_out != nullptr)
+      *error_out = "probe-call emission: spill bracket: " + std::string(message);
+  };
+  const util::DiagnosticEmitter spill_error(report_spill_error);
+  const util::FailureOr<SpillBracket> maybe_spill =
+      build_spill_bracket(plan.vgpr_spills, plan.sgpr_spills, plan.acc_spills,
+                          plan.spill_bridge_vgpr, plan.arch, &spill_error);
+  if (maybe_spill.failed())
+    return std::nullopt;
+  const SpillBracket &spill = maybe_spill.value();
+
+  // Architecture-complete load drain, emitted once at each probe-call boundary
+  // regardless of whether the site spills. Liveness does not model a pre-anchor
+  // asynchronous load still targeting an otherwise-dead register, so such a load
+  // could retire over a special-state/temp value we save below; a probe can
+  // likewise return with an outstanding load that would escape the call boundary.
+  // Emitted at the very top of the envelope (before any special-state/target/link
+  // write) and again immediately after the call returns (before any restoration).
+  auto report_boundary_error = [error_out](std::string_view message) {
+    if (error_out != nullptr)
+      *error_out = "probe-call emission: boundary drain: " + std::string(message);
+  };
+  const util::DiagnosticEmitter boundary_error(report_boundary_error);
+  const util::FailureOr<std::vector<uint32_t>> maybe_boundary_drain =
+      build_wait_all_loads_complete(plan.arch, &boundary_error);
+  if (maybe_boundary_drain.failed())
+    return std::nullopt;
+  const std::vector<uint32_t> &boundary_drain = maybe_boundary_drain.value();
+
   util::FailureOr<uint16_t> maybe_exec_operand = scalar_operand_exec_lo(plan.arch, &error);
   if (maybe_exec_operand.failed())
     return std::nullopt;
@@ -497,23 +576,6 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   if (maybe_minus_one.failed())
     return std::nullopt;
   const uint16_t minus_one = maybe_minus_one.value();
-  const uint16_t link = plan.link_pair_base;
-  const uint16_t target_lo = plan.target_pair_base;
-  const uint16_t target_hi = static_cast<uint16_t>(plan.target_pair_base + 1);
-  // Literal-constant scalar source code; the 32-bit literal follows the word.
-  constexpr uint16_t kLiteralConstant = 0xFF;
-
-  const SpillBracket spill = build_spill_bracket(
-      plan.vgpr_spills, plan.sgpr_spills, plan.acc_spills, plan.spill_bridge_vgpr, plan.arch);
-
-  // Architecture-complete load drain, emitted once at each probe-call boundary
-  // regardless of whether the site spills. Liveness does not model a pre-anchor
-  // asynchronous load still targeting an otherwise-dead register, so such a load
-  // could retire over a special-state/temp value we save below; a probe can
-  // likewise return with an outstanding load that would escape the call boundary.
-  // Emitted at the very top of the envelope (before any special-state/target/link
-  // write) and again immediately after the call returns (before any restoration).
-  const std::vector<uint32_t> boundary_drain = build_wait_all_loads_complete(plan.arch);
 
   std::vector<uint32_t> env;
   auto append_scalar = [&](util::FailureOr<uint32_t> word) {
