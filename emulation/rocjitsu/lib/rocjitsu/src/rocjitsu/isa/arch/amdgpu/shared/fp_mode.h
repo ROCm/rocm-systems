@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "util/data_types.h"
+#include "util/host_target.h"
 
 #include <algorithm>
 #include <bit>
@@ -25,9 +26,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 #include <type_traits>
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 #include <xmmintrin.h>
 #endif
 
@@ -62,7 +64,7 @@ inline int host_round_mode(uint32_t round_mode) {
   }
 }
 
-#if defined(__aarch64__)
+#if RJ_HOST_ARCH_AARCH64
 inline uint64_t read_fpcr() {
   uint64_t value;
   __asm__ volatile("mrs %0, fpcr" : "=r"(value) : : "memory");
@@ -77,19 +79,19 @@ inline void write_fpcr(uint64_t value) {
 class ScopedFenv {
 public:
   explicit ScopedFenv(uint32_t round_mode) {
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     saved_mxcsr_ = _mm_getcsr();
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
     saved_fpcr_ = read_fpcr();
 #endif
     saved_ = std::feholdexcept(&environment_) == 0;
     if (saved_)
       std::fesetround(host_round_mode(round_mode));
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     constexpr uint32_t kDazMask = 1u << 6;
     constexpr uint32_t kFtzMask = 1u << 15;
     _mm_setcsr(_mm_getcsr() & ~(kDazMask | kFtzMask));
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
     constexpr uint64_t kFizMask = uint64_t{1} << 0;
     constexpr uint64_t kFz16Mask = uint64_t{1} << 19;
     constexpr uint64_t kFzMask = uint64_t{1} << 24;
@@ -103,9 +105,9 @@ public:
   ~ScopedFenv() {
     if (saved_)
       std::fesetenv(&environment_);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     _mm_setcsr(saved_mxcsr_);
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
     write_fpcr(saved_fpcr_);
 #endif
   }
@@ -113,9 +115,9 @@ public:
 private:
   std::fenv_t environment_{};
   bool saved_ = false;
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   uint32_t saved_mxcsr_ = 0;
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
   uint64_t saved_fpcr_ = 0;
 #endif
 };
@@ -639,6 +641,15 @@ inline uint16_t packed_mul_bf16(float a, float b, bool fp16_ovfl) {
 enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
 
 /// @brief Execute scalar floating atomics with explicit ISA policy and bit-preserving selection.
+/// @details FCMPSWAP flushes only comparison inputs and selects the original source or memory
+/// bits. RDNA3/3.5 ISA 13.2 and CDNA2 ISA 9.5.2 / CDNA3/4 ISA 9.2.2 instead specify flushing
+/// the CompareStore result. Captures on gfx1010/gfx1030/gfx1100 LDS (F32/F64) and gfx1100
+/// global F32 contradict that rule on those paths. CDNA1-4 and RDNA3.5 LDS F32/F64,
+/// RDNA1/2 cache F32/F64, RDNA3.5 cache F32, and gfx1100 FLAT/BUFFER F32 inherit this policy
+/// without equivalent captures. CDNA5/RDNA4 expose no FCMPSWAP instructions in this tree.
+/// Every capture used FP_DENORM 0 or 3, endpoints that cannot separate input-controlled
+/// from output-controlled flushing. Denormal memory compared against +0 with a normal
+/// replacement would, under FP_DENORM 1 or 2: this policy swaps only in mode 2.
 template <typename Bits>
 Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bits compare_bits,
                    uint32_t denorm_mode, bool legacy_minmax, bool source_nan_first = false) {
@@ -659,10 +670,12 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
   const Bits compare_input = (denorm_mode & 1u) ? compare_bits : flush(compare_bits);
   if (operation == ScalarAtomicOp::FCMPSWAP) {
     // Integer equality implements finite IEEE equality except for signed zero;
-    // classify NaNs explicitly so equal payloads never cause a swap.
+    // classify NaNs explicitly so equal payloads never cause a swap. Denormal
+    // flushing applies only to the comparison; selection preserves the original
+    // source bits on a match and original memory bits on a mismatch.
     const bool equal =
         old_input == compare_input || ((old_input & ~kSign) == 0 && (compare_input & ~kSign) == 0);
-    return !is_nan(old_input) && !is_nan(compare_input) && equal ? source_input : old_input;
+    return !is_nan(old_input) && !is_nan(compare_input) && equal ? source_bits : old_bits;
   }
   if (operation == ScalarAtomicOp::FADD) {
     // DS and cache ADD use fixed RNE, independent of both MODE.round and the host.
@@ -682,6 +695,9 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
     const Bits result = std::bit_cast<Bits>(static_cast<Float>(old_value + source_value));
     return (denorm_mode & 2u) ? result : flush(result);
   }
+
+  if (operation != ScalarAtomicOp::FMIN && operation != ScalarAtomicOp::FMAX)
+    throw std::invalid_argument("unsupported scalar floating-point atomic operation");
 
   // CDNA1-4 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
   // CDNA5 / RDNA4 MIN_NUM/MAX_NUM select from the flushed values instead.
@@ -762,29 +778,16 @@ inline float finalize_omod_f32(float value, uint32_t omod) {
   return std::bit_cast<float>(bits);
 }
 
-/// @brief Scale an F32 host result in the caller's rounding environment.
-/// @details Live scalar/SDWA helper outside the shared raw-bit output stage;
-/// see output_modifier.h for migration scope.
-/// Zeros and tiny arithmetic results become +0 before scaling; a normal result
-/// that becomes tiny when halved retains its sign and flushes before packing.
-inline float apply_omod_f32(float value, uint32_t omod) {
-  if (omod == 0)
-    return value;
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  const uint32_t magnitude = bits & 0x7fffffffu;
-  if (magnitude > 0x7f800000u)
-    return value;
-  if (magnitude < 0x00800000u)
-    return 0.0f;
-  if (omod == 3 && magnitude < 0x01000000u)
-    return std::bit_cast<float>(bits & 0x80000000u);
-  if (omod == 1)
-    value *= 2.0f;
-  else if (omod == 2)
-    value *= 4.0f;
-  else if (omod == 3)
-    value *= 0.5f;
-  return value;
+/// @brief Scale an F32 result by OMOD through the shared raw-bit stage.
+/// @details Zeros and tiny results become +0 before scaling; a normal result that
+/// becomes tiny when halved keeps its sign as a zero. Overflow rounds by
+/// `round_mode` (MODE.FP_ROUND); TRANS callers pass nearest-even.
+inline float apply_omod_f32(float value, uint32_t omod, uint32_t round_mode) {
+  output_modifier::Policy policy;
+  policy.omod = omod;
+  policy.round_mode = round_mode;
+  return std::bit_cast<float>(
+      output_modifier::scale<fp_format::F32>(std::bit_cast<uint32_t>(value), policy));
 }
 
 /// @brief Scale an already rounded half result represented in F32.
@@ -817,7 +820,9 @@ inline double finalize_omod_f64(double value, uint32_t omod) {
 }
 
 /// @brief Ordinary VALU arithmetic operations governed by MODE.
-enum class Arithmetic : uint8_t { ADD, SUB, MUL, FMA, MUL_LEGACY, FMA_DX9_ZERO };
+/// @details Subtraction is ADD of the negated subtrahend: host subtraction would keep a NaN
+/// subtrahend's sign, unlike the hardware.
+enum class Arithmetic : uint8_t { ADD, MUL, FMA, MUL_LEGACY, FMA_DX9_ZERO };
 
 namespace detail {
 
@@ -836,8 +841,6 @@ inline Float evaluate_arithmetic(Float lhs, Float rhs, Float addend) {
   volatile Float accumulator = addend;
   if constexpr (operation == Arithmetic::ADD)
     return left + right;
-  else if constexpr (operation == Arithmetic::SUB)
-    return left - right;
   else if constexpr (operation == Arithmetic::MUL)
     return left * right;
   else if constexpr (operation == Arithmetic::MUL_LEGACY)
@@ -904,15 +907,55 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
       });
 }
 
+/// @brief V_MULLIT_F32 on sources with ABS/NEG applied, before OMOD and CLAMP.
+/// @details MODE flushes the sources first, so a subnormal S2 counts as zero.
+/// S1 equal to -MAX_FLOAT, -INF or NaN, or S2 that is zero, negative or NaN,
+/// gives -MAX_FLOAT. Otherwise a zero factor gives +0, as in the legacy multiply,
+/// even with an infinite or NaN S0. Other products use the architectural F32
+/// multiply: MODE rounding, tininess before F32 exponent packing, and quiets_nan
+/// for a NaN S0. `force_output_flush` is set by an effective OMOD, which flushes a
+/// tiny product before scaling, as for V_MUL_F32.
+/// Measured on gfx1201 and gfx1100 (IEEE=0 and 1); other targets with
+/// V_MULLIT_F32 inherit these rules without measurement.
+inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round_mode,
+                           uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode,
+                           bool force_output_flush) {
+  using F32 = fp_format::F32;
+  constexpr uint32_t kNegativeMax = F32::kSign | (F32::kInfinity - 1);
+  const auto input = input_denormal::Policy::make(denorm_mode);
+  s0 = input_denormal::flush_input<F32>(s0, input);
+  s1 = input_denormal::flush_input<F32>(s1, input);
+  s2 = input_denormal::flush_input<F32>(s2, input);
+  const auto is_nan = [](uint32_t bits) { return (bits & F32::kMagnitude) > F32::kInfinity; };
+  const bool s2_positive = (s2 & F32::kSign) == 0 && s2 != 0;
+  if (s1 == kNegativeMax || s1 == (F32::kSign | F32::kInfinity) || is_nan(s1) || !s2_positive ||
+      is_nan(s2))
+    return kNegativeMax;
+  if ((s0 & F32::kMagnitude) == 0 || (s1 & F32::kMagnitude) == 0)
+    return 0;
+  return std::bit_cast<uint32_t>(
+      arithmetic<Arithmetic::MUL>(std::bit_cast<float>(s0), std::bit_cast<float>(s1), 0.0f,
+                                  round_mode, denorm_mode, arch, ieee_mode, force_output_flush));
+}
+
 /// @brief Evaluate prepared F16 arithmetic operands in F64.
 /// @details The caller flushes each raw source half before widening. Destination
 /// rounding and output flushing belong to finish_arithmetic_f16; migrated VOP3
 /// callers apply OMOD/CLAMP to the returned half afterward.
+/// The unscoped form leaves the environment to the caller, for repairs running
+/// inside a region that already owns it.
+template <Arithmetic operation>
+inline double arithmetic_f16_unscoped(float lhs, float rhs, float addend) {
+  return detail::evaluate_arithmetic<operation>(static_cast<double>(lhs), static_cast<double>(rhs),
+                                                static_cast<double>(addend));
+}
+
+/// @brief arithmetic_f16_unscoped under its own guest FP environment.
+/// @details Installs `round_mode` and delegates, for callers that own no scope.
 template <Arithmetic operation>
 inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_mode) {
   detail::ScopedFenv environment(round_mode);
-  return detail::evaluate_arithmetic<operation>(static_cast<double>(lhs), static_cast<double>(rhs),
-                                                static_cast<double>(addend));
+  return arithmetic_f16_unscoped<operation>(lhs, rhs, addend);
 }
 
 /// @brief Round an F16 arithmetic destination and apply output-denormal policy.
@@ -920,9 +963,11 @@ inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_
 /// afterward. SDWA supplies omod here to keep the emulator's pre-round scaling,
 /// which gfx1030 SDWA MUL_F16 and ADD_F16 captures contradict; see
 /// output_modifier.h.
-inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
-                                      bool fp16_ovfl, uint32_t omod = 0) {
-  detail::ScopedFenv environment(0);
+/// The unscoped form leaves the nearest-even environment to the caller, keeping
+/// the same rounding, output flushing and FP16_OVFL handling.
+inline uint16_t finish_arithmetic_f16_unscoped(double value, uint32_t round_mode,
+                                               uint32_t denorm_mode, bool fp16_ovfl,
+                                               uint32_t omod = 0) {
   const uint16_t rounded =
       pseudo_scalar::round_f16_result(value, round_mode, omod, false, fp16_ovfl, false);
   const auto result = static_cast<uint16_t>(output_denormal::flush_output<fp_format::F16>(
@@ -930,15 +975,23 @@ inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_
   return finalize_omod_f16(result, omod);
 }
 
+/// @brief finish_arithmetic_f16_unscoped under its own nearest-even environment.
+/// @details Installs the environment and delegates, for callers that own no scope.
+inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
+                                      bool fp16_ovfl, uint32_t omod = 0) {
+  detail::ScopedFenv environment(0);
+  return finish_arithmetic_f16_unscoped(value, round_mode, denorm_mode, fp16_ovfl, omod);
+}
+
 /// @brief Whether a host SIMD arithmetic fast path implements the wave's FP policy.
 /// @details Requires nearest rounding and preserved host inputs/outputs.
 inline bool native_arithmetic_matches(uint32_t round_mode, uint32_t denorm_mode) {
   if (denorm_mode != 3 || round_mode != 0 || std::fegetround() != FE_TONEAREST)
     return false;
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   // MXCSR rounding can differ from the x87 rounding reported by fegetround().
   return (_mm_getcsr() & (_MM_ROUND_MASK | (1u << 6) | (1u << 15))) == 0;
-#elif defined(__aarch64__)
+#elif RJ_HOST_ARCH_AARCH64
   return (detail::read_fpcr() & ((uint64_t{1} << 0) | (uint64_t{1} << 19) | (uint64_t{1} << 24))) ==
          0;
 #else

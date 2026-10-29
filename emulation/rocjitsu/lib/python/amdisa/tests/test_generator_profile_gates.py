@@ -3809,6 +3809,238 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'inst.vdst.write_lane' not in true16_ternary
 
 
+@pytest.mark.parametrize('arch_name', ['rdna3_5', 'rdna4', 'cdna5'])
+def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+    arithmetic = 'S_MIN_F16' if arch_name == 'rdna3_5' else 'S_ADD_F16'
+    cases = [
+        (arithmetic, ('ssrc0', 'ssrc1'), False),
+        ('S_CVT_F32_F16', ('ssrc0',), False),
+        ('S_CVT_HI_F32_F16', ('ssrc0',), True),
+        ('S_SEXT_I32_I16', (), False),
+        ('S_PACK_LL_B32_B16', (), False),
+        ('S_PACK_LH_B32_B16', (), False),
+        ('S_PACK_HH_B32_B16', (), False),
+        ('S_PACK_HL_B32_B16', (), False),
+    ]
+    for name, numeric_sources, high in cases:
+        enc, inst = next(
+            (enc, inst)
+            for enc in spec.inst_encodings
+            for inst in enc.insts
+            if inst.name == name
+        )
+        generator._current_inst_fields = {field.name for field in enc.ucode_fields}
+        generator._current_operand_names = {operand.name for operand in inst.operands}
+        generator._current_enc = enc
+        body = generator._gen_execute_body(
+            inst, semantics.instructions[name], enc.enc_name
+        )
+
+        for operand in inst.src_operands:
+            if operand.name in numeric_sources:
+                assert operand.data_format_name == 'FMT_NUM_F16', name
+                suffix = ', true' if high else ''
+                assert (
+                    f'amdgpu::read_scalar_f16_carrier({operand.name}, wf{suffix})'
+                    in body
+                ), name
+                assert f'.read_scalar({operand.name})' not in body, name
+            else:
+                assert operand.data_format_name != 'FMT_NUM_F16', name
+                assert f'.read_scalar({operand.name})' in body, name
+        if not numeric_sources:
+            assert 'read_scalar_f16_carrier' not in body, name
+        assert ('>> 16' in body) or not high, name
+
+
+@pytest.mark.parametrize('arch_name', ['rdna3', 'rdna4', 'cdna4', 'cdna5'])
+def test_generated_16bit_valu_inline_format_follows_each_source(
+    arch_name, amdgpu_generated_root: Path
+):
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+    generated_root = amdgpu_generated_root / _generated_dir_name(arch_name)
+    source = '\n'.join(
+        path.read_text()
+        for path in sorted(generated_root.glob('vop*.cpp'))
+        if '_exec' not in path.stem
+    )
+    cases = [
+        ('ENC_VOP1', 'V_CVT_F16_I16', {'src0'}),
+        ('ENC_VOP1', 'V_CVT_F16_U16', {'src0'}),
+        ('ENC_VOP3', 'V_CVT_F16_I16', {'src0'}),
+        ('ENC_VOP3', 'V_CVT_F16_U16', {'src0'}),
+        ('ENC_VOP3', 'V_MAX_I16', {'src0', 'src1'}),
+        ('ENC_VOP3', 'V_LSHLREV_B16', {'src0', 'src1'}),
+        ('ENC_VOP2', 'V_ADD_F16', set()),
+        ('ENC_VOP3', 'V_ADD_F16', set()),
+        ('ENC_VOP2', 'V_LDEXP_F16', set()),
+        ('ENC_VOP3', 'V_LDEXP_F16', set()),
+        ('ENC_VOP3P', 'V_PK_ADD_F16', set()),
+    ]
+    if arch_name != 'cdna4':
+        cases.extend(
+            [
+                ('ENC_VOP1', 'V_MOV_B16', {'src0'}),
+                ('ENC_VOP3', 'V_CNDMASK_B16', {'src0', 'src1'}),
+            ]
+        )
+    cases = [
+        (encoding, name, dict.fromkeys(sources, 'F32'))
+        for encoding, name, sources in cases
+    ]
+    bf16 = {
+        'rdna3': ('ENC_VOP3', 'V_DOT2_BF16_BF16', {'src2': 'BF16'}),
+        'rdna4': ('ENC_VOP3', 'V_DOT2_BF16_BF16', {'src2': 'BF16'}),
+        'cdna4': ('ENC_VOP1', 'V_CVT_F32_BF16', {'src0': 'BF16'}),
+        'cdna5': ('ENC_VOP1', 'V_TANH_BF16', {'src0': 'F32'}),
+    }
+    cases.append(bf16[arch_name])
+    if arch_name in ('cdna4', 'cdna5'):
+        cases.append(
+            (
+                'ENC_VOP3',
+                'V_CVT_F32_BF16',
+                {'src0': 'F32' if arch_name == 'cdna5' else 'BF16'},
+            )
+        )
+
+    for encoding, name, expected_formats in cases:
+        inst = next(
+            inst
+            for enc in spec.inst_encodings
+            if enc.enc_name == encoding
+            for inst in enc.insts
+            if inst.name == name
+        )
+        constructor = _generated_constructor_body(source, inst.fmt_name)
+        flagged = re.findall(
+            r'(\w+)\.set_lane_inline_float_format\(Operand::LaneInlineFloatFormat::(\w+)\);',
+            ''.join(constructor.split()),
+        )
+        assert dict(flagged) == expected_formats, inst.fmt_name
+        assert len(flagged) == len(expected_formats), inst.fmt_name
+        for operand in expected_formats:
+            setter = constructor.index(f'{operand}.set_lane_inline_float_format(')
+            assert setter > constructor.rfind(f'{operand} = '), inst.fmt_name
+
+    operand_exec = (generated_root / 'operand_exec.cpp').read_text()
+    assert 'uses_fp32_inline_constants' not in operand_exec
+    chunk = operand_exec[operand_exec.index('void Operand::read_lane_chunk_exec(') :]
+    chunk = chunk[: chunk.index('\n}')]
+    assert 'out,count,read_lane_exec(wf,lane_base)' in ''.join(chunk.split())
+
+
+@pytest.mark.parametrize(
+    'arch_name',
+    [
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+    ],
+)
+def test_generated_legacy_16bit_alu_destinations_preserve_the_other_half(
+    arch_name, amdgpu_generated_root: Path
+):
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+    generated_root = amdgpu_generated_root / _generated_dir_name(arch_name)
+    source = '\n'.join(
+        path.read_text()
+        for path in sorted(generated_root.glob('*.cpp'))
+        if '_exec' not in path.stem
+    )
+
+    def constructor(encoding, name):
+        inst = next(
+            inst
+            for enc in spec.inst_encodings
+            if enc.enc_name == encoding
+            for inst in enc.insts
+            if inst.name == name
+        )
+        return inst, _generated_constructor_body(source, inst.fmt_name)
+
+    legacy = arch_name in ('rdna1', 'rdna2')
+    statement = 'vdst.set_register_byte_mask(0x3);'
+    preserve = 'vdst.set_preserve_unwritten_bytes();'
+    guard = (
+        'if (reinterpret_cast<const OpEncoding*>(inst)->src0 != '
+        f'amdgpu::SRC_SDWA) {{ {statement} {preserve} }}'
+    )
+    for encoding, name in [
+        ('ENC_VOP1', 'V_CVT_F16_U16'),
+        ('ENC_VOP2', 'V_ADD_F16'),
+        ('ENC_VOP3', 'V_ADD_F16'),
+        ('ENC_VOP3', 'V_MAX_I16'),
+    ]:
+        inst, body = constructor(encoding, name)
+        destination = next(op for op in inst.dst_operands if op.name == 'vdst')
+        assert destination.size == 16, inst.fmt_name
+        assert body.count(statement) == int(legacy), inst.fmt_name
+        assert body.count(preserve) == int(legacy), inst.fmt_name
+        if legacy:
+            guarded = ''.join(guard.split()) in ''.join(body.split())
+            assert guarded == (encoding in ('ENC_VOP1', 'ENC_VOP2')), inst.fmt_name
+            assert body.index(statement) > body.rfind('vdst = '), inst.fmt_name
+
+    exclusions = [
+        ('ENC_SOP1', 'S_SEXT_I32_I16'),
+        ('ENC_SOP2', 'S_PACK_LL_B32_B16'),
+        ('ENC_VOP3P', 'V_PK_ADD_F16'),
+    ]
+    if legacy:
+        exclusions.extend(
+            [
+                ('ENC_DS', 'DS_READ_I8_D16'),
+                ('ENC_MUBUF', 'BUFFER_LOAD_UBYTE_D16'),
+                ('ENC_FLAT', 'FLAT_LOAD_UBYTE_D16'),
+                ('ENC_VOP1', 'V_SAT_PK_U8_I16'),
+                ('ENC_VOP3', 'V_SAT_PK_U8_I16'),
+            ]
+        )
+        for name, mask in [('V_FMA_MIXLO_F16', '0x3'), ('V_FMA_MIXHI_F16', '0xc')]:
+            inst, body = constructor('ENC_VOP3P', name)
+            masks = re.findall(r'vdst\.set_register_byte_mask\(([^)]+)\);', body)
+            assert masks == [mask], inst.fmt_name
+            assert 'amdgpu::SRC_SDWA' not in body, inst.fmt_name
+            assert '.set_preserve_unwritten_bytes();' not in body, inst.fmt_name
+    if arch_name in ('rdna3_5', 'rdna4', 'cdna5'):
+        scalar = 'S_MIN_F16' if arch_name == 'rdna3_5' else 'S_ADD_F16'
+        exclusions.append(('ENC_SOP2', scalar))
+    for encoding, name in exclusions:
+        inst, body = constructor(encoding, name)
+        assert '.set_register_byte_mask(0x3);' not in body, inst.fmt_name
+        assert '.set_preserve_unwritten_bytes();' not in body, inst.fmt_name
+        if name == 'V_SAT_PK_U8_I16':
+            assert next(op for op in inst.dst_operands if op.name == 'vdst').size == 16
+            generator = CodeGenerator(spec, '', derive_all_semantics(spec))
+            generator._current_inst_fields = set()
+            execution = generator._gen_execute_body(
+                inst, generator.semantics.instructions[name], encoding
+            )
+            assert 'uint32_t result =' in execution
+            assert 'write_lane(vdst, lane, result)' in execution
+            assert 'write_vop3_true16_dst' not in execution
+
+
 def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
     execute_shared_path: Path,
     gfx1250_generated_root: Path,
@@ -3861,6 +4093,7 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
             flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
             assert flush in body
             assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in body
+            assert 'read_scalar_f16_carrier' not in body
             assert body.index('util::f16_to_f32(') < body.index(flush)
             assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
             assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
@@ -3870,6 +4103,10 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
             constructor = _generated_constructor_body(constructor_source, class_name)
             assert 'vop3_opsel' not in constructor
             assert 'simm32 & 0xFFFFu' in constructor
+            assert (
+                'src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);'
+                in constructor
+            )
 
         pseudo_scalar_constructors = [
             'VSExpF32Vop3',
@@ -3927,11 +4164,15 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
     vop2 = _shared_execute_body(execute_shared, 'v_add_f16_vop2', 'v_add_f16_vop3')
     vop3 = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
 
-    assert 'if (wf.fp16_ovfl())' in vop2
-    assert 'f32_to_f16_ovfl_simd' in vop2
+    # Both encodings delegate FP16_OVFL narrowing to the shared arithmetic helper,
+    # so neither selects a narrowing helper by branching on the bit. VOP2 takes the
+    # unscoped core under one per-instruction environment rather than one per chunk.
+    assert 'binary_f16_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>' in vop2
+    assert 'ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(' in vop2
+    assert 'if (wf.fp16_ovfl())' not in vop2
+    assert 'f32_to_f16_ovfl_simd' not in vop2
     assert 'sdwa::finish_arithmetic_f16' in vop2
     assert 'wf.fp16_ovfl()' in vop2
-    # VOP3 delegates FP16_OVFL narrowing to its MODE-aware SIMD helper.
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in vop3
     assert 'sdwa::finish_arithmetic_f16' in vop3
     assert 'wf.fp16_ovfl()' in vop3
@@ -6793,7 +7034,12 @@ def test_generated_vop3_dot2_true16_uses_true16_helpers(
     assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
     assert 'uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);' in body
     assert 'uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);' in body
-    assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
+    assert (
+        'uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane(src2, lane);' in body
+    )
+    replication = 'if (amdgpu::dot2_src_needs_half_replication(inst_.src2))'
+    assert replication in body
+    assert body.index(replication) < body.index('if (opsel & 4u)')
     assert (
         'amdgpu::gfx12_dot2_packed16<false>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl())'
         in body
@@ -7565,6 +7811,40 @@ def test_vopd_integer_simd_probe_requires_available_opcodes(tmp_path, missing_op
     execute_slot = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot') :]
     assert execute_slot.index('src0 = apply_neg(') < execute_slot.index('return src0;')
     assert execute_slot.index('return src0;') < execute_slot.index('uint32_t src1 =')
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_vopd_subtraction_adds_negated_subtrahend(tmp_path, arch):
+    profile = Rdna3Profile() if arch == 'rdna3' else Rdna4Profile()
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch,
+        generated_dir_name=arch,
+        cpp_namespace=arch,
+        profile=profile,
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+    codegen.gen_vopd()
+    exec_cpp = (tmp_path / arch / 'vopd_exec.cpp').read_text()
+
+    def body(case):
+        # The last label is the execute_slot body; earlier ones list modifier support.
+        start = exec_cpp.rindex(f'case {case}:')
+        return exec_cpp[start : exec_cpp.index('case ', start + 1)]
+
+    # As VOP2: ADD of the negated subtrahend, in operand order, with the
+    # architectural NaN policy. Host subtraction would keep a NaN subtrahend's sign.
+    sub, subrev = body('kVopdSubF32'), body('kVopdSubrevF32')
+    for text in (sub, subrev):
+        assert 'Arithmetic::ADD>' in text
+        assert 'Arithmetic::SUB>' not in text
+        assert 'wf.cu().arch(), wf.ieee_mode()' in text
+    assert 'std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u)' in sub
+    assert (
+        'std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1)' in subrev
+    )
 
 
 def test_rdna4_profile_enables_generated_vopd():

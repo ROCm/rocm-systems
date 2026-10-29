@@ -4,6 +4,41 @@
 //! Signal lifetime, callback, wait, IPC, and ABI regression tests.
 
 use super::*;
+use crate::api::signal::asynchronous::*;
+
+#[test]
+fn satisfied_single_wait_does_not_take_lifecycle_mutex() {
+    let slot = Arc::new(AmdSignal::user(7));
+    let handle = HsaSignal {
+        handle: Arc::as_ptr(&slot) as u64,
+    };
+    reserve_wait_signal_slots(1).unwrap();
+    publish_wait_signal(handle.handle as usize);
+    let lifecycle = lock().unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        // SAFETY: The registry and Arc keep the slot mapped for this load.
+        let value = unsafe {
+            signal_wait(
+                handle,
+                SIGNAL_CONDITION_EQ,
+                7,
+                0,
+                WAIT_STATE_ACTIVE,
+                Ordering::Acquire,
+            )
+        };
+        sender.send(value).unwrap();
+    });
+    let result = receiver.recv_timeout(Duration::from_secs(1));
+    drop(lifecycle);
+    worker.join().unwrap();
+    WAIT_SIGNAL_HANDLES
+        .write()
+        .unwrap()
+        .remove(&(handle.handle as usize));
+    assert_eq!(result.unwrap(), 7);
+}
 
 /// Creates a signal batch and returns its live members.
 fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal>) {

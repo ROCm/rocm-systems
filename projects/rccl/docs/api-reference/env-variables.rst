@@ -116,6 +116,17 @@ in the following table.
         | ``1``: Build them on the first AllGather eligible for hierarchical
           AllGather, outside graph capture.
 
+    * - | ``NCCL_NVLS_ENABLE``
+        | Controls NVLink SHARP (NVLS), an NVIDIA NVSwitch multicast feature.
+          RCCL accepts this variable for compatibility with NCCL but does not
+          implement NVLS, so it has no effect on AMD GPUs. Because RCCL never
+          creates NVLS multicast buffers, the multicast bind failure that NCCL
+          2.29 and later reports as a ``WARN`` and an initialization error
+          cannot occur in RCCL.
+      - | ``0``, ``1``, ``2``: All values behave the same. Communicator
+          initialization does not use NVLS and does not fail because of it.
+        | Default: ``2``
+
 Logging and debugging
 =====================
 
@@ -606,6 +617,56 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``RCCL_IB_GDR_FLUSH_FLAG``
+        | Replaces the GPUDirect RDMA flush of Simple-protocol receives in the
+          ``IB`` network transport (``net_ib``). By default, the proxy fences
+          each receive with an RDMA read on a loopback QP and waits for it
+          before handing the data to the GPU. With this variable set, the
+          sender writes a per-QP flag into GPU memory after the payload, on the
+          same QP and without relaxed ordering, and the GPU waits for the flag
+          instead.
+        | A communicator uses it only when every rank sets it and can use it:
+          gfx942 or gfx950, the ``IB`` transport, and no adaptive routing
+          (``NCCL_IB_ADAPTIVE_ROUTING``), out-of-order receive queues
+          (``NCCL_IB_OOO_RQ``), ID-based receive matching
+          (``NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1``) or port-failover
+          resiliency (``NCCL_IB_RESILIENCY_PORT_FAILOVER``). Otherwise every
+          rank keeps the RDMA read flush. A connection also keeps it when
+          either side uses more than one NIC (NIC Fusion, including a fused
+          vNIC chosen by ``NCCL_IB_SUBNET_AWARE_ROUTING``), a request spans
+          more than 8 QPs, or the flag memory cannot be registered. LL and
+          LL128 receives never use the flag.
+        | On gfx950 with 2 to 8 nodes of 8 GPUs, a communicator using it also
+          adjusts the ``ncclAllReduce`` algorithm and protocol choice from
+          16 MB per node upward, and switches ``ncclReduceScatter`` from LL128
+          to Simple above 6 MB per rank instead of 8 MB, unless ``NCCL_ALGO``
+          or ``NCCL_PROTO`` is set.
+        | Read once per process.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``RCCL_IB_GDR_FLUSH_FLAG_TUNE``
+        | Turns on additional collective tuning for communicators that use
+          ``RCCL_IB_GDR_FLUSH_FLAG``, on gfx950 with 8 GPUs per node on 2 to 8
+          or 16 nodes. It has no effect on other communicators.
+        | The LL128 buffer of ring and tree connections grows to 4 times its
+          default size; send/recv connections keep the default.
+          ``NCCL_LL128_BUFFSIZE`` disables the larger buffer.
+        | ``ncclAllReduce`` selects Ring/LL128 from 12 MB per node for as long
+          as one ring loop can carry the data (about 98 MiB per node with the
+          larger buffer), Tree/Simple up to 64 MB per node, and Ring/Simple on
+          48 channels from 64 to 128 MB per node. On 16 nodes it selects
+          Tree/Simple from 8 to 64 MB per node.
+        | ``ncclReduceScatter`` keeps LL128 up to 7 MB per rank instead of 6 MB,
+          and switches to Simple above that on 16 nodes too.
+        | Tree/LL128, and Ring/LL128 ``ncclBroadcast`` and ``ncclReduce`` below
+          about ``nRanks / 2`` chunks per channel, keep the default chunk size.
+        | The algorithm and protocol choices do not apply when ``NCCL_ALGO``
+          or ``NCCL_PROTO`` is set.
+        | Read once per process. All ranks must use the same value.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
     * - | ``NCCL_NCHANNELS_PER_NET_PEER``
         | Sets the number of channels used per network (remote) peer.
         | This overrides the value of the ``nChannelsPerNetPeer`` field in
@@ -665,6 +726,30 @@ in the following table.
         | Controls ring remapping for specific topologies.
       - | Remapping specification string
         | Used with Rome 4P2H topology
+
+    * - | ``RCCL_PCIE_ORDERED_RING``
+        | This varilable applies only to gfx1250 scale-up single-host communicators.
+          Pins ring graph search to the order GPUs appear in the topology
+          array, so every channel uses the same ring. Without it the search
+          picks a different permutation per channel, so a device exchanges
+          with many different peers; pinning the order reduces fan-out to
+          one peer per direction per device across all rings. On
+          partitioned (DPX) GPUs the unpinned search also mixes scale-up
+          and scale-in hops between channels, though ring throughput is
+          bounded by its slowest hop either way. This
+          constrains GPU visitation order only; path validation, bandwidth
+          constraints, and backtracking are unchanged, and the ring still
+          travels whatever paths the search validates. Applies to gfx1250
+          ring graphs on a single host where every rank is a GPU of that
+          topology; trees, CollNet, other architectures, and multi-host
+          communicators are unaffected. ``NCCL_GRAPH_FILE`` and
+          ``NCCL_RINGS`` take precedence. Also accepted as
+          ``NCCL_PCIE_ORDERED_RING``.
+      - | ``0``: Disabled, use the unconstrained permutation search.
+        | ``1``: Enabled (default). If no ordered ring passes validation,
+          warn and fall back to the default ordering.
+        | ``2``: Enabled, strict. If no ordered ring passes validation,
+          fail communicator initialization instead of falling back.
 
     * - | ``NCCL_GIN_PLUGIN``
         | Selects external GIN (GPU-Initiated Networking) plugins.
@@ -1091,6 +1176,15 @@ threshold table introduced for gfx1250.
         | ``0``: Disabled.
         | ``1``: Force-enabled (CTA_POLICY check bypassed).
 
+    * - | ``RCCL_CE_REDUCESCATTER``
+        | Opt-in Copy Engine ReduceScatter. Off by default. When enabled, it shares
+          the CE AllReduce staging buffer (``ceARTmpBuf``); user buffers do not need
+          symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
+          Single-node symmetric communicators only. There is no message-size cap;
+          large messages are pipelined through the staging slots.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled, subject to the other eligibility checks.
+
     * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
           the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
@@ -1100,24 +1194,28 @@ threshold table introduced for gfx1250.
       - | ``-1``: Resolved from the per-arch table (default).
         | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce size cap.
 
-    * - | ``RCCL_CE_AR_REG_MAX_MSG_BYTES``
-        | Overrides the CE registered-window AllReduce message size cap. When ``-1``
-          (default), the cap is read from ``ceRegMax[AllReduce]`` in the per-arch
-          table. This is the upper bound for the path where both send and receive
-          buffers are in symmetric windows (``-R 2`` mode in rccl-tests).
-      - | ``-1``: Resolved from the per-arch table (default).
-        | ``N`` (bytes): Use ``N`` as the registered AllReduce size cap.
-
     * - | ``RCCL_CE_AR_STAGING_BYTES``
         | Overrides the total allocation size of the CE AllReduce staging buffer
           (``ceARTmpBuf``). When ``-1`` (default), the buffer is allocated at the
-          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (256 MiB). Increasing
+          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
           this reduces pipelining overhead for large messages but raises per-rank
           GPU memory usage. This variable sizes the buffer only; the selector cap
-          is controlled separately by ``RCCL_CE_AR_2SHOT_MAX_BYTES``.
-      - | ``-1``: Use the compile-time default of 256 MiB (default).
+          is controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
+      - | ``-1``: Use the compile-time default of 16 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
+    * - | ``RCCL_TDM_LL128_ENABLE``
+        | Routes the LL128 user destination buffer through the gfx1250 tensor data
+          mover: each warp's slice is staged in LDS and pushed out as one bulk
+          transfer instead of per-lane vector stores. Gains are concentrated in
+          large messages under LL128 (AllGather is the best case); below roughly
+          32 MiB the staging overhead makes it a small loss. The library must also
+          be built with ``--enable-tdm-prim-ll128``, and the path only compiles on
+          gfx1250 with an SDK providing the tensor data mover builtins. On any
+          other architecture, or without the build flag, this variable has no
+          effect.
+      - | ``0``: Disabled (default). The LL128 store uses the per-lane vector path.
+        | ``1``: Enabled, where the build and architecture support it.
     * - | ``RCCL_CE_AR_2SHOT_MIN_BYTES``
         | Overrides the minimum message size for the CE 2-shot AllReduce path.
           When ``-1`` (default), the value is resolved from ``ceNonRegMin[AllReduce]``

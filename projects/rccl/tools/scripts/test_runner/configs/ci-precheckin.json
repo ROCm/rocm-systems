@@ -76,6 +76,7 @@
         {"name": "Standalone.RegressionTiming", "description": "Verify no timing regression for protocols (LL, LL128, Simple)", "test_filter": "Standalone.RegressionTiming"},
         {"name": "Standalone.CommCuDevice_Check", "description": "Verify device associated with communicator in single/multi-device scenarios", "test_filter": "Standalone.CommCuDevice_Check"},
         {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"},
+        {"name": "Standalone.NvlsEnable_NoEffect", "description": "Verify NCCL_NVLS_ENABLE=0/1/2 does not fail init or AllReduce; log checks for NCCL's NVLS bind messages are tripwires for enabling the CUDA NVLS code", "test_filter": "Standalone.NvlsEnable_NoEffect"},
         {"name": "Fp8Validation.HostCompareIsExact", "description": "FP8 host comparison rejects a result one FP8 step away", "test_filter": "Fp8Validation.HostCompareIsExact", "timeout": 60},
         {"name": "Fp8Validation.DeviceCompareIsExact", "description": "FP8 device comparison rejects a result one FP8 step away", "test_filter": "Fp8Validation.DeviceCompareIsExact", "timeout": 60},
         {"name": "Fp8Validation.VerifiableReferenceDetectsErrors", "description": "FP8 verifiable generator verifies its expected output and detects a single corrupted element", "test_filter": "Fp8Validation.VerifiableReferenceDetectsErrors", "timeout": 60},
@@ -112,6 +113,15 @@
         {"name": "DoneEventOrdering.GroupedPathBaseline", "description": "DoneEventOrdering grouped path baseline", "test_filter": "DoneEventOrdering.GroupedPathBaseline", "timeout": 240},
         {"name": "DoneEventOrdering.DefaultStreamToNamedStream", "description": "DoneEventOrdering default to named stream", "test_filter": "DoneEventOrdering.DefaultStreamToNamedStream", "timeout": 240},
         {"name": "DoneEventOrdering.SameStreamThenSwitch", "description": "DoneEventOrdering same stream then switch", "test_filter": "DoneEventOrdering.SameStreamThenSwitch", "timeout": 240},
+        {"name": "GraphCaptureStreamOrdering.SingleCollective", "description": "GraphCaptureStreamOrdering one captured AllReduce under each capture mode", "test_filter": "GraphCaptureStreamOrdering.SingleCollective", "timeout": 240},
+        {"name": "GraphCaptureStreamOrdering.LongChainNoEdgeBlowup", "description": "GraphCaptureStreamOrdering 16 captured AllReduces form a chain without redundant edges", "test_filter": "GraphCaptureStreamOrdering.LongChainNoEdgeBlowup", "timeout": 240},
+        {"name": "GraphCaptureStreamOrdering.InterleavedUserWork", "description": "GraphCaptureStreamOrdering user kernels and zero-count calls between captured AllReduces under graph mixing and implicit launch order", "test_filter": "GraphCaptureStreamOrdering.InterleavedUserWork", "timeout": 240},
+        {"name": "GraphCaptureStreamOrdering.InterleavedUserWorkNetTransport", "description": "GraphCaptureStreamOrdering user kernels between captured AllReduces over the socket transport", "test_filter": "GraphCaptureStreamOrdering.InterleavedUserWorkNetTransport", "timeout": 240},
+        {"name": "GraphCaptureStreamOrdering.ForkJoinBeforeCollective", "description": "GraphCaptureStreamOrdering fork/join user work feeding a captured AllReduce", "test_filter": "GraphCaptureStreamOrdering.ForkJoinBeforeCollective", "timeout": 240},
+        {"name": "GraphCaptureStreamOrdering.GroupedAndPointToPoint", "description": "GraphCaptureStreamOrdering grouped collectives and send/recv captured on one stream", "test_filter": "GraphCaptureStreamOrdering.GroupedAndPointToPoint", "timeout": 240},
+        {"name": "GraphCaptureStreamOrdering.EagerAroundCapture", "description": "GraphCaptureStreamOrdering uncaptured one- and two-stream launches before, between and after graph launches", "test_filter": "GraphCaptureStreamOrdering.EagerAroundCapture", "timeout": 240},
+        {"name": "GraphCaptureStreamOrdering.ConcurrentCapturesSameComm", "description": "GraphCaptureStreamOrdering two graphs captured at once from the same communicators", "test_filter": "GraphCaptureStreamOrdering.ConcurrentCapturesSameComm", "timeout": 240},
+        {"name": "GraphCaptureStreamOrdering.RecaptureAcrossStreams", "description": "GraphCaptureStreamOrdering recapture on the same and on a different stream", "test_filter": "GraphCaptureStreamOrdering.RecaptureAcrossStreams", "timeout": 240},
         {"name": "Recorder.ParseBinary", "description": "Recorder parse binary tests", "test_filter": "Recorder.ParseBinary", "timeout": 60},
         {"name": "Recorder.ParseJson", "description": "Recorder parse JSON tests", "test_filter": "Recorder.ParseJson", "timeout": 60},
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithread verification tests", "test_filter": "Recorder.VerifyMultithread", "timeout": 60},
@@ -174,61 +184,6 @@
         {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
       ]
     },
-    "unit_tests_micro_crypt": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroCrypt",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "CryptMicrotests", "description": "Host-only misc/crypt.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_strongstream": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroStrongstream",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "StrongstreamMicrotests", "description": "Host-only misc/strongstream.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_utils": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroUtils",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "UtilsMicrotests", "description": "Host-only misc/utils.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_argcheck": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroArgcheck",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "ArgcheckMicrotests", "description": "Host-only misc/argcheck.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_cpuset": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroCpuset",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "CpusetMicrotests", "description": "Host-only include/cpuset.h microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
     "unit_tests_utility_host_only": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsUtilityHostOnly",
@@ -243,17 +198,6 @@
         {"name": "UtilityHostOnly_AllTests", "description": "nccl_device/utility.h compiled as plain C++ (host testAbort overload)", "test_filter": "*"}
       ]
     },
-    "unit_tests_micro_dda_coll": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroDdaColl",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "DdaCollMicrotests", "description": "Host-only algorithms/dda collective launchers microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
     "unit_tests_gdr": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsGdr",
@@ -263,226 +207,6 @@
       "timeout": 60,
       "tests": [
         {"name": "GdrPeerMem", "description": "net_ib peer-memory client sysfs detection (mock memory_peers tree)", "test_filter": "GdrPeerMem.*"}
-      ]
-    },
-    "unit_tests_micro": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicro",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "P2pMicrotests", "description": "Host-only p2p.cc microtests (no GPU, no HIP/RCCL runtime); contributes p2p.cc coverage", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_init": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroInit",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "InitMicrotests", "description": "Host-only init.cc microtests (no GPU, no HIP/RCCL runtime); contributes init.cc coverage", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_init_uncached": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroInit-uncached",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "InitMicrotestsUncached", "description": "Host-only init.cc microtests, HIP_*_UNCACHED_MEMORY arm; covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_nccl_device": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroNcclDevice",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "NcclDeviceMicrotests", "description": "Host-only nccl_device requirement builders microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_core": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroCore",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "CoreMicrotests", "description": "Host-only nccl_device/core.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_cft_dev_runtime": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroCftDevRuntime",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "CftDevRuntimeMicrotests", "description": "Host-only cft_dev_runtime.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_init_faultinj": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroInit-faultinj",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "InitMicrotestsFaultInj", "description": "Host-only init.cc microtests, ENABLE_FAULT_INJECTION arm (the one that ships); covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_param": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroParam",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "ParamMicrotests", "description": "Host-only param runtime microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_enqueue": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroEnqueue",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "EnqueueMicrotests", "description": "Host-only enqueue.cc microtests (no GPU, no HIP/RCCL runtime); contributes enqueue.cc coverage", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_symkernels": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroSymKernels",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "SymKernelsMicrotests", "description": "Host-only sym_kernels.cc/sym_kernels_host.cc microtests (no GPU, no HIP/RCCL runtime); contributes sym_kernels coverage", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_profiler": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroProfiler",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "ProfilerMicrotests", "description": "Host-only profiler plugin microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_gin_host": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroGinHost",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "GinHostMicrotests", "description": "Host-only gin/gin_host.cc microtests (no GPU, no HIP/RCCL runtime); covers GIN_PROXY_NTHREADS (NVIDIA/nccl#2279 / AICOMRCCL-2017) and proxy-thread CPU affinity (AICOMRCCL-1859)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_gin_host_finalize": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroGinHostFinalize",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "GinHostFinalizeMicrotests", "description": "Host-only gin/gin_host.cc finalize microtests (no GPU, no HIP/RCCL runtime); covers plugin finalize on comm destroy (AICOMRCCL-2739)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_dda_ipc": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroDdaIpc",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "DdaIpcMicrotests", "description": "Host-only dda_all_reduce_ipc.cu eligibility, datatype dispatch and flat/tree selection microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_roctx_nvml": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroRoctxNvml",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "RoctxNvmlMicrotests", "description": "Host-only misc/roctx.cc + misc/nvmlwrap_stub.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_rocmwrap": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroRocmwrap",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "RocmwrapMicrotests", "description": "Host-only misc/rocmwrap.cc microtests (no GPU, no HIP/RCCL runtime); covers the cuMem VMM capability checks and rocmLibraryInit's ROCr/DMA-BUF setup", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_amdsmi_wrap": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroAmdsmiWrap",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "AmdsmiWrapMicrotests", "description": "Host-only misc/amdsmi_wrap.cc microtests (no GPU, no HIP/RCCL runtime); covers device, bus-id, link, firmware and fabric queries across the WSL2, amd_smi_lib and ARSMI backends", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_rome_models": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroRomeModels",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "RomeModelsMicrotests", "description": "Host-only graph/rome_models.cc microtests (no GPU, no HIP/RCCL runtime); covers parseGraphLight RCCL_TREES input validation", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_topo": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroTopo",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "TopoMicrotests", "description": "Host-only src/graph microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
-      ]
-    },
-    "unit_tests_micro_dda": {
-      "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicroDda",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "tests": [
-        {"name": "DdaMicrotests", "description": "Host-only src/algorithms/dda/ microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
     }
   },
@@ -500,171 +224,15 @@
       "enabled": true
     },
     {
-      "name": "RCCL Microtests - crypt.cc",
-      "description": "rccl-UnitTestsMicroCrypt (host-only misc/crypt.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_crypt",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - strongstream.cc",
-      "description": "rccl-UnitTestsMicroStrongstream (host-only misc/strongstream.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_strongstream",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - utils.cc",
-      "description": "rccl-UnitTestsMicroUtils (host-only misc/utils.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_utils",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - argcheck.cc",
-      "description": "rccl-UnitTestsMicroArgcheck (host-only misc/argcheck.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_argcheck",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - cpuset.h",
-      "description": "rccl-UnitTestsMicroCpuset (host-only include/cpuset.h microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_cpuset",
-      "enabled": true
-    },
-    {
       "name": "RCCL Unit Tests - nccl::utility plain-C++ build",
       "description": "rccl-UnitTestsUtilityHostOnly (nccl_device/utility.h as plain C++, CPU-only)",
       "config": "unit_tests_utility_host_only",
       "enabled": true
     },
     {
-      "name": "RCCL Microtests - algorithms/dda collective launchers",
-      "description": "rccl-UnitTestsMicroDdaColl (host-only algorithms/dda collective launchers microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_dda_coll",
-      "enabled": true
-    },
-    {
       "name": "RCCL Unit Tests - GDR Peer-Memory Detection",
       "description": "rccl-UnitTestsGdr (net_ib memory_peers sysfs scan, CPU-only)",
       "config": "unit_tests_gdr",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - p2p.cc",
-      "description": "rccl-UnitTestsMicro (host-only p2p.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - init.cc",
-      "description": "rccl-UnitTestsMicroInit (host-only init.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_init",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - init.cc (uncached)",
-      "description": "rccl-UnitTestsMicroInit-uncached (init.cc HIP_*_UNCACHED_MEMORY arm)",
-      "config": "unit_tests_micro_init_uncached",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - nccl_device requirement builders",
-      "description": "rccl-UnitTestsMicroNcclDevice (host-only nccl_device requirement builders microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_nccl_device",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - nccl_device/core.cc",
-      "description": "rccl-UnitTestsMicroCore (host-only nccl_device/core.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_core",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - cft_dev_runtime.cc",
-      "description": "rccl-UnitTestsMicroCftDevRuntime (host-only cft_dev_runtime.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_cft_dev_runtime",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - init.cc (fault injection)",
-      "description": "rccl-UnitTestsMicroInit-faultinj (init.cc ENABLE_FAULT_INJECTION arm)",
-      "config": "unit_tests_micro_init_faultinj",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - param runtime",
-      "description": "rccl-UnitTestsMicroParam (host-only param runtime microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_param",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - enqueue.cc",
-      "description": "rccl-UnitTestsMicroEnqueue (host-only enqueue.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_enqueue",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - sym_kernels.cc",
-      "description": "rccl-UnitTestsMicroSymKernels (host-only sym_kernels.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_symkernels",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - profiler plugin",
-      "description": "rccl-UnitTestsMicroProfiler (host-only profiler plugin microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_profiler",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - gin_host.cc",
-      "description": "rccl-UnitTestsMicroGinHost (host-only gin/gin_host.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_gin_host",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - gin_host.cc finalize",
-      "description": "rccl-UnitTestsMicroGinHostFinalize (host-only gin/gin_host.cc finalize microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_gin_host_finalize",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - dda_all_reduce_ipc.cu",
-      "description": "rccl-UnitTestsMicroDdaIpc (host-only DDA IPC all-reduce eligibility/dispatch microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_dda_ipc",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - misc/roctx.cc + misc/nvmlwrap_stub.cc",
-      "description": "rccl-UnitTestsMicroRoctxNvml (host-only misc/roctx.cc + misc/nvmlwrap_stub.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_roctx_nvml",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - rocmwrap.cc",
-      "description": "rccl-UnitTestsMicroRocmwrap (host-only misc/rocmwrap.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_rocmwrap",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - amdsmi_wrap.cc",
-      "description": "rccl-UnitTestsMicroAmdsmiWrap (host-only misc/amdsmi_wrap.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_amdsmi_wrap",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - rome_models.cc",
-      "description": "rccl-UnitTestsMicroRomeModels (host-only rome_models.cc microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_rome_models",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - src/graph",
-      "description": "rccl-UnitTestsMicroTopo (host-only src/graph microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_topo",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Microtests - algorithms/dda",
-      "description": "rccl-UnitTestsMicroDda (host-only src/algorithms/dda/ microtests, no GPU/HIP/RCCL runtime)",
-      "config": "unit_tests_micro_dda",
       "enabled": true
     }
   ]
