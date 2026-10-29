@@ -1033,4 +1033,27 @@ TEST_F(PluginNetGdrMicrotestIsolated, AGetPropertiesFailureIsRetried) {
   });
 }
 
+// ROCM-27737: a Socket comm's "no GDR" must not answer for a later IB comm on the same GPU.
+TEST_F(PluginNetGdrMicrotestIsolated, ASocketVerdictDoesNotAnswerForIb) {
+  RUN_ISOLATED_TEST("PluginNetGdr_ASocketVerdictDoesNotAnswerForIb", [this]() {
+    ncclNet_t socketNet = FakeNet<kSocket>::Make("Socket");
+    g_net[kSocket].ndev = 2;  // cudaDevMask stays 0: Socket offers NCCL_PTR_CUDA nowhere
+    g_net[kIb].ndev = 2;
+    g_net[kIb].cudaDevMask = 0b1;
+
+    int gdr = -1;
+    comm_->ncclNet = &socketNet;
+    comm_->netPluginIndex = 1;
+    ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
+    EXPECT_EQ(gdr, 0);
+
+    // Same process, same GPU, different plugin -- what ncclCommSplit on a Socket parent produces.
+    comm_->ncclNet = &net_;
+    comm_->netPluginIndex = 0;
+    ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
+    EXPECT_EQ(gdr, 1);
+    EXPECT_EQ(g_net[kIb].devicesCalls, 1) << "IB was answered from Socket's slot, not probed";
+  });
+}
+
 }  // namespace
