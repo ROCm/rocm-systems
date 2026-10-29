@@ -9,8 +9,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "cpuset.h"
@@ -93,6 +96,50 @@ TEST_F(CpusetMicrotest, StrToCpuset_KnownBug_MoreThan32WordsShiftsTheMask) {
   words[32] = "1";
   ASSERT_EQ(ncclSuccess, ncclStrToCpuset(Words(words).c_str(), &set_));
   EXPECT_EQ((std::vector<int>{1}), Cpus());
+}
+
+// Ranks of a single-process multi-GPU job parse their NUMA cpumaps concurrently during init. Each thread
+// gets a mask with its own word count and bit pattern, so a tokenizer cursor shared across threads
+// (strtok()) shows up as a thread receiving another thread's words, or the wrong number of them.
+TEST_F(CpusetMicrotest, StrToCpuset_ConcurrentParsesDoNotInterfere) {
+  constexpr int kThreads = 8;
+  constexpr int kIters = 20000;
+  std::vector<std::string> masks(kThreads);
+  std::vector<std::vector<int>> expected(kThreads);
+  for (int t = 0; t < kThreads; t++) {
+    int nWords = 2 + t;
+    for (int w = nWords - 1; w >= 0; w--) {
+      int bit = (3 * t + w) % 32;
+      char word[16];
+      snprintf(word, sizeof(word), "%08x", 1u << bit);
+      masks[t] += std::string(masks[t].empty() ? "" : ",") + word;
+    }
+    for (int w = 0; w < nWords; w++) expected[t].push_back(32 * w + (3 * t + w) % 32);
+  }
+
+  std::atomic<bool> go{false};
+  std::atomic<int> mismatches{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < kThreads; t++) {
+    threads.emplace_back([&, t] {
+      while (!go.load()) std::this_thread::yield();
+      for (int i = 0; i < kIters; i++) {
+        ncclAffinity set;
+        if (ncclStrToCpuset(masks[t].c_str(), &set) != ncclSuccess) {
+          mismatches++;
+          continue;
+        }
+        std::vector<int> cpus;
+        for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+          if (CPU_ISSET(cpu, &set)) cpus.push_back(cpu);
+        }
+        if (cpus != expected[t]) mismatches++;
+      }
+    });
+  }
+  go = true;
+  for (auto& thread : threads) thread.join();
+  EXPECT_EQ(0, mismatches.load()) << "of " << kThreads * kIters << " concurrent parses";
 }
 
 // ncclCpusetToRangeStr
