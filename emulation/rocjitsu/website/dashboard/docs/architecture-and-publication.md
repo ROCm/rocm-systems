@@ -1,0 +1,139 @@
+# Website, data, and publication
+
+## Source map
+
+Paths below are relative to `emulation/rocjitsu/website/dashboard/`.
+
+```text
+src/main.jsx → src/App.jsx             # start React; coordinate loading and pages
+src/components/                       # pages, charts, tables, pickers
+src/hooks/useDashboardState.js         # filters, selections, URL/history state
+src/data/dashboardData.js             # fetch publication JSON
+src/data/dashboardDataAdapter.js      # adapt corpus runs and derive memory-only sets
+src/data/runSchema.js                 # corpus version and configuration identity
+src/data/selectors.js                  # derive chart/comparison data
+src/config/metadata.json              # bundled repository/Beta/canonical-branch settings
+scripts/process-dashboard-data.mjs     # local-only consumer inspection
+vite.config.js                        # build assets and select the data source
+```
+
+This is a static React website. The browser fetches JSON and computes the displayed comparisons; there is no dashboard application server in production.
+
+## Display scaling
+
+Desktop density follows browser-window width in CSS pixels, not the display's
+physical pixel count or device pixel ratio. Equal-width windows therefore use
+the same text and layout sizes on standard and HiDPI displays. At a 1920 CSS-pixel
+width the scale is 0.7392: 14px text renders at about 10.35 CSS pixels. The scale
+increases for wider windows; below 900 CSS pixels the interface stays native-sized.
+Browser zoom can change the available CSS width and cause reflow. Popups use the
+applied body density for inverse coordinate scaling and matching text sizes.
+
+## Website deployment versus data publication
+
+These are separate workflows and Git branches:
+
+| What | Repository-root workflow | Destination |
+| --- | --- | --- |
+| Website HTML/JS/CSS | `.github/workflows/rocjitsu-publish-website.yml` | `gh-pages:rocjitsu-dashboard/` |
+| Benchmark JSON | `.github/workflows/rocjitsu-benchmarks.yml` | `gh-pages-rocjitsu:rocjitsu-dashboard/data/` |
+
+Website publication checks current `develop` against the last published source revision, verifies/builds changed sites, then publishes dashboard `dist/`. Manual publication also requires `develop`. Production assets do not contain benchmark fixtures or measurements. Keep fixture JSON out of both publication destinations. Updating bundled settings requires a website rebuild; publishing new measurements does not.
+
+```text
+Website URL:
+https://rocm.github.io/rocm-systems/rocjitsu-dashboard/
+
+Production JSON base URL:
+https://raw.githubusercontent.com/ROCm/rocm-systems/refs/heads/gh-pages-rocjitsu/rocjitsu-dashboard/data/
+```
+
+The base URL comes from `scripts/dashboard-data-source.mjs`; `src/data/publishedDataUrls.js` constructs the index URL. Fixture/local-data modes use `./data/`: fixtures come from `tests/fixtures/data/`, or `DASHBOARD_DATA_DIR` supplies a local directory.
+
+## Data and browser loading
+
+Bundled `src/config/metadata.json` contains repository URL, Beta flag and canonical
+branch, not a producer schema version. The data root contains only an index and
+corpus run documents. Each run embeds flat measurements and definitions; there
+are no external catalog resources.
+
+```text
+Fetch index.json → fetch indexed runs → strict JSON parsing
+  → adapt corpus schema 1 and derive first-occurrence configuration membership
+  → existing selectors → UI
+```
+
+Unindexed files are not scanned. The mutable index bypasses cache; immutable runs
+can use cache. Reload All cache-busts requests without changing source values.
+Failures of required identity/path/core inputs are visible data errors. Optional
+metadata does not gate the dataset. The [corpus raw-run schema](https://github.com/ROCm/rocjitsu-test-corpus/blob/develop/benchmarks/raw-run-schema.md)
+owns the input format. Nullish provenance values display as an em dash (`—`) in metadata tables;
+source nulls stay unchanged. Missing or unusable commit dates disable dependent
+chronology without replacing them with execution time. Download JSON preserves
+the full parsed `{index,runs}`, including ordered samples, exit codes and
+diagnostics, independently of filters.
+
+## Preparing and publishing measurements
+
+The benchmark workflow runs on relevant develop pushes or manual dispatch, not a scheduled trigger. It invokes the corpus `performance-v1.toml` manifest once with both target configs and no target, case, or thread-policy selector, using the manifest's sampling defaults. The selected corpus revision is defined by `CORPUS_SHA` in the [benchmark workflow](../../../../../.github/workflows/rocjitsu-benchmarks.yml). This configuration does not establish native or hosted execution acceptance. The runner selects supported combinations and checkpoints one consolidated `run.json`, alongside per-target/policy diagnostics.
+
+For manual runs, **Use workflow from** selects the branch and workflow/tooling revision. The optional `source_commit` accepts a full SHA or an unambiguous 7–40 hexadecimal prefix from that branch's history; blank snapshots the selected branch tip once before preparation. Short prefixes resolve to a full SHA before ancestry validation or checkout; unknown, ambiguous and out-of-branch commits fail. Benchmark checkout, build checks and runner attribution use that immutable source SHA, which may be older than the workflow SHA. Automatic develop pushes measure the event SHA even if develop moves afterward. The optional `pull_request_number` is metadata only: for a side branch it must identify an open same-repository PR from that branch to develop, with the selected commit in its head history. The early metadata job records the selected source commit's merge-base with a frozen develop tip. Develop runs reject PR metadata and omit base/PR fields.
+
+Manual `publish_results` defaults to true and applies to both develop and side-branch workflows. The input warns that side-branch runs use side-branch workflow tooling. Disable publishing for artifact-only tests. Automatic develop pushes still publish normally. Before artifact upload, result JSON records the workflow SHA in the existing `publication.workflow_commit_sha` field, including when publishing is disabled. Preparation tooling and publication validation come from the workflow revision, so selecting an older source commit does not select older orchestration code. Publication retains the measured SHA in raw provenance and the workflow SHA in `publication.workflow_commit_sha`; source branch/message/base/PR describe the selected benchmark source.
+
+### Isolated preparation before measurement
+
+The workflow creates a fresh owned `${RUNNER_TEMP}/rocjitsu-benchmark-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`. `emulation/rocjitsu/scripts/prepare-benchmarks.py` keeps its venv, builds, wheelhouse, generated artifacts, logs and caches there, outside the runner-owned results directory. It rejects reused attempts, mismatched ownership and symbolic directory paths; cleanup removes only the verified owned attempt. Source checkouts remain unchanged and are checked before and after preparation phases.
+
+Preparation uses Python 3.12, the corpus's exact SDK/benchmark requirement pins, and the immutable `TENSILE_SHA` and `NANOBIND_SHA` revisions defined once in the benchmark workflow environment. Checkouts, helper source checks and artifact provenance consume those same values. Dependency resolution records indexes, reports and package inventories while constraining the benchmark pins. Before builds, preflight requires CMake ≥3.25.2, SDK HIP/LLVMObjectYAML/ROCmCMakeBuildTools, ZLIB and OpenMP. A noneditable rocisa wheel uses an external backend build directory and the discovered installed `nanobind_DIR`; only the exact built wheel is installed into the owned venv. Native adapter and host-test builds instead use the separately pinned disconnected nanobind source. Builds use Ninja's default parallelism; the preparation helper sets no build job limit. Artifact generation separately retains its `CpuThreads=4` limit.
+
+The explicit `ROCISA_BACKEND=native` and four SDK loader directories (`lib`, `lib/rocm_sysdeps/lib`, `lib/llvm/lib`, `lib/host-math/lib`) are retained. Those SDK directories come first, followed by incoming nonempty `LD_LIBRARY_PATH` entries as fallbacks, with stable deduplication and no empty segments. This preserves setup-python's own library path across child processes and Actions environment exports; `LD_PRELOAD`, `PYTHONHOME` and `PYTHONPATH` remain stripped. A fresh owned-venv subprocess checks `import ctypes, joblib` after loader setup and before builds, under the workflow's benchmark job limit. This smoke is not a substitute for exact CI-runtime or generation acceptance. Preparation commands use an owned **writable** controlled working directory, not a source checkout or a read-only empty directory: the native capability probe can emit implicit `a.out`. Only that regular assembler-output filename is permitted there; foreign loader files reject. No upstream/ELF/compiler patch or speculative `GPU_TARGETS` rewrite is made. Wheel import checks record exact extension/library hashes, installed-wheel origin and loader mappings; this does not establish portable relocatability of the upstream wheel.
+
+The workflow defines the corpus-relative recipe once in `BENCHMARK_MANIFEST` (currently `benchmarks/suites/performance-v1.toml`) and passes that same value to both `prepare-benchmarks.py generate --manifest` and `benchmarks.runner --manifest`. Only `generate` consumes inventory and requires this argument; dependencies, runtime/native builds, early diagnostics and cleanup do not require a manifest. The helper has no recipe default and accepts only a contained regular `.toml` file under the corpus checkout, rejecting absolute/traversal paths and symbolic files or ancestors.
+
+The helper validates every manifest-selected variant against the pinned corpus `CANDIDATES` literal dictionary and prepares only those variants (currently four), using the exact selected shapes/targets, upstream template hashes and generator `CpuThreads=4`. Unused supported variants do not require preparation; empty selections and unsupported declarations reject clearly. It strips inherited `HCC_AMDGPU_TARGET` and sets that variable only in each generator's copied child environment, using the validated target for that variant. This suppresses the installed HIPCC's demonstrated implicit enumeration path without hard-coding a global gfx950 or leaking a target to unrelated preparation commands or later workflow steps. Command receipts record the effective target, not the whole inherited environment. It validates artifact/configuration hashes and provenance before exporting `PYTHON`, SDK/source paths, `TENSILE_CANDIDATE_ARTIFACTS` and `TENSILE_CANDIDATE_RUNNER`. Failed preparation prevents the measured suite; cases are never dropped and stale artifacts are never reused. Generator threads do not set simulator runtime policy. Local intercepted tests verify orchestration and rejection predicates, **not actual dependency installation, native generation, kernel execution or hosted acceptance**.
+
+The workflow is the timeout authority. The benchmark job has a 120-minute ceiling including setup/preparation, the performance suite and diagnostics. The performance step has a 60-minute cap; publishing remains a separate job with its existing 30-minute cap. This is not a strict 120-minute workflow-wide wall-clock limit: source metadata, queueing and container overhead are not guaranteed by the benchmark timer. Preparation steps have no separate caps, and the Python helper has no internal phase, command, import or diagnostic timers; standalone invocations have no helper-enforced time limit. Diagnostics, uploads and cleanup also have no separate step caps; the only configured limits are the benchmark job's 120 minutes, the performance step's 60 minutes and the publisher job's 30 minutes. Their `always()` guards are retained, but no cleanup or diagnostic time is reserved and job cancellation may prevent those steps from completing. The 120-minute job limit can interrupt preparation or the suite; preparation can leave less than 60 minutes for performance, and no diagnostic time is reserved. On ordinary Python interruption or handled SIGTERM, the helper attempts to kill the active owned process group immediately and reap its leader, without a timed grace period. Command receipts retain actual exit status and elapsed time and mark interrupted commands; phase receipts record failure. This is best-effort interruption cleanup, not a standalone timeout guarantee. Preparation diagnostics exclude files with symbolic ancestors or resolved paths outside the owned attempt and exclusively create a fresh archive without following or truncating existing output links/files. Preparation diagnostics have a separate attempt-specific artifact, 14-day retention, and an explicit inventory describing truncation/omission (at most 128 files, final 256 KiB per file). Upload handling precedes owned cleanup. Hard cancellation or job termination can prevent process cleanup, receipts, upload and scratch cleanup. Manual `publish_results=false` still disables the entire publisher job, not diagnostic handling.
+
+```text
+Prepare pinned dependencies, wheel, native adapter and four generated variants
+  → validate preparation provenance and artifacts
+  → run supported target/policy combinations in one corpus invocation
+  → record publication.workflow_commit_sha in run.json (also for artifact-only runs)
+  → upload raw result directories as a GitHub Actions artifact
+  → publish job downloads that artifact
+  → fill remaining publication context without changing measured results
+  → copy the run into the branch-appropriate results directory
+  → structurally update index.json once
+  → ordinary Git commit + push
+```
+
+Publication keeps raw measurements, ordered samples, diagnostics, exit codes and
+provenance unchanged. Workflow/Tensile revisions belong in `publication`; source
+messages describe the measured SHA. Missing optional base/PR/tool context remains
+null. No catalog generation, downstream manifest check or dedicated validator
+stage is part of this boundary. Local browser tests are not hosted publication
+or release evidence.
+
+## Immutable runs
+
+The same path with identical bytes is reusable; different content at an existing
+path is an error. A newly indexed path updates `generatedAt`; an already indexed
+path leaves index bytes unchanged. Ordinary Git publication failures remain
+visible; no force push or custom retry engine is implied.
+
+Benchmark-set identity is `execution_summary.benchmark_suite`. This publisher
+requires an immutable TOML recipe and fixed benchmark-ID membership for each
+shared target/thread-policy configuration under that identity. A subset or
+expanded recipe is a different benchmark set and requires a new suite ID. Failed
+measurements remain members; failure does not remove a benchmark from the set.
+This is a requirement on producers, not a guarantee stated by the upstream run
+schema. The consumer relies on this contract; publication does not perform
+cross-run membership validation.
+
+Set picker dates describe the latest known develop commit using each set, not
+execution or creation time.
+Unknown URL identities stay explicit until the user chooses an available set or
+Shared benchmarks. Export remains unfiltered.
+
+Contract: [corpus run JSON](https://github.com/ROCm/rocjitsu-test-corpus/blob/develop/benchmarks/raw-run-schema.md). Commands: [build and test](build-and-test.md).
