@@ -1060,4 +1060,32 @@ TEST_F(StrongstreamMicrotest, AdvanceToEvent_CapturedHipFailuresPropagate) {
   }
 }
 
+// `s` takes over the dependency set of `source` directly, without a scratch stream.
+TEST_F(StrongstreamMicrotest, AdvanceToStream_ReplacesTheFrontierWithTheSources) {
+  const hipStream_t source = reinterpret_cast<hipStream_t>(0x999);
+  hipGraphNode_t n1 = reinterpret_cast<hipGraphNode_t>(0x51), n2 = reinterpret_cast<hipGraphNode_t>(0x52);
+  g_capture[source] = {hipStreamCaptureStatusActive, 1, kGraph, {n1, n2}};
+  g_capture[kOrigin] = {hipStreamCaptureStatusActive, 1, kGraph, {reinterpret_cast<hipGraphNode_t>(0x50)}};
+  ASSERT_EQ(ncclStreamAdvanceToStream(kOrigin, source), ncclSuccess);
+  ASSERT_EQ(g_calls.size(), 2u);
+  EXPECT_EQ(g_calls[0].fn, "hipStreamGetCaptureInfo_v2");
+  EXPECT_EQ(g_calls[0].a, source);
+  EXPECT_EQ(g_calls[1].fn, "hipStreamUpdateCaptureDependencies");
+  EXPECT_EQ(g_calls[1].a, kOrigin);
+  EXPECT_EQ(g_calls[1].b, g_capture[source].deps.data());
+  EXPECT_EQ(g_calls[1].n, 2u);
+  EXPECT_EQ(g_calls[1].flags, (uint64_t)hipStreamSetCaptureDependencies);
+  EXPECT_EQ(Count("hipStreamCreateWithFlags"), 0);
+  EXPECT_EQ(Count("hipStreamDestroy"), 0);
+}
+
+TEST_F(StrongstreamMicrotest, AdvanceToStream_HipFailuresPropagate) {
+  const hipStream_t source = reinterpret_cast<hipStream_t>(0x999);
+  for (const char* fn : {"hipStreamGetCaptureInfo_v2", "hipStreamUpdateCaptureDependencies"}) {
+    SCOPED_TRACE(fn);
+    FailNext(fn);
+    EXPECT_EQ(ncclStreamAdvanceToStream(kOrigin, source), ncclUnhandledCudaError);
+  }
+}
+
 }  // namespace

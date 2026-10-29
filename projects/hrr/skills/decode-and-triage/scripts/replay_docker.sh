@@ -3,6 +3,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Archive-derived text this script prints (the archive path, and a log name built
+# from it) goes through the skill's one sanitizer, as does the replay's output.
+safe() { python3 "$SCRIPT_DIR/archive_text.py" --text "$1"; }
 
 ARCHIVE=""
 LOG=""
@@ -152,8 +155,8 @@ else
   echo "[replay_docker] using image HRR stack: playback=$PLAY_INSIDE" >&2
 fi
 
-echo "[replay_docker] image=$IMAGE GPU=$GPU archive=$ARCHIVE" >&2
-echo "[replay_docker] log=$LOG" >&2
+echo "[replay_docker] image=$IMAGE GPU=$GPU archive=$(safe "$ARCHIVE")" >&2
+echo "[replay_docker] log=$(safe "$LOG")" >&2
 
 set +e
 docker_run run --rm \
@@ -164,9 +167,9 @@ docker_run run --rm \
   -e "HIP_HRR_REPLAY_PROGRESS_SECONDS=${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
   "$IMAGE" \
   "$PLAY_INSIDE" "/arch/$PID_NAME" \
-  2>&1 | tee "$LOG"
+  2>&1 | tee "$LOG" | python3 "$SCRIPT_DIR/archive_text.py"
 RC=${PIPESTATUS[0]}
 set -e
 
-echo "[replay_docker] exit=$RC log=$LOG" >&2
+echo "[replay_docker] exit=$RC log=$(safe "$LOG")" >&2
 exit "$RC"
