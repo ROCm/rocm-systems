@@ -3,6 +3,8 @@
 
 """Unit tests for ISA dimension properties on IsaProfile subclasses."""
 
+import re
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1512,3 +1514,41 @@ def test_valu16_destination_and_bf16_inline_policies(
 ):
     assert profile.valu16_preserves_unwritten_half is preserves_half
     assert profile.bf16_inline_uses_f32_carrier is bf16_f32_carrier
+
+
+@pytest.mark.parametrize('split_execution_sources', [False, True])
+def test_execution_operands_override_all_base_value_accessors(
+    tmp_path, split_execution_sources
+):
+    class Profile(Rdna4Profile):
+        @property
+        def split_execution_sources(self):
+            return split_execution_sources
+
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name='rdna4',
+            generated_dir_name='rdna4',
+            cpp_namespace='rdna4',
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=Profile(),
+        ),
+        str(tmp_path),
+    )
+    generator.gen_operand()
+    operand_header = (tmp_path / 'rdna4' / 'operand.h').read_text()
+
+    # Guest fields must dispatch to concrete execution hooks; the descriptor
+    # base implementations are programmer-error assertions, not guest failures.
+    for method in (
+        'read_scalar',
+        'read_lane',
+        'write_scalar',
+        'write_lane',
+        'read_scalar64',
+        'read_lane64',
+        'write_scalar64',
+        'write_lane64',
+    ):
+        assert re.search(rf'\b{method}\([^;]+\) const override;', operand_header)

@@ -350,6 +350,10 @@ private:
 
   // Value access is intentionally private. Instruction implementations use
   // RegisterAccess; Operand remains the ISA-specific resolver/backend.
+  // The concrete operand must implement each accessor used by its execution
+  // backend. Descriptor-only operands do not support value access, and staged
+  // source delegates do not support writes. Calling an unimplemented base
+  // accessor is a programmer error, not a rejected guest operand encoding.
 
   /// @brief Read this operand as a scalar 32-bit value.
   /// @param wf Wavefront providing register state.
