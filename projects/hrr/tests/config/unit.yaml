@@ -59,7 +59,11 @@ cases:
   Unit_HRR_Limits_ScopedCharge: {}
   Unit_HRR_Limits_SequenceGapEndsReplay: {}
   Unit_HRR_Limits_ThreadCap: {}
-  Unit_HRR_Limits_WallClockEndsBlockedLoad: {}
+  Unit_HRR_Limits_WallClockEndsBlockedLoad:
+    skip:
+      - when: {os: windows}
+        kind: unsupported
+        reason: hrr_limits_test.cc compiles this case out under _WIN32 (it blocks the load on a FIFO)
   Unit_HRR_Limits_WallClockWatchdog: {}
   Unit_HRR_Playback_PlacementHeldRanges: {}
   Unit_HRR_Playback_PlacementRangeChecked: {}
