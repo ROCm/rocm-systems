@@ -4141,10 +4141,10 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
     if (!comm->ceColl.initialized) {
       NEW_NOTHROW_GOTO(ceInitJob, ncclCeInitAsyncJob, ret, fail);
       ceInitJob->comm = comm;
-      NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)ceInitJob, ncclCeInitJob, ncclCeInitAsyncJobFree, comm),
-                    ret, fail);
+      ret = ncclMgmtTaskEnqueue((struct ncclAsyncJob*)ceInitJob, ncclCeInitJob, ncclCeInitAsyncJobFree, comm);
+      ceInitJob = nullptr; // ncclMgmtTaskEnqueue owns the job: it enqueues it on success and frees it on failure
+      NCCLCHECKGOTO(ret, ret, fail);
       comm->ceColl.initialized = true;
-      ceInitJob = nullptr; // ceInitJob is now owned by the management task
     }
   } else if (!comm->ceColl.initialized) {
     NCCLCHECKGOTO(ncclCalloc(&ceTask, 1), ret, fail);
@@ -4219,6 +4219,38 @@ fail:
   if (ceInitJob) ncclCeInitAsyncJobFree(ceInitJob);
   if (ceTask) free(ceTask);
   goto exit;
+}
+
+// Shared by rmaTaskAppend and rawTaskAppend so both paths accept and reject the same WaitSignal arguments.
+static ncclResult_t validateWaitSignalDescs(struct ncclComm* comm, struct ncclInfo* info) {
+  if (info->nDesc <= 0 || info->signalDescs == NULL) {
+    WARN("ncclWaitSignal: invalid arguments");
+    return ncclInvalidArgument;
+  }
+  for (int i = 0; i < info->nDesc; i++) {
+    if (info->signalDescs[i].opCnt <= 0) {
+      WARN("ncclWaitSignal: descriptor %d has invalid opCnt %d", i, info->signalDescs[i].opCnt);
+      return ncclInvalidArgument;
+    }
+    if (info->signalDescs[i].sigIdx < 0 || info->signalDescs[i].sigIdx >= comm->config.numRmaSig) {
+      WARN("ncclWaitSignal: descriptor %d has invalid sigIdx %d (must be in [0, %d))", i, info->signalDescs[i].sigIdx,
+           comm->config.numRmaSig);
+      return ncclInvalidArgument;
+    }
+    if (info->signalDescs[i].ctx < 0 || info->signalDescs[i].ctx >= comm->config.numRmaCtx) {
+      WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, info->signalDescs[i].ctx,
+           comm->config.numRmaCtx);
+      return ncclInvalidArgument;
+    }
+    // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
+    // sees these descriptors (ncclWaitSignal passes root = 0).
+    if (info->signalDescs[i].peer < 0 || info->signalDescs[i].peer >= comm->nRanks) {
+      WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, info->signalDescs[i].peer,
+           comm->nRanks);
+      return ncclInvalidArgument;
+    }
+  }
+  return ncclSuccess;
 }
 
 static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) {
@@ -4329,35 +4361,7 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
       return ncclInvalidArgument;
     }
   } else if (info->coll == ncclFuncWaitSignal) {
-    // Check if signalDescs is valid
-    if (info->signalDescs == NULL || info->nDesc == 0) {
-      WARN("ncclWaitSignal: invalid arguments");
-      return ncclInvalidArgument;
-    }
-    // Validate each descriptor
-    for (int i = 0; i < info->nDesc; i++) {
-      if (info->signalDescs[i].opCnt <= 0) {
-        WARN("ncclWaitSignal: descriptor %d has invalid opCnt %d", i, info->signalDescs[i].opCnt);
-        return ncclInvalidArgument;
-      }
-      if (info->signalDescs[i].sigIdx < 0 || info->signalDescs[i].sigIdx >= comm->config.numRmaSig) {
-        WARN("ncclWaitSignal: descriptor %d has invalid sigIdx %d (must be in [0, %d))", i, info->signalDescs[i].sigIdx,
-             comm->config.numRmaSig);
-        return ncclInvalidArgument;
-      }
-      if (info->signalDescs[i].ctx < 0 || info->signalDescs[i].ctx >= comm->config.numRmaCtx) {
-        WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, info->signalDescs[i].ctx,
-             comm->config.numRmaCtx);
-        return ncclInvalidArgument;
-      }
-      // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
-      // sees these descriptors (ncclWaitSignal passes root = 0).
-      if (info->signalDescs[i].peer < 0 || info->signalDescs[i].peer >= comm->nRanks) {
-        WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, info->signalDescs[i].peer,
-             comm->nRanks);
-        return ncclInvalidArgument;
-      }
-    }
+    NCCLCHECK(validateWaitSignalDescs(comm, info));
   }
 
   // ncclSignal / ncclWaitSignal take no window, so they cannot trigger the collective RMA init that
@@ -4535,33 +4539,7 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
     }
     ncclIntruQueueEnqueue(&rtq->genericQueue, t);
   } else if (info->coll == ncclFuncWaitSignal) {
-    if (info->nDesc <= 0 || info->signalDescs == NULL) {
-      WARN("ncclWaitSignal: invalid arguments");
-      return ncclInvalidArgument;
-    }
-    for (int i = 0; i < info->nDesc; i++) {
-      if (info->signalDescs[i].opCnt <= 0) {
-        WARN("ncclWaitSignal: descriptor %d has invalid opCnt %d", i, info->signalDescs[i].opCnt);
-        return ncclInvalidArgument;
-      }
-      if (info->signalDescs[i].sigIdx < 0 || info->signalDescs[i].sigIdx >= comm->config.numRmaSig) {
-        WARN("ncclWaitSignal: descriptor %d has invalid sigIdx %d (must be in [0, %d))", i, info->signalDescs[i].sigIdx,
-             comm->config.numRmaSig);
-        return ncclInvalidArgument;
-      }
-      if (info->signalDescs[i].ctx < 0 || info->signalDescs[i].ctx >= comm->config.numRmaCtx) {
-        WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, info->signalDescs[i].ctx,
-             comm->config.numRmaCtx);
-        return ncclInvalidArgument;
-      }
-      // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
-      // sees these descriptors (ncclWaitSignal passes root = 0).
-      if (info->signalDescs[i].peer < 0 || info->signalDescs[i].peer >= comm->nRanks) {
-        WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, info->signalDescs[i].peer,
-             comm->nRanks);
-        return ncclInvalidArgument;
-      }
-    }
+    NCCLCHECK(validateWaitSignalDescs(comm, info));
     t = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
     t->kind = ncclTaskKindRma;
     t->rma.func = ncclFuncWaitSignal;

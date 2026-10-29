@@ -279,8 +279,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `test_categories_micro_onerank.yaml`.
 - **`rccl-UnitTestsMicroMgmtTaskEnq`** — `enqueue/mgmt_task_enq.cc` (via `MGMT_TASK_ENQ_CC_PATH`,
   from `mgmt-task-enq-test.cc`); suite `MgmtTaskEnq*`. Its own binary because
-  `fakes/nccl_stubs.cc` fakes `ncclMgmtTaskEnqueue`, which this target drops via
-  `RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue`. See `test_categories_micro_mgmt_task_enq.yaml`.
+  `fakes/mgmt_task_enq_fakes.cc`, which the other targets link, fakes `ncclMgmtTaskEnqueue`.
+  See `test_categories_micro_mgmt_task_enq.yaml`.
 - **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
   `CeCollMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`, both in
   `ce-coll-test.cc`. Its own binary because every other target links
@@ -730,6 +730,7 @@ symbol.
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
 | `src/enqueue/enqueue.cc`'s own symbols (targets that do not compile the real file) | `fakes/enqueue_fakes.cc` |
+| `src/enqueue/mgmt_task_enq.cc` (targets that do not compile the real file) | `fakes/mgmt_task_enq_fakes.cc` |
 | `src/init.cc` comm lifecycle, CTA/channel params, `allocTracker` | `fakes/comm_fakes.cc`; `rccl-UnitTestsMicroRmaProxy` keeps a local `allocTracker` because that isolated target does not link the broader comm fake |
 | `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc`; `ncclMemTrack*` / `ncclMemUntrack*` in `fakes/nccl_fakes.cc` |
