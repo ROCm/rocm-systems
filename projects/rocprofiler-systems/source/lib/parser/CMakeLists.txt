@@ -20,11 +20,19 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/value_text.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/config_store.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/parse_result.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/default_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/env_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/cli_parser.cpp
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/schema.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/value_text.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/config_store.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/parse_result.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/default_parser.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/env_parser.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/cli_parser.hpp
 )
 
 get_filename_component(PARSER_SOURCE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
