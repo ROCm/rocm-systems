@@ -6006,10 +6006,11 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
   }
 }
 
-/// Fast path for the bf16-input MFMA shapes (v_mfma_f32_*_bf16). Identical to
-/// the f16 specialization except the bulk input convert is the bf16 zero-extend
-/// (no F16C needed). Falls back to the generic exec_f32 without usable host
-/// SIMD, under force-scalar, or with cbsz/blgp.
+/// Fast path for the bf16-input MFMA shapes (v_mfma_f32_*_bf16). Follows the
+/// f16 specialization, except that the bulk input convert is the bf16
+/// zero-extend (no F16C needed) and results are published one word at a time.
+/// Falls back to the generic exec_f32 without usable host SIMD, under
+/// force-scalar, or with cbsz/blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                              uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {

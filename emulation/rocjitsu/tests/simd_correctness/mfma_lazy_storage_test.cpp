@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file mfma_lazy_storage_test.cpp
-/// @brief Focused MFMA coverage for logical VGPR reads across lazy chunks.
+/// @brief Focused MFMA coverage for VGPR reads and writes across lazy chunks.
 
 #include "mma_exact_test_support.h"
 #include "simdojo/components/register_file.h"
