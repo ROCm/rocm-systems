@@ -41,7 +41,10 @@ RJ_DIAGNOSTIC_POP
 
 #include <cerrno>
 #include <csignal>
+#include <cstddef>
 #include <fcntl.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
 #include <poll.h>
 #include <spawn.h>
 #include <sys/eventfd.h>
@@ -6431,6 +6434,52 @@ TEST(RemoteDriverPtracerGrantTest, RefusesAPeerBelongingToAnotherUser) {
             rocjitsu::PtracerGrantVerdict::RefusedForeignUser);
   EXPECT_EQ(rocjitsu::ptracer_grant_verdict(4242, 0, self, self),
             rocjitsu::PtracerGrantVerdict::RefusedNoPeer);
+}
+
+// Run the irreversible filter in a child so it never covers gtest or TSan.
+// glibc lowers send/recv to the denied sendto/recvfrom calls; unrestricted tests
+// would stay green if either returned. Exit codes distinguish filter setup,
+// exact write and exact read failures, and the parent checks only that result.
+TEST(RpcTransportTest, ExactIoUsesDescriptorPassingSyscallsUnderSeccomp) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    std::array<sock_filter, 5> filter{{
+        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(seccomp_data, nr)),
+        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 2, 0),
+        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_recvfrom, 1, 0),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | EPERM),
+    }};
+    sock_fprog program{static_cast<unsigned short>(filter.size()), filter.data()};
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
+        syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER, 0, &program) != 0)
+      _exit(1);
+
+    std::array<uint8_t, 64> sent{};
+    for (size_t i = 0; i < sent.size(); ++i)
+      sent[i] = static_cast<uint8_t>(i);
+    size_t bytes_sent = 0;
+    if (!rocjitsu::rpc_send_exact(sv[0], sent.data(), sent.size(), &bytes_sent) ||
+        bytes_sent != sent.size())
+      _exit(2);
+
+    std::array<uint8_t, 64> received{};
+    if (!rocjitsu::rpc_recv_exact(sv[1], received.data(), received.size()) || received != sent)
+      _exit(3);
+    _exit(0);
+  }
+
+  ChildProcessGuard child_guard(child);
+  ::close(sv[0]);
+  ::close(sv[1]);
+  const int child_result = wait_for_child_with_timeout(child, std::chrono::seconds(5));
+  EXPECT_EQ(child_result, 0);
+  if (child_result >= 0)
+    child_guard.release();
 }
 
 // --- Daemon-mode DBG_TRAP notifier-fd transfer via SCM_RIGHTS ---
