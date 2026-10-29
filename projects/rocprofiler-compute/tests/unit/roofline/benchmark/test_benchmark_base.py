@@ -30,6 +30,7 @@ try:
     from roofline.benchmark.gfx11.benchmark_gfx1151 import Bench_gfx1151
     from roofline.benchmark.gfx11.benchmark_gfx1152 import Bench_gfx1152
     from roofline.benchmark.gfx11.benchmark_gfx1153 import Bench_gfx1153
+    from roofline.benchmark.gfx12.benchmark_gfx1201 import Bench_gfx1201
     from roofline.benchmark.gfx12.benchmark_gfx1250 import Bench_gfx1250
 except OSError as hip_load_error:
     # hip_interface and hiprtc_interface dlopen the ROCm libraries at import.
@@ -50,6 +51,7 @@ BENCH_CLASSES = [
     Bench_gfx1151,
     Bench_gfx1152,
     Bench_gfx1153,
+    Bench_gfx1201,
     Bench_gfx1250,
 ]
 
@@ -197,6 +199,16 @@ def test_matrix_kernel_sources_define_selected_symbol(bench_class):
             kernel_name,
             f"{bench_class.__name__} {test_key}",
         )
+
+
+def test_gfx1201_enabled_matrix_tests_have_operations_and_kernels():
+    bench = Bench_gfx1201(0, dict(CACHE_SIZES))
+    for test_key in bench.tests:
+        if not test_key.startswith("WMMA-") or not runs_benchmark(bench, test_key):
+            continue
+        matrix_type = test_key.removeprefix("WMMA-")
+        assert bench.matrix_ops[matrix_type] > 0
+        assert matrix_type in bench.matrix_kernel_selector
 
 
 # =============================================================================

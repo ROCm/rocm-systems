@@ -36,6 +36,11 @@ for a new architecture against
 `--device` selects the GPU for the roofline microbenchmarks. It does not
 choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
 
+On gfx1201, the historical `HBM` roofline label refers to GDDR6 device memory.
+WMMA points require a working SQ event 233 counter; check profiling warnings and
+counter output. The aggregate VALU instruction counter gives an estimate rather
+than a precision-specific FLOP count.
+
 See [standalone roofline](../../docs/how-to/profile/mode.rst) for `--roof-only`
 and `--bench-only`, which run the microbenchmarks without profiling an
 application.

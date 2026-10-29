@@ -536,7 +536,8 @@ mi_gpu_spec:
         models:
           - gpu_model: rdna4_navi48
             design:
-              memory_levels: ["LDS", "L0", "L1", "L2"]
+              # HBM is the roofline CSV's historical name for device memory.
+              memory_levels: ["LDS", "L0", "L1", "L2", "HBM"]
             chip_ids:
               physical: 30032
 

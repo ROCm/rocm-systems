@@ -15,9 +15,6 @@
 # supported precisions to what RDNA4 actually implements.
 # -----------------------------------------------------------------------------
 
-import utils.hip_interface as hip
-
-from .. import benchmark_base
 from . import benchmark_gfx12_base
 
 # One wmma.16x16x16 issues 16*16*16 = 4096 MACs = 8192 FLOPs (multiply + add).
@@ -25,9 +22,6 @@ from . import benchmark_gfx12_base
 # the WMMA unit stays saturated and the measured ceiling is stable.
 WMMA_ACC = 8
 WMMA_FLOPS_PER_INSTRUCTION = 8192
-
-# Fallback GL0 working set when AMD-SMI does not expose a separate L0 entry.
-L0_BYTES_PER_CU = 32 * 1024
 
 
 # =============================================================================
@@ -45,6 +39,7 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
             "WMMA-F4",
             "WMMA-F6",
             "WMMA-F6F4",
+            "WMMA-MXF8",
             "WMMA-F32",
             "WMMA-F64",
             "WMMA-I8",
@@ -62,26 +57,6 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
             "F16": WMMA_FLOPS_PER_INSTRUCTION * WMMA_ACC,
             "BF16": WMMA_FLOPS_PER_INSTRUCTION * WMMA_ACC,
         }
-
-        self.tests["L0"] = self.l0_bw_bench
-
-    # -----------------------------------------------------------------------------
-    # L0 (GL0/TCP per-CU) bandwidth benchmark
-    # -----------------------------------------------------------------------------
-    def l0_bw_bench(self, device: int) -> benchmark_base.PerfMetrics:
-        """Measure GL0 bandwidth, synthesising a working set if AMD-SMI has none.
-
-        The base implementation assumes ``cache_sizes["L0"]`` was populated by
-        ``specs.set_cache_sizes``. On Navi48 that entry can be absent, which
-        would raise a KeyError out of ``cache_kernel_selector``.
-        """
-        if "L0" not in self.cache_sizes:
-            num_cu = hip.hipGetDeviceProperties(device).multiProcessorCount
-            self.cache_sizes["L0"] = L0_BYTES_PER_CU * num_cu
-            self.cache_kernel_selector["L0"] = (
-                f"Cache_bw<float, {self.cache_sizes['L0']}, 256>"
-            )
-        return self.cache_bw_bench(device, "L0", 100)
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source
