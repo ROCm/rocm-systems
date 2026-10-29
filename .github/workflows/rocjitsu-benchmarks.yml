@@ -9,15 +9,22 @@ on:
       - ".github/workflows/rocjitsu-benchmarks.yml"
   workflow_dispatch:
     inputs:
-      publish_results:
-        description: "Publish dashboard results (leave disabled for test runs)"
-        required: false
-        type: boolean
-        default: false
-      pull_request_number:
-        description: "Optional open PR number for the selected side branch"
+      source_commit:
+        description: >-
+          Source commit: blank for the selected branch tip, or a 7-40-character
+          hexadecimal SHA/prefix from its history. 'Use workflow from' selects
+          the branch; a side-branch SHA with develop selected is rejected.
         required: false
         type: string
+      pull_request_number:
+        description: "Optional open, same-repository PR from the selected side branch to develop"
+        required: false
+        type: string
+      publish_results:
+        description: "Publish to shared dashboard dataset. Warning: side-branch workflows use side-branch tooling."
+        required: false
+        type: boolean
+        default: true
 
 # Each job grants only the access it needs.
 permissions: {}
@@ -32,6 +39,7 @@ env:
   TENSILE_SHA: dd77374194a3ea1a7258cd54f87af6747b6362a5
   NANOBIND_SHA: 9b3afa9dbdc23641daf26fadef7743e7127ff92f
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+  WORKFLOW_SOURCE_DIR: ${{ github.workspace }}/workflow-source/emulation/rocjitsu
   CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   TENSILE_SOURCE: ${{ github.workspace }}/tensile-source
   NANOBIND_SOURCE: ${{ github.workspace }}/native-nanobind
@@ -47,77 +55,139 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
+      source_branch: ${{ steps.resolve.outputs.source_branch }}
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
       base_branch: ${{ steps.resolve.outputs.base_branch }}
       base_sha: ${{ steps.resolve.outputs.base_sha }}
       pull_request_number: ${{ steps.resolve.outputs.pull_request_number }}
       pull_request_url: ${{ steps.resolve.outputs.pull_request_url }}
-    env:
-      BENCHMARK_BRANCH: ${{ github.ref_name }}
-      BENCHMARK_SHA: ${{ github.sha }}
     steps:
       - name: Resolve source metadata before benchmarking
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
           REQUESTED_PULL_REQUEST: ${{ inputs.pull_request_number || '' }}
         run: |
-          if [[ "${BENCHMARK_BRANCH}" == "develop" ]]; then
-            if [[ -n "${REQUESTED_PULL_REQUEST}" ]]; then
-              echo "::error::A pull request number is only valid for a side-branch run."
-              exit 1
+          set -euo pipefail
+
+          fail() {
+            echo "::error::$1" >&2
+            exit 1
+          }
+
+          resolve_source() {
+            if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+              BENCHMARK_BRANCH="${GITHUB_REF#refs/heads/}"
+              BENCHMARK_SHA="${REQUESTED_SOURCE_COMMIT}"
+            else
+              # A push measures its event SHA, never a later develop tip.
+              BENCHMARK_BRANCH=develop
+              BENCHMARK_SHA="${GITHUB_SHA}"
             fi
-            exit 0
-          fi
+            if [[ -z "${BENCHMARK_BRANCH}" || "${BENCHMARK_BRANCH}" == -* ]] \
+               || ! git check-ref-format "refs/heads/${BENCHMARK_BRANCH}"; then
+              fail "The selected workflow branch must be a valid branch name."
+            fi
+            if [[ -n "${BENCHMARK_SHA}" && ! "${BENCHMARK_SHA}" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+              fail "source_commit must be blank or a 7-40 hex commit SHA."
+            fi
+            BENCHMARK_SHA="${BENCHMARK_SHA,,}"
+            if [[ -n "${BENCHMARK_SHA}" && ${#BENCHMARK_SHA} -lt 40 ]]; then
+              # GitHub rejects unknown or ambiguous prefixes; never choose a match.
+              COMMIT_PREFIX="${BENCHMARK_SHA}"
+              BENCHMARK_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${COMMIT_PREFIX}" --jq '.sha')"
+              if [[ ! "${BENCHMARK_SHA}" =~ ^[0-9a-f]{40}$ || "${BENCHMARK_SHA}" != "${COMMIT_PREFIX}"* ]]; then
+                fail "source_commit could not be resolved to a unique full SHA."
+              fi
+            fi
+            if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+              # Encode the branch as URL data, not an API query/ref expression.
+              BRANCH_PATH="$(jq -rn --arg branch "${BENCHMARK_BRANCH}" '$branch | @uri')"
+              BRANCH_TIP="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BRANCH_PATH}" --jq '.object.sha')"
+              [[ "${BRANCH_TIP}" =~ ^[0-9a-f]{40}$ ]]
+              BENCHMARK_SHA="${BENCHMARK_SHA:-${BRANCH_TIP}}"
+              MERGE_BASE="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BENCHMARK_SHA}...${BRANCH_TIP}" --jq '.merge_base_commit.sha')"
+              if [[ "${MERGE_BASE}" != "${BENCHMARK_SHA}" ]]; then
+                fail "source_commit must belong to the selected workflow branch history."
+              fi
+            fi
+            printf 'source_branch=%s\nsource_sha=%s\n' \
+              "${BENCHMARK_BRANCH}" "${BENCHMARK_SHA}" >> "${GITHUB_OUTPUT}"
+          }
 
-          BASE_BRANCH=develop
-          BASE_BRANCH_SHA="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_BRANCH}" \
-            --jq '.object.sha')"
-          if [[ ! "${BASE_BRANCH_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Could not resolve an immutable ${BASE_BRANCH} revision."
-            exit 1
-          fi
-          BASE_SHA="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/compare/${BASE_BRANCH_SHA}...${BENCHMARK_SHA}" \
-            --jq '.merge_base_commit.sha')"
-          if [[ ! "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Could not resolve a canonical develop merge-base for ${BENCHMARK_SHA}."
-            exit 1
-          fi
-          printf 'base_branch=%s\nbase_sha=%s\n' \
-            "${BASE_BRANCH}" "${BASE_SHA}" >> "${GITHUB_OUTPUT}"
+          resolve_base_metadata() {
+            if [[ "${BENCHMARK_BRANCH}" == "develop" ]]; then
+              if [[ -n "${REQUESTED_PULL_REQUEST}" ]]; then
+                fail "A pull request number is only valid for a side-branch run."
+              fi
+              return
+            fi
 
-          if [[ -z "${REQUESTED_PULL_REQUEST}" ]]; then
-            exit 0
-          fi
-          if [[ ! "${REQUESTED_PULL_REQUEST}" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::pull_request_number must be a positive integer."
-            exit 1
-          fi
+            BASE_BRANCH=develop
+            BASE_BRANCH_SHA="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_BRANCH}" \
+              --jq '.object.sha')"
+            if [[ ! "${BASE_BRANCH_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+              fail "Could not resolve an immutable ${BASE_BRANCH} revision."
+            fi
+            BASE_SHA="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/compare/${BASE_BRANCH_SHA}...${BENCHMARK_SHA}" \
+              --jq '.merge_base_commit.sha')"
+            if [[ ! "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+              fail "Could not resolve a canonical develop merge-base for ${BENCHMARK_SHA}."
+            fi
+            printf 'base_branch=%s\nbase_sha=%s\n' \
+              "${BASE_BRANCH}" "${BASE_SHA}" >> "${GITHUB_OUTPUT}"
+          }
 
-          PR_JSON="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/pulls/${REQUESTED_PULL_REQUEST}")"
-          PR_STATE="$(jq -r '.state' <<< "${PR_JSON}")"
-          PR_BASE="$(jq -r '.base.ref' <<< "${PR_JSON}")"
-          PR_HEAD_REPOSITORY="$(jq -r '.head.repo.full_name // ""' <<< "${PR_JSON}")"
-          PR_HEAD_BRANCH="$(jq -r '.head.ref' <<< "${PR_JSON}")"
-          PR_HEAD_SHA="$(jq -r '.head.sha' <<< "${PR_JSON}")"
-          PR_URL="$(jq -r '.html_url' <<< "${PR_JSON}")"
-          if [[ "${PR_STATE}" != open \
-                || "${PR_BASE}" != "${BASE_BRANCH}" \
-                || "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" \
-                || "${PR_HEAD_BRANCH}" != "${BENCHMARK_BRANCH}" \
-                || "${PR_HEAD_SHA}" != "${BENCHMARK_SHA}" \
-                || "${PR_URL}" != "https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}" ]]; then
-            echo "::error::PR #${REQUESTED_PULL_REQUEST} must be an open ${GITHUB_REPOSITORY}:${BENCHMARK_BRANCH} PR to develop at ${BENCHMARK_SHA}."
-            exit 1
+          resolve_optional_pr() {
+            if [[ -z "${REQUESTED_PULL_REQUEST}" ]]; then
+              return
+            fi
+            if [[ ! "${REQUESTED_PULL_REQUEST}" =~ ^[1-9][0-9]*$ ]]; then
+              fail "pull_request_number must be a positive integer."
+            fi
+
+            PR_JSON="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/pulls/${REQUESTED_PULL_REQUEST}")"
+            PR_STATE="$(jq -r '.state' <<< "${PR_JSON}")"
+            PR_BASE="$(jq -r '.base.ref' <<< "${PR_JSON}")"
+            PR_HEAD_REPOSITORY="$(jq -r '.head.repo.full_name // ""' <<< "${PR_JSON}")"
+            PR_HEAD_BRANCH="$(jq -r '.head.ref' <<< "${PR_JSON}")"
+            PR_HEAD_SHA="$(jq -r '.head.sha' <<< "${PR_JSON}")"
+            PR_URL="$(jq -r '.html_url' <<< "${PR_JSON}")"
+            if [[ "${PR_STATE}" != open \
+                  || "${PR_BASE}" != "${BASE_BRANCH}" \
+                  || "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" \
+                  || "${PR_HEAD_BRANCH}" != "${BENCHMARK_BRANCH}" \
+                  || ! "${PR_HEAD_SHA}" =~ ^[0-9a-f]{40}$ \
+                  || "${PR_URL}" != "https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}" ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} must be an open same-repository ${BENCHMARK_BRANCH} PR to develop."
+            fi
+            PR_MERGE_BASE="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/compare/${BENCHMARK_SHA}...${PR_HEAD_SHA}" \
+              --jq '.merge_base_commit.sha')"
+            if [[ "${PR_MERGE_BASE}" != "${BENCHMARK_SHA}" ]]; then
+              fail "source_commit must belong to the selected PR head history."
+            fi
+            printf 'pull_request_number=%s\npull_request_url=%s\n' \
+              "${REQUESTED_PULL_REQUEST}" "${PR_URL}" >> "${GITHUB_OUTPUT}"
+          }
+
+          if [[ "${GITHUB_REF_TYPE}" != branch ]]; then
+            fail "Select a workflow branch, not a tag."
           fi
-          printf 'pull_request_number=%s\npull_request_url=%s\n' \
-            "${REQUESTED_PULL_REQUEST}" "${PR_URL}" >> "${GITHUB_OUTPUT}"
+          resolve_source
+          resolve_base_metadata
+          resolve_optional_pr
 
   benchmark:
     name: Run performance benchmark
     needs: source-metadata
+    env:
+      BENCHMARK_SHA: ${{ needs.source-metadata.outputs.source_sha }}
+      BENCHMARK_BRANCH: ${{ needs.source-metadata.outputs.source_branch }}
     runs-on: rocjitsu-benchmark
     timeout-minutes: 120
     permissions:
@@ -191,7 +261,15 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: rocm-systems
+          ref: ${{ needs.source-metadata.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Checkout benchmark workflow tooling
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: workflow-source
           ref: ${{ github.sha }}
+          sparse-checkout: emulation/rocjitsu/scripts
           persist-credentials: false
 
       - name: Record benchmark source
@@ -199,9 +277,10 @@ jobs:
         working-directory: rocm-systems
         run: |
           COMMIT_MESSAGE="$(git show -s --format=%s HEAD)"
-          WORKFLOW_COMMIT_SHA="$(git rev-parse --verify HEAD^{commit})"
-          [[ "${WORKFLOW_COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
-          printf 'workflow_commit_sha=%s\n' "${WORKFLOW_COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
+          SOURCE_SHA="$(git rev-parse --verify HEAD^{commit})"
+          [[ "${SOURCE_SHA}" == "${BENCHMARK_SHA}" ]]
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          printf 'workflow_commit_sha=%s\n' "${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
           printf 'commit_message=%s\n' "${COMMIT_MESSAGE}" >> "${GITHUB_OUTPUT}"
           printf 'run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
 
@@ -247,18 +326,18 @@ jobs:
           python-version: "3.12"
 
       - name: Install benchmark dependencies
-        run: python "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" dependencies
+        run: python "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" dependencies
 
       - name: Build rocjitsu
-        run: python "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" rocjitsu
+        run: python "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" rocjitsu
 
       - name: Prepare Tensile wheel and native adapter
-        run: python "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" native
+        run: python "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" native
 
       - name: Generate pinned Tensile artifacts
         id: prepare
         run: |
-          "${ROCJITSU_VENV}/bin/python" "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" generate --manifest "${BENCHMARK_MANIFEST}"
+          "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" generate --manifest "${BENCHMARK_MANIFEST}"
 
       - name: Run performance suite
         if: ${{ success() && steps.prepare.outcome == 'success' }}
@@ -300,11 +379,26 @@ jobs:
             echo "::warning::Suite completed with benchmark failures; preserving results."
           fi
 
+      - name: Record result workflow revision
+        if: ${{ always() && (steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure') }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          result = Path(os.environ['ROCJITSU_RESULT_DIR']) / 'run.json'
+          if result.is_file():
+              run = json.loads(result.read_text())
+              run['publication']['workflow_commit_sha'] = os.environ['GITHUB_SHA']
+              result.write_text(json.dumps(run, indent=2) + '\n')
+          PY
+
       - name: Collect preparation diagnostics
         if: always()
         run: |
-          if [[ -n "${BENCHMARK_DIR:-}" && -f "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" && -x /usr/bin/python3 ]]; then
-            /usr/bin/python3 "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" diagnostics
+          if [[ -n "${BENCHMARK_DIR:-}" && -f "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" && -x /usr/bin/python3 ]]; then
+            /usr/bin/python3 "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" diagnostics
           else
             echo "::warning::Preparation helper or system Python unavailable; retain Actions setup logs."
           fi
@@ -330,8 +424,8 @@ jobs:
       - name: Clean owned benchmark scratch
         if: always()
         run: |
-          if [[ -n "${BENCHMARK_DIR:-}" && -f "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" && -x /usr/bin/python3 ]]; then
-            /usr/bin/python3 "${ROCJITSU_SOURCE_DIR}/scripts/prepare-benchmarks.py" cleanup
+          if [[ -n "${BENCHMARK_DIR:-}" && -f "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" && -x /usr/bin/python3 ]]; then
+            /usr/bin/python3 "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" cleanup
           else
             echo "::warning::Ownership cannot be checked without helper and system Python; scratch retained."
           fi
@@ -343,7 +437,7 @@ jobs:
       cancel-in-progress: false
       queue: max
     needs: [source-metadata, benchmark]
-    if: ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' && (github.event_name != 'workflow_dispatch' || inputs.publish_results == true) }}
+    if: ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && inputs.publish_results == true)) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -354,7 +448,8 @@ jobs:
       BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
       DATA_DIR: ${{ github.workspace }}/publication/rocjitsu-dashboard/data
       BENCHMARK_MACHINE: ${{ needs.benchmark.outputs.machine }}
-      BENCHMARK_BRANCH: ${{ github.ref_name }}
+      BENCHMARK_BRANCH: ${{ needs.source-metadata.outputs.source_branch }}
+      BENCHMARK_SHA: ${{ needs.source-metadata.outputs.source_sha }}
       BENCHMARK_COMMIT_MESSAGE: ${{ needs.benchmark.outputs.source_commit_message }}
       WORKFLOW_COMMIT_SHA: ${{ needs.benchmark.outputs.workflow_commit_sha }}
       TENSILE_COMMIT_SHA: ${{ needs.benchmark.outputs.tensile_commit_sha }}
@@ -409,6 +504,7 @@ jobs:
             --arg branch "${BENCHMARK_BRANCH}" \
             --arg message "${BENCHMARK_COMMIT_MESSAGE}" \
             --arg machine "${BENCHMARK_MACHINE}" --arg trigger "${TRIGGER}" \
+            --arg source_sha "${BENCHMARK_SHA}" \
             --arg workflow_sha "${WORKFLOW_COMMIT_SHA}" \
             --arg tensile_sha "${TENSILE_COMMIT_SHA}" \
             --arg base_branch "${SOURCE_BASE_BRANCH}" --arg base_sha "${SOURCE_BASE_SHA}" \
@@ -416,7 +512,7 @@ jobs:
               def known: if . == "" then null else . end;
 
               # A checkout message describes the measurement only at the same SHA.
-              (if .provenance.rocjitsu.rocjitsu_commit_sha == $workflow_sha
+              (if .provenance.rocjitsu.rocjitsu_commit_sha == $source_sha
                then ($message | known) else null end) as $source_message |
               (if $base_branch != "" and $base_sha != ""
                then {branch: $base_branch, commit: $base_sha} else null end) as $source_base |
