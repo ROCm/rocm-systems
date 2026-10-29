@@ -22,6 +22,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/host_target.h"
 #include "util/simd_test_hooks.h"
 
 #include <array>
@@ -33,6 +34,7 @@
 #include <memory>
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -53,9 +55,9 @@ constexpr SimdPathExpectation expect_simd_path(amdgpu::SimdFastPath path) {
 constexpr SimdPathExpectation expect_simd_fallback() { return {.checked = true}; }
 
 // Conversions with 64-bit lanes fall back to scalar where native 64-bit SIMD
-// masks are broken (UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS).
+// masks are broken (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS).
 constexpr SimdPathExpectation expect_simd_path_64(amdgpu::SimdFastPath path) {
-  return UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS ? expect_simd_fallback() : expect_simd_path(path);
+  return RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS ? expect_simd_fallback() : expect_simd_path(path);
 }
 
 struct ArithmeticCase {
@@ -1260,7 +1262,7 @@ std::vector<ArithmeticCase> f16_fma_omod_cases() {
 
 std::vector<ArithmeticCase> host_mxcsr_cases() {
   std::vector<ArithmeticCase> cases;
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   constexpr uint32_t kDazMask = 1u << 6;
   constexpr uint32_t kFtzMask = 1u << 15;
   constexpr uint32_t kControlMask = _MM_ROUND_MASK | kDazMask | kFtzMask;
@@ -1374,7 +1376,7 @@ std::vector<ArithmeticCase> modifier_environment_cases() {
       }
     }
   }
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   constexpr uint32_t kDazMask = 1u << 6;
   constexpr uint32_t kControlMask = _MM_ROUND_MASK | kDazMask | (1u << 15);
   for (uint32_t daz : {0u, kDazMask}) {
@@ -1685,8 +1687,7 @@ std::vector<ArithmeticCase> log_exp_policy_cases() {
                 half_words[0] = gcn ? (logarithm ? 0x7e0c8100u : 0x7e0c8300u)
                                     : (logarithm ? 0x7e0caf00u : 0x7e0cb100u);
               }
-              const bool preserves_high_half =
-                  !gcn && arch != ROCJITSU_CODE_ARCH_RDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA2;
+              const bool preserves_high_half = !gcn;
               const uint32_t half_cases[][2] = {
                   {0x7c01u, quiet ? 0x7e01u : 0x7c01u},
                   {0xfc01u, quiet ? 0xfe01u : 0xfc01u},
@@ -1796,8 +1797,7 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
         ROCJITSU_CODE_ARCH_RDNA4}) {
     const bool gcn = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
                      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
-    const bool true16 =
-        !gcn && arch != ROCJITSU_CODE_ARCH_RDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA2;
+    const bool preserves_high_half = !gcn;
     const bool always_omod = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
     for (const auto &sample : captured) {
       // Other profiles check exact values and MODE policy, not unmeasured finite approximations.
@@ -1821,8 +1821,8 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
                          : (sample.logarithm ? 0x7e0caf00u : 0x7e0cb100u);
         }
         for (uint32_t rounding = 0; rounding < 4; ++rounding) {
-          const uint32_t expected =
-              (always_omod ? sample.rdna4 : sample.rdna3) | (true16 ? 0xdead0000u : 0u);
+          const uint32_t expected = (always_omod ? sample.rdna4 : sample.rdna3) |
+                                    (preserves_high_half ? 0xdead0000u : 0u);
           cases.push_back({"Arch" + std::to_string(arch) + sample.name + (e64 ? "E64" : "E32") +
                                "Round" + std::to_string(rounding),
                            arch,
@@ -2652,9 +2652,7 @@ std::vector<ArithmeticCase> rounded_result_modifier_cases() {
 // gfx1201 does. Each case transcribes a lane from external VALU probe captures
 // (v_mul_f16_e64 and v_add_f16_e64 with div:2); the raw artifacts are not
 // checked into this tree. The captures return
-// the same half and keep the initialized 0xa5a5 high half. RDNA1/2 cases start
-// from a zero high half because their shared emulator executor clears it, a
-// separate difference from hardware.
+// the same half and keep the initialized 0xa5a5 high half.
 std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
   static constexpr uint32_t kIeee = 1u << 9;
   static constexpr uint32_t kFp16Ovfl = 1u << 23;
@@ -2673,11 +2671,11 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
           rdna3::build_vop3(rdna3::kVMulF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3}),
           rdna3::build_vop3(rdna3::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
       Target{
-          "Gfx1030", ROCJITSU_CODE_ARCH_RDNA2, 0u,
+          "Gfx1030", ROCJITSU_CODE_ARCH_RDNA2, 0xa5a50000u,
           rdna2::build_vop3(rdna2::kVMulF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3}),
           rdna2::build_vop3(rdna2::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
       Target{
-          "Gfx1010", ROCJITSU_CODE_ARCH_RDNA1, 0u,
+          "Gfx1010", ROCJITSU_CODE_ARCH_RDNA1, 0xa5a50000u,
           rdna2::build_vop3(rdna2::kVMulF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3}),
           rdna2::build_vop3(rdna2::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
   };
@@ -2800,7 +2798,7 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
       FE_TONEAREST, 0, expect_simd_fallback());
   add("AddHostRoundUpStillUsesSimd", false, 0x3c00, 0x1000, 0xa5a53c00u, 0xc0, 0, 0, 0, 0, 0,
       FE_UPWARD);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   // Enable the full-MXCSR preservation assertion without overriding rounding.
   cases.back().mxcsr_mask = _MM_EXCEPT_MASK;
   // Widened F16 ADD/MUL operands and results cannot be F32 subnormals, so host
@@ -3883,24 +3881,19 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
       half(0u), 0xf0u | kDx10, f16);
   add("Gfx1201ClampSignalingNanToZero", kRdna4, clamp_f32_f64(kRdna4),
       f64_source(0x7ff0000000000001ull), single(0u), 0xf0u, from_f64);
-  // The RDNA2 executors write an F16 result zero-extended where gfx1030 keeps
-  // the destination's high half, so these start from a zero destination. That
-  // half is the known RDNA1/2 discrepancy, not part of the CLAMP rule.
-  const auto rdna2_f32_source = [](uint32_t bits) { return Pairs{{0, bits}, {6, 0u}}; };
-  const auto low = [](uint32_t bits) { return Pairs{{6, bits}}; };
-  add("Gfx1030ClampKeepsNanWithoutDx10", kRdna2, clamp_f16_f32(kRdna2),
-      rdna2_f32_source(0x7fc00000u), low(0x7e00u), 0xf0u, rdna2_f16);
-  add("Gfx1030ClampNanToZeroWithDx10", kRdna2, clamp_f16_f32(kRdna2), rdna2_f32_source(0x7fc00000u),
-      low(0u), 0xf0u | kDx10, rdna2_f16);
+  add("Gfx1030ClampKeepsNanWithoutDx10", kRdna2, clamp_f16_f32(kRdna2), f32_source(0x7fc00000u),
+      half(0x7e00u), 0xf0u, rdna2_f16);
+  add("Gfx1030ClampNanToZeroWithDx10", kRdna2, clamp_f16_f32(kRdna2), f32_source(0x7fc00000u),
+      half(0u), 0xf0u | kDx10, rdna2_f16);
   add("Gfx1030ClampKeepsNanPayloadWithoutDx10", kRdna2, clamp_f32_f64(kRdna2),
       f64_source(0x7ff4000012345678ull), single(0x7fe00000u), 0xf0u, from_f64);
   add("Gfx1030ClampNanPayloadToZeroWithDx10", kRdna2, clamp_f32_f64(kRdna2),
       f64_source(0x7ff4000012345678ull), single(0u), 0xf0u | kDx10, from_f64);
   // CLAMP still maps -Inf to +0 and +Inf to 1.0 on both, with or without DX10_CLAMP.
-  add("Gfx1030ClampNegativeInfinityToZero", kRdna2, clamp_f16_f32(kRdna2),
-      rdna2_f32_source(0xff800000u), low(0u), 0xf0u, rdna2_f16);
-  add("Gfx1030ClampInfinityToOne", kRdna2, clamp_f16_f32(kRdna2), rdna2_f32_source(0x7f800000u),
-      low(0x3c00u), 0xf0u, rdna2_f16);
+  add("Gfx1030ClampNegativeInfinityToZero", kRdna2, clamp_f16_f32(kRdna2), f32_source(0xff800000u),
+      half(0u), 0xf0u, rdna2_f16);
+  add("Gfx1030ClampInfinityToOne", kRdna2, clamp_f16_f32(kRdna2), f32_source(0x7f800000u),
+      half(0x3c00u), 0xf0u, rdna2_f16);
 
   const auto f16_f32 = rdna4(rdna4::kVCvtF16F32Vop3);
   const auto f16_f32_mul2 = rdna4(rdna4::kVCvtF16F32Vop3, 1);
@@ -3960,8 +3953,7 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   struct Legacy {
     const char *name;
     rj_code_arch_t arch;
-    // gfx1030 keeps an F16 result's high half, but the RDNA2 executors write it
-    // zero-extended, so its cases start from a zero destination.
+    // Both targets keep the initialized F16 destination's high half.
     uint32_t high;
     // RDNA3 F16 results take the true16 word path; RDNA2 ones the VOP1 path.
     amdgpu::SimdFastPath f16_path;
@@ -3972,7 +3964,7 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
       Legacy{"Gfx1100", ROCJITSU_CODE_ARCH_RDNA3, kHigh, amdgpu::SimdFastPath::VOP_WORDS,
              rdna3::build_vop3(rdna3::kVCvtF16F32Vop3, {.vdst = 6, .src0 = 256, .omod = 1}),
              rdna3::build_vop3(rdna3::kVCvtF32F64Vop3, {.vdst = 6, .src0 = 256, .omod = 1})},
-      Legacy{"Gfx1030", ROCJITSU_CODE_ARCH_RDNA2, 0u, amdgpu::SimdFastPath::VOP1_UNARY,
+      Legacy{"Gfx1030", ROCJITSU_CODE_ARCH_RDNA2, kHigh, amdgpu::SimdFastPath::VOP1_UNARY,
              rdna2::build_vop3(rdna2::kVCvtF16F32Vop3, {.vdst = 6, .src0 = 256, .omod = 1}),
              rdna2::build_vop3(rdna2::kVCvtF32F64Vop3, {.vdst = 6, .src0 = 256, .omod = 1})},
   };
@@ -4418,7 +4410,7 @@ std::vector<ArithmeticCase> ldexp_tininess_cases() {
       sources.emplace_back(1, uint32_t(lane.value >> 32));
       expected.emplace_back(7, uint32_t(lane.expected >> 32));
     }
-    const bool simd = !f64 || !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS;
+    const bool simd = !f64 || !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS;
     cases.push_back(
         {std::string(f64 ? "LdexpF64" : "LdexpF32") + lane.name,
          ROCJITSU_CODE_ARCH_RDNA4,
@@ -4807,7 +4799,7 @@ std::vector<DotLane> dot_family_lanes() {
                        uint32_t src1, uint32_t acc, uint32_t gfx1201,
                        std::optional<uint32_t> gfx1100, std::vector<uint32_t> modes,
                        SimdPathExpectation simd = {}) {
-    if (UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && modifiers.clamp &&
+    if (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS && modifiers.clamp &&
         simd.path == amdgpu::SimdFastPath::VOP3P_DOT_INT)
       simd = expect_simd_fallback();
     lanes.push_back(
@@ -5416,11 +5408,11 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
       cu->write_sgpr(wave->sgpr_alloc().base + source.first, source.second);
     std::fenv_t saved_environment;
     ASSERT_EQ(std::fegetenv(&saved_environment), 0);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     const uint32_t saved_mxcsr = _mm_getcsr();
 #endif
     ASSERT_EQ(std::fesetround(test.host_rounding), 0);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     // Sticky flags from earlier tests must not hide exception-state leaks.
     const uint32_t host_mxcsr =
         (_mm_getcsr() & ~(test.mxcsr_mask | _MM_EXCEPT_MASK)) | test.mxcsr_bits;
@@ -5430,11 +5422,11 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
     amdgpu::ScopedSimdFastPathTracker tracker;
     const bool succeeded = cu->execute_instruction(instruction.get(), *wave).succeeded();
     const int restored_rounding = std::fegetround();
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     const uint32_t restored_mxcsr = _mm_getcsr();
 #endif
     const int restore_status = std::fesetenv(&saved_environment);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     _mm_setcsr(saved_mxcsr);
     if (test.mxcsr_mask != 0) {
       EXPECT_EQ(restored_mxcsr, host_mxcsr);
@@ -5481,7 +5473,7 @@ struct ForceScalarGuard {
 // on the host, so the caller's flags survive only if its slot is scoped; the
 // RDNA3 MAX selects on raw bits and raises nothing. mxcsr_mask makes the harness
 // assert the flags survive, which it does only where MXCSR exists.
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 TEST(ValuFpModeHelpers, VopdInexactAddKeepsHostFlags) {
   const ArithmeticCase test{
       "gfx1100VopdInexactAddSignalingNanMaxKeepsHostFlags",
@@ -5814,7 +5806,7 @@ INSTANTIATE_TEST_SUITE_P(Rdna3Boundary, ValuMullitModeTest,
                            return info.param.name;
                          });
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding = FE_TONEAREST) {
   ForceScalarGuard guard;
   struct Sample {
@@ -6288,7 +6280,7 @@ TEST(ValuFpModeHelpers, LegacySdwaOutputScalePrecedesF16Rounding) {
 }
 
 TEST(ValuFpModeHelpers, HostFlushControlsDoNotOverrideGpuMode) {
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   using amdgpu::fp_mode::Arithmetic;
   const uint32_t saved_mxcsr = _mm_getcsr();
   const uint32_t host_mxcsr = saved_mxcsr | (1u << 6) | (1u << 15);
@@ -6557,5 +6549,83 @@ INSTANTIATE_TEST_SUITE_P(SaluMinmax, SaluMinmaxTest, testing::ValuesIn(kSaluMinm
                          [](const testing::TestParamInfo<SaluMinmaxCase> &info) {
                            return info.param.name;
                          });
+
+struct FloatCompareSwapCase {
+  uint64_t memory, compare, source;
+  uint64_t preserved, flushed; ///< Final memory with MODE denormals preserved / flushed.
+};
+
+// Captured on gfx1100 global F32 and gfx1010/gfx1030/gfx1100 LDS F32/F64:
+// MODE flushing changes only the comparison. F64 rows are LDS evidence, not cache captures.
+// See atomic_scalar's manual discrepancy and unmeasured-target qualification.
+template <typename Bits>
+void check_float_compare_swap_policy(std::initializer_list<FloatCompareSwapCase> cases) {
+  for (const auto &test : cases) {
+    SCOPED_TRACE(testing::Message() << std::hex << "memory=" << test.memory
+                                    << " compare=" << test.compare << " source=" << test.source);
+    const auto run = [&](uint32_t denorm_mode) {
+      return amdgpu::fp_mode::atomic_scalar<Bits>(
+          amdgpu::fp_mode::ScalarAtomicOp::FCMPSWAP, static_cast<Bits>(test.memory),
+          static_cast<Bits>(test.source), static_cast<Bits>(test.compare), denorm_mode,
+          /*legacy_minmax=*/true);
+    };
+    EXPECT_EQ(run(/*denorm_mode=*/3), static_cast<Bits>(test.preserved));
+    EXPECT_EQ(run(/*denorm_mode=*/0), static_cast<Bits>(test.flushed));
+  }
+}
+
+TEST(FpModePolicyTest, ScalarAtomicRejectsUnsupportedOperations) {
+  const auto invalid = static_cast<amdgpu::fp_mode::ScalarAtomicOp>(0xff);
+  EXPECT_THROW(amdgpu::fp_mode::atomic_scalar<uint32_t>(invalid, 0x3f800000, 0x40000000, 0, 3,
+                                                        /*legacy_minmax=*/true),
+               std::invalid_argument);
+  EXPECT_THROW(amdgpu::fp_mode::atomic_scalar<uint64_t>(invalid, 0x3ff0000000000000,
+                                                        0x4000000000000000, 0, 3,
+                                                        /*legacy_minmax=*/true),
+               std::invalid_argument);
+}
+
+TEST(FpModePolicyTest, FloatCompareSwapFlushesOnlyTheComparison) {
+  check_float_compare_swap_policy<uint32_t>({
+      {0x3f800000, 0x3f800000, 0x40000000, 0x40000000, 0x40000000}, // 1.0 == 1.0
+      {0x3f800000, 0x40400000, 0x40000000, 0x3f800000, 0x3f800000}, // 1.0 != 3.0
+      {0x80000000, 0x00000000, 0x40800000, 0x40800000, 0x40800000}, // -0 == +0
+      {0x00000000, 0x80000000, 0x40800000, 0x40800000, 0x40800000}, // +0 == -0
+      {0x7fc00000, 0x7fc00000, 0x40a00000, 0x7fc00000, 0x7fc00000}, // equal qNaN bits
+      {0x7f800001, 0x7f800001, 0x40a00000, 0x7f800001, 0x7f800001}, // equal sNaN bits
+      {0xffc00000, 0xffc00000, 0x40a00000, 0xffc00000, 0xffc00000}, // equal -qNaN bits
+      {0x00000001, 0x00000001, 0x40c00000, 0x40c00000, 0x40c00000}, // equal denormals
+      {0x00000001, 0x00000000, 0x40c00000, 0x00000001, 0x40c00000}, // denormal vs +0
+      {0x00000000, 0x00000001, 0x40c00000, 0x00000000, 0x40c00000}, // +0 vs denormal
+      {0x00000001, 0x00000002, 0x40c00000, 0x00000001, 0x40c00000}, // two denormals
+      {0x80000001, 0x00000001, 0x41000000, 0x80000001, 0x41000000}, // -denormal vs +denormal
+      {0x3f800000, 0x3f800000, 0x00000001, 0x00000001, 0x00000001}, // denormal source
+      {0x3f800000, 0x3f800000, 0x7f800001, 0x7f800001, 0x7f800001}, // sNaN source
+      {0x00000001, 0x40400000, 0x41000000, 0x00000001, 0x00000001}, // denormal, mismatch
+      {0x80000001, 0x3f800000, 0x41000000, 0x80000001, 0x80000001}, // -denormal, mismatch
+      {0x7f800000, 0x7f800000, 0x40e00000, 0x40e00000, 0x40e00000}, // +inf == +inf
+      {0x7f800000, 0xff800000, 0x40e00000, 0x7f800000, 0x7f800000}, // +inf != -inf
+  });
+  constexpr uint64_t kOne = 0x3ff0000000000000, kThree = 0x4008000000000000;
+  constexpr uint64_t kSix = 0x4018000000000000, kDenorm = 0x0000000000000001;
+  check_float_compare_swap_policy<uint64_t>({
+      {kOne, kOne, kSix, kSix, kSix},            // 1.0 == 1.0
+      {kOne, kThree, kSix, kOne, kOne},          // 1.0 != 3.0
+      {0x8000000000000000, 0, kSix, kSix, kSix}, // -0 == +0
+      {0x7ff8000000000000, 0x7ff8000000000000, kSix, 0x7ff8000000000000,
+       0x7ff8000000000000}, // equal qNaN bits
+      {0x7ff0000000000001, 0x7ff0000000000001, kSix, 0x7ff0000000000001,
+       0x7ff0000000000001},                                          // equal sNaN bits
+      {kDenorm, kDenorm, kSix, kSix, kSix},                          // equal denormals
+      {kDenorm, 0, kSix, kDenorm, kSix},                             // denormal vs +0
+      {kDenorm, 0x0000000000000002, kSix, kDenorm, kSix},            // two denormals
+      {0x8000000000000001, kDenorm, kSix, 0x8000000000000001, kSix}, // -denormal vs +denormal
+      {kOne, kOne, kDenorm, kDenorm, kDenorm},                       // denormal source
+      {kOne, kOne, 0x7ff0000000000001, 0x7ff0000000000001, 0x7ff0000000000001}, // sNaN source
+      {kDenorm, kThree, kSix, kDenorm, kDenorm}, // denormal, mismatch
+      {0x8000000000000001, kOne, kSix, 0x8000000000000001,
+       0x8000000000000001}, // -denormal, mismatch
+  });
+}
 
 } // namespace

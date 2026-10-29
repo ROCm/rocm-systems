@@ -115,15 +115,6 @@ ncclResult_t bootstrapRecv(void* bs, int peer, int tag, void* data, int size) {
 }
 
 // ---------------------------------------------------------------------------
-// Arg checks / comm readiness.
-// ---------------------------------------------------------------------------
-ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSuccess; }
-ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
-// Seam: NCCLCHECK'd on entry to ncclCommWindowRegister_impl, so the
-// not-ready rejection is only reachable by driving it.
-
-
-// ---------------------------------------------------------------------------
 // Public registration API.
 // ---------------------------------------------------------------------------
 // Seams: ncclDevrWindowRegisterInGroup takes a local registration up front and
@@ -305,7 +296,11 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm*, ncclGinType_t* ginType) {
   if (ginType) *ginType = NCCL_GIN_TYPE_NONE;
   return ncclSuccess;
 }
-ncclResult_t ncclGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
+// Seam: ncclDevrCommCreateInternal latches GIN only after this succeeds.
+static ncclResult_t DefaultGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce = DefaultGinConnectOnce;
+
+ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnectOnce(comm); }
 ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*) {
   return ncclSuccess;
 }
@@ -506,15 +501,18 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct nc
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
 extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsaBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = {};
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = {};
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = {};
   return ncclSuccess;
 }
 
@@ -560,6 +558,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapAllGather                      = DefaultAllGather;
   g_devrBootstrapSend                           = DefaultBootstrapSend;
   g_devrBootstrapRecv                           = DefaultBootstrapRecv;
+  g_devrGinConnectOnce                          = DefaultGinConnectOnce;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;

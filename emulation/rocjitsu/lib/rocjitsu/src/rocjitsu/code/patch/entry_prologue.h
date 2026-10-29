@@ -99,10 +99,8 @@ struct DbiEntryPrologue {
 /// @param error_out Optional; filled with the reason on failure.
 /// @returns nullopt on a descriptor with no kernarg pointer, storage that is
 ///          misaligned, out of range, not one run, or overlapping, or a wrapper
-///          whose offsets do not fit the target's SMEM immediate.
-///
-/// @throws util::UnimplementedInst for a non-AMDGPU architecture, matching the
-///         builders it emits through. Every other rejection is fail-closed.
+///          whose offsets do not fit the target's SMEM immediate, or for a
+///          non-AMDGPU architecture.
 [[nodiscard]] std::optional<DbiEntryPrologue>
 build_dbi_entry_prologue(const amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
                          DbiEntryStorage storage, std::string *error_out = nullptr);
@@ -130,9 +128,6 @@ struct DbiEntryProloguePlan {
 /// @param error_out Optional; filled with the reason on failure.
 /// @returns nullopt when the kernel preloads kernargs, or for any reason the two
 ///          composed steps report.
-///
-/// @throws util::UnimplementedInst for a non-AMDGPU architecture, from the
-///         builders @ref build_dbi_entry_prologue emits through.
 [[nodiscard]] std::optional<DbiEntryProloguePlan>
 plan_dbi_entry_prologue(KernelBlockScope blocks, const amdhsa::kernel_descriptor_t &desc,
                         rj_code_arch_t arch, uint32_t kernel_sgpr_count,

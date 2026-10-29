@@ -100,13 +100,15 @@ public:
   /// Bits outside execMask are ignored; zero records no LDS intervals.
   /// elementBytes selects the execution granularity at the backing boundary;
   /// zero treats the whole per-lane access as one element.
+  /// allocationEnd additionally clips complete elements to a captured workgroup
+  /// allocation without reducing register or counter participation.
   void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0},
-                        int elementBytes = 0);
+                        int elementBytes = 0, std::optional<uint64_t> allocationEnd = std::nullopt);
   /// Register two LDS address sets per lane. elementBytes selects the granularity
   /// of complete elements retained at the backing boundary; zero treats the
   /// whole per-lane access in each address set as one element.

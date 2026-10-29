@@ -14,7 +14,23 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <sched.h>
+
+#include "fail_loud.h"
+#include "signature-drift.h"
+
+// Omitted when RCCL_OS_FAKES_OMIT_ncclSocketClose is defined: the target's own socket model closes sockets.
+#ifndef RCCL_OS_FAKES_OMIT_ncclSocketClose
+static ncclResult_t DefaultSocketClose(struct ncclSocket*, bool) {
+  FailLoudUnfaked("os_fakes", "ncclSocketClose");
+}
+std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose = DefaultSocketClose;
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketClose, ncclSocketClose);
+#undef ASSERT_HOOK_MATCHES_PROD
+
+ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) { return g_ncclSocketClose(sock, wait); }
+#endif
 
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
   void* p = nullptr;
@@ -37,7 +53,9 @@ size_t ncclOsGetCommMempoolMaxSize() { return 0; }  // src/os/linux.cc: 0 = no c
 int g_ncclOsCpuCountValue = 0;
 int g_ncclOsCpuCountCalls = 0;
 std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
+static std::mutex g_affinityMutex;  // proxy.cc's two service threads call these concurrently
 int ncclOsCpuCount(const ncclAffinity& affinity) {
+  std::lock_guard<std::mutex> lock(g_affinityMutex);
   g_ncclOsCpuCountCalls++;
   g_ncclOsCpuCountMasks.push_back(affinity);
   return g_ncclOsCpuCountValue;
@@ -58,6 +76,7 @@ ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { return g_ncclOsGetAffin
 ncclResult_t g_ncclOsSetAffinityResult = ncclSuccess;
 std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
+  std::lock_guard<std::mutex> lock(g_affinityMutex);
   g_ncclOsSetAffinityMasks.push_back(affinity);
   return g_ncclOsSetAffinityResult;
 }
@@ -117,6 +136,21 @@ ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* 
 
 void ncclOsCpuZero(ncclAffinity& affinity) { CPU_ZERO(&affinity); }
 void ncclOsCpuSet(ncclAffinity& affinity, int cpu) { CPU_SET(cpu, &affinity); }
+bool ncclOsCpuIsSet(const ncclAffinity& affinity, int cpu) { return CPU_ISSET(cpu, &affinity); }
+int ncclOsGetCpu() { return 0; }
+uint64_t ncclOsGetTid() { return 0; }
+
+// The real pair makes the mutex/cond process-shared; the counters show each was called.
+int g_ncclOsMutexCondSharedCalls = 0;
+int g_ncclOsMutexCondUnsharedCalls = 0;
+void ncclOsSetMutexCondShared(std::mutex&, std::condition_variable&, int* initialized) {
+  g_ncclOsMutexCondSharedCalls++;
+  *initialized = 1;
+}
+void ncclOsUnsetMutexCondShared(std::mutex&, std::condition_variable&, int* initialized) {
+  g_ncclOsMutexCondUnsharedCalls++;
+  *initialized = 0;
+}
 
 // Topology discovery's sysfs reads. With no PCI path, ncclTopoGetXmlFromSys keeps whatever attributes a test pre-built.
 ncclResult_t ncclOsGetPciPath(const char*, char** path) {
@@ -136,13 +170,22 @@ ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int, char* affinityStr, size_t m
   return ncclSuccess;
 }
 
+static char* DefaultNcclOsRealpath(const char*, char*) { return nullptr; }
+std::function<char*(const char*, char*)> g_ncclOsRealpath = DefaultNcclOsRealpath;
+char* ncclOsRealpath(const char* path, char* resolvedPath) { return g_ncclOsRealpath(path, resolvedPath); }
+
 void ResetOsFakes() {
+#ifndef RCCL_OS_FAKES_OMIT_ncclSocketClose
+  g_ncclSocketClose = DefaultSocketClose;
+#endif
   g_ncclOsCpuCountValue = 0;
   g_ncclOsCpuCountCalls = 0;
   g_ncclOsCpuCountMasks.clear();
   g_ncclOsGetAffinity = [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
   g_ncclOsSetAffinityResult = ncclSuccess;
   g_ncclOsSetAffinityMasks.clear();
+  g_ncclOsMutexCondSharedCalls = 0;
+  g_ncclOsMutexCondUnsharedCalls = 0;
   g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
   g_ncclOsTopoGetStrFromSysCalls = 0;
   g_ncclOsTopoGetStrFromSys = DefaultOsTopoGetStrFromSys;
@@ -152,4 +195,5 @@ void ResetOsFakes() {
   g_pciComputePartition = kDefaultComputePartition;
   g_pciComputePartitionCalls = 0;
   g_lastPciComputePartitionBusId.clear();
+  g_ncclOsRealpath = DefaultNcclOsRealpath;
 }

@@ -11,6 +11,7 @@
 
 add_executable(hrr-unit-tests
   hrr_format_test.cc
+  hrr_host_rect_test.cc
   hrr_limits_test.cc
   hrr_recovery_test.cc
   hrr_repair_test.cc
@@ -103,7 +104,9 @@ if(TARGET hrr-playback AND NOT WIN32)
     hrr_refusals_test.cc
     hrr_blob_refusal_test.cc
     hrr_access_policy_window_test.cc
+    hrr_capture_state_test.cc
     hrr_unmapped_note_test.cc
+    hrr_memcpy3d_array_test.cc
   )
 
   add_executable(hrr-handler-tests

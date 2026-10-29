@@ -565,6 +565,16 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def valu16_preserves_unwritten_half(self) -> bool:
+        """True when ordinary 16-bit VALU writes preserve the other half."""
+        return False
+
+    @property
+    def bf16_inline_uses_f32_carrier(self) -> bool:
+        """True when numeric BF16 sources retain the full F32 inline carrier."""
+        return False
+
+    @property
     def supports_gpr_idx(self) -> bool:
         """True when MODE.GPR_IDX_EN applies M0 indexing to VALU operands."""
         return False
@@ -2199,6 +2209,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
       padding fields for gaps in the MicrocodeFormat bitfield layout.
     """
 
+    @property
+    def valu16_preserves_unwritten_half(self) -> bool:
+        return True
+
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
     _SKIP_DPP_SDWA = True
 
@@ -2999,6 +3013,15 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     flat_saddr_null_aliases = ()
+
+    @property
+    def bf16_inline_uses_f32_carrier(self) -> bool:
+        # CDNA5 ISA section 4.1 describes automatic upper-half selection
+        # without OPSEL, but section 7.2.2 forbids BF16 VOP1 inline inputs.
+        # Follow LLVM 1bcad03262a5 AMDGPUAsmParser.cpp:4678-4726's raw-carrier
+        # interpretation: VOP1 reads the low half, while VOP3 uses OPSEL.
+        # Older assembler acceptance does not qualify CDNA5 hardware behavior.
+        return True
 
     @property
     def smem_register_offset_condition(self) -> str:
