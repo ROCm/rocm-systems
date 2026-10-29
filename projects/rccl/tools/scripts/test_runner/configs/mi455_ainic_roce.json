@@ -304,6 +304,60 @@
         }
       ]
     },
+    "net_ib_gdr_flush_flag_base": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 1200,
+      "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0"
+      }
+    },
+    "net_ib_gdr_flush_flag": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "tests": [
+        {
+          "name": "GdrFlushFlag_DefaultQps",
+          "description": "Remote GDR flush flag with default QPs. GdrFlushFlagTest needs 2 ranks; GdrFlushFlagProtoSwitchMPITest needs 2 nodes.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        },
+        {
+          "name": "GdrFlushFlag_FusedNic",
+          "description": "Fused (two-NIC) device keeps the RDMA read flush. Its own process: the vNIC it makes stays in the device list, and later comms in the process would use it and run without the flag.",
+          "test_filter": "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4Qps",
+          "description": "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps_split": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4QpsSplit",
+          "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
     "gdr_flush_cumem_multinode": {
       "extends": "default",
       "is_gtest": true,
@@ -1389,9 +1443,9 @@
           "test_filter": "RcclAlltoAllDecision.*"
         },
         {
-          "name": "RcclCeAr2ShotMax",
+          "name": "RcclCeNonRegMax",
           "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
-          "test_filter": "RcclCeAr2ShotMax.*"
+          "test_filter": "RcclCeNonRegMax.*"
         },
         {
           "name": "RcclCeArGrownBuffer",
@@ -3553,6 +3607,43 @@
           "name": "CE_FaultInj_MultipleFaults",
           "description": "Multiple CE_FAULT_* bits simultaneously; all target functions return ncclSystemError; ncclCeFaultClear restores all",
           "test_filter": "CeFaultInjTest.MultipleFaultsArmedAndCleared"
+        }
+      ]
+    },
+    "grow_mpi_tests_netbidir": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_OOB_NET_ENABLE": "1",
+        "NCCL_BOOTSTRAP_BIDIR_NET": "1"
+      },
+      "tests": [
+        {
+          "name": "Grow_SendRecv_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: ncclCommGrow with NCCL_OOB_NET_ENABLE=1 and NCCL_BOOTSTRAP_BIDIR_NET=1 (4 ranks) must not hang; net bidir reverse ring is disabled during grow",
+          "test_filter": "GrowMPITest.Grow_SendRecv"
+        },
+        {
+          "name": "DoubleGrow_AllReduce_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: two sequential grows with net bidir OOB enabled complete and AllReduce verifies on the grown communicator",
+          "test_filter": "GrowMPITest.DoubleGrow_AllReduce"
+        },
+        {
+          "name": "Grow_RankPreservation_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: rank indices preserved after grow with net bidir OOB enabled",
+          "test_filter": "GrowMPITest.Grow_RankPreservation"
+        },
+        {
+          "name": "Grow_CoordinatorOnlyUniqueId_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: coordinator-only uniqueId grow with net bidir OOB enabled, exercising inner existing ranks that run with nHandles==0 under NCCL_BOOTSTRAP_BIDIR_NET=1",
+          "test_filter": "GrowMPITest.Grow_CoordinatorOnlyUniqueId"
         }
       ]
     },
@@ -6087,6 +6178,32 @@
           "name": "SymWin_WindowLifecycle_Repeated",
           "description": "Repeated register/deregister cycles",
           "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_SlicesShareBacking",
+          "description": "Many slices of one allocation share a backing registration",
+          "test_filter": "SymWin_WindowLifecycle.SlicesShareBackingRegistration"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_BackingReleasedAfterLast",
+          "description": "A slice stays mapped after its sibling window on the same allocation is deregistered",
+          "test_filter": "SymWin_WindowLifecycle.BackingReleasedAfterLastWindow"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_ReleasedBackingFreesVa",
+          "description": "The last window to drop a backing returns that symmetric VA for the next registration",
+          "test_filter": "SymWin_WindowLifecycle.ReleasedBackingFreesSymmetricVa"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_DuplicateExactRange",
+          "description": "Two live windows on the same range deregister independently",
+          "test_filter": "SymWin_WindowLifecycle.DuplicateExactRange"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_RankDivergentReregister",
+          "description": "Collective re-register when only one rank has dropped its backing cache",
+          "test_filter": "SymWin_WindowLifecycle.RankDivergentReregister",
+          "timeout": 120
         }
       ]
     },
@@ -6098,7 +6215,7 @@
       "num_nodes": 1,
       "num_gpus": 2,
       "timeout": 180,
-      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (kernel >= 6.8, ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
+      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "NCCL_CUMEM_ENABLE": "1"
@@ -6698,6 +6815,24 @@
       "enabled": false
     },
     {
+      "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes. Disabled: gfx1250 cannot use the flag, so every case would skip.",
+      "config": "net_ib_gdr_flush_flag",
+      "enabled": false
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs per connection. Disabled: gfx1250 cannot use the flag, so every case would skip.",
+      "config": "net_ib_gdr_flush_flag_4qps",
+      "enabled": false
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1. Disabled: gfx1250 cannot use the flag, so every case would skip.",
+      "config": "net_ib_gdr_flush_flag_4qps_split",
+      "enabled": false
+    },
+    {
       "name": "GDR Flush - cuMem AllGather (Multi-Node)",
       "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the RO=0 scratchpad write+read fence",
       "config": "gdr_flush_cumem_multinode",
@@ -7199,6 +7334,12 @@
       "name": "Grow MPI Tests (2-rank)",
       "description": "ncclCommGrow coverage at 2 ranks on a single node: argument validation, rank preservation, config inheritance, non-blocking grow, parent destroy lifecycle, error recovery regrow, and ncclCommGetUniqueId edge cases",
       "config": "grow_mpi_tests",
+      "enabled": true
+    },
+    {
+      "name": "Grow MPI Tests - Net Bidir Regression (4-rank, single-node)",
+      "description": "AICOMRCCL-3004: ncclCommGrow over the network bootstrap with NCCL_BOOTSTRAP_BIDIR_NET=1 at 4 ranks on one node, guarding against the bidirectional-net reverse-ring hang during grow (Grow_SendRecv, DoubleGrow_AllReduce, Grow_RankPreservation, Grow_CoordinatorOnlyUniqueId).",
+      "config": "grow_mpi_tests_netbidir",
       "enabled": true
     },
     {

@@ -38,7 +38,7 @@ enum class ScratchAddressMode { VectorEnable, LegacyCdna, Rdna1, Rdna2 };
 /// - FLAT (seg==0): 64-bit VGPR pair + unsigned 12-bit offset.
 /// - SCRATCH (seg==1): scratch_base + 32-bit VGPR + saddr + signed 12-bit (RDNA) or 13-bit (CDNA)
 /// offset.
-/// - GLOBAL (seg==2): 64-bit saddr + 32-bit VGPR + signed 13-bit offset,
+/// - GLOBAL (seg==2): 64-bit saddr + unsigned 32-bit VGPR offset + signed 13-bit offset,
 ///   or 64-bit VGPR pair when saddr==0x7F.
 ///
 /// Requires: inst.seg, inst.saddr, inst.addr, inst.offset, inst.pad_12.
@@ -137,7 +137,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
           static_cast<uint64_t>(lane) * kScratchInterleave + (priv_off % kScratchInterleave);
     }
   } else if (inst.seg == 2) {
-    // GLOBAL: saddr (64-bit SGPR pair) + VGPR (32-bit) + offset,
+    // GLOBAL: saddr (64-bit SGPR pair) + unsigned VGPR offset (32-bit) + offset,
     //         or VGPR pair (64-bit) + offset when saddr==0x7F.
     uint64_t saddr_val = 0;
     if (inst.saddr != 0x7F) {
@@ -156,8 +156,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
         continue;
       uint64_t vaddr;
       if (inst.saddr != 0x7F) {
-        vaddr = static_cast<uint64_t>(static_cast<int64_t>(
-            static_cast<int32_t>(vaddr_region.lane(0, lane)))); // sign-extended 32-bit offset
+        vaddr = amdgpu::flat_vector_offset(vaddr_region.lane(0, lane), /*signed_offset=*/false);
       } else {
         vaddr = vaddr_region.lane64(0, lane); // 64-bit VGPR pair
       }

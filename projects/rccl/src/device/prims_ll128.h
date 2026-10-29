@@ -576,7 +576,8 @@ public:
                         uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* e = nullptr,
                         bool ipcReg = false, bool netReg = false, int stepSize_ = 0)
     : redOp(redOpArg), tid(tid), nthreads(nthreads), wid(tid % WARP_SIZE), /*compiler warnings*/
-      stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS / sizeof(uint64_t)), warp(tid / WARP_SIZE),
+      stepSize(stepSize_ > 0 ? stepSize_ : ncclShmem.comm.buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS / sizeof(uint64_t)),
+      warp(tid / WARP_SIZE),
       warpInBlock(threadIdx.x / WARP_SIZE),
       flagThread((tid % (NCCL_LL128_LINEELEMS / 2)) == (NCCL_LL128_LINEELEMS / 2 - 1)), group(group),
       threadsPerBlock(blockDim.x) {
@@ -616,12 +617,15 @@ public:
 #endif
   }
 
+  // stepSize_ is the Simple-protocol chunk the send/recv kernel passes for every protocol; LL128 send/recv uses its
+  // own buffer, which can be smaller than the one collectives use.
   __forceinline__ __device__ Primitives(int tid, int nthreads, int const* recvPeers, int const* sendPeers,
                                         void const* inputBuf, void* outputBuf, uint64_t redOpArg, uint8_t group,
                                         uint8_t connIndexRecv, uint8_t connIndexSend, struct ncclDevWorkColl* collWork,
                                         struct ncclDevWorkP2p* p2pWork, int stepSize_ = 0, int mode = primsModeDefault)
     : Primitives(tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group, connIndexRecv,
-                 connIndexSend, collWork) {}
+                 connIndexSend, collWork, false, false,
+                 p2pWork != nullptr ? ncclShmem.comm.p2pLl128BuffSize / NCCL_STEPS / (int)sizeof(uint64_t) : 0) {}
 
   __device__ ~Primitives() {
     // Save steps for the next operation
