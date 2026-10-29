@@ -1,0 +1,76 @@
+inherit: ../gfx90a/fabric.yaml
+fabric.ai_hbm:
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / SUM(TCC_BUBBLE_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64)
+fabric.atomic:
+  formula: SUM(TCC_EA0_ATOMIC_sum) / SUM($denom)
+fabric.atomic_lat:
+  formula: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum)
+fabric.atomic_traffic:
+  formula: 100 * SUM(TCC_EA0_ATOMIC_sum) / SUM(TCC_EA0_WRREQ_sum)
+fabric.hbm_bw:
+  formula: SUM(TCC_BUBBLE_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
+fabric.hbm_rd:
+  formula: SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM($denom)
+fabric.hbm_rd_bw_est:
+  name: Estimated HBM Read Bandwidth
+  formula: 64 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Estimated bandwidth of read requests from the Data Fabric to HBM (DRAM), assuming
+    64 bytes per request. Upper-bound estimate because some requests may be 32 bytes.
+fabric.hbm_rd_traffic:
+  formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)
+fabric.hbm_wr_atomic:
+  formula: SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM($denom)
+fabric.hbm_wr_atomic_bw_est:
+  name: Estimated HBM Write and Atomic Bandwidth
+  formula: 64 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Estimated bandwidth of write and atomic requests from the Data Fabric to HBM (DRAM),
+    assuming 64 bytes per request. Upper-bound estimate because some requests may
+    be 32 bytes.
+fabric.hbm_wr_atomic_traffic:
+  formula: 100 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)
+fabric.rd_32b:
+  formula: SUM(TCC_EA0_RDREQ_32B_sum) / SUM($denom)
+fabric.rd_64b:
+  formula: SUM(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / SUM($denom)
+fabric.rd_bw:
+  formula: SUM(TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
+  peak: !remove
+fabric.rd_bw_incl_128b:
+  name: L2-Fabric Read Bandwidth (Including 128-Byte Reads)
+  formula: SUM(128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    The number of bytes read by the L2 over the Infinity Fabric interface per unit
+    time.
+  peak: $hbmBandwidth
+fabric.rd_lat:
+  formula: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)
+fabric.rd_uncached:
+  formula: SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM($denom)
+fabric.remote_rd:
+  formula: SUM(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM($denom)
+fabric.remote_rd_traffic:
+  formula: 100 * SUM(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM(TCC_EA0_RDREQ_sum)
+fabric.remote_wr_atomic:
+  formula: SUM(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM($denom)
+fabric.remote_wr_atomic_traffic:
+  formula: 100 * SUM(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM(TCC_EA0_WRREQ_sum)
+fabric.uncached_rd_traffic:
+  formula: 100 * SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM(TCC_EA0_RDREQ_sum)
+fabric.uncached_wr_atomic_traffic:
+  formula: 100 * SUM(TCC_EA0_WR_UNCACHED_32B_sum) / SUM(TCC_EA0_WRREQ_sum)
+fabric.wr_atomic_32b:
+  formula: AVG(NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom, TCC_EA0_WRREQ_sum))
+fabric.wr_atomic_64b:
+  formula: SUM(TCC_EA0_WRREQ_64B_sum) / SUM($denom)
+fabric.wr_atomic_bw:
+  formula: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
+fabric.wr_atomic_bw_norm: !remove
+fabric.wr_atomic_uncached:
+  formula: SUM(TCC_EA0_WR_UNCACHED_32B_sum) / SUM($denom)
+fabric.wr_lat:
+  formula: SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM(TCC_EA0_WRREQ_sum)
