@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-# Run the corpus HIP file-limit matrix with the same configuration as CI.
+# Run the standalone corpus HIP file-limit matrix.
 # Required: ROCM_PATH, ROCJITSU_BUILD_DIR, ROCJITSU_CORPUS_DIR.
 # Optional: ROCJITSU_SOURCE_DIR (defaults to this script's source tree).
 # Additional arguments are passed to CTest, e.g. -R local.early -V.
@@ -43,7 +43,7 @@ if ! command -v tini >/dev/null; then
   exit 1
 fi
 
-# Match CI's client instrumentation. UBSan-only rocjitsu builds use an
+# Match the rocjitsu build's instrumentation. UBSan-only builds use an
 # uninstrumented HIP client; ASan and TSan builds need matching host runtimes.
 client_sanitizer=""
 if grep -Eq '^RJ_ENABLE_TSAN:BOOL=(1|ON|TRUE|YES)$' "${cache}"; then
