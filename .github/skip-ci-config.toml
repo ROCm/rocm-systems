@@ -94,6 +94,7 @@ common = [
     ".github/workflows/*-formatting.yml",
     ".github/workflows/unit-tests.yml",
     ".github/actions/changed-files/*",
+    ".github/actions/scoped-formatting/*",
     ".github/workflows/tests/*",
 
     # Documentation files
