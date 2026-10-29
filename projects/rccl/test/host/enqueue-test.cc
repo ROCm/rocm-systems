@@ -2393,15 +2393,12 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
 }
 
-// A failed prologue must not reach launch(): the addon's work would land on the wrong device, or on a
-// captured stream without its ordering. cudaDev (5) differs from the current device (3) so the
-// prologue's hipSetDevice and the epilogue's restore are both observable, and the launch lambda
-// returns success so a launch that ran anyway would also turn the result into ncclSuccess and record.
+// Begin fails, so launch() must not run. cudaDev 5 != current 3 makes the set and the restore observable.
 TEST_F(EnqueueMicrotest, AddonLaunch_SetDeviceFailed_SkipsLaunchAndRestoresTheDevice) {
   AddonComm ac;
-  ac.c()->nRanks  = 2;
-  ac.c()->cudaDev = 5;
-  g_currentDevice = 3;
+  ac.c()->cudaDev        = 5;
+  ac.c()->addonStopEvent = kAddonDoneEvent;  // Begin clears it, so a stale event can't leak through
+  g_currentDevice        = 3;
   std::vector<int> setDevices;
   ScopedHook setDevice(g_hipSetDevice, [&](int dev) {
     setDevices.push_back(dev);
@@ -2437,9 +2434,9 @@ TEST_F(EnqueueMicrotest, AddonLaunch_SetDeviceFailed_SkipsLaunchAndRestoresTheDe
 
 TEST_F(EnqueueMicrotest, AddonLaunch_CaptureQueryFailed_SkipsLaunchAndRestoresTheDevice) {
   AddonComm ac;
-  ac.c()->nRanks  = 2;
-  ac.c()->cudaDev = 5;
-  g_currentDevice = 3;
+  ac.c()->cudaDev        = 5;
+  ac.c()->addonStopEvent = kAddonDoneEvent;  // Begin clears it, so a stale event can't leak through
+  g_currentDevice        = 3;
   // A tag from another stream: a launch that ran anyway would overwrite it with kAddonStream's.
   hipStream_t const otherStream = reinterpret_cast<hipStream_t>(0x0B5);
   ac.c()->lastStreamTag = ncclStreamTag(otherStream);
