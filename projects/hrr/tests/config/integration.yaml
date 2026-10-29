@@ -19,8 +19,18 @@ targets:
   os: [linux, windows]
   arch: [gfx90a, gfx942, gfx950, gfx1030, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1153, gfx1200, gfx1201, gfx1250]
 cases:
-  Unit_HRR_AllApisRoundtrip: {}
-  Unit_HRR_AllApis_Direct: {}
+  Unit_HRR_AllApisRoundtrip:
+    skip:
+      - when: {arch: ["gfx90a", "gfx11*", "gfx120*"], emulator: true}
+        kind: disabled
+        reason: "rocJitsu does not execute image_store, which hipMemcpy3D to and from a hipArray needs on image-capable archs"
+        issue: "https://github.com/ROCm/rocm-systems/issues/14612"
+  Unit_HRR_AllApis_Direct:
+    skip:
+      - when: {arch: ["gfx90a", "gfx11*", "gfx120*"], emulator: true}
+        kind: disabled
+        reason: "rocJitsu does not execute image_store, which hipMemcpy3D to and from a hipArray needs on image-capable archs"
+        issue: "https://github.com/ROCm/rocm-systems/issues/14612"
   Unit_HRR_ApiMatrix_Breadth2_Direct: {}
   Unit_HRR_ApiMatrix_Breadth_Direct: {}
   Unit_HRR_ApiMatrix_Deprioritised_Direct: {}
@@ -55,6 +65,10 @@ cases:
         kind: disabled
         reason: "hipMemcpyToArray and hipMemcpyFromArray copy no data under the RDNA3 and RDNA4 rocJitsu configs"
         issue: "https://github.com/ROCm/rocm-systems/issues/13724"
+      - when: {arch: gfx90a, emulator: true}
+        kind: disabled
+        reason: "rocJitsu does not execute image_store, which hipMemcpy3D to and from a hipArray needs on image-capable archs"
+        issue: "https://github.com/ROCm/rocm-systems/issues/14612"
   Unit_HRR_ApiMatrix_T5_Roundtrip: {}
   Unit_HRR_ApiMatrix_UC1Dense_Direct: {}
   Unit_HRR_BlankCaptureOutputCapturesNothing: {}
