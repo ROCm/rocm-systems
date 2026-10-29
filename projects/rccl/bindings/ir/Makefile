@@ -70,6 +70,7 @@ BITCODE_CXX_STD  ?= gnu++17
 # Defined unconditionally so `clean` removes them whatever the knobs are
 # set to. The intermediates live under OBJDIR, which clean removes wholesale.
 FINAL_BC       := $(LIBDIR)/librccl_device.bc
+FINAL_LTO_IR   := $(LIBDIR)/librccl_device.ltoir
 
 WRAPPER_HEADER := $(INCDIR)/nccl_device_wrapper.h
 
@@ -194,9 +195,139 @@ llvm_ir:
 
 endif
 
-build: llvm_ir
+##########################################################################
+# ltoir: librccl_device.ltoir
+#
+# RCCL's analogue of NCCL's libnccl_device.ltoir. Same knob name
+# (NCCL_EMIT_LTO_IR), same target name (ltoir), same build-tree location
+# ($(LIBDIR)), same deferred-inlining semantics, so a consumer that knows
+# how to drive NCCL's LTO IR finds RCCL's in the same place.
+#
+# What NCCL produces with a single `nvcc -dlto --ltoir` is frontend IR with
+# the optimizer not yet run: inlining is undecided, so the device linker
+# later inlines with the real call site visible. It is unoptimized but still
+# fully OPTIMIZABLE. That last word is the whole design constraint.
+##########################################################################
+
+ifneq ($(NCCL_EMIT_LTO_IR), 0)
+
+# Mirror NCCL's variable names. NCCL defaults LTO_IR_ARCH to
+# BITCODE_LIB_ARCH; it uses a different C++ std for the two artifacts
+# (gnu++17 for the .bc, c++17 for the .ltoir), but RCCL has no reason to
+# diverge the two, so this defaults to the same std as the .bc.
+LTO_IR_ARCH    ?= $(BITCODE_LIB_ARCH)
+LTO_IR_CXX_STD ?= $(BITCODE_CXX_STD)
+
+LTO_IR_RAW := $(OBJDIR)/librccl_device.ltoir.raw
+
+##### Compiler flags #####
+# There is no --ltoir on AMDGPU. The analogue is
+#   -c -emit-llvm -O1 -Xclang -disable-llvm-passes
+# -O1 sets CodeGenOpts.OptimizationLevel so the frontend does NOT stamp
+# optnone/noinline; -disable-llvm-passes then suppresses the pipeline, so
+# the IR arrives unoptimized but unencumbered.
+#
+# -O0 is NOT a substitute. Measured on gfx950 / ROCm 7.2.4, -O0 stamps
+# `noinline optnone` on every function with or without
+# -disable-llvm-passes. optnone permanently forbids the downstream
+# link-time inliner from touching the function -- strictly worse than
+# --ltoir, and not removable downstream. -fno-inline and
+# -finline-hint-functions are out for the same reason: both stamp noinline.
+#
+# Both macros, never one: __NCCL_DEVICE_LTOIR_LIB__ is a MODIFIER of the
+# bitcode-library build, not a replacement for it. See the #error in
+# nccl_device_wrapper.h for the two things that break otherwise.
+LTO_IR_CLANG_FLAGS := -c -emit-llvm -O1 -Xclang -disable-llvm-passes \
+	-std=$(LTO_IR_CXX_STD) \
+	-x hip \
+	--rocm-path=$(ROCM_PATH) \
+	--offload-device-only \
+	--offload-arch=$(LTO_IR_ARCH) \
+	$(RCCL_INCLUDES) $(ROCM_INCLUDES) \
+	-D__clang_llvm_bitcode_lib__ \
+	-D__NCCL_DEVICE_LTOIR_LIB__ \
+	-D__CUDACC_EXTENDED_LAMBDA__ \
+	$(NCCL_DEVICE_DEFINES) \
+	-D__HIP_PLATFORM_AMD__=1
+
+##### opt passes #####
+# internalize ONLY.
+#
+# nvcc --ltoir has its own symbol discipline; pristine clang IR does not --
+# every non-static C++ header function survives as an external mangled
+# symbol, so without this the artifact's export surface would not match the
+# .bc's. Measured: the raw compile has 213 defined T symbols of which 50 are
+# mangled; after internalize it has exactly the .bc's 82, none mangled.
+#
+# No -internalize-public-api-list is needed, unlike the .bc recipe above:
+# NCCL_IR_EXPORT's `used, retain` already puts every thunk into @llvm.used,
+# which internalize honours as a root set.
+#
+# NOT `inline`. NOT `globaldce`. Those are precisely what this artifact
+# exists to avoid -- adding either silently turns it back into
+# librccl_device.bc, and only the define-count test in
+# test/ir-device/tests/test_lto_ir.py would notice.
+LTO_IR_OPT_PASSES := --passes=internalize
+
+##### Rules #####
+# check_hipify is order-only (|). It is a .PHONY target, so as a normal
+# prerequisite it would be perpetually out of date and force a recompile on
+# every single invocation. Order-only still runs the preflight before the
+# compile but does not mark the target stale. (The llvm_ir path above has
+# check_hipify as a normal prerequisite and therefore does rebuild
+# unconditionally; that is pre-existing develop behaviour and deliberately
+# left alone here.)
+$(LTO_IR_RAW): $(LLVM_SRC) $(WRAPPER_HEADER) util.h | check_hipify
+	@mkdir -p $(OBJDIR)
+	@echo "Generating LTO IR (deferred inlining) for $(LTO_IR_ARCH)..."
+	$(CLANG) $(LTO_IR_CLANG_FLAGS) $(LLVM_SRC) -o $@
+
+# No llvm-dis/llvm-as round-trip and no ftz/align scrubbing on this path:
+# NCCL strips nvvm-reflect-ftz metadata and align attributes because libNVVM
+# rejects them. Both are NVVM-specific; AMDGPU has no analogue and needs none.
+$(FINAL_LTO_IR): $(LTO_IR_RAW)
+	@mkdir -p $(LIBDIR)
+	@echo "Internalizing LTO IR -> $@"
+	$(OPT) $(LTO_IR_OPT_PASSES) $< -o $@
+
+ltoir: $(FINAL_LTO_IR) $(WRAPPER_HEADER)
+	@echo "RCCL LTO IR generated successfully:"
+	@echo "  C++ Standard:      $(LTO_IR_CXX_STD)"
+	@echo "  GPU Architecture:  $(LTO_IR_ARCH)"
+	@echo "  Raw LTO IR:        $(LTO_IR_RAW)"
+	@echo "  Final LTO IR:      $(FINAL_LTO_IR)"
+	@echo "  Wrapper Header:    $(WRAPPER_HEADER)"
+
+else  # NCCL_EMIT_LTO_IR == 0
+
+ltoir:
+	@echo "RCCL LTO IR generation disabled (NCCL_EMIT_LTO_IR=0)"
+
+endif
+
+build: llvm_ir ltoir
 
 clean:
-	rm -rf $(OBJDIR) $(FINAL_BC) $(WRAPPER_HEADER)
+	rm -rf $(OBJDIR) $(FINAL_BC) $(FINAL_LTO_IR) $(WRAPPER_HEADER)
 
-.PHONY: llvm_ir build clean
+.PHONY: llvm_ir ltoir build clean
+
+# Serialize IR-gen to avoid a race, mirroring NCCL's guard at the bottom of
+# its bindings/ir/Makefile, including the nested-ifneq spelling.
+#
+# Order-only (|), never a real prerequisite: the .ltoir must NOT regenerate
+# just because the .bc changed. The two artifacts are independent outputs of
+# the same source, not derived from one another.
+#
+# NCCL hangs this off $(FINAL_LTO_IR) because there its .ltoir IS the single
+# nvcc compile. RCCL splits the recipe into a raw compile plus an internalize
+# step, so the equivalent of NCCL's intent -- keep the two expensive IR
+# compiles of this heavily-templated TU from running concurrently under -j --
+# is to hang it off $(LTO_IR_RAW). Hanging it off $(FINAL_LTO_IR) instead
+# would only serialize the cheap internalize step and let both clang
+# invocations overlap, which is the thing being guarded against.
+ifneq ($(EMIT_LLVM_IR), 0)
+ifneq ($(NCCL_EMIT_LTO_IR), 0)
+$(LTO_IR_RAW): | $(FINAL_BC)
+endif
+endif
