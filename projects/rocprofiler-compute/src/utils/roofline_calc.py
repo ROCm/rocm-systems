@@ -124,6 +124,21 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
         "I32": OpsSupport.VALU,
         "I64": OpsSupport.VALU,
     },  # Unsupported: F4, F6, F8
+    # RDNA4 WMMA covers F16, BF16 and FP8 (all accumulating to F32). There is no
+    # FP4/FP6 matrix path and no matrix-F32/F64/I8 path -- those are gfx1250 and
+    # CDNA features -- so those precisions stay VALU-only here.
+    "gfx1201": {
+        "FP8": OpsSupport.MATRIX,
+        "FP16": OpsSupport.VALU | OpsSupport.MATRIX,
+        # MATRIX only: the gfx12 benchmark base has no VALU BF16 test, so a
+        # VALU claim here would expect a BF16Flops column that is never written.
+        "BF16": OpsSupport.MATRIX,
+        "FP32": OpsSupport.VALU,
+        "FP64": OpsSupport.VALU,
+        "I8": OpsSupport.VALU,
+        "I32": OpsSupport.VALU,
+        "I64": OpsSupport.VALU,
+    },  # Unsupported: F4, F6
     "gfx1250": {
         "FP4": OpsSupport.MATRIX,
         "FP6": OpsSupport.MATRIX,
