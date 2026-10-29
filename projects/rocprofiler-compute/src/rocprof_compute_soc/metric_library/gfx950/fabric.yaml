@@ -1,0 +1,571 @@
+inherit: ../gfx942/fabric.yaml
+fabric.ai_hbm:
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F8 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / SUM(TCC_EA0_RDREQ_128B_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64)
+fabric.ea_hbm_atomic_pressure:
+  name: EA HBM Atomic Pressure
+  formula: 100 * SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_sum) / SUM(TCC_EA0_WRREQ_DRAM_sum)
+  unit: Percent
+  description: >-
+    Percentage of HBM-destined write requests that are atomics. High values indicate
+    atomic contention at HBM. Atomics require read-modify-write cycles and typically
+    achieve lower effective bandwidth than pure reads or writes. Consider reducing
+    atomic granularity or using alternative synchronization patterns.
+fabric.ea_hbm_wr_vs_atomic_split:
+  name: EA HBM Write vs Atomic Split
+  formula: 100 * SUM(TCC_EA0_WRREQ_WRITE_DRAM_sum) / SUM(TCC_EA0_WRREQ_DRAM_sum)
+  unit: Percent
+  description: >-
+    Percentage of HBM-destined write requests that are non-atomic (pure writes). The
+    complement (100% - this value) represents atomics. High atomic fraction to HBM
+    can degrade effective write bandwidth due to read-modify-write overhead.
+fabric.ea_io_bw_bound_combined:
+  name: EA IO Bandwidth Bound - Combined
+  formula: 100 * SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    Combined IO (PCIe) read and write credit stall percentage. High values indicate
+    the PCIe path is the bottleneck. Relevant for workloads with significant host-device
+    data transfer during kernel execution.
+fabric.ea_rd_bw_fraction_gmi:
+  name: EA Read Bandwidth Fraction - GMI
+  formula: 100 * SUM(TCC_EA0_RDREQ_GMI_32B_sum) / SUM(TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_RDREQ_IO_32B_sum)
+  unit: Percent
+  description: >-
+    Bandwidth-weighted percentage of EA read traffic routed via GMI to remote XCDs
+    or AIDs. High values indicate significant remote memory access, which has higher
+    latency than local HBM. Uses gfx950-specific 32B counters.
+fabric.ea_rd_bw_fraction_hbm:
+  name: EA Read Bandwidth Fraction - HBM
+  formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_32B_sum) / SUM(TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_RDREQ_IO_32B_sum)
+  unit: Percent
+  description: >-
+    Bandwidth-weighted percentage of EA read traffic destined for HBM, calculated
+    using 32B-granularity counters. Unlike the request fraction, this accounts for
+    different request sizes across destinations.
+fabric.ea_rd_bw_fraction_io:
+  name: EA Read Bandwidth Fraction - IO
+  formula: 100 * SUM(TCC_EA0_RDREQ_IO_32B_sum) / SUM(TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_RDREQ_IO_32B_sum)
+  unit: Percent
+  description: >-
+    Bandwidth-weighted percentage of EA read traffic routed via IO (PCIe) to the host
+    or other devices. High values indicate significant host-to-device data transfer.
+    Uses gfx950-specific 32B counters.
+fabric.ea_rd_wr_balance:
+  name: EA Read/Write Balance
+  formula: 100 * SUM(TCC_EA0_RDREQ_sum) / SUM(TCC_EA0_RDREQ_sum + TCC_EA0_WRREQ_sum)
+  unit: Percent
+  description: >-
+    Percentage of EA traffic that is reads (vs writes). Values near 50% indicate balanced
+    read/write traffic. Values >80% indicate read-dominant workloads; values <20%
+    indicate write-dominant workloads. Extreme imbalance can cause suboptimal utilization
+    of bidirectional memory bandwidth.
+fabric.ea_stall_destination_dominance_gmi:
+  name: EA Stall Destination Dominance - GMI
+  formula: 100 * SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum + TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_WRREQ_IO_CREDIT_STALL_sum)
+  unit: Percent
+  description: >-
+    Percentage of total EA credit stalls attributable to GMI. A high value indicates
+    remote memory access is the dominant bottleneck source.
+fabric.ea_stall_destination_dominance_hbm:
+  name: EA Stall Destination Dominance - HBM
+  formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum + TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_WRREQ_IO_CREDIT_STALL_sum)
+  unit: Percent
+  description: >-
+    Percentage of total EA credit stalls attributable to HBM (DRAM). Identifies whether
+    HBM is the dominant stall source among all three destinations. A value near 100%
+    means virtually all EA stalls come from HBM backpressure.
+fabric.ea_stall_destination_dominance_io:
+  name: EA Stall Destination Dominance - IO
+  formula: 100 * SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum + TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_WRREQ_IO_CREDIT_STALL_sum)
+  unit: Percent
+  description: >-
+    Percentage of total EA credit stalls attributable to IO (PCIe). A high value indicates
+    PCIe traffic is the dominant bottleneck source.
+fabric.ea_to_hbm_total_bw:
+  name: EA to HBM Total Bandwidth
+  formula: 32 * SUM(TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_WRREQ_WRITE_DRAM_32B_sum + TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total bandwidth from EA to HBM combining reads, writes, and atomics. This represents
+    the aggregate HBM bandwidth consumed by the accelerator. Compare against peak
+    HBM bandwidth to assess memory bandwidth utilization.
+fabric.ea_wr_backpressure:
+  name: EA Write Backpressure
+  formula: 100 * SUM(TCC_EA0_WRREQ_STALL_sum + TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    Combined EA write stall and too-many-writes stall as a percentage of L2 busy time.
+    High values indicate the EA write path is congested, causing L2 to stall on write
+    requests. This can be caused by HBM write bandwidth saturation, write-heavy workloads,
+    or atomic contention.
+fabric.hbm_atomic_bw:
+  name: HBM Atomic Bandwidth
+  formula: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes due to L2 atomic requests routed to Infinity Fabric targeting
+    the accelerator's local HBM (DRAM), divided by total duration.
+fabric.hbm_bw:
+  formula: SUM(TCC_EA0_RDREQ_128B_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
+fabric.hbm_rd_bw:
+  name: HBM Read Bandwidth
+  formula: 32 * SUM(TCC_EA0_RDREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes due to L2 read requests routed to Infinity Fabric targeting
+    the accelerator's local HBM (DRAM), divided by total duration.
+fabric.hbm_rd_bw_est: !remove
+fabric.hbm_wr_atomic_bw:
+  name: HBM Write and Atomic Bandwidth
+  formula: 32 * SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum + TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Combined bandwidth of write and atomic requests from L2 to the accelerator's local
+    HBM (DRAM), divided by total duration.
+fabric.hbm_wr_atomic_bw_est: !remove
+fabric.hbm_wr_bw:
+  name: HBM Write Bandwidth
+  formula: 32 * SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes due to L2 write requests routed to Infinity Fabric targeting
+    the accelerator's local HBM (DRAM), divided by total duration.
+fabric.memory_bw_bound_combined_credit_pressure:
+  name: L2 Memory Bandwidth Bound - Combined Credit Pressure
+  formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    Combined HBM read and write credit stall percentage. This is the primary memory
+    bandwidth bound indicator. High values (>10%) with high memory utilization (>80%)
+    strongly indicate memory bandwidth is the bottleneck.
+fabric.normalized_ea_gmi_rd_credit_stall:
+  name: Normalized EA - GMI Read Credit Stall
+  formula: 100 * SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: >-
+    Percentage of kernel execution time EA read requests were stalled due to Infinity
+    Fabric credit exhaustion. High values indicate remote read bandwidth is saturated.
+    Normalized to kernel cycles for cross-component comparison.
+fabric.normalized_ea_gmi_wr_credit_stall:
+  name: Normalized EA - GMI Write Credit Stall
+  formula: 100 * SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: >-
+    Percentage of kernel execution time EA write requests were stalled due to Infinity
+    Fabric credit exhaustion. High values indicate remote write bandwidth is saturated.
+    Normalized to kernel cycles for cross-component comparison.
+fabric.normalized_ea_hbm_rd_credit_stall:
+  name: Normalized EA - HBM Read Credit Stall
+  formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: >-
+    Percentage of kernel execution time EA read requests were stalled due to HBM credit
+    exhaustion. High values indicate HBM read bandwidth is saturated. Normalized to
+    kernel cycles for cross-component comparison with L1/L2 stalls.
+fabric.normalized_ea_hbm_wr_credit_stall:
+  name: Normalized EA - HBM Write Credit Stall
+  formula: 100 * SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: >-
+    Percentage of kernel execution time EA write requests were stalled due to HBM
+    credit exhaustion. High values indicate HBM write bandwidth is saturated. Normalized
+    to kernel cycles for cross-component comparison.
+fabric.normalized_ea_io_rd_credit_stall:
+  name: Normalized EA - IO Read Credit Stall
+  formula: 100 * SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: >-
+    Percentage of kernel execution time EA read requests were stalled due to IO interface
+    credit exhaustion. High values indicate PCIe/IO read bandwidth is saturated. Normalized
+    to kernel cycles for cross-component comparison.
+fabric.normalized_ea_io_wr_credit_stall:
+  name: Normalized EA - IO Write Credit Stall
+  formula: 100 * SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: >-
+    Percentage of kernel execution time EA write requests were stalled due to IO interface
+    credit exhaustion. High values indicate PCIe/IO write bandwidth is saturated.
+    Normalized to kernel cycles for cross-component comparison.
+fabric.normalized_ea_to_gmi_total_32b_req:
+  name: Normalized EA to GMI Total 32B Requests
+  formula: SUM(TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_WRREQ_WRITE_GMI_32B_sum + TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Requests/s
+  description: >-
+    Total EA to GMI 32B-granularity requests (reads + writes + atomics) per second.
+    Measures aggregate GMI traffic rate. Uses 32B counters because per-destination
+    request-count counters are not available for GMI.
+fabric.normalized_ea_to_hbm_atomic_req:
+  name: Normalized EA to HBM Atomic Requests
+  formula: SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Requests/s
+  description: >-
+    EA to HBM atomic requests per second of kernel execution. Normalized to wall-clock
+    time for absolute throughput measurement.
+fabric.normalized_ea_to_hbm_rd_req:
+  name: Normalized EA to HBM Read Requests
+  formula: SUM(TCC_EA0_RDREQ_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Requests/s
+  description: >-
+    EA to HBM read requests per second of kernel execution. Normalized to wall-clock
+    time for absolute throughput measurement.
+fabric.normalized_ea_to_hbm_wr_req:
+  name: Normalized EA to HBM Write Requests
+  formula: SUM(TCC_EA0_WRREQ_WRITE_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Requests/s
+  description: >-
+    EA to HBM non-atomic write requests per second of kernel execution. Normalized
+    to wall-clock time for absolute throughput measurement.
+fabric.normalized_ea_to_io_total_32b_req:
+  name: Normalized EA to IO Total 32B Requests
+  formula: SUM(TCC_EA0_RDREQ_IO_32B_sum + TCC_EA0_WRREQ_WRITE_IO_32B_sum + TCC_EA0_WRREQ_ATOMIC_IO_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Requests/s
+  description: >-
+    Total EA to IO (PCIe) 32B-granularity requests (reads + writes + atomics) per
+    second. Measures aggregate PCIe traffic rate. Uses 32B counters because per-destination
+    request-count counters are not available for IO.
+fabric.normalized_ea_too_many_writes_stall:
+  name: Normalized EA - Too Many Writes Stall
+  formula: 100 * SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: >-
+    Percentage of kernel execution time EA could not accept write requests because
+    the maximum number of pending writes was reached. Indicates write credit starvation.
+    Normalized to kernel cycles for cross-component comparison.
+fabric.normalized_ea_wr_stall:
+  name: Normalized EA - Write Stall
+  formula: 100 * SUM(TCC_EA0_WRREQ_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: >-
+    Percentage of kernel execution time EA write requests were stalled for any reason.
+    Normalized to kernel cycles for cross-component comparison.
+fabric.normalized_l2_to_ea_rd_credit_stall_gmi:
+  name: Normalized L2 to EA - Read Credit Stall (GMI)
+  formula: 100 * SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that L2 read requests to remote memory (via GMI)
+    were stalled because all GMI read credits were in use. Averaged across all L2
+    channels. High values indicate remote read bandwidth saturation.
+fabric.normalized_l2_to_ea_rd_credit_stall_hbm:
+  name: Normalized L2 to EA - Read Credit Stall (HBM)
+  formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that L2 read requests to HBM were stalled because
+    all HBM read credits were in use. Averaged across all L2 channels. High values
+    indicate HBM read bandwidth saturation.
+fabric.normalized_l2_to_ea_rd_credit_stall_io:
+  name: Normalized L2 to EA - Read Credit Stall (IO)
+  formula: 100 * SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that L2 read requests to IO (PCIe) were stalled
+    because all IO read credits were in use. Averaged across all L2 channels. High
+    values indicate PCIe read bandwidth saturation.
+fabric.normalized_l2_to_ea_rd_req:
+  name: Normalized L2 to EA Read Requests
+  formula: SUM(TCC_EA0_RDREQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Requests/s
+  description: >-
+    L2 to memory through EA read requests per second of kernel execution. Normalized
+    to wall-clock time for absolute throughput measurement.
+fabric.normalized_l2_to_ea_too_many_writes_stall:
+  name: Normalized L2 to EA - Too Many Writes Stall
+  formula: 100 * SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that L2 could not issue write requests to memory
+    because the maximum number of pending EA writes was reached. Averaged across all
+    L2 channels. High values indicate write credit starvation at the memory interface.
+fabric.normalized_l2_to_ea_wr_credit_stall_gmi:
+  name: Normalized L2 to EA - Write Credit Stall (GMI)
+  formula: 100 * SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that L2 write requests to remote memory (via GMI)
+    were stalled because all GMI write credits were in use. Averaged across all L2
+    channels. High values indicate remote write bandwidth saturation.
+fabric.normalized_l2_to_ea_wr_credit_stall_hbm:
+  name: Normalized L2 to EA - Write Credit Stall (HBM)
+  formula: 100 * SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that L2 write requests to HBM were stalled because
+    all HBM write credits were in use. Averaged across all L2 channels. High values
+    indicate HBM write bandwidth saturation.
+fabric.normalized_l2_to_ea_wr_credit_stall_io:
+  name: Normalized L2 to EA - Write Credit Stall (IO)
+  formula: 100 * SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that L2 write requests to IO (PCIe) were stalled
+    because all IO write credits were in use. Averaged across all L2 channels. High
+    values indicate PCIe write bandwidth saturation.
+fabric.normalized_l2_to_ea_wr_req:
+  name: Normalized L2 to EA Write Requests
+  formula: SUM(TCC_EA0_WRREQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Requests/s
+  description: >-
+    L2 to memory through EA write requests per second of kernel execution. Normalized
+    to wall-clock time for absolute throughput measurement.
+fabric.normalized_l2_to_ea_wr_stall:
+  name: Normalized L2 to EA - Write Stall
+  formula: 100 * SUM(TCC_EA0_WRREQ_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that L2 write requests to memory (via the EA interface)
+    were stalled. Averaged across all L2 channels. High values indicate the memory
+    write path is saturated.
+fabric.pcie_atomic_bw:
+  name: PCIe Atomic Bandwidth
+  formula: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes due to L2 atomic requests routed to PCIe (CPU or non-xGMI
+    connected GPU traffic), divided by total duration.
+fabric.pcie_rd_bw:
+  name: PCIe Read Bandwidth
+  formula: 32 * SUM(TCC_EA0_RDREQ_IO_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes due to L2 read requests routed to PCIe (CPU or non-xGMI
+    connected GPU traffic), divided by total duration.
+fabric.pcie_wr_bw:
+  name: PCIe Write Bandwidth
+  formula: 32 * SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes due to L2 write requests routed to PCIe (CPU or non-xGMI
+    connected GPU traffic), divided by total duration.
+fabric.rd_128b_ea0:
+  name: L2-Fabric Read Requests (128B, EA0 Counter)
+  formula: SUM(TCC_EA0_RDREQ_128B_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of L2 requests to Infinity Fabric to read 128B of data from any
+    memory location, per normalization unit.
+fabric.rd_64b:
+  formula: SUM(TCC_EA0_RDREQ_64B_sum) / SUM($denom)
+fabric.rd_bw:
+  formula: SUM(TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + TCC_EA0_RDREQ_128B_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
+fabric.rd_hbm_stall:
+  name: L2-Fabric Read Stall (HBM)
+  formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The number of cycles the L2-Fabric interface was stalled on read requests to the
+    accelerator's local HBM as a percent of the total active L2 cycles.
+fabric.rd_infinity_fabric_stall:
+  name: L2-Fabric Read Stall (Infinity Fabric)
+  formula: 100 * SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The number of cycles the L2-Fabric interface was stalled on read requests to remote
+    Infinity Fabric connected accelerators or CPUs as a percent of the total active
+    L2 cycles.
+fabric.rd_pcie_stall:
+  name: L2-Fabric Read Stall (PCIe)
+  formula: 100 * SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The number of cycles the L2-Fabric interface was stalled on read requests to remote
+    PCIe connected accelerators or CPUs as a percent of the total active L2 cycles.
+fabric.rd_stall:
+  name: L2-Fabric Read Stall
+  formula: 100 * SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The ratio of the total number of cycles the L2-Fabric interface was stalled on
+    a read request to any destination (local HBM, remote PCIe\xAE connected accelerator
+    or CPU, or remote Infinity Fabric connected accelerator or CPU) over the total
+    active L2 cycles.
+fabric.remote_access_pressure_gmi:
+  name: L2 Remote Access Pressure (GMI)
+  formula: 100 * SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    Combined GMI read and write credit stall percentage. High values indicate remote
+    memory access bottleneck (multi-GPU or multi-socket).
+fabric.remote_rd: !remove
+fabric.remote_wr_atomic: !remove
+fabric.tcc_ea0_atomic_level:
+  name: TCC_EA0_ATOMIC_LEVEL
+  formula: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+fabric.tcc_ea0_rdreq:
+  name: TCC_EA0_RDREQ
+  formula: SUM(TCC_EA0_RDREQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_rdreq_dram_32b:
+  name: TCC_EA0_RDREQ_DRAM_32B
+  formula: SUM(TCC_EA0_RDREQ_DRAM_32B_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_rdreq_dram_credit_stall:
+  name: TCC_EA0_RDREQ_DRAM_CREDIT_STALL
+  formula: SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+fabric.tcc_ea0_rdreq_gmi_32b:
+  name: TCC_EA0_RDREQ_GMI_32B
+  formula: SUM(TCC_EA0_RDREQ_GMI_32B_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_rdreq_gmi_credit_stall:
+  name: TCC_EA0_RDREQ_GMI_CREDIT_STALL
+  formula: SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+fabric.tcc_ea0_rdreq_io_32b:
+  name: TCC_EA0_RDREQ_IO_32B
+  formula: SUM(TCC_EA0_RDREQ_IO_32B_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_rdreq_io_credit_stall:
+  name: TCC_EA0_RDREQ_IO_CREDIT_STALL
+  formula: SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+fabric.tcc_ea0_rdreq_level:
+  name: TCC_EA0_RDREQ_LEVEL
+  formula: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq:
+  name: TCC_EA0_WRREQ
+  formula: SUM(TCC_EA0_WRREQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_atomic_dram:
+  name: TCC_EA0_WRREQ_ATOMIC_DRAM
+  formula: SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_atomic_dram_32b:
+  name: TCC_EA0_WRREQ_ATOMIC_DRAM_32B
+  formula: SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_atomic_gmi_32b:
+  name: TCC_EA0_WRREQ_ATOMIC_GMI_32B
+  formula: SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_atomic_io_32b:
+  name: TCC_EA0_WRREQ_ATOMIC_IO_32B
+  formula: SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_dram_credit_stall:
+  name: TCC_EA0_WRREQ_DRAM_CREDIT_STALL
+  formula: SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_gmi_credit_stall:
+  name: TCC_EA0_WRREQ_GMI_CREDIT_STALL
+  formula: SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_io_credit_stall:
+  name: TCC_EA0_WRREQ_IO_CREDIT_STALL
+  formula: SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_level:
+  name: TCC_EA0_WRREQ_LEVEL
+  formula: SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_stall:
+  name: TCC_EA0_WRREQ_STALL
+  formula: SUM(TCC_EA0_WRREQ_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_wr_dram:
+  name: TCC_EA0_WRREQ_WRITE_DRAM
+  formula: SUM(TCC_EA0_WRREQ_WRITE_DRAM_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_wr_dram_32b:
+  name: TCC_EA0_WRREQ_WRITE_DRAM_32B
+  formula: SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_wr_gmi_32b:
+  name: TCC_EA0_WRREQ_WRITE_GMI_32B
+  formula: SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.tcc_ea0_wrreq_wr_io_32b:
+  name: TCC_EA0_WRREQ_WRITE_IO_32B
+  formula: SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+fabric.to_ea_wr_atomic_bw:
+  name: L2 to EA Write and Atomic Bandwidth
+  formula: SUM(TCC_EA0_WRREQ_64B_sum * 64 + NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum, TCC_EA0_WRREQ_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: The write and atomic bandwidth from L2 to the EA interface.
+fabric.to_memory_traffic_ratio:
+  name: L2 to Memory Traffic Ratio
+  formula: 100 * SUM(TCC_EA0_RDREQ_sum + TCC_EA0_WRREQ_sum) / SUM(TCC_REQ_sum)
+  unit: Percent
+  description: >-
+    Percentage of L2 requests that result in L2 to memory through EA traffic. High
+    ratio (>50%) indicates most L2 requests go to memory (poor cache locality). Low
+    ratio suggests good cache hit rate and workload fits in L2.
+fabric.wr_hbm_stall:
+  name: L2-Fabric Write Stall (HBM)
+  formula: 100 * SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The number of cycles the L2-Fabric interface was stalled on write or atomic requests
+    to accelerator's local HBM as a percent of the total active L2 cycles.
+fabric.wr_infinity_fabric_stall:
+  name: L2-Fabric Write Stall (Infinity Fabric)
+  formula: 100 * SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The number of cycles the L2-Fabric interface was stalled on write or atomic requests
+    to remote Infinity Fabric connected accelerators or CPUs as a percent of the total
+    active L2 cycles.
+fabric.wr_pcie_stall:
+  name: L2-Fabric Write Stall (PCIe)
+  formula: 100 * SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The number of cycles the L2-Fabric interface was stalled on write or atomic requests
+    to remote PCIe connected accelerators or CPUs as a percent of the total active
+    L2 cycles.
+fabric.wr_stall:
+  name: L2-Fabric Write Stall
+  formula: 100 * SUM(TCC_EA0_WRREQ_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The ratio of the total number of cycles the L2-Fabric interface was stalled on
+    a write or atomic request to any destination (local HBM, remote accelerator or
+    CPU, PCIe connected accelerator or CPU, or remote Infinity Fabric connected accelerator
+    or CPU) over the total active L2 cycles.
+fabric.xgmi_atomic_bw:
+  name: Infinity Fabric Atomic Bandwidth
+  formula: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes due to L2 atomic requests routed to Infinity Fabric (xGMI
+    peer GPU traffic), divided by total duration.
+fabric.xgmi_rd_bw:
+  name: Infinity Fabric Read Bandwidth
+  formula: 32 * SUM(TCC_EA0_RDREQ_GMI_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes due to L2 read requests routed to Infinity Fabric (xGMI
+    peer GPU traffic), divided by total duration.
+fabric.xgmi_wr_bw:
+  name: Infinity Fabric Write Bandwidth
+  formula: 32 * SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes due to L2 write requests routed to Infinity Fabric (xGMI
+    peer GPU traffic), divided by total duration.
