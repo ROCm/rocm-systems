@@ -1,3 +1,8 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE.txt for license information
+"""ElasticBuffer.dispatch's Python-side scale handling, with the C library stubbed."""
+
 import os
 import sys
 import types
