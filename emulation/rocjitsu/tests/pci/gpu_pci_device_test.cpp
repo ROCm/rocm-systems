@@ -3120,6 +3120,9 @@ TEST_F(GpuDeviceSdma, ExecutesAnIndirectBufferAndSignalsItsFence) {
 
   auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
   ring_doorbell(0x800, doorbell);
+  // The inbox drain can return between asynchronous SDMA service turns.
+  // Wait for the submitted work before checking fences and the trap.
+  ASSERT_TRUE(device_.synchronize_sdma_queue_for_test(/*engine=*/0));
 
   EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0xdeadbeefu);
   EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 7u);
@@ -3209,6 +3212,8 @@ TEST_F(GpuDeviceSdma, CompletesSatisfiedRegisterAndMemoryPolls) {
   auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
   ring_doorbell(0x800, doorbell);
 
+  // Satisfied polls still complete asynchronously after the inbox drain.
+  ASSERT_TRUE(device_.synchronize_sdma_queue_for_test(/*engine=*/0));
   EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 64u);
 }
 

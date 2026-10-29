@@ -26,6 +26,10 @@ ASSERT_HOOK_MATCHES_PROD(g_ceInitBatchOpsParams, ncclCeInitBatchOpsParams);
 ASSERT_HOOK_MATCHES_PROD(g_ceLaunchBatchOps, ncclCeLaunchBatchOps);
 ASSERT_HOOK_MATCHES_PROD(g_ncclCeInit, ncclCeInit);
 ASSERT_HOOK_MATCHES_PROD(g_ncclCeEnsureAllReduceStaging, ncclCeEnsureAllReduceStaging);
+ASSERT_HOOK_MATCHES_PROD(g_ceAlltoAllvEligible, ncclCeAlltoAllvEligible);
+ASSERT_HOOK_MATCHES_PROD(g_hierCeAlltoAllvEligible, ncclHierCeAlltoAllvEligible);
+ASSERT_HOOK_MATCHES_PROD(g_ceAllReduce, ncclCeAllReduce);
+ASSERT_HOOK_MATCHES_PROD(g_ceReduceScatter, ncclCeReduceScatter);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 static ncclResult_t DefaultCeInit(struct ncclComm*) {
@@ -148,6 +152,55 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
 #endif
 }
 
+static bool DefaultCeAlltoAllvEligible(struct ncclComm*, ncclDataType_t, ncclSymRegType_t, bool, bool) {
+  FailLoudUnfaked("ce_fakes", "ncclCeAlltoAllvEligible");
+}
+std::function<bool(struct ncclComm*, ncclDataType_t, ncclSymRegType_t, bool, bool)> g_ceAlltoAllvEligible =
+    DefaultCeAlltoAllvEligible;
+bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                             bool hasSysmemSegment, bool capturing) {
+  return g_ceAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, capturing);
+}
+
+static bool DefaultHierCeAlltoAllvEligible(struct ncclComm*, ncclDataType_t, ncclSymRegType_t, struct ncclDevrWindow*,
+                                           struct ncclDevrWindow*, bool, bool) {
+  FailLoudUnfaked("ce_fakes", "ncclHierCeAlltoAllvEligible");
+}
+std::function<bool(struct ncclComm*, ncclDataType_t, ncclSymRegType_t, struct ncclDevrWindow*, struct ncclDevrWindow*,
+                   bool, bool)>
+    g_hierCeAlltoAllvEligible = DefaultHierCeAlltoAllvEligible;
+bool ncclHierCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                                 struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
+                                 bool hasSysmemSegment, bool capturing) {
+  return g_hierCeAlltoAllvEligible(comm, datatype, winRegType, sendWin, recvWin, hasSysmemSegment, capturing);
+}
+
+static ncclResult_t DefaultCeAllReduce(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                       hipStream_t, struct ncclDevrWindow*, struct ncclCeCollArgs*) {
+  FailLoudUnfaked("ce_fakes", "ncclCeAllReduce");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, hipStream_t,
+                           struct ncclDevrWindow*, struct ncclCeCollArgs*)>
+    g_ceAllReduce = DefaultCeAllReduce;
+ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                             ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream,
+                             struct ncclDevrWindow* recvWin, struct ncclCeCollArgs* profilerArgs) {
+  return g_ceAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, recvWin, profilerArgs);
+}
+
+static ncclResult_t DefaultCeReduceScatter(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                           hipStream_t, struct ncclDevrWindow*, struct ncclCeCollArgs*) {
+  FailLoudUnfaked("ce_fakes", "ncclCeReduceScatter");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, hipStream_t,
+                           struct ncclDevrWindow*, struct ncclCeCollArgs*)>
+    g_ceReduceScatter = DefaultCeReduceScatter;
+ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                 ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream,
+                                 struct ncclDevrWindow* recvWin, struct ncclCeCollArgs* profilerArgs) {
+  return g_ceReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, stream, recvWin, profilerArgs);
+}
+
 void ResetCeFakes() {
   g_ceInitBatchOpsParams = DefaultCeInitBatchOpsParams;
   g_ceLaunchBatchOps     = DefaultCeLaunchBatchOps;
@@ -161,4 +214,8 @@ void ResetCeFakes() {
   g_ceScratchAvailable = DefaultCeScratchAvailable;
   g_ceLocalReduceBlocks = DefaultCeLocalReduceBlocks;
   g_hierCeAvailable = DefaultHierCeAvailable;
+  g_ceAlltoAllvEligible = DefaultCeAlltoAllvEligible;
+  g_hierCeAlltoAllvEligible = DefaultHierCeAlltoAllvEligible;
+  g_ceAllReduce = DefaultCeAllReduce;
+  g_ceReduceScatter = DefaultCeReduceScatter;
 }

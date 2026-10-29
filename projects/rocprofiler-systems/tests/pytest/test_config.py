@@ -6,9 +6,11 @@ General configuration file tests.
 """
 
 from __future__ import annotations
-import pytest
-from pathlib import Path
+
 import shutil
+from pathlib import Path
+
+import pytest
 from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.rocprof_config]

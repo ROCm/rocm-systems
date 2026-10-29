@@ -76,12 +76,23 @@ pub enum NodeKind {
     HostSystem,
     /// OS NUMA domain.
     HostNuma,
-    /// KFD node with no GPU ID.
-    KfdHost,
-    /// KFD node reporting a GPU ID.
-    KfdGpu,
+    /// Driver node with host CPUs and no GPU endpoint.
+    Host,
+    /// Driver node reporting a GPU endpoint, possibly alongside host CPUs.
+    Gpu,
     /// Node reported by another activation driver.
     Other,
+}
+
+/// CPU cores reported on a native topology node.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CpuNodeInfo {
+    /// Number of logical CPU cores reported by this source.
+    pub core_count: u32,
+    /// Lowest reported logical processor ID, when available.
+    pub core_id_base: Option<u32>,
+    /// Maximum CPU engine clock in MHz, when reported.
+    pub maximum_clock_mhz: Option<u32>,
 }
 
 /// One source-qualified topology node.
@@ -95,6 +106,8 @@ pub struct TopologyNode {
     pub native_id: NativeNodeId,
     /// Source node classification.
     pub kind: NodeKind,
+    /// CPU presence on this node, independent of whether it also has a GPU.
+    pub cpu: Option<CpuNodeInfo>,
 }
 
 /// An endpoint can attach to multiple nodes; several endpoints may attach to
@@ -160,6 +173,49 @@ pub struct MemoryLocation {
     pub host_visible_bytes: Option<u64>,
 }
 
+/// Native memory heap classification retained without implying allocatability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryBankKind {
+    /// System memory.
+    System,
+    /// Device framebuffer memory reported as host visible.
+    FrameBufferPublic,
+    /// Device framebuffer memory reported as private.
+    FrameBufferPrivate,
+    /// Device global data share.
+    Gds,
+    /// Device local data share.
+    Lds,
+    /// Device scratch memory.
+    Scratch,
+    /// Device mapped system memory.
+    DeviceSvm,
+    /// Remapped device MMIO.
+    Mmio,
+    /// Heap class not recognized by this runtime.
+    Other(u32),
+}
+
+/// One source-qualified native memory bank. Its ordinal identifies a report,
+/// not an allocation target; native allocation APIs may merge banks.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryBank {
+    /// Node that reported this bank.
+    pub node: NodeId,
+    /// Source-native bank ordinal within the node.
+    pub native_ordinal: u32,
+    /// Native heap classification.
+    pub kind: MemoryBankKind,
+    /// Reported bank capacity in bytes.
+    pub capacity_bytes: u64,
+    /// Opaque flags reported by the native source.
+    pub native_flags: u32,
+    /// Reported bus width in bits, when present.
+    pub width_bits: Option<u32>,
+    /// Reported maximum memory clock in MHz, when present.
+    pub maximum_clock_mhz: Option<u32>,
+}
+
 /// One source-qualified view of independent passive topology observations.
 /// A session publishes it only after driver contributions validate.
 /// Host facts can be incomplete; their per-source `complete` flag records that.
@@ -182,6 +238,8 @@ pub struct TopologySnapshot {
     pub caches: Vec<TopologyCache>,
     /// Memory locations attached to source-qualified nodes.
     pub memory_locations: Vec<MemoryLocation>,
+    /// Source-qualified native memory bank reports.
+    pub memory_banks: Vec<MemoryBank>,
 }
 
 impl TopologySnapshot {
@@ -195,6 +253,7 @@ impl TopologySnapshot {
             routes: Vec::new(),
             caches: Vec::new(),
             memory_locations: Vec::new(),
+            memory_banks: Vec::new(),
         };
         let complete = result.host.domains_complete
             && result.host.caches.complete
@@ -232,6 +291,7 @@ impl TopologySnapshot {
                 source,
                 native_id: NativeNodeId::LinuxNuma(domain.numa_node),
                 kind: NodeKind::HostNuma,
+                cpu: None,
             })?;
             for cache in &domain.caches.records {
                 result.caches.try_push(TopologyCache {
@@ -286,8 +346,12 @@ impl TopologySnapshot {
                 ) | (
                     SourceKind::LinuxKfd,
                     NativeNodeId::LinuxKfd(_),
-                    NodeKind::KfdHost | NodeKind::KfdGpu
-                ) | (SourceKind::Driver, NativeNodeId::Driver(_), NodeKind::Other)
+                    NodeKind::Host | NodeKind::Gpu
+                ) | (
+                    SourceKind::Driver,
+                    NativeNodeId::Driver(_),
+                    NodeKind::Host | NodeKind::Gpu | NodeKind::Other
+                )
             )
         });
         if !valid_type
@@ -307,6 +371,7 @@ impl TopologySnapshot {
             source,
             native_id,
             kind,
+            cpu: None,
         })?;
         Ok(id)
     }
@@ -422,6 +487,66 @@ impl TopologySnapshot {
         Ok(())
     }
 
+    /// Associates CPU facts with a validated activation-driver node.
+    pub(crate) fn set_cpu_node(&mut self, node: NodeId, cpu: CpuNodeInfo) -> Result<(), Error> {
+        let Some(record) = self.nodes.get_mut(node.0) else {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "CPU facts have no topology node",
+            });
+        };
+        if self.sources[record.source.0].kind == SourceKind::HostOs
+            || !matches!(record.kind, NodeKind::Host | NodeKind::Gpu)
+            || cpu.core_count == 0
+            || record.cpu.is_some()
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "CPU facts are inconsistent with their source node",
+            });
+        }
+        record.cpu = Some(cpu);
+        Ok(())
+    }
+
+    /// Adds one native memory bank after checking its node and ordinal.
+    pub(crate) fn add_memory_bank(&mut self, bank: MemoryBank) -> Result<(), Error> {
+        if self.nodes.get(bank.node.0).is_none()
+            || self.memory_banks.iter().any(|record| {
+                record.node == bank.node && record.native_ordinal == bank.native_ordinal
+            })
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidData,
+                detail: "native memory bank has no node or a duplicate ordinal",
+            });
+        }
+        self.memory_banks.try_push(bank)?;
+        Ok(())
+    }
+
+    /// Native memory banks attached to one source-qualified node.
+    pub fn banks_for_node(&self, node: NodeId) -> impl Iterator<Item = &MemoryBank> {
+        self.memory_banks
+            .iter()
+            .filter(move |bank| bank.node == node)
+    }
+
+    /// Reported directed route between exact source-qualified nodes.
+    #[must_use]
+    pub fn route_between_nodes(&self, from: NodeId, to: NodeId) -> Option<MemoryLinkInfo> {
+        if from == to {
+            return None;
+        }
+        let source = self.nodes.get(from.0)?.source;
+        (self.nodes.get(to.0)?.source == source).then_some(())?;
+        self.routes
+            .iter()
+            .rev()
+            .find(|route| route.source == from && route.target == to)
+            .map(|route| route.info)
+    }
+
     /// Nodes to which the endpoint is attached in this snapshot.
     pub fn nodes_for_endpoint(&self, endpoint: &Endpoint) -> impl Iterator<Item = &TopologyNode> {
         let owned = self.endpoints.iter().any(|candidate| {
@@ -433,7 +558,9 @@ impl TopologySnapshot {
             .filter_map(|attachment| self.nodes.get(attachment.node.0))
     }
 
-    fn native_nodes_for_endpoint(
+    /// Activation-driver nodes attached to this endpoint, excluding passive
+    /// host-locality observations from the host OS.
+    pub fn native_nodes_for_endpoint(
         &self,
         endpoint: &Endpoint,
     ) -> impl Iterator<Item = &TopologyNode> {
@@ -473,14 +600,14 @@ impl TopologySnapshot {
         })
     }
 
-    /// Reported directed route from an endpoint to a KFD host node.
+    /// Reported directed route from an endpoint to its driver's host node.
     #[must_use]
     pub fn route_to_host(&self, from: &Endpoint) -> Option<MemoryLinkInfo> {
         self.routes.iter().rev().find_map(|route| {
             let source = self.nodes.get(route.source.0)?;
             let target = self.nodes.get(route.target.0)?;
             (source.source == target.source
-                && target.kind == NodeKind::KfdHost
+                && target.kind == NodeKind::Host
                 && self
                     .native_nodes_for_endpoint(from)
                     .any(|node| node.id == source.id))
@@ -488,14 +615,14 @@ impl TopologySnapshot {
         })
     }
 
-    /// Reported directed route from a KFD host node to an endpoint.
+    /// Reported directed route from a driver's host node to an endpoint.
     #[must_use]
     pub fn route_from_host(&self, to: &Endpoint) -> Option<MemoryLinkInfo> {
         self.routes.iter().rev().find_map(|route| {
             let source = self.nodes.get(route.source.0)?;
             let target = self.nodes.get(route.target.0)?;
             (source.source == target.source
-                && source.kind == NodeKind::KfdHost
+                && source.kind == NodeKind::Host
                 && self
                     .native_nodes_for_endpoint(to)
                     .any(|node| node.id == target.id))
@@ -521,6 +648,7 @@ mod tests {
         HostTopologySnapshot {
             memory_bytes: None,
             cpu: None,
+            cpu_apic_ids: Vec::new(),
             online_cpus: None,
             caches: HostCaches {
                 records: Vec::new(),
@@ -587,7 +715,7 @@ mod tests {
             )
             .unwrap();
         let gpu = snapshot
-            .add_node(source, NativeNodeId::LinuxKfd(7), NodeKind::KfdGpu)
+            .add_node(source, NativeNodeId::LinuxKfd(7), NodeKind::Gpu)
             .unwrap();
         let host_numa = snapshot
             .nodes
@@ -666,13 +794,13 @@ mod tests {
             )
             .unwrap();
         let from = snapshot
-            .add_node(source, NativeNodeId::LinuxKfd(1), NodeKind::KfdGpu)
+            .add_node(source, NativeNodeId::LinuxKfd(1), NodeKind::Gpu)
             .unwrap();
         let to = snapshot
-            .add_node(source, NativeNodeId::LinuxKfd(2), NodeKind::KfdGpu)
+            .add_node(source, NativeNodeId::LinuxKfd(2), NodeKind::Gpu)
             .unwrap();
         let host_node = snapshot
-            .add_node(source, NativeNodeId::LinuxKfd(0), NodeKind::KfdHost)
+            .add_node(source, NativeNodeId::LinuxKfd(0), NodeKind::Host)
             .unwrap();
         snapshot.add_endpoint(first.clone(), from).unwrap();
         snapshot.add_endpoint(second.clone(), to).unwrap();
@@ -688,6 +816,46 @@ mod tests {
                 .unwrap_err()
                 .kind(),
             ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn generic_driver_nodes_keep_host_routes_and_cpu_facts() {
+        let mut snapshot = TopologySnapshot::new(host()).unwrap();
+        let endpoint = endpoint(3);
+        let source = snapshot
+            .add_source(
+                SourceKind::Driver,
+                None,
+                true,
+                Some(endpoint.driver_instance),
+            )
+            .unwrap();
+        let host_node = snapshot
+            .add_node(source, NativeNodeId::Driver(1), NodeKind::Host)
+            .unwrap();
+        let gpu_node = snapshot
+            .add_node(source, NativeNodeId::Driver(2), NodeKind::Gpu)
+            .unwrap();
+        snapshot
+            .set_cpu_node(
+                host_node,
+                CpuNodeInfo {
+                    core_count: 8,
+                    core_id_base: None,
+                    maximum_clock_mhz: None,
+                },
+            )
+            .unwrap();
+        snapshot.add_endpoint(endpoint.clone(), gpu_node).unwrap();
+        snapshot.add_route(host_node, gpu_node, link()).unwrap();
+        assert_eq!(snapshot.route_from_host(&endpoint), Some(link()));
+        assert_eq!(
+            snapshot
+                .native_nodes_for_endpoint(&endpoint)
+                .map(|node| node.id)
+                .collect::<Vec<_>>(),
+            [gpu_node]
         );
     }
 }

@@ -339,6 +339,10 @@ jobs:
             # async-event bookkeeping, outside rocjitsu-owned code.
             "HsaTranslateTest\.TranslateAndDispatchVectorAdd"
             "HsaTranslateTest\.TranslateAndDispatchMfma16x16"
+            # Both HSA initialization cases use the same ROCr async-event
+            # handoff. Their assertions pass, but its uninstrumented atomics
+            # can produce a TSan allocation/reclamation report in GetAllEvents.
+            "^HsaTest\.(InitSucceeded|GpuAgentFound)$"
             # HIP test discovery and the daemon HIP clients initialize the
             # instrumented ROCr runtime, which can report a ConcurrentAsyncEvents
             # race during asynchronous-event teardown outside rocjitsu-owned code.
@@ -532,7 +536,11 @@ jobs:
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
-          uv pip install -r requirements.txt
+          # Keep the pinned corpus on the compatible pytest/xdist pair.
+          # pytest 9.2 node IDs break loadgroup in pytest-xdist 3.8.
+          uv pip install -r requirements.txt \
+            "pytest>=5.4.1,<9.2" \
+            "pytest-xdist>=1.32.0,<3.9"
           ROCM_SDK_DEVICE_PACKAGES=()
           for gfx in ${ROCM_SDK_DEVICE_GFX_GROUP}; do
             ROCM_SDK_DEVICE_PACKAGES+=(
@@ -667,8 +675,8 @@ jobs:
           uv venv --python 3.12 "${ROCJITSU_DBT_VENV}"
           uv pip install \
             --python "${ROCJITSU_DBT_VENV}/bin/python" \
-            "pytest>=5.4.1" \
-            "pytest-xdist>=1.32.0"
+            "pytest>=5.4.1,<9.2" \
+            "pytest-xdist>=1.32.0,<3.9"
           uv pip install \
             --python "${ROCJITSU_DBT_VENV}/bin/python" \
             --prerelease allow \

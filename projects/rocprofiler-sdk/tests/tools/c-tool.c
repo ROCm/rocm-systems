@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,7 @@ thread_precreate(rocprofiler_runtime_library_t lib, void* tool_data)
 {
     uint32_t* priority = (uint32_t*) tool_data;
 
+#if !defined(ROCPROFILER_C_TOOL_ACCEPT_CONFIGURE)
     if(priority && *priority == 0)
     {
         fprintf(
@@ -51,11 +52,29 @@ thread_precreate(rocprofiler_runtime_library_t lib, void* tool_data)
         fflush(stderr);
         abort();
     }
+#endif
 
     (void) lib;
+    (void) priority;
 }
 
 static uint32_t tool_priority = 0;
+
+#if defined(ROCPROFILER_C_TOOL_ACCEPT_CONFIGURE)
+static int
+tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
+{
+    (void) fini_func;
+    (void) tool_data;
+    return 0;
+}
+
+static void
+tool_fini(void* tool_data)
+{
+    (void) tool_data;
+}
+#endif
 
 rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t                 version,
@@ -85,6 +104,13 @@ rocprofiler_configure(uint32_t                 version,
     rocprofiler_at_internal_thread_create(
         thread_precreate, NULL, ROCPROFILER_LIBRARY, &tool_priority);
 
+#if defined(ROCPROFILER_C_TOOL_ACCEPT_CONFIGURE)
+    // accept the configuration without enabling any services
+    static rocprofiler_tool_configure_result_t cfg = {
+        sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, NULL};
+    return &cfg;
+#else
     // return pointer to configure data
     return NULL;
+#endif
 }

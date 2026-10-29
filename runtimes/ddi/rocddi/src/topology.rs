@@ -22,9 +22,9 @@ pub mod host;
 mod model;
 pub mod platform;
 pub use model::{
-    AttachmentKind, EndpointAttachment, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeId,
-    NodeKind, ReportedRoute, SourceId, SourceKind, TopologyCache, TopologyNode, TopologySnapshot,
-    TopologySource,
+    AttachmentKind, CpuNodeInfo, EndpointAttachment, MemoryBank, MemoryBankKind, MemoryLocation,
+    MemoryLocationKind, NativeNodeId, NodeId, NodeKind, ReportedRoute, SourceId, SourceKind,
+    TopologyCache, TopologyNode, TopologySnapshot, TopologySource,
 };
 
 /// Exact PCI function and configuration identity reported by the OS.
@@ -74,6 +74,8 @@ pub struct CacheInfo {
     pub line_size_bytes: Option<u32>,
     /// Data and instruction classification of this cache.
     pub kind: CacheKind,
+    /// Whether the source classifies this as a CPU cache.
+    pub cpu_cache: bool,
     /// Whether the source marks this cache as associated with compute units.
     pub(crate) compute_unit_cache: bool,
 }
@@ -92,6 +94,7 @@ impl CacheInfo {
             size_bytes,
             line_size_bytes,
             kind,
+            cpu_cache: false,
             compute_unit_cache: false,
         }
     }
@@ -180,6 +183,192 @@ pub struct GpuQueueCapabilities {
     pub sdma_engine_count: u32,
 }
 
+/// Qualified packet and scratch dialect selected from the discovered target.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GpuTargetProfile {
+    /// No packet dialect has been qualified for this target.
+    #[default]
+    Other,
+    /// Qualified wave64 GFX9 targets.
+    Gfx9,
+    /// GFX10 targets with AQL transport support.
+    Gfx10,
+    /// GFX11 targets with AQL transport support.
+    Gfx11,
+    /// GFX12.0.0 packet dialect.
+    Gfx1200,
+    /// GFX12.0.1 packet dialect.
+    Gfx1201,
+    /// GFX12.5.0 packet dialect.
+    Gfx1250,
+}
+
+/// Native scratch descriptor encoding for a qualified target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GpuScratchEncoding {
+    /// Wave64 scratch descriptor with GFX9 alignment.
+    Gfx9,
+    /// Wave32 scratch descriptor with GFX12 alignment.
+    Gfx12,
+}
+
+/// SDMA packet layout qualified for a target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GpuSdmaDialect {
+    /// GFX9 SDMA packets.
+    Gfx9,
+    /// GFX12.0 SDMA packets.
+    Gfx1200,
+    /// GFX12.5 SDMA packets.
+    Gfx1250,
+}
+
+impl GpuTargetProfile {
+    /// Resolves a KFD target code once when the endpoint is discovered.
+    #[must_use]
+    pub const fn from_kfd_target(target: u32) -> Self {
+        match target {
+            90008 | 90010 | 90402 | 90500 => Self::Gfx9,
+            100_100..=109_999 => Self::Gfx10,
+            110_000..=119_999 => Self::Gfx11,
+            120_000 => Self::Gfx1200,
+            120_001 => Self::Gfx1201,
+            120_500 => Self::Gfx1250,
+            _ => Self::Other,
+        }
+    }
+
+    /// Whether the current backend qualifies an AQL queue transport.
+    #[must_use]
+    pub const fn supports_aql(self) -> bool {
+        match self {
+            Self::Other => false,
+            Self::Gfx9
+            | Self::Gfx10
+            | Self::Gfx11
+            | Self::Gfx1200
+            | Self::Gfx1201
+            | Self::Gfx1250 => true,
+        }
+    }
+
+    /// Whether the qualified DRM kernel command transport is available.
+    #[must_use]
+    pub const fn supports_kernel_submission(self) -> bool {
+        match self {
+            Self::Gfx1200 | Self::Gfx1201 | Self::Gfx1250 => true,
+            Self::Other | Self::Gfx9 | Self::Gfx10 | Self::Gfx11 => false,
+        }
+    }
+
+    /// Returns the fixed scratch descriptor supported by this wavefront.
+    #[must_use]
+    pub const fn scratch_encoding(self, wavefront_size: u32) -> Option<GpuScratchEncoding> {
+        match self {
+            Self::Gfx9 if wavefront_size == 64 => Some(GpuScratchEncoding::Gfx9),
+            Self::Gfx1200 | Self::Gfx1201 | Self::Gfx1250 if wavefront_size == 32 => {
+                Some(GpuScratchEncoding::Gfx12)
+            }
+            Self::Other
+            | Self::Gfx9
+            | Self::Gfx10
+            | Self::Gfx11
+            | Self::Gfx1200
+            | Self::Gfx1201
+            | Self::Gfx1250 => None,
+        }
+    }
+
+    /// Returns an SDMA dialect only when its packet format is implemented.
+    #[must_use]
+    pub const fn sdma_dialect(self) -> Option<GpuSdmaDialect> {
+        match self {
+            Self::Gfx9 => Some(GpuSdmaDialect::Gfx9),
+            Self::Gfx1200 | Self::Gfx1201 => Some(GpuSdmaDialect::Gfx1200),
+            Self::Gfx1250 => Some(GpuSdmaDialect::Gfx1250),
+            Self::Other | Self::Gfx10 | Self::Gfx11 => None,
+        }
+    }
+
+    /// Whether SDMA FENCE packets expose the explicit system bit.
+    #[must_use]
+    pub const fn sdma_fence_system(self) -> bool {
+        match self {
+            Self::Gfx1200 | Self::Gfx1201 | Self::Gfx1250 => true,
+            Self::Other | Self::Gfx9 | Self::Gfx10 | Self::Gfx11 => false,
+        }
+    }
+
+    /// Whether SDMA COPY and FENCE packets expose memory scope fields.
+    #[must_use]
+    pub const fn sdma_memory_scope(self) -> bool {
+        match self {
+            Self::Gfx1250 => true,
+            Self::Other
+            | Self::Gfx9
+            | Self::Gfx10
+            | Self::Gfx11
+            | Self::Gfx1200
+            | Self::Gfx1201 => false,
+        }
+    }
+
+    /// Whether this target has the implemented image sampler descriptor.
+    #[must_use]
+    pub const fn supports_image_sampler(self) -> bool {
+        match self {
+            Self::Gfx1200 | Self::Gfx1201 => true,
+            Self::Other | Self::Gfx9 | Self::Gfx10 | Self::Gfx11 | Self::Gfx1250 => false,
+        }
+    }
+
+    /// Whether AMDF can advertise PM4 dispatch scratch on this target.
+    #[must_use]
+    pub const fn supports_pm4_dispatch_scratch(self) -> bool {
+        match self {
+            Self::Gfx11 | Self::Gfx1200 | Self::Gfx1201 | Self::Gfx1250 => true,
+            Self::Other | Self::Gfx9 | Self::Gfx10 => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod target_profile_tests {
+    use super::{GpuScratchEncoding, GpuSdmaDialect, GpuTargetProfile as Profile};
+
+    #[test]
+    fn qualified_targets_keep_packet_and_scratch_dialects_together() {
+        for target in [90008, 90010, 90402, 90500] {
+            let profile = Profile::from_kfd_target(target);
+            assert_eq!(profile, Profile::Gfx9);
+            assert_eq!(profile.sdma_dialect(), Some(GpuSdmaDialect::Gfx9));
+            assert_eq!(profile.scratch_encoding(64), Some(GpuScratchEncoding::Gfx9));
+            assert_eq!(profile.scratch_encoding(32), None);
+        }
+        for (target, profile, dialect) in [
+            (120_000, Profile::Gfx1200, GpuSdmaDialect::Gfx1200),
+            (120_001, Profile::Gfx1201, GpuSdmaDialect::Gfx1200),
+            (120_500, Profile::Gfx1250, GpuSdmaDialect::Gfx1250),
+        ] {
+            assert_eq!(Profile::from_kfd_target(target), profile);
+            assert_eq!(profile.sdma_dialect(), Some(dialect));
+            assert_eq!(
+                profile.scratch_encoding(32),
+                Some(GpuScratchEncoding::Gfx12)
+            );
+            assert_eq!(profile.scratch_encoding(64), None);
+            assert!(profile.supports_kernel_submission());
+        }
+        for target in [90009, 120_002, 120_501] {
+            let profile = Profile::from_kfd_target(target);
+            assert_eq!(profile, Profile::Other);
+            assert!(!profile.supports_aql());
+            assert_eq!(profile.sdma_dialect(), None);
+            assert_eq!(profile.scratch_encoding(32), None);
+        }
+    }
+}
+
 /// GPU target and enabled compute geometry captured without activation.
 /// Required geometry fields must be complete and consistent before this record
 /// is published; opening an endpoint never substitutes guessed dimensions.
@@ -190,14 +379,14 @@ pub struct GpuQueueCapabilities {
 )]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GpuInfo {
-    /// Native KFD GPU identity used to resolve imported allocation placement.
-    pub native_gpu_id: u32,
     /// Exact GFX major version.
     pub gfx_major: u32,
     /// Exact GFX minor version.
     pub gfx_minor: u32,
     /// Exact GFX stepping.
     pub gfx_stepping: u32,
+    /// Packet and scratch dialect resolved from the KFD target at discovery.
+    pub target_profile: GpuTargetProfile,
     /// Globally unique immutable GPU identifier when reported by the backend.
     pub unique_id: Option<u64>,
     /// AMD GPU hive identifier, or zero when the endpoint has no hive.

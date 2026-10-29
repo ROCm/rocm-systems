@@ -3,9 +3,7 @@
 
 //! Memory, SVM, interop, and virtual-memory regression tests.
 
-use super::allocation::*;
 use super::interop::*;
-use super::virtual_memory::*;
 use super::*;
 
 #[test]
@@ -120,32 +118,6 @@ fn allow_access_rejects_reserved_flags_before_runtime_lookup() {
             )
         },
         INVALID_ARGUMENT
-    );
-}
-
-#[test]
-/// Verifies that registered range aligns native pages and preserves host offset.
-fn registered_range_aligns_native_pages_and_preserves_host_offset() {
-    assert_eq!(
-        registered_range(0x10_000, 1, 4096),
-        Some((0x10_000, 4096, 0))
-    );
-    assert_eq!(
-        registered_range(0x10_345, 1, 4096),
-        Some((0x10_000, 4096, 0x345))
-    );
-    assert_eq!(
-        registered_range(0x10_345, 4096, 4096),
-        Some((0x10_000, 8192, 0x345))
-    );
-    assert_eq!(registered_range(usize::MAX, 2, 4096), None);
-    assert_eq!(
-        registered_range(0x10_123, 1, 65_536),
-        Some((0x10_000, 65_536, 0x123))
-    );
-    assert_eq!(
-        registered_range(0x10_123, 65_536, 65_536),
-        Some((0x10_000, 131_072, 0x123))
     );
 }
 
@@ -335,10 +307,49 @@ fn virtual_mapping_contains_only_its_half_open_range() {
         offset: 0,
         size: 0x2000,
         access: HashMap::new(),
+        host_mapping: None,
     };
     assert!(mapping.contains(0x1_2000));
     assert!(mapping.contains(0x1_3fff));
     assert!(!mapping.contains(0x1_4000));
+}
+
+#[test]
+/// Verifies that CPU permissions share one process mapping without losing
+/// agent-specific grants when either CPU changes access.
+fn virtual_host_permissions_union_cpu_grants() {
+    let mut mapping = VmemMapping {
+        handle: 1,
+        reservation: 0x1_0000,
+        address: 0x1_2000,
+        offset: 0,
+        size: 0x1000,
+        access: HashMap::new(),
+        host_mapping: None,
+    };
+    mapping.access.insert(
+        CPU_AGENT,
+        VmemAccess {
+            permissions: ACCESS_PERMISSION_RO,
+            owner: VmemAccessOwner::Host,
+        },
+    );
+    mapping.access.insert(
+        CPU_AGENT + 1,
+        VmemAccess {
+            permissions: ACCESS_PERMISSION_WO,
+            owner: VmemAccessOwner::Host,
+        },
+    );
+    assert_eq!(mapping.host_permissions(), ACCESS_PERMISSION_RW);
+    assert_eq!(
+        mapping.host_permissions_after(CPU_AGENT, ACCESS_PERMISSION_NONE),
+        ACCESS_PERMISSION_WO
+    );
+    assert_eq!(
+        mapping.host_permissions_after(CPU_AGENT + 1, ACCESS_PERMISSION_RO),
+        ACCESS_PERMISSION_RO
+    );
 }
 
 #[test]
@@ -812,19 +823,17 @@ fn cpu_pool_allocations_preserve_their_cache_policy() {
 }
 
 #[test]
-/// Verifies that GFX12 GPU pool and region enumeration matches `ROCr`.
-fn gfx12_gpu_pool_and_region_enumeration_matches_rocr() {
+/// Verifies the GPU pool handle classes used by enumeration.
+fn gpu_pool_handle_classes_are_stable() {
     let index = 2;
+    let handle = |kind| HsaState::gpu_pool(index, kind).handle;
     let pools = gpu_agent_pools(index, false, false)
         .into_iter()
         .map(|pool| pool.handle)
         .collect::<Vec<_>>();
     assert_eq!(
         pools,
-        [
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_COARSE,
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_GROUP,
-        ]
+        [handle(GpuPoolKind::Coarse), handle(GpuPoolKind::Group)]
     );
     let fine_pools = gpu_agent_pools(index, true, false)
         .into_iter()
@@ -833,9 +842,9 @@ fn gfx12_gpu_pool_and_region_enumeration_matches_rocr() {
     assert_eq!(
         fine_pools,
         [
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_COARSE,
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_FINE,
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_GROUP,
+            handle(GpuPoolKind::Coarse),
+            handle(GpuPoolKind::Fine),
+            handle(GpuPoolKind::Group),
         ]
     );
 
@@ -846,27 +855,10 @@ fn gfx12_gpu_pool_and_region_enumeration_matches_rocr() {
     assert_eq!(
         extended_pools,
         [
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_COARSE,
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_EXTENDED,
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_FINE,
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_GROUP,
-        ]
-    );
-
-    let regions = gpu_agent_regions(index, true, false)
-        .into_iter()
-        .map(|pool| pool.handle)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        regions,
-        [
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_COARSE,
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_FINE,
-            GPU_POOL_BASE + index as u64 * 0x10 + GPU_POOL_GROUP,
-            CPU_POOL_FINE,
-            CPU_POOL_KERNARG,
-            CPU_POOL_EXTENDED,
-            CPU_POOL_COARSE,
+            handle(GpuPoolKind::Coarse),
+            handle(GpuPoolKind::ExtendedFine),
+            handle(GpuPoolKind::Fine),
+            handle(GpuPoolKind::Group),
         ]
     );
 }

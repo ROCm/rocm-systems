@@ -431,8 +431,14 @@ public:
     execution_failure_handler_ = std::move(cb);
   }
 
+  /// @brief Offer an architectural memory fault to its runtime or debugger owner.
+  /// @details Fetch and debugger probes supply the access address and direction.
+  /// Deferred data and tensor-DMA faults supply zero/false when lane metadata is
+  /// unavailable. The issue PC identifies the faulting instruction in all cases;
+  /// data-fault callbacks see the advanced resume PC and may rewind it for XNACK.
+  /// @returns True if the frontend owns the fault and retains the wave.
   using MemoryViolationHandler =
-      std::function<bool(Wavefront &wf, uint64_t address, bool is_write)>;
+      std::function<bool(Wavefront &wf, uint64_t address, bool is_write, uint64_t issue_pc)>;
   void set_memory_violation_handler(MemoryViolationHandler cb) {
     memory_violation_handler_ = std::move(cb);
   }
@@ -846,6 +852,11 @@ public:
     return std::forward<F>(fn)();
   }
 
+  /// @brief Retry retained memory of a paused queue without issuing instructions.
+  /// @details Flushes resulting fault notifications before returning. Snapshot
+  /// callers must still reject memory that remains unavailable after this pass.
+  void retry_paused_queue_memory(uint32_t process_id, uint32_t queue_id, bool replay_loads = false);
+
   /// @brief Pause once after releasing the wave-state lock but before flushing
   /// command-processor notifications.
   /// @details Test-only seam for deterministic lock-order regressions. The hook
@@ -1152,9 +1163,19 @@ public:
   /// @details This deliberately bypasses plugin observation and is reserved
   /// for VM storage operations. Instruction code receives
   /// `InstructionComputeUnitView`, which does not expose this API.
+  /// @pre @p reg_idx identifies an existing physical VGPR and @p lane is less
+  /// than vgpr_storage_lane_count().
+  /// @see read_vgpr_storage_bounded() for reads with bounds checks.
   uint32_t read_vgpr_storage(uint32_t reg_idx, uint32_t lane) const {
     return reinterpret_cast<const uint32_t *>(raw_vgpr_data(reg_idx))[lane];
   }
+
+  /// @brief Read physical VGPR storage without producing an observation callback.
+  /// @details Suitable for debugger and VM inspection; checks physical-register
+  /// and lane bounds before reading storage.
+  /// @returns Lane value, or zero outside the physical register or lane bounds.
+  /// @see read_vgpr_storage() for unchecked reads requiring valid indices.
+  virtual uint32_t read_vgpr_storage_bounded(uint32_t reg_idx, uint32_t lane) const = 0;
 
   /// @brief Number of physical VGPR registers in one allocation block.
   uint32_t vgpr_allocation_block_size() const { return vgpr_allocation_block_size_; }
@@ -1446,7 +1467,10 @@ protected:
     QueueExceptionDeliveryPolicy delivery_policy;
   };
 
-  /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
+  /// @brief Offer an architectural data fault to its owner, otherwise cancel it.
+  /// @param issue_pc Original instruction PC, before advancing to the resume PC.
+  void handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc);
+  /// @brief Cancel a terminal VM failure and notify the CP without offering it again.
   void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
   void fail_gws_wait(Wavefront &wf, std::string_view reason);
@@ -1911,6 +1935,12 @@ public:
     if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX)
       return 0;
     notify_vgpr_read_by_reg(reg_idx, uint64_t{1} << lane);
+    return vgpr_file_[reg_idx][lane];
+  }
+
+  uint32_t read_vgpr_storage_bounded(uint32_t reg_idx, uint32_t lane) const override {
+    if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX)
+      return 0;
     return vgpr_file_[reg_idx][lane];
   }
 
