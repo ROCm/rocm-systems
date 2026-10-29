@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "addc/cper/record.hpp"
+#include "addc/cper/pcie_section.hpp"
 
 namespace addc::cper::sections
 {
@@ -11,8 +11,6 @@ namespace addc::cper::sections
 /// into the normalized JSON IR used by the analyzer pipeline.
 [[nodiscard]] bool matches_pcie(
     const RecordHeader& header, const SectionDescriptor& desc) noexcept;
-[[nodiscard]] nlohmann::json parse_pcie(
-    std::span<const uint8_t> body, const SectionDescriptor& desc);
 [[nodiscard]] nlohmann::json parse_pcie(
     std::span<const uint8_t> body, const SectionDescriptor& desc,
     ParseContext& context);

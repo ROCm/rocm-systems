@@ -5,9 +5,6 @@
 #include "addc/common.hpp"
 #include "addc/detail/format.hpp"
 
-#include <algorithm>
-#include <cctype>
-
 namespace addc::decoder
 {
 
@@ -27,15 +24,6 @@ namespace
     }
 
     return addc::kAfidSentinel;
-}
-
-[[nodiscard]] std::string toLower(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char c) {
-                       return static_cast<char>(std::tolower(c));
-                   });
-    return value;
 }
 
 [[nodiscard]] std::string codeTypeCategory(uint8_t code_type)
@@ -110,7 +98,7 @@ nlohmann::ordered_json to_json(const DecodedOutbound& d)
     };
     j["error_severity"] =
         d.severity.empty() ? nlohmann::json(nullptr)
-                           : nlohmann::json(toLower(d.severity));
+                           : nlohmann::json(d.severity);
 
     if (!d.runtime_error_bits.empty())
     {

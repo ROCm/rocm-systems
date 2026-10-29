@@ -231,6 +231,64 @@ void fill_common_metadata(Section& sec, const nlohmann::json& descriptor,
     return b;
 }
 
+/// Parse an MI450 PLDM bundle from a pldmBundle object.
+[[nodiscard]] inline GpuMi450PldmBundle parse_mi450_pldm_bundle(
+    const nlohmann::json& pb)
+{
+    GpuMi450PldmBundle b;
+    if (const auto v = json_u32(pb, "patch"))
+        b.patch = static_cast<uint8_t>(*v);
+    if (const auto v = json_u32(pb, "minor"))
+        b.minor = static_cast<uint8_t>(*v);
+    if (const auto v = json_u32(pb, "majorYear"))
+        b.major_year = static_cast<uint8_t>(*v);
+    if (const auto v = json_u32(pb, "buildType"))
+        b.build_type = static_cast<uint8_t>(*v);
+    if (const auto v = json_u32(pb, "productId"))
+        b.product_id = static_cast<uint8_t>(*v);
+    return b;
+}
+
+inline void parse_pldm_into(GpuPldmBundle& bundle, const nlohmann::json& pb)
+{
+    bundle = parse_pldm_bundle(pb);
+}
+
+inline void parse_pldm_into(GpuMi450PldmBundle& bundle,
+                            const nlohmann::json& pb)
+{
+    bundle = parse_mi450_pldm_bundle(pb);
+}
+
+/// Read the header shared by the AMD GPU crashdump, runtime and Scale Up
+/// bodies: valid bits, PCIe_DEVID, FW_ID and PLDM_BNDL. The PLDM layout
+/// follows the section's bundle type; entry counts are read only for sections
+/// that keep them.
+template <typename Section>
+void fill_gpu_header(Section& sec, const nlohmann::json& body)
+{
+    if (const auto* vb = json_obj(body, "validBits"))
+    {
+        sec.fw_id_valid = json_bool(*vb, "fwIdValid").value_or(false);
+        sec.pcie_devid_valid = json_bool(*vb, "pcieDevidValid").value_or(false);
+        sec.pldm_bundle_valid = json_bool(*vb, "pldmBndlValid").value_or(false);
+        if constexpr (requires { sec.gpu_error_info_count; })
+        {
+            if (const auto cnt = json_u32(*vb, "gpuErrorInfoCount"))
+                sec.gpu_error_info_count = static_cast<uint8_t>(*cnt);
+        }
+        if constexpr (requires { sec.gpu_context_info_count; })
+        {
+            if (const auto cnt = json_u32(*vb, "gpuContextInfoCount"))
+                sec.gpu_context_info_count = static_cast<uint8_t>(*cnt);
+        }
+    }
+    sec.pcie_dev_id = json_str(body, "pcieDevId").value_or(std::string{});
+    sec.fw_id = json_str(body, "fwId").value_or(std::string{});
+    if (const auto* pb = json_obj(body, "pldmBundle"))
+        parse_pldm_into(sec.pldm_bundle, *pb);
+}
+
 // --- Little-endian binary readers
 // ---------------------------------------------
 
@@ -288,6 +346,64 @@ inline constexpr std::size_t kContextHeaderSize = 16u;
 // --- MCA bank parser
 // ----------------------------------------------------------
 
+/// Parse DBG_LOG frames that start at `offset` in a crashdump register array.
+/// Frame: [u16-BE block_id(8)|num_instances(8)][u16-LE block_size], then
+/// num_instances x block_size bytes. Header 0x7ADA with block size 0xBAAD
+/// marks corruption and ends the walk. Block 40 with zero fields is one
+/// 256-byte instance. A non-zero `block25_instances` replaces the header
+/// count of block 25 (Uncore Trace DRB), which EPYC pads to a fixed count.
+[[nodiscard]] inline std::vector<DbgLogGroup> parse_dbg_log_frames(
+    std::span<const uint8_t> blob, std::size_t offset,
+    uint16_t block25_instances = 0u)
+{
+    std::vector<DbgLogGroup> groups;
+    if (blob.size() <= offset + 4u)
+        return groups;
+    const std::size_t payload_size = blob.size() - offset;
+    std::size_t off = 0u;
+    while (off + 4u <= payload_size)
+    {
+        const std::size_t base = offset + off;
+        const uint16_t hdr = read_u16_be(blob, base);
+        const uint16_t bsz = read_u16_le(blob, base + 2u);
+        if (hdr == 0x7ADAu && bsz == 0xBAADu)
+            break;
+        const auto block_id = static_cast<uint8_t>(hdr >> 8u);
+        const auto num_instances = static_cast<uint8_t>(hdr & 0xFFu);
+
+        uint16_t eff_num =
+            (block_id == 40u && num_instances == 0u) ? 1u : num_instances;
+        const uint16_t eff_bsz = (block_id == 40u && bsz == 0u) ? 256u : bsz;
+        if (block_id == 25u && block25_instances != 0u)
+            eff_num = block25_instances;
+
+        const std::size_t frame_bytes =
+            4u + static_cast<std::size_t>(eff_num) * eff_bsz;
+        if (frame_bytes == 0u || off + frame_bytes > payload_size)
+            break;
+        DbgLogGroup grp;
+        grp.block_id = block_id;
+        grp.block_size = eff_bsz;
+        grp.instances.reserve(eff_num);
+        for (uint16_t ni = 0u; ni < eff_num; ++ni)
+        {
+            const std::size_t inst_off =
+                base + 4u + static_cast<std::size_t>(ni) * eff_bsz;
+            if (inst_off + eff_bsz > blob.size())
+                break;
+            const auto first =
+                blob.begin() + static_cast<std::ptrdiff_t>(inst_off);
+            grp.instances.push_back(DbgLogInstance{
+                .data = std::vector<uint8_t>{first, first + eff_bsz},
+            });
+        }
+        if (!grp.instances.empty())
+            groups.push_back(std::move(grp));
+        off += frame_bytes;
+    }
+    return groups;
+}
+
 /// Parse one McaBankDump from a 512-byte slot at `offset` within `data`.
 /// Out-of-bounds reads return 0.
 [[nodiscard]] inline McaBankDump parse_mca_bank(std::span<const uint8_t> data,
@@ -341,6 +457,18 @@ inline constexpr std::size_t kContextHeaderSize = 16u;
 
     if (const auto* mcs = json_obj(eis, "msCheckStructure"))
     {
+        if (const auto* mvb = json_obj(*mcs, "validBits"))
+        {
+            constexpr std::array<std::string_view, 6> kKeys{
+                "errorTypeValid", "pccValid",           "uncorrectedValid",
+                "preciseIpValid", "restartableIpValid", "overflowValid"};
+            for (std::size_t bit = 0u; bit < kKeys.size(); ++bit)
+            {
+                if (json_bool(*mvb, kKeys[bit]).value_or(false))
+                    info.ms_check_valid_bits |=
+                        static_cast<uint16_t>(1u << bit);
+            }
+        }
         if (const auto v = json_u32(*mcs, "errorType"))
             info.error_type = static_cast<uint8_t>(*v);
         auto as_bool = [&](std::string_view key) -> bool {

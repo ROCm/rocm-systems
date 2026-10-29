@@ -3,6 +3,7 @@
 #include "addc/decoder/pcie/decoder.hpp"
 
 #include "addc-common/base64.hpp"
+#include "addc/cper/amd_section_ids.hpp"
 #include "addc/detail/format.hpp"
 
 #include <algorithm>
@@ -49,8 +50,8 @@ struct PlatformInfo
 
 [[nodiscard]] PlatformInfo getPlatformInfo(uint8_t revision_major)
 {
-    auto program_rev = static_cast<uint8_t>(revision_major & 0xFU);
-    const auto gen_rev = static_cast<uint8_t>((revision_major >> 4U) & 0xFU);
+    auto program_rev = cper::program_gen(revision_major);
+    const auto gen_rev = cper::ras_gen(revision_major);
     if (program_rev == 0U && gen_rev != 0U)
     {
         program_rev = 1U;

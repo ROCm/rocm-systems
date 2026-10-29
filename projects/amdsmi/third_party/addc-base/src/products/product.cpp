@@ -9,7 +9,7 @@ namespace addc::product
 namespace
 {
 
-constexpr std::array<DescriptorRoute, 1> firerange_descriptor_routes{{{4, 1}}};
+constexpr std::array<DescriptorRoute, 1> embedded_2005_descriptor_routes{{{4, 1}}};
 constexpr std::array<DescriptorRoute, 2> genoa_descriptor_routes{{{1, 0},
                                                                   {1, 1}}};
 constexpr std::array<DescriptorRoute, 1> mi300a_descriptor_routes{{{2, 1}}};
@@ -19,7 +19,7 @@ constexpr std::array<DescriptorRoute, 1> turin_descriptor_routes{{{1, 2}}};
 constexpr std::array<DescriptorRoute, 1> venice_descriptor_routes{{{1, 3}}};
 
 constexpr std::size_t product_count =
-#ifdef ADDC_HAS_FIRERANGE
+#ifdef ADDC_HAS_EMBEDDED_2005
     1 +
 #endif
 #ifdef ADDC_HAS_GENOA
@@ -52,9 +52,9 @@ constexpr std::size_t product_count =
     0;
 
 constexpr std::array<ProductDefinition, product_count> products{{
-#ifdef ADDC_HAS_FIRERANGE
-    {{ProductId::firerange, "firerange", "AMD EPYC Embedded 2005",
-      ProductFamily::epyc, {}, firerange_descriptor_routes},
+#ifdef ADDC_HAS_EMBEDDED_2005
+    {{ProductId::embedded_2005, "embedded_2005", "AMD EPYC Embedded 2005",
+      ProductFamily::epyc, {}, embedded_2005_descriptor_routes},
      {true, true, true}},
 #endif
 #ifdef ADDC_HAS_GENOA

@@ -159,8 +159,8 @@ std::optional<StructuralRecord> to_typed_record(
         if (kind == SectionKind::AmdMi300Runtime)
         {
             const auto major = unsignedField(*revision, "major");
-            if (major && (*major & 0xFU) == 2U &&
-                ((*major >> 4U) & 0xFU) == 3U)
+            if (major && is_mi450_gpu_runtime_revision(
+                             static_cast<uint8_t>(*major & 0xFFU)))
             {
                 kind = SectionKind::AmdMi450Runtime;
             }

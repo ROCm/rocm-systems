@@ -9,6 +9,12 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
+
+namespace addc::cper
+{
+struct StructuralSection;
+} // namespace addc::cper
 
 namespace addc::pipeline
 {
@@ -23,6 +29,9 @@ struct DecodeContext
     decoder::DbgLogDecodeFunction decode_dbglog =
         decoder::decode_base_dbglog;
     decoder::WdtDecodeFunction decode_wdt = decoder::decode_base_wdt;
+    /// All sections of the record being decoded, for decoders that combine
+    /// related sections into one event. Null when a section is decoded alone.
+    const std::vector<cper::StructuralSection>* record_sections = nullptr;
 };
 
 } // namespace addc::pipeline

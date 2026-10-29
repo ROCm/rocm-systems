@@ -1,9 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "cper-section-amd-mi300-runtime.hpp"
+#include "cper-section-amd-gpu-runtime.hpp"
 
 #include "../base64.hpp"
 #include "../endian.hpp"
+#include "addc/cper/amd_section_ids.hpp"
 #include "addc/detail/ascii.hpp"
 #include "addc/detail/format.hpp"
 
@@ -19,27 +20,6 @@ using addc::cper::read_u64_le;
 namespace
 {
 
-inline constexpr Guid kMi300RuntimeGuid{
-    0x32ac0c78U,
-    0x2623U,
-    0x48f6U,
-    {0x81U, 0xa2U, 0xacU, 0x69U, 0x17U, 0x80U, 0x55U, 0x1dU}};
-
-// --- Null-terminated ASCII from raw bytes
-// ------------------------------------- Reads len bytes from d at off as a
-// null-terminated ASCII string.
-// --- GUID from 16 raw bytes (EFI byte order) ---------------------------------
-std::string guidStringFromBytes(std::span<const uint8_t> d, std::size_t off)
-{
-    if (off + 16U > d.size())
-    {
-        return "";
-    }
-    const Guid g =
-        Guid::parse(std::span<const uint8_t, 16>{d.data() + off, 16U});
-    return g.to_string();
-}
-
 // --- ValidBits ---------------------------------------------------------------
 nlohmann::json parseValidBitsRuntime(uint64_t v)
 {
@@ -52,93 +32,8 @@ nlohmann::json parseValidBitsRuntime(uint64_t v)
     };
 }
 
-// --- PldmBundle --------------------------------------------------------------
-nlohmann::json parsePldmBundle(uint32_t v)
-{
-    return {
-        {"minor", v & 0xFFU},
-        {"major", (v >> 8U) & 0xFFU},
-        {"year", (v >> 16U) & 0xFFU},
-        {"productionDebug", (v >> 24U) & 0xFFU},
-    };
-}
-
-// --- MsCheckStructure ValidBits ----------------------------------------------
-nlohmann::json parseMsCheckValidBits(uint64_t v)
-{
-    return {
-        {"checkInfoValid", bool(v & 0x1U)},
-        {"targetAddressIdentifierValid", bool((v >> 1U) & 0x1U)},
-        {"requesterIdentifierValid", bool((v >> 2U) & 0x1U)},
-        {"responderIdentifierValid", bool((v >> 3U) & 0x1U)},
-        {"instructionPointerValid", bool((v >> 4U) & 0x1U)},
-    };
-}
-
-// --- GpuContextInfoStructureMsCheckStructureValidBits ------------------------
-nlohmann::json parseMsCheckStructVbits(uint64_t v)
-{
-    return {
-        {"errorTypeValid", bool(v & 0x1U)},
-        {"pccValid", bool((v >> 1U) & 0x1U)},
-        {"uncorrectedValid", bool((v >> 2U) & 0x1U)},
-        {"preciseIpValid", bool((v >> 3U) & 0x1U)},
-        {"restartableIpValid", bool((v >> 4U) & 0x1U)},
-        {"overflowValid", bool((v >> 5U) & 0x1U)},
-    };
-}
-
-// --- GpuContextInfoStructureMsCheckStructure ---------------------------------
-nlohmann::json parseMsCheckStruct(uint64_t v)
-{
-    return {
-        {"validBits", parseMsCheckStructVbits(v & 0xFFFFU)},
-        {"errorType", (v >> 16U) & 0x7U},
-        {"pcc", (v >> 19U) & 0x1U},
-        {"uncorrected", (v >> 20U) & 0x1U},
-        {"preciseIp", (v >> 21U) & 0x1U},
-        {"restartableIp", (v >> 22U) & 0x1U},
-        {"overflow", (v >> 23U) & 0x1U},
-    };
-}
-
-// --- MI300 Error Info Structure (64 bytes) -----------------------------------
-nlohmann::json parseMi300ErrorInfo(std::span<const uint8_t> body,
-                                   std::size_t base)
-{
-    if (base + 64U > body.size())
-    {
-        return nullptr;
-    }
-    const auto d = body.subspan(base, 64U);
-    const uint64_t vb = read_u64_le(d, 16U);
-    const uint64_t ms_raw = read_u64_le(d, 24U);
-    const uint64_t target = read_u64_le(d, 32U);
-    const uint64_t requester = read_u64_le(d, 40U);
-    const uint64_t responder = read_u64_le(d, 48U);
-    const uint64_t instr = read_u64_le(d, 56U);
-    nlohmann::json j = nlohmann::json::object();
-    j["errorStructureType"] = guidStringFromBytes(d, 0U);
-
-    nlohmann::json vb_j = parseMsCheckValidBits(vb);
-    vb_j["fruManufacturerPartNumberValid"] = bool((vb >> 5U) & 0x1U);
-    vb_j["redfishEventLogIdValid"] = bool((vb >> 6U) & 0x1U);
-    j["validBits"] = std::move(vb_j);
-
-    j["msCheckStructure"] = parseMsCheckStruct(ms_raw);
-    j["targetIdentifier"] = addc::format("0x{:016x}", target);
-    j["requesterIdentifier"] = addc::format("0x{:016x}", requester);
-    j["responderIdentifier"] = addc::format("0x{:016x}", responder);
-    j["instructionIdentifier"] = addc::format("0x{:016x}", instr);
-    j["fruManufacturerPartNumber"] =
-        addc::detail::read_ascii_field(d, 32U, 16U);
-    j["redfishEventLogId"] =
-        addc::detail::read_ascii_field(d, 56U, 8U);
-    return j;
-}
-
-// --- MI300 Context Structure (runtime - with msrAddress + mmRegisterAddress) -
-nlohmann::json parseMi300ContextRuntime(std::span<const uint8_t> body,
+// --- Context Structure (runtime - with msrAddress + mmRegisterAddress) -------
+nlohmann::json parseContextRuntime(std::span<const uint8_t> body,
                                         std::size_t base,
                                         const ParseContext& context)
 {
@@ -166,33 +61,34 @@ nlohmann::json parseMi300ContextRuntime(std::span<const uint8_t> body,
 
 } // anonymous namespace
 
-// --- MI300 runtime classification -------------------------------------------
+// --- AMD GPU runtime classification -----------------------------------------
 
-bool matches_amd_mi300_runtime(const RecordHeader& /*header*/,
-                               const SectionDescriptor& desc) noexcept
+bool matches_amd_gpu_runtime(const RecordHeader& /*header*/,
+                             const SectionDescriptor& desc) noexcept
 {
-    return desc.section_type == kMi300RuntimeGuid;
+    return desc.section_type == kAmdGpuRuntimeGuid;
 }
 
-// --- MI300 runtime parsing --------------------------------------------------
+// --- AMD GPU runtime parsing ------------------------------------------------
 // Body layout:
 //   0:  u64 validBits
 //   8:  4-byte pcieDevId  -> null-terminated ASCII
 //  12:  u32 pldmBundle
 //  16: 48-byte fwId       -> null-terminated ASCII
-//  64 + i*64: MI300 ErrorInfoStructure[gpuErrorInfoCount]  (each 64 bytes)
-//  after: MI300 ContextStructure[] (variable), gpuContextInfoCount of them
+//  64 + i*64: ErrorInfoStructure[gpuErrorInfoCount]  (each 64 bytes)
+//  after: ContextStructure[] (variable), gpuContextInfoCount of them
 
-nlohmann::json parse_amd_mi300_runtime(std::span<const uint8_t> body,
-                                       const SectionDescriptor& desc)
+nlohmann::json parse_amd_gpu_runtime(std::span<const uint8_t> body,
+                                     const SectionDescriptor& desc,
+                                     AmdGpuLayout layout)
 {
     ParseContext context;
-    return parse_amd_mi300_runtime(body, desc, context);
+    return parse_amd_gpu_runtime(body, desc, layout, context);
 }
 
-nlohmann::json parse_amd_mi300_runtime(
-    std::span<const uint8_t> body, const SectionDescriptor& /*desc*/,
-    ParseContext& context)
+nlohmann::json parse_amd_gpu_runtime(std::span<const uint8_t> body,
+                                     const SectionDescriptor& /*desc*/,
+                                     AmdGpuLayout layout, ParseContext& context)
 {
     if (body.size() < 8U)
     {
@@ -247,7 +143,7 @@ nlohmann::json parse_amd_mi300_runtime(
         {
             break;
         }
-        auto entry = parseMi300ErrorInfo(body, cur);
+        auto entry = parse_amd_gpu_error_info(body, cur, layout);
         if (!entry.is_null())
         {
             error_infos.push_back(std::move(entry));
@@ -275,7 +171,7 @@ nlohmann::json parse_amd_mi300_runtime(
         {
             break;
         }
-        auto entry = parseMi300ContextRuntime(body, cur, context);
+        auto entry = parseContextRuntime(body, cur, context);
         if (!entry.is_null())
         {
             ctx_structs.push_back(std::move(entry));
@@ -293,7 +189,7 @@ nlohmann::json parse_amd_mi300_runtime(
     return {
         {"validBits", valid_bits_j},
         {"pcieDevId", pcie_dev_id},
-        {"pldmBundle", parsePldmBundle(pldm_raw)},
+        {"pldmBundle", parse_amd_gpu_pldm_bundle(pldm_raw, layout)},
         {"fwId", fw_id},
         {"gpuErrorInfoStructures", std::move(error_infos)},
         {"gpuContextStructures", std::move(ctx_structs)},

@@ -41,6 +41,40 @@ constexpr uint64_t readU64Le(std::span<const uint8_t> d, std::size_t o) noexcept
     return v;
 }
 
+// --- Bytes after the declared record -----------------------------------------
+
+enum class TrailingBytes
+{
+    Padding,
+    TextTransfer,
+    Unexplained,
+};
+
+// A buffer larger than its declared record is harmless only when the extra
+// bytes are zero padding. A text-mode transfer turns each LF into CR LF, so
+// the extra byte count then equals the number of CR LF pairs in the buffer.
+// That check comes first: shifted data can end in zeros and look like padding.
+TrailingBytes classifyTrailingBytes(std::span<const uint8_t> buf,
+                                    std::size_t declared) noexcept
+{
+    std::size_t crlf_pairs = 0U;
+    for (std::size_t i = 0U; i + 1U < buf.size(); ++i)
+    {
+        if (buf[i] == 0x0DU && buf[i + 1U] == 0x0AU)
+        {
+            ++crlf_pairs;
+        }
+    }
+    if (crlf_pairs == buf.size() - declared)
+    {
+        return TrailingBytes::TextTransfer;
+    }
+    const auto tail = buf.subspan(declared);
+    const bool zeros = std::all_of(tail.begin(), tail.end(),
+                                   [](uint8_t b) { return b == 0U; });
+    return zeros ? TrailingBytes::Padding : TrailingBytes::Unexplained;
+}
+
 // --- GUID binary parse -------------------------------------------------------
 
 Guid parseGuid(std::span<const uint8_t> d, std::size_t o) noexcept
@@ -72,27 +106,39 @@ constexpr std::string_view severityToString(uint32_t code) noexcept
     }
 }
 
-constexpr std::string_view recordFlagsName(uint32_t flags) noexcept
+// Flags is a bit field. Set bits are joined with " | "; zero or any
+// undefined bit gives "Unknown".
+std::string recordFlagsName(uint32_t flags)
 {
-    // integer_to_readable_pair with keys {1,2,4}
-    switch (flags)
+    constexpr std::array<std::string_view, 4> kNames{
+        "HW_ERROR_FLAGS_RECOVERED", "HW_ERROR_FLAGS_PREVERR",
+        "HW_ERROR_FLAGS_SIMULATED", "HW_ERROR_FLAGS_INJECTION_CONTEXT"};
+    if (flags == 0U || (flags >> kNames.size()) != 0U)
     {
-        case 1:
-            return "HW_ERROR_FLAGS_RECOVERED";
-        case 2:
-            return "HW_ERROR_FLAGS_PREVERR";
-        case 4:
-            return "HW_ERROR_FLAGS_SIMULATED";
-        default:
-            return "Unknown";
+        return "Unknown";
     }
+    std::string name;
+    for (std::size_t bit = 0U; bit < kNames.size(); ++bit)
+    {
+        if ((flags & (1U << bit)) == 0U)
+        {
+            continue;
+        }
+        if (!name.empty())
+        {
+            name += " | ";
+        }
+        name += kNames[bit];
+    }
+    return name;
 }
 
 // --- Notification-type GUID -> human-readable name
 // ----------------------------
 
 // Notification GUIDs are defined by the UEFI CPER specification. The readable
-// names preserve compatibility with existing libcper JSON consumers.
+// names preserve compatibility with existing libcper JSON consumers. Platform
+// Event and MPx Trace Log are AMD notification types.
 std::string_view notificationTypeName(const Guid& g) noexcept
 {
     struct Entry
@@ -102,7 +148,7 @@ std::string_view notificationTypeName(const Guid& g) noexcept
     };
     // Non-constexpr: MSVC does not allow constexpr functions with static
     // locals.
-    static const std::array<Entry, 11> kTable{{
+    static const std::array<Entry, 13> kTable{{
         {Guid{0x2DCE8BB1U,
               0xBDD7U,
               0x450eU,
@@ -158,6 +204,16 @@ std::string_view notificationTypeName(const Guid& g) noexcept
               0x4214U,
               {0x96U, 0xE5U, 0x94U, 0x99U, 0x2EU, 0x75U, 0x2BU, 0xCDU}},
          "PEI"},
+        {Guid{0x3F7C2A1EU,
+              0x8D5BU,
+              0x4C91U,
+              {0x9AU, 0x2FU, 0x6EU, 0x7BU, 0x4DU, 0x1CU, 0x0AU, 0x8FU}},
+         "Platform Event"},
+        {Guid{0x2327BCA9U,
+              0x9490U,
+              0x4696U,
+              {0xADU, 0xDEU, 0x04U, 0xC9U, 0x94U, 0x5BU, 0x80U, 0x30U}},
+         "MPx Trace Log"},
     }};
     for (const auto& e : kTable)
     {
@@ -201,12 +257,24 @@ void to_json(nlohmann::json& j, const Guid& g)
 // Fields are therefore used as-is without BCD decoding.
 std::string Timestamp::decode_timestamp() const
 {
+    // A zero century means no date was recorded; do not produce year -100.
     const int year_full =
-        (static_cast<int>(century) - 1) * 100 + static_cast<int>(year);
+        century == 0U
+            ? static_cast<int>(year)
+            : (static_cast<int>(century) - 1) * 100 + static_cast<int>(year);
     return addc::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00", year_full,
                         static_cast<int>(month), static_cast<int>(day),
                         static_cast<int>(hours), static_cast<int>(minutes),
                         static_cast<int>(seconds));
+}
+
+std::string Timestamp::decode_bcd_timestamp() const
+{
+    const auto bcd = [](uint8_t value) noexcept
+    { return static_cast<int>((value >> 4U) * 10U + (value & 0x0FU)); };
+    return addc::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00",
+                        bcd(century) * 100 + bcd(year), bcd(month), bcd(day),
+                        bcd(hours), bcd(minutes), bcd(seconds));
 }
 
 // --- RecordFlags -------------------------------------------------------------
@@ -533,6 +601,43 @@ std::optional<CperRecord> CperRecord::parse_detailed(
                 "declared record length does not contain the available record",
         });
         logical_record_size = buf.size();
+    }
+    else if (logical_record_size < buf.size())
+    {
+        const TrailingBytes trailing =
+            classifyTrailingBytes(buf, logical_record_size);
+        if (trailing != TrailingBytes::Padding)
+        {
+            if (options.parse_mode == addc::ParseMode::Strict)
+            {
+                return fail(ParseError::InvalidRecordLength, kOffRecordLength);
+            }
+            // The declared length is kept. Section data may be shifted, so the
+            // pipeline marks the decoded events as corrupted.
+            const std::size_t extra = buf.size() - logical_record_size;
+            std::string reason = addc::format(
+                "buffer is {} bytes larger than the declared record length "
+                "and the extra bytes are not zero padding; section data may "
+                "be damaged",
+                extra);
+            if (trailing == TrailingBytes::TextTransfer)
+            {
+                reason = addc::format(
+                    "buffer is {} bytes larger than the declared record "
+                    "length and the extra byte count equals the number of "
+                    "CR LF pairs; the record probably passed through a "
+                    "text-mode (CRLF) transfer and section data is shifted",
+                    extra);
+            }
+            record.repairs.push_back(ParseRepair{
+                .code = "record_length_mismatch",
+                .field = "record_length",
+                .section_index = std::nullopt,
+                .original_value = hdr.record_length,
+                .substituted_value = hdr.record_length,
+                .reason = std::move(reason),
+            });
+        }
     }
 
     std::size_t next_expected_offset = descriptors_end;

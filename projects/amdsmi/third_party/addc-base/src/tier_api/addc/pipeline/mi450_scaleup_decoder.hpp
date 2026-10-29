@@ -8,8 +8,8 @@
 namespace addc::pipeline
 {
 
-[[nodiscard]] std::vector<PipelineEvent> decode_ainic(
-    const SectionDescriptor& descriptor, const AinicPlatformContextSection& section,
+[[nodiscard]] std::vector<PipelineEvent> decode_mi450_scaleup(
+    const SectionDescriptor& descriptor, const AmdMi450ScaleUpSection& section,
     const DecodeContext& context, std::string* error_out = nullptr);
 
 } // namespace addc::pipeline

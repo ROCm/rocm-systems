@@ -651,6 +651,18 @@ TEST(GpuUnit, AddcReportContainsTheDecodedEvent) {
   EXPECT_NE(buffer.find(kUnclassifiedFru), std::string::npos);
 }
 
+TEST(GpuUnit, AddcReportIgnoresBytesBeyondTheRecord) {
+  auto record = make_record_with_unclassified_event();
+  record.resize((record.size() + kCperHeaderSize), 0xAB);
+  auto size = uint32_t{0};
+  ASSERT_EQ(cper_get_report_json(record.data(), record.size(), nullptr, &size),
+            AMDSMI_STATUS_SUCCESS);
+  auto buffer = std::string(size, '\0');
+  ASSERT_EQ(cper_get_report_json(record.data(), record.size(), buffer.data(), &size),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_NE(buffer.find(std::to_string(ADDC_UNCLASSIFIED_AFID)), std::string::npos);
+}
+
 // amdgpu writes the crashdump section of a runtime fatal record 32 bytes shorter than
 // sizeof(cper_sec_crashdump): the dump union stops after fatal_err.
 constexpr size_t kAmdgpuFatalCrashdumpSize = 0xB0;

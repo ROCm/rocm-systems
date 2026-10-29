@@ -18,6 +18,10 @@
 namespace addc::pipeline
 {
 
+// Parser repair code for a buffer larger than its declared CPER record.
+inline constexpr std::string_view kRecordLengthMismatch =
+    "record_length_mismatch";
+
 [[nodiscard]] const nlohmann::json* jsonObjectPtr(const nlohmann::json& obj,
                                                   std::string_view key)
 {
@@ -67,8 +71,47 @@ void append_parser_recovery(PipelineOutput& output,
     }
     for (const auto& repair : *repairs)
     {
+        if (repair.value("code", std::string{}) == kRecordLengthMismatch)
+        {
+            output.diagnostics.warn(std::string{kRecordLengthMismatch},
+                                    repair.value("reason", std::string{}),
+                                    repair);
+            continue;
+        }
         output.diagnostics.debug("parser_recovery",
                                  "Parser repaired malformed input", repair);
+    }
+}
+
+[[nodiscard]] bool has_record_length_mismatch(const PipelineOutput& output)
+{
+    if (!output.recovery.is_object())
+    {
+        return false;
+    }
+    const auto repairs = output.recovery.find("repairs");
+    if (repairs == output.recovery.end() || !repairs->is_array())
+    {
+        return false;
+    }
+    return std::any_of(repairs->begin(), repairs->end(),
+                       [](const nlohmann::json& repair)
+                       {
+                           return repair.value("code", std::string{}) ==
+                                  kRecordLengthMismatch;
+                       });
+}
+
+void mark_events_from_parser_recovery(PipelineOutput& output)
+{
+    // Section data may be shifted, so no decoded value can be trusted.
+    if (!has_record_length_mismatch(output))
+    {
+        return;
+    }
+    for (PipelineEvent& event : output.events)
+    {
+        event.validation["corrupted"] = true;
     }
 }
 
@@ -324,8 +367,9 @@ std::optional<cper::StructuralRecord> prepare_structural_record(
     {
         append_parser_recovery(output, *recovery);
     }
-    const DecodeContext context = make_decode_context(
+    DecodeContext context = make_decode_context(
         record.canonical_header, output, mca_decode, dbglog_decode, wdt_decode);
+    context.record_sections = &record.sections;
     for (std::size_t index = 0U; index < record.sections.size(); ++index)
     {
         if (!appendDecodedSection(index, record.sections[index], context,
@@ -334,6 +378,7 @@ std::optional<cper::StructuralRecord> prepare_structural_record(
             return std::nullopt;
         }
     }
+    mark_events_from_parser_recovery(output);
     return output;
 }
 

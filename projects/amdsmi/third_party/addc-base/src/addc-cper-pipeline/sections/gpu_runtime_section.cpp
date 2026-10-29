@@ -82,30 +82,7 @@ std::optional<AmdGpuRuntimeSection> parseGpuRuntimeSection(
     fill_common_metadata(sec, descriptor, "mi300x");
     sec.descriptor_flags = parse_descriptor_flags(descriptor);
 
-    if (const auto* vb = json_obj(*body, "validBits"))
-    {
-        sec.fw_id_valid = json_bool(*vb, "fwIdValid").value_or(false);
-        sec.pcie_devid_valid =
-            json_bool(*vb, "pcieDevidValid").value_or(false);
-        sec.pldm_bundle_valid =
-            json_bool(*vb, "pldmBndlValid").value_or(false);
-        if (const auto cnt = json_u32(*vb, "gpuErrorInfoCount"))
-        {
-            sec.gpu_error_info_count = static_cast<uint8_t>(*cnt);
-        }
-        if (const auto cnt = json_u32(*vb, "gpuContextInfoCount"))
-        {
-            sec.gpu_context_info_count = static_cast<uint8_t>(*cnt);
-        }
-    }
-
-    sec.pcie_dev_id = json_str(*body, "pcieDevId").value_or(std::string{});
-    sec.fw_id = json_str(*body, "fwId").value_or(std::string{});
-
-    if (const auto* pb = json_obj(*body, "pldmBundle"))
-    {
-        sec.pldm_bundle = parse_pldm_bundle(*pb);
-    }
+    fill_gpu_header(sec, *body);
 
     if (body->contains("gpuErrorInfoStructures") &&
         (*body)["gpuErrorInfoStructures"].is_array())

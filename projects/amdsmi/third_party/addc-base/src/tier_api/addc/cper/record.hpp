@@ -74,6 +74,9 @@ struct Timestamp
     /// 2024). AMD CPER records do not comply - fields are raw binary integers
     /// (e.g. 0x18 = 24, not 0x24). All bytes are therefore used as-is.
     [[nodiscard]] std::string decode_timestamp() const;
+
+    /// Decode UEFI-compliant BCD fields into the same ISO 8601 form.
+    [[nodiscard]] std::string decode_bcd_timestamp() const;
 };
 
 // --- Record-level flags

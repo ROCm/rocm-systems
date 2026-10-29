@@ -79,7 +79,7 @@ endif()
 # ── Product selection ──────────────────────────────────────────────────────────
 
 set(_addc_all_projects
-    firerange genoa mi300a mi300c mi300x mi325x mi350 mi450 turin venice)
+    embedded_2005 genoa mi300a mi300c mi300x mi325x mi350 mi450 turin venice)
 string(REPLACE "," ";" _addc_requested "${ADDC_PROJECTS}")
 list(LENGTH _addc_requested _addc_requested_count)
 if(_addc_requested_count EQUAL 0)
@@ -114,7 +114,7 @@ foreach(_p IN LISTS _addc_all_projects)
     endif()
 endforeach()
 set(_addc_cpu_project OFF)
-if(ADDC_ENABLE_FIRERANGE OR ADDC_ENABLE_GENOA OR ADDC_ENABLE_TURIN OR ADDC_ENABLE_VENICE)
+if(ADDC_ENABLE_EMBEDDED_2005 OR ADDC_ENABLE_GENOA OR ADDC_ENABLE_TURIN OR ADDC_ENABLE_VENICE)
     set(_addc_cpu_project ON)
 endif()
 set(_addc_mi300_gpu_project OFF)
@@ -171,7 +171,6 @@ set(_srcs
     src/addc-cper-parser/cper-parse.cpp
     src/addc-cper-parser/cper-record.cpp
     src/addc-cper-parser/section_dispatch.cpp
-    src/addc-cper-parser/sections/cper-section-ainic.cpp
     src/addc-cper-parser/sections/cper-section-ia32x64.cpp
     src/addc-cper-parser/sections/cper-section-pcie.cpp
 )
@@ -187,16 +186,17 @@ endif()
 if(_addc_cpu_project OR ADDC_ENABLE_MI450)
     list(APPEND _srcs src/addc-cper-parser/sections/cper-section-amd-epyc-mtl.cpp)
 endif()
-if(_addc_mi300_gpu_project)
-    list(APPEND _srcs src/addc-cper-parser/sections/cper-section-amd-mi300-crashdump.cpp)
-endif()
 if(_addc_mi300_gpu_project OR ADDC_ENABLE_MI450)
-    list(APPEND _srcs src/addc-cper-parser/sections/cper-section-amd-mi300-runtime.cpp)
+    list(APPEND _srcs
+        src/addc-cper-parser/sections/cper-section-amd-gpu-common.cpp
+        src/addc-cper-parser/sections/cper-section-amd-gpu-crashdump.cpp
+        src/addc-cper-parser/sections/cper-section-amd-gpu-runtime.cpp
+    )
 endif()
 if(ADDC_ENABLE_MI450)
     list(APPEND _srcs
-        src/addc-cper-parser/sections/cper-section-amd-mi450-crashdump.cpp
         src/addc-cper-parser/sections/cper-section-amd-mi450-mtl.cpp
+        src/addc-cper-parser/sections/cper-section-amd-mi450-scaleup.cpp
     )
 endif()
 add_library(addc_cper_parser STATIC ${_srcs})
@@ -257,11 +257,10 @@ set(_srcs
     src/addc-cper-pipeline/pipeline.cpp
     src/addc-cper-pipeline/section_dispatch.cpp
     src/addc-cper-parser/structural.cpp
-    src/addc-cper-pipeline/sections/ainic_decoder.cpp
-    src/addc-cper-pipeline/sections/ainic_section.cpp
     src/addc-cper-pipeline/sections/epyc_crashdump_section.cpp
     src/addc-cper-pipeline/sections/mtl_section.cpp
     src/addc-cper-pipeline/sections/mi450_mtl_section.cpp
+    src/addc-cper-pipeline/sections/mi450_scaleup_section.cpp
     src/addc-cper-pipeline/sections/cdd_section.cpp
     src/addc-cper-pipeline/sections/pmic_section.cpp
     src/addc-cper-pipeline/sections/gpu_crashdump_section.cpp
@@ -272,9 +271,12 @@ set(_srcs
     src/addc-cper-pipeline/sections/pcie_section.cpp
     src/addc-cper-pipeline/sections/section_conversion.cpp
 )
+# MI300A/C crashdumps use the EPYC crashdump format.
+if(_addc_cpu_project OR _addc_mi300_gpu_project)
+    list(APPEND _srcs src/addc-cper-pipeline/sections/epyc_crashdump_decoder.cpp)
+endif()
 if(_addc_cpu_project)
     list(APPEND _srcs
-        src/addc-cper-pipeline/sections/epyc_crashdump_decoder.cpp
         src/addc-cper-pipeline/sections/cdd_decoder.cpp
         src/addc-cper-pipeline/sections/pmic_decoder.cpp
         src/addc-cper-pipeline/sections/ia32x64_decoder.cpp
@@ -294,6 +296,7 @@ if(ADDC_ENABLE_MI450)
     list(APPEND _srcs
         src/addc-cper-pipeline/sections/gpu_mi450_crashdump_decoder.cpp
         src/addc-cper-pipeline/sections/gpu_mi450_runtime_decoder.cpp
+        src/addc-cper-pipeline/sections/mi450_scaleup_decoder.cpp
     )
 endif()
 add_library(addc_cper_pipeline STATIC ${_srcs})
@@ -335,6 +338,11 @@ if(ADDC_ENABLE_TESTS)
     addc_add_test(allocation-contract-test allocation-contract
         SOURCES tests/allocation_contract.cpp
         LIBS addc_common addc_cper_parser addc_cper_pipeline)
+    if(ADDC_ENABLE_MI450)
+        addc_add_test(mi450-cper-layout-test mi450-cper-layout
+            SOURCES tests/mi450_cper_layout.cpp LIBS addc_cper_pipeline
+            DEFS ${_addc_product_defs})
+    endif()
     if(ADDC_ENABLE_MI300X AND ADDC_ENABLE_MI450)
         addc_add_test(descriptor-platform-smoke descriptor-platform-smoke
             SOURCES tests/descriptor_platform_smoke.cpp LIBS addc_cper_pipeline)
@@ -342,6 +350,11 @@ if(ADDC_ENABLE_TESTS)
     if(_addc_cpu_project)
         addc_add_test(section-dispatch-test section-dispatch
             SOURCES tests/section_dispatch.cpp LIBS addc_cper_pipeline)
+    endif()
+    if(_addc_cpu_project OR _addc_mi300_gpu_project)
+        addc_add_test(epyc-crashdump-dispatch-test epyc-crashdump-dispatch
+            SOURCES tests/epyc_crashdump_dispatch.cpp LIBS addc_cper_pipeline
+            DEFS ${_addc_product_defs})
     endif()
     addc_add_test(parser-classification-test parser-classification
         SOURCES tests/parser_classification.cpp LIBS addc_cper_parser DEFS ${_addc_product_defs})

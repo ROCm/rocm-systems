@@ -57,14 +57,59 @@ std::string decode_severity(McaRegisters regs)
     return "Unknown";
 }
 
-McaResult decode_common(const BankCapture& bank, uint32_t afid)
+std::string decode_severity(McaRegisters regs, product::ProductId product)
+{
+    switch (product)
+    {
+        case product::ProductId::embedded_2005:
+        case product::ProductId::genoa:
+        case product::ProductId::turin:
+        case product::ProductId::venice:
+            break;
+        default:
+            return decode_severity(regs);
+    }
+
+    // Poison is evaluated last so pcc, uc and tcc, and deferred keep their
+    // own classification.
+    const auto& s = regs.status;
+    if (s.pcc)
+    {
+        return "Fatal";
+    }
+    if (!s.pcc && s.uc && s.tcc)
+    {
+        return "Fatal";
+    }
+    if (!s.pcc && s.uc && !s.tcc)
+    {
+        return "Non-Fatal";
+    }
+    if (!s.pcc && !s.uc && !s.tcc && s.deferred)
+    {
+        return "Non-Fatal";
+    }
+    if (!s.pcc && !s.uc && !s.tcc && !s.deferred)
+    {
+        return "Corrected";
+    }
+    if (s.poison)
+    {
+        return "Non-Fatal";
+    }
+    return "Unknown";
+}
+
+McaResult decode_common(const BankCapture& bank, uint32_t afid,
+                        std::optional<product::ProductId> product)
 {
     const McaRegisters& regs = bank.regs;
     McaResult event;
     event.decoded = DecodedMca{
         .bank = std::nullopt,
         .error_type = std::nullopt,
-        .severity = addc::mca::decode_severity(regs),
+        .severity = product ? addc::mca::decode_severity(regs, *product)
+                            : addc::mca::decode_severity(regs),
         .location = std::nullopt,
         .instance = std::nullopt,
         .description = std::nullopt,
@@ -119,7 +164,7 @@ std::optional<McaResult> try_decode_project_event(
             return base::mi450::decode(bank);
 #endif
         default:
-            return decode_common(bank);
+            return decode_common(bank, kAfidSentinel, definition->identity.id);
     }
 }
 

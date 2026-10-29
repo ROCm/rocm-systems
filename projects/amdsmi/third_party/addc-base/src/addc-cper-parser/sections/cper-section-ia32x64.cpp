@@ -3,6 +3,7 @@
 #include "cper-section-ia32x64.hpp"
 
 #include "../base64.hpp"
+#include "../endian.hpp"
 #include "addc/detail/format.hpp"
 
 #include <algorithm>
@@ -10,6 +11,10 @@
 
 namespace addc::cper::sections
 {
+
+using addc::cper::read_u16_le;
+using addc::cper::read_u32_le;
+using addc::cper::read_u64_le;
 
 namespace
 {
@@ -97,41 +102,6 @@ constexpr std::string_view msCheckErrorTypeName(uint32_t v) noexcept
 // --- Portable LE readers
 // ------------------------------------------------------
 
-constexpr uint16_t readU16(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    return static_cast<uint16_t>(d[o]) |
-           (static_cast<uint16_t>(d[o + 1U]) << 8U);
-}
-
-constexpr uint32_t readU32(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    return static_cast<uint32_t>(d[o]) |
-           (static_cast<uint32_t>(d[o + 1U]) << 8U) |
-           (static_cast<uint32_t>(d[o + 2U]) << 16U) |
-           (static_cast<uint32_t>(d[o + 3U]) << 24U);
-}
-
-constexpr uint64_t readU64(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    uint64_t v{};
-    for (std::size_t i = 0U; i < 8U; ++i)
-    {
-        v |= static_cast<uint64_t>(d[o + i]) << (8U * i);
-    }
-    return v;
-}
-
-template <typename Fn>
-auto safeRead(std::span<const uint8_t> d, std::size_t offset, std::size_t width,
-              Fn reader) noexcept -> decltype(reader(d, offset))
-{
-    if (offset + width > d.size())
-    {
-        return {};
-    }
-    return reader(d, offset);
-}
-
 // --- Parse a 16-byte GUID from body at position pos
 // ---------------------------
 Guid readGuid(std::span<const uint8_t> d, std::size_t pos) noexcept
@@ -188,12 +158,12 @@ nlohmann::json parseProcErrorInfo(std::span<const uint8_t> body,
 
     const Guid type_guid = readGuid(body, offset);
     const std::string type_name = ia32x64ErrorTypeName(type_guid);
-    const uint64_t validation_bits = readU64(body, offset + 16U);
-    const uint64_t check_info = readU64(body, offset + 24U);
-    const uint64_t target_id = readU64(body, offset + 32U);
-    const uint64_t requestor_id = readU64(body, offset + 40U);
-    const uint64_t responder_id = readU64(body, offset + 48U);
-    const uint64_t instr_ptr = readU64(body, offset + 56U);
+    const uint64_t validation_bits = read_u64_le(body, offset + 16U);
+    const uint64_t check_info = read_u64_le(body, offset + 24U);
+    const uint64_t target_id = read_u64_le(body, offset + 32U);
+    const uint64_t requestor_id = read_u64_le(body, offset + 40U);
+    const uint64_t responder_id = read_u64_le(body, offset + 48U);
+    const uint64_t instr_ptr = read_u64_le(body, offset + 56U);
 
     nlohmann::json entry;
     entry["type"] = {{"guid", type_guid.to_string()}, {"name", type_name}};
@@ -282,10 +252,10 @@ nlohmann::json parseProcContextInfo(std::span<const uint8_t> body,
         return nullptr;
     }
 
-    const uint16_t ctx_type = readU16(body, offset + 0U);
-    uint16_t arr_size = readU16(body, offset + 2U);
-    const uint32_t msr_addr = readU32(body, offset + 4U);
-    const uint64_t mm_addr = readU64(body, offset + 8U);
+    const uint16_t ctx_type = read_u16_le(body, offset + 0U);
+    uint16_t arr_size = read_u16_le(body, offset + 2U);
+    const uint32_t msr_addr = read_u32_le(body, offset + 4U);
+    const uint64_t mm_addr = read_u64_le(body, offset + 8U);
 
     // Compute bytes available for register array data from this context's
     // header to end of body.
@@ -360,8 +330,8 @@ nlohmann::json parse_ia32x64(
         return nullptr;
     }
 
-    const uint64_t valid_bits = safeRead(body, 0U, 8U, readU64);
-    const uint64_t apic_id = safeRead(body, 8U, 8U, readU64);
+    const uint64_t valid_bits = read_u64_le(body, 0U);
+    const uint64_t apic_id = read_u64_le(body, 8U);
 
     const bool apic_id_valid = (valid_bits & 0x1U) != 0U;
     const bool cpuid_valid = (valid_bits & 0x2U) != 0U;
@@ -373,10 +343,10 @@ nlohmann::json parse_ia32x64(
     if (cpuid_valid)
     {
         cpuid_info = {
-            {"eax", safeRead(body, 16U, 8U, readU64)},
-            {"ebx", safeRead(body, 24U, 8U, readU64)},
-            {"ecx", safeRead(body, 32U, 8U, readU64)},
-            {"edx", safeRead(body, 40U, 8U, readU64)},
+            {"eax", read_u64_le(body, 16U)},
+            {"ebx", read_u64_le(body, 24U)},
+            {"ecx", read_u64_le(body, 32U)},
+            {"edx", read_u64_le(body, 40U)},
         };
     }
     else
