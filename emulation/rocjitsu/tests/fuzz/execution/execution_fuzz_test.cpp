@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -108,6 +109,26 @@ TEST(ExecutionFuzzInputTest, ArbitraryInputsPreserveByteStreamAcrossSizes) {
   }
 }
 
+TEST(ExecutionFuzzInputTest, GeneratedInstructionsPreservePrefixesAcrossSizes) {
+  constexpr uint64_t seed = 2;
+  for (FuzzTarget target : {FuzzTarget::Gfx942, FuzzTarget::Gfx1250}) {
+    SCOPED_TRACE(target_name(target));
+    const std::vector<uint8_t> full_input = random_input(seed, kMaxInputSize, target);
+    ASSERT_EQ(full_input.size(), kMaxInputSize);
+    for (size_t size = 1; size < kMaxInputSize; ++size) {
+      SCOPED_TRACE(size);
+      const std::vector<uint8_t> input = random_input(seed, size, target);
+      ASSERT_EQ(input.size(), size);
+      // Each input has one sparse bit mutation, so their common prefix can
+      // differ in at most two bits when those mutations land differently.
+      unsigned differing_bits = 0;
+      for (size_t byte = 0; byte < size; ++byte)
+        differing_bits += std::popcount(static_cast<unsigned>(input[byte] ^ full_input[byte]));
+      EXPECT_LE(differing_bits, 2u);
+    }
+  }
+}
+
 TEST(ExecutionFuzzInputTest, WmmaPrefixStartsAtExactCapacity) {
   constexpr std::array first_wmma =
       cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
@@ -115,31 +136,35 @@ TEST(ExecutionFuzzInputTest, WmmaPrefixStartsAtExactCapacity) {
   constexpr std::array second_wmma =
       cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
                          {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
-  constexpr std::array<uint32_t, 4> expected_words = {first_wmma[0], first_wmma[1], second_wmma[0],
-                                                      second_wmma[1]};
+  constexpr size_t input_size =
+      kHeaderSize + (first_wmma.size() + second_wmma.size()) * sizeof(uint32_t);
   struct Case {
     uint64_t seed;
     uint8_t short_mode;
     uint8_t prefix_mode;
   };
-  constexpr std::array cases = {Case{1, 0x00, 0x08}, Case{17, 0x01, 0x09}};
+  constexpr std::array cases = {
+      Case{1, 0, kFullExecMaskBit},
+      Case{17, kAsyncSelectBit, kAsyncSelectBit | kFullExecMaskBit},
+  };
   for (FuzzTarget target : {FuzzTarget::Gfx1250, FuzzTarget::Gfx1251}) {
     SCOPED_TRACE(target_name(target));
     for (const Case &test_case : cases) {
       SCOPED_TRACE(test_case.seed);
-      const std::vector<uint8_t> short_input = random_input(test_case.seed, 17, target);
-      ASSERT_EQ(short_input.size(), 17u);
+      const std::vector<uint8_t> short_input = random_input(test_case.seed, input_size - 1, target);
+      ASSERT_EQ(short_input.size(), input_size - 1);
       EXPECT_EQ(short_input[1], test_case.short_mode);
 
-      const std::vector<uint8_t> input = random_input(test_case.seed, 18, target);
-      ASSERT_EQ(input.size(), 18u);
-      EXPECT_EQ(input[1], test_case.prefix_mode);
-      for (size_t byte = 0; byte < expected_words.size() * sizeof(uint32_t); ++byte) {
-        SCOPED_TRACE(byte);
-        const uint32_t word = expected_words[byte / sizeof(uint32_t)];
-        EXPECT_EQ(input[kHeaderSize + byte],
-                  static_cast<uint8_t>(word >> (8 * (byte % sizeof(uint32_t)))));
-      }
+      std::vector<uint8_t> expected{static_cast<uint8_t>(target), test_case.prefix_mode};
+      const auto append = [&](const auto &words) {
+        for (const uint32_t word : words)
+          for (unsigned byte = 0; byte < sizeof(word); ++byte)
+            expected.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+      };
+      append(first_wmma);
+      append(second_wmma);
+      ASSERT_EQ(expected.size(), input_size);
+      EXPECT_EQ(random_input(test_case.seed, input_size, target), expected);
     }
   }
 }

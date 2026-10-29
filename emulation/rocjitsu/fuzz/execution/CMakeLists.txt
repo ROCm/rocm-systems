@@ -32,9 +32,11 @@ rj_configure_target(rj_execution_fuzz_core GENERATED PRIVATE_INCLUDES WARNINGS)
 # Retain the ppc64le GCC 14+ -Wfree-nonheap-object demotion as a precaution
 # pending verification of the pre-sized random_input() implementation there.
 # The former reserve()/push_back() implementation triggered GCC PR 115016
-# at -O3; the new implementation compiles cleanly on x86-64 GCC 14/15.
-# Recheck: remove this block and build execution_fuzz_core.cpp on ppc64le
-# GCC 14 at -O3 before removing the precaution.
+# at -O3. The pre-sized implementation was verified on x86-64 Ubuntu 24.04
+# with GCC 14.2.0, Release (-O3 -Werror), and ROCJITSU_ENABLE_VFIO=ON.
+# Review also verified x86-64 GCC 15.2 with Release flags.
+# Recheck: build execution_fuzz_core.cpp with ppc64le GCC 14 at -O3 without
+# this block, and delete the block if the build is warning-free.
 if(
     CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14"
