@@ -5528,7 +5528,7 @@ rocprofiler-sdk:
             - gfx1152
             - gfx1153
             - gfx1201
-          expression: 
+          expression:
             400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
     - name: AggSysCycles
       description: 'Unit: cycles'
@@ -5904,7 +5904,7 @@ rocprofiler-sdk:
             + TCC_EA0_RDREQ_32B_sum*32)/1024
         - architectures:
             - gfx950
-          expression: 
+          expression:
             (TCC_EA0_RDREQ_128B_sum*128+TCC_EA0_RDREQ_64B_sum*64+TCC_EA0_RDREQ_32B_sum*32)/1024
         - architectures:
             - gfx1150
@@ -5912,7 +5912,7 @@ rocprofiler-sdk:
             - gfx1152
             - gfx1153
             - gfx1201
-          expression: 
+          expression:
             (GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024
     - name: BANDWIDTH_EA
       description: Memory Bandwidth measured at the TCC_EA interface. In units of
@@ -5926,11 +5926,11 @@ rocprofiler-sdk:
             - gfx940
             - gfx941
             - gfx942
-          expression: 
+          expression:
             (WRITE_SIZE*1024+TCC_BUBBLE_sum*128+(TCC_EA0_RDREQ_sum-TCC_BUBBLE_sum)*64)/reduce(GRBM_GUI_ACTIVE,max)
         - architectures:
             - gfx950
-          expression: 
+          expression:
             (WRITE_SIZE*1024+TCC_EA0_RDREQ_128B_sum*128+TCC_EA0_RDREQ_64B_sum*64)/reduce(GRBM_GUI_ACTIVE,max)
     - name: FetchSize
       description: The total kilobytes fetched from the video memory. This is measured
@@ -5964,7 +5964,7 @@ rocprofiler-sdk:
         - architectures:
             - gfx908
             - gfx90a
-          expression: 
+          expression:
             (reduce(SQ_INSTS_FLAT,sum)-reduce(SQ_INSTS_FLAT_LDS_ONLY,sum))/reduce(SQ_WAVES,sum)
     - name: GDSInsts
       description: The average number of GDS read or GDS write instructions executed
@@ -6165,7 +6165,7 @@ rocprofiler-sdk:
         - architectures:
             - gfx908
             - gfx90a
-          expression: 
+          expression:
             (reduce(SQ_INSTS_LDS,sum)-reduce(SQ_INSTS_FLAT_LDS_ONLY,sum))/reduce(SQ_WAVES,sum)
     - name: LdsBankConflict
       description: 'Unit: conflicts/access'
@@ -6175,7 +6175,7 @@ rocprofiler-sdk:
             - gfx90a
             - gfx942
             - gfx950
-          expression: 
+          expression:
             reduce(SQ_LDS_BANK_CONFLICT,sum)/(reduce(SQ_LDS_IDX_ACTIVE,sum)-reduce(SQ_LDS_BANK_CONFLICT,sum))
     - name: LdsLatency
       description: 'Unit: cycles'
@@ -6334,7 +6334,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
-          expression: 
+          expression:
             (SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16+SQ_INSTS_VALU_MFMA_MOPS_F32+SQ_INSTS_VALU_MFMA_MOPS_F64)*512
     - name: MfmaFlopsBF16
       description: 'Unit: FLOP'
@@ -12843,7 +12843,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
-          expression: 
+          expression:
             (SQ_INSTS_VALU_FMA_F16*2+SQ_INSTS_VALU_ADD_F16+SQ_INSTS_VALU_MUL_F16+SQ_INSTS_VALU_TRANS_F16)*64+((SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16)*512)
     - name: TOTAL_32_OPS
       description: The number of 32 bits OPS executed
@@ -12855,7 +12855,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
-          expression: 
+          expression:
             (SQ_INSTS_VALU_FMA_F32*2+SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_ADD_F32+SQ_INSTS_VALU_MUL_F32+SQ_INSTS_VALU_TRANS_F32)*64+(SQ_INSTS_VALU_MFMA_MOPS_F32*512)
     - name: TOTAL_64_OPS
       description: The number of 64 bits OPS executed
@@ -12867,7 +12867,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
-          expression: 
+          expression:
             (SQ_INSTS_VALU_FMA_F64*2+SQ_INSTS_VALU_INT64+SQ_INSTS_VALU_ADD_F64+SQ_INSTS_VALU_MUL_F64)*64+(SQ_INSTS_VALU_MFMA_MOPS_F64*512)
     - name: RDC_OPS_16_PER_SIMDCYCLE
       description: The number of 16 bits OPS executed per simd-cycle
@@ -12957,7 +12957,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
-          expression: 
+          expression:
             100*reduce(SQ_THREAD_CYCLES_VALU,sum)/(reduce(SQ_ACTIVE_INST_VALU,sum)*MAX_WAVE_SIZE)
     - name: SIMD_UTILIZATION
       description: Fraction of time the SIMDs are being utilized [0,1].
@@ -13032,7 +13032,7 @@ rocprofiler-sdk:
       definitions:
         - architectures:
             - gfx90a
-          expression: 
+          expression:
             400*(reduce(SQ_ACTIVE_INST_VMEM,sum)+reduce(SQ_ACTIVE_INST_FLAT,sum))/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
     - name: WRITE_REQ_32B
       description: The total number of 32-byte effective memory writes.
@@ -13220,7 +13220,7 @@ rocprofiler-sdk:
       definitions:
         - architectures:
             - gfx90a
-          expression: 
+          expression:
             TCP_TCC_READ_REQ_LATENCY_sum/(TCP_TCC_READ_REQ_sum+TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
     - name: vL1dWrTagConfStallRate
       description: 'Unit: percent'
@@ -13235,7 +13235,7 @@ rocprofiler-sdk:
       definitions:
         - architectures:
             - gfx90a
-          expression: 
+          expression:
             TCP_TCC_WRITE_REQ_LATENCY_sum/(TCP_TCC_WRITE_REQ_sum+TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
     - name: SerializedAtomicRatio
       description: Ratio of cycles spent waiting on serialized atomic accesses caused

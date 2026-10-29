@@ -20,29 +20,53 @@ sets:
   set_option: compute_thruput_flops
   description: >-
     Key compute throughput metrics: VALU FP32 and FP64 FLOPS, WMMA throughput,
-    IPC, and wavefront occupancy. Use for identifying compute-bound kernels.
+    and IPC. Use for identifying compute-bound kernels.
   metric:
   - 2.1.0: VALU FLOPs (FP32)
   - 2.1.1: WMMA FLOPs (F16->F32 16x16x16)
   - 2.1.2: VALU FLOPs (F64)
   - 2.1.3: IPC
+
+- title: Wavefront Occupancy
+  set_option: wavefront_occupancy
+  description: >-
+    Wavefront occupancy for identifying resource constraints on active waves.
+  metric:
   - 2.1.4: Wavefront Occupancy
 
 - title: Memory Throughput
   set_option: mem_thruput
   description: >-
-    Key memory bandwidth metrics: GL0/GL1/GL2 cache hit rates and bandwidth,
-    fabric read/write bandwidth, and LDS bank conflicts.
-    Use for identifying memory-bound kernels and bandwidth bottlenecks.
+    Cache hit rates and GL0 bandwidth for identifying memory-bound kernels.
   metric:
   - 2.1.5: GL2 Cache Hit Rate
+  - 2.1.11: GL0 Cache Hit Rate (TCP Cache)
+  - 2.1.12: GL0 Cache BW (TCP Cache)
+  - 2.1.13: GL1 Cache Hit Rate
+
+- title: Memory Fabric Read Throughput
+  set_option: mem_fabric_read_thruput
+  description: GL2-fabric read bandwidth for identifying memory bottlenecks.
+  metric:
   - 2.1.6: GL2-Fabric Read BW
+
+- title: Memory Fabric Write Throughput
+  set_option: mem_fabric_write_thruput
+  description: GL2-fabric write bandwidth.
+  metric:
   - 2.1.7: GL2-Fabric Write BW
-  - 2.1.10: GL0 Cache Hit Rate (TCP Cache)
-  - 2.1.11: GL0 Cache BW (TCP Cache)
-  - 2.1.12: GL1 Cache Hit Rate
-  - 2.1.13: GL1 Cache Read BW
-  - 2.1.14: GL2 Cache BW
+
+- title: GL1 Cache Read Throughput
+  set_option: gl1_read_thruput
+  description: GL1 cache read bandwidth.
+  metric:
+  - 2.1.14: GL1 Cache Read BW
+
+- title: GL2 Cache Throughput
+  set_option: gl2_thruput
+  description: GL2 cache bandwidth.
+  metric:
+  - 2.1.15: GL2 Cache BW
 
 - title: LDS Performance
   set_option: lds_perf
@@ -51,8 +75,8 @@ sets:
     instruction mix. Use for optimizing shared memory usage.
   metric:
   - 2.1.8: LDS Bank Conflicts
-  - 7.4.1: LDS Instructions
-  - 7.4.2: LDS Bandwidth
+  - 7.5.7: Instructions - LDS
+  - 4.1.6: LDS BW
 
 - title: Launch Stats
   set_option: launch_stats
@@ -75,13 +99,13 @@ sets:
     instructions and their issued counts per wave. Use to understand
     instruction distribution and shader workload balance.
   metric:
-  - 7.5.0: VALU Instructions
-  - 7.5.1: SALU Instructions
-  - 7.5.2: SMEM Instructions
-  - 7.5.3: Texture Load Instructions
-  - 7.5.4: Texture Store Instructions
-  - 7.5.5: LDS Instructions
-  - 7.5.6: Flat Instructions
+  - 7.5.2: Instructions - VALU
+  - 7.5.3: Instructions - SALU
+  - 7.5.4: Instructions - SMEM
+  - 7.6.1: Instructions - TEX Load
+  - 7.6.2: Instructions - TEX Store
+  - 7.5.7: Instructions - LDS
+  - 7.6.0: Instructions - VMEM Flat
 
 - title: Wave Wait Analysis
   set_option: wave_wait
@@ -96,13 +120,13 @@ sets:
 - title: Cache Efficiency
   set_option: cache_efficiency
   description: >-
-    Full cache hierarchy efficiency: instruction and scalar data cache
-    hit rates, and all cache bandwidth metrics from L0 to DRAM.
+    Cache hierarchy efficiency: instruction, scalar data, GL0, GL1, and
+    GL2 cache hit rates, plus scalar data and instruction cache bandwidth.
   metric:
-  - 2.1.15: Scalar Data Cache Hit Rate
-  - 2.1.16: Scalar Data Cache BW
-  - 2.1.17: Instruction Cache Hit Rate
-  - 2.1.18: Instruction Cache BW
-  - 2.1.10: GL0 Cache Hit Rate (TCP Cache)
-  - 2.1.12: GL1 Cache Hit Rate
+  - 2.1.16: Scalar Data Cache Hit Rate
+  - 2.1.17: Scalar Data Cache BW
+  - 2.1.18: Instruction Cache Hit Rate
+  - 2.1.19: Instruction Cache BW
+  - 2.1.11: GL0 Cache Hit Rate (TCP Cache)
+  - 2.1.13: GL1 Cache Hit Rate
   - 2.1.5: GL2 Cache Hit Rate
