@@ -153,13 +153,15 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     uint64_t addr = saddr_val + vaddr + offset;
     if (decode_flat_private) {
       // CDNA5 section 10.1.1 checks the final address, including IOFFSET.
-      if (amdgpu::flat_address_in_hole(wf, addr, amdgpu::FlatPrivateLayout::EncodedLane))
+      if (amdgpu::flat_address_in_hole(wf, addr, amdgpu::kCdna5FlatVaBits,
+                                       amdgpu::FlatPrivateLayout::EncodedLane))
         d.memviol_lane_mask |= uint64_t{1} << lane;
       const auto translated =
           amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane);
+      if (amdgpu::rejects_private_flat_atomic(translated.private_address,
+                                              d.atomic_op != amdgpu::AtomicOp::NONE, d.elem_size))
+        d.memviol_lane_mask |= uint64_t{1} << lane;
       if (translated.private_address) {
-        if (d.atomic_op != amdgpu::AtomicOp::NONE && d.elem_size == sizeof(uint64_t))
-          d.memviol_lane_mask |= uint64_t{1} << lane;
         addr = translated.value;
         d.scratch_swizzle = true;
         d.requires_scratch_backing = true;

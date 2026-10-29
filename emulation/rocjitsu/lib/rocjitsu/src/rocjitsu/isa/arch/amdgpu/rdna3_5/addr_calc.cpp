@@ -130,17 +130,18 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
       vaddr = vaddr_region.lane64(0, lane);
     }
     const uint64_t base_address = saddr_val + vaddr;
-    if (inst.seg == 0 &&
-        amdgpu::flat_address_in_hole(wf, base_address, amdgpu::FlatPrivateLayout::Linear))
-      d.memviol_lane_mask |= uint64_t{1} << lane;
     uint64_t addr = base_address + offset;
     if (inst.seg == 0) {
+      // Section 11.3 checks the aperture before adding IOFFSET.
+      if (amdgpu::flat_address_in_hole(wf, base_address, amdgpu::kRdnaFlatVaBits,
+                                       amdgpu::FlatPrivateLayout::Linear))
+        d.memviol_lane_mask |= uint64_t{1} << lane;
       const auto translated =
           amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Linear);
       // IOFFSET crossing into another aperture is undefined on RDNA.
       // For defined accesses, final-address translation preserves private provenance.
-      if (translated.private_address && d.atomic_op != amdgpu::AtomicOp::NONE &&
-          d.elem_size == sizeof(uint64_t))
+      if (amdgpu::rejects_private_flat_atomic(translated.private_address,
+                                              d.atomic_op != amdgpu::AtomicOp::NONE, d.elem_size))
         d.memviol_lane_mask |= uint64_t{1} << lane;
       addr = translated.value;
     }
