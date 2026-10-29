@@ -147,7 +147,11 @@ void InterruptSignal::StoreRelease(hsa_signal_value_t value) {
 }
 void InterruptSignal::StoreReleaseAndNotify(hsa_signal_value_t value) {
   UpdateValue(ValueOp::kStore, value, std::memory_order_release);
-  if (event_ != nullptr) HSAKMT_CALL(hsaKmtSetEvent(event_));
+  // Pairs with the fence a waiter issues between registering (waiting_++) and its last value
+  // check before sleeping: either that check sees this store, or the InWaiting() load below sees
+  // the waiter. Without it the load can pass the store and both sides miss each other.
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  if (event_ != nullptr && InWaiting()) HSAKMT_CALL(hsaKmtSetEvent(event_));
 }
 
 hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition,

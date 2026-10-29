@@ -1881,6 +1881,12 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
   }
 
+  // The ring may be write-combining device memory, where a host read is uncached, so the last
+  // packet's completion signal is tracked here as it is written instead of read back from the slot.
+  hsa_signal_t last_completion_signal =
+      reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+          flatPacketData.data() + (numPackets - 1) * kPacketSize)->completion_signal;
+
   // Attach profiling / completion signals to one packet and return the signal
   // that times it when this is a kernel dispatch. Used by the MOVDIR64B path,
   // which assembles the full packet (body + signal + valid header) in a host
@@ -1913,8 +1919,12 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
           flatPacketData.data() + i * kPacketSize);
       const uint64_t prePatchedHandle = pre_patched ? hostPkt->completion_signal.handle : 0;
       if (prePatchedHandle == 0) {
-        pkt->completion_signal =
+        const hsa_signal_t completion_signal =
             Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true);
+        pkt->completion_signal = completion_signal;
+        if (isLast) {
+          last_completion_signal = completion_signal;
+        }
         if (isKernelDispatch || isBarrier) {
           if (isBaseKernelDispatch && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
             pkt->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
@@ -1936,7 +1946,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         }
       }
     } else if (isLast && (attach_signal || blocking)) {
-      pkt->completion_signal = Barriers().ActiveSignal();
+      last_completion_signal = Barriers().ActiveSignal();
+      pkt->completion_signal = last_completion_signal;
     }
     return nullptr;
   };
@@ -2030,11 +2041,22 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
   };
 
+  // The ramp only helps a CP that would otherwise idle waiting for this batch. When the CP still
+  // has more unprocessed packets ahead of it than the lead chunk would give it, the ramp only adds
+  // host reservation/fence/doorbell rounds, so publish full chunks from the start. The CP publishes
+  // read_dispatch_id in blocks, and an idle CP can leave the last block unreported, so a backlog
+  // only counts beyond one such block; otherwise an idle queue would lose the ramp.
+  constexpr uint64_t kReadIndexBlock = 8;
+  constexpr uint64_t kRampSkipBacklog = kLead + kReadIndexBlock;
+  const uint64_t read_index = Hsa::queue_load_read_index_scacquire(gpu_queue_);
+  const uint64_t cp_backlog = Hsa::queue_load_write_index_relaxed(gpu_queue_) - read_index;
+  const bool cp_has_backlog = cp_backlog >= kRampSkipBacklog;
+
   // Slots are reserved one chunk at a time, and only once the ring can hold the whole chunk.
   // Reserving the full batch up front lets the write index lead the read index by a full
   // ring or more, which the CP cannot tell apart from an empty queue.
   uint64_t lastIndex = 0;
-  size_t chunk_size = std::min(kLead, kPeriod);
+  size_t chunk_size = cp_has_backlog ? kPeriod : std::min(kLead, kPeriod);
   for (size_t chunkStart = 0; chunkStart < numPackets; ) {
     const size_t chunkEnd  = std::min(chunkStart + chunk_size, numPackets);
     const size_t thisChunk = chunkEnd - chunkStart;
@@ -2090,7 +2112,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
           queueBase + (chunkLastIndex & queueMask) * kPacketSize);
       if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
-        lastSlotPtr->completion_signal = Barriers().ActiveSignal();
+        last_completion_signal = Barriers().ActiveSignal();
+        lastSlotPtr->completion_signal = last_completion_signal;
       }
 
       // Per-packet fixups: profiling signals, kernel-name printing, inline barrier logging.
@@ -2168,22 +2191,19 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 
   SetStateFlag(kHasPendingDispatch);
 
-  auto* finalLastSlot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-      queueBase + (lastIndex & queueMask) * kPacketSize);
-
   // Skip the pending dispatch only when both conditions are met: a completion
   // signal tracks the last packet and the fence is already clean (system scope).
-  if (finalLastSlot->completion_signal.handle != 0 && !isFenceDirty()) {
+  if (last_completion_signal.handle != 0 && !isFenceDirty()) {
     ClearStateFlag(kHasPendingDispatch);
   }
 
-  TrackQueueProgress(*finalLastSlot, lastIndex, pre_patched);
+  TrackQueueProgress(last_completion_signal, lastIndex, pre_patched);
 
   if (blocking) {
     LogInfo("Running serialized as blocking is requested");
     if (!Barriers().WaitCurrent()) {
       LogPrintfError("Failed blocking queue wait with signal [0x%lx]",
-                     finalLastSlot->completion_signal.handle);
+                     last_completion_signal.handle);
       profilingEnd();
       return false;
     }

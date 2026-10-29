@@ -859,13 +859,17 @@ class VirtualGPU : public device::VirtualDevice {
   //! Record the last write index and whether the last packet is idle-trackable. Only tracker-owned
   //! signals (from Barriers().ActiveSignal()) qualify; set skip_signal for externally-provided or
   //! absent completion signals. IsQueueIdle() reads the tracker-owned signal at check time.
+  inline void TrackQueueProgress(hsa_signal_t completion_signal, uint64_t index,
+                                 bool skip_signal = false) {
+    last_write_index_ = index;
+    if (!skip_signal && completion_signal.handle != 0) {
+      last_packet_with_signal_index_ = index;
+    }
+  }
   template <typename AqlPacket>
   inline void TrackQueueProgress(const AqlPacket& packet, uint64_t index,
                                  bool skip_signal = false) {
-    last_write_index_ = index;
-    if (!skip_signal && packet.completion_signal.handle != 0) {
-      last_packet_with_signal_index_ = index;
-    }
+    TrackQueueProgress(packet.completion_signal, index, skip_signal);
   }
 
   //! Returns true if the queue is considered as idle, i.e. all submitted packets are complete.

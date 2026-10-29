@@ -215,6 +215,8 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
 
   uint32_t prior = 0;
   for (uint32_t i = 0; i < signal_count; i++) prior = Max(prior, signals[i]->waiting_++);
+  // Pairs with the fence in StoreReleaseAndNotify().
+  std::atomic_thread_fence(std::memory_order_seq_cst);
 
   MAKE_SCOPE_GUARD([&]() {
     for (uint32_t i = 0; i < signal_count; i++) signals[i]->waiting_--;
@@ -375,7 +377,8 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
 
   uint32_t prior = 0;
   for (uint32_t i = 0; i < signal_count; i++) prior = Max(prior, signals[i]->waiting_++);
-
+  // Pairs with the fence in StoreReleaseAndNotify().
+  std::atomic_thread_fence(std::memory_order_seq_cst);
 
   MAKE_SCOPE_GUARD([&]() {
     for (uint32_t i = 0; i < signal_count; i++) signals[i]->waiting_--;

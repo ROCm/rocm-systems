@@ -417,7 +417,7 @@ void Command::enqueue() {
 
       // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
       if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
-          (type() == CL_COMMAND_TASK)) {
+          ((type() == CL_COMMAND_TASK) && !joins_batch_)) {
         // The current HSA signal tracking logic requires profiling enabled for the markers
         EnableProfiling();
         // Update batch head for the current marker. Hence the status of all commands can be
