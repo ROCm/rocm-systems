@@ -1042,6 +1042,8 @@ function(rccl_define_micro_source_lists)
     transport/net_ib/init-test.cc
     transport/net_ib/net-ib-gid-inspect-test.cc
     transport/net_ib/p2p-test.cc
+    transport/net_ib/p2p-resiliency-test.cc
+    transport/net_ib/p2p-resiliency-recovery-test.cc
     transport/net_ib/reg-test.cc
     transport/rma-socket-test.cc
     transport/rma-socket-mem-test.cc
@@ -2413,6 +2415,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     NET_IB_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/init_tmp.cc"
     NET_IB_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/net_ib_gid_inspect.cc"
     NET_IB_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_tmp.cc"
+    NET_IB_P2P_RESILIENCY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_resiliency.cc"
+    NET_IB_P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_resiliency_recovery.cc"
     NET_IB_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/reg.cc"
     RMA_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc"
     RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"

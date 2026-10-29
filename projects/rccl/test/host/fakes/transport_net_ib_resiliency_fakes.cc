@@ -61,6 +61,13 @@ static ncclResult_t DefaultIbResiliencyRemoteCompletionRecordsSet(struct ncclIbR
                                                                   uint) {
   FailLoudUnfaked("transport_net_ib_resiliency_fakes", "ncclIbResiliencyRemoteCompletionRecordsSet");
 }
+static ncclResult_t DefaultIbResiliencyQpReconfigure(struct ncclIbResiliency*, struct ncclIbQp*,
+                                                      struct ncclIbNetCommDevBase*, int, bool*) {
+  FailLoudUnfaked("transport_net_ib_resiliency_fakes", "ncclIbResiliencyQpReconfigure");
+}
+static ncclResult_t DefaultIbResiliencyQpsReconfigure(struct ncclIbResiliency*, int, bool*) {
+  FailLoudUnfaked("transport_net_ib_resiliency_fakes", "ncclIbResiliencyQpsReconfigure");
+}
 
 std::function<ncclResult_t(struct ncclIbRequest*, bool*)> g_ncclIbResiliencyRequestIsComplete =
     DefaultIbResiliencyRequestIsComplete;
@@ -90,6 +97,11 @@ std::function<ncclResult_t(struct ncclIbResiliency*, struct ncclIbConnectionMeta
 std::function<ncclResult_t(struct ncclIbResiliency*)> g_ncclIbResiliencyClose = DefaultIbResiliencyClose;
 std::function<ncclResult_t(struct ncclIbResiliency*, uint32_t, uint64_t, uint)>
     g_ncclIbResiliencyRemoteCompletionRecordsSet = DefaultIbResiliencyRemoteCompletionRecordsSet;
+std::function<ncclResult_t(struct ncclIbResiliency*, struct ncclIbQp*, struct ncclIbNetCommDevBase*, int,
+                           bool*)>
+    g_ncclIbResiliencyQpReconfigure = DefaultIbResiliencyQpReconfigure;
+std::function<ncclResult_t(struct ncclIbResiliency*, int, bool*)> g_ncclIbResiliencyQpsReconfigure =
+    DefaultIbResiliencyQpsReconfigure;
 
 ASSERT_HOOK_MATCHES_PROD(g_ncclIbResiliencyInit, ncclIbResiliencyInit);
 ASSERT_HOOK_MATCHES_PROD(g_ncclIbResiliencyRequestIsComplete, ncclIbResiliencyRequestIsComplete);
@@ -107,6 +119,8 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclIbResiliencyReceiverQpsCreateToRts, ncclIbResilie
 ASSERT_HOOK_MATCHES_PROD(g_ncclIbResiliencyClose, ncclIbResiliencyClose);
 ASSERT_HOOK_MATCHES_PROD(g_ncclIbResiliencyRemoteCompletionRecordsSet,
                          ncclIbResiliencyRemoteCompletionRecordsSet);
+ASSERT_HOOK_MATCHES_PROD(g_ncclIbResiliencyQpReconfigure, ncclIbResiliencyQpReconfigure);
+ASSERT_HOOK_MATCHES_PROD(g_ncclIbResiliencyQpsReconfigure, ncclIbResiliencyQpsReconfigure);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 ncclResult_t ncclIbResiliencyInit(struct ncclIbNetCommBase* base, struct ncclIbResiliency** resiliency) {
@@ -161,6 +175,15 @@ ncclResult_t ncclIbResiliencyRemoteCompletionRecordsSet(struct ncclIbResiliency*
                                                          uint64_t address, uint devIndex) {
   return g_ncclIbResiliencyRemoteCompletionRecordsSet(resiliency, rkey, address, devIndex);
 }
+ncclResult_t ncclIbResiliencyQpReconfigure(struct ncclIbResiliency* resiliency, struct ncclIbQp* qp,
+                                            struct ncclIbNetCommDevBase* devBase, int devIndex,
+                                            bool* success) {
+  return g_ncclIbResiliencyQpReconfigure(resiliency, qp, devBase, devIndex, success);
+}
+ncclResult_t ncclIbResiliencyQpsReconfigure(struct ncclIbResiliency* resiliency, int devIndex,
+                                             bool* success) {
+  return g_ncclIbResiliencyQpsReconfigure(resiliency, devIndex, success);
+}
 
 void ResetTransportNetIbResiliencyFakes() {
   g_ncclIbResiliencyInit = DefaultIbResiliencyInit;
@@ -178,4 +201,6 @@ void ResetTransportNetIbResiliencyFakes() {
   g_ncclIbResiliencyReceiverQpsCreateToRts = DefaultIbResiliencyReceiverQpsCreateToRts;
   g_ncclIbResiliencyClose = DefaultIbResiliencyClose;
   g_ncclIbResiliencyRemoteCompletionRecordsSet = DefaultIbResiliencyRemoteCompletionRecordsSet;
+  g_ncclIbResiliencyQpReconfigure = DefaultIbResiliencyQpReconfigure;
+  g_ncclIbResiliencyQpsReconfigure = DefaultIbResiliencyQpsReconfigure;
 }
