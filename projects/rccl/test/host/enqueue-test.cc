@@ -5196,6 +5196,11 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegMultiRpn_PicksTheSendBufferPerCo
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegRingOneRpnAllGather_UsesWholeNetSizedChunks) {
+#if !NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
+  // ROCM-33020: HIP builds keep the ordinary proxy schedule. The unsupported
+  // path is covered by CalcCollChunking_NetOffloadUnsupportedOneRpnRegisteredAllGatherUsesKernelSchedule.
+  GTEST_SKIP() << "one-RPN AllGather net offload is not compiled in";
+#else
   ChunkComm cc;
   cc.comm.isOneRPN = true;
   auto t = NetRegTask(ncclFuncAllGather, NCCL_ALGO_RING);
@@ -5209,6 +5214,7 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegRingOneRpnAllGather_UsesWholeNet
   const size_t loopSize = size_t(nChannels) * cc.comm.nRanks * NCCL_MAX_NET_SIZE;
   EXPECT_EQ(loopSize, r.proxyOp.loopSize);
   EXPECT_EQ(int(DIVUP(nBytes, loopSize) * (cc.comm.nRanks - 1)), r.proxyOp.nsteps);
+#endif
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegWithTree_IsAnInternalError) {

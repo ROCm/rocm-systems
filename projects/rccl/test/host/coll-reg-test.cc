@@ -1328,7 +1328,9 @@ TEST_F(RegisterCollRingMicrotest, OneRpnGatherRegistered_CapsChannelsAtNetCount)
     task_.func = func;
     task_.nMaxChannels = 32;
     EXPECT_EQ(Run(), ncclSuccess);
-    EXPECT_EQ(task_.nMaxChannels, 3) << func;
+    // AllGather is capped only when the matching net-offload kernel is compiled in.
+    const int expected = ncclUseOneRpnNetRegChannelCap(func) ? 3 : 32;
+    EXPECT_EQ(task_.nMaxChannels, expected) << func;
     free(task_.sendNetHandles);
     free(task_.recvNetHandles);
     free(task_.srecvNetHandles);
