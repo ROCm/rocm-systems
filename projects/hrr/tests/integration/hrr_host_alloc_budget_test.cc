@@ -68,10 +68,16 @@ TEST_CASE("Unit_HRR_HostBudgetMemCreate_Direct", "[.][hrr-direct]") {
     HRR_SKIP("no host-located VMM granularity on this device");
   const size_t size = (kBudgetBuf + gran - 1) / gran * gran;
   if (size > 3u << 20) HRR_SKIP("host-located granularity " << gran << " is above the 3 MiB cap");
+  // Support is decided once, here; a failure in a later round is a real one.
+  {
+    hipMemGenericAllocationHandle_t probe{};
+    if (hipMemCreate(&probe, size, &prop, 0) != hipSuccess)
+      HRR_SKIP("host-located hipMemCreate is not supported on this device");
+    HRR_HIP_CHECK(hipMemRelease(probe));
+  }
   for (int i = 0; i < kBudgetRounds; ++i) {
     hipMemGenericAllocationHandle_t h{};
-    if (hipMemCreate(&h, size, &prop, 0) != hipSuccess)
-      HRR_SKIP("host-located hipMemCreate is not supported on this device");
+    HRR_HIP_CHECK(hipMemCreate(&h, size, &prop, 0));
     HRR_HIP_CHECK(hipMemRelease(h));
   }
 }

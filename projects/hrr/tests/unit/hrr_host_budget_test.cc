@@ -440,4 +440,75 @@ TEST_CASE("Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth", "[hrr]") {
   CHECK(n1[15] == 0x44);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - A host-located hipMemCreate handle keeps its charge while a hipMemMap
+ *     holds it: hipMemRelease alone does not give the bytes back (the runtime
+ *     keeps the memory until the last hipMemUnmap), the unmap does. A handle
+ *     mapped twice is returned only by the second unmap, and one never mapped is
+ *     returned by the release. Each step checks the exact figure, so a charge
+ *     returned twice shows too.
+ */
+TEST_CASE("Unit_HRR_HostBudget_MemCreateChargeHeldWhileMapped", "[hrr]") {
+  auto* h1 = reinterpret_cast<hipMemGenericAllocationHandle_t>(uintptr_t{0x1000});
+  auto* h2 = reinterpret_cast<hipMemGenericAllocationHandle_t>(uintptr_t{0x2000});
+  auto* va = reinterpret_cast<void*>(uintptr_t{0x100000});
+  auto* va2 = reinterpret_cast<void*>(uintptr_t{0x200000});
+  PlaybackContext ctx;
+  ctx.host_budget.set_cap(1000);
+
+  // Create, map, release: the charge stays, then the unmap returns it.
+  REQUIRE(ctx.charge_host(300, "seed"));
+  ctx.vmm_note_create(0x7000, h1, 300);
+  ctx.vmm_note_map(va, 300, h1);
+  ctx.vmm_note_release(h1);
+  CHECK(ctx.host_budget.used() == 300);
+  ctx.vmm_note_unmap(va, 300);
+  CHECK(ctx.host_budget.used() == 0);
+
+  // Two mappings: only the last unmap returns it.
+  REQUIRE(ctx.charge_host(200, "seed"));
+  ctx.vmm_note_create(0x7100, h2, 200);
+  ctx.vmm_note_map(va, 100, h2);
+  ctx.vmm_note_map(va2, 100, h2);
+  ctx.vmm_note_release(h2);
+  ctx.vmm_note_unmap(va, 100);
+  CHECK(ctx.host_budget.used() == 200);
+  ctx.vmm_note_unmap(va2, 100);
+  CHECK(ctx.host_budget.used() == 0);
+  ctx.vmm_note_unmap(va2, 100);  // nothing mapped any more
+  CHECK(ctx.host_budget.used() == 0);
+
+  // Never mapped: the release returns it at once.
+  REQUIRE(ctx.charge_host(50, "seed"));
+  ctx.vmm_note_create(0x7200, h1, 50);
+  ctx.vmm_note_release(h1);
+  CHECK(ctx.host_budget.used() == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Releasing a region's stand-in buffer removes the alloc_map entry only if
+ *     that entry is the stand-in. When the archive has since allocated managed
+ *     memory at the region base, region DEL leaves the managed entry and its
+ *     charge in place.
+ */
+TEST_CASE("Unit_HRR_HostBudget_RegionReleaseKeepsReplacingAllocation", "[hrr]") {
+  auto* managed = reinterpret_cast<void*>(uintptr_t{0xB0000});
+  PlaybackContext ctx;
+  ctx.host_budget.set_cap(100);
+  REQUIRE(ctx.charge_host(60, "seed managed"));
+  ctx.record_alloc(0xB000, managed, 60, AllocKind::Managed);
+
+  hrr_release_region(ctx, 0xB000, nullptr);  // the stand-in was some other buffer
+  CHECK(ctx.has_alloc(0xB000));
+  CHECK(ctx.host_budget.used() == 60);
+
+  hrr_release_region(ctx, 0xB000, managed);  // now it is the entry's own buffer
+  CHECK_FALSE(ctx.has_alloc(0xB000));
+  CHECK(ctx.host_budget.used() == 0);
+}
+
 /** @} */

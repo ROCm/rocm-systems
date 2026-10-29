@@ -452,11 +452,17 @@ struct PlaybackContext {
 
     // VMM replay maps (guarded by map_mutex):
     //   vmm_handle_map: recorded hipMemGenericAllocationHandle_t (as u64) -> live handle
-    //                   and the host bytes charged for it (0 for a device-located
-    //                   handle), which hipMemRelease gives back
-    //   vmm_va_map    : recorded reserved-VA base (u64) -> {live_va, size}
-    struct VmmHandle { hipMemGenericAllocationHandle_t live; uint64_t host_charge; };
-    std::unordered_map<uint64_t, VmmHandle> vmm_handle_map;
+    //   vmm_live_map  : live handle -> the host bytes charged for it (0 for a
+    //                   device-located handle), how many mappings hold it, and
+    //                   whether hipMemRelease was called. hipMemMap takes its own
+    //                   reference on the handle, so the memory (and the charge)
+    //                   outlives hipMemRelease until the last hipMemUnmap.
+    //   vmm_mappings  : live VA of each hipMemMap -> {size, live handle}
+    std::unordered_map<uint64_t, hipMemGenericAllocationHandle_t> vmm_handle_map;
+    struct VmmLive { uint64_t host_charge; int maps; bool released; };
+    std::unordered_map<hipMemGenericAllocationHandle_t, VmmLive> vmm_live_map;
+    struct VmmMapping { size_t size; hipMemGenericAllocationHandle_t live; };
+    std::map<uintptr_t, VmmMapping> vmm_mappings;
     struct VmmVA { void* live; size_t size; };
     std::unordered_map<uint64_t, VmmVA> vmm_va_map;
 
@@ -472,7 +478,52 @@ struct PlaybackContext {
         if (rec == 0) return {};
         std::shared_lock lk(map_mutex);
         auto it = vmm_handle_map.find(rec);
-        return it != vmm_handle_map.end() ? it->second.live : hipMemGenericAllocationHandle_t{};
+        return it != vmm_handle_map.end() ? it->second : hipMemGenericAllocationHandle_t{};
+    }
+
+    // The charge of a live handle goes back once it is released and unmapped.
+    // Caller holds map_mutex exclusively.
+    void vmm_drop_if_free_locked(hipMemGenericAllocationHandle_t live) {
+        auto it = vmm_live_map.find(live);
+        if (it == vmm_live_map.end() || !it->second.released || it->second.maps > 0) return;
+        host_budget.release(it->second.host_charge);
+        vmm_live_map.erase(it);
+    }
+    void vmm_note_create(uint64_t rec, hipMemGenericAllocationHandle_t live, uint64_t charge) {
+        std::unique_lock lk(map_mutex);
+        vmm_handle_map[rec] = live;
+        vmm_live_map[live] = {charge, 0, false};
+    }
+    // hipMemRelease succeeded on `live`: it is no longer reachable by name, and
+    // its charge stays while a mapping holds it.
+    void vmm_note_release(hipMemGenericAllocationHandle_t live) {
+        std::unique_lock lk(map_mutex);
+        auto it = vmm_live_map.find(live);
+        if (it == vmm_live_map.end()) return;
+        it->second.released = true;
+        vmm_drop_if_free_locked(live);
+    }
+    void vmm_note_map(void* live_va, size_t size, hipMemGenericAllocationHandle_t live) {
+        std::unique_lock lk(map_mutex);
+        auto it = vmm_live_map.find(live);
+        if (it == vmm_live_map.end()) return;
+        ++it->second.maps;
+        vmm_mappings[reinterpret_cast<uintptr_t>(live_va)] = {size, live};
+    }
+    // hipMemUnmap succeeded on [live_va, live_va + size): every mapping wholly
+    // inside gives its reference back.
+    void vmm_note_unmap(void* live_va, size_t size) {
+        std::unique_lock lk(map_mutex);
+        const uintptr_t lo = reinterpret_cast<uintptr_t>(live_va);
+        const uintptr_t hi = lo + size;
+        for (auto it = vmm_mappings.lower_bound(lo); it != vmm_mappings.end() && it->first < hi;) {
+            if (it->first + it->second.size > hi) { ++it; continue; }
+            const auto live = it->second.live;
+            it = vmm_mappings.erase(it);
+            auto lit = vmm_live_map.find(live);
+            if (lit != vmm_live_map.end()) --lit->second.maps;
+            vmm_drop_if_free_locked(live);
+        }
     }
 
     // ---- External region annotations (regions/*.hrrr, see hrr_regions.h) ----
