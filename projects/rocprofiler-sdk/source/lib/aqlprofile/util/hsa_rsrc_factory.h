@@ -28,10 +28,8 @@
 // because aqlprofile.hpp drives the ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE
 // gate and includes aql_profile_v2.h *before* including this header, and our
 // own include guard (SRC_UTIL_HSA_RSRC_FACTORY_H_) short-circuits the
-// re-entry. Do not reorder the includes in aqlprofile.hpp, or this cycle
-// will produce an incomplete aqlprofile_cu_bitmap_t at AgentInfo's point of
-// use below.
-#include "lib/aqlprofile/aqlprofile.hpp"  // aqlprofile_cu_bitmap_t (gated aql_profile_v2.h)
+// re-entry. Do not reorder the includes in aqlprofile.hpp.
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/aqlprofile/hsa_includes.h"
 
 #include <cstdint>
@@ -156,12 +154,12 @@ struct AgentInfo
     // Timestamp frequency for realtime clock
     uint32_t timestamp_freq{0};
 
-    // Per-SE/SA active CU bitmap from DRM. Bit set = active CU. All-zero
-    // means the bitmap is unavailable, in which case GFX11+ WGP iteration
-    // falls back to the legacy sequential formula based on cu_num. Uses the
-    // shared aqlprofile_cu_bitmap_t so this internal cache cannot drift
-    // from the public V2 ABI layout.
-    aqlprofile_cu_bitmap_t cu_bitmap{};
+    // Per-(XCC, SE, SA) active CU bitmap (AMDGPU_INFO_CU_BITMAP layout),
+    // indexed [(xcc * se_per_xcc() + se) * shader_arrays_per_se + sa]. Bit set
+    // = active CU; a zero entry is an SA with no WGP available. Empty means the bitmap
+    // is unavailable, in which case GFX11+ WGP iteration treats every WGP of
+    // the cu_num-derived count as active.
+    std::vector<uint32_t> cu_bitmap{};
 
     // Number of XCC per AID
     uint32_t xcc_per_aid{1};
