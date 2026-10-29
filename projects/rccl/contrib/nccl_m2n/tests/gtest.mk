@@ -11,7 +11,8 @@
 # Source resolution (in order):
 #   1. Caller-supplied $(GTEST_DIR), passed on the make command line or in
 #      the environment.
-#   2. Vendored copy at $(TESTSDIR)/googletest.
+#   2. The repository-root googletest submodule, third_party/googletest.
+#   3. Vendored copy at $(TESTSDIR)/googletest.
 #
 # When neither resolves, $(GTEST_AVAILABLE) stays at 0 (no $(error)) and
 # tests/Makefile turns gtest-dependent targets into a friendly no-op.
@@ -20,12 +21,18 @@
 #
 # Include this file from tests/Makefile after Makefile.common.
 
+# Repository-root submodule (shared with the other extensions in this repo).
+# The upstream googletest repo nests the framework one level down, so the
+# usable source root is third_party/googletest/googletest.
+GTEST_SUBMODULE := $(abspath $(NCCL_RESHARD_ROOT)/../third_party/googletest/googletest)
 GTEST_VENDORED := $(TESTSDIR)/googletest
-GTEST_OBJDIR := $(BUILDDIR)/gtest
+GTEST_OBJDIR := $(OBJDIR)/gtest
 
 # GTEST_DIR may already be set by the caller. Honor that path as-is.
 ifeq ($(origin GTEST_DIR),undefined)
-    ifneq ($(wildcard $(GTEST_VENDORED)/include/gtest/gtest.h),)
+    ifneq ($(wildcard $(GTEST_SUBMODULE)/include/gtest/gtest.h),)
+        GTEST_DIR := $(GTEST_SUBMODULE)
+    else ifneq ($(wildcard $(GTEST_VENDORED)/include/gtest/gtest.h),)
         GTEST_DIR := $(GTEST_VENDORED)
     endif
 endif

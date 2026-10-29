@@ -21,11 +21,12 @@
  *   Efficiency = Speedup / N           (100% = perfectly parallel)
  *
  * Differences from the legacy reshard_batch_bench.cu (MR !16):
- *   - Calls ncclReshardWithWindow with a caller-managed window per
- *     (comm, buffer) pair, registered ONCE before the sweep and reused
- *     for every (tensor × shard) configuration.
- *   - No per-iteration ncclM2nFinalize / library-managed window
- *     cache — the user-window path skips both.
+ *   - Calls the ncclReshardWithWindow entry point and retains a caller-managed
+ *     window per (comm, buffer) pair for API regression coverage. The library
+ *     ignores the window and uses the same configured copy transport as
+ *     ncclReshard.
+ *   - No per-iteration ncclM2nFinalize; the handle is created once and
+ *     reused for the whole sweep.
  *
  * Usage:
  *   mpirun -np <worldSize> reshard_batch_bench_user_window [options]
@@ -38,8 +39,8 @@
  *       --num-comms 2 --num-tensors 4 --iterations 20 --warmup 4
  ************************************************************************/
 
-#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "bench_common.h"
@@ -213,45 +214,32 @@ struct ShardCfg {
   int dstSd;
 };
 
-static TensorCfg benchParseSingleTensorDims(const char* s) {
-  TensorCfg cfg = {};
-  std::istringstream ss(s);
-  std::string tok;
-  while (std::getline(ss, tok, ',') && cfg.nDims < 3) cfg.dims[cfg.nDims++] = (size_t)std::stoull(tok);
-  return cfg;
+static bool benchParseSingleTensorDims(const char* value, TensorCfg* out) {
+  TensorCfg parsed = {};
+  if (!benchParseTensorDims(value, parsed.dims, &parsed.nDims)) return false;
+  *out = parsed;
+  return true;
 }
 
 // "d0,d1:d0,d1:..." → list of TensorCfg
-static std::vector<TensorCfg> benchParseTensorDimsList(const char* s) {
-  std::vector<TensorCfg> out;
-  std::istringstream ss(s);
-  std::string tok;
-  // NOLINTNEXTLINE(bugprone-infinite-loop) — getline mutates `ss` internally
-  while (std::getline(ss, tok, ':')) out.push_back(benchParseSingleTensorDims(tok.c_str()));
-  return out;
-}
-
-// "0,1,0" → {0,1,0}
-static std::vector<int> benchParseIntList(const char* s) {
-  std::vector<int> out;
-  std::istringstream ss(s);
-  std::string tok;
-  // NOLINTNEXTLINE(bugprone-infinite-loop) — getline mutates `ss` internally
-  while (std::getline(ss, tok, ',')) out.push_back(std::stoi(tok));
-  return out;
-}
-
-// Strict mesh-dims parser — bench_common.h's benchParseMeshDims is lenient
-// (defaults to 0 on garbage); for this bench's user-facing CLI we want a
-// loud failure instead of a silent 0 that breaks downstream rank counts.
-static void parseMeshDimsStrict(const char* str, int dims[2]) {
-  char* copy = strdup(str);
-  char* saveptr = nullptr;
-  char* token = strtok_r(copy, ",x", &saveptr);
-  dims[0] = benchParseInt(token, "--*-mesh-dims dim0");
-  token = strtok_r(nullptr, ",x", &saveptr);
-  dims[1] = benchParseInt(token, "--*-mesh-dims dim1");
-  free(copy);
+static bool benchParseTensorDimsList(const char* value, std::vector<TensorCfg>* out) {
+  if (value == nullptr || out == nullptr || *value == '\0') return false;
+  std::vector<TensorCfg> parsed;
+  const std::string input(value);
+  size_t begin = 0;
+  while (begin < input.size()) {
+    const size_t end = input.find(':', begin);
+    const std::string item = input.substr(begin, end - begin);
+    TensorCfg cfg = {};
+    if (item.empty() || !benchParseSingleTensorDims(item.c_str(), &cfg)) return false;
+    parsed.push_back(cfg);
+    if (end == std::string::npos) {
+      *out = std::move(parsed);
+      return true;
+    }
+    begin = end + 1;
+  }
+  return false;
 }
 
 static void benchPrintUsage(const char* prog) {
@@ -276,9 +264,15 @@ static void benchPrintUsage(const char* prog) {
   printf("  --warmup <N>                           Warmup iterations (default: "
          "4)\n");
   printf("  --validate                             Check data correctness\n");
-  printf("  --algorithm <ring|direct>              Algorithm (default: ring)\n");
-  printf("  --lb-mode <uniform|node>               Load balance (default: "
-         "uniform)\n");
+  printf("  --algorithm <ring|direct>              Legacy compatibility setting "
+         "(default: ring)\n");
+  printf("  --api <default|window>                 Public entry point (default: default)\n");
+  printf("  --copy-algorithm <a>                   Advanced staging override: "
+         "'pack',\n");
+  printf("                                           'pipe', or 'direct' "
+         "(default: pack)\n");
+  printf("  --lb-mode <node|uniform>               Load balance (default: "
+         "node)\n");
   printf("  --print-all-ranks                      Per-rank timing\n");
   printf("  --verbose                              Debug output\n");
   printf("\nExample:\n");
@@ -301,66 +295,82 @@ int main(int argc, char* argv[]) {
 
   int numComms = 1;
   int numTensors = 4;
-  int srcMdims[2] = {0, 0};
-  int dstMdims[2] = {0, 0};
+  int srcMdims[NCCL_RESHARD_MESH_NDIMS] = {0, 0};
+  int dstMdims[NCCL_RESHARD_MESH_NDIMS] = {0, 0};
   int iterations = 20;
   int warmup = 4;
   bool bValidate = false;
   bool bVerbose = false;
   bool bPrintAllRanks = false;
   const char* algorithm = "RING";
+  ReshardApiMode apiMode = ReshardApiMode::Default;
+  const char* copyAlgorithm = nullptr;
   const char* lbMode = "UNIFORM";
 
   std::vector<TensorCfg> tensorCfgs;
   std::vector<int> srcSdRaw;
   std::vector<int> dstSdRaw;
 
-  for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--num-comms") == 0) {
-      numComms = benchParseInt(argv[++i], "--num-comms");
-    } else if (strcmp(argv[i], "--num-tensors") == 0) {
-      numTensors = benchParseInt(argv[++i], "--num-tensors");
-    } else if (strcmp(argv[i], "--tensor-dims") == 0) {
-      tensorCfgs = benchParseTensorDimsList(argv[++i]);
-    } else if (strcmp(argv[i], "--src-mesh-dims") == 0) {
-      parseMeshDimsStrict(argv[++i], srcMdims);
-    } else if (strcmp(argv[i], "--dst-mesh-dims") == 0) {
-      parseMeshDimsStrict(argv[++i], dstMdims);
-    } else if (strcmp(argv[i], "--src-shard-dims") == 0 || strcmp(argv[i], "--src-shard-dim") == 0) {
-      srcSdRaw = benchParseIntList(argv[++i]);
-    } else if (strcmp(argv[i], "--dst-shard-dims") == 0 || strcmp(argv[i], "--dst-shard-dim") == 0) {
-      dstSdRaw = benchParseIntList(argv[++i]);
-    } else if (strcmp(argv[i], "--iterations") == 0) {
-      iterations = benchParseInt(argv[++i], "--iterations");
-    } else if (strcmp(argv[i], "--warmup") == 0) {
-      warmup = benchParseInt(argv[++i], "--warmup");
-    } else if (strcmp(argv[i], "--validate") == 0) {
-      bValidate = true;
-    } else if (strcmp(argv[i], "--verbose") == 0) {
-      bVerbose = true;
-    } else if (strcmp(argv[i], "--print-all-ranks") == 0) {
-      bPrintAllRanks = true;
-    } else if (strcmp(argv[i], "--algorithm") == 0) {
-      ++i;
-      if (strcmp(argv[i], "direct") == 0) {
-        algorithm = "DIRECT";
-      } else if (strcmp(argv[i], "ring") == 0) {
-        algorithm = "RING";
-      } else {
-        if (mpiRank == 0) printf("ERROR: unknown algorithm '%s'\n", argv[i]);
-        MPI_Finalize();
-        return 1;
+  auto parseTensorCfgs = [&](const char* value) {
+    if (!benchParseTensorDimsList(value, &tensorCfgs)) {
+      if (mpiRank == 0) {
+        printf("ERROR: invalid --tensor-dims value '%s'\n", value);
       }
-    } else if (strcmp(argv[i], "--lb-mode") == 0) {
-      ++i;
-      if (strcmp(argv[i], "node") == 0) lbMode = "NODE_AWARE";
-      else lbMode = "UNIFORM";
-    } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-      if (mpiRank == 0) benchPrintUsage(argv[0]);
-      MPI_Finalize();
-      return 0;
+      return BenchParseResult::Error;
     }
+    return BenchParseResult::Success;
+  };
+
+  auto parseShardDims = [&](const char* name, std::vector<int>* out) {
+    return [name, out, mpiRank](const char* value) {
+      if (!benchParseNonNegativeIntList(value, out)) {
+        if (mpiRank == 0) {
+          printf("ERROR: invalid %s value '%s'\n", name, value);
+        }
+        return BenchParseResult::Error;
+      }
+      return BenchParseResult::Success;
+    };
+  };
+
+  BenchArgParser parser(argc, argv, mpiRank);
+  parser.integer("--num-comms", "--num-comms", &numComms)
+    .integer("--num-tensors", "--num-tensors", &numTensors)
+    .value("--tensor-dims", parseTensorCfgs)
+    .meshDims("--src-mesh-dims", srcMdims)
+    .meshDims("--dst-mesh-dims", dstMdims)
+    .value("--src-shard-dims", parseShardDims("--src-shard-dims", &srcSdRaw))
+    .value("--src-shard-dim", parseShardDims("--src-shard-dim", &srcSdRaw))
+    .value("--dst-shard-dims", parseShardDims("--dst-shard-dims", &dstSdRaw))
+    .value("--dst-shard-dim", parseShardDims("--dst-shard-dim", &dstSdRaw))
+    .integer("--iterations", "--iterations", &iterations)
+    .integer("--warmup", "--warmup", &warmup)
+    .flag("--validate", [&] { bValidate = true; })
+    .flag("--verbose", [&] { bVerbose = true; })
+    .flag("--print-all-ranks", [&] { bPrintAllRanks = true; })
+    .enumValue("--algorithm", &algorithm, {{"direct", "DIRECT"}, {"ring", "RING"}},
+               "ERROR: unknown algorithm '%s' (use 'ring' or 'direct')\n")
+    .apiMode("--api", &apiMode)
+    .enumValue("--copy-algorithm", &copyAlgorithm,
+               {{"direct", "DIRECT"}, {"pack", "PACK"}, {"pipe", "PIPE"}},
+               "ERROR: unknown --copy-algorithm '%s' (use 'pack', 'pipe', or 'direct')\n")
+    .enumValue("--lb-mode", &lbMode, {{"node", "NODE_AWARE"}, {"uniform", "UNIFORM"}},
+               "ERROR: unknown --lb-mode '%s' (use 'uniform' or 'node')\n")
+    .help(benchPrintUsage);
+
+  int parseExit = benchParseExitCode(parser.parse());
+  if (parseExit >= 0) {
+    return parseExit;
   }
+
+  if (iterations <= 0 || warmup < 0) {
+    if (mpiRank == 0) {
+      printf("ERROR: --iterations must be > 0 and --warmup must be >= 0\n");
+    }
+    MPI_Finalize();
+    return 1;
+  }
+  benchConfigureCopyAlgorithm(copyAlgorithm);
 
   if (srcMdims[0] <= 0 || srcMdims[1] <= 0 || dstMdims[0] <= 0 || dstMdims[1] <= 0 || tensorCfgs.empty() ||
       srcSdRaw.empty() || dstSdRaw.empty()) {
@@ -406,7 +416,8 @@ int main(int argc, char* argv[]) {
   if (bVerbose) benchSetEnv("NCCL_RESHARD_LOG_LEVEL", "DEBUG");
   benchSetEnv("NCCL_RESHARD_ALGORITHM", algorithm);
   benchSetEnv("NCCL_RESHARD_LB_MODE", lbMode);
-  NCCLCHECK(ncclM2nInit(NULL));
+  ncclM2nHandle_t m2nHandle = nullptr;
+  NCCLCHECK(ncclM2nInit(&m2nHandle, NULL));
 
   // ------------------------------------------------------------------------
   // Create numComms independent NCCL communicators (each covers all ranks)
@@ -445,9 +456,17 @@ int main(int argc, char* argv[]) {
   std::vector<void*> bufs(numTensors);
   std::vector<ncclWindow_t> windows(numTensors, nullptr);
   for (int i = 0; i < numTensors; i++) {
-    NCCLCHECK(ncclMemAlloc(&bufs[i], maxAlloc));
+    if (apiMode == ReshardApiMode::Default) {
+      CUDACHECK(cudaMalloc(&bufs[i], maxAlloc));
+    } else if (apiMode == ReshardApiMode::Window) {
+      NCCLCHECK(ncclMemAlloc(&bufs[i], maxAlloc));
+    }
     CUDACHECK(cudaMemset(bufs[i], 0xDE, maxAlloc));
-    NCCLCHECK(ncclCommWindowRegister(comms[i % numComms], bufs[i], maxAlloc, &windows[i], NCCL_WIN_COLL_SYMMETRIC));
+    if (apiMode == ReshardApiMode::Window) {
+      NCCLCHECK(benchWaitCommReady(comms[i % numComms]));
+      NCCLCHECK(ncclCommWindowRegister(comms[i % numComms], bufs[i], maxAlloc, &windows[i],
+                                                   NCCL_WIN_COLL_SYMMETRIC));
+    }
   }
 
   std::vector<cudaStream_t> streams(numTensors);
@@ -461,7 +480,7 @@ int main(int argc, char* argv[]) {
     printf("Tensors   : %d per batch\n", numTensors);
     printf("Src mesh  : %dx%d\n", srcMdims[0], srcMdims[1]);
     printf("Dst mesh  : %dx%d\n", dstMdims[0], dstMdims[1]);
-    printf("Algorithm : %s\n", algorithm);
+    printf("Algorithm setting (compatibility): %s\n", algorithm);
     printf("Iters     : %d  warmup=%d\n", iterations, warmup);
     printf("\n");
     printf("%-24s %-12s %9s %9s %8s %7s %9s %9s\n", "Tensor dims", "Pattern", "Seq ms", "Con ms", "Speedup", "Eff%",
@@ -471,18 +490,24 @@ int main(int argc, char* argv[]) {
     fflush(stdout);
   }
 
+  // Finish registration before transfers read the window handles.
+  if (apiMode == ReshardApiMode::Window) {
+    for (auto& c : comms) NCCLCHECK(benchWaitCommReady(c));
+  }
+
   int overallRc = 0;
 
   // ------------------------------------------------------------------------
   // Sweep: shard pattern × tensor size
   // ------------------------------------------------------------------------
   for (auto& sc : shardCfgs) {
-    ncclMesh_t srcMesh = {.dims = {srcMdims[0], srcMdims[1]},
-                                     .startRank = 0,
-                                     .placement = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(sc.srcSd)}};
-    ncclMesh_t dstMesh = {.dims = {dstMdims[0], dstMdims[1]},
-                                     .startRank = srcTotal,
-                                     .placement = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(sc.dstSd)}};
+    ncclMesh_t srcMesh = NCCL_M2N_MESH_INITIALIZER;
+    srcMesh.ndims = 2;
+    srcMesh.dims = srcMdims;
+    ncclMesh_t dstMesh = NCCL_M2N_MESH_INITIALIZER;
+    dstMesh.ndims = 2;
+    dstMesh.dims = dstMdims;
+    dstMesh.startRank = srcTotal;
     const char* pattern = (sc.srcSd == sc.dstSd) ? "same-dim" : "cross-dim";
 
     for (auto& tc : tensorCfgs) {
@@ -521,23 +546,37 @@ int main(int argc, char* argv[]) {
 
       // --- one reshard for tensor i on stream s, comm[i % numComms]
       auto oneTransfer = [&](int i, cudaStream_t s) {
-        ncclDistTensor_t srcT = {};
+        size_t srcLocalShape[NCCL_RESHARD_MAX_TENSOR_DIMS] = {};
+        int srcPlacements[] = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(sc.srcSd)};
+        ncclDistTensor_t srcT = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+        srcT.localShape = srcLocalShape;
         srcT.ndims = tc.nDims;
         srcT.dtype = ncclInt8; // bench validates byte patterns
         srcT.mesh = &srcMesh;
+        srcT.placements = srcPlacements;
         srcT.dataPtr = bIsSource ? bufs[i] : nullptr;
-        if (bIsSource)
-          for (int d = 0; d < tc.nDims; d++) srcT.localShape[d] = srcLocal[d];
+        for (int d = 0; d < tc.nDims; d++) {
+          srcT.localShape[d] = srcLocal[d];
+        }
 
-        ncclDistTensor_t dstT = {};
+        size_t dstLocalShape[NCCL_RESHARD_MAX_TENSOR_DIMS] = {};
+        int dstPlacements[] = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(sc.dstSd)};
+        ncclDistTensor_t dstT = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+        dstT.localShape = dstLocalShape;
         dstT.ndims = tc.nDims;
         dstT.dtype = ncclInt8;
         dstT.mesh = &dstMesh;
+        dstT.placements = dstPlacements;
         dstT.dataPtr = bIsDest ? bufs[i] : nullptr;
-        if (bIsDest)
-          for (int d = 0; d < tc.nDims; d++) dstT.localShape[d] = dstLocal[d];
+        for (int d = 0; d < tc.nDims; d++) {
+          dstT.localShape[d] = dstLocal[d];
+        }
 
-        NCCLCHECK(ncclReshardWithWindow(comms[i % numComms], windows[i], &srcT, &dstT, s));
+        if (apiMode == ReshardApiMode::Default) {
+          NCCLCHECK(ncclReshard(m2nHandle, comms[i % numComms], &srcT, &dstT, s));
+        } else {
+          NCCLCHECK(ncclReshardWithWindow(m2nHandle, comms[i % numComms], windows[i], &srcT, &dstT, s));
+        }
       };
 
       auto runSequential = [&]() {
@@ -647,14 +686,34 @@ int main(int argc, char* argv[]) {
   }
 
   // ------------------------------------------------------------------------
-  // Teardown — deregister windows BEFORE destroying comms.
+  // Teardown — complete work and deregister windows before destroying comms.
   // ------------------------------------------------------------------------
-  for (int i = 0; i < numTensors; i++) ncclCommWindowDeregister(comms[i % numComms], windows[i]);
-  ncclM2nFinalize();
-  for (auto& b : bufs) NCCLCHECK(ncclMemFree(b));
+  CUDACHECK(cudaStreamSynchronize(seqStream));
+  for (auto& s : streams) CUDACHECK(cudaStreamSynchronize(s));
+  if (apiMode == ReshardApiMode::Window) {
+    for (int i = 0; i < numTensors; i++) {
+      NCCLCHECK(benchWaitCommReady(comms[i % numComms]));
+      NCCLCHECK(ncclCommWindowDeregister(comms[i % numComms], windows[i]));
+    }
+  }
+  // Complete deregistration before releasing the buffers.
+  if (apiMode == ReshardApiMode::Window) {
+    for (auto& c : comms) NCCLCHECK(benchWaitCommReady(c));
+  }
+  NCCLCHECK(ncclM2nFinalize(m2nHandle));
+  for (auto& b : bufs) {
+    if (apiMode == ReshardApiMode::Default) {
+      CUDACHECK(cudaFree(b));
+    } else if (apiMode == ReshardApiMode::Window) {
+      NCCLCHECK(ncclMemFree(b));
+    }
+  }
   for (auto& s : streams) CUDACHECK(cudaStreamDestroy(s));
   CUDACHECK(cudaStreamDestroy(seqStream));
-  for (auto& c : comms) ncclCommDestroy(c);
+  for (auto& c : comms) {
+    NCCLCHECK(benchWaitCommReady(c));
+    NCCLCHECK(ncclCommDestroy(c));
+  }
 
   MPICHECK(MPI_Finalize());
   return overallRc;

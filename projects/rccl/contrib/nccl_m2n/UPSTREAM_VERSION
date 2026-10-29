@@ -1,0 +1,5 @@
+repository: https://github.com/NVIDIA/nccl-extensions
+path: nccl_m2n
+branch: main
+commit: cd509938321658a5d4bfc4cf94bdae9c5d9c6d08
+date: 2026-10-28

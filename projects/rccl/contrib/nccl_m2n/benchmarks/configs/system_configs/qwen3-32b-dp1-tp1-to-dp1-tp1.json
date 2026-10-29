@@ -1,0 +1,21 @@
+{
+    "_comment": "Two-rank direct-payload diagnostic: one unsharded trainer copy transfers to one unsharded generator copy.",
+    "train": {
+        "num_gpus": 1,
+        "tp_size": 1,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 1
+    },
+    "generation": {
+        "num_gpus": 1,
+        "tp_size": 1,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 1
+    }
+}

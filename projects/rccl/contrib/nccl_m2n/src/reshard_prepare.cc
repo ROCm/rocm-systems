@@ -22,6 +22,7 @@
 
 #include "reshard_types.h"
 #include "m2n_checks.h"
+#include "m2n_checked_math.h"
 #include "m2n_log.h"
 #include "reshard_internal.h"
 
@@ -40,43 +41,36 @@ static int fmtSizes(char* buf, size_t bufsz, const size_t* arr, int n) {
 // Debug Print Helpers (TRACE level)
 // ============================================================================
 
-static void debugPrintMeshGroupInfo(int worldRank, const char* meshName, const ncclMesh_t* mesh,
+static void debugPrintMeshGroupInfo(int worldRank, const char* meshName, const ncclDistTensor_t* tensor,
                                     const ncclReshardMeshGroupInfo* info) {
   if (reshardGetLogLevel() < RESHARD_LOG_TRACE) return;
 
-  const char* p0 = mesh->placement[0] == NCCL_RESHARD_REPLICATE ?
+  const ncclMesh_t* mesh = tensor->mesh;
+  const char* p0 = tensor->placements[0] == NCCL_RESHARD_REPLICATE ?
                      "REPLICATE" :
-                     (mesh->placement[0] == 0 ? "SHARD(0)" : (mesh->placement[0] == 1 ? "SHARD(1)" : "SHARD(2)"));
-  const char* p1 = mesh->placement[1] == NCCL_RESHARD_REPLICATE ?
+                     (tensor->placements[0] == 0 ? "SHARD(0)" : (tensor->placements[0] == 1 ? "SHARD(1)" : "SHARD(2)"));
+  const char* p1 = tensor->placements[1] == NCCL_RESHARD_REPLICATE ?
                      "REPLICATE" :
-                     (mesh->placement[1] == 0 ? "SHARD(0)" : (mesh->placement[1] == 1 ? "SHARD(1)" : "SHARD(2)"));
+                     (tensor->placements[1] == 0 ? "SHARD(0)" : (tensor->placements[1] == 1 ? "SHARD(1)" : "SHARD(2)"));
 
   RESHARD_TRACE(worldRank, "=== %s Mesh Analysis ===", meshName);
   RESHARD_TRACE(worldRank, "  Mesh: dims=[%d, %d], startRank=%d", mesh->dims[0], mesh->dims[1], mesh->startRank);
   RESHARD_TRACE(worldRank, "  Placement: [%s, %s]", p0, p1);
-  RESHARD_TRACE(worldRank, "  Derived: shardMeshDim=%d, repMeshDim=%d, shardTensorDim=%d", info->shardMeshDim,
-                info->repMeshDim, info->shardTensorDim);
   RESHARD_TRACE(worldRank, "  Counts: shardCount=%d, repCount=%d", info->shardCount, info->repCount);
-  RESHARD_TRACE(worldRank, "  My position: meshPos=[%d, %d], shardIdx=%d, repIdx=%d", info->meshPos[0],
-                info->meshPos[1], info->shardIdx, info->repIdx);
-
-  char shardBuf[512];
+  RESHARD_TRACE(worldRank, "  My position: shardIdx=%d, repIdx=%d", info->shardIdx, info->repIdx);
+  char shardBuf[512] = {}, repBuf[512] = {};
   int pos = 0;
   for (int i = 0; i < info->shardCount && pos < (int)sizeof(shardBuf) - 16; i++) {
-    pos += snprintf(shardBuf + pos, sizeof(shardBuf) - pos, "%s%d", (i != 0) ? ", " : "",
-                    info->shardGroupStart + i * info->shardGroupStride);
+    pos += snprintf(shardBuf + pos, sizeof(shardBuf) - pos, "%s%d", i ? ", " : "",
+                    getMeshRank(tensor, info, i, info->repIdx));
   }
-  RESHARD_TRACE(worldRank, "  Shard group: start=%d, stride=%d (members: %s)", info->shardGroupStart,
-                info->shardGroupStride, shardBuf);
-
-  char repBuf[512];
   pos = 0;
   for (int i = 0; i < info->repCount && pos < (int)sizeof(repBuf) - 16; i++) {
-    pos += snprintf(repBuf + pos, sizeof(repBuf) - pos, "%s%d", (i != 0) ? ", " : "",
-                    info->repGroupStart + i * info->repGroupStride);
+    pos += snprintf(repBuf + pos, sizeof(repBuf) - pos, "%s%d", i ? ", " : "",
+                    getMeshRank(tensor, info, info->shardIdx, i));
   }
-  RESHARD_TRACE(worldRank, "  Rep group: start=%d, stride=%d (members: %s)", info->repGroupStart, info->repGroupStride,
-                repBuf);
+  RESHARD_TRACE(worldRank, "  Shard group members: [%s]", shardBuf);
+  RESHARD_TRACE(worldRank, "  Replica group members: [%s]", repBuf);
 }
 
 static void debugPrintLoadBalancer(int worldRank, const ncclReshardRepLoadBalancer* lb) {
@@ -205,16 +199,305 @@ static void debugPrintTransferPlan(int worldRank, int srcShardIdx, int dstShardI
   fflush(stdout);
 }
 
+static int countOverlappingDstShards(const size_t srcDims[], const size_t srcStrides[], const ncclReshardShardLayout_t& srcShardLayout,
+                                     int srcShardIdx, const size_t dstDims[], const size_t dstStrides[],
+                                     const ncclReshardShardLayout_t& dstShardLayout, int dstShardCount, int ndims, size_t elementsPerChunk) {
+  int count = 0;
+  for (int dstShard = 0; dstShard < dstShardCount; dstShard++) {
+    ncclReshardTransferPlan plan;
+    computeTransferPlan(srcDims, srcStrides, srcShardLayout, srcShardIdx, dstDims, dstStrides, dstShardLayout, dstShard,
+                        ndims, elementsPerChunk, &plan);
+    if (plan.totalInnerTransfers > 0) count++;
+  }
+  return count;
+}
+
+static int countOverlappingSrcShards(const size_t srcDims[], const size_t srcStrides[], const ncclReshardShardLayout_t& srcShardLayout,
+                                     int srcShardCount, const size_t dstDims[], const size_t dstStrides[],
+                                     const ncclReshardShardLayout_t& dstShardLayout, int dstShardIdx, int ndims, size_t elementsPerChunk) {
+  int count = 0;
+  for (int srcShard = 0; srcShard < srcShardCount; srcShard++) {
+    ncclReshardTransferPlan plan;
+    computeTransferPlan(srcDims, srcStrides, srcShardLayout, srcShard, dstDims, dstStrides, dstShardLayout, dstShardIdx,
+                        ndims, elementsPerChunk, &plan);
+    if (plan.totalInnerTransfers > 0) count++;
+  }
+  return count;
+}
+
+static ncclResult_t validateRingDomainFanout(int worldRank, const ncclDistTensor_t* dst,
+                                             const ncclReshardMeshGroupInfo* fullDstInfo, int dstShard, int repStart,
+                                             int repEnd, int dstGpusPerDomain) {
+  for (int rep = repStart; rep < repEnd; rep++) {
+    int repRank = getMeshRank(dst, fullDstInfo, dstShard, rep);
+    int repNode = repRank / dstGpusPerDomain;
+    int localRepCount = 0;
+    for (int checkRep = repStart; checkRep < repEnd; checkRep++) {
+      int checkRank = getMeshRank(dst, fullDstInfo, dstShard, checkRep);
+      if (checkRank / dstGpusPerDomain == repNode) localRepCount++;
+    }
+    if (localRepCount > MAX_LOCAL_FOLLOWERS + 1) {
+      NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                    "validateReshardPlanLimits: local destination fan-out exceeds capacity at dstShard %d, domain %d "
+                    "(localRepCount=%d > MAX_LOCAL_FOLLOWERS+1=%d). Fix: increase MAX_LOCAL_FOLLOWERS in "
+                    "reshard_limits.h.",
+                    dstShard, repNode, localRepCount, MAX_LOCAL_FOLLOWERS + 1);
+    }
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t validateReshardPlanLimits(int worldRank, const ncclDistTensor_t* src, const size_t srcTensorDims[],
+                                       const ncclDistTensor_t* dst, const size_t dstTensorDims[],
+                                       size_t elementsPerChunk, ReshardAlgorithm algo, int dstGpusPerDomain) {
+  const int ndims = src->ndims;
+  ncclReshardMeshGroupInfo fullSrcInfo, fullDstInfo;
+  computeMeshGroupInfo(src, src->mesh->startRank, &fullSrcInfo);
+  computeMeshGroupInfo(dst, dst->mesh->startRank, &fullDstInfo);
+
+  size_t srcDims[NCCL_RESHARD_MAX_TENSOR_DIMS] = {0};
+  size_t dstDims[NCCL_RESHARD_MAX_TENSOR_DIMS] = {0};
+  size_t srcStrides[NCCL_RESHARD_MAX_TENSOR_DIMS] = {0};
+  size_t dstStrides[NCCL_RESHARD_MAX_TENSOR_DIMS] = {0};
+  NCCL_M2N_CHECK(resolveReshardDims(worldRank, srcTensorDims, fullSrcInfo.shardLayout, dstTensorDims,
+                                    fullDstInfo.shardLayout, ndims, srcDims, dstDims));
+  NCCL_M2N_CHECK(computeStridesChecked(srcDims, ndims, srcStrides));
+  NCCL_M2N_CHECK(computeStridesChecked(dstDims, ndims, dstStrides));
+
+  ncclReshardRepLoadBalancer lb = {.srcRepCount = fullSrcInfo.repCount,
+                                   .dstRepCount = fullDstInfo.repCount,
+                                   .dstGpusPerDomain = dstGpusPerDomain,
+                                   .dstRepStartRank = dst->mesh->startRank,
+                                   .dstRepStride = (fullDstInfo.repMeshDim == 0) ? dst->mesh->dims[1] : 1,
+                                   .mode = reshardEffectiveLbMode(src, dst)};
+
+  if (algo == RESHARD_ALGO_DIRECT) {
+    for (int srcShard = 0; srcShard < fullSrcInfo.shardCount; srcShard++) {
+      int overlapDstCount =
+        countOverlappingDstShards(srcDims, srcStrides, fullSrcInfo.shardLayout, srcShard, dstDims, dstStrides,
+                                  fullDstInfo.shardLayout, fullDstInfo.shardCount, ndims, elementsPerChunk);
+      for (int srcRep = 0; srcRep < fullSrcInfo.repCount; srcRep++) {
+        int targetRepStart, targetRepEnd;
+        getTargetRepRange(&lb, srcRep, &targetRepStart, &targetRepEnd);
+        size_t targetCount = 0;
+        NCCL_M2N_CHECK_ARG(m2nCheckedMulSize(static_cast<size_t>(overlapDstCount),
+                                             static_cast<size_t>(targetRepEnd - targetRepStart), &targetCount),
+                           worldRank,
+                           "validateReshardPlanLimits: direct target count overflow for srcShard %d, srcRep %d",
+                           srcShard, srcRep);
+        if (targetCount > static_cast<size_t>(MAX_DIRECT_TARGETS)) {
+          NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                        "validateReshardPlanLimits: direct target list would exceed capacity for srcShard %d, srcRep "
+                        "%d (targets=%zu > MAX_DIRECT_TARGETS=%d). Fix: increase MAX_DIRECT_TARGETS in "
+                        "reshard_limits.h.",
+                        srcShard, srcRep, targetCount, MAX_DIRECT_TARGETS);
+        }
+      }
+    }
+    for (int dstShard = 0; dstShard < fullDstInfo.shardCount; dstShard++) {
+      int sourceCount =
+        countOverlappingSrcShards(srcDims, srcStrides, fullSrcInfo.shardLayout, fullSrcInfo.shardCount, dstDims,
+                                  dstStrides, fullDstInfo.shardLayout, dstShard, ndims, elementsPerChunk);
+      if (sourceCount > MAX_DIRECT_SOURCES) {
+        NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                      "validateReshardPlanLimits: direct source list would exceed capacity for dstShard %d "
+                      "(sources=%d > MAX_DIRECT_SOURCES=%d). Fix: increase MAX_DIRECT_SOURCES in reshard_limits.h.",
+                      dstShard, sourceCount, MAX_DIRECT_SOURCES);
+      }
+    }
+    return ncclSuccess;
+  }
+
+  for (int srcShard = 0; srcShard < fullSrcInfo.shardCount; srcShard++) {
+    int overlapDstCount =
+      countOverlappingDstShards(srcDims, srcStrides, fullSrcInfo.shardLayout, srcShard, dstDims, dstStrides,
+                                fullDstInfo.shardLayout, fullDstInfo.shardCount, ndims, elementsPerChunk);
+    if (overlapDstCount > MAX_TARGETS) {
+      NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                    "validateReshardPlanLimits: target list would exceed capacity for srcShard %d "
+                    "(targets=%d > MAX_TARGETS=%d). Fix: increase MAX_TARGETS in reshard_limits.h.",
+                    srcShard, overlapDstCount, MAX_TARGETS);
+    }
+  }
+  for (int dstShard = 0; dstShard < fullDstInfo.shardCount; dstShard++) {
+    int sourceCount =
+      countOverlappingSrcShards(srcDims, srcStrides, fullSrcInfo.shardLayout, fullSrcInfo.shardCount, dstDims,
+                                dstStrides, fullDstInfo.shardLayout, dstShard, ndims, elementsPerChunk);
+    if (sourceCount > MAX_SOURCES) {
+      NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                    "validateReshardPlanLimits: source list would exceed capacity for dstShard %d "
+                    "(sources=%d > MAX_SOURCES=%d). Fix: increase MAX_SOURCES in reshard_limits.h.",
+                    dstShard, sourceCount, MAX_SOURCES);
+    }
+  }
+  for (int srcRep = 0; srcRep < fullSrcInfo.repCount; srcRep++) {
+    int targetRepStart, targetRepEnd;
+    getTargetRepRange(&lb, srcRep, &targetRepStart, &targetRepEnd);
+    for (int dstShard = 0; dstShard < fullDstInfo.shardCount; dstShard++) {
+      NCCL_M2N_CHECK(validateRingDomainFanout(worldRank, dst, &fullDstInfo, dstShard, targetRepStart, targetRepEnd,
+                                             dstGpusPerDomain));
+    }
+  }
+  return ncclSuccess;
+}
+
+// ============================================================================
+// Split-comm cross-rail ring-hop detector (host, communication-free)
+//
+// The split-comm RING path forwards each cross-NVL ring hop over commB, which
+// is a RAIL comm: it can only service a put between two ranks that share the
+// same rail (local-GPU index) across nodes.  A few uneven-ratio layouts wire a
+// ring hop between leaders on DIFFERENT rails (e.g. a shard occupying the upper
+// rails of one NVL domain and the lower rails of the next); commB has no QP for
+// such a hop and the recipient hangs forever waiting on the signal.
+//
+// This predicate detects that condition so the caller can fall back to the
+// (rail-agnostic) non-split path for the offending reshard.  It is a pure
+// function of the mesh geometry + load-balancer parameters — identical inputs
+// on every rank — so all ranks reach the same decision with NO collective (an
+// allreduce here would serialize every reshard at scale).
+//
+// A ring hop connects the leader at localRepIdx i on one NVL domain to the
+// leader at the same localRepIdx on the next domain in the chain.  Leaders on a
+// domain are the shard's reps that land there, in rep order (== localRepIdx
+// order).  So a hop is cross-rail iff, for some chain-adjacent domain pair, the
+// rail of the i-th rep differs.  The chain construction (getTargetRepRange, the
+// per-domain grouping via getMeshRank, and the nodeWalkStep stepping) mirrors
+// prepareReshardParams so the detector and the ring builder never diverge.
+// ============================================================================
+bool reshardPlanHasCrossRailRingHop(const ncclDistTensor_t* src, const ncclDistTensor_t* dst, int dstGpusPerDomain,
+                                    int dstNodeAnchor, bool splitStrided, int splitNumInjectionDomains,
+                                    int splitDomainsPerRep) {
+  if (dstGpusPerDomain <= 0) {
+    return false;
+  }
+
+  ncclReshardMeshGroupInfo fullSrcInfo, fullDstInfo;
+  computeMeshGroupInfo(src, src->mesh->startRank, &fullSrcInfo);
+  computeMeshGroupInfo(dst, dst->mesh->startRank, &fullDstInfo);
+
+  ncclReshardRepLoadBalancer lb = {.srcRepCount = fullSrcInfo.repCount,
+                                   .dstRepCount = fullDstInfo.repCount,
+                                   .dstGpusPerDomain = dstGpusPerDomain,
+                                   .dstRepStartRank = dst->mesh->startRank,
+                                   .dstRepStride = (fullDstInfo.repMeshDim == 0) ? dst->mesh->dims[1] : 1,
+                                   .mode = reshardEffectiveLbMode(src, dst),
+                                   .dstNodeAnchor = dstNodeAnchor};
+  if (splitStrided && lb.mode == RESHARD_LB_NODE_AWARE && splitNumInjectionDomains > 0) {
+    lb.numInjectionDomains = splitNumInjectionDomains;
+    lb.domainsPerRep = (splitDomainsPerRep > 0) ? splitDomainsPerRep : 1;
+    lb.strided = true;
+  }
+
+  const int nodeWalkStep = (lb.strided && lb.numInjectionDomains > 0) ? lb.numInjectionDomains : 1;
+  const bool strided = (lb.strided && lb.numInjectionDomains > 0);
+
+  /* Rail of every rep on one NVL domain, in rep order (== localRepIdx order).
+   * Sized like prepareReshardParams' per-domain rep arrays; a domain that
+   * would exceed this is treated as cross-rail (conservative fall back). */
+  int railsA[MAX_LOCAL_FOLLOWERS + 1];
+  int railsB[MAX_LOCAL_FOLLOWERS + 1];
+
+  for (int shard = 0; shard < fullDstInfo.shardCount; shard++) {
+    for (int srcRep = 0; srcRep < lb.srcRepCount; srcRep++) {
+      int repStart = 0, repEnd = 0;
+      getTargetRepRange(&lb, srcRep, &repStart, &repEnd);
+      if (repStart >= repEnd) {
+        continue;
+      }
+
+      /* Visit each NVL domain of this chain once (at its first rep in range)
+       * and compare its leaders' rails against the ring-successor domain's, at
+       * matching localRepIdx.  Fixed stack arrays only — no heap. */
+      for (int rep = repStart; rep < repEnd; rep++) {
+        const int node = (getMeshRank(dst, &fullDstInfo, shard, rep) - dstNodeAnchor) / dstGpusPerDomain;
+
+        bool firstRepOfNode = true;
+        for (int r = repStart; r < rep; r++) {
+          if ((getMeshRank(dst, &fullDstInfo, shard, r) - dstNodeAnchor) / dstGpusPerDomain == node) {
+            firstRepOfNode = false;
+            break;
+          }
+        }
+        if (!firstRepOfNode) {
+          continue;
+        }
+
+        /* Ring-successor domain: strided chains step by K domains, the
+         * contiguous baseline rings to the next domain present in the chain
+         * (matches the ringNextNode scan in prepareReshardParams). */
+        int succNode = -1;
+        for (int r = repStart; r < repEnd; r++) {
+          const int rNode = (getMeshRank(dst, &fullDstInfo, shard, r) - dstNodeAnchor) / dstGpusPerDomain;
+          if (strided) {
+            if (rNode == node + nodeWalkStep) {
+              succNode = rNode;
+              break;
+            }
+          } else if (rNode > node && (succNode < 0 || rNode < succNode)) {
+            succNode = rNode;
+          }
+        }
+        if (succNode < 0) {
+          continue;
+        }
+
+        int cntA = 0, cntB = 0;
+        for (int r = repStart; r < repEnd; r++) {
+          const int rank = getMeshRank(dst, &fullDstInfo, shard, r);
+          const int rNode = (rank - dstNodeAnchor) / dstGpusPerDomain;
+          const int rail = (rank - dstNodeAnchor) % dstGpusPerDomain;
+          if (rNode == node) {
+            if (cntA >= MAX_LOCAL_FOLLOWERS + 1) {
+              return true;
+            }
+            railsA[cntA++] = rail;
+          } else if (rNode == succNode) {
+            if (cntB >= MAX_LOCAL_FOLLOWERS + 1) {
+              return true;
+            }
+            railsB[cntB++] = rail;
+          }
+        }
+
+        /* A shorter successor domain collapses the tail localRepIdx slots onto
+         * its last leader; clamp the successor index so a rail mismatch in the
+         * collapsed tail is not missed. */
+        for (int i = 0; i < cntA && cntB > 0; i++) {
+          const int j = (i < cntB) ? i : (cntB - 1);
+          if (railsA[i] != railsB[j]) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+
 // ============================================================================
 // Prepare Kernel Parameters (Ring / Hierarchical)
 // ============================================================================
 
-ncclReshardParams prepareReshardParams(
-  int worldRank, const void* srcBuffer, const size_t srcTensorDims[], int ndims, const ncclMesh_t* srcMesh,
-  const void* dstBuffer, const size_t dstTensorDims[], const ncclMesh_t* dstMesh, ncclWindow_t window,
-  size_t elementsPerChunk, int numCtas, int srcGpusPerDomain, int dstGpusPerDomain, const size_t* allWindowOffsets) {
+ncclResult_t prepareReshardParams(int worldRank, const ncclDistTensor_t* src, const size_t srcTensorDims[],
+                                  const ncclDistTensor_t* dst, const size_t dstTensorDims[], ncclWindow_t window,
+                                  size_t elementsPerChunk, int numCtas, unsigned int mySignalBase,
+                                  int srcGpusPerDomain, int dstGpusPerDomain, const size_t* allWindowOffsets,
+                                  ncclReshardParams* outParams, bool splitStrided, bool nodeAnchorAtMeshStart,
+                                  int splitNumInjectionDomains, int splitDomainsPerRep) {
+  NCCL_M2N_CHECK_ARG(outParams != nullptr, worldRank, "prepareReshardParams: outParams must be non-null");
   ncclReshardParams params;
   memset(&params, 0, sizeof(params));
+  const ncclMesh_t* srcMesh = src->mesh;
+  const ncclMesh_t* dstMesh = dst->mesh;
+  int ndims = src->ndims;
+
+  /* Origin for dst NVL-domain indexing.  Non-split callers pass false =>
+   * dstNodeAnchor=0 => absolute mapping (byte-identical to the shipping path).
+   * The split path passes true => anchor at the dst mesh start so an
+   * asymmetric-PP gen domain is not split into phantom nodes. */
+  const int dstNodeAnchor = nodeAnchorAtMeshStart ? dstMesh->startRank : 0;
 
   {
     char sd[128], dd[128];
@@ -224,9 +507,9 @@ ncclReshardParams prepareReshardParams(
     RESHARD_DEBUG(worldRank, "prepareReshardParams() START");
     RESHARD_DEBUG(worldRank, "========================================");
     RESHARD_DEBUG(worldRank, "Input parameters:");
-    RESHARD_DEBUG(worldRank, "  srcBuffer=%p, ndims=%d", srcBuffer, ndims);
+    RESHARD_DEBUG(worldRank, "  srcBuffer=%p, ndims=%d", src->dataPtr, ndims);
     RESHARD_DEBUG(worldRank, "  srcTensorDims=[%s]", sd);
-    RESHARD_DEBUG(worldRank, "  dstBuffer=%p", dstBuffer);
+    RESHARD_DEBUG(worldRank, "  dstBuffer=%p", dst->dataPtr);
     RESHARD_DEBUG(worldRank, "  dstTensorDims=[%s]", dd);
     RESHARD_DEBUG(worldRank, "  elementsPerChunk=%zu, numCtas=%d", elementsPerChunk, numCtas);
     RESHARD_DEBUG(worldRank, "  srcGpusPerDomain=%d, dstGpusPerDomain=%d", srcGpusPerDomain, dstGpusPerDomain);
@@ -247,6 +530,7 @@ ncclReshardParams prepareReshardParams(
    * touching getenv on the per-call hot path. */
   params.chunkSizeBytes = gReshardChunkSizeBytes > 0 ? gReshardChunkSizeBytes : CHUNK_SIZE_BYTES;
   params.totalCtas = numCtas;
+  params.mySignalBase = mySignalBase;
   params.myWorldRank = worldRank;
   params.ndims = ndims;
 
@@ -266,113 +550,51 @@ ncclReshardParams prepareReshardParams(
   ncclReshardMeshGroupInfo srcInfo, dstInfo;
   ncclReshardMeshGroupInfo fullSrcInfo, fullDstInfo;
 
-  computeMeshGroupInfo(srcMesh, srcMesh->startRank, &fullSrcInfo);
-  computeMeshGroupInfo(dstMesh, dstMesh->startRank, &fullDstInfo);
+  computeMeshGroupInfo(src, srcMesh->startRank, &fullSrcInfo);
+  computeMeshGroupInfo(dst, dstMesh->startRank, &fullDstInfo);
 
-  params.srcShardTensorDim = fullSrcInfo.shardTensorDim;
-  params.dstShardTensorDim = fullDstInfo.shardTensorDim;
+  params.srcShardLayout = fullSrcInfo.shardLayout;
+  params.dstShardLayout = fullDstInfo.shardLayout;
   params.srcShardCount = fullSrcInfo.shardCount;
   params.dstShardCount = fullDstInfo.shardCount;
-  params.sameShardDim = (params.srcShardTensorDim == params.dstShardTensorDim);
 
-  RESHARD_DEBUG(worldRank, "Sharding configuration:");
-  RESHARD_DEBUG(worldRank, "  srcShardTensorDim=%d, dstShardTensorDim=%d", params.srcShardTensorDim,
-                params.dstShardTensorDim);
-  RESHARD_DEBUG(worldRank, "  srcShardCount=%d, dstShardCount=%d", params.srcShardCount, params.dstShardCount);
-  RESHARD_DEBUG(worldRank, "  sameShardDim=%d (%s)", params.sameShardDim,
-                params.sameShardDim ? "SAME-DIM sharding" : "CROSS-DIM sharding");
-
+  params.mySrcShardIdx = -1;
+  params.mySrcRepIdx = -1;
+  params.myDstShardIdx = -1;
+  params.myDstRepIdx = -1;
   if (params.isSource) {
-    computeMeshGroupInfo(srcMesh, worldRank, &srcInfo);
-    debugPrintMeshGroupInfo(worldRank, "Source", srcMesh, &srcInfo);
-
+    computeMeshGroupInfo(src, worldRank, &srcInfo);
+    debugPrintMeshGroupInfo(worldRank, "Source", src, &srcInfo);
     params.mySrcShardIdx = srcInfo.shardIdx;
     params.mySrcRepIdx = srcInfo.repIdx;
-    for (int d = 0; d < ndims; d++) params.srcDims[d] = srcTensorDims[d];
-    computeStrides(params.srcDims, ndims, params.srcStrides);
-
-    {
-      char db[128], sb[128];
-      fmtSizes(db, sizeof(db), params.srcDims, ndims);
-      fmtSizes(sb, sizeof(sb), params.srcStrides, ndims);
-      RESHARD_DEBUG(worldRank, "Source local info:");
-      RESHARD_DEBUG(worldRank, "  mySrcShardIdx=%d, mySrcRepIdx=%d", params.mySrcShardIdx, params.mySrcRepIdx);
-      RESHARD_DEBUG(worldRank, "  srcDims=[%s], srcStrides=[%s]", db, sb);
-    }
-  } else {
-    params.mySrcShardIdx = -1;
-    params.mySrcRepIdx = -1;
   }
-
   if (params.isDest) {
-    computeMeshGroupInfo(dstMesh, worldRank, &dstInfo);
-    debugPrintMeshGroupInfo(worldRank, "Dest", dstMesh, &dstInfo);
-
+    computeMeshGroupInfo(dst, worldRank, &dstInfo);
+    debugPrintMeshGroupInfo(worldRank, "Dest", dst, &dstInfo);
     params.myDstShardIdx = dstInfo.shardIdx;
     params.myDstRepIdx = dstInfo.repIdx;
-    for (int d = 0; d < ndims; d++) params.dstDims[d] = dstTensorDims[d];
-    computeStrides(params.dstDims, ndims, params.dstStrides);
-
-    {
-      char db[128], sb[128];
-      fmtSizes(db, sizeof(db), params.dstDims, ndims);
-      fmtSizes(sb, sizeof(sb), params.dstStrides, ndims);
-      RESHARD_DEBUG(worldRank, "Dest local info:");
-      RESHARD_DEBUG(worldRank, "  myDstShardIdx=%d, myDstRepIdx=%d", params.myDstShardIdx, params.myDstRepIdx);
-      RESHARD_DEBUG(worldRank, "  dstDims=[%s], dstStrides=[%s]", db, sb);
-    }
-  } else {
-    params.myDstShardIdx = -1;
-    params.myDstRepIdx = -1;
   }
-
-  // Infer missing dimensions
-  if (params.isSource && !params.isDest) {
-    for (int d = 0; d < ndims; d++) {
-      size_t globalSize;
-      if (d == params.srcShardTensorDim) globalSize = srcTensorDims[d] * params.srcShardCount;
-      else globalSize = srcTensorDims[d];
-
-      if (d == params.dstShardTensorDim) params.dstDims[d] = globalSize / params.dstShardCount;
-      else params.dstDims[d] = globalSize;
-    }
-    computeStrides(params.dstDims, ndims, params.dstStrides);
-
-    {
-      char db[128], sb[128];
-      fmtSizes(db, sizeof(db), params.dstDims, ndims);
-      fmtSizes(sb, sizeof(sb), params.dstStrides, ndims);
-      RESHARD_DEBUG(worldRank, "Inferred dstDims from src:");
-      RESHARD_DEBUG(worldRank, "  dstDims=[%s], dstStrides=[%s]", db, sb);
-    }
-  }
-
-  if (params.isDest && !params.isSource) {
-    for (int d = 0; d < ndims; d++) {
-      size_t globalSize;
-      if (d == params.dstShardTensorDim) globalSize = dstTensorDims[d] * params.dstShardCount;
-      else globalSize = dstTensorDims[d];
-
-      if (d == params.srcShardTensorDim) params.srcDims[d] = globalSize / params.srcShardCount;
-      else params.srcDims[d] = globalSize;
-    }
-    computeStrides(params.srcDims, ndims, params.srcStrides);
-
-    {
-      char db[128], sb[128];
-      fmtSizes(db, sizeof(db), params.srcDims, ndims);
-      fmtSizes(sb, sizeof(sb), params.srcStrides, ndims);
-      RESHARD_DEBUG(worldRank, "Inferred srcDims from dst:");
-      RESHARD_DEBUG(worldRank, "  srcDims=[%s], srcStrides=[%s]", db, sb);
-    }
-  }
+  NCCL_M2N_CHECK(resolveReshardDims(worldRank, srcTensorDims, params.srcShardLayout, dstTensorDims,
+                                    params.dstShardLayout, ndims, params.srcDims, params.dstDims));
+  NCCL_M2N_CHECK(computeStridesChecked(params.srcDims, ndims, params.srcStrides));
+  NCCL_M2N_CHECK(computeStridesChecked(params.dstDims, ndims, params.dstStrides));
 
   ncclReshardRepLoadBalancer lb = {.srcRepCount = fullSrcInfo.repCount,
-                                .dstRepCount = fullDstInfo.repCount,
-                                .dstGpusPerDomain = dstGpusPerDomain,
-                                .dstRepStartRank = dstMesh->startRank,
-                                .dstRepStride = (fullDstInfo.repMeshDim == 0) ? dstMesh->dims[1] : 1,
-                                .mode = reshardGetLoadBalanceMode()};
+                               .dstRepCount = fullDstInfo.repCount,
+                               .dstGpusPerDomain = dstGpusPerDomain,
+                               .dstRepStartRank = dstMesh->startRank,
+                               .dstRepStride = (fullDstInfo.repMeshDim == 0) ? dstMesh->dims[1] : 1,
+                               .mode = reshardEffectiveLbMode(src, dst),
+                               .dstNodeAnchor = dstNodeAnchor};
+
+  /* Split-comm strided injection: K is decided once by split-comm formation
+   * when it sizes commA, then passed into the load balancer so ring stride and
+   * leader selection cannot diverge from commA membership. */
+  if (splitStrided && lb.mode == RESHARD_LB_NODE_AWARE && splitNumInjectionDomains > 0) {
+    lb.numInjectionDomains = splitNumInjectionDomains;
+    lb.domainsPerRep = (splitDomainsPerRep > 0) ? splitDomainsPerRep : 1;
+    lb.strided = true;
+  }
 
   debugPrintLoadBalancer(worldRank, &lb);
 
@@ -390,9 +612,9 @@ ncclReshardParams prepareReshardParams(
 
     for (int dstShard = 0; dstShard < params.dstShardCount; dstShard++) {
       ncclReshardTransferPlan plan;
-      computeTransferPlan(params.srcDims, params.srcStrides, params.srcShardTensorDim, params.mySrcShardIdx,
-                          params.dstDims, params.dstStrides, params.dstShardTensorDim, dstShard, ndims,
-                          elementsPerChunk, &plan);
+      NCCL_M2N_CHECK(computeTransferPlanChecked(params.srcDims, params.srcStrides, params.srcShardLayout,
+                                                params.mySrcShardIdx, params.dstDims, params.dstStrides,
+                                                params.dstShardLayout, dstShard, ndims, elementsPerChunk, &plan));
 
       if (plan.totalInnerTransfers == 0) {
         RESHARD_TRACE(worldRank, "  dstShard %d: NO OVERLAP", dstShard);
@@ -400,14 +622,9 @@ ncclReshardParams prepareReshardParams(
       }
 
       if (params.numTargets >= MAX_TARGETS) {
-        RESHARD_FATAL(worldRank,
-                      "prepareReshardParams: target list TRUNCATED at "
-                      "dstShard %d! "
-                      "numTargets=%d >= MAX_TARGETS=%d. Remaining dst "
-                      "shards dropped. "
-                      "Some dest ranks will NEVER receive data — "
-                      "kernel WILL HANG. "
-                      "Fix: increase MAX_TARGETS in reshard_limits.h.",
+        NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                      "prepareReshardParams: target list capacity exceeded at dstShard %d "
+                      "(numTargets=%d >= MAX_TARGETS=%d); increase MAX_TARGETS in reshard_limits.h.",
                       dstShard, params.numTargets, MAX_TARGETS);
       }
 
@@ -417,9 +634,10 @@ ncclReshardParams prepareReshardParams(
 
         for (int srcShard = 0; srcShard < params.srcShardCount; srcShard++) {
           ncclReshardTransferPlan checkPlan;
-          computeTransferPlan(params.srcDims, params.srcStrides, params.srcShardTensorDim, srcShard, params.dstDims,
-                              params.dstStrides, params.dstShardTensorDim, dstShard, ndims, elementsPerChunk,
-                              &checkPlan);
+          NCCL_M2N_CHECK(computeTransferPlanChecked(params.srcDims, params.srcStrides, params.srcShardLayout,
+                                                    srcShard, params.dstDims, params.dstStrides,
+                                                    params.dstShardLayout, dstShard, ndims, elementsPerChunk,
+                                                    &checkPlan));
 
           if (checkPlan.totalInnerTransfers > 0) {
             if (srcShard < params.mySrcShardIdx) myPosition++;
@@ -427,27 +645,24 @@ ncclReshardParams prepareReshardParams(
           }
         }
 
-        int firstRepRank = getMeshRank(dstMesh, &fullDstInfo, dstShard, targetRepStart);
-        int firstRepNode = firstRepRank / dstGpusPerDomain;
+        int firstRepRank = getMeshRank(dst, &fullDstInfo, dstShard, targetRepStart);
+        int firstRepNode = (firstRepRank - dstNodeAnchor) / dstGpusPerDomain;
 
         int localRepsOnTargetNode[MAX_LOCAL_FOLLOWERS + 1];
         int numLocalRepsOnTargetNode = 0;
 
         for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
-          int repRank = getMeshRank(dstMesh, &fullDstInfo, dstShard, rep);
-          int repNode = repRank / dstGpusPerDomain;
+          int repRank = getMeshRank(dst, &fullDstInfo, dstShard, rep);
+          int repNode = (repRank - dstNodeAnchor) / dstGpusPerDomain;
 
           if (repNode == firstRepNode) {
             if (numLocalRepsOnTargetNode < MAX_LOCAL_FOLLOWERS + 1) {
               localRepsOnTargetNode[numLocalRepsOnTargetNode++] = rep;
             } else {
-              RESHARD_FATAL(worldRank,
-                            "prepareReshardParams: "
-                            "localRepsOnTargetNode overflow! "
-                            "numLocalRepsOnTargetNode=%d >= "
-                            "%d (MAX_LOCAL_FOLLOWERS+1). "
-                            "Fix: increase MAX_LOCAL_FOLLOWERS "
-                            "in reshard_limits.h.",
+              NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                            "prepareReshardParams: localRepsOnTargetNode overflow "
+                            "(numLocalRepsOnTargetNode=%d >= MAX_LOCAL_FOLLOWERS+1=%d); increase "
+                            "MAX_LOCAL_FOLLOWERS in reshard_limits.h.",
                             numLocalRepsOnTargetNode, MAX_LOCAL_FOLLOWERS + 1);
             }
           }
@@ -467,7 +682,7 @@ ncclReshardParams prepareReshardParams(
         }
 
         int leaderRep = localRepsOnTargetNode[targetLocalRepIdx];
-        int leaderRank = getMeshRank(dstMesh, &fullDstInfo, dstShard, leaderRep);
+        int leaderRank = getMeshRank(dst, &fullDstInfo, dstShard, leaderRep);
 
         RESHARD_TRACE(worldRank, "  dstShard %d: Hierarchical target selection:", dstShard);
         RESHARD_TRACE(worldRank, "    numSourcesToDstShard=%d, myPosition=%d", numSourcesToDstShard, myPosition);
@@ -496,7 +711,9 @@ ncclReshardParams prepareReshardParams(
                       plan.dstBaseOffset);
 
         target->isContiguous = (plan.totalInnerTransfers == 1);
-        target->totalBytes = plan.totalInnerTransfers * plan.innerSize;
+        NCCL_M2N_CHECK_ARG(m2nCheckedMulSize(plan.totalInnerTransfers, plan.innerSize, &target->totalBytes), worldRank,
+                           "prepareReshardParams: target totalBytes overflow: transfers=%zu innerSize=%zu",
+                           plan.totalInnerTransfers, plan.innerSize);
 
         RESHARD_TRACE(worldRank, "  dstShard %d: OVERLAP -> target[%d]", dstShard, params.numTargets - 1);
         RESHARD_TRACE(worldRank, "    leaderRep=%d, leaderRank=%d", leaderRep, leaderRank);
@@ -517,7 +734,7 @@ ncclReshardParams prepareReshardParams(
     int targetRepStart, targetRepEnd;
     getTargetRepRange(&lb, sourceRep, &targetRepStart, &targetRepEnd);
 
-    int myNode = worldRank / dstGpusPerDomain;
+    int myNode = (worldRank - dstNodeAnchor) / dstGpusPerDomain;
 
     RESHARD_TRACE(worldRank, "=== DEST: Computing Sources (Hierarchical) ===");
     RESHARD_TRACE(worldRank, "  myDstShardIdx=%d, myDstRepIdx=%d", params.myDstShardIdx, params.myDstRepIdx);
@@ -530,16 +747,14 @@ ncclReshardParams prepareReshardParams(
     int myLocalRepIdx = 0;
 
     for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
-      int repRank = getMeshRank(dstMesh, &fullDstInfo, params.myDstShardIdx, rep);
-      int repNode = repRank / dstGpusPerDomain;
+      int repRank = getMeshRank(dst, &fullDstInfo, params.myDstShardIdx, rep);
+      int repNode = (repRank - dstNodeAnchor) / dstGpusPerDomain;
 
       if (repNode == myNode) {
         if (numLocalReps >= MAX_LOCAL_FOLLOWERS + 1) {
-          RESHARD_FATAL(worldRank,
-                        "prepareReshardParams: localReps overflow! "
-                        "numLocalReps=%d >= %d (MAX_LOCAL_FOLLOWERS+1). "
-                        "Fix: increase MAX_LOCAL_FOLLOWERS in "
-                        "reshard_limits.h.",
+          NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                        "prepareReshardParams: localReps overflow: numLocalReps=%d >= %d "
+                        "(MAX_LOCAL_FOLLOWERS+1). Fix: increase MAX_LOCAL_FOLLOWERS in reshard_limits.h.",
                         numLocalReps, MAX_LOCAL_FOLLOWERS + 1);
         }
         if (rep == dstInfo.repIdx) myLocalRepIdx = numLocalReps;
@@ -554,7 +769,7 @@ ncclReshardParams prepareReshardParams(
       char lrBuf[2048];
       int pos = 0;
       for (int i = 0; i < numLocalReps && pos < (int)sizeof(lrBuf) - 32; i++) {
-        int repRank = getMeshRank(dstMesh, &fullDstInfo, params.myDstShardIdx, localReps[i]);
+        int repRank = getMeshRank(dst, &fullDstInfo, params.myDstShardIdx, localReps[i]);
         pos +=
           snprintf(lrBuf + pos, sizeof(lrBuf) - pos, "%srep%d(rank%d)", (i != 0) ? ", " : "", localReps[i], repRank);
       }
@@ -565,11 +780,11 @@ ncclReshardParams prepareReshardParams(
     int firstNodeLocalReps = 0;
     int firstRepNode = -1;
     if (targetRepStart < targetRepEnd) {
-      int firstRepRank = getMeshRank(dstMesh, &fullDstInfo, params.myDstShardIdx, targetRepStart);
-      firstRepNode = firstRepRank / dstGpusPerDomain;
+      int firstRepRank = getMeshRank(dst, &fullDstInfo, params.myDstShardIdx, targetRepStart);
+      firstRepNode = (firstRepRank - dstNodeAnchor) / dstGpusPerDomain;
       for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
-        int repRank = getMeshRank(dstMesh, &fullDstInfo, params.myDstShardIdx, rep);
-        int repNode = repRank / dstGpusPerDomain;
+        int repRank = getMeshRank(dst, &fullDstInfo, params.myDstShardIdx, rep);
+        int repNode = (repRank - dstNodeAnchor) / dstGpusPerDomain;
         if (repNode == firstRepNode) firstNodeLocalReps++;
       }
     }
@@ -582,22 +797,17 @@ ncclReshardParams prepareReshardParams(
 
     for (int srcShard = 0; srcShard < params.srcShardCount; srcShard++) {
       ncclReshardTransferPlan plan;
-      computeTransferPlan(params.srcDims, params.srcStrides, params.srcShardTensorDim, srcShard, params.dstDims,
-                          params.dstStrides, params.dstShardTensorDim, params.myDstShardIdx, ndims, elementsPerChunk,
-                          &plan);
+      NCCL_M2N_CHECK(computeTransferPlanChecked(params.srcDims, params.srcStrides, params.srcShardLayout, srcShard,
+                                                params.dstDims, params.dstStrides, params.dstShardLayout,
+                                                params.myDstShardIdx, ndims, elementsPerChunk, &plan));
 
       if (plan.totalInnerTransfers > 0 && numAllSources < MAX_SOURCES) {
         allSourceShards[numAllSources++] = srcShard;
         RESHARD_TRACE(worldRank, "    srcShard %d: OVERLAP (all_source[%d])", srcShard, numAllSources - 1);
       } else if (plan.totalInnerTransfers > 0 && numAllSources >= MAX_SOURCES) {
-        RESHARD_FATAL(worldRank,
-                      "prepareReshardParams: allSourceShards "
-                      "TRUNCATED at srcShard %d! "
-                      "numAllSources=%d >= MAX_SOURCES=%d. "
-                      "Overlapping src shards dropped. "
-                      "Dest rank will miss data from source shards — "
-                      "kernel WILL HANG. "
-                      "Fix: increase MAX_SOURCES in reshard_limits.h.",
+        NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                      "prepareReshardParams: source list capacity exceeded at srcShard %d "
+                      "(numAllSources=%d >= MAX_SOURCES=%d); increase MAX_SOURCES in reshard_limits.h.",
                       srcShard, numAllSources, MAX_SOURCES);
       } else {
         RESHARD_TRACE(worldRank, "    srcShard %d: NO OVERLAP", srcShard);
@@ -614,11 +824,12 @@ ncclReshardParams prepareReshardParams(
        Once a later node has fewer reps, the collapsed source slots stay
        collapsed for downstream nodes because each rank has only one ring
        successor. */
-    for (int node = firstRepNode; node >= 0 && node <= myNode; node++) {
+    const int nodeWalkStep = (lb.strided && lb.numInjectionDomains > 0) ? lb.numInjectionDomains : 1;
+    for (int node = firstRepNode; node >= 0 && node <= myNode; node += nodeWalkStep) {
       int nodeLocalReps = 0;
       for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
-        int repRank = getMeshRank(dstMesh, &fullDstInfo, params.myDstShardIdx, rep);
-        int repNode = repRank / dstGpusPerDomain;
+        int repRank = getMeshRank(dst, &fullDstInfo, params.myDstShardIdx, rep);
+        int repNode = (repRank - dstNodeAnchor) / dstGpusPerDomain;
         if (repNode == node) nodeLocalReps++;
       }
       if (nodeLocalReps > 0 && nodeLocalReps < activeSourceSlots) activeSourceSlots = nodeLocalReps;
@@ -642,6 +853,9 @@ ncclReshardParams prepareReshardParams(
     }
 
     params.isLeaderForSources = (mySourceEnd > mySourceStart);
+    /* Only the head of a ring chain is injected directly over commA.
+     * Downstream leaders receive through commB. */
+    params.destInjectedDirectly = params.isLeaderForSources && (myNode == firstRepNode);
 
     RESHARD_TRACE(worldRank,
                   "  Source distribution: firstNodeLocalReps=%d, "
@@ -666,8 +880,7 @@ ncclReshardParams prepareReshardParams(
         }
         int mappedLr = lr;
         if (activeSourceSlots > 0 && mappedLr >= activeSourceSlots) mappedLr = activeSourceSlots - 1;
-        int repRank =
-          numLocalReps > 0 ? getMeshRank(dstMesh, &fullDstInfo, params.myDstShardIdx, localReps[mappedLr]) : -1;
+        int repRank = numLocalReps > 0 ? getMeshRank(dst, &fullDstInfo, params.myDstShardIdx, localReps[mappedLr]) : -1;
         RESHARD_TRACE(worldRank,
                       "    source_slot[%d] -> local_rep[%d] (rank %d): "
                       "sources [%d, %d)%s",
@@ -680,30 +893,28 @@ ncclReshardParams prepareReshardParams(
       int srcShard = allSourceShards[idx];
 
       ncclReshardTransferPlan plan;
-      computeTransferPlan(params.srcDims, params.srcStrides, params.srcShardTensorDim, srcShard, params.dstDims,
-                          params.dstStrides, params.dstShardTensorDim, params.myDstShardIdx, ndims, elementsPerChunk,
-                          &plan);
+      NCCL_M2N_CHECK(computeTransferPlanChecked(params.srcDims, params.srcStrides, params.srcShardLayout, srcShard,
+                                                params.dstDims, params.dstStrides, params.dstShardLayout,
+                                                params.myDstShardIdx, ndims, elementsPerChunk, &plan));
 
       if (params.numSources >= MAX_SOURCES) {
-        RESHARD_FATAL(worldRank,
-                      "prepareReshardParams: source list TRUNCATED at "
-                      "srcShard %d (all_idx=%d)! "
-                      "numSources=%d >= MAX_SOURCES=%d. Remaining "
-                      "sources dropped. "
-                      "Dest rank will wait for data that never arrives "
-                      "— kernel WILL HANG. "
-                      "Fix: increase MAX_SOURCES in reshard_limits.h.",
+        NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                      "prepareReshardParams: source list capacity exceeded at srcShard %d, index %d "
+                      "(numSources=%d >= MAX_SOURCES=%d); increase MAX_SOURCES in reshard_limits.h.",
                       srcShard, idx, params.numSources, MAX_SOURCES);
       }
       {
-        int srcRank = getMeshRank(srcMesh, &fullSrcInfo, srcShard, sourceRep);
+        int srcRank = getMeshRank(src, &fullSrcInfo, srcShard, sourceRep);
 
         ncclReshardSourceInfo* source = &params.sources[params.numSources++];
-        source->signalBase = srcRank * numCtas;
+        source->signalBase = computeReshardSignalBaseUnchecked(srcMesh, srcRank, numCtas);
         source->plan = plan;
+        source->srcShardIdx = srcShard;
 
         source->isContiguous = (plan.totalInnerTransfers == 1);
-        source->totalBytes = plan.totalInnerTransfers * plan.innerSize;
+        NCCL_M2N_CHECK_ARG(m2nCheckedMulSize(plan.totalInnerTransfers, plan.innerSize, &source->totalBytes), worldRank,
+                           "prepareReshardParams: source totalBytes overflow: transfers=%zu innerSize=%zu",
+                           plan.totalInnerTransfers, plan.innerSize);
 
         RESHARD_TRACE(worldRank, "  srcShard %d: OVERLAP -> source[%d] (all_idx=%d)", srcShard, params.numSources - 1,
                       idx);
@@ -754,16 +965,19 @@ ncclReshardParams prepareReshardParams(
 
     int ringNextNode = -1;
     for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
-      int repRank = getMeshRank(dstMesh, &fullDstInfo, params.myDstShardIdx, rep);
-      int repNode = repRank / dstGpusPerDomain;
+      int repRank = getMeshRank(dst, &fullDstInfo, params.myDstShardIdx, rep);
+      int repNode = (repRank - dstNodeAnchor) / dstGpusPerDomain;
+      if (lb.strided && lb.numInjectionDomains > 0 && ((repNode - myNode) % lb.numInjectionDomains != 0)) {
+        continue;
+      }
       if (repNode > myNode && (ringNextNode == -1 || repNode < ringNextNode)) ringNextNode = repNode;
     }
     RESHARD_TRACE(worldRank, "  ringNextNode=%d", ringNextNode);
 
     for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
-      int repRank = getMeshRank(dstMesh, &fullDstInfo, params.myDstShardIdx, rep);
+      int repRank = getMeshRank(dst, &fullDstInfo, params.myDstShardIdx, rep);
       int repRankInMesh = repRank - dstMesh->startRank;
-      int repNode = repRank / dstGpusPerDomain;
+      int repNode = (repRank - dstNodeAnchor) / dstGpusPerDomain;
 
       if (repRank == worldRank) {
         RESHARD_TRACE(worldRank,
@@ -781,12 +995,9 @@ ncclReshardParams prepareReshardParams(
                         "node=%d -> LSA follower[%d]",
                         rep, repRank, repRankInMesh, repNode, params.numLocalFollowers - 1);
         } else {
-          RESHARD_FATAL(worldRank,
-                        "prepareReshardParams: localFollowerWorldRanks "
-                        "overflow! "
-                        "numLocalFollowers=%d >= MAX_LOCAL_FOLLOWERS=%d. "
-                        "Fix: increase MAX_LOCAL_FOLLOWERS in "
-                        "reshard_limits.h.",
+          NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                        "prepareReshardParams: localFollowerWorldRanks overflow: numLocalFollowers=%d >= "
+                        "MAX_LOCAL_FOLLOWERS=%d. Fix: increase MAX_LOCAL_FOLLOWERS in reshard_limits.h.",
                         params.numLocalFollowers, MAX_LOCAL_FOLLOWERS);
         }
       } else if (rep > dstInfo.repIdx && params.ringNextWorldRank == -1) {
@@ -794,8 +1005,8 @@ ncclReshardParams prepareReshardParams(
         if (repNode == ringNextNode) {
           int ringNodeLocalReps = 0;
           for (int r = targetRepStart; r < targetRepEnd; r++) {
-            int rRank = getMeshRank(dstMesh, &fullDstInfo, params.myDstShardIdx, r);
-            int rNode = rRank / dstGpusPerDomain;
+            int rRank = getMeshRank(dst, &fullDstInfo, params.myDstShardIdx, r);
+            int rNode = (rRank - dstNodeAnchor) / dstGpusPerDomain;
             if (rNode == repNode) ringNodeLocalReps++;
           }
           int targetRingLocalRepIdx = params.localRepIdx;
@@ -807,8 +1018,8 @@ ncclReshardParams prepareReshardParams(
 
           int nextLocalRepIdx = 0;
           for (int r = targetRepStart; r <= rep; r++) {
-            int rRank = getMeshRank(dstMesh, &fullDstInfo, params.myDstShardIdx, r);
-            int rNode = rRank / dstGpusPerDomain;
+            int rRank = getMeshRank(dst, &fullDstInfo, params.myDstShardIdx, r);
+            int rNode = (rRank - dstNodeAnchor) / dstGpusPerDomain;
             if (rNode == repNode) {
               if (r == rep) break;
               nextLocalRepIdx++;
@@ -866,8 +1077,6 @@ ncclReshardParams prepareReshardParams(
     RESHARD_DEBUG(worldRank, "  Final params summary:");
     RESHARD_DEBUG(worldRank, "    isSource=%d, isDest=%d", params.isSource, params.isDest);
     RESHARD_DEBUG(worldRank, "    srcDims=[%s], dstDims=[%s]", sd, dd);
-    RESHARD_DEBUG(worldRank, "    srcShardTensorDim=%d, dstShardTensorDim=%d (%s)", params.srcShardTensorDim,
-                  params.dstShardTensorDim, params.sameShardDim ? "SAME-DIM" : "CROSS-DIM");
     RESHARD_DEBUG(worldRank, "    srcShardCount=%d, dstShardCount=%d", params.srcShardCount, params.dstShardCount);
     RESHARD_DEBUG(worldRank, "    numTargets=%d, numSources=%d", params.numTargets, params.numSources);
     if (params.isDest) {
@@ -883,19 +1092,25 @@ ncclReshardParams prepareReshardParams(
     RESHARD_DEBUG(worldRank, "========================================");
   }
 
-  return params;
+  *outParams = params;
+  return ncclSuccess;
 }
 
 // ============================================================================
 // Prepare Direct Algorithm Parameters
 // ============================================================================
 
-ncclReshardDirectParams prepareDirectReshardParams(
-  int worldRank, const size_t* srcTensorDims, const size_t* dstTensorDims, int ndims,
-  const ncclMesh_t* srcMesh, const ncclMesh_t* dstMesh, ncclWindow_t window,
-  size_t elementsPerChunk, int numCtas, const size_t* allWindowOffsets) {
+ncclResult_t prepareDirectReshardParams(int worldRank, const ncclDistTensor_t* src, const size_t srcTensorDims[],
+                                        const ncclDistTensor_t* dst, const size_t dstTensorDims[],
+                                        ncclWindow_t window, size_t elementsPerChunk, int numCtas,
+                                        unsigned int mySignalBase, int dstGpusPerDomain,
+                                        const size_t* allWindowOffsets, ncclReshardDirectParams* outParams) {
+  NCCL_M2N_CHECK_ARG(outParams != nullptr, worldRank, "prepareDirectReshardParams: outParams must be non-null");
   ncclReshardDirectParams params;
   memset(&params, 0, sizeof(params));
+  const ncclMesh_t* srcMesh = src->mesh;
+  const ncclMesh_t* dstMesh = dst->mesh;
+  int ndims = src->ndims;
 
   RESHARD_DEBUG(worldRank, "================================================");
   RESHARD_DEBUG(worldRank, "prepareDirectReshardParams() ENTER");
@@ -904,6 +1119,7 @@ ncclReshardDirectParams prepareDirectReshardParams(
   params.window = window;
   params.elementsPerChunk = elementsPerChunk;
   params.totalCtas = numCtas;
+  params.mySignalBase = mySignalBase;
   params.myWorldRank = worldRank;
   params.ndims = ndims;
 
@@ -913,40 +1129,25 @@ ncclReshardDirectParams prepareDirectReshardParams(
   params.isSource = (worldRank >= srcMesh->startRank && worldRank < srcMesh->startRank + srcMeshSize);
   params.isDest = (worldRank >= dstMesh->startRank && worldRank < dstMesh->startRank + dstMeshSize);
 
-  /* Mesh-level views (shardTensorDim, shardCount, repCount, etc.)
+  /* Mesh-level views (shardLayout, shardCount, repCount, etc.)
    * are identical for every rank in a mesh — compute them once at
    * startRank.  Per-rank fields (meshPos, shardIdx, repIdx) only
    * matter for participating ranks; defer those until isSource /
    * isDest are checked below. */
   ncclReshardMeshGroupInfo fullSrcInfo, fullDstInfo;
-  computeMeshGroupInfo(srcMesh, srcMesh->startRank, &fullSrcInfo);
-  computeMeshGroupInfo(dstMesh, dstMesh->startRank, &fullDstInfo);
+  computeMeshGroupInfo(src, srcMesh->startRank, &fullSrcInfo);
+  computeMeshGroupInfo(dst, dstMesh->startRank, &fullDstInfo);
 
-  params.srcShardTensorDim = fullSrcInfo.shardTensorDim;
-  params.dstShardTensorDim = fullDstInfo.shardTensorDim;
+  params.srcShardLayout = fullSrcInfo.shardLayout;
+  params.dstShardLayout = fullDstInfo.shardLayout;
   params.srcShardCount = fullSrcInfo.shardCount;
   params.dstShardCount = fullDstInfo.shardCount;
 
-  size_t globalDims[MAX_TENSOR_DIMS];
-  for (int d = 0; d < ndims; d++) {
-    if (params.isSource && srcTensorDims != nullptr)
-      if (d == params.srcShardTensorDim) globalDims[d] = srcTensorDims[d] * params.srcShardCount;
-      else globalDims[d] = srcTensorDims[d];
-    else if (params.isDest && dstTensorDims != nullptr)
-      if (d == params.dstShardTensorDim) globalDims[d] = dstTensorDims[d] * params.dstShardCount;
-      else globalDims[d] = dstTensorDims[d];
-    else globalDims[d] = 1;
-  }
+  NCCL_M2N_CHECK(resolveReshardDims(worldRank, srcTensorDims, params.srcShardLayout, dstTensorDims,
+                                    params.dstShardLayout, ndims, params.srcDims, params.dstDims));
 
-  for (int d = 0; d < ndims; d++) {
-    if (d == params.srcShardTensorDim) params.srcDims[d] = globalDims[d] / params.srcShardCount;
-    else params.srcDims[d] = globalDims[d];
-    if (d == params.dstShardTensorDim) params.dstDims[d] = globalDims[d] / params.dstShardCount;
-    else params.dstDims[d] = globalDims[d];
-  }
-
-  computeStrides(params.srcDims, ndims, params.srcStrides);
-  computeStrides(params.dstDims, ndims, params.dstStrides);
+  NCCL_M2N_CHECK(computeStridesChecked(params.srcDims, ndims, params.srcStrides));
+  NCCL_M2N_CHECK(computeStridesChecked(params.dstDims, ndims, params.dstStrides));
 
   /* Per-rank position info — only computed for participating ranks. */
   params.mySrcShardIdx = -1;
@@ -955,12 +1156,12 @@ ncclReshardDirectParams prepareDirectReshardParams(
   params.myDstRepIdx = -1;
   ncclReshardMeshGroupInfo srcInfo{}, dstInfo{};
   if (params.isSource) {
-    computeMeshGroupInfo(srcMesh, worldRank, &srcInfo);
+    computeMeshGroupInfo(src, worldRank, &srcInfo);
     params.mySrcShardIdx = srcInfo.shardIdx;
     params.mySrcRepIdx = srcInfo.repIdx;
   }
   if (params.isDest) {
-    computeMeshGroupInfo(dstMesh, worldRank, &dstInfo);
+    computeMeshGroupInfo(dst, worldRank, &dstInfo);
     params.myDstShardIdx = dstInfo.shardIdx;
     params.myDstRepIdx = dstInfo.repIdx;
   }
@@ -968,14 +1169,13 @@ ncclReshardDirectParams prepareDirectReshardParams(
   int srcRepCount = fullSrcInfo.repCount;
   int dstRepCount = fullDstInfo.repCount;
 
-  int dstGpusPerDomain = (reshardGetDstDomainSize() > 0) ? reshardGetDstDomainSize() : reshardGetGpusPerNode();
-
   ncclReshardRepLoadBalancer lb = {.srcRepCount = srcRepCount,
-                                .dstRepCount = dstRepCount,
-                                .dstGpusPerDomain = dstGpusPerDomain,
-                                .dstRepStartRank = dstMesh->startRank,
-                                .dstRepStride = (fullDstInfo.repMeshDim == 0) ? dstMesh->dims[1] : 1,
-                                .mode = reshardGetLoadBalanceMode()};
+                                   .dstRepCount = dstRepCount,
+                                   .dstGpusPerDomain = dstGpusPerDomain,
+                               .dstRepStartRank = dstMesh->startRank,
+                               .dstRepStride = (fullDstInfo.repMeshDim == 0) ? dstMesh->dims[1] : 1,
+                               .mode = reshardEffectiveLbMode(src, dst),
+                               .domainsPerRep = 1};
 
   RESHARD_DEBUG(worldRank, "  isSource=%d, isDest=%d", params.isSource, params.isDest);
   RESHARD_DEBUG(worldRank, "  srcShardCount=%d, dstShardCount=%d", params.srcShardCount, params.dstShardCount);
@@ -995,26 +1195,21 @@ ncclReshardDirectParams prepareDirectReshardParams(
 
     for (int dstShard = 0; dstShard < params.dstShardCount; dstShard++) {
       ncclReshardTransferPlan plan;
-      computeTransferPlan(params.srcDims, params.srcStrides, params.srcShardTensorDim, params.mySrcShardIdx,
-                          params.dstDims, params.dstStrides, params.dstShardTensorDim, dstShard, ndims,
-                          elementsPerChunk, &plan);
+      NCCL_M2N_CHECK(computeTransferPlanChecked(params.srcDims, params.srcStrides, params.srcShardLayout,
+                                                params.mySrcShardIdx, params.dstDims, params.dstStrides,
+                                                params.dstShardLayout, dstShard, ndims, elementsPerChunk, &plan));
 
       if (plan.totalInnerTransfers == 0) continue;
 
       for (int dstRep = targetRepStart; dstRep < targetRepEnd; dstRep++) {
         if (params.numTargets >= MAX_DIRECT_TARGETS) {
-          RESHARD_FATAL(worldRank,
-                        "prepareDirectReshardParams: target list TRUNCATED at "
-                        "dstShard %d, dstRep %d! "
-                        "numTargets=%d >= MAX_DIRECT_TARGETS=%d. Remaining "
-                        "(dstShard, dstRep) pairs dropped. "
-                        "Some dest ranks will NEVER receive data - kernel "
-                        "WILL HANG. "
-                        "Fix: increase MAX_DIRECT_TARGETS in reshard_limits.h.",
+          NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                        "prepareDirectReshardParams: target list capacity exceeded at dstShard %d, dstRep %d "
+                        "(numTargets=%d >= MAX_DIRECT_TARGETS=%d); increase MAX_DIRECT_TARGETS in reshard_limits.h.",
                         dstShard, dstRep, params.numTargets, MAX_DIRECT_TARGETS);
         }
 
-        int dstRank = getMeshRank(dstMesh, &fullDstInfo, dstShard, dstRep);
+        int dstRank = getMeshRank(dst, &fullDstInfo, dstShard, dstRep);
 
         ncclReshardDirectTargetInfo* target = &params.targets[params.numTargets++];
         target->dstShardIdx = dstShard;
@@ -1026,7 +1221,9 @@ ncclReshardDirectParams prepareDirectReshardParams(
         }
         target->plan = plan;
         target->isContiguous = (plan.totalInnerTransfers == 1);
-        target->totalBytes = plan.totalInnerTransfers * plan.innerSize;
+        NCCL_M2N_CHECK_ARG(m2nCheckedMulSize(plan.totalInnerTransfers, plan.innerSize, &target->totalBytes), worldRank,
+                           "prepareDirectReshardParams: target totalBytes overflow: transfers=%zu innerSize=%zu",
+                           plan.totalInnerTransfers, plan.innerSize);
         target->windowOffset = (allWindowOffsets != nullptr) ? allWindowOffsets[dstRank] : 0;
 
         RESHARD_TRACE(worldRank,
@@ -1051,31 +1248,28 @@ ncclReshardDirectParams prepareDirectReshardParams(
 
     for (int srcShard = 0; srcShard < params.srcShardCount; srcShard++) {
       ncclReshardTransferPlan plan;
-      computeTransferPlan(params.srcDims, params.srcStrides, params.srcShardTensorDim, srcShard, params.dstDims,
-                          params.dstStrides, params.dstShardTensorDim, params.myDstShardIdx, ndims, elementsPerChunk,
-                          &plan);
+      NCCL_M2N_CHECK(computeTransferPlanChecked(params.srcDims, params.srcStrides, params.srcShardLayout, srcShard,
+                                                params.dstDims, params.dstStrides, params.dstShardLayout,
+                                                params.myDstShardIdx, ndims, elementsPerChunk, &plan));
 
       if (plan.totalInnerTransfers == 0) continue;
 
       if (params.numSources >= MAX_DIRECT_SOURCES) {
-        RESHARD_FATAL(worldRank,
-                      "prepareDirectReshardParams: source list TRUNCATED at "
-                      "srcShard %d! "
-                      "numSources=%d >= MAX_DIRECT_SOURCES=%d. Remaining "
-                      "sources dropped. "
-                      "Dest rank will wait for data that never arrives - kernel "
-                      "WILL HANG. "
-                      "Fix: increase MAX_DIRECT_SOURCES in reshard_limits.h.",
+        NCCL_M2N_FAIL(ncclInvalidArgument, worldRank,
+                      "prepareDirectReshardParams: source list capacity exceeded at srcShard %d "
+                      "(numSources=%d >= MAX_DIRECT_SOURCES=%d); increase MAX_DIRECT_SOURCES in reshard_limits.h.",
                       srcShard, params.numSources, MAX_DIRECT_SOURCES);
       }
 
-      int srcRank = getMeshRank(srcMesh, &fullSrcInfo, srcShard, sourceRep);
+      int srcRank = getMeshRank(src, &fullSrcInfo, srcShard, sourceRep);
 
       ncclReshardDirectSourceInfo* source = &params.sources[params.numSources++];
-      source->signalBase = srcRank * numCtas;
+      source->signalBase = computeReshardSignalBaseUnchecked(srcMesh, srcRank, numCtas);
       source->plan = plan;
       source->isContiguous = (plan.totalInnerTransfers == 1);
-      source->totalBytes = plan.totalInnerTransfers * plan.innerSize;
+      NCCL_M2N_CHECK_ARG(m2nCheckedMulSize(plan.totalInnerTransfers, plan.innerSize, &source->totalBytes), worldRank,
+                         "prepareDirectReshardParams: source totalBytes overflow: transfers=%zu innerSize=%zu",
+                         plan.totalInnerTransfers, plan.innerSize);
 
       RESHARD_TRACE(worldRank,
                     "  source[%d]: srcShard=%d, srcRep=%d, "
@@ -1089,5 +1283,6 @@ ncclReshardDirectParams prepareDirectReshardParams(
   RESHARD_DEBUG(worldRank, "prepareDirectReshardParams() EXIT");
   RESHARD_DEBUG(worldRank, "================================================");
 
-  return params;
+  *outParams = params;
+  return ncclSuccess;
 }

@@ -1,0 +1,21 @@
+{
+    "_comment": "Four-rank non-TP4 diagnostic: one trainer TP2 replica transfers to one generator TP2 replica.",
+    "train": {
+        "num_gpus": 2,
+        "tp_size": 2,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 1
+    },
+    "generation": {
+        "num_gpus": 2,
+        "tp_size": 2,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 1
+    }
+}

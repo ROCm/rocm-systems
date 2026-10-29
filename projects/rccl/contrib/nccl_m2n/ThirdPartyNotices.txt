@@ -4,19 +4,19 @@ This package bundles third-party software under the licenses reproduced below.
 
 
 ==============================================================================
-JSON for Modern C++ is under the MIT License (Copyright (c) 2013-2023 Niels Lohmann):
+JSON for Modern C++ is under the MIT License (Copyright (c) 2013-2025 Niels Lohmann):
 ==============================================================================
 
 JSON for Modern C++ (https://github.com/nlohmann/json) - MIT License
 
   Bundled at: third_party/nlohmann/json.hpp
-  Version:    3.11.3
+  Version:    3.12.0
   Used by:    benchmarks/reshard_model_bench.cu for parsing model
               and system configuration JSON files.
 
 MIT License
 
-Copyright (c) 2013-2023 Niels Lohmann <https://nlohmann.me>
+Copyright (c) 2013-2025 Niels Lohmann <https://nlohmann.me>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

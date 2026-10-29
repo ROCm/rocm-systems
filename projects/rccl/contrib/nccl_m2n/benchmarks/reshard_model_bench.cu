@@ -22,7 +22,7 @@
  *   - Groups per-expert 2D tensors into combined 3D expert tensors
  *   - Deduplicates across layers (keeps one representative per pattern)
  *   - PP-aware: one NCCL communicator per (train_stage, gen_stage) pair
- *   - User-window API: one ncclWindow_t per PP comm, pre-registered
+ *   - Compatibility API coverage with pre-registered caller windows
  *   - Per-pattern and aggregate bandwidth / latency reporting
  *
  * Grid order (innermost to outermost): TP -> CP -> EP -> DP -> PP
@@ -438,9 +438,13 @@ static std::map<std::string, ParamInfo> deduplicateParamsPP(
 }
 
 // ============================================================================
-// ncclMesh_t Construction from Placements
+// ncclMesh_t / ncclDistTensor_t Construction from Placements
 //
-// The ncclReshardWithWindow API takes a 2D mesh: dims[2], startRank, placement[2].
+// The ncclReshard API splits topology (mesh) from per-tensor placements:
+//   ncclMesh_t       :  ndims, dims pointer, startRank
+//   ncclDistTensor_t :  ..., placements pointer (mesh.ndims entries)
+//
+// Convention used here:
 //   dims[0] = replicated count (product of non-sharding mesh axes)
 //   dims[1] = shard count     (mesh axis that shards the tensor)
 //   placement[0] = REPLICATE
@@ -514,10 +518,21 @@ static void printUsage(const char* prog) {
   printf("  --iterations <N>        Timed iterations (default: 10)\n");
   printf("  --warmup <N>            Warmup iterations (default: 2)\n");
   printf("  --gpus-per-node <N>     GPUs per node (default: 8)\n");
-  printf("  --algorithm <auto|ring|direct>  Reshard algorithm (default: "
-         "auto)\n");
-  printf("  --lb-mode <uniform|node>        Load balance mode (default: "
-         "uniform)\n");
+  printf("  --algorithm <auto|ring|direct>  Legacy compatibility setting "
+         "(default: auto)\n");
+  printf("  --api <window|default>             Public API to drive (default: "
+         "default).\n");
+  printf("                                  'default' uses ncclReshard with "
+         "cudaMalloc'd\n");
+  printf("                                  buffers; window registration is "
+         "skipped.\n");
+  printf("                                  'window' calls ncclReshardWithWindow with\n");
+  printf("                                  caller-window setup.\n");
+  printf("  --copy-algorithm <a>            Advanced staging override: "
+         "'pack',\n");
+  printf("                                  'pipe', or 'direct' (default: pack).\n");
+  printf("  --lb-mode <node|uniform>        Load balance mode (default: "
+         "node)\n");
   printf("  --no-dedup              Disable param deduplication\n");
   printf("  --validate              Validate correctness after warmup\n");
   printf("  --validate-iterations <N>  Validation iterations (default: 3)\n");
@@ -543,41 +558,55 @@ int main(int argc, char* argv[]) {
   int validateIterations = 3;
   bool verbose = false;
   const char* algorithm = "AUTO";
-  const char* lbMode = "UNIFORM";
+  const char* lbMode = "NODE_AWARE";
+  ReshardApiMode apiMode = ReshardApiMode::Default;
+  const char* copyAlgorithm = nullptr;
 
-  for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--model-config") == 0) {
-      modelConfigPath = argv[++i];
-    } else if (strcmp(argv[i], "--system-config") == 0) {
-      systemConfigPath = argv[++i];
-    } else if (strcmp(argv[i], "--iterations") == 0) {
-      iterations = benchParseInt(argv[++i], "--iterations");
-    } else if (strcmp(argv[i], "--warmup") == 0) {
-      warmup = benchParseInt(argv[++i], "--warmup");
-    } else if (strcmp(argv[i], "--gpus-per-node") == 0) {
-      gpusPerNode = benchParseInt(argv[++i], "--gpus-per-node");
-    } else if (strcmp(argv[i], "--no-dedup") == 0) {
-      deduplicate = false;
-    } else if (strcmp(argv[i], "--validate") == 0) {
-      validate = true;
-    } else if (strcmp(argv[i], "--validate-iterations") == 0) {
-      validateIterations = benchParseInt(argv[++i], "--validate-iterations");
-    } else if (strcmp(argv[i], "--verbose") == 0) {
-      verbose = true;
-    } else if (strcmp(argv[i], "--algorithm") == 0) {
-      ++i;
-      if (strcmp(argv[i], "direct") == 0) algorithm = "DIRECT";
-      else if (strcmp(argv[i], "ring") == 0) algorithm = "RING";
-      else algorithm = "AUTO";
-    } else if (strcmp(argv[i], "--lb-mode") == 0) {
-      ++i;
-      if (strcmp(argv[i], "node") == 0) lbMode = "NODE_AWARE";
-    } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-      if (mpiRank == 0) printUsage(argv[0]);
-      MPI_Finalize();
-      return 0;
-    }
+  auto parseModelConfig = [&](const char* value) {
+    modelConfigPath = value;
+    return BenchParseResult::Success;
+  };
+
+  auto parseSystemConfig = [&](const char* value) {
+    systemConfigPath = value;
+    return BenchParseResult::Success;
+  };
+
+  BenchArgParser parser(argc, argv, mpiRank);
+  parser.value("--model-config", parseModelConfig)
+      .value("--system-config", parseSystemConfig)
+      .integer("--iterations", "--iterations", &iterations)
+      .integer("--warmup", "--warmup", &warmup)
+      .integer("--gpus-per-node", "--gpus-per-node", &gpusPerNode)
+      .flag("--no-dedup", [&] { deduplicate = false; })
+      .flag("--validate", [&] { validate = true; })
+      .integer("--validate-iterations", "--validate-iterations", &validateIterations)
+      .flag("--verbose", [&] { verbose = true; })
+      .enumValue("--algorithm", &algorithm, {{"auto", "AUTO"}, {"direct", "DIRECT"}, {"ring", "RING"}},
+          "ERROR: unknown --algorithm '%s' (use 'auto', 'ring', or 'direct')\n")
+      .apiMode("--api", &apiMode)
+      .enumValue("--copy-algorithm", &copyAlgorithm,
+          {{"direct", "DIRECT"}, {"pack", "PACK"}, {"pipe", "PIPE"}},
+          "ERROR: unknown --copy-algorithm '%s' (use 'direct', 'pack', or 'pipe')\n")
+      .enumValue("--lb-mode", &lbMode, {{"node", "NODE_AWARE"}, {"uniform", "UNIFORM"}},
+          "ERROR: unknown --lb-mode '%s' (use 'uniform' or 'node')\n")
+      .help(printUsage);
+
+  int parseExit = benchParseExitCode(parser.parse());
+  if (parseExit >= 0) {
+    return parseExit;
   }
+
+  if (iterations <= 0 || warmup < 0 || gpusPerNode <= 0 || validateIterations <= 0) {
+    if (mpiRank == 0) {
+      printf("ERROR: --iterations > 0, --warmup >= 0, --gpus-per-node > 0, "
+             "--validate-iterations > 0 are required\n");
+    }
+    MPI_Finalize();
+    return 1;
+  }
+
+  benchConfigureCopyAlgorithm(copyAlgorithm);
 
   if (modelConfigPath.empty() || systemConfigPath.empty()) {
     if (mpiRank == 0) {
@@ -712,7 +741,8 @@ int main(int argc, char* argv[]) {
   if (verbose) benchSetEnv("NCCL_RESHARD_LOG_LEVEL", "DEBUG");
   benchSetEnv("NCCL_RESHARD_ALGORITHM", algorithm);
   benchSetEnv("NCCL_RESHARD_LB_MODE", lbMode);
-  NCCLCHECK(ncclM2nInit(NULL));
+  ncclM2nHandle_t m2nHandle = nullptr;
+  NCCLCHECK(ncclM2nInit(&m2nHandle, NULL));
 
   // ========================================================================
   // Print configuration
@@ -737,7 +767,13 @@ int main(int argc, char* argv[]) {
            genCfg.tp, genCfg.cp, genCfg.ep, genCfg.dp, genCfg.pp, genNumGpus, genStageSize);
     printf("Layers: %d, Params (after grouping+dedup): %zu (%d skipped)\n", numLayers, allTransfers.size(), skipped);
     printf("PP comm pairs: %zu\n", ppCommPairs.size());
-    printf("Algorithm: %s, LB Mode: %s\n", algorithm, lbMode);
+    if (apiMode == ReshardApiMode::Default) {
+      printf("API: default (ncclReshard, copy-algorithm=%s)\n", benchResolvedCopyAlgorithm());
+    } else {
+      printf("API: window entry point (ncclReshardWithWindow, copy-algorithm=%s)\n",
+             benchResolvedCopyAlgorithm());
+    }
+    printf("Algorithm setting (compatibility): %s, LB Mode: %s\n", algorithm, lbMode);
     printf("Iterations: %d (warmup: %d), Validate: %s (iters: %d), Dedup: "
            "%s\n",
            iterations, warmup, validate ? "yes" : "no", validateIterations, deduplicate ? "yes" : "no");
@@ -810,12 +846,13 @@ int main(int argc, char* argv[]) {
   }
 
   // ========================================================================
-  // Allocate per-param buffers + register windows
+  // Allocate per-param buffers + compatibility-mode windows
   //
-  // Each transfer descriptor gets its own buffer and window so that
-  // multiple params in the same pattern group can be in flight without
-  // overwriting each other.  Streams remain one-per-PP-comm (NCCL ops
-  // on the same communicator serialize anyway).
+  // Each transfer descriptor gets its own buffer so that multiple params in
+  // the same pattern group can be in flight without overwriting each other.
+  // Compatibility mode also retains the old caller-window setup, although the
+  // library ignores it. Streams remain one-per-PP-comm (NCCL ops on the same
+  // communicator serialize anyway).
   // ========================================================================
   struct TransferBufferEntry {
     void* buffer = nullptr;
@@ -835,9 +872,16 @@ int main(int argc, char* argv[]) {
 
     TransferBufferEntry& tbe = transferBuffers[i];
     tbe.allocSize = bufSize;
-    NCCLCHECK(ncclMemAlloc(&tbe.buffer, bufSize));
-    CUDACHECK(cudaMemset(tbe.buffer, 0, bufSize));
-    NCCLCHECK(ncclCommWindowRegister(commEntry.comm, tbe.buffer, bufSize, &tbe.window, NCCL_WIN_COLL_SYMMETRIC));
+    if (apiMode == ReshardApiMode::Default) {
+      CUDACHECK(cudaMalloc(&tbe.buffer, bufSize));
+      CUDACHECK(cudaMemset(tbe.buffer, 0, bufSize));
+    } else {
+      NCCLCHECK(ncclMemAlloc(&tbe.buffer, bufSize));
+      CUDACHECK(cudaMemset(tbe.buffer, 0, bufSize));
+      NCCLCHECK(benchWaitCommReady(commEntry.comm));
+      NCCLCHECK(ncclCommWindowRegister(commEntry.comm, tbe.buffer, bufSize, &tbe.window,
+                                                   NCCL_WIN_COLL_SYMMETRIC));
+    }
 
     if (verbose) {
       printf("[Rank %d] buffer registered: param=%s comm=(%d,%d) size=%zu\n", mpiRank, td.paramName.c_str(), key.first,
@@ -864,6 +908,13 @@ int main(int argc, char* argv[]) {
     pg.transferIndices.push_back(i);
   }
 
+  // Finish registration before transfers read the window handles.
+  if (apiMode == ReshardApiMode::Window) {
+    for (auto& [key, entry] : ppComms) {
+      if (entry.participates) NCCLCHECK(benchWaitCommReady(entry.comm));
+    }
+  }
+
   // ========================================================================
   // Run a single transfer
   // ========================================================================
@@ -877,41 +928,53 @@ int main(int argc, char* argv[]) {
     void* buffer = tbe.buffer;
     ncclWindow_t win = tbe.window;
 
-    ncclMesh_t srcMesh;
-    srcMesh.dims[0] = td.srcMesh.repCount;
-    srcMesh.dims[1] = td.srcMesh.shardCount;
+    int srcMeshDims[] = {td.srcMesh.repCount, td.srcMesh.shardCount};
+    ncclMesh_t srcMesh = NCCL_M2N_MESH_INITIALIZER;
+    srcMesh.ndims = 2;
+    srcMesh.dims = srcMeshDims;
     srcMesh.startRank = 0;
-    srcMesh.placement[0] = NCCL_RESHARD_REPLICATE;
-    srcMesh.placement[1] =
-      (td.srcMesh.shardTensorDim >= 0) ? NCCL_RESHARD_SHARD(td.srcMesh.shardTensorDim) : NCCL_RESHARD_REPLICATE;
 
-    ncclMesh_t dstMesh;
-    dstMesh.dims[0] = td.dstMesh.repCount;
-    dstMesh.dims[1] = td.dstMesh.shardCount;
+    int dstMeshDims[] = {td.dstMesh.repCount, td.dstMesh.shardCount};
+    ncclMesh_t dstMesh = NCCL_M2N_MESH_INITIALIZER;
+    dstMesh.ndims = 2;
+    dstMesh.dims = dstMeshDims;
     dstMesh.startRank = trainStageSize;
-    dstMesh.placement[0] = NCCL_RESHARD_REPLICATE;
-    dstMesh.placement[1] =
-      (td.dstMesh.shardTensorDim >= 0) ? NCCL_RESHARD_SHARD(td.dstMesh.shardTensorDim) : NCCL_RESHARD_REPLICATE;
 
     bool rankIsTrainInComm = (commIt->second.localRank < trainStageSize);
 
-    ncclDistTensor_t srcTensor = {};
+    int srcPlacements[] = {
+      NCCL_RESHARD_REPLICATE,
+      (td.srcMesh.shardTensorDim >= 0) ? NCCL_RESHARD_SHARD(td.srcMesh.shardTensorDim) : NCCL_RESHARD_REPLICATE,
+    };
+    size_t srcLocalShape[NCCL_RESHARD_MAX_TENSOR_DIMS] = {};
+    ncclDistTensor_t srcTensor = NCCL_M2N_DIST_TENSOR_INITIALIZER;
     srcTensor.dataPtr = rankIsTrainInComm ? buffer : nullptr;
+    srcTensor.localShape = srcLocalShape;
     srcTensor.ndims = td.ndims;
     srcTensor.dtype = getNcclDtype(td.param.dtype);
     srcTensor.mesh = &srcMesh;
-    if (rankIsTrainInComm)
-      for (int d = 0; d < td.ndims; d++) srcTensor.localShape[d] = td.srcLocalShape[d];
+    srcTensor.placements = srcPlacements;
+    for (int d = 0; d < td.ndims; d++) srcTensor.localShape[d] = td.srcLocalShape[d];
 
-    ncclDistTensor_t dstTensor = {};
+    int dstPlacements[] = {
+      NCCL_RESHARD_REPLICATE,
+      (td.dstMesh.shardTensorDim >= 0) ? NCCL_RESHARD_SHARD(td.dstMesh.shardTensorDim) : NCCL_RESHARD_REPLICATE,
+    };
+    size_t dstLocalShape[NCCL_RESHARD_MAX_TENSOR_DIMS] = {};
+    ncclDistTensor_t dstTensor = NCCL_M2N_DIST_TENSOR_INITIALIZER;
     dstTensor.dataPtr = rankIsTrainInComm ? nullptr : buffer;
+    dstTensor.localShape = dstLocalShape;
     dstTensor.ndims = td.ndims;
     dstTensor.dtype = getNcclDtype(td.param.dtype);
     dstTensor.mesh = &dstMesh;
-    if (!rankIsTrainInComm)
-      for (int d = 0; d < td.ndims; d++) dstTensor.localShape[d] = td.dstLocalShape[d];
+    dstTensor.placements = dstPlacements;
+    for (int d = 0; d < td.ndims; d++) dstTensor.localShape[d] = td.dstLocalShape[d];
 
-    NCCLCHECK(ncclReshardWithWindow(comm, win, &srcTensor, &dstTensor, stream));
+    if (apiMode == ReshardApiMode::Default) {
+      NCCLCHECK(ncclReshard(m2nHandle, comm, &srcTensor, &dstTensor, stream));
+    } else {
+      NCCLCHECK(ncclReshardWithWindow(m2nHandle, comm, win, &srcTensor, &dstTensor, stream));
+    }
   };
 
   auto syncAllStreams = [&]() {
@@ -1237,20 +1300,42 @@ int main(int argc, char* argv[]) {
   // ========================================================================
   // Cleanup
   // ========================================================================
-  ncclM2nFinalize();
+  for (auto& [key, entry] : ppComms) {
+    if (entry.participates) CUDACHECK(cudaStreamSynchronize(entry.stream));
+  }
+  NCCLCHECK(ncclM2nFinalize(m2nHandle));
 
-  for (size_t i = 0; i < allTransfers.size(); i++) {
-    auto& tbe = transferBuffers[i];
+  if (apiMode == ReshardApiMode::Window) {
+    for (size_t i = 0; i < allTransfers.size(); i++) {
+      auto& tbe = transferBuffers[i];
+      if (!tbe.buffer) continue;
+      auto key = std::make_pair(allTransfers[i].trainStage, allTransfers[i].genStage);
+      auto commIt = ppComms.find(key);
+      if (commIt != ppComms.end() && commIt->second.comm) {
+        NCCLCHECK(benchWaitCommReady(commIt->second.comm));
+        NCCLCHECK(ncclCommWindowDeregister(commIt->second.comm, tbe.window));
+      }
+    }
+    // Complete deregistration before releasing the buffers.
+    for (auto& [key, entry] : ppComms) {
+      if (entry.participates) NCCLCHECK(benchWaitCommReady(entry.comm));
+    }
+  }
+  for (auto& tbe : transferBuffers) {
     if (!tbe.buffer) continue;
-    auto key = std::make_pair(allTransfers[i].trainStage, allTransfers[i].genStage);
-    auto commIt = ppComms.find(key);
-    if (commIt != ppComms.end() && commIt->second.comm) ncclCommWindowDeregister(commIt->second.comm, tbe.window);
-    NCCLCHECK(ncclMemFree(tbe.buffer));
+    if (apiMode == ReshardApiMode::Default) {
+      CUDACHECK(cudaFree(tbe.buffer));
+    } else {
+      NCCLCHECK(ncclMemFree(tbe.buffer));
+    }
   }
 
   for (auto& [key, entry] : ppComms) {
     if (entry.stream) CUDACHECK(cudaStreamDestroy(entry.stream));
-    if (entry.comm) ncclCommDestroy(entry.comm);
+    if (entry.comm) {
+      NCCLCHECK(benchWaitCommReady(entry.comm));
+      NCCLCHECK(ncclCommDestroy(entry.comm));
+    }
   }
 
   MPICHECK(MPI_Finalize());
