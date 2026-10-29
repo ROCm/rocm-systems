@@ -6,14 +6,11 @@
 #include "database_backend.hpp"
 #include "debug.hpp"
 #include "directory.hpp"
+#include "embedded_schema.hpp"
 #include "profiler-hub/version.hpp"
-#include "schema_catalog.hpp"
 
-#include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <regex>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -22,6 +19,15 @@
 namespace
 {
 
+using rocpd::data_storage::schema::embedded_schema_t;
+using rocpd::data_storage::schema::find_embedded_schema;
+using rocpd::data_storage::schema::k_embedded_schemas;
+
+/**
+ * Creates the parent directory of `db_file` when it does not already exist.
+ * Called for a new database path, before the file itself is opened. An existing
+ * directory is left unchanged.
+ */
 [[maybe_unused]] void
 create_directory_for_database_file(const std::string& db_file)
 {
@@ -34,7 +40,8 @@ create_directory_for_database_file(const std::string& db_file)
 
 /**
  * Substitutes the {{uuid}}, {{schema_version}}, etc. placeholders in `schema_content`
- * (a compiled-in SQL constant from schema_catalog.hpp) with their actual runtime values.
+ * (a compiled-in SQL constant from the versions.yml headers) with their actual runtime
+ * values.
  * @return The finished query string, or empty if `schema_content` is null.
  */
 [[maybe_unused]] std::string
@@ -72,11 +79,50 @@ get_schema_query(const char*                    schema_content,
     return query_str;
 }
 
+/**
+ * Selects the embedded RocPD schema for `schema_version`.
+ * A concrete version is looked up by "MAJOR.MINOR.PATCH". version_t{} (all zero)
+ * selects the highest major.minor.patch in k_embedded_schemas.
+ * @return The matching catalog row, or nullptr when the version is not embedded.
+ */
+[[maybe_unused]] const embedded_schema_t*
+resolve_embedded_schema(const profiler_hub::version_t& schema_version)
+{
+    if(!schema_version.is_latest())
+    {
+        return find_embedded_schema(schema_version.to_string());
+    }
+    // version_t{} selects the highest major.minor.patch in k_embedded_schemas.
+    const embedded_schema_t* newest_schema = nullptr;
+    for(const auto& schema : k_embedded_schemas)
+    {
+        const profiler_hub::version_t embedded_version{ schema.major,
+                                                        schema.minor,
+                                                        schema.patch };
+        if(newest_schema == nullptr ||
+           profiler_hub::version_t{ newest_schema->major,
+                                    newest_schema->minor,
+                                    newest_schema->patch } < embedded_version)
+        {
+            newest_schema = &schema;
+        }
+    }
+    return newest_schema;
+}
+
 }  // namespace
 
 namespace profiler_hub::data_storage
 {
 
+/**
+ * Factory for a backend owned by `shared_ptr`.
+ * The constructor opens `db_path` in `mode`. When that file already exists, the
+ * backend is treated as initialized and, if it contains exactly one RocPD uuid,
+ * that uuid replaces `uuid`. Uuid discovery uses `shared_from_this()`, so it runs
+ * only after this `shared_ptr` exists.
+ * @return The open backend.
+ */
 template <typename SqlitePolicy>
 std::shared_ptr<database_backend<SqlitePolicy>>
 database_backend<SqlitePolicy>::create(std::string    db_path,
@@ -102,6 +148,13 @@ database_backend<SqlitePolicy>::create(std::string    db_path,
     return backend;
 }
 
+/**
+ * Opens the connection for `db_path`.
+ * An existing file is opened on disk and marked initialized, because its schema is
+ * already present. A new path gets its parent directory created, then the connection
+ * is opened in memory or on disk according to `mode`. BEGIN, COMMIT, and ROLLBACK
+ * are prepared for later transactions.
+ */
 template <typename SqlitePolicy>
 database_backend<SqlitePolicy>::database_backend(std::string    db_path,
                                                  std::string    uuid,
@@ -147,6 +200,9 @@ database_backend<SqlitePolicy>::database_backend(std::string    db_path,
     LOG_INFO("profiler_hub database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
 }
 
+/**
+ * Finalizes the prepared transaction statements and closes the connection.
+ */
 template <typename SqlitePolicy>
 database_backend<SqlitePolicy>::~database_backend()
 {
@@ -156,6 +212,12 @@ database_backend<SqlitePolicy>::~database_backend()
     SqlitePolicy::close(m_sqlite3);
 }
 
+/**
+ * Reads the distinct RocPD uuids from table names in sqlite_master.
+ * Names look like `rocpd_<table>_<uuid>`; the query returns the text after the last
+ * underscore.
+ * @return One entry per distinct uuid. Empty when the database has no rocpd tables.
+ */
 template <typename SqlitePolicy>
 std::vector<std::string>
 database_backend<SqlitePolicy>::discover_uuids()
@@ -182,8 +244,11 @@ database_backend<SqlitePolicy>::discover_uuids()
 }
 
 /**
- * Creates the rocpd schema for `schema_version` (or the latest available version,
- * if version_t{}) and marks the database as initialized.
+ * Creates the RocPD schema for `schema_version` and marks the database initialized.
+ * version_t{} (all zero) uses the newest embedded schema. An already-initialized
+ * database logs a warning and returns. Tables, indexes, views, data views, summary
+ * views, and metadata are executed in that order, with uuid and version placeholders
+ * filled in. An unknown version throws.
  */
 template <typename SqlitePolicy>
 void
@@ -195,35 +260,21 @@ database_backend<SqlitePolicy>::initialize_schema(profiler_hub::version_t schema
         return;
     }
 
-    // known_schema_versions() caches its table in a function-local static, so every
-    // subsequent initialize_schema() call (e.g. across versions/instances) reuses it
-    // instead of rebuilding it.
-    const auto& versions = known_schema_versions();
-
-    // version_t{} (all-zero) means "use whatever is the latest compiled-in version".
-    profiler_hub::version_t resolved_version = schema_version;
-    if(schema_version.is_latest())
-    {
-        for(const auto& entry : versions)
-        {
-            if(resolved_version.is_latest() || resolved_version < entry.version)
-            {
-                resolved_version = entry.version;
-            }
-        }
-    }
-
-    const auto version_it = std::find_if(
-        versions.begin(), versions.end(), [&resolved_version](const auto& entry) {
-            return entry.version == resolved_version;
-        });
-    if(version_it == versions.end())
+    // version_t{} (all-zero) means the newest entry generated from versions.yml.
+    const auto* schema = resolve_embedded_schema(schema_version);
+    if(schema == nullptr)
     {
         throw std::runtime_error("Unsupported rocpd schema version requested: " +
                                  schema_version.to_string());
     }
 
-    for(const char* schema_content : version_it->sql)
+    const profiler_hub::version_t resolved_version{ schema->major,
+                                                    schema->minor,
+                                                    schema->patch };
+    const char* schema_parts[] = { schema->tables,        schema->indexes,
+                                   schema->views,         schema->data_views,
+                                   schema->summary_views, schema->metadata };
+    for(const char* schema_content : schema_parts)
     {
         // A missing schema here means a broken build, so stop instead of a partial DB.
         if(schema_content == nullptr)
@@ -246,6 +297,10 @@ database_backend<SqlitePolicy>::initialize_schema(profiler_hub::version_t schema
     m_initialized = true;
 }
 
+/**
+ * Runs `query` on the open connection.
+ * Throws when SQLite reports an error.
+ */
 template <typename SqlitePolicy>
 void
 database_backend<SqlitePolicy>::execute(const std::string& query)
@@ -254,6 +309,10 @@ database_backend<SqlitePolicy>::execute(const std::string& query)
         SqlitePolicy::exec(m_sqlite3, query.c_str()), "Failed to execute query:", query);
 }
 
+/**
+ * Copies an in-memory database onto `m_db_path`.
+ * On-disk backends log a warning and return. A second flush of the same backend throws.
+ */
 template <typename SqlitePolicy>
 void
 database_backend<SqlitePolicy>::flush()

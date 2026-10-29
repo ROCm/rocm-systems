@@ -1,0 +1,10 @@
+// Auto-generated from versions.yml. Do not edit.
+#pragma once
+
+@ROCPD_REGISTRY_INCLUDES@
+namespace rocpd::data_storage::schema {
+
+inline constexpr embedded_schema_t k_embedded_schemas[] = {
+@ROCPD_REGISTRY_ENTRIES@};
+
+}  // namespace rocpd::data_storage::schema
