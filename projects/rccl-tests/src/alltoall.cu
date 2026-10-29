@@ -20,11 +20,9 @@
 // Hierarchical alltoall (-D 5): one DevComm per GIN backend on the same communicator.
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,29,2) && defined(NCCL_OS_LINUX)
 #define ALLTOALL_HIER_GIN 1
+#include "alltoall_hier_policy.h"
 enum { hierSdmaDevComm = 0, hierNetDevComm = 1, hierDevCommCount = 2 };
 static_assert(hierDevCommCount <= testMaxDevComms, "raise testMaxDevComms");
-
-// CTAs [0, hierNetCtaCount) drive the network DevComm; the rest drive Anvil SDMA.
-__host__ __device__ inline int hierNetCtaCount(int nCtas) { return nCtas / 2; }
 
 // RCCL_TESTS_A2A_HIER_GROUP_SIZE=g splits the LSA team into groups of g consecutive
 // ranks and sends to LSA peers in another group over the network DevComm, so a
@@ -231,7 +229,7 @@ testResult_t AlltoAllGetMultiDevCommRequirements(int deviceImpl, ncclDevCommRequ
   TESTCHECK(testCheckGinBackendCompiled((ncclGinType_t)netType));
 #endif
 
-  const int netCtas = hierNetCtaCount(deviceCtaCount);
+  const int netCtas = alltoall_hier::netCtaCount(deviceCtaCount);
   const int sdmaCtas = deviceCtaCount - netCtas;
 
   ncclDevCommRequirements* sdma = &reqs[hierSdmaDevComm];
@@ -554,14 +552,6 @@ __global__ void HybridAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffse
 #endif
 
 #ifdef ALLTOALL_HIER_GIN
-// Peers outside the LSA team use the network DevComm; with groupSize > 0, so do
-// LSA peers outside this rank's group. The relation is symmetric, so both ends of
-// a pair use the same DevComm and agree on how many puts each receiver counts.
-__device__ inline bool hierPeerUsesNet(int peer, int rank, int lsaBase, int lsaSize, int groupSize) {
-  if (peer < lsaBase || peer >= lsaBase + lsaSize) return true;
-  return groupSize > 0 && (peer - lsaBase) / groupSize != (rank - lsaBase) / groupSize;
-}
-
 // Each CTA signals its own index, and the barriers are per CTA index. Every put to
 // a given rank comes from the same CTA index on all senders, so the receiving CTA
 // with that index reads signalBase before its barrier admits any of those puts.
@@ -573,7 +563,7 @@ __device__ void hierPutWait(ncclGin& gin, ncclTeam world, bool net, int lsaBase,
   int tid = threadIdx.x + groupCta * blockDim.x;
   int nthreads = blockDim.x * groupCtas;
   for (int r = tid; r < world.nRanks; r += nthreads) {
-    if (hierPeerUsesNet(r, world.rank, lsaBase, lsaSize, groupSize) != net) continue;
+    if (alltoall_hier::peerUsesNet(r, world.rank, lsaBase, lsaSize, groupSize) != net) continue;
     gin.put(world, r,
         recvwin, recvoffset + world.rank * size,
         sendwin, sendoffset + r * size,
@@ -586,13 +576,13 @@ __device__ void hierPutWait(ncclGin& gin, ncclTeam world, bool net, int lsaBase,
   gin.flush(ncclCoopCta());
 }
 
-// Hierarchical alltoall: CTAs [0, hierNetCtaCount) put to network peers on
+// Hierarchical alltoall: CTAs [0, netCtaCount) put to network peers on
 // netComm and synchronize with a world barrier; the remaining CTAs put to LSA
 // peers on sdmaComm (Anvil SDMA) and synchronize with an LSA barrier.
 template <typename T>
 __device__ void hierAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count,
                                  struct ncclDevComm const& sdmaComm, struct ncclDevComm const& netComm, int groupSize) {
-  const int netCtas = hierNetCtaCount(gridDim.x);
+  const int netCtas = alltoall_hier::netCtaCount(gridDim.x);
   const bool net = blockIdx.x < netCtas;
   struct ncclDevComm const& devComm = net ? netComm : sdmaComm;
   const int groupCta = net ? blockIdx.x : blockIdx.x - netCtas;
@@ -601,9 +591,7 @@ __device__ void hierAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
   ncclTeam world = ncclTeamWorld(devComm);
   ncclTeam lsa = ncclTeamLsa(devComm);
   const int lsaBase = world.rank - lsa.rank;
-  int lsaPeers = lsa.nRanks;  // includes this rank
-  if (groupSize > 0) lsaPeers = min(groupSize, lsa.nRanks - lsa.rank / groupSize * groupSize);
-  const int nPeers = net ? world.nRanks - lsaPeers : lsaPeers;
+  const int nPeers = alltoall_hier::peerCount(net, world.rank, world.nRanks, lsaBase, lsa.nRanks, groupSize);
 
   ncclGin gin { devComm, 0 };
   const uint64_t signalBase = gin.readSignal(groupCta);

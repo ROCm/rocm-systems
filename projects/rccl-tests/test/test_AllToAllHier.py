@@ -30,7 +30,8 @@
 # Opt-in: set RCCL_TESTS_GIN_HIER_A2A=1 on a node with a GIN-capable RCCL built
 # with ENABLE_ROCSHMEM_GIN. Uses the same RCCL_TESTS_A2A_* / RCCL_TESTS_MPI_*
 # variables as test_AllToAll.py. A run that prints "# SKIP" (a backend is not
-# active) is reported as a pytest skip.
+# active) fails, because opting in asserts both backends are available; set
+# RCCL_TESTS_A2A_HIER_ALLOW_SKIP=1 to report it as a pytest skip instead.
 
 import os
 import shlex
@@ -54,12 +55,9 @@ executable = os.environ.get(
     "RCCL_TESTS_A2A_EXE", os.path.join(path, "..", "build", "alltoall_perf")
 )
 
-_enabled = os.environ.get("RCCL_TESTS_GIN_HIER_A2A", "") not in (
-    "",
-    "0",
-    "false",
-    "False",
-)
+_FALSE_VALUES = ("", "0", "false", "False")
+_enabled = os.environ.get("RCCL_TESTS_GIN_HIER_A2A", "") not in _FALSE_VALUES
+ALLOW_SKIP = os.environ.get("RCCL_TESTS_A2A_HIER_ALLOW_SKIP", "") not in _FALSE_VALUES
 
 NP = env_int("RCCL_TESTS_A2A_NP", 0) or (detect_ngpus() if _enabled else 0)
 LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
@@ -99,9 +97,15 @@ def _run_hier(request, per_peer_bytes, dtype, group_size):
     rc, out = run_with_conn_gate_retry(
         lambda: launch_mpi_shell(cmd, TIMEOUT_S, hang_msg), CONN_RETRIES
     )
-    for line in (out or "").splitlines():
-        if line.startswith("# SKIP"):
-            pytest.skip(line)
+    if rc != 0:
+        return rc
+    skip = next((l for l in (out or "").splitlines() if l.startswith("# SKIP")), None)
+    if skip:
+        if not ALLOW_SKIP:
+            pytest.fail(
+                "{} (set RCCL_TESTS_A2A_HIER_ALLOW_SKIP=1 to report this as a skip)".format(skip)
+            )
+        pytest.skip(skip)
     return rc
 
 

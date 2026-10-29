@@ -203,11 +203,8 @@ struct testEngine {
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
   testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm);
-  /* Optional; for device implementations that need more than one DevComm on the
-   * same communicator. Fills reqs[0..*nReqs), at most testMaxDevComms entries, each
-   * preset to NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER. *nReqs == 0 skips the test
-   * (the hook prints why). Returns testNotImplemented for device implementations
-   * that use getDevCommRequirements. */
+  /* Optional: fills up to testMaxDevComms reqs (preset to NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER) for
+   * one communicator; *nReqs == 0 skips, testNotImplemented falls back to getDevCommRequirements. */
   testResult_t (*getMultiDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, int* nReqs, ncclComm_t comm);
 #elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);

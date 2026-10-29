@@ -2835,7 +2835,11 @@ testResult_t run() {
   }
   free(comms);
   envstr = getenv("NCCL_TESTS_MIN_BW");
-  const double check_avg_bw = envstr ? atof(envstr) : -1;
+  double check_avg_bw = envstr ? atof(envstr) : -1;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  // A device implementation that skipped ran no sizes, so there is no bandwidth to check.
+  if (deviceImpl && threads[0].args.nDevComms == 0) check_avg_bw = -1;
+#endif
   if (bw_count[0] > 0) {
     bw[0] /= bw_count[0];
   }
