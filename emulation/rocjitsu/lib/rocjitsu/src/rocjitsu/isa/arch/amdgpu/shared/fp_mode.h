@@ -26,7 +26,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
-#include <stdexcept>
 #include <type_traits>
 
 #if RJ_HOST_ARCH_X86
@@ -696,8 +695,8 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
     return (denorm_mode & 2u) ? result : flush(result);
   }
 
-  if (operation != ScalarAtomicOp::FMIN && operation != ScalarAtomicOp::FMAX)
-    throw std::invalid_argument("unsupported scalar floating-point atomic operation");
+  assert((operation == ScalarAtomicOp::FMIN || operation == ScalarAtomicOp::FMAX) &&
+         "unsupported scalar floating-point atomic operation");
 
   // CDNA1-4 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
   // CDNA5 / RDNA4 MIN_NUM/MAX_NUM select from the flushed values instead.
