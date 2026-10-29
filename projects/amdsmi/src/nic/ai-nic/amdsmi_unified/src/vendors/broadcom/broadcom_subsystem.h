@@ -16,7 +16,8 @@
 /**
  * Broadcom NIC support: discover() walks /sys/class/net and turns each
  * bnxt_en- or bng_en-bound function of PCI vendor 0x14e4 into one Ethernet SmiNic. Broadcom
- * exposes no grouping PCI bridge, so each netdev function maps to its own NIC.
+ * exposes no grouping PCI bridge, so each function maps to its own NIC and every netdev on that
+ * function is one of its ports.
  */
 class SmiNicSubsystemBroadcom : public SmiNicSubsystem {
  public:
