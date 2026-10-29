@@ -95,17 +95,29 @@ class TestCpuClock(unittest.TestCase):
 
     def test_get_cpu_current_io_bandwidth(self):
         self.common.print_func_name("")
-        # IO_BW_ENCODINGS tuples are (link_name, encoding, expected); the API
-        # takes (handle, encoding, link_name).
-        self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_current_io_bandwidth,
-            "amdsmi_get_cpu_current_io_bandwidth",
-            arg_sets=[
-                (f"encoding={encoding} link_name={link_name}", (encoding, link_name))
-                for link_name, encoding, _ in common.IO_BW_ENCODINGS
-            ],
-            correct_accept=CORRECT_ACCEPT_WITH_INVAL,
-        )
+        for i, cpu in enumerate(self.common.skip_without_cpu()):
+            # Link names are only legal if the platform's encoding table lists them,
+            # and that table is selected by HSMP protocol version.
+            try:
+                proto_ver = amdsmi.amdsmi_get_cpu_hsmp_proto_ver(cpu)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                self.skipTest(f"HSMP protocol version unavailable: {e}")
+            links = common.io_bw_encodings_for_proto_ver(proto_ver)
+            if not links:
+                self.skipTest(f"HSMP protocol version {proto_ver} defines no IO link encodings")
+
+            for encoding_name, encoding, encoding_cond in links:
+                msg = f"\t### amdsmi_get_cpu_current_io_bandwidth(cpu={i}, encoding={encoding} encoding_name={encoding_name}):"
+                try:
+                    ret = amdsmi.amdsmi_get_cpu_current_io_bandwidth(cpu, encoding, encoding_name)
+                    self.common.print(msg, ret)
+                    self.common.check_ret("", "", self.common.PASS)
+                except amdsmi.AmdSmiLibraryException as e:
+                    if self.common.check_ret(msg, e, encoding_cond):
+                        self.raise_exception = e
+                self.common.print("")
+        if self.raise_exception:
+            raise self.raise_exception
         return
 
     def test_get_cpu_fclk_mclk(self):
