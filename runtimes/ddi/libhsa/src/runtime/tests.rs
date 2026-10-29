@@ -148,6 +148,63 @@ fn initialization_gate_rejects_overlapping_generations() {
 }
 
 #[test]
+fn concurrent_init_waits_for_the_first_generation_to_finish() {
+    let lifecycle = Arc::new(Mutex::new(HsaLifecycle::new()));
+    let changed = Arc::new(Condvar::new());
+    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    let ready = Arc::new(std::sync::Barrier::new(2));
+    let worker_lifecycle = lifecycle.clone();
+    let worker_changed = changed.clone();
+    let worker_ready = ready.clone();
+    let worker = std::thread::spawn(move || {
+        let guard = worker_lifecycle.lock().unwrap();
+        worker_ready.wait();
+        begin_init_waiting(guard, &worker_changed)
+    });
+    ready.wait();
+    lifecycle
+        .lock()
+        .unwrap()
+        .cancel_init_with_notification(generation, false, &changed)
+        .unwrap();
+    let next = worker.join().unwrap().unwrap().unwrap();
+    assert_ne!(next, generation);
+    lifecycle.lock().unwrap().cancel_init(next, false).unwrap();
+}
+
+#[test]
+fn callback_init_does_not_wait_for_preparing_shutdown() {
+    let lifecycle = Mutex::new(HsaLifecycle::new());
+    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    lifecycle
+        .lock()
+        .unwrap()
+        .prepare_without_runtime_for_test(generation);
+    let _scope = CallbackScope::enter();
+    assert_eq!(
+        begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+}
+
+#[test]
+fn same_thread_lifecycle_reentry_is_rejected() {
+    let entry = LifecycleCallScope::enter().unwrap();
+    assert_eq!(
+        LifecycleCallScope::enter().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    let helper = LifecycleCallScope::enter_helper();
+    drop(helper);
+    assert_eq!(
+        LifecycleCallScope::enter().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    drop(entry);
+    assert!(LifecycleCallScope::enter().is_ok());
+}
+
+#[test]
 /// Verifies that failed initialization cleanup quarantines the next generation.
 fn failed_initialization_cleanup_quarantines_the_next_generation() {
     let mut registry = HsaLifecycle::new();
@@ -586,7 +643,7 @@ fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
         },
         endpoints: Vec::new(),
         sources: Vec::new(),
-        nodes: [(2, NodeKind::KfdHost, 8), (7, NodeKind::KfdGpu, 4)]
+        nodes: [(2, NodeKind::Host, 8), (7, NodeKind::Gpu, 4)]
             .into_iter()
             .enumerate()
             .map(|(id, (native, kind, count))| TopologyNode {
