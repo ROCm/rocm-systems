@@ -4944,7 +4944,8 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
 VmAccessOutcome CommandProcessor::flush_gpu_caches(AddressSpaceHandle address_space) {
   std::optional<uint32_t> vmid;
   if (address_space) {
-    const auto info = gpu_vm_ ? gpu_vm_->lookup(address_space) : std::nullopt;
+    const std::optional<AddressSpaceInfo> info =
+        gpu_vm_ ? gpu_vm_->lookup(address_space) : std::nullopt;
     if (!info)
       return VmAccessOutcome::Faulted;
     vmid = info->vmid;
