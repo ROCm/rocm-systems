@@ -345,12 +345,7 @@ class TestIsFatBinary:
     def test_is_fat_binary_zero_size_hip_fatbin(
         self, test_assets_dir, tmp_path, toolchain
     ):
-        """A zero-sized .hip_fatbin is not device code.
-
-        hipcc --offload-host-only can leave a SHT_PROGBITS .hip_fatbin header
-        whose sh_size is 0. Parsing that payload raises
-        "Unrecognized fatbin format: first 4 bytes are b''".
-        """
+        """A zero-sized SHT_PROGBITS .hip_fatbin is not device code."""
         source = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
         assert source.exists(), f"Test asset not found: {source}"
 
