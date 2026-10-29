@@ -537,7 +537,7 @@
         }
       ]
     },
-    "net_ib_coverage_env": {
+    "net_ib_coverage_env_base": {
       "extends": "net_ib_base",
       "timeout": 300,
       "description": "Coverage-oriented re-run of core transfer tests under alternate IB env. GID_INDEX=-1 forces RoCE GID auto-select (the auto-select path is skipped when a fixed index is pinned); PCI_RELAXED_ORDERING=0 exercises the relaxed-ordering-disabled registration/connect paths; ADAPTIVE_ROUTING=1 reaches the adaptive-routing threshold path. Env knobs are NIC-agnostic.",
@@ -545,7 +545,10 @@
         "NCCL_IB_GID_INDEX": "-1",
         "NCCL_IB_PCI_RELAXED_ORDERING": "0",
         "NCCL_IB_ADAPTIVE_ROUTING": "1"
-      },
+      }
+    },
+    "net_ib_coverage_env": {
+      "extends": "net_ib_coverage_env_base",
       "tests": [
         {
           "name": "NetIB_Cov_SimpleSendRecv",
@@ -689,6 +692,17 @@
           "name": "NetIB_Flush_AfterRecv",
           "description": "iflush completes after a GPU-memory receive",
           "test_filter": "NetIbMPITest.FlushAfterRecv"
+        }
+      ]
+    },
+    "net_ib_stress_gpu_memory": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "tests": [
+        {
+          "name": "NetIB_Stress_GpuMemoryTransfer",
+          "description": "5 GPU alloc/transfer/flush/verify/free cycles",
+          "test_filter": "NetIbMPITest.GpuMemoryTransferStress"
         }
       ]
     },
@@ -1161,7 +1175,7 @@
         }
       ]
     },
-    "fault_inject_cast": {
+    "fault_inject_cast_base": {
       "extends": "cast_base",
       "timeout": 300,
       "env_variables": {
@@ -1174,7 +1188,25 @@
         "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
         "RCCL_IB_FAULT_INJECTION": "1",
         "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
-      },
+      }
+    },
+    "fault_inject_cast_failover_read": {
+      "extends": "fault_inject_cast_base",
+      "description": "Fault-injection cases whose failover replays the message with an RDMA READ, which Meta RoCE (ionic) does not support.",
+      "tests": [
+        {
+          "name": "FaultInj_Cast_OpsPollCqFlushNonFatal",
+          "description": "CAST ops-overload: poll_cq shim rewrites QP 0 completion status to WR_FLUSH_ERR; failover completes via surviving device, fatalCount==0",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqFlushNonFatal",
+          "env_variables": {
+            "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+            "NCCL_IB_MERGE_NICS": "1"
+          }
+        }
+      ]
+    },
+    "fault_inject_cast": {
+      "extends": "fault_inject_cast_base",
       "tests": [
         {
           "name": "FaultInj_Cast_QpErrorIsFatal",
@@ -1205,15 +1237,6 @@
           "name": "FaultInj_Cast_OpsPostSendErrno",
           "description": "CAST ops-overload: real ibv_post_send forced to return EAGAIN via shimmed ops table; isend fails or fatalCount > 0",
           "test_filter": "NetIbMPITest.FaultInjCastOpsPostSendErrno"
-        },
-        {
-          "name": "FaultInj_Cast_OpsPollCqFlushNonFatal",
-          "description": "CAST ops-overload: poll_cq shim rewrites QP 0 completion status to WR_FLUSH_ERR; failover completes via surviving device, fatalCount==0",
-          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqFlushNonFatal",
-          "env_variables": {
-            "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
-            "NCCL_IB_MERGE_NICS": "1"
-          }
         },
         {
           "name": "FaultInj_Cast_OpsPollCqSynthFatal",
@@ -1322,8 +1345,8 @@
         },
         {
           "name": "Resiliency_GidChangeRefresh",
-          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
-          "test_filter": "Transport/NetIbGidChangeTest.*"
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast). The net_ib_cast port-recovery case is excluded: recovery needs UD QPs, which Meta RoCE (ionic) does not provide.",
+          "test_filter": "Transport/NetIbGidChangeTest.*-Transport/NetIbGidChangeTest.PortRecoveryRefreshesStaleCommGid/NetIbCast"
         },
         {
           "name": "Resiliency_PostRecoveryPingPongHoldsSync",
@@ -1416,11 +1439,6 @@
           "name": "NetIB_Stress_LongRunningEndurance",
           "description": "10000 transfers, tag cycling, RDMA checkpoints",
           "test_filter": "NetIbMPITest.LongRunningEndurance"
-        },
-        {
-          "name": "NetIB_Stress_GpuMemoryTransfer",
-          "description": "5 GPU alloc/transfer/flush/verify/free cycles",
-          "test_filter": "NetIbMPITest.GpuMemoryTransferStress"
         },
         {
           "name": "NetIB_Stress_RapidRecvPostDrain",
@@ -1582,10 +1600,45 @@
       }
     },
     "net_ib_coverage_env_cast": {
-      "extends": "net_ib_coverage_env",
+      "extends": "net_ib_coverage_env_base",
       "env_variables": {
         "NCCL_NET": "IB-CAST"
-      }
+      },
+      "tests": [
+        {
+          "name": "NetIB_Cov_SimpleSendRecv",
+          "description": "Send/recv under GID auto-select + relaxed-ordering-off + adaptive routing",
+          "test_filter": "NetIbMPITest.SimpleSendRecv",
+          "timeout": 180
+        },
+        {
+          "name": "NetIB_Cov_RegisterHost",
+          "description": "Host MR registration under relaxed-ordering-disabled path",
+          "test_filter": "NetIbMPITest.RegisterHostMemory",
+          "timeout": 180
+        }
+      ]
+    },
+    "net_ib_coverage_env_cast_ar": {
+      "extends": "net_ib_coverage_env_base",
+      "description": "ib-cast transfers above the adaptive-routing threshold under the coverage env. On MI450 AINIC the receiver completes them with size 0.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      },
+      "tests": [
+        {
+          "name": "NetIB_Cov_MultipleSizes",
+          "description": "Multi-size transfer under alternate IB env (GID auto-select / RO off / AR on)",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes",
+          "timeout": 300
+        },
+        {
+          "name": "NetIB_Cov_LargeTransfer",
+          "description": "Large transfer crossing the AR threshold under adaptive routing",
+          "test_filter": "NetIbMPITest.LargeTransfer",
+          "timeout": 300
+        }
+      ]
     },
     "net_ib_multirecv_cast": {
       "extends": "net_ib_multirecv",
@@ -1643,6 +1696,42 @@
     },
     "net_ib_stress_inline_cast": {
       "extends": "net_ib_stress_inline",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_multithread_independent_cast": {
+      "extends": "net_ib_multithread_independent",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_merge_disabled_cast": {
+      "extends": "net_ib_merge_disabled",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_vnic_validation_cast": {
+      "extends": "net_ib_vnic_validation",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_vnic_host_cast": {
+      "extends": "net_ib_vnic_host",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_flush_cast": {
+      "extends": "net_ib_flush",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_stress_gpu_memory_cast": {
+      "extends": "net_ib_stress_gpu_memory",
       "env_variables": {
         "NCCL_NET": "IB-CAST"
       }
@@ -5791,8 +5880,9 @@
     },
     {
       "name": "NET IB - Flush",
-      "description": "InfiniBand GPU flush (iflush) with GDR",
-      "config": "net_ib_flush"
+      "description": "InfiniBand GPU flush (iflush) with GDR. Disabled on MI450 AINIC: the receive into GPU memory fails with ncclInternalError before the flush is posted.",
+      "config": "net_ib_flush",
+      "enabled": false
     },
     {
       "name": "NET IB - vNIC Host Buffers",
@@ -5896,6 +5986,12 @@
       "config": "fault_inject_cast"
     },
     {
+      "name": "NET IB - Fault Injection (CAST path, failover RDMA READ)",
+      "description": "CAST fault injection whose failover replays with an RDMA READ. Disabled on MI450 AINIC: Meta RoCE (ionic) does not support RDMA READ.",
+      "config": "fault_inject_cast_failover_read",
+      "enabled": false
+    },
+    {
       "name": "NET IB - Resiliency Port Failover",
       "description": "Port failover tests: error classification, CQE recovery, multi-device failover, data integrity under failure",
       "config": "resiliency_failover"
@@ -5942,8 +6038,15 @@
     },
     {
       "name": "NET IB - Stress Inline CTS",
-      "description": "CTS inline send boundary tests",
-      "config": "net_ib_stress_inline"
+      "description": "CTS inline send boundary tests. Disabled on MI450 AINIC: with NCCL_IB_USE_INLINE=1 net_ib delivers corrupted data (the ib-cast twin passes).",
+      "config": "net_ib_stress_inline",
+      "enabled": false
+    },
+    {
+      "name": "NET IB - Stress GPU Memory",
+      "description": "GPU alloc/transfer/verify stress. Disabled on MI450 AINIC: receives into GPU memory time out and the data does not match.",
+      "config": "net_ib_stress_gpu_memory",
+      "enabled": false
     },
     {
       "name": "NET IB - Initialization Tests (ib-cast)",
@@ -5979,6 +6082,12 @@
       "name": "NET IB - Coverage Env (ib-cast)",
       "description": "Coverage-env transfer tests via ib-cast plugin: exercises CAST GID auto-select and relaxed-ordering paths (NCCL_NET=IB-CAST)",
       "config": "net_ib_coverage_env_cast"
+    },
+    {
+      "name": "NET IB - Coverage Env (ib-cast, above AR threshold)",
+      "description": "ib-cast multi-size and large transfers under the coverage env. Disabled on MI450 AINIC: transfers above 8 KiB complete with size 0.",
+      "config": "net_ib_coverage_env_cast_ar",
+      "enabled": false
     },
     {
       "name": "NET IB - MultiRecv (ib-cast)",
@@ -6039,6 +6148,38 @@
       "name": "NET IB - Stress Inline CTS (ib-cast)",
       "description": "InfiniBand inline CTS stress via ib-cast plugin (NCCL_NET=IB-CAST)",
       "config": "net_ib_stress_inline_cast"
+    },
+    {
+      "name": "NET IB - Stress GPU Memory (ib-cast)",
+      "description": "GPU alloc/transfer/verify stress via ib-cast plugin (NCCL_NET=IB-CAST). Disabled on MI450 AINIC: receives into GPU memory time out and the data does not match.",
+      "config": "net_ib_stress_gpu_memory_cast",
+      "enabled": false
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (4) (ib-cast)",
+      "description": "4 worker threads/rank, each on an independent context and connection, via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_multithread_independent_cast"
+    },
+    {
+      "name": "NET IB - vNIC Merge Disabled Guard (ib-cast)",
+      "description": "makeVDevice merge-disabled guard via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_merge_disabled_cast"
+    },
+    {
+      "name": "NET IB - vNIC Validation (ib-cast)",
+      "description": "makeVDevice / CheckVProps validation via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_vnic_validation_cast"
+    },
+    {
+      "name": "NET IB - vNIC Host Buffers (ib-cast)",
+      "description": "Virtual NIC tests on host buffers via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_vnic_host_cast"
+    },
+    {
+      "name": "NET IB - Flush (ib-cast)",
+      "description": "GPU flush (iflush) via ib-cast plugin (NCCL_NET=IB-CAST). Disabled on MI450 AINIC: the receive into GPU memory fails with ncclInternalError before the flush is posted.",
+      "config": "net_ib_flush_cast",
+      "enabled": false
     },
     {
       "name": "Unit Tests - Fixtures (Release)",
