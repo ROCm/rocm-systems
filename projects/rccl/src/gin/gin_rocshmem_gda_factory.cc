@@ -297,6 +297,15 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
   struct ibv_device** dev_list = nullptr;
   int ndev = 0;
 
+  // Ensure rccl's ibverbs symbols are loaded before any wrap_ibv_* call. The
+  // plugin reaches here only after enumerate (which already does this), but a
+  // direct rocshmem_gin_create_qps caller hits gin_open_ib_device first, so the
+  // get_device_list below would dereference the still-NULL ibv symbol table.
+  if (!gin_ibv_available()) {
+    LOG_ERROR("GIN QP factory: ibverbs symbols unavailable");
+    return -1;
+  }
+
   dev_list = gin_ibv_get_device_list(&ndev);
   if (!dev_list || ndev == 0) {
     LOG_ERROR("GIN QP factory: no IB devices found (ibverbs get_device_list returned %d)", ndev);
