@@ -86,8 +86,11 @@ function(add_rocshmem_targets)
         endif()
     endif()
 
+    # GIN-only: the gate matters solely for the copied GIN headers (which no longer
+    # ship constmem.hpp). An ENABLE_ROCSHMEM build compiles librocshmem itself and
+    # does not use the copied headers, so it must not be blocked by a pre-gate source.
     set(_rocshmem_config_in "${ROCSHMEM_SOURCE_DIR}/cmake/rocshmem_config.h.in")
-    if(EXISTS "${_rocshmem_config_in}")
+    if(ENABLE_ROCSHMEM_GIN AND EXISTS "${_rocshmem_config_in}")
         file(STRINGS "${_rocshmem_config_in}" _constmem_gate REGEX "cmakedefine[ \t]+USE_CONSTMEM")
         if(NOT _constmem_gate)
             message(FATAL_ERROR
