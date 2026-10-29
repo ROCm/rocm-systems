@@ -1,0 +1,5 @@
+inherit: ../gfx908/vl1d.yaml
+vl1d.cache_bw:
+  peak_empirical: $L1Bw_empirical_peak
+vl1d.l2_bw:
+  peak_empirical: $L2Bw_empirical_peak
