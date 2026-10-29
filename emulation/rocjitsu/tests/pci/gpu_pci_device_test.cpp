@@ -1581,21 +1581,31 @@ TEST_F(GpuDeviceMes, RemoveRetriesUnsupportedLiveWorkAfterItDrainsWithoutAnother
   command_processor_.shutdown();
 }
 
-TEST_F(GpuDeviceMes, FailedRemoveRestoresPriorSuspensionAndPreservesUnfinishedWork) {
+TEST_F(GpuDeviceMes, TerminalRemoveSaveFailureDiscardsContextAndAllowsFollowingCommands) {
+  using simdojo::DmaAccessOutcome;
   constexpr uint64_t kContext = 0x20000;
   constexpr uint64_t kContextPhysical = 0x300000;
   constexpr uint32_t kControlStack = 0x1000;
   constexpr uint32_t kContextSize = 0x20000;
   constexpr uint32_t kQueue = uint32_t{1} << 31;
-  enum class Failure { Capacity, HeaderRead, ImageWrite, ControlStackOffset, WaveStateOffset };
+  enum class Failure { Capacity, HeaderRead, ImageWrite, WaveStateOffset };
   configure_compute_unit();
-  for (const auto failure : {Failure::Capacity, Failure::HeaderRead, Failure::ImageWrite,
-                             Failure::ControlStackOffset, Failure::WaveStateOffset}) {
+  // Capacity fails in the serializer; both terminal access outcomes are
+  // injected at the read/write boundary for the other failure sites.
+  for (const auto &[failure, terminal_outcome] :
+       {std::pair{Failure::Capacity, DmaAccessOutcome::Faulted},
+        std::pair{Failure::HeaderRead, DmaAccessOutcome::Faulted},
+        std::pair{Failure::HeaderRead, DmaAccessOutcome::Malformed},
+        std::pair{Failure::ImageWrite, DmaAccessOutcome::Faulted},
+        std::pair{Failure::ImageWrite, DmaAccessOutcome::Malformed},
+        std::pair{Failure::WaveStateOffset, DmaAccessOutcome::Faulted},
+        std::pair{Failure::WaveStateOffset, DmaAccessOutcome::Malformed}}) {
     for (const auto &[queue_paused, wave_paused] :
          {std::pair{false, false}, std::pair{false, true}, std::pair{true, false}}) {
       SCOPED_TRACE(::testing::Message()
-                   << "failure=" << static_cast<int>(failure) << " queue_paused=" << queue_paused
-                   << " wave_paused=" << wave_paused);
+                   << "failure=" << static_cast<int>(failure) << " outcome="
+                   << (terminal_outcome == DmaAccessOutcome::Faulted ? "Faulted" : "Malformed")
+                   << " queue_paused=" << queue_paused << " wave_paused=" << wave_paused);
       store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
       store_dword(kSchedulerMqdPhysical + 175 * 4, kControlStack);
       store_dword(kSchedulerMqdPhysical + 177 * 4,
@@ -1639,53 +1649,106 @@ TEST_F(GpuDeviceMes, FailedRemoveRestoresPriorSuspensionAndPreservesUnfinishedWo
       store_dword(kRemove + 4, kDefaultComputeDoorbell / sizeof(uint32_t));
       store_qword(kRemove + 6 * 4, kApiStatusGpu);
       store_qword(kRemove + 8 * 4, 2);
-      auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
-      // A pending attempt must retain its pause. A later failure must restore
-      // the state before this first attempt, not the already-paused retry state.
+      constexpr uint64_t kQuery = kRingPhysical + 128 * sizeof(uint32_t);
+      store_dword(kQuery, 0x000400b1); // QUERY_SCHEDULER_STATUS follows REMOVE.
+      store_qword(kQuery + 2 * sizeof(uint32_t), kRingFenceGpu);
+      store_qword(kQuery + 4 * sizeof(uint32_t), 3);
+      store_qword(kRingFencePhysical, 0);
+      auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+      // A transient access failure retains the save-induced suspension and
+      // the original work. Only a terminal failure discards the queue.
       transport_.fail_next_read(kContextPhysical + 16, simdojo::DmaAccessOutcome::Unavailable);
       ring_doorbell(0x60, doorbell);
       ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
       EXPECT_TRUE(command_processor_.queue_debug_suspended_for_test(kQueue, 3));
       EXPECT_TRUE(wave->debug_suspended());
-      switch (failure) {
-      case Failure::Capacity:
-        break;
-      case Failure::HeaderRead:
-        transport_.fail_next_read(kContextPhysical + 16, simdojo::DmaAccessOutcome::Faulted);
-        break;
-      case Failure::ImageWrite:
-        transport_.fail_next_write(kContextPhysical, simdojo::DmaAccessOutcome::Faulted);
-        break;
-      case Failure::ControlStackOffset:
-        transport_.fail_next_write(kSchedulerMqdPhysical + 174 * sizeof(uint32_t),
-                                   simdojo::DmaAccessOutcome::Faulted);
-        break;
-      case Failure::WaveStateOffset:
-        transport_.fail_next_write(kSchedulerMqdPhysical + 176 * sizeof(uint32_t),
-                                   simdojo::DmaAccessOutcome::Faulted);
-        break;
-      }
-      device_.drain_doorbell_inbox_for_test();
-      EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
-      EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
-      EXPECT_EQ(command_processor_.queue_debug_suspended_for_test(kQueue, 3), queue_paused);
-      EXPECT_EQ(wave->debug_suspended(), wave_paused);
-      EXPECT_FALSE(wave->is_halted());
-      EXPECT_EQ(wave->debug_read_sgpr(0), 0x12345678u);
-      std::vector<uint8_t> actual_lds(expected_lds.size());
-      const auto &lds = wave->lds();
-      lds.read(wave->lds_base(), actual_lds.data(), actual_lds.size());
-      EXPECT_EQ(actual_lds, expected_lds);
-      EXPECT_TRUE(command_processor_.has_dispatch_for_test(kQueue, 3, 1));
-      EXPECT_FALSE(command_processor_.queue_faulted_for_test(kQueue, 3));
-      EXPECT_EQ(soc_.mes_engine().active_queues(), 1u);
-      EXPECT_EQ(soc_.queue_registry().active_queues(), 1u);
+      const auto fail_access = [&](simdojo::DmaAccessOutcome outcome) {
+        switch (failure) {
+        case Failure::Capacity:
+          break;
+        case Failure::HeaderRead:
+          transport_.fail_next_read(kContextPhysical + 16, outcome);
+          break;
+        case Failure::ImageWrite:
+          transport_.fail_next_write(kContextPhysical, outcome);
+          break;
+        case Failure::WaveStateOffset:
+          transport_.fail_next_write(kSchedulerMqdPhysical + 176 * sizeof(uint32_t), outcome);
+          break;
+        }
+      };
       if (failure != Failure::Capacity) {
-        // Once the access fault is corrected, the same REMOVE can complete.
+        // Exercise Unavailable at every injected access, including publication
+        // after the image or first MQD offset has already been written.
+        fail_access(simdojo::DmaAccessOutcome::Unavailable);
+        device_.drain_doorbell_inbox_for_test();
+        EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+        EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+        EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
+        EXPECT_TRUE(command_processor_.queue_debug_suspended_for_test(kQueue, 3));
+        EXPECT_TRUE(wave->debug_suspended());
+        EXPECT_FALSE(wave->is_halted());
+        EXPECT_EQ(wave->debug_read_sgpr(0), 0x12345678u);
+        std::vector<uint8_t> actual_lds(expected_lds.size());
+        const auto &lds = wave->lds();
+        lds.read(wave->lds_base(), actual_lds.data(), actual_lds.size());
+        EXPECT_EQ(actual_lds, expected_lds);
+        EXPECT_TRUE(command_processor_.has_dispatch_for_test(kQueue, 3, 1));
+        EXPECT_EQ(soc_.mes_engine().active_queues(), 1u);
+        EXPECT_EQ(soc_.queue_registry().active_queues(), 1u);
+      }
+      if (failure == Failure::Capacity) {
+        // A failed save must never be retried just because invalidating its
+        // MQD marker is temporarily unavailable. Count save-area header reads
+        // to distinguish continued cleanup from a second save attempt.
+        transport_.count_reads_in(kContextPhysical + 16, 8);
+        transport_.fail_next_write(kSchedulerMqdPhysical + 174 * sizeof(uint32_t),
+                                   DmaAccessOutcome::Unavailable);
+      }
+      fail_access(terminal_outcome);
+      device_.drain_doorbell_inbox_for_test();
+      if (failure == Failure::Capacity) {
+        EXPECT_EQ(transport_.counted_reads(), 1u);
+        EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+        EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+        EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
+        EXPECT_TRUE(command_processor_.queue_debug_suspended_for_test(kQueue, 3));
+        EXPECT_TRUE(wave->debug_suspended());
+        EXPECT_EQ(soc_.queue_registry().active_queues(), 1u);
+        device_.drain_doorbell_inbox_for_test();
+        EXPECT_EQ(transport_.counted_reads(), 1u) << "Cleanup must not restart the failed save";
+      }
+      // A terminal save failure must not hold up the device's entire MES ring
+      // or leave an image that a later ADD could mistake for a saved context.
+      EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+      EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 192u);
+      EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 3u);
+      EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
+      EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+      EXPECT_FALSE(command_processor_.has_registered_queues());
+      EXPECT_FALSE(command_processor_.has_dispatch_for_test(kQueue, 3, 1));
+      EXPECT_FALSE(compute_unit_->has_active_wfs());
+      EXPECT_TRUE(compute_unit_->can_allocate_lds(64 * 1024));
+      EXPECT_EQ(transport_.dword_at(kSchedulerMqdPhysical + 174 * sizeof(uint32_t)), kControlStack);
+      EXPECT_EQ(transport_.dword_at(kSchedulerMqdPhysical + 176 * sizeof(uint32_t)), kControlStack);
+
+      if (transport_.dword_at(kReadPointerPhysical) == 192u) {
+        // Reuse the original ADD and MQD without resetting the save offsets:
+        // fixture initialization would conceal an incorrectly valid snapshot.
+        std::array<std::byte, 64 * sizeof(uint32_t)> add{};
+        ASSERT_TRUE(transport_.read(kRingPhysical, add));
+        constexpr uint64_t kAdd = kRingPhysical + 192 * sizeof(uint32_t);
+        ASSERT_TRUE(transport_.write(kAdd, add));
+        store_qword(kAdd + 40 * sizeof(uint32_t), 4);
+        doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{256});
         ring_doorbell(0x60, doorbell);
-        EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
-        EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
+        EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 4u);
+        EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 256u);
+        EXPECT_EQ(soc_.mes_engine().active_queues(), 1u);
+        EXPECT_EQ(soc_.queue_registry().active_queues(), 1u);
+        EXPECT_TRUE(command_processor_.has_registered_queues());
         EXPECT_FALSE(compute_unit_->has_active_wfs());
+        EXPECT_TRUE(compute_unit_->can_allocate_lds(64 * 1024));
       }
       device_.reset(simdojo::ResetKind::FunctionLevel);
       configure_gart();

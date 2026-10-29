@@ -727,35 +727,55 @@ VmAccessOutcome MesEngine::remove_queue(uint64_t doorbell_offset, const GpuVmAcc
     const QueueIdentity identity{.address_space = queue->address_space,
                                  .process_id = queue->process_id,
                                  .queue_id = queue->queue_id};
-    const auto fail_save = [&](VmAccessOutcome outcome) {
-      // Access retries retain the save's suspension; terminal failures undo it.
-      if (outcome != VmAccessOutcome::Unavailable)
-        compute_bindings_.cancel_context_save(identity);
-      return outcome;
+    const auto publish_offsets = [&](uint32_t control_stack_offset, uint32_t wave_state_offset) {
+      // KFD derives its user header from these two firmware-updated MQD fields.
+      for (const auto &[field, value] :
+           {std::pair{kMqdControlStackOffsetDword, control_stack_offset},
+            std::pair{kMqdWaveStateOffsetDword, wave_state_offset}}) {
+        const auto status = gart_access.write(queue->mqd_address + field * sizeof(uint32_t),
+                                              std::as_bytes(std::span(&value, 1)));
+        if (status != VmAccessOutcome::Complete)
+          return status;
+      }
+      return VmAccessOutcome::Complete;
     };
-    const QueueContextSaveResult saved = compute_bindings_.save_context(
-        identity, queue->context_save_address, queue->context_save_size, queue->control_stack_size);
-    if (std::holds_alternative<Unsupported>(saved.outcome)) {
-      // This state cannot be checkpointed, but accepted work can still finish.
-      // Undo only our pause and retain REMOVE's automatic retry, including when
-      // an earlier caller-owned pause prevents progress until explicitly resumed.
-      compute_bindings_.cancel_context_save(identity);
-      return VmAccessOutcome::Unavailable;
+    if (!queue->discard_context_on_remove) {
+      const QueueContextSaveResult saved =
+          compute_bindings_.save_context(identity, queue->context_save_address,
+                                         queue->context_save_size, queue->control_stack_size);
+      if (std::holds_alternative<Unsupported>(saved.outcome)) {
+        // This state cannot be checkpointed, but accepted work can still finish.
+        // Undo only our pause and retain REMOVE's automatic retry, including when
+        // an earlier caller-owned pause prevents progress until explicitly resumed.
+        compute_bindings_.cancel_context_save(identity);
+        return VmAccessOutcome::Unavailable;
+      }
+      auto outcome = std::get<VmAccessOutcome>(saved.outcome);
+      if (outcome == VmAccessOutcome::Complete)
+        outcome = publish_offsets(saved.control_stack_offset, saved.wave_state_offset);
+      if (outcome != VmAccessOutcome::Complete) {
+        if (outcome != VmAccessOutcome::Faulted && outcome != VmAccessOutcome::Malformed) {
+          if (outcome != VmAccessOutcome::Unavailable)
+            compute_bindings_.cancel_context_save(identity);
+          return outcome;
+        }
+        queue->discard_context_on_remove = true;
+        util::Logger::warn(std::format(
+            "{}: context save {} for queue {}, process {}, doorbell {:#x}; discarding context",
+            diagnostic_name_, outcome == VmAccessOutcome::Faulted ? "Faulted" : "Malformed",
+            queue->queue_id, queue->process_id, doorbell_offset));
+      }
     }
-    const auto outcome = std::get<VmAccessOutcome>(saved.outcome);
-    if (outcome != VmAccessOutcome::Complete)
-      return fail_save(outcome);
-    // KFD derives its user header from these two firmware-updated MQD fields.
-    for (const auto &[field, value] :
-         {std::pair{kMqdControlStackOffsetDword, saved.control_stack_offset},
-          std::pair{kMqdWaveStateOffsetDword, saved.wave_state_offset}}) {
-      const auto status = gart_access.write(queue->mqd_address + field * sizeof(uint32_t),
-                                            std::as_bytes(std::span(&value, 1)));
-      if (status != VmAccessOutcome::Complete)
-        return fail_save(status);
+    if (queue->discard_context_on_remove) {
+      // Leave no restore marker, including when only the first offset was
+      // published. An unavailable write retries only this cleanup, with the
+      // queue still paused; it never retries the terminally failed save.
+      const auto outcome = publish_offsets(queue->control_stack_size, queue->control_stack_size);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
     }
-    // The image and both MQD offsets are durable. Drop resident resources
-    // without completing work, then remove the execution binding itself.
+    // MQD now names either a durable image or a fresh queue. Drop resident
+    // resources without completing work, then remove the execution binding.
     compute_bindings_.release_context(identity);
   }
 

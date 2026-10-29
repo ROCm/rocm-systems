@@ -67,14 +67,15 @@ public:
   [[nodiscard]] virtual QueueContextSaveResult save_context(const QueueIdentity &identity,
                                                             uint64_t address, uint32_t area_size,
                                                             uint32_t control_stack_size) = 0;
-  /// @brief Restore the pre-save suspension state when draining or after a save/MQD failure.
+  /// @brief Restore the pre-save suspension state when abandoning a save attempt.
   /// @details Preserve unfinished work and any pre-existing pause. No-op if no
-  /// save is pending. Partial save-area/MQD writes are not rolled back; REMOVE
-  /// remains unacknowledged and a later attempt must publish a fresh snapshot.
+  /// save is pending. Partial save-area/MQD writes are not rolled back; a retry
+  /// must publish a fresh snapshot. Failed saves discarded by REMOVE instead
+  /// keep execution suspended until release_context() frees the resources.
   virtual void cancel_context_save(const QueueIdentity &identity) = 0;
-  /// @brief Release paused resident resources after MQD publication succeeds.
-  /// @details Also used to roll back a failed restore. No normal WG completion
-  /// is generated; queue deregistration remains owned by MES.
+  /// @brief Release paused resident resources without completing their work.
+  /// @details Used after publishing a successful save, invalidating a failed
+  /// save, or to roll back a failed restore. Queue deregistration belongs to MES.
   virtual void release_context(const QueueIdentity &identity) = 0;
 
   /// @brief Apply saved state into a new binding, keeping execution suspended.
@@ -261,6 +262,9 @@ private:
     bool active = false;
     bool aql = false;
     bool trap_enabled = false;
+    // A terminal save failure commits REMOVE to discarding the context.
+    // Retries may finish invalidating the MQD but must never restart the save.
+    bool discard_context_on_remove = false;
     AddressSpaceHandle address_space;
     QueueHandle queue_handle;
     QueueKind kind = QueueKind::Mes;
