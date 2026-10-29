@@ -139,12 +139,10 @@ class TestCliBase(unittest.TestCase):
 
     # Exit codes a single argument may also answer with, beyond NOT_SUPPORTED
     SWEEP_TOLERATED_CODES = {
-        # Not all ASICs support setting all modes, which is an invalid set option
-        "set": {"--memory-partition": amdsmi.AmdSmiStatus.INVAL},
         # This reset is a read -- the kernel clears xgmi_error when it is read --
         # so the read's errno becomes the reset's status, and some drivers reject
         # it with EINVAL.
-        "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL},
+        "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL}
     }
 
     # Order for the amd-smi reset commands, putting --clocks last since
@@ -981,8 +979,9 @@ class TestCliBase(unittest.TestCase):
     def _active_memory_partition(self, gpu_index, explicit_gpu):
         """The NPS mode the target devices run now, or None when they differ.
 
-        Any other mode stays staged until the next driver reload, and requesting the
-        active mode does not cancel it, so the sweep only requests this one. Without
+        Any other mode stays staged until the next driver reload, and with current library
+        and amdgpu releases requesting the active mode does not cancel it, so the sweep
+        only requests this one. Without
         an explicit --gpu the command runs on every device, so all must agree;
         sub-partition handles report no mode and are left out.
         """

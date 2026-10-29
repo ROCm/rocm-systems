@@ -4,11 +4,13 @@
 
 """Hardware-free checks that the memory partition tests leave no NPS mode staged.
 
-A staged NPS mode applies on the next driver reload, and requesting the active mode
-does not cancel it. These run the functional tests against a fake driver with those
-rules and check that the starting mode is still active, with nothing staged, after.
+With current library and amdgpu releases a staged NPS mode applies on the next driver
+reload, and requesting the active mode does not cancel it. These run the functional
+tests against a fake driver with those rules and check that the starting mode is still
+active, with nothing staged, after.
 """
 
+import contextlib
 import importlib.util
 import os
 import unittest
@@ -43,7 +45,11 @@ def _load_functional(name):
 
 
 class _FakeHive:
-    """Hive-wide memory partition state that follows the driver's staging rules."""
+    """Hive-wide memory partition state that follows the driver's staging rules.
+
+    A reload that changes the mode resets every GPU to the first accelerator profile,
+    the default after an NPS change.
+    """
 
     def __init__(self, active="NPS1", caps=("NPS1", "NPS2", "NPS4")):
         self.handles = [object(), object()]
@@ -55,7 +61,15 @@ class _FakeHive:
         self.reported = {}  # handle index -> mode it reports instead of the active one
         self.loaded = True
         self.load_fails = False
+        self.unload_fails = False
         self.modprobe_calls = []
+        self.profiles = [2, 2]  # accelerator profile index per handle (2 = QPX)
+        self.profile_busy = 0  # profile sets that answer BUSY before one succeeds
+        # Reload preconditions.
+        self.modprobe_path = "/usr/sbin/modprobe"
+        self.can_load_modules = True
+        self.built_in = False
+        self.refcnt = "0"
 
     def set_mode(self, handle, mode):
         if handle not in self.handles:
@@ -70,7 +84,9 @@ class _FakeHive:
     def modprobe(self, *args):
         self.modprobe_calls.append(args)
         returncode = 0
-        if args == ("-r", "amdgpu"):
+        if args == ("-r", "amdgpu") and self.unload_fails:
+            returncode = 1
+        elif args == ("-r", "amdgpu"):
             self.loaded = False
         elif args == ("amdgpu",) and self.load_fails:
             returncode = 1
@@ -79,7 +95,30 @@ class _FakeHive:
             self.loaded = True
             if self.staged:
                 self.active, self.staged = self.staged, None
+                self.profiles = [0] * len(self.handles)
         return mock.Mock(wait=mock.Mock(return_value=returncode))
+
+    def read_first_line(self, path):
+        if self.built_in or not self.loaded:
+            return ""
+        if path.endswith("/refcnt"):
+            return self.refcnt
+        return "live" if path.endswith("/initstate") else ""
+
+    def get_profile(self, gpu):
+        index = self.profiles[self.handles.index(gpu)]
+        return {
+            "partition_profile": {
+                "profile_index": index,
+                "profile_type": ["SPX", "DPX", "QPX"][index],
+            }
+        }
+
+    def set_profile(self, gpu, index):
+        if self.profile_busy:
+            self.profile_busy -= 1
+            raise amdsmi.AmdSmiLibraryException(amdsmi.AmdSmiStatus.BUSY)
+        self.profiles[self.handles.index(gpu)] = index
 
     def api(self):
         not_supported = amdsmi.AmdSmiLibraryException(amdsmi.AmdSmiStatus.NOT_SUPPORTED)
@@ -97,10 +136,8 @@ class _FakeHive:
             "amdsmi_get_gpu_memory_partition_config": lambda _gpu: {
                 "partition_caps": list(self.caps)
             },
-            "amdsmi_get_gpu_accelerator_partition_profile": lambda _gpu: {
-                "partition_profile": {"profile_index": 0, "profile_type": "SPX"}
-            },
-            "amdsmi_set_gpu_accelerator_partition_profile": mock.Mock(),
+            "amdsmi_get_gpu_accelerator_partition_profile": self.get_profile,
+            "amdsmi_set_gpu_accelerator_partition_profile": self.set_profile,
             "amdsmi_set_gpu_memory_partition": self.set_mode,
             "amdsmi_set_gpu_memory_partition_mode": self.set_mode,
         }
@@ -117,27 +154,42 @@ class TestGpuMemoryPartitionStaging(unittest.TestCase):
     def _run(self, test_class, name, hive, destructive=False, **harness_attrs):
         """Run one functional test against *hive*; return its unittest result."""
         result = unittest.TestResult()
-        with mock.patch.multiple(amdsmi, **hive.api()), mock.patch.multiple(
-            common.Common,
-            amdsmi_smart_init=lambda _self: (None, 0),
-            check_amdgpu_driver=lambda _self: hive.loaded,
-        ):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.multiple(amdsmi, **hive.api()))
+            stack.enter_context(
+                mock.patch.multiple(
+                    common.Common,
+                    amdsmi_smart_init=lambda _self: (None, 0),
+                    check_amdgpu_driver=lambda _self: hive.loaded,
+                )
+            )
             harness = common.Common(common.VERBOSITY_QUIET)
             for attr, value in harness_attrs.items():
                 setattr(harness, attr, value)
-            with mock.patch.object(test_class, "common", harness, create=True), mock.patch.object(
-                self.cycle, "_ALLOW_DESTRUCTIVE_TESTS", destructive
-            ), mock.patch.object(
-                self.cycle.shutil, "which", return_value="/usr/sbin/modprobe"
-            ), mock.patch.object(self.cycle, "_run_modprobe", hive.modprobe), mock.patch.object(
-                self.cycle.time, "sleep"
+            cycle = self.cycle
+            for target, attr, value in (
+                (test_class, "common", harness),
+                (cycle, "_ALLOW_DESTRUCTIVE_TESTS", destructive),
+                (cycle, "_modprobe_path", lambda: hive.modprobe_path),
+                (cycle, "_can_load_modules", lambda: hive.can_load_modules),
+                (cycle, "_read_first_line", hive.read_first_line),
+                (cycle, "_run_modprobe", hive.modprobe),
+                (cycle.time, "sleep", mock.Mock()),
             ):
-                test_class(name).run(result)
+                stack.enter_context(mock.patch.object(target, attr, value, create=True))
+            test_class(name).run(result)
         return result
+
+    def _failures(self, result):
+        return [text for _, text in result.failures + result.errors]
 
     def assertNothingStaged(self, hive, mode):
         self.assertIsNone(hive.staged, "a test left an NPS mode staged for the next reload")
         self.assertEqual(hive.active, mode)
+
+    def assertStartingState(self, hive):
+        self.assertNothingStaged(hive, "NPS1")
+        self.assertEqual(hive.profiles, [2, 2], "accelerator profiles not restored")
 
     def assertSkippedWithoutFlag(self, result):
         self.assertEqual(len(result.skipped), 1, result.failures + result.errors)
@@ -271,8 +323,91 @@ class TestGpuMemoryPartitionStaging(unittest.TestCase):
             hive,
             destructive=True,
         )
-        messages = [text for _, text in result.failures + result.errors]
-        self.assertTrue(any("staged" in text for text in messages), messages)
+        messages = self._failures(result)
+        self.assertTrue(any("up in NPS2" in text for text in messages), messages)
+        self.assertEqual(hive.modprobe_calls, [("-r", "amdgpu"), ("amdgpu",), ("amdgpu",)])
+
+    def test_failed_unload_names_the_staged_mode(self):
+        hive = _FakeHive()
+        hive.unload_fails = True
+        result = self._run(
+            self.cycle.TestGpuMemoryPartitionCycle,
+            "test_cycle_memory_partition_modes",
+            hive,
+            destructive=True,
+        )
+        messages = self._failures(result)
+        self.assertTrue(any("NPS2 is still staged" in text for text in messages), messages)
+
+    def test_every_reload_precondition_is_checked_before_staging(self):
+        blockers = {
+            "modprobe not found": lambda hive: setattr(hive, "modprobe_path", None),
+            "CAP_SYS_MODULE": lambda hive: setattr(hive, "can_load_modules", False),
+            "not a loaded module": lambda hive: setattr(hive, "built_in", True),
+            "in use by another process (refcnt 3)": lambda hive: setattr(hive, "refcnt", "3"),
+            "refcnt is unreadable": lambda hive: setattr(hive, "refcnt", "busy"),
+        }
+        for name in (
+            "test_cycle_memory_partition_modes",
+            "test_applying_memory_partition_needs_reload",
+        ):
+            for reason, block in blockers.items():
+                with self.subTest(test=name, blocker=reason):
+                    hive = _FakeHive()
+                    block(hive)
+                    result = self._run(
+                        self.cycle.TestGpuMemoryPartitionCycle, name, hive, destructive=True
+                    )
+                    messages = self._failures(result)
+                    self.assertTrue(any(reason in text for text in messages), messages)
+                    self.assertTrue(any("nothing was staged" in text for text in messages))
+                    self.assertNothingStaged(hive, "NPS1")
+                    self.assertEqual(hive.modprobe_calls, [])
+
+    def test_profile_restore_retries_busy(self):
+        hive = _FakeHive()
+        hive.profile_busy = 2
+        result = self._run(
+            self.cycle.TestGpuMemoryPartitionCycle,
+            "test_cycle_memory_partition_modes",
+            hive,
+            destructive=True,
+        )
+        self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
+        self.assertStartingState(hive)
+
+    def test_profile_restore_fails_when_it_stays_busy(self):
+        hive = _FakeHive()
+        hive.profile_busy = 1000
+        result = self._run(
+            self.cycle.TestGpuMemoryPartitionCycle,
+            "test_cycle_memory_partition_modes",
+            hive,
+            destructive=True,
+        )
+        messages = self._failures(result)
+        self.assertTrue(any("accelerator profiles not restored" in t for t in messages), messages)
+
+    def test_profile_restore_is_skipped_after_a_failed_memory_restore(self):
+        hive = _FakeHive()
+        hive.load_fails = True
+        unload_and_load = hive.modprobe
+
+        def modprobe(*args):
+            if args == ("-r", "amdgpu"):
+                hive.profiles = [0, 0]  # the unload drops the partitions
+            return unload_and_load(*args)
+
+        hive.modprobe = modprobe
+        set_profile = mock.Mock(side_effect=hive.set_profile)
+        hive.set_profile = set_profile
+        self._run(
+            self.cycle.TestGpuMemoryPartitionCycle,
+            "test_cycle_memory_partition_modes",
+            hive,
+            destructive=True,
+        )
+        set_profile.assert_not_called()
 
     def test_set_without_reload_applies_and_restores_when_destructive(self):
         hive = _FakeHive()
@@ -283,7 +418,7 @@ class TestGpuMemoryPartitionStaging(unittest.TestCase):
             destructive=True,
         )
         self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
-        self.assertNothingStaged(hive, "NPS1")
+        self.assertStartingState(hive)
 
     def test_cycle_returns_to_start_when_destructive(self):
         hive = _FakeHive()
@@ -294,7 +429,7 @@ class TestGpuMemoryPartitionStaging(unittest.TestCase):
             destructive=True,
         )
         self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
-        self.assertNothingStaged(hive, "NPS1")
+        self.assertStartingState(hive)
         self.assertEqual(hive.reloads, 3)
 
     def test_cycle_failure_before_reload_still_restores(self):

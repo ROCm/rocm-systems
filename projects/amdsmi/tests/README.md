@@ -167,10 +167,11 @@ The install target remaps the tree to the historical path:
 
 ## Memory-partition coverage
 
-A staged NPS mode takes effect on the next driver reload, and requesting the active
-mode does not cancel it. Default runs therefore never request an NPS mode other than
-the active one; only `AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1` runs stage other modes, and they
-apply them with a reload before finishing:
+A staged NPS mode takes effect on the next driver reload, and with current library and
+amdgpu releases requesting the active mode does not cancel it. Default runs therefore
+never request an NPS mode other than the active one; only
+`AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1` runs stage other modes, and they apply them with a
+reload before finishing:
 
 - `GpuFunctionalReadWrite.TestMemoryPartitionReadWrite` checks getters, capabilities,
   invalid inputs, and setting only the current mode. Saved per-device memory and compute
@@ -191,6 +192,24 @@ apply them with a reload before finishing:
 `unit/gpu/memorypartition_read_write_test.cc` and
 `python/unit/gpu/test_memory_partition_staging.py` check these tests against a fake
 driver that follows the staging rules.
+
+The variable makes both `amdsmitst` and the Python integration run unload amdgpu, so
+every GPU on the node goes away for about a minute per mode, and each of the two
+cycles reloads once per supported mode plus once to restore. Set it only on a node you
+have to yourself:
+
+- Run as root with CAP_SYS_MODULE, with `kmod` installed (`modprobe` in `/usr/sbin`
+  or `/sbin`) and amdgpu loaded as a module, not built in.
+- Stop anything that holds amdgpu: GPU workloads, display servers, monitoring agents.
+  When amdgpu is in use, either cycle fails before staging anything.
+- Put the variable after `sudo`, which drops it otherwise:
+
+  ```bash
+  sudo AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1 ./amdsmitst --gtest_filter=GpuFunctionalReadWrite.TestMemoryPartitionReadWrite
+  ```
+
+When no other mode can be applied (one supported mode, every mode rejected, or GPUs
+starting in different modes) the cycle reports itself as skipped instead of passing.
 
 Run on an idle node where nothing else changes partitions (no GPU workloads, no
 partition or metrics agent holding the device): reads and same-mode requests are not

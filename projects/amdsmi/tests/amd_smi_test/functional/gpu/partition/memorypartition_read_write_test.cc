@@ -18,6 +18,8 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -33,38 +35,6 @@ const uint32_t MAX_SPX_PARTITIONS = 1;  // Single GPU node
 const uint32_t MAX_DPX_PARTITIONS = 2;
 const uint32_t MAX_TPX_PARTITIONS = 3;
 const uint32_t MAX_QPX_PARTITIONS = 4;
-
-TestMemoryPartitionReadWrite::TestMemoryPartitionReadWrite() : TestBase() {
-  set_title("AMDSMI Memory Partition Read Test");
-  set_description(
-      "Verify memory partition reads, capabilities, invalid inputs, and current-mode sets. "
-      "With AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1, also apply each supported NPS mode with a "
-      "driver reload, then restore the starting NPS mode and accelerator profiles.");
-  const char* destructive = std::getenv("AMDSMI_ALLOW_DESTRUCTIVE_TESTS");
-  allow_destructive_ = destructive && std::strcmp(destructive, "1") == 0;
-  api_.sleep_ms = [](uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); };
-}
-
-TestMemoryPartitionReadWrite::~TestMemoryPartitionReadWrite(void) {}
-
-void TestMemoryPartitionReadWrite::SetUp(void) {
-  TestBase::SetUp();
-
-  return;
-}
-
-void TestMemoryPartitionReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
-
-void TestMemoryPartitionReadWrite::DisplayResults(void) const {
-  TestBase::DisplayResults();
-  return;
-}
-
-void TestMemoryPartitionReadWrite::Close() {
-  // This will close handles opened within rsmitst utility calls and call
-  // amdsmi_shut_down(), so it should be done after other hsa cleanup
-  TestBase::Close();
-}
 
 static const std::string memoryPartitionString(amdsmi_memory_partition_type_t memoryPartitionType) {
   switch (memoryPartitionType) {
@@ -86,11 +56,18 @@ namespace {
 constexpr amdsmi_memory_partition_type_t kNpsModes[] = {
     AMDSMI_MEMORY_PARTITION_NPS1, AMDSMI_MEMORY_PARTITION_NPS2, AMDSMI_MEMORY_PARTITION_NPS4,
     AMDSMI_MEMORY_PARTITION_NPS8};
-constexpr int kModprobeTimeoutSec = 300;
-constexpr int kDriverLiveTimeoutSec = 120;
+// Same bounds as test_memory_partition_cycle.py.
+constexpr int kModprobeTimeoutSec = 120;
+constexpr int kReapTimeoutSec = 10;
+constexpr int kDriverLiveTimeoutSec = 60;
 constexpr int kEnumerateAttempts = 30;
-constexpr int kProfileAttempts = 10;
 constexpr uint32_t kRetryDelayMs = 2000;
+constexpr uint32_t kNameLen = 255;
+constexpr int kCapSysModule = 16;
+const char kRefcntPath[] = "/sys/module/amdgpu/refcnt";
+const char kInitstatePath[] = "/sys/module/amdgpu/initstate";
+const char kProcStatusPath[] = "/proc/self/status";
+const char* const kModprobePaths[] = {"/usr/sbin/modprobe", "/sbin/modprobe"};
 
 amdsmi_memory_partition_type_t ModeFromName(const std::string& name) {
   for (auto mode : kNpsModes) {
@@ -133,82 +110,160 @@ bool ModeInCaps(const amdsmi_nps_caps_t& caps, amdsmi_memory_partition_type_t mo
   }
 }
 
-std::string ReadSysfsLine(const char* path) {
-  std::ifstream file(path);
-  std::string line;
-  std::getline(file, line);
-  return line;
-}
-
-// -1 when amdgpu is not loaded.
-int AmdgpuRefcount() {
-  const std::string value = ReadSysfsLine("/sys/module/amdgpu/refcnt");
-  return value.empty() ? -1 : std::atoi(value.c_str());
-}
-
-// Runs modprobe from a fixed path with fixed arguments: no shell and no PATH lookup.
-bool RunModprobe(const std::vector<std::string>& args, std::string* error) {
-  std::string command = "modprobe";
-  for (const auto& arg : args) {
-    command += " " + arg;
-  }
-  const char* path = nullptr;
-  for (const char* candidate : {"/usr/sbin/modprobe", "/sbin/modprobe"}) {
-    if (access(candidate, X_OK) == 0) {
-      path = candidate;
-      break;
+std::string CapsString(const amdsmi_nps_caps_t& caps) {
+  std::string names;
+  for (auto mode : kNpsModes) {
+    if (ModeInCaps(caps, mode)) {
+      names += (names.empty() ? "" : ", ") + memoryPartitionString(mode);
     }
   }
-  if (!path) {
-    *error = "modprobe not found in /usr/sbin or /sbin (install kmod)";
-    return false;
+  return names.empty() ? "N/A" : names;
+}
+
+std::string ReadFile(const std::string& path) {
+  std::ifstream file(path);
+  std::stringstream text;
+  text << file.rdbuf();
+  return text.str();
+}
+
+std::string FirstLine(const std::string& text) { return text.substr(0, text.find('\n')); }
+
+// -1 unless the first line is a non-negative decimal number.
+int ParseCount(const std::string& text) {
+  const std::string line = FirstLine(text);
+  char* end = nullptr;
+  errno = 0;
+  const long value = std::strtol(line.c_str(), &end, 10);
+  if (line.empty() || errno != 0 || *end != '\0' || value < 0 ||
+      value > std::numeric_limits<int>::max()) {
+    return -1;
   }
-  std::vector<char*> argv;
-  argv.push_back(const_cast<char*>("modprobe"));
+  return static_cast<int>(value);
+}
+
+// CAP_SYS_MODULE in the CapEff line of /proc/self/status.
+bool HasCapSysModule(const std::string& status) {
+  std::istringstream lines(status);
+  std::string line;
+  while (std::getline(lines, line)) {
+    if (line.rfind("CapEff:", 0) != 0) {
+      continue;
+    }
+    const char* digits = line.c_str() + std::strlen("CapEff:");
+    char* end = nullptr;
+    const unsigned long long caps = std::strtoull(digits, &end, 16);
+    return end != digits && ((caps >> kCapSysModule) & 1ULL);
+  }
+  return false;
+}
+
+// 1 once `pid` is reaped, 0 at the deadline, -1 on a waitpid error.
+int Reap(pid_t pid, std::chrono::steady_clock::time_point deadline, int* status) {
+  for (;;) {
+    const pid_t done = waitpid(pid, status, WNOHANG);
+    if (done == pid) {
+      return 1;
+    }
+    if (done < 0 && errno != EINTR) {
+      return -1;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return 0;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+}
+
+}  // namespace
+
+TestMemoryPartitionReadWrite::TestMemoryPartitionReadWrite() : TestBase() {
+  set_title("AMDSMI Memory Partition Read Test");
+  set_description(
+      "Verify memory partition reads, capabilities, invalid inputs, and current-mode sets. "
+      "With AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1, also apply each supported NPS mode with a "
+      "driver reload, then restore the starting NPS mode and accelerator profiles.");
+  const char* destructive = std::getenv("AMDSMI_ALLOW_DESTRUCTIVE_TESTS");
+  allow_destructive_ = destructive && std::strcmp(destructive, "1") == 0;
+  api_.read_file = ReadFile;
+  api_.is_executable = [](const std::string& path) { return access(path.c_str(), X_OK) == 0; };
+  api_.run = [](const std::string& path, const std::vector<std::string>& args, std::string* error) {
+    return RunProgram(path, args, kModprobeTimeoutSec, kReapTimeoutSec, error);
+  };
+  api_.sleep_ms = [](uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); };
+}
+
+TestMemoryPartitionReadWrite::~TestMemoryPartitionReadWrite(void) {}
+
+void TestMemoryPartitionReadWrite::SetUp(void) {
+  TestBase::SetUp();
+
+  return;
+}
+
+void TestMemoryPartitionReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
+
+void TestMemoryPartitionReadWrite::DisplayResults(void) const {
+  TestBase::DisplayResults();
+  return;
+}
+
+void TestMemoryPartitionReadWrite::Close() {
+  // This will close handles opened within rsmitst utility calls and call
+  // amdsmi_shut_down(), so it should be done after other hsa cleanup
+  TestBase::Close();
+}
+
+TestMemoryPartitionReadWrite::RunResult TestMemoryPartitionReadWrite::RunProgram(
+    const std::string& path, const std::vector<std::string>& args, int timeout_sec, int reap_sec,
+    std::string* error) {
+  std::string command = path;
+  std::vector<char*> argv{const_cast<char*>(path.c_str())};
   for (const auto& arg : args) {
+    command += " " + arg;
     argv.push_back(const_cast<char*>(arg.c_str()));
   }
   argv.push_back(nullptr);
+  // A fixed environment, so variables such as MODPROBE_OPTIONS do not pass through sudo -E.
+  char env_path[] = "PATH=/usr/sbin:/usr/bin:/sbin:/bin";
+  char* envp[] = {env_path, nullptr};
 
   std::cout << "\t** " << command << std::endl;
   const pid_t pid = fork();
   if (pid < 0) {
     *error = command + ": fork failed: " + std::strerror(errno);
-    return false;
+    return RunResult::kFailed;
   }
   if (pid == 0) {
-    execv(path, argv.data());
+    execve(path.c_str(), argv.data(), envp);
     _exit(127);
   }
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(kModprobeTimeoutSec);
   int status = 0;
-  for (;;) {
-    const pid_t done = waitpid(pid, &status, WNOHANG);
-    if (done == pid) {
-      break;
+  const auto now = std::chrono::steady_clock::now;
+  const int reaped = Reap(pid, now() + std::chrono::seconds(timeout_sec), &status);
+  if (reaped < 0) {
+    *error = command + ": waitpid failed: " + std::strerror(errno);
+    return RunResult::kFailed;
+  }
+  if (reaped == 0) {
+    kill(pid, SIGKILL);
+    if (Reap(pid, now() + std::chrono::seconds(reap_sec), &status) != 1) {
+      *error = command + " timed out after " + std::to_string(timeout_sec) +
+               "s and ignored SIGKILL; it is stuck in the kernel, so the node needs a reboot";
+      return RunResult::kStuck;
     }
-    if (done < 0 && errno != EINTR) {
-      *error = command + ": waitpid failed: " + std::strerror(errno);
-      return false;
-    }
-    if (std::chrono::steady_clock::now() > deadline) {
-      kill(pid, SIGKILL);
-      waitpid(pid, &status, 0);
-      *error = command + " timed out after " + std::to_string(kModprobeTimeoutSec) + "s";
-      return false;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    *error = command + " timed out after " + std::to_string(timeout_sec) + "s";
+    return RunResult::kTimedOut;
   }
   if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-    *error = command + " failed (exit status " +
-             std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : -1) + ")";
-    return false;
+    *error = command + " failed (" +
+             (WIFEXITED(status) ? "exit status " + std::to_string(WEXITSTATUS(status))
+                                : "signal " + std::to_string(WTERMSIG(status))) +
+             ")";
+    return RunResult::kFailed;
   }
-  return true;
+  return RunResult::kOk;
 }
-
-}  // namespace
 
 void TestMemoryPartitionReadWrite::Run(void) {
   amdsmi_status_t ret, err, ret_set;
@@ -259,40 +314,8 @@ void TestMemoryPartitionReadWrite::Run(void) {
       continue;
     }
     original_profiles[dv_ind] = profile;
-    std::string nps_caps_str = "";
-    if ((profile.memory_caps.nps_flags.nps1_cap == 0 &&
-         profile.memory_caps.nps_flags.nps2_cap == 0 &&
-         profile.memory_caps.nps_flags.nps4_cap == 0 &&
-         profile.memory_caps.nps_flags.nps8_cap == 0)) {
-      nps_caps_str = "N/A";
-    } else {
-      nps_caps_str.clear();
-      if (profile.memory_caps.nps_flags.nps1_cap) {
-        (nps_caps_str.empty()) ? nps_caps_str += "NPS1" : nps_caps_str += ", NPS1";
-      }
-      if (profile.memory_caps.nps_flags.nps2_cap) {
-        (nps_caps_str.empty()) ? nps_caps_str += "NPS2" : nps_caps_str += ", NPS2";
-      }
-      if (profile.memory_caps.nps_flags.nps4_cap) {
-        (nps_caps_str.empty()) ? nps_caps_str += "NPS4" : nps_caps_str += ", NPS4";
-      }
-      if (profile.memory_caps.nps_flags.nps8_cap) {
-        (nps_caps_str.empty()) ? nps_caps_str += "NPS8" : nps_caps_str += ", NPS8";
-      }
-    }
-
-    std::string profile_type_str = "N/A";
-    if (profile.profile_type == AMDSMI_ACCELERATOR_PARTITION_SPX) {
-      profile_type_str = "SPX";
-    } else if (profile.profile_type == AMDSMI_ACCELERATOR_PARTITION_DPX) {
-      profile_type_str = "DPX";
-    } else if (profile.profile_type == AMDSMI_ACCELERATOR_PARTITION_TPX) {
-      profile_type_str = "TPX";
-    } else if (profile.profile_type == AMDSMI_ACCELERATOR_PARTITION_QPX) {
-      profile_type_str = "QPX";
-    } else if (profile.profile_type == AMDSMI_ACCELERATOR_PARTITION_CPX) {
-      profile_type_str = "CPX";
-    }
+    const std::string nps_caps_str = CapsString(profile.memory_caps);
+    const std::string profile_type_str = ProfileName(profile.profile_type);
 
     // save the primary partition type
     if (profile.profile_type != AMDSMI_ACCELERATOR_PARTITION_INVALID) {
@@ -387,40 +410,8 @@ void TestMemoryPartitionReadWrite::Run(void) {
     int resource_index = 0;
     for (uint32_t i = 0; i < profile_config.num_profiles; i++) {
       auto current_profile = profile_config.profiles[i];
-      std::string profile_type_str = "N/A";
-      if (current_profile.profile_type == AMDSMI_ACCELERATOR_PARTITION_SPX) {
-        profile_type_str = "SPX";
-      } else if (current_profile.profile_type == AMDSMI_ACCELERATOR_PARTITION_DPX) {
-        profile_type_str = "DPX";
-      } else if (current_profile.profile_type == AMDSMI_ACCELERATOR_PARTITION_TPX) {
-        profile_type_str = "TPX";
-      } else if (current_profile.profile_type == AMDSMI_ACCELERATOR_PARTITION_QPX) {
-        profile_type_str = "QPX";
-      } else if (current_profile.profile_type == AMDSMI_ACCELERATOR_PARTITION_CPX) {
-        profile_type_str = "CPX";
-      }
-
-      std::string nps_caps_str = "";
-      if ((current_profile.memory_caps.nps_flags.nps1_cap == 0 &&
-           current_profile.memory_caps.nps_flags.nps2_cap == 0 &&
-           current_profile.memory_caps.nps_flags.nps4_cap == 0 &&
-           current_profile.memory_caps.nps_flags.nps8_cap == 0)) {
-        nps_caps_str = "N/A";
-      } else {
-        nps_caps_str.clear();
-        if (current_profile.memory_caps.nps_flags.nps1_cap) {
-          (nps_caps_str.empty()) ? nps_caps_str += "NPS1" : nps_caps_str += ", NPS1";
-        }
-        if (current_profile.memory_caps.nps_flags.nps2_cap) {
-          (nps_caps_str.empty()) ? nps_caps_str += "NPS2" : nps_caps_str += ", NPS2";
-        }
-        if (current_profile.memory_caps.nps_flags.nps4_cap) {
-          (nps_caps_str.empty()) ? nps_caps_str += "NPS4" : nps_caps_str += ", NPS4";
-        }
-        if (current_profile.memory_caps.nps_flags.nps8_cap) {
-          (nps_caps_str.empty()) ? nps_caps_str += "NPS8" : nps_caps_str += ", NPS8";
-        }
-      }
+      const std::string profile_type_str = ProfileName(current_profile.profile_type);
+      const std::string nps_caps_str = CapsString(current_profile.memory_caps);
       IF_VERB(STANDARD) {
         std::cout << "\t**profile_config.profiles[" << i << "]:\n"
                   << "\t\tprofile_type: " << profile_type_str
@@ -485,16 +476,12 @@ void TestMemoryPartitionReadWrite::Run(void) {
     if (ret != AMDSMI_STATUS_SUCCESS) {
       continue;
     }
-    const std::map<std::string, amdsmi_memory_partition_type_t> memory_modes = {
-        {"NPS1", AMDSMI_MEMORY_PARTITION_NPS1},
-        {"NPS2", AMDSMI_MEMORY_PARTITION_NPS2},
-        {"NPS4", AMDSMI_MEMORY_PARTITION_NPS4},
-        {"NPS8", AMDSMI_MEMORY_PARTITION_NPS8}};
     const std::string original_memory(
         orig_memory_partition, strnlen(orig_memory_partition, sizeof(orig_memory_partition)));
-    const auto original_mode = memory_modes.find(original_memory);
-    EXPECT_NE(original_mode, memory_modes.end()) << "Invalid memory partition snapshot";
-    if (original_mode == memory_modes.end()) {
+    const amdsmi_memory_partition_type_t original_mode = ModeFromName(original_memory);
+    EXPECT_NE(original_mode, AMDSMI_MEMORY_PARTITION_UNKNOWN)
+        << "Invalid memory partition snapshot";
+    if (original_mode == AMDSMI_MEMORY_PARTITION_UNKNOWN) {
       continue;
     }
     original_memory_modes[dv_ind] = original_memory;
@@ -645,7 +632,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     }
 
     // Active-mode requests cannot cancel a deferred alternate-NPS write.
-    new_memory_partition = original_mode->second;
+    new_memory_partition = original_mode;
     IF_VERB(STANDARD) {
       std::cout << std::endl;
       std::cout << "\t**"
@@ -781,82 +768,101 @@ void TestMemoryPartitionReadWrite::Run(void) {
 }
 
 bool TestMemoryPartitionReadWrite::RefreshHandles(std::string* error) {
-  // Not initialized after a failed reload; nothing to shut down then.
-  amdsmi_shut_down();
+  // amdsmi_init is reference counted, so this re-enumerates only while the fixture
+  // holds the only reference, as it does in amdsmitst.
+  api_.shut_down();
   num_monitor_devs_ = 0;
   amdsmi_status_t err = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-  if (err != AMDSMI_STATUS_SUCCESS) {
-    if (error) {
-      *error = std::string("amdsmi_init failed: ") + smi_amdgpu_get_status_string(err, false);
-    }
-    return false;
-  }
-  uint32_t socket_count = 0;
-  err = amdsmi_get_socket_handles(&socket_count, nullptr);
-  std::vector<amdsmi_socket_handle> sockets(socket_count);
   if (err == AMDSMI_STATUS_SUCCESS) {
-    err = amdsmi_get_socket_handles(&socket_count, sockets.data());
+    err = EnumerateHandles();
   }
-  for (uint32_t i = 0; err == AMDSMI_STATUS_SUCCESS && i < socket_count; ++i) {
-    uint32_t count = 0;
-    err = amdsmi_get_processor_handles(sockets[i], &count, nullptr);
-    std::vector<amdsmi_processor_handle> handles(count);
-    if (err == AMDSMI_STATUS_SUCCESS) {
-      err = amdsmi_get_processor_handles(sockets[i], &count, handles.data());
-    }
-    for (uint32_t j = 0; err == AMDSMI_STATUS_SUCCESS && j < count; ++j) {
-      if (num_monitor_devs_ >= MAX_MONITOR_DEVICES) {
-        err = AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
-        break;
-      }
-      processor_handles_[num_monitor_devs_++] = handles[j];
-    }
-  }
-  if (err != AMDSMI_STATUS_SUCCESS && error) {
-    *error = std::string("enumerating devices failed: ") + smi_amdgpu_get_status_string(err, false);
-  }
-  return err == AMDSMI_STATUS_SUCCESS;
-}
-
-bool TestMemoryPartitionReadWrite::DriverIdle(std::string* error) {
-  amdsmi_shut_down();
-  const int refcount = AmdgpuRefcount();
-  RefreshHandles(nullptr);
-  if (refcount != 0) {
-    *error = refcount < 0 ? "amdgpu is not loaded"
-                          : "amdgpu is in use by another process (refcnt " +
-                                std::to_string(refcount) + "); the NPS cycle needs the GPUs idle";
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    num_monitor_devs_ = 0;
+    *error = std::string("amdsmi_init or device enumeration failed: ") +
+             smi_amdgpu_get_status_string(err, false);
     return false;
   }
   return true;
 }
 
-bool TestMemoryPartitionReadWrite::ReloadDriver(std::string* error) {
+std::string TestMemoryPartitionReadWrite::ModprobePath() {
+  for (const char* path : kModprobePaths) {
+    if (api_.is_executable(path)) {
+      return path;
+    }
+  }
+  return "";
+}
+
+int TestMemoryPartitionReadWrite::AmdgpuRefcount() {
+  return ParseCount(api_.read_file(kRefcntPath));
+}
+
+std::string TestMemoryPartitionReadWrite::ReloadBlocker() {
+  std::string blocker;
+  if (ModprobePath().empty()) {
+    blocker = "modprobe not found in /usr/sbin or /sbin (install kmod)";
+  } else if (!HasCapSysModule(api_.read_file(kProcStatusPath))) {
+    blocker = "this process cannot load kernel modules (needs root with CAP_SYS_MODULE)";
+  } else if (FirstLine(api_.read_file(kInitstatePath)) != "live") {
+    blocker =
+        "amdgpu is not a loaded module (it may be built into the kernel), so it cannot be "
+        "reloaded";
+  } else {
+    // Our own descriptors would count as a user of amdgpu.
+    api_.shut_down();
+    const int refcount = AmdgpuRefcount();
+    if (refcount != 0) {
+      blocker = refcount < 0
+                    ? "amdgpu refcnt is unreadable"
+                    : "amdgpu is in use by another process (refcnt " + std::to_string(refcount) +
+                          "); the NPS cycle needs the GPUs idle";
+    }
+  }
+  std::string error;
+  if (!RefreshHandles(&error) && blocker.empty()) {
+    blocker = error;
+  }
+  return blocker;
+}
+
+TestMemoryPartitionReadWrite::Reload TestMemoryPartitionReadWrite::ReloadDriver(
+    std::string* error) {
+  std::string ignored;
+  const std::string modprobe = ModprobePath();
   // Our own descriptors would keep amdgpu loaded.
-  amdsmi_shut_down();
+  api_.shut_down();
   num_monitor_devs_ = 0;
   const int refcount = AmdgpuRefcount();
-  if (refcount != 0) {
-    *error = "amdgpu is in use (refcnt " + std::to_string(refcount) + "); not reloading";
-    RefreshHandles(nullptr);
-    return false;
+  if (modprobe.empty() || refcount != 0) {
+    *error = modprobe.empty() ? "modprobe not found in /usr/sbin or /sbin"
+                              : "amdgpu is in use (refcnt " + std::to_string(refcount) + ")";
+    RefreshHandles(&ignored);
+    return Reload::kNotUnloaded;
   }
   std::cout << "\t** Reloading amdgpu, this may take a minute..." << std::endl;
   const auto started = std::chrono::steady_clock::now();
-  if (!RunModprobe({"-r", "amdgpu"}, error)) {
-    RefreshHandles(nullptr);
-    return false;
+  const RunResult unload = api_.run(modprobe, {"-r", "amdgpu"}, error);
+  if (unload != RunResult::kOk) {
+    if (unload != RunResult::kStuck && FirstLine(api_.read_file(kInitstatePath)) == "live") {
+      RefreshHandles(&ignored);
+      return Reload::kNotUnloaded;
+    }
+    return Reload::kNotLoaded;
   }
-  // Never leave the driver unloaded: try the load twice.
-  std::string load_error;
-  if (!RunModprobe({"amdgpu"}, &load_error) && !RunModprobe({"amdgpu"}, &load_error)) {
-    *error = "amdgpu did not load again, GPUs are unavailable: " + load_error;
-    return false;
+  // Never leave the driver unloaded: try the load twice, unless modprobe is stuck.
+  RunResult load = api_.run(modprobe, {"amdgpu"}, error);
+  if (load == RunResult::kFailed || load == RunResult::kTimedOut) {
+    load = api_.run(modprobe, {"amdgpu"}, error);
   }
-  for (int waited = 0; ReadSysfsLine("/sys/module/amdgpu/initstate") != "live"; ++waited) {
+  if (load != RunResult::kOk) {
+    return Reload::kNotLoaded;
+  }
+  for (int waited = 0; FirstLine(api_.read_file(kInitstatePath)) != "live"; ++waited) {
     if (waited >= kDriverLiveTimeoutSec) {
-      *error = "amdgpu loaded but did not report live";
-      return false;
+      *error = "amdgpu loaded but did not report live within " +
+               std::to_string(kDriverLiveTimeoutSec) + "s";
+      return Reload::kNotLoaded;
     }
     api_.sleep_ms(1000);
   }
@@ -865,18 +871,24 @@ bool TestMemoryPartitionReadWrite::ReloadDriver(std::string* error) {
                                                                 started)
                    .count()
             << "s" << std::endl;
-  return RefreshHandles(error);
+  // The devices probe asynchronously after the load.
+  for (int attempt = 1; !RefreshHandles(error); ++attempt) {
+    if (attempt >= kEnumerateAttempts) {
+      return Reload::kNoDevices;
+    }
+    api_.sleep_ms(kRetryDelayMs);
+  }
+  return Reload::kApplied;
 }
 
 std::string TestMemoryPartitionReadWrite::PhysicalKey(amdsmi_processor_handle handle) {
   amdsmi_kfd_info_t kfd = {};
-  if (amdsmi_get_gpu_kfd_info(handle, &kfd) == AMDSMI_STATUS_SUCCESS &&
-      kfd.current_partition_id != 0 &&
+  if (api_.get_kfd_info(handle, &kfd) == AMDSMI_STATUS_SUCCESS && kfd.current_partition_id != 0 &&
       kfd.current_partition_id != std::numeric_limits<uint32_t>::max()) {
     return "";
   }
   amdsmi_bdf_t bdf = {};
-  if (amdsmi_get_gpu_device_bdf(handle, &bdf) != AMDSMI_STATUS_SUCCESS) {
+  if (api_.get_bdf(handle, &bdf) != AMDSMI_STATUS_SUCCESS) {
     return "";
   }
   char key[32];
@@ -897,7 +909,7 @@ TestMemoryPartitionReadWrite::ReadPhysicalGpus(bool* complete) {
     }
     PhysicalGpu gpu;
     gpu.handle = processor_handles_[i];
-    char memory[255] = {};
+    char memory[kNameLen] = {};
     const auto status = api_.get_memory(gpu.handle, memory, sizeof(memory));
     if (status == AMDSMI_STATUS_NOT_SUPPORTED) {
       continue;
@@ -911,36 +923,78 @@ TestMemoryPartitionReadWrite::ReadPhysicalGpus(bool* complete) {
     gpu.profile_valid =
         api_.get_profile(gpu.handle, &gpu.profile, partition_id) == AMDSMI_STATUS_SUCCESS;
     amdsmi_memory_partition_config_t config = {};
-    if (api_.get_memory_config(gpu.handle, &config) == AMDSMI_STATUS_SUCCESS) {
-      gpu.caps = config.partition_caps;
-    }
+    gpu.caps_valid = api_.get_memory_config(gpu.handle, &config) == AMDSMI_STATUS_SUCCESS;
+    gpu.caps = config.partition_caps;
     gpus[key] = gpu;
   }
   return gpus;
 }
 
-bool TestMemoryPartitionReadWrite::StageOnAll(amdsmi_memory_partition_type_t mode,
-                                              bool* any_staged) {
-  bool complete = true;
-  const auto gpus = ReadPhysicalGpus(&complete);
-  size_t accepted = 0;
+std::string TestMemoryPartitionReadWrite::AgreedMode(const std::map<std::string, PhysicalGpu>& gpus,
+                                                     bool complete, size_t physical_count) {
+  if (!complete || gpus.empty() || gpus.size() != physical_count) {
+    return "";
+  }
+  const std::string& mode = gpus.begin()->second.memory;
+  for (const auto& entry : gpus) {
+    if (entry.second.memory != mode) {
+      return "";
+    }
+  }
+  return mode;
+}
+
+TestMemoryPartitionReadWrite::StageResult TestMemoryPartitionReadWrite::StageOnAll(
+    amdsmi_memory_partition_type_t mode) {
+  StageResult result;
+  const auto gpus = ReadPhysicalGpus(&result.complete);
+  result.total = gpus.size();
   for (const auto& entry : gpus) {
     const auto status = api_.set_memory(entry.second.handle, mode);
     std::cout << "\t** " << entry.first << ": set " << memoryPartitionString(mode) << " -> "
               << smi_amdgpu_get_status_string(status, false) << std::endl;
     if (status == AMDSMI_STATUS_SUCCESS) {
-      ++accepted;
+      ++result.accepted;
     } else {
       EXPECT_TRUE(status == AMDSMI_STATUS_INVAL || status == AMDSMI_STATUS_NOT_SUPPORTED)
           << entry.first << ": unexpected status staging " << memoryPartitionString(mode);
     }
   }
-  *any_staged = accepted > 0;
-  if (accepted > 0 && accepted < gpus.size()) {
-    ADD_FAILURE() << memoryPartitionString(mode) << " accepted by " << accepted << " of "
-                  << gpus.size() << " GPUs";
+  if (result.accepted > 0 && result.accepted < result.total) {
+    ADD_FAILURE() << memoryPartitionString(mode) << " accepted by " << result.accepted << " of "
+                  << result.total << " GPUs";
   }
-  return complete && accepted == gpus.size();
+  return result;
+}
+
+bool TestMemoryPartitionReadWrite::ApplyStaged(const std::string& staged,
+                                               const std::string& start) {
+  std::string error;
+  Reload result = ReloadDriver(&error);
+  if (result == Reload::kNotUnloaded) {
+    std::cout << "\t** " << error << "; retrying the reload once" << std::endl;
+    api_.sleep_ms(kRetryDelayMs);
+    result = ReloadDriver(&error);
+  }
+  const std::string not_restored =
+      ", so " + start + " and the accelerator profiles were not restored";
+  switch (result) {
+    case Reload::kApplied:
+      return true;
+    case Reload::kNotUnloaded:
+      ADD_FAILURE() << error << "; " << staged
+                    << " is still staged, and the next amdgpu reload applies it" << not_restored;
+      break;
+    case Reload::kNotLoaded:
+      ADD_FAILURE() << error << "; amdgpu is not loaded, and its next load may bring the GPUs "
+                    << "up in " << staged << not_restored;
+      break;
+    case Reload::kNoDevices:
+      ADD_FAILURE() << error << "; amdgpu reloaded but the library found no devices"
+                    << not_restored;
+      break;
+  }
+  return false;
 }
 
 std::string TestMemoryPartitionReadWrite::VerifyMode(const std::string& expected,
@@ -948,65 +1002,81 @@ std::string TestMemoryPartitionReadWrite::VerifyMode(const std::string& expected
   // Partition devices can take a moment to appear after the load.
   std::map<std::string, PhysicalGpu> gpus;
   bool complete = false;
-  for (int attempt = 0; attempt < kEnumerateAttempts; ++attempt) {
+  std::string ignored;
+  for (int attempt = 1; attempt <= kEnumerateAttempts; ++attempt) {
     gpus = ReadPhysicalGpus(&complete);
-    if (complete && gpus.size() == physical_count) {
+    if ((complete && gpus.size() == physical_count) || attempt == kEnumerateAttempts) {
       break;
     }
     api_.sleep_ms(kRetryDelayMs);
-    RefreshHandles(nullptr);
+    RefreshHandles(&ignored);
   }
   EXPECT_TRUE(complete) << "Memory partition unreadable after reload";
   EXPECT_EQ(gpus.size(), physical_count) << "GPU count changed after reload";
-  std::string agreed = gpus.empty() ? "" : gpus.begin()->second.memory;
   for (const auto& entry : gpus) {
     EXPECT_EQ(entry.second.memory, expected) << entry.first << ": reload applied the wrong mode";
-    if (entry.second.memory != agreed) {
-      agreed.clear();
-    }
     std::cout << "\t** " << entry.first << ": " << entry.second.memory << " / "
               << ProfileName(entry.second.profile.profile_type) << std::endl;
   }
-  return (complete && gpus.size() == physical_count) ? agreed : "";
+  return AgreedMode(gpus, complete, physical_count);
 }
 
 void TestMemoryPartitionReadWrite::RestoreAcceleratorProfiles(
     const std::map<std::string, PhysicalGpu>& original) {
-  for (const auto& entry : original) {
-    if (!entry.second.profile_valid) {
-      continue;
-    }
-    const auto& want = entry.second.profile;
-    SCOPED_TRACE(::testing::Message() << entry.first);
-    bool restored = false;
-    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
-    for (int attempt = 0; attempt < kProfileAttempts && !restored; ++attempt) {
-      bool complete = true;
-      const auto gpus = ReadPhysicalGpus(&complete);
-      const auto current = gpus.find(entry.first);
+  // Shared rounds: read every GPU, set each one that differs, then wait once.
+  std::set<std::string> restored, rejected;
+  std::map<std::string, amdsmi_status_t> last_status;
+  std::string ignored;
+  for (int round = 1; round <= kProfileAttempts; ++round) {
+    bool complete = true;
+    const auto gpus = ReadPhysicalGpus(&complete);
+    bool pending = false;
+    for (const auto& entry : original) {
+      const std::string& key = entry.first;
+      const auto& want = entry.second.profile;
+      if (!entry.second.profile_valid || restored.count(key) || rejected.count(key)) {
+        continue;
+      }
+      const auto current = gpus.find(key);
       if (current == gpus.end() || !current->second.profile_valid) {
-        api_.sleep_ms(kRetryDelayMs);
-        RefreshHandles(nullptr);
+        pending = true;
         continue;
       }
       if (current->second.profile.profile_index == want.profile_index) {
-        restored = true;
-        break;
+        restored.insert(key);
+        continue;
       }
-      status = api_.set_profile(current->second.handle, want.profile_index);
-      std::cout << "\t** " << entry.first << ": set accelerator profile "
-                << ProfileName(want.profile_type) << " (index " << want.profile_index << ") -> "
+      pending = true;
+      if (round == kProfileAttempts) {
+        continue;  // the last round only reads back
+      }
+      const auto status = api_.set_profile(current->second.handle, want.profile_index);
+      last_status[key] = status;
+      std::cout << "\t** " << key << ": set accelerator profile " << ProfileName(want.profile_type)
+                << " (index " << want.profile_index << ") -> "
                 << smi_amdgpu_get_status_string(status, false) << std::endl;
       if (status != AMDSMI_STATUS_SUCCESS && status != AMDSMI_STATUS_BUSY) {
-        break;
+        rejected.insert(key);
       }
-      // A profile change replaces the partition devices; BUSY is retried.
-      api_.sleep_ms(kRetryDelayMs);
-      RefreshHandles(nullptr);
     }
-    EXPECT_TRUE(restored) << "Accelerator profile not restored to "
-                          << ProfileName(want.profile_type) << " (index " << want.profile_index
-                          << "), last status " << smi_amdgpu_get_status_string(status, false);
+    if (!pending || round == kProfileAttempts) {
+      break;
+    }
+    // A profile change replaces the partition devices, and BUSY is retried.
+    api_.sleep_ms(kRetryDelayMs);
+    RefreshHandles(&ignored);
+  }
+  for (const auto& entry : original) {
+    if (!entry.second.profile_valid || restored.count(entry.first)) {
+      continue;
+    }
+    const auto last = last_status.find(entry.first);
+    ADD_FAILURE() << entry.first << ": accelerator profile not restored to "
+                  << ProfileName(entry.second.profile.profile_type) << " (index "
+                  << entry.second.profile.profile_index << "), last status "
+                  << (last == last_status.end()
+                          ? "none"
+                          : smi_amdgpu_get_status_string(last->second, false));
   }
 }
 
@@ -1017,100 +1087,89 @@ void TestMemoryPartitionReadWrite::RunMemoryPartitionCycle() {
   bool complete = true;
   const auto original = ReadPhysicalGpus(&complete);
   if (!complete) {
-    ADD_FAILURE() << "Memory partition unreadable on some GPUs; NPS cycle not run";
+    ADD_FAILURE() << "Memory partition unreadable on some GPUs; NPS cycle not run, nothing was "
+                     "staged";
     return;
   }
   if (original.empty()) {
-    std::cout << "\t** No GPU reports a memory partition; nothing to cycle.\n";
-    return;
+    GTEST_SKIP() << "No GPU reports a memory partition; nothing to cycle";
   }
   const std::string start = original.begin()->second.memory;
   amdsmi_nps_caps_t caps = original.begin()->second.caps;
+  std::string unreadable_caps;
   for (const auto& entry : original) {
     if (entry.second.memory != start) {
-      std::cout << "\t** GPUs start in different memory partition modes; NPS cycle not run.\n";
-      return;
+      GTEST_SKIP() << "GPUs start in different memory partition modes; NPS cycle not run";
+    }
+    if (!entry.second.caps_valid) {
+      unreadable_caps += " " + entry.first;
     }
     caps.nps_cap_mask &= entry.second.caps.nps_cap_mask;
+  }
+  if (!unreadable_caps.empty()) {
+    ADD_FAILURE() << "Memory partition capabilities unreadable on" << unreadable_caps
+                  << "; NPS cycle not run, nothing was staged";
+    return;
   }
   if (ModeFromName(start) == AMDSMI_MEMORY_PARTITION_UNKNOWN) {
     ADD_FAILURE() << "Starting memory partition " << start << " cannot be restored";
     return;
   }
-  std::string error;
-  if (!DriverIdle(&error)) {
-    ADD_FAILURE() << error << "; NPS cycle not run, nothing was staged";
+  std::vector<amdsmi_memory_partition_type_t> candidates;
+  for (auto mode : kNpsModes) {
+    if (memoryPartitionString(mode) != start && ModeInCaps(caps, mode)) {
+      candidates.push_back(mode);
+    }
+  }
+  if (candidates.empty()) {
+    GTEST_SKIP() << "Every GPU supports only " << start << " (" << CapsString(caps)
+                 << "); no other NPS mode to cycle";
+  }
+  const std::string blocker = ReloadBlocker();
+  if (!blocker.empty()) {
+    ADD_FAILURE() << blocker << "; NPS cycle not run, nothing was staged";
     return;
   }
 
-  std::cout << "\t** Starting mode: " << start << " on " << original.size() << " GPUs\n";
-  // ReloadDriver leaves no devices only when amdgpu failed to load again.
-  auto reload = [&](std::string* reload_error) {
-    if (ReloadDriver(reload_error)) {
-      return true;
-    }
-    ADD_FAILURE() << *reload_error;
-    return false;
-  };
+  std::cout << "\t** Starting mode: " << start << " on " << original.size()
+            << " GPUs; supported: " << CapsString(caps) << "\n";
   std::string current = start;
-  bool staged_pending = false;
-  for (auto mode : kNpsModes) {
+  std::vector<std::string> applied;
+  for (auto mode : candidates) {
     const std::string name = memoryPartitionString(mode);
-    if (name == start || !ModeInCaps(caps, mode)) {
-      continue;
-    }
     std::cout << "\n\t** ---- " << current << " -> " << name << " ----" << std::endl;
-    bool any_staged = false;
-    StageOnAll(mode, &any_staged);
-    if (!any_staged) {
+    const StageResult stage = StageOnAll(mode);
+    if (stage.accepted == 0) {
       std::cout << "\t** " << name << " rejected by every GPU; no reload needed.\n";
       continue;
     }
-    staged_pending = true;
-    if (!reload(&error)) {
-      break;
+    if (!ApplyStaged(name, start)) {
+      return;
     }
-    staged_pending = false;
     current = VerifyMode(name, original.size());
-    if (current != name) {
+    if (current != name || stage.accepted != stage.total || !stage.complete) {
       break;
     }
+    applied.push_back(name);
   }
 
   std::cout << "\n\t** ---- Restore " << start << " ----" << std::endl;
-  if (num_monitor_devs_ == 0) {
-    ADD_FAILURE() << "amdgpu is not loaded; " << start
-                  << " and the accelerator profiles were not restored";
-    return;
-  }
-  if (staged_pending) {
-    // Requesting the active mode does not cancel a staged one, so apply it first.
-    if (!reload(&error)) {
-      ADD_FAILURE() << "A memory partition mode is still staged; the next driver reload "
-                    << "applies it instead of " << start;
-      return;
-    }
-    bool read = true;
-    const auto gpus = ReadPhysicalGpus(&read);
-    current = gpus.empty() ? "" : gpus.begin()->second.memory;
-  }
   if (current != start) {
-    bool any_staged = false;
-    StageOnAll(ModeFromName(start), &any_staged);
-    EXPECT_TRUE(any_staged) << "Could not stage the restore to " << start;
-    if (any_staged && reload(&error)) {
-      VerifyMode(start, original.size());
-    }
-    if (num_monitor_devs_ == 0) {
-      ADD_FAILURE() << "amdgpu is not loaded; accelerator profiles were not restored";
+    const StageResult stage = StageOnAll(ModeFromName(start));
+    if (stage.accepted == 0) {
+      ADD_FAILURE() << "Could not stage the restore to " << start;
       return;
     }
+    if (!ApplyStaged(start, start)) {
+      return;
+    }
+    VerifyMode(start, original.size());
   }
   RestoreAcceleratorProfiles(original);
 
-  bool read = true;
-  const auto final_state = ReadPhysicalGpus(&read);
-  EXPECT_TRUE(read) << "Memory partition unreadable after restore";
+  bool final_complete = true;
+  const auto final_state = ReadPhysicalGpus(&final_complete);
+  EXPECT_TRUE(final_complete) << "Memory partition unreadable after restore";
   EXPECT_EQ(final_state.size(), original.size()) << "GPU count changed after restore";
   for (const auto& entry : original) {
     const auto now = final_state.find(entry.first);
@@ -1125,5 +1184,13 @@ void TestMemoryPartitionReadWrite::RunMemoryPartitionCycle() {
       EXPECT_EQ(now->second.profile.profile_index, entry.second.profile.profile_index)
           << entry.first << ": accelerator profile index not restored";
     }
+  }
+  std::string applied_names;
+  for (const auto& name : applied) {
+    applied_names += (applied_names.empty() ? "" : ", ") + name;
+  }
+  std::cout << "\t** Modes applied: " << (applied.empty() ? "none" : applied_names) << std::endl;
+  if (applied.empty()) {
+    GTEST_SKIP() << "No other NPS mode could be applied (modes applied: none)";
   }
 }

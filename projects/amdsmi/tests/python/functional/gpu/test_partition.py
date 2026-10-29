@@ -308,14 +308,20 @@ class TestGpuPartition(unittest.TestCase):
     # Uses clk_type_name instead of clk_type
     # Uses clk_limit_type_name instead of clk_limit_type
 
+    def _rejected_memory_partition_types(self):
+        """Memory partition values the setter must reject, so none can be staged."""
+        rejected = [t for t in common.MEMORY_PARTITION_TYPES if t[2] == common.FAIL]
+        self.assertTrue(rejected, "no memory partition value is expected to be rejected")
+        return rejected
+
     def test_set_gpu_memory_partition_return_codes(self):
         """Verify that set rejects values that are not a memory partition mode."""
         self.common.print_func_name("")
 
-        # A valid mode stays staged until the next driver reload, and requesting the
-        # active mode does not cancel it, so only values that cannot be staged are sent.
-        rejected = [t for t in common.MEMORY_PARTITION_TYPES if t[2] == common.FAIL]
-        self.assertTrue(rejected, "no memory partition value is expected to be rejected")
+        # A valid mode stays staged until the next driver reload, and with current library
+        # and amdgpu releases requesting the active mode does not cancel it, so only values
+        # that cannot be staged are sent.
+        rejected = self._rejected_memory_partition_types()
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_set_gpu_memory_partition_mode=amdsmi.amdsmi_set_gpu_memory_partition_mode,
             memory_partition_type=rejected,
@@ -391,8 +397,7 @@ class TestGpuPartition(unittest.TestCase):
             self.skipTest(msg)
 
         # Same restriction as test_set_gpu_memory_partition_return_codes.
-        rejected = [t for t in common.MEMORY_PARTITION_TYPES if t[2] == common.FAIL]
-        self.assertTrue(rejected, "no memory partition value is expected to be rejected")
+        rejected = self._rejected_memory_partition_types()
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_set_gpu_memory_partition_mode=amdsmi.amdsmi_set_gpu_memory_partition_mode,
             memory_partition_mode=rejected,
