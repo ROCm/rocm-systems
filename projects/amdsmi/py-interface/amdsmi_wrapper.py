@@ -4241,6 +4241,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_rocm_version = _libraries['libamd_smi.so'].amdsmi_get_rocm_version
+    amdsmi_get_rocm_version.restype = amdsmi_status_t
+    amdsmi_get_rocm_version.argtypes = [ctypes.POINTER(struct_amdsmi_version_t)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_ecc_count = _libraries['libamd_smi.so'].amdsmi_get_gpu_ecc_count
     amdsmi_get_gpu_ecc_count.restype = amdsmi_status_t
     amdsmi_get_gpu_ecc_count.argtypes = [amdsmi_processor_handle, amdsmi_gpu_block_t, ctypes.POINTER(struct_amdsmi_error_count_t)]
@@ -5920,14 +5926,15 @@ __all__ = \
     'amdsmi_get_processor_handles',
     'amdsmi_get_processor_handles_by_type',
     'amdsmi_get_processor_info', 'amdsmi_get_processor_type',
-    'amdsmi_get_soc_pstate', 'amdsmi_get_socket_handles',
-    'amdsmi_get_socket_info', 'amdsmi_get_supported_power_cap',
-    'amdsmi_get_temp_metric', 'amdsmi_get_threads_per_core',
-    'amdsmi_get_tray_info', 'amdsmi_get_ttm_info',
-    'amdsmi_get_utilization_count', 'amdsmi_get_vcn_busy_percent',
-    'amdsmi_get_violation_status', 'amdsmi_get_xgmi_info',
-    'amdsmi_get_xgmi_plpd', 'amdsmi_gpu_block_t',
-    'amdsmi_gpu_cache_info_t', 'amdsmi_gpu_control_counter',
+    'amdsmi_get_rocm_version', 'amdsmi_get_soc_pstate',
+    'amdsmi_get_socket_handles', 'amdsmi_get_socket_info',
+    'amdsmi_get_supported_power_cap', 'amdsmi_get_temp_metric',
+    'amdsmi_get_threads_per_core', 'amdsmi_get_tray_info',
+    'amdsmi_get_ttm_info', 'amdsmi_get_utilization_count',
+    'amdsmi_get_vcn_busy_percent', 'amdsmi_get_violation_status',
+    'amdsmi_get_xgmi_info', 'amdsmi_get_xgmi_plpd',
+    'amdsmi_gpu_block_t', 'amdsmi_gpu_cache_info_t',
+    'amdsmi_gpu_control_counter',
     'amdsmi_gpu_counter_group_supported', 'amdsmi_gpu_create_counter',
     'amdsmi_gpu_destroy_counter', 'amdsmi_gpu_metrics_t',
     'amdsmi_gpu_ras_policy_info_t', 'amdsmi_gpu_ras_policy_v4_0_t',

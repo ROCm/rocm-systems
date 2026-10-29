@@ -9011,27 +9011,19 @@ finally:
 
 ### amdsmi_get_rocm_version
 
-Description: This function attempts to retrieve the ROCm version by loading the `librocm-core.so` shared library. This function doesn't require amdsmi library init.
+Description: This function retrieves the ROCm version by calling the `amdsmi_get_rocm_version` C API, which locates and queries the `librocm-core.so` shared library. This function doesn't require amdsmi library init.
 
-Output: Tuple (bool, str) containing rocm_load_status and version_message
-
-Exceptions that can be thrown by `amdsmi_get_rocm_version` function:
-
-* `AmdSmiLibraryException`
+Output: Tuple (bool, str) containing rocm_load_status and version_message. `rocm_load_status` is `True` and `version_message` is the version string ("major.minor.release") on success; otherwise `rocm_load_status` is `False` and `version_message` describes the failure. This function does not raise exceptions.
 
 Example:
 
 ```python
 import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    rocm_load_status, version_message = amdsmi.amdsmi_get_rocm_version()
-    print(f"ROCm load status: {rocm_load_status}")
-    print(f"ROCm version msg: {version_message}")
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
+rocm_load_status, version_message = amdsmi.amdsmi_get_rocm_version()
+if rocm_load_status:
+    print(f"ROCm version: {version_message}")
+else:
+    print(f"Error: {version_message}")
 ```
 
 ### amdsmi_set_cpu_xgmi_pstate_range

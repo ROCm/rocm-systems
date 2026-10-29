@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -49,6 +50,7 @@
 #include "amd_smi/impl/nic/amd_smi_switch_device.h"
 #endif  // BRCM_NIC
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
+#include "amd_smi/impl/amd_smi_lib_loader.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "amd_smi/impl/amd_smi_ualoe.h"
@@ -5845,6 +5847,106 @@ amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t* version) {
   version->build = AMDSMI_LIB_VERSION_STRING;
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+// librocm-core.so ships with the ROCm core runtime, not amd-smi, so it isn't
+// guaranteed to live next to libamd_smi.so; search the same locations a ROCm
+// install can place it in (both soname variants, in case the dev symlink is
+// absent) before falling back to the dynamic linker.
+static std::vector<std::string> rocm_core_candidates() {
+  std::vector<std::string> dirs;
+
+  // Relocatable tree (ROCm install / TheRock rocm-sdk wheel): librocm-core.so
+  // typically sits in the same lib/ directory as this library itself.
+  Dl_info self_info{};
+  if (dladdr(reinterpret_cast<void*>(&amdsmi_get_rocm_version), &self_info) != 0 &&
+      self_info.dli_fname != nullptr) {
+    std::string self_path(self_info.dli_fname);
+    size_t slash = self_path.find_last_of('/');
+    if (slash != std::string::npos) {
+      dirs.push_back(self_path.substr(0, slash));
+    }
+  }
+
+  const char* rocm_home = std::getenv("ROCM_HOME");
+  if (rocm_home == nullptr) {
+    rocm_home = std::getenv("ROCM_PATH");
+  }
+  if (rocm_home != nullptr) {
+    dirs.push_back(std::string(rocm_home) + "/lib");
+  }
+  dirs.push_back("/opt/rocm/lib");
+
+  std::vector<std::string> candidates;
+  for (const auto& dir : dirs) {
+    candidates.push_back(dir + "/librocm-core.so.1");
+    candidates.push_back(dir + "/librocm-core.so");
+  }
+  candidates.push_back("librocm-core.so.1");
+  candidates.push_back("librocm-core.so");
+  return candidates;
+}
+
+amdsmi_status_t amdsmi_get_rocm_version(amdsmi_version_t* version) {
+  if (version == nullptr) return AMDSMI_STATUS_INVAL;
+
+  // The installed ROCm version cannot change mid-process, so resolve it once
+  // and cache it: avoids a dlopen/dlsym/dlclose round trip on every call, and
+  // gives version->build the same process-lifetime validity as the literal
+  // string amdsmi_get_lib_version() hands back for its own build field.
+  static amdsmi_status_t cached_status = AMDSMI_STATUS_NOT_SUPPORTED;
+  static amdsmi_version_t cached_version{};
+  static std::string cached_build_str;
+  static std::once_flag once;
+
+  std::call_once(once, []() {
+    std::vector<std::string> owned_candidates = rocm_core_candidates();
+    std::vector<const char*> candidates;
+    candidates.reserve(owned_candidates.size());
+    for (const auto& candidate : owned_candidates) {
+      candidates.push_back(candidate.c_str());
+    }
+
+    // librocm-core.so is an optional dependency (unlike libdrm); a host without
+    // ROCm core installed is expected, so stay silent on failure here.
+    amd::smi::AMDSmiLibraryLoader rocm_core_loader;
+    amdsmi_status_t status = rocm_core_loader.load(candidates, /*log_on_failure=*/false);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      cached_status = AMDSMI_STATUS_NOT_SUPPORTED;
+      return;
+    }
+
+    typedef uint32_t (*getROCmVersion_t)(uint32_t*, uint32_t*, uint32_t*);
+    getROCmVersion_t get_rocm_version = nullptr;
+    status = rocm_core_loader.load_symbol(reinterpret_cast<getROCmVersion_t*>(&get_rocm_version),
+                                          "getROCmVersion", /*log_on_failure=*/false);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      rocm_core_loader.unload();
+      cached_status = AMDSMI_STATUS_NOT_SUPPORTED;
+      return;
+    }
+
+    uint32_t major = 0;
+    uint32_t minor = 0;
+    uint32_t release = 0;
+    uint32_t rocm_core_status = get_rocm_version(&major, &minor, &release);
+    rocm_core_loader.unload();
+    if (rocm_core_status != 0) {
+      cached_status = AMDSMI_STATUS_API_FAILED;
+      return;
+    }
+
+    cached_build_str =
+        std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(release);
+    cached_version.major = major;
+    cached_version.minor = minor;
+    cached_version.release = release;
+    cached_version.build = cached_build_str.c_str();
+    cached_status = AMDSMI_STATUS_SUCCESS;
+  });
+
+  *version = cached_version;
+  return cached_status;
 }
 
 amdsmi_status_t amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle,
