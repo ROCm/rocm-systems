@@ -1751,9 +1751,17 @@ endif()
 # install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
-  # Resolve to a full path: nothing on the link line supplies ${ROCM_PATH}/lib, so a bare
-  # -lhsakmt would have no search path to resolve against.
+  # libhsakmt is a static archive. We link it as a plain library (not via
+  # find_package(hsakmt) because the hsakmt-config.cmake is broken on many rocm
+  # releases).
+  # Used two ways below: ENABLE_ROCSHMEM links it alongside librocshmem.a (it's a
+  # dependency of librocshmem.a); ENABLE_ROCSHMEM_GIN links it for anvil.cpp's
+  # direct hsaKmt* calls. The symbols are absorbed into librccl.so so the
+  # dependency does not propagate, and its drm/numa deps resolve at load time
+  # via librccl's existing libhsa-runtime64 dependency.
   find_library(HSAKMT_LIBRARY NAMES hsakmt
+    # Resolve to a full path: nothing on the link line supplies ${ROCM_PATH}/lib, so a bare
+    # -lhsakmt would have no search path to resolve against.
     HINTS "${ROCM_PATH}"
     PATH_SUFFIXES lib lib64)
   if(NOT HSAKMT_LIBRARY)
@@ -1775,13 +1783,9 @@ if(ENABLE_ROCSHMEM)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 elseif(ENABLE_ROCSHMEM_GIN)
   # GIN is self-contained: all rocshmem host code it needs is compiled directly
-  # into librccl.so (SDMA and the GDA factory + mlx5 provider via src/gin). So
-  # there is no rocshmem host-symbol extraction, no --exclude-libs, and no
-  # --allow-shlib-undefined — librccl leaves no rocshmem host symbol unresolved.
-  # GIN device code is header-only (no rocshmem device bitcode), so unlike
-  # ENABLE_ROCSHMEM this branch links no rocshmem library at all.
-  #
-  # anvil.cpp calls hsaKmt* directly. hsa-runtime64 is already linked above.
+  # into librccl.so (SDMA and the GDA factory + mlx5 provider via src/gin).
+  # Only real dependency: anvil.cpp calls hsaKmt* directly (see the HSAKMT_LIBRARY
+  # detection above) so it must be added to librccl.so.
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
 endif()
 
