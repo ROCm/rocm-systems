@@ -183,14 +183,19 @@ struct HrrConsent {
 // consent file or per run in HIP_HRR_CAPTURE_CONSENT for CI and containers.
 static HrrConsent hrr_capture_consent() {
   // A set variable decides the run: yes consents, any other value withholds consent.
-  // A blank one (the flag parser's form of an exported empty variable) counts as unset.
-  if (!flagIsDefault(HIP_HRR_CAPTURE_CONSENT)) {
-    const std::string answer = hrr_consent_trim(HIP_HRR_CAPTURE_CONSENT);
-    if (answer == "yes") return {"HIP_HRR_CAPTURE_CONSENT", ""};
-    if (!answer.empty()) {
-      return {"", std::string("HIP_HRR_CAPTURE_CONSENT is set to '") + HIP_HRR_CAPTURE_CONSENT +
-                      "', which withholds consent."};
-    }
+  // A blank one counts as unset. As in CLR's flag parser, double quotes that are the
+  // first and last characters other than ' ' are dropped.
+  const char* env = std::getenv("HIP_HRR_CAPTURE_CONSENT");
+  std::string value = env != nullptr ? env : "";
+  const size_t first = value.find_first_not_of(' ');
+  const size_t last = value.find_last_not_of(' ');
+  if (last > first && value[first] == '"' && value[last] == '"') {
+    value = value.substr(first + 1, last - first - 1);
+  }
+  const std::string answer = hrr_consent_trim(value);
+  if (answer == "yes") return {"HIP_HRR_CAPTURE_CONSENT", ""};
+  if (!answer.empty()) {
+    return {"", "HIP_HRR_CAPTURE_CONSENT is set to '" + value + "', which withholds consent."};
   }
   const std::string path = hrr_consent_file();
   if (path.empty()) return {};

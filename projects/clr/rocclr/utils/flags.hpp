@@ -275,8 +275,6 @@ release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
         "1 = Disable Image support for ROC path")                             \
 release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
         "Set to a directory path to enable HRR capture; archive written there") \
-release(cstring, HIP_HRR_CAPTURE_CONSENT, "",                                 \
-        "Set to yes to consent to HRR capture without a consent file")        \
 release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \
         "Enable HRR capture argument-provenance tracing (per-arg dumps and "  \
         "H2D destination logging) at LOG_INFO level")                         \
