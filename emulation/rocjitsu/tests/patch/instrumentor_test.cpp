@@ -1933,7 +1933,7 @@ TEST(InstrumentorSpill, PlanAccSpillsRejectsUnsupportedArch) {
 
 // AccVGPR spilling is CDNA-only. RDNA4 has a scratch emitter (nonzero offset cap)
 // but no AccVGPR file, so plan_acc_spills rejects it up front with a CDNA-only
-// diagnostic instead of letting emission throw UnimplementedInst later.
+// diagnostic instead of deferring the rejection to emission.
 TEST(InstrumentorSpill, PlanAccSpillsRejectsNonCdnaArch) {
   SpillManager spills(0, 4096);
   std::vector<SpillSlot> out;
@@ -1985,6 +1985,38 @@ TEST(InstrumentorProbePatch, RejectsGfx1251ProbeForGfx1250Destination) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("concrete target"), std::string::npos)
       << "error was: " << result.errors.front();
+}
+
+// Normal planning needs no spills for this probe, but emission must still reject
+// RDNA3's unsupported boundary drain without publishing a partial patch or ELF.
+TEST(InstrumentorProbePatch, RejectsNoSpillRdna3BoundaryDrainWithoutOutput) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  const uint32_t nop = build_s_nop(0, arch);
+  auto target = make_amdgpu_kernel_elf({nop, nop}, /*private_bytes=*/0,
+                                       /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  auto probe = make_amdgpu_probe_elf("rj_test_probe", {build_s_setpc_b64(30, arch)},
+                                     EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  Instrumentor instr(obj, arch);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  EXPECT_NO_THROW({
+    const auto result = instr.patch_with_debug_summaries();
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors.front(),
+              "probe-call emission: boundary drain: Unimplemented instruction: "
+              "all-loads wait for target architecture");
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.patches.empty());
+  });
 }
 
 TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
@@ -3665,11 +3697,11 @@ protected:
   // spill, no bridge). Checks the words appear, not their order or the descriptor size.
   void expect_acc_spill_present(const std::vector<uint32_t> &cave, uint16_t acc, uint32_t off) {
     const util::FailureOr<std::vector<uint32_t>> maybe_store =
-        build_scratch_store_dword(acc, off, a_.arch, /*acc=*/true);
+        build_scratch_store_dword(acc, off, a_.arch, nullptr, /*acc=*/true);
     ASSERT_TRUE(maybe_store.succeeded());
     const auto &store = maybe_store.value();
     const util::FailureOr<std::vector<uint32_t>> maybe_load =
-        build_scratch_load_dword(acc, off, a_.arch, /*acc=*/true);
+        build_scratch_load_dword(acc, off, a_.arch, nullptr, /*acc=*/true);
     ASSERT_TRUE(maybe_load.succeeded());
     const auto &load = maybe_load.value();
     EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
@@ -3734,12 +3766,12 @@ protected:
     ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
     EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
     const util::FailureOr<std::vector<uint32_t>> maybe_store =
-        build_scratch_store_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true);
+        build_scratch_store_dword(/*acc=*/0, /*off=*/64, a_.arch, nullptr, /*acc=*/true);
     ASSERT_TRUE(maybe_store.succeeded());
     const auto &store = maybe_store.value();
     expect_drain_before_store(cave, store);
     const util::FailureOr<std::vector<uint32_t>> maybe_scratch_load_dword =
-        build_scratch_load_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true);
+        build_scratch_load_dword(/*acc=*/0, /*off=*/64, a_.arch, nullptr, /*acc=*/true);
     ASSERT_TRUE(maybe_scratch_load_dword.succeeded());
     expect_drain_after_return(cave, store, maybe_scratch_load_dword.value());
     EXPECT_EQ(caved.scratch, 68u);

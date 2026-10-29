@@ -99,7 +99,7 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   // VGPRs: batch stores in the prologue.
   for (const SpillSlot &slot : vgpr_spills) {
     const util::FailureOr<std::vector<uint32_t>> maybe_store =
-        build_scratch_store_dword(slot.reg, slot.byte_offset, arch, false, error);
+        build_scratch_store_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/false);
     if (maybe_store.failed())
       return util::Result::failure();
     const auto &store = maybe_store.value();
@@ -111,7 +111,7 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   // with the VGPR stores; loads batch with the VGPR loads under the shared wait below.
   for (const SpillSlot &slot : acc_spills) {
     const util::FailureOr<std::vector<uint32_t>> maybe_store =
-        build_scratch_store_dword(slot.reg, slot.byte_offset, arch, /*acc=*/true, error);
+        build_scratch_store_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/true);
     if (maybe_store.failed())
       return util::Result::failure();
     const auto &store = maybe_store.value();
@@ -136,7 +136,7 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
     const auto &wl = maybe_wl.value();
     bracket.prologue.insert(bracket.prologue.end(), wl.begin(), wl.end());
     const util::FailureOr<std::vector<uint32_t>> maybe_store =
-        build_scratch_store_dword(bridge_vgpr, slot.byte_offset, arch, false, error);
+        build_scratch_store_dword(bridge_vgpr, slot.byte_offset, arch, error, /*acc=*/false);
     if (maybe_store.failed())
       return util::Result::failure();
     const auto &store = maybe_store.value();
@@ -152,7 +152,7 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   // is reused), then the VGPRs and AccVGPRs, so a reused bridge's reload lands last.
   for (const SpillSlot &slot : sgpr_spills) {
     const util::FailureOr<std::vector<uint32_t>> maybe_load =
-        build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch, false, error);
+        build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch, error, /*acc=*/false);
     if (maybe_load.failed())
       return util::Result::failure();
     const auto &load = maybe_load.value();
@@ -170,7 +170,7 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   }
   for (const SpillSlot &slot : vgpr_spills) {
     const util::FailureOr<std::vector<uint32_t>> maybe_load =
-        build_scratch_load_dword(slot.reg, slot.byte_offset, arch, false, error);
+        build_scratch_load_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/false);
     if (maybe_load.failed())
       return util::Result::failure();
     const auto &load = maybe_load.value();
@@ -179,7 +179,7 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   }
   for (const SpillSlot &slot : acc_spills) {
     const util::FailureOr<std::vector<uint32_t>> maybe_load =
-        build_scratch_load_dword(slot.reg, slot.byte_offset, arch, /*acc=*/true, error);
+        build_scratch_load_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/true);
     if (maybe_load.failed())
       return util::Result::failure();
     const auto &load = maybe_load.value();
@@ -499,14 +499,14 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Literal-constant scalar source code; the 32-bit literal follows the word.
   constexpr uint16_t kLiteralConstant = 0xFF;
 
-  auto sink = [error_out](std::string_view message) {
+  auto report_spill_error = [error_out](std::string_view message) {
     if (error_out != nullptr)
-      error_out->assign(message);
+      *error_out = "probe-call emission: spill bracket: " + std::string(message);
   };
-  const util::DiagnosticEmitter error(sink);
+  const util::DiagnosticEmitter spill_error(report_spill_error);
   const util::FailureOr<SpillBracket> maybe_spill =
       build_spill_bracket(plan.vgpr_spills, plan.sgpr_spills, plan.acc_spills,
-                          plan.spill_bridge_vgpr, plan.arch, &error);
+                          plan.spill_bridge_vgpr, plan.arch, &spill_error);
   if (maybe_spill.failed())
     return std::nullopt;
   const SpillBracket &spill = maybe_spill.value();
@@ -518,8 +518,13 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // likewise return with an outstanding load that would escape the call boundary.
   // Emitted at the very top of the envelope (before any special-state/target/link
   // write) and again immediately after the call returns (before any restoration).
+  auto report_boundary_error = [error_out](std::string_view message) {
+    if (error_out != nullptr)
+      *error_out = "probe-call emission: boundary drain: " + std::string(message);
+  };
+  const util::DiagnosticEmitter boundary_error(report_boundary_error);
   const util::FailureOr<std::vector<uint32_t>> maybe_boundary_drain =
-      build_wait_all_loads_complete(plan.arch, &error);
+      build_wait_all_loads_complete(plan.arch, &boundary_error);
   if (maybe_boundary_drain.failed())
     return std::nullopt;
   const std::vector<uint32_t> &boundary_drain = maybe_boundary_drain.value();

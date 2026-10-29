@@ -540,7 +540,7 @@ protected:
   // restores it.
   void expect_missing_restore_clobbers_accvgpr() {
     const util::FailureOr<std::vector<uint32_t>> maybe_load =
-        build_scratch_load_dword(/*acc0=*/0, 64, a_.arch, /*acc=*/true);
+        build_scratch_load_dword(/*acc0=*/0, 64, a_.arch, nullptr, /*acc=*/true);
     ASSERT_TRUE(maybe_load.succeeded());
     const std::vector<uint32_t> &load = maybe_load.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
@@ -691,7 +691,7 @@ protected:
     ASSERT_TRUE(maybe_readlane.succeeded());
     const std::array<uint32_t, 2> readlane = maybe_readlane.value();
     const util::FailureOr<std::vector<uint32_t>> maybe_aload =
-        build_scratch_load_dword(/*acc0=*/0, 72, a_.arch, /*acc=*/true);
+        build_scratch_load_dword(/*acc0=*/0, 72, a_.arch, nullptr, /*acc=*/true);
     ASSERT_TRUE(maybe_aload.succeeded());
     const std::vector<uint32_t> &aload = maybe_aload.value();
     const uint32_t nop = build_s_nop(0, a_.arch);

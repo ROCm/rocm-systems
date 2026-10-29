@@ -311,18 +311,18 @@ TEST(InstructionBuilder, SpillBuildersReportFailuresWithoutThrowing) {
                 "Unimplemented instruction: v_writelane_b32 for target architecture");
   check_failure([&](auto error) { return build_v_readlane_b32(0, 0, 0, invalid, error); },
                 "Unimplemented instruction: v_readlane_b32 for target architecture");
-  check_failure([&](auto error) { return build_scratch_store_dword(0, 0, invalid, false, error); },
+  check_failure([&](auto error) { return build_scratch_store_dword(0, 0, invalid, error); },
                 "Unimplemented instruction: scratch_store for target architecture");
-  check_failure([&](auto error) { return build_scratch_load_dword(0, 0, invalid, false, error); },
+  check_failure([&](auto error) { return build_scratch_load_dword(0, 0, invalid, error); },
                 "Unimplemented instruction: scratch_load for target architecture");
   check_failure(
       [](auto error) {
-        return build_scratch_store_dword(0, 0, ROCJITSU_CODE_ARCH_RDNA4, true, error);
+        return build_scratch_store_dword(0, 0, ROCJITSU_CODE_ARCH_RDNA4, error, /*acc=*/true);
       },
       "Unimplemented instruction: scratch_store of an AccVGPR on an arch without them");
   check_failure(
       [](auto error) {
-        return build_scratch_load_dword(0, 0, ROCJITSU_CODE_ARCH_RDNA4, true, error);
+        return build_scratch_load_dword(0, 0, ROCJITSU_CODE_ARCH_RDNA4, error, /*acc=*/true);
       },
       "Unimplemented instruction: scratch_load of an AccVGPR on an arch without them");
   check_failure([&](auto error) { return build_wait_stores_complete(invalid, error); },
@@ -437,11 +437,27 @@ TEST(InstructionBuilder, BuildScratchLoadDword) {
   EXPECT_EQ(rdna4[2], 0x00004000u);
 }
 
+// Forwarding an emitter as the fourth argument must preserve the default VGPR
+// register file for both scratch builders.
+TEST(InstructionBuilder, ScratchDiagnosticPointerKeepsVgprRegisterFile) {
+  util::StringDiagnostic diagnostic;
+  const auto error = diagnostic.emitter();
+  const util::FailureOr<std::vector<uint32_t>> store =
+      build_scratch_store_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA3, &error);
+  ASSERT_TRUE(store.succeeded());
+  EXPECT_EQ(store.value()[1], 0x007F0200u);
+  const util::FailureOr<std::vector<uint32_t>> load =
+      build_scratch_load_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA3, &error);
+  ASSERT_TRUE(load.succeeded());
+  EXPECT_EQ(load.value()[1], 0x027F0000u);
+  EXPECT_TRUE(diagnostic.message().empty());
+}
+
 TEST(InstructionBuilder, BuildScratchStoreDwordAccVgpr) {
   // acc=1 sets the CDNA FLAT acc bit (word1 bit 23 = 0x00800000), addressing the
   // AccVGPR file for the data operand. Same as BuildScratchStoreDword otherwise.
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 = build_scratch_store_dword(
-      /*vdata=*/3, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3, /*acc=*/true);
+      /*vdata=*/3, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3, nullptr, /*acc=*/true);
   ASSERT_TRUE(maybe_cdna3.succeeded());
   const auto &cdna3 = maybe_cdna3.value();
   ASSERT_EQ(cdna3.size(), 2u);
@@ -449,7 +465,7 @@ TEST(InstructionBuilder, BuildScratchStoreDwordAccVgpr) {
   EXPECT_EQ(cdna3[1], 0x00FF0300u);
 
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna4 =
-      build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4, /*acc=*/true);
+      build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4, nullptr, /*acc=*/true);
   ASSERT_TRUE(maybe_cdna4.succeeded());
   const auto &cdna4 = maybe_cdna4.value();
   ASSERT_EQ(cdna4.size(), 2u);
@@ -460,9 +476,8 @@ TEST(InstructionBuilder, BuildScratchStoreDwordAccVgpr) {
 TEST(InstructionBuilder, BuildScratchLoadDwordAccVgpr) {
   // acc=1 sets the CDNA FLAT acc bit (word1 bit 23 = 0x00800000), writing the load
   // result into the AccVGPR file. Same as BuildScratchLoadDword otherwise.
-  const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 =
-      build_scratch_load_dword(/*vdst=*/5, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3,
-                               /*acc=*/true);
+  const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 = build_scratch_load_dword(
+      /*vdst=*/5, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3, nullptr, /*acc=*/true);
   ASSERT_TRUE(maybe_cdna3.succeeded());
   const auto &cdna3 = maybe_cdna3.value();
   ASSERT_EQ(cdna3.size(), 2u);
@@ -470,7 +485,7 @@ TEST(InstructionBuilder, BuildScratchLoadDwordAccVgpr) {
   EXPECT_EQ(cdna3[1], 0x05FF0000u);
 
   const util::FailureOr<std::vector<uint32_t>> maybe_cdna4 =
-      build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4, /*acc=*/true);
+      build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4, nullptr, /*acc=*/true);
   ASSERT_TRUE(maybe_cdna4.succeeded());
   const auto &cdna4 = maybe_cdna4.value();
   ASSERT_EQ(cdna4.size(), 2u);

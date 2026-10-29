@@ -41,55 +41,6 @@ uint64_t resolve_sopp_target(uint64_t branch_pc, uint32_t branch_word) {
 // from a valid plan.
 //==============================================================================
 
-TEST(TrampolineBuilder, ProbeCallRejectsUnsupportedSpillBuildersWithoutOutput) {
-  for (const auto cls : {RegClass::VGPR, RegClass::SGPR, RegClass::ACC_VGPR}) {
-    TrampolinePlan plan;
-    plan.is_probe_call = true;
-    plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
-    if (cls == RegClass::VGPR)
-      plan.vgpr_spills.push_back({cls, 0, 0});
-    else if (cls == RegClass::SGPR)
-      plan.sgpr_spills.push_back({cls, 0, 0});
-    else
-      plan.acc_spills.push_back({cls, 0, 0});
-    std::string error;
-    EXPECT_NO_THROW({
-      const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
-      EXPECT_FALSE(bytes.has_value());
-    });
-    EXPECT_EQ(error, cls == RegClass::SGPR
-                         ? "Unimplemented instruction: v_writelane_b32 for target architecture"
-                         : "Unimplemented instruction: scratch_store for target architecture");
-  }
-
-  // A valid VGPR store is already in the local bracket when the AccVGPR store
-  // rejects RDNA4. None of that partial bracket may escape as trampoline bytes.
-  TrampolinePlan plan;
-  plan.is_probe_call = true;
-  plan.arch = ROCJITSU_CODE_ARCH_RDNA4;
-  plan.vgpr_spills.push_back({RegClass::VGPR, 0, 0});
-  plan.acc_spills.push_back({RegClass::ACC_VGPR, 0, 4});
-  std::string error;
-  EXPECT_NO_THROW({
-    const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
-    EXPECT_FALSE(bytes.has_value());
-  });
-  EXPECT_EQ(error,
-            "Unimplemented instruction: scratch_store of an AccVGPR on an arch without them");
-}
-
-TEST(TrampolineBuilder, ProbeCallRejectsUnsupportedBoundaryDrainWithoutOutput) {
-  TrampolinePlan plan;
-  plan.is_probe_call = true;
-  plan.arch = ROCJITSU_CODE_ARCH_INVALID;
-  std::string error;
-  EXPECT_NO_THROW({
-    const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
-    EXPECT_FALSE(bytes.has_value());
-  });
-  EXPECT_EQ(error, "Unimplemented instruction: all-loads wait for target architecture");
-}
-
 TEST(TrampolineBuilder, Emits4ByteRelocationAnchorPatch) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint64_t kAnchor = 0x100;
@@ -972,6 +923,57 @@ TEST(TrampolineBuilderEmit, UndeclaredArgumentSourceFails) {
   plan.probe_args[0].source = static_cast<ProbeArgSource>(99);
   EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
   EXPECT_NE(err.find("not a declared ProbeArgSource"), std::string::npos) << err;
+}
+
+TEST(TrampolineBuilderEmit, ProbeCallRejectsUnsupportedSpillBuildersWithoutOutput) {
+  for (const auto cls : {RegClass::VGPR, RegClass::SGPR, RegClass::ACC_VGPR}) {
+    TrampolinePlan plan;
+    plan.is_probe_call = true;
+    plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+    if (cls == RegClass::VGPR)
+      plan.vgpr_spills.push_back({cls, 0, 0});
+    else if (cls == RegClass::SGPR)
+      plan.sgpr_spills.push_back({cls, 0, 0});
+    else
+      plan.acc_spills.push_back({cls, 0, 0});
+    std::string error;
+    EXPECT_NO_THROW({
+      const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+      EXPECT_FALSE(bytes.has_value());
+    });
+    EXPECT_EQ(error, cls == RegClass::SGPR ? "probe-call emission: spill bracket: Unimplemented "
+                                             "instruction: v_writelane_b32 for target architecture"
+                                           : "probe-call emission: spill bracket: Unimplemented "
+                                             "instruction: scratch_store for target architecture");
+  }
+
+  // A valid VGPR store is already in the local bracket when the AccVGPR store
+  // rejects RDNA4. None of that partial bracket may escape as trampoline bytes.
+  TrampolinePlan plan;
+  plan.is_probe_call = true;
+  plan.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  plan.vgpr_spills.push_back({RegClass::VGPR, 0, 0});
+  plan.acc_spills.push_back({RegClass::ACC_VGPR, 0, 4});
+  std::string error;
+  EXPECT_NO_THROW({
+    const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+    EXPECT_FALSE(bytes.has_value());
+  });
+  EXPECT_EQ(error, "probe-call emission: spill bracket: Unimplemented instruction: scratch_store "
+                   "of an AccVGPR on an arch without them");
+}
+
+TEST(TrampolineBuilderEmit, ProbeCallRejectsUnsupportedBoundaryDrainWithoutOutput) {
+  TrampolinePlan plan;
+  plan.is_probe_call = true;
+  plan.arch = ROCJITSU_CODE_ARCH_INVALID;
+  std::string error;
+  EXPECT_NO_THROW({
+    const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+    EXPECT_FALSE(bytes.has_value());
+  });
+  EXPECT_EQ(error, "probe-call emission: boundary drain: Unimplemented instruction: all-loads wait "
+                   "for target architecture");
 }
 
 // A separately constructed plan can name the literal source code instead of
