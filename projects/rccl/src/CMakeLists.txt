@@ -1529,9 +1529,8 @@ if(BUILD_ADDRESS_SANITIZER)
     target_link_options(rccl PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
   endif()
 endif()
-# Applications need not be built with the flag, so librccl.so carries the
-# shared host runtime. It intercepts HSA only if it precedes libhsa-runtime64
-# in symbol lookup order; otherwise it warns and LD_PRELOAD is needed.
+# The runtime intercepts HSA only if it precedes libhsa-runtime64 in lookup
+# order; otherwise it must be LD_PRELOADed.
 if(BUILD_DEVICE_ADDRESS_SANITIZER)
   target_compile_options(rccl PRIVATE -fsanitize=daddress)
   target_link_options(rccl PRIVATE -fsanitize=daddress -shared-libsan

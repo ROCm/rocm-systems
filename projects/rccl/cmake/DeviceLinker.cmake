@@ -407,9 +407,22 @@ function(dl_add_fat_object NAME SRC)
       list(APPEND _half_flags -MD -MF "${_obj}.d")
       set(_depfile DEPFILE "${_obj}.d")
     endif()
+    set(_commands COMMAND ${DL_CLANG} -x hip ${_half_flags} ${_flags} -c -o ${_obj} ${SRC})
+    if(BUILD_DEVICE_ADDRESS_SANITIZER AND NOT _half STREQUAL "host")
+      # See ir_codegen_cmd in tools/rccl-device-compile.
+      set(_mt "")
+      if(_depfile)
+        set(_mt -MT ${_obj})
+      endif()
+      set(_commands
+        COMMAND ${DL_CLANG} -x hip ${_half_flags} ${_mt} ${_flags} -emit-llvm -c -o ${_obj}.bc ${SRC}
+        COMMAND ${CMAKE_RCCLDEV_COMPILER} --ir-codegen --arch=${_half}
+          --target-id=${DL_TARGET_ID_${_half}} --clang=${DL_CLANG}
+          --dasan-tu-rt=${RCCL_DASAN_TU_RT} ${_flags} -o ${_obj} ${_obj}.bc)
+    endif()
     add_custom_command(
       OUTPUT  ${_obj}
-      COMMAND ${DL_CLANG} -x hip ${_half_flags} ${_flags} -c -o ${_obj} ${SRC}
+      ${_commands}
       DEPENDS ${SRC} ${_deps}
       ${_depfile}
       COMMENT "DL compile (${_half}): ${NAME}"
@@ -615,6 +628,9 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     -fPIC
     ${DL_INHERITED_FLAGS}
   )
+  if(BUILD_DEVICE_ADDRESS_SANITIZER)
+    target_compile_options(${_dev_target} PRIVATE --dasan-tu-rt=${RCCL_DASAN_TU_RT})
+  endif()
   target_compile_definitions(${_dev_target} PRIVATE RCCL_DEVICE_LINKER)
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
@@ -669,7 +685,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   endif()
   set(_dl_dasan_rt_arg "")
   if(BUILD_DEVICE_ADDRESS_SANITIZER)
-    set(_dl_dasan_rt_arg "--dasan-rt=${RCCL_DASAN_DEVICE_RT}")
+    set(_dl_dasan_rt_arg "--dasan-rt=${RCCL_DASAN_DEVICE_RT}" "--dasan-tu-rt=${RCCL_DASAN_TU_RT}")
   endif()
 
   add_custom_command(

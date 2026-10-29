@@ -235,9 +235,7 @@ if (BUILD_ADDRESS_SANITIZER)
   endif()
 endif()
 
-# Device address sanitizer: needs no xnack+ target or instrumented host. The
-# host runtime is linked into librccl.so; the device runtime goes into the
-# per-arch device link (cmake/DeviceLinker.cmake).
+# Unlike BUILD_ADDRESS_SANITIZER, needs no xnack+ target.
 if(BUILD_DEVICE_ADDRESS_SANITIZER)
   if(BUILD_ADDRESS_SANITIZER)
     message(FATAL_ERROR "BUILD_DEVICE_ADDRESS_SANITIZER and BUILD_ADDRESS_SANITIZER are mutually exclusive")
@@ -257,6 +255,19 @@ if(BUILD_DEVICE_ADDRESS_SANITIZER)
   get_filename_component(DASAN_RUNTIME_DIR "${_dasan_host_rt}" DIRECTORY)
   message(STATUS "DASAN host runtime directory: ${DASAN_RUNTIME_DIR}")
   message(STATUS "DASAN device runtime: ${RCCL_DASAN_DEVICE_RT}")
+  set(RCCL_DASAN_TU_RT "${CMAKE_BINARY_DIR}/dasan_device_tu.bc")
+  execute_process(
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/rccl-device-compile
+      --clang=${CMAKE_CXX_COMPILER}
+      --derive-dasan-tu-rt=${RCCL_DASAN_DEVICE_RT} -o ${RCCL_DASAN_TU_RT}
+    RESULT_VARIABLE _dasan_tu_rt_result
+    ERROR_VARIABLE _dasan_tu_rt_error)
+  if(NOT _dasan_tu_rt_result EQUAL 0)
+    message(FATAL_ERROR
+      "BUILD_DEVICE_ADDRESS_SANITIZER: cannot derive the per-TU device runtime: "
+      "${_dasan_tu_rt_error}")
+  endif()
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RCCL_DASAN_DEVICE_RT}")
 endif()
 
 # Check if clang compiler can offload to GPU_TARGETS
