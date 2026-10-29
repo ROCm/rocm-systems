@@ -1621,6 +1621,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       INFO(NCCL_TUNING, "AR symk disqualified: msgBytes=%zu < symMinR2=%zu", msgBytes, symMinR2);
     if (!query && symkRequested && symSuppressedByMax)
       INFO(NCCL_TUNING, "AR symk disqualified: msgBytes=%zu > symMaxR2=%zu", msgBytes, symMaxR2);
+    if (query && symEligible && hasSysmemSegment)
+      return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllReduce, count, datatype, query, decision);
 
 
   // develop's single "will CE AllReduce service this call" gate (collectives.cc
@@ -1849,6 +1851,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       INFO(NCCL_TUNING, "AG symk disqualified: totalBytes=%zu < agSymMinR2=%zu", totalBytes, agSymMinR2);
     if (!query && agSymkRequested && agSymSuppressedBySize)
       INFO(NCCL_TUNING, "AG symk disqualified: totalBytes=%zu > agSymMaxR2=%zu", totalBytes, agSymMaxR2);
+    const bool hasSysmemSegment =
+      ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+    if (query && symEligible && hasSysmemSegment)
+      return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllGather, sendcount, datatype, query, decision);
     // symEligible gates DDA below; the symk report itself is deferred until after
     // the CE-registered check so it loses to CE exactly as dispatch does
     // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
@@ -2068,6 +2074,10 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
       INFO(NCCL_TUNING, "RS symk disqualified: totalBytes=%zu < rsSymMinR2=%zu", totalBytes, rsSymMinR2);
     if (!query && symkRequested && symSuppressedByMax)
       INFO(NCCL_TUNING, "RS symk disqualified: totalBytes=%zu > rsSymMaxR2=%zu", totalBytes, rsSymMaxR2);
+    const bool hasSysmemSegment =
+      ncclDevrWindowHasSysmemSegment(rsSendWin) || ncclDevrWindowHasSysmemSegment(rsRecvWin);
+    if (query && symEligible && hasSysmemSegment)
+      return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncReduceScatter, recvcount, datatype, query, decision);
 
     // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
     // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.

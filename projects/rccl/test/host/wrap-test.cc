@@ -7724,6 +7724,37 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_ReduceScatterDelegatesToSelectReduce
       });
 }
 
+TEST(WrapMicrotestIsolated, GetCollImplInfo_SymmetricWindowWithSysmemReportsKernelFallback) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_SymmetricWindowWithSysmemReportsKernelFallback",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_TREE;
+          task->protocol = NCCL_PROTO_LL;
+          task->nMaxChannels = 7;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeSelectComm();
+        const void* send = reinterpret_cast<void*>(0x1000);
+        void* recv = reinterpret_cast<void*>(0x2000);
+        TestDevrWindows windows(comm, send, /*sendHasSysmem=*/true, recv, /*recvHasSysmem=*/false);
+
+        for (ncclFunc_t coll : {ncclFuncAllReduce, ncclFuncAllGather, ncclFuncReduceScatter}) {
+          int algo = -1, protocol = -1, maxChannels = -1;
+          EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, coll, 8, ncclFloat32, ncclSum, send, recv,
+                                                     /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+          EXPECT_EQ(NCCL_ALGO_TREE, algo);
+          EXPECT_EQ(NCCL_PROTO_LL, protocol);
+          EXPECT_EQ(7, maxChannels);
+        }
+        EXPECT_EQ(getAlgo.calls, 3);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, GetCollImplInfo_OtherCollFallsBackToGetAlgoInfo) {
   RUN_ISOLATED_TEST(
       "Wrap_GetCollImplInfo_OtherCollFallsBackToGetAlgoInfo",

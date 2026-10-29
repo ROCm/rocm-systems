@@ -3608,12 +3608,12 @@
         {
           "name": "CE_RecvOffset_Symmetric_Lsa",
           "description": "Registered CE AllReduce into a multi-segment symmetric window at a non-zero receive offset uses the window-relative offset",
-          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
+          "test_filter": "UBR_MultiSegment.CE_RecvOffset"
         },
         {
           "name": "CE_RecvOffset_BeforeLegacyRecvOffsetCorruptsResult",
           "description": "BEFORE control: fault injection restores the legacy base-relative offset and the result must be corrupted (ENABLE_FAULT_INJECTION build)",
-          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult"
+          "test_filter": "UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult"
         },
         {
           "name": "CE_RecvOffset_RecvRangePastWindowFallsBack",
@@ -5324,7 +5324,7 @@
         {
           "name": "UBR_MultiSegment_All_Core",
           "description": "Single-node UBR multi-segment tests except jobs that need a dedicated env or two nodes",
-          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindow*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.CE_RecvOffset:UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindow*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
         },
         {
           "name": "UBR_MultiSegment_Generic_Reuse",
