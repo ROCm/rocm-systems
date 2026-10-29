@@ -58,7 +58,7 @@ struct DbiInstrumentation {
 /// a trampoline (Instrumentor::first_anchor()); blocks without one are counted
 /// and skipped. Only single-kernel objects on a target DBI is validated on are
 /// instrumented. Instrumentor::patch() refuses a kernel it does not support,
-/// a wave32 kernel or a call for example, as UnsupportedKernel. Patching is
+/// one that makes a call for example, as UnsupportedKernel. Patching is
 /// all-or-nothing, so one refused site leaves the whole object unpatched.
 ///
 /// @pre @p probe.object is a valid code object.

@@ -183,13 +183,15 @@ TEST(DbiRuntimeSites, LeavesObjectWithTwoKernelsUnpatched) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
-TEST(DbiRuntimeSites, LeavesWave32KernelUnpatched) {
-  // CallsTheProbeAtTheFirstAnchorOfEachBlock instruments the same kernel in wave64.
+TEST(DbiRuntimeSites, InstrumentsAWave32Kernel) {
+  // CallsTheProbeAtTheFirstAnchorOfEachBlock instruments the same kernel in Wave64.
   const DbiInstrumentation result =
       instrument(kernel(kGfx1200, three_block_text(kGfx1200), /*granulated_sgpr_count=*/3,
                         /*entry_text_offset=*/0, /*wave32=*/true),
                  probe(kGfx1200));
-  expect_refused(result, DbiLoadDecision::UnsupportedKernel, "wave32");
+  ASSERT_EQ(result.decision, DbiLoadDecision::Instrumented)
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  EXPECT_EQ(result.sites, 2u);
 }
 
 TEST(DbiRuntimeSites, LeavesKernelThatMakesACallUnpatched) {

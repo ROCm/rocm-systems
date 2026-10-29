@@ -410,11 +410,11 @@ TEST(ProbeLiveInTest, RejectsAnEntryInsideAnInstruction) {
   sym.body_size = 4;
 
   std::string err;
-  EXPECT_FALSE(analyze_probe_live_ins(
-                   obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
-                   *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
-                    /*wave_size=*/64, &err)
-                   .has_value());
+  EXPECT_FALSE(
+      analyze_probe_live_ins(obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
+                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
+                             /*wave_size=*/64, &err)
+          .has_value());
   EXPECT_NE(err.find("invalid reachable CFG entry"), std::string::npos) << err;
 }
 

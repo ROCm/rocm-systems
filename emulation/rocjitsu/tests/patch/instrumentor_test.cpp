@@ -2212,7 +2212,7 @@ TEST(InstrumentorProbePatch, RejectsGfx1251ProbeForGfx1250Destination) {
 TEST(InstrumentorProbePatch, RejectsNoSpillRdna3BoundaryDrainWithoutOutput) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
   const uint32_t nop = build_s_nop(0, arch);
-  auto target = make_amdgpu_kernel_elf({nop, nop}, /*private_bytes=*/0,
+  auto target = make_amdgpu_kernel_elf({nop, nop, build_s_endpgm(arch)}, /*private_bytes=*/0,
                                        /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1100);
   auto probe = make_amdgpu_probe_elf("rj_test_probe", {build_s_setpc_b64(30, arch)},
                                      EF_AMDGPU_MACH_AMDGCN_GFX1100);
@@ -2609,11 +2609,11 @@ std::vector<uint32_t> gfx12_store_probe_body(bool define_base) {
 }
 
 // Patch @p body into a Wave32 gfx1200 kernel, passing @p arg_dwords immediate
-// arguments in v0 upward. The patch gates refuse a probe call in a Wave32
-// kernel, so this skips them; these tests check the probe body.
+// arguments in v0 upward.
 InstrumentedCodeObjectDebug patch_gfx12_probe(const std::vector<uint32_t> &body,
                                               size_t arg_dwords) {
-  auto target = make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto target = make_gfx1200_wave32_kernel_elf(
+      {0xBF800000u, 0xBF800000u, build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)}, /*private_bytes=*/0);
   auto probe = make_gfx1200_probe_elf("rj_test_probe", body);
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -2625,7 +2625,6 @@ InstrumentedCodeObjectDebug patch_gfx12_probe(const std::vector<uint32_t> &body,
   pt.probe_symbol = "rj_test_probe";
   pt.probe_args.assign(arg_dwords, probe_arg_imm(0));
   instr.add_point(pt);
-  InstrumentorTestAccess::skip_patch_gates(instr);
   return instr.patch_with_debug_summaries();
 }
 
@@ -2814,7 +2813,8 @@ void expect_only_probe_calls_refused(const std::vector<uint8_t> &target,
 // also reads s3 before defining it, and that must not be the error reported.
 TEST(InstrumentorProbePatch, ProbeCallGatesPrecedeProbeAnalysis) {
   expect_only_probe_calls_refused(
-      make_gfx950_elf_with_two_nops(),
+      make_gfx950_elf_with_text_words(
+          {0xBF800000u, 0xBF800000u, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)}),
       make_gfx950_probe_elf("rj_test_probe",
                             {build_s_mov_b32(4, 3, ROCJITSU_CODE_ARCH_CDNA4), kProbeSetpcS30S31}),
       ROCJITSU_CODE_ARCH_CDNA4, /*anchor_offset=*/4, "discovered kernel descriptor");
@@ -2841,7 +2841,8 @@ TEST(InstrumentorProbePatch, ProbeReadingAboveAWave32CompareIsRefused) {
       build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4),
   };
   const std::vector<uint32_t> text = {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
-                                      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4)};
+                                      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+                                      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
   for (const bool wave32 : {true, false}) {
     SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
     auto target = wave32 ? make_gfx1200_wave32_kernel_elf(text, /*private_bytes=*/0)
@@ -3779,9 +3780,10 @@ TEST(InstrumentorProbePatch, TwoSitesDistinctProbesEachTargetsItsBody) {
 }
 
 TEST(InstrumentorProbePatch, UnknownProbeSymbolFailsClosed) {
-  // Ends in s_endpgm: patch() refuses a probe call in code that runs off .text.
-  auto target = make_gfx950_elf_with_text_words(
-      {0xBF800000u, 0xBF800000u, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)});
+  // patch() refuses a probe call in code that runs off .text or has no kernel
+  // descriptor before it looks the probe up.
+  auto target = make_gfx950_kernel_elf(
+      {0xBF800000u, 0xBF800000u, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)}, /*private_bytes=*/0);
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -3902,9 +3904,9 @@ TEST(InstrumentorProbePatch, DescriptorlessProbeCallFailsClosed) {
       << "error was: " << result.errors.front();
 }
 
-// Liveness cannot see every register some kernels still need: a wave32 kernel,
-// one that makes a call or runs off .text, one that reaches a register relative
-// to M0 or through GPR index mode, or one with an RDNA4 image instruction.
+// Liveness cannot see every register some kernels still need: a kernel that
+// makes a call or runs off .text, one that reaches a register relative to M0 or
+// through GPR index mode, or one with an RDNA4 image instruction.
 // Both patch entry points refuse each when the point calls a probe, and patch an
 // inline nop, which takes no registers. Skipping the patch gates patches the
 // probe call.
@@ -3919,10 +3921,6 @@ TEST(InstrumentorProbePatch, RefusesKernelsLivenessCannotFollow) {
   constexpr rj_code_arch_t cdna4 = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr rj_code_arch_t rdna4 = ROCJITSU_CODE_ARCH_RDNA4;
   const Case cases[] = {
-      {"wave32", rdna4,
-       make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u, build_s_endpgm(rdna4)},
-                                      /*private_bytes=*/0),
-       make_gfx1200_probe_elf("rj_test_probe", {build_s_setpc_b64(/*s[30:31]=*/30, rdna4)}), 0},
       // 0x00 s_call_b64 s[30:31] -> 0x0c, 0x04 s_nop, 0x08 s_endpgm,
       // 0x0c s_setpc_b64 s[30:31].
       {"makes a call", cdna4,

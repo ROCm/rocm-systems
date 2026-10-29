@@ -13,9 +13,9 @@ namespace rocjitsu {
 // Both patch entry points run the patch gates. One refuses points that need
 // runtime support no runtime provides yet, such as the kernarg wrapper the entry
 // prologue loads through. The others refuse kernels the Instrumentor does not
-// support: ones liveness cannot follow for a probe call (Wave32, a call, an
-// unresolved edge, a relative register access, an RDNA4 image instruction) and
-// ones that preload kernel arguments past a second firmware entry.
+// support: ones liveness cannot follow for a probe call (a call, an unresolved
+// edge, a relative register access, an RDNA4 image instruction) and ones that
+// preload kernel arguments past a second firmware entry.
 // skip_patch_gates() lets a test exercise the gated path. A simulator test may
 // supply the runtime support itself (the harness hands the CP the wrapper); a
 // unit test may only inspect the plan and never dispatch it. Skipping supplies

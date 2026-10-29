@@ -488,18 +488,15 @@ public:
   /// return edge, and nothing past an unresolved edge
   /// (BasicBlock::successor_issue()). A register read only in a callee, after a
   /// call returns, or past such an edge counts as dead, so a trampoline in such
-  /// a kernel may clobber it. Liveness also reads the SGPR destination of a
-  /// wave32 compare or carry-out as the pair its encoding names, so the register
-  /// after it can count as dead in a wave32 kernel (#14022). And it sees the
-  /// register an operand encodes, not the one an `s_movrel*` / `v_movrel*`
-  /// access or GPR index mode reaches. When a point calls a probe, patch()
-  /// refuses a code object with a wave32 kernel, a call, an unresolved edge
-  /// (code that runs off the end of .text included), such a relative access,
-  /// or an RDNA4 image instruction, whose address VGPRs the decoder does not
-  /// report. It also refuses a kernel that preloads kernel arguments on CDNA2 or
-  /// where uses_kernarg_preload_firmware_skip() holds: firmware can enter one
-  /// 256 bytes past its descriptor entry, which is not treated as a kernel
-  /// entry. These refusals set `kernel_unsupported`.
+  /// a kernel may clobber it. Liveness also sees the register an operand
+  /// encodes, not the one an `s_movrel*` / `v_movrel*` access or GPR index mode
+  /// reaches. When a point calls a probe, patch() refuses a code object with a
+  /// call, an unresolved edge (code that runs off the end of .text included),
+  /// such a relative access, or an RDNA4 image instruction, whose address VGPRs
+  /// the decoder does not report. It also refuses a kernel that preloads kernel
+  /// arguments on CDNA2 or where uses_kernarg_preload_firmware_skip() holds:
+  /// firmware can enter one 256 bytes past its descriptor entry, which is not
+  /// treated as a kernel entry. These refusals set `kernel_unsupported`.
   ///
   /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
   /// prologue those need loads through a kernarg wrapper that no runtime builds

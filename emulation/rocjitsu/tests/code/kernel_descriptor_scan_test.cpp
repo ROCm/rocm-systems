@@ -386,7 +386,7 @@ TEST(KernargPreload, LengthAndOffsetDecodeIndependently) {
 
 } // namespace
 
-TEST(KernargPreload, FirmwareEntersPastTheDescriptorEntryOnlyOnCdna3AndCdna4) {
+TEST(KernargPreload, DbtUsesFirmwareSkipOnlyOnCdna3AndCdna4) {
   EXPECT_TRUE(uses_kernarg_preload_firmware_skip(ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_TRUE(uses_kernarg_preload_firmware_skip(ROCJITSU_CODE_ARCH_CDNA4));
   // CDNA2 firmware enters the same way, but DBT does not handle that entry.

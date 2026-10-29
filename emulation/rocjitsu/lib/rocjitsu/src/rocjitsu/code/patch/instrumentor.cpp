@@ -276,8 +276,6 @@ bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &a
 
 // Liveness decides which registers a trampoline may take, and it cannot see
 // every register some kernels still need:
-// - it reads the SGPR destination of a wave32 compare or carry-out as the pair
-//   its encoding names, so the register after it can read dead;
 // - it follows successors() only, so a register read across a call or an
 //   unresolved edge reads dead;
 // - it sees the register an operand encodes, so one reached relative to M0 or
@@ -286,15 +284,9 @@ bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &a
 //   image instruction's address VGPRs.
 // Returns why @p blocks, decoded from @p text, hold such a kernel, or empty when
 // they do not.
-std::string liveness_refusal_reason(rj_code_arch_t arch, const CodeObject &obj,
+std::string liveness_refusal_reason(rj_code_arch_t arch,
                                     const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                                     std::span<const uint8_t> text) {
-  for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj)) {
-    if (kernel_wavefront_size(arch, kernel.descriptor) == 32)
-      return "the kernel at text offset " + std::to_string(kernel.entry_text_offset) +
-             " runs in wave32, and liveness reads a wave32 lane mask's SGPR destination as a "
-             "pair";
-  }
   for (const auto &block : blocks) {
     const std::string where = "the block at text offset " + std::to_string(block->start_offset());
     if (!block->call_edges().empty())
@@ -1307,7 +1299,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                       [](const InstrumentationPoint &pt) { return !pt.probe_symbol.empty(); });
       std::string refusal;
       if (calls_probe)
-        refusal = liveness_refusal_reason(arch_, obj_, blocks_, *text);
+        refusal = liveness_refusal_reason(arch_, blocks_, *text);
       if (refusal.empty())
         refusal = kernarg_preload_refusal_reason(arch_, obj_);
       if (!refusal.empty()) {
