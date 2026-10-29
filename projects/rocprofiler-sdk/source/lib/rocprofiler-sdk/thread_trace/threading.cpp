@@ -180,7 +180,8 @@ producer_loop(
     bool   do_sleep{false};
     size_t num_shader_engines = 0;
     for(const auto& packet : buffer_packets)
-        num_shader_engines = std::max(num_shader_engines, size_t(packet->shader_engine_id + 1));
+        num_shader_engines =
+            std::max(num_shader_engines, static_cast<size_t>(packet->shader_engine_id + 1));
     ROCP_FATAL_IF(num_shader_engines > 64)
         << "Triple buffering supports at most 64 shader engines, got " << num_shader_engines;
 
@@ -351,6 +352,7 @@ producer_loop(
         hsa::sqtt_buffer_status_t            status{};
         rocprofiler_thread_trace_timestamp_t start_ts{};
         rocprofiler_thread_trace_timestamp_t end_ts{};
+        bool                                 cpu_full{false};
     };
     std::deque<retired_buffer_t> retired_buffers{};
     uint64_t                     retired_mask = 0;  // Bit per SE with a buffer in retired_buffers
@@ -358,22 +360,30 @@ producer_loop(
 
     auto se_bit = [](int shader_engine_id) { return uint64_t{1} << shader_engine_id; };
 
+    auto find_retired = [&](int shader_engine_id) {
+        return std::find_if(
+            retired_buffers.begin(), retired_buffers.end(), [&](const auto& retired) {
+                return retired.status.shader_engine_id == shader_engine_id;
+            });
+    };
+
     // Copies a retired buffer to a CPU slot. With allow_stop, stops the trace once if consumers
     // cannot keep up; this must only happen after the swaps of the current poll were submitted.
-    auto copy_retired = [&](std::deque<retired_buffer_t>::iterator it, bool allow_stop) {
+    auto copy_retired = [&](const std::deque<retired_buffer_t>::iterator& it, bool allow_stop) {
         size_t slot_idx = try_claim_slot();
-        int flags = it->status.gpu_full ? ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL
-                                        : ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
         if(slot_idx == num_buffers)
         {
             if(allow_stop)
             {
                 if(!any_full && !stop_trace()) return false;
-                any_full = true;
-                flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
+                any_full     = true;
+                it->cpu_full = true;
             }
             slot_idx = wait_for_free_slot();
         }
+        int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
+        if(it->status.gpu_full) flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
+        if(it->cpu_full) flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
         send_to_consumer(it->status.data,
                          it->status.size,
                          flags,
@@ -403,16 +413,34 @@ producer_loop(
         if(!att_queue_submit(queue, &buffer_packets.at(0)->query_status, &submit_signal)) return;
         signal_wait(submit_signal);
 
+        // Only consumers free slots concurrently, so this many copies before the swaps never wait.
+        size_t free_slots = 0;
+        for(size_t i = 0; i < num_buffers; i++)
+            if(!buffers[i].filled.load()) ++free_slots;
+
         // Check all engines before submitting any swaps: on gfx10+ overflow disables the queue.
         bool gpu_full = false;
+        bool cpu_full = false;
         for(auto& packet : buffer_packets)
         {
             auto& current_ts = current_timestamps.at(packet->shader_engine_id);
             if(current_ts.gpu_clock == 0)
                 current_ts = convert_timestamp(queue.agent_id, packet->get_gpu_clock().start);
 
+            // Swapping an engine with an uncopied retired buffer needs a slot for that copy first.
+            // Without one, waiting would let the GPU overflow: leave the engine unqueried, so its
+            // filled buffer stays pending for the drain, and stop once the other swaps are out.
+            const bool needs_copy = (retired_mask & se_bit(packet->shader_engine_id)) != 0;
+            if(needs_copy && free_slots == 0)
+            {
+                find_retired(packet->shader_engine_id)->cpu_full = true;
+                cpu_full                                         = true;
+                continue;
+            }
+
             if(auto status = packet->query_buffer_status())
             {
+                if(needs_copy) --free_slots;
                 if(status->gpu_full && parameters.restart_on_gpu_full)
                 {
                     ROCP_WARNING << "GPU buffer overflow on agent " << queue.agent_id.handle
@@ -456,14 +484,9 @@ producer_loop(
         for(size_t i = 0; i < buffers_requiring_swap.size(); i++)
         {
             auto& status = buffers_requiring_swap[i];
-            if(retired_mask & se_bit(status.shader_engine_id))
-            {
-                auto it = std::find_if(
-                    retired_buffers.begin(), retired_buffers.end(), [&](const auto& retired) {
-                        return retired.status.shader_engine_id == status.shader_engine_id;
-                    });
-                if(!copy_retired(it, false)) return;
-            }
+            if((retired_mask & se_bit(status.shader_engine_id)) != 0 &&
+               !copy_retired(find_retired(status.shader_engine_id), false))
+                return;
 
             const bool last = i + 1 == buffers_requiring_swap.size();
             ROCP_TRACE << "Sending buffer swap for SE " << status.shader_engine_id;
@@ -485,7 +508,7 @@ producer_loop(
         }
         buffers_requiring_swap.clear();
 
-        if(gpu_full)
+        if(gpu_full || cpu_full)
         {
             if(!stop_trace()) return;
             any_full = true;
