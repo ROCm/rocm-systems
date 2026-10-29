@@ -4890,10 +4890,10 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
   ncclResult_t res = ncclSuccess;
 
   int oldDev;
+  /* *newcomm should be NCCL_COMM_NULL until comm split fully complete. */
+  if (newcomm) *newcomm = NCCL_COMM_NULL;
   CUDACHECK(cudaGetDevice(&oldDev));
   NCCLCHECKGOTO(PtrCheck(newcomm, caller, "newcomm"), res, exit);
-  /* *newcomm should be NCCL_COMM_NULL until comm split fully complete. */
-  *newcomm = NCCL_COMM_NULL;
   NCCLCHECKGOTO(CommCheck(comm, caller, "comm"), res, exit);
   if (isShrink) {
     NCCLCHECKGOTO(PtrCheck(excludeRanksList, caller, "excludeRanksList"), res, exit);
@@ -5001,8 +5001,7 @@ exit:
 fail:
   if (childComm) {
     if (!comm->shareResources) {
-      comm->childAbortFlag = NULL;
-      comm->childAbortFlagDev = NULL;
+      COMPILER_ATOMIC_STORE(&comm->childAbortFlag, static_cast<uint32_t*>(nullptr), std::memory_order_release);
       if (childComm->abortFlag) free(childComm->abortFlag);
       if (childComm->abortFlagDev) ncclCudaHostFree(childComm->abortFlagDev);
       if (childComm->abortFlagRefCount) free(childComm->abortFlagRefCount);

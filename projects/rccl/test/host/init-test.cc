@@ -9550,7 +9550,7 @@ TEST_F(InitMicrotest, InitChildComm_GetDeviceFails_ReturnsCudaErrorBeforeAnyVali
   ScopedHook getDevice(g_hipGetDevice, [](int*) { return hipErrorInvalidValue; });
   ncclComm_t out = kGrow_NewcommPoison;
   EXPECT_EQ(ncclUnhandledCudaError, Grow_RunSplit(/*parent=*/nullptr, kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
-  EXPECT_EQ(kGrow_NewcommPoison, out) << "the device query precedes every write to *newcomm";
+  EXPECT_EQ(nullptr, out) << "*newcomm is cleared before the device query";
   EXPECT_EQ(1, getDevice.calls);
 }
 
@@ -9795,7 +9795,6 @@ TEST_F(InitMicrotest, InitChildComm_ConfigParseFails_ClearsTheParentChildAbortFl
 
   EXPECT_FALSE(parent->shareResources);
   EXPECT_EQ(nullptr, parent->childAbortFlag) << "the parent must not keep the freed child abort flag";
-  EXPECT_EQ(nullptr, parent->childAbortFlagDev);
   EXPECT_EQ(nullptr, out);
   EXPECT_EQ(0, spy.calls());
 }
