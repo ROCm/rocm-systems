@@ -1088,6 +1088,30 @@ class TestCorrectSysInfo:
         assert sys_info["num_xcd"].item() == "4"
         assert sys_info["cu_per_gpu"].item() == "64"
 
+    @pytest.mark.parametrize(
+        ("correction", "expected", "deprecated"),
+        [
+            ("num_xcd:4,cu_per_gpu:64", {"num_xcd": "4", "cu_per_gpu": "64"}, True),
+            ("num_xcd:4, cu_per_gpu:64", {"num_xcd": "4", "cu_per_gpu": "64"}, True),
+            ("sbios:Vendor, Build:42", {"sbios": "Vendor, Build:42"}, False),
+            (
+                "sbios:American Megatrends International, LLC.X",
+                {"sbios": "American Megatrends International, LLC.X"},
+                False,
+            ),
+        ],
+    )
+    def test_commas_split_only_between_spec_pairs(
+        self, monkeypatch, correction, expected, deprecated
+    ) -> None:
+        """Comma-separated pairs are split with a warning; other commas stay."""
+        mocks = common.patch_console(monkeypatch, "utils.parser", "warning")
+        mspec = make_mi350_machine_specs(monkeypatch)
+        correct_sys_info(mspec, [correction])
+
+        assert {name: getattr(mspec, name) for name in expected} == expected
+        assert mocks["warning"].called == deprecated
+
     def test_surrounding_whitespace_is_stripped(self, monkeypatch) -> None:
         """Spaces around names and values do not break the override."""
         sys_info = correct_sys_info(
