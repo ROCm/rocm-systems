@@ -2214,7 +2214,7 @@ class Device : public RuntimeObject {
    * @param src Host source buffer
    * @return False if the write failed.
    */
-  virtual bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+  virtual [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
                                  const void* src) const {
     return false;
   }
