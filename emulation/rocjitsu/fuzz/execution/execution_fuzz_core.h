@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "rocjitsu/code/rj_code.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -63,6 +65,9 @@ struct RunStats {
 
 std::optional<FuzzTarget> parse_target(std::string_view name);
 std::string_view target_name(FuzzTarget target);
+rj_code_arch_t target_arch(FuzzTarget target);
+rj_code_target_id_t target_id(FuzzTarget target);
+uint32_t terminating_instruction(FuzzTarget target);
 bool targets_cover_amdgpu_execution_registry();
 std::optional<FuzzTarget> indexed_target(uint8_t index);
 

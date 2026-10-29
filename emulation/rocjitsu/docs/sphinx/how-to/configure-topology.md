@@ -53,7 +53,13 @@ Copy a pre-built config and modify the fields that matter for your workload. The
 
 ### `max_ticks`
 
-An integer that caps the number of simulation ticks. The VM stops when all primary components signal completion, when quiescence is detected, or when this limit is reached --- whichever comes first. Set to `0` for unlimited ticks (the VM runs until completion or an explicit stop request).
+An integer that sets a finite simulation-tick horizon. The VM stops when all
+primary components signal completion, when quiescence is detected, or when this
+limit is reached --- whichever comes first. If every partition becomes idle
+before the limit while a primary remains active, the finite run stops at the
+last processed tick rather than waiting for future async work. Set to `0` for
+unlimited ticks (the VM waits for active primaries until completion or an
+explicit stop request).
 
 ### `num_threads`
 

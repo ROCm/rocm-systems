@@ -245,12 +245,14 @@ RJ_API_EXPORT void rj_vm_destroy(rj_vm_t *vm);
 /// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple engine partitions.
 RJ_API_EXPORT rj_status_t rj_vm_step(rj_vm_t *vm, int *active);
 
-/// @brief Run the VM to completion or until max_ticks is reached.
+/// @brief Run the VM to completion or until its finite horizon stops it.
 ///
 /// @details Runs the simulation to completion. Terminates when all primary
 /// components signal completion, the tick limit from the configuration is
-/// reached, or quiescence is detected. This call must not overlap
-/// rj_vm_load_plugins or rj_vm_destroy.
+/// reached, or quiescence is detected. A finite run also terminates at the last
+/// processed tick when a primary remains active but no work is queued; an
+/// unlimited run continues waiting for future async work. This call must not
+/// overlap rj_vm_load_plugins or rj_vm_destroy.
 /// @param[in] vm VM handle.
 /// @param[out] ticks_executed Number of ticks actually executed (may be NULL).
 /// @retval ROCJITSU_STATUS_SUCCESS Simulation completed successfully.

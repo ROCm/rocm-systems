@@ -106,8 +106,10 @@ private:
 /// Functional\<Base\> CRTP mixin, which self-schedules a timer callback and
 /// re-enqueues after each advance(). If no events are ever scheduled and no
 /// primaries are registered, the simulation terminates via quiescence. If
-/// primaries are registered, the engine waits until async events arrive or
-/// all primaries signal completion.
+/// primaries are registered and `max_ticks == 0`, the engine waits until async
+/// events arrive or all primaries signal completion. A finite run does not wait
+/// indefinitely for foreign-thread publications: an active primary with no
+/// queued work stops before the tick limit with `ExitCause::ACTIVE_PRIMARY_STALL`.
 ///
 /// Typical usage:
 /// @code
@@ -123,7 +125,9 @@ class SimulationEngine {
 public:
   /// @brief Configuration parameters for the simulation engine.
   struct Config {
-    Tick max_ticks = 0;       ///< Simulation stops at this tick (0 = unlimited).
+    Tick max_ticks = 0; ///< Maximum simulation tick (0 = unlimited). A finite run can stop earlier
+                        ///< when an active primary becomes quiescent, reporting
+                        ///< ExitCause::ACTIVE_PRIMARY_STALL at the last processed tick.
     uint32_t num_threads = 1; ///< Number of worker threads (one per partition).
     double wall_clock_ratio =
         0.0;                      ///< Sim-time per wall-time ratio (0 = disabled, 1.0 = real-time).
@@ -224,9 +228,10 @@ public:
   /// @details On the first call, starts all components (initialization
   /// happens in create()). Each subsequent call advances to the next event
   /// time and processes all events at that timestamp, then returns.
-  /// Ticks without scheduled events are skipped. If the queue is empty
-  /// but primaries are registered, returns true so the caller can poll
-  /// for async events.
+  /// Ticks without scheduled events are skipped. If the queue is empty but
+  /// primaries are registered, an unlimited run returns true so the caller can
+  /// poll for async events. A finite run instead returns false with
+  /// ExitCause::ACTIVE_PRIMARY_STALL at the last processed tick.
   /// @retval true Simulation can continue.
   /// @retval false Simulation is done (query last_exit() for details).
   bool step();
@@ -242,9 +247,10 @@ public:
   /// @brief Register the calling component as a primary (work-producing).
   ///
   /// @details Primary components participate in the end-of-simulation consensus
-  /// protocol. The simulation ends gracefully when all registered primaries
-  /// have called primary_release(). Must be called during initialize()
-  /// or startup(), before the main simulation loop starts.
+  /// protocol. An unlimited run waits until all registered primaries call
+  /// primary_release(). A finite run can instead stop with
+  /// ExitCause::ACTIVE_PRIMARY_STALL when no work remains before max_ticks.
+  /// Must be called during initialize() or startup(), before the main simulation loop starts.
   void register_as_primary();
 
   /// @brief Release this primary (signal it is done producing work).
@@ -432,7 +438,7 @@ private:
   Tick compute_async_floor(const PartitionContext &ctx) const;
 
   /// @brief Set the exit event (internal helper).
-  void set_exit(ExitReason reason, Tick tick, std::string message, int code = 0);
+  void set_exit(Tick tick, std::string message, ExitCause cause);
 
   /// @brief Record a terminal FAILURE status and mark the generation done, atomically.
   /// @details For terminal failures only, and unlike set_exit() it is last-writer-wins:

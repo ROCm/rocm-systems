@@ -180,7 +180,7 @@ ExitStatus SimulationEngine::run() {
 
   if (config_.max_ticks > 0 && num_threads == 1) {
     max_ticks_event_.set_handler([this](Tick ts, Message *) {
-      set_exit(ExitReason::COMPLETED, ts, "max ticks reached");
+      set_exit(ts, "max ticks reached", ExitCause::MAX_TICKS);
       done_.store(true, std::memory_order_release);
     });
     contexts_[0]->event_queue.push(
@@ -290,7 +290,7 @@ bool SimulationEngine::step() {
 
     if (config_.max_ticks > 0) {
       max_ticks_event_.set_handler([this](Tick ts, Message *) {
-        set_exit(ExitReason::COMPLETED, ts, "max ticks reached");
+        set_exit(ts, "max ticks reached", ExitCause::MAX_TICKS);
         done_.store(true, std::memory_order_release);
       });
       contexts_[0]->event_queue.push(
@@ -311,6 +311,22 @@ bool SimulationEngine::step() {
       return false;
     }
     return true;
+  }
+
+  // The max-ticks sentinel is a horizon, not simulated work. If it is the only
+  // queued event before that horizon, first classify the drained state at the
+  // real current time. This keeps finite runs consistent with the partitioned
+  // engine, which publishes TICK_MAX when no work remains.
+  if (config_.max_ticks > 0 && ctx.event_queue.current_tick() < config_.max_ticks &&
+      ctx.event_queue.contains_only(&max_ticks_event_)) {
+    current_time_.store(ctx.event_queue.current_tick(), std::memory_order_release);
+    if (check_termination(TICK_MAX)) {
+      running_ = false;
+      return false;
+    }
+    drain_async_events();
+    if (ctx.event_queue.contains_only(&max_ticks_event_))
+      return true;
   }
 
   Tick step_tick = ctx.event_queue.next_event_time();
@@ -353,6 +369,22 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       Tick last_drained_tick = 0;
       while (!ctx.event_queue.empty()) {
         Tick next_tick = ctx.event_queue.next_event_time();
+        // A lone max-ticks sentinel means the finite simulation has drained
+        // before its horizon. Classify that state without processing the
+        // sentinel, then wait if await_primaries keeps the engine alive.
+        if (config_.max_ticks > 0 && ctx.event_queue.current_tick() < config_.max_ticks &&
+            ctx.event_queue.contains_only(&max_ticks_event_)) {
+          current_time_.store(ctx.event_queue.current_tick(), std::memory_order_release);
+          if (check_termination(TICK_MAX))
+            return;
+          drain_async_events();
+          if (ctx.event_queue.contains_only(&max_ticks_event_)) {
+            pacer_.pause();
+            idle_wait_quiescent();
+            pacer_.resume();
+          }
+          continue;
+        }
         if (next_tick > last_drained_tick) {
           last_drained_tick = next_tick;
           drain_async_events();
@@ -599,8 +631,12 @@ bool SimulationEngine::is_fully_quiescent() const {
       if (!q->empty())
         return false;
     }
-    // Check for any processable local events.
-    if (!ctx->event_queue.empty())
+    // A lone max-ticks sentinel is only a finite horizon. Before reaching it,
+    // it does not prevent an otherwise drained simulation from terminating.
+    const bool only_pre_horizon_sentinel = config_.max_ticks > 0 &&
+                                           ctx->event_queue.current_tick() < config_.max_ticks &&
+                                           ctx->event_queue.contains_only(&max_ticks_event_);
+    if (!ctx->event_queue.empty() && !only_pre_horizon_sentinel)
       return false;
   }
   return true;
@@ -624,17 +660,28 @@ bool SimulationEngine::check_termination(Tick lbts) {
     // cross-partition messages are fully delivered before termination.
     if (!is_fully_quiescent())
       return false;
-    set_exit(ExitReason::COMPLETED, lbts, "all primaries completed");
+    const Tick completion_tick =
+        lbts == TICK_MAX ? current_time_.load(std::memory_order_acquire) : lbts;
+    set_exit(completion_tick, "all primaries completed", ExitCause::ALL_PRIMARIES_COMPLETED);
     done_.store(true, std::memory_order_release);
     return true;
   }
-  // Multi-threaded max_ticks: terminate when global LBTS reaches max_ticks.
+  // A finite horizon ends at max_ticks. A TICK_MAX horizon instead means every
+  // partition is quiescent; stop a registered primary distinctly so callers can
+  // distinguish a stall from simulated budget exhaustion in every worker mode.
   if (config_.max_ticks > 0 && config_.num_threads > 1) {
     if (lbts != TICK_MAX && lbts >= config_.max_ticks) {
-      set_exit(ExitReason::COMPLETED, config_.max_ticks, "max ticks reached");
+      set_exit(config_.max_ticks, "max ticks reached", ExitCause::MAX_TICKS);
       done_.store(true, std::memory_order_release);
       return true;
     }
+  }
+  if (config_.max_ticks > 0 && lbts == TICK_MAX &&
+      active_primaries_.load(std::memory_order_acquire) > 0) {
+    set_exit(current_time_.load(std::memory_order_acquire), "active primaries quiescent",
+             ExitCause::ACTIVE_PRIMARY_STALL);
+    done_.store(true, std::memory_order_release);
+    return true;
   }
   if (lbts == TICK_MAX) {
     // If primaries are still active, they are promising future work
@@ -646,8 +693,8 @@ bool SimulationEngine::check_termination(Tick lbts) {
     // engine alive while waiting for external stimuli (doorbells).
     if (config_.await_primaries && !has_primaries_.load(std::memory_order_acquire))
       return false;
-    set_exit(ExitReason::COMPLETED, current_time_.load(std::memory_order_acquire),
-             "all partitions quiescent");
+    set_exit(current_time_.load(std::memory_order_acquire), "all partitions quiescent",
+             ExitCause::QUIESCENCE);
     done_.store(true, std::memory_order_release);
     return true;
   }
@@ -751,12 +798,12 @@ void SimulationEngine::drain_async_events() {
   }
 }
 
-void SimulationEngine::set_exit(ExitReason reason, Tick tick, std::string message, int code) {
+void SimulationEngine::set_exit(Tick tick, std::string message, ExitCause cause) {
   std::lock_guard<std::mutex> lock(exit_mutex_);
   // First writer wins. Use an explicit flag rather than message.empty() to
   // avoid false negatives when the message string happens to be empty.
   if (!exit_set_) {
-    exit_status_ = ExitStatus(reason, tick, std::move(message), code);
+    exit_status_ = ExitStatus(ExitReason::COMPLETED, tick, std::move(message), 0, cause);
     exit_set_ = true;
   }
 }

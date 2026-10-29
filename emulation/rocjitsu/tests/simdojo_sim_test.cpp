@@ -73,6 +73,53 @@ public:
   void startup() override { engine()->register_as_primary(); }
 };
 
+/// Active primary that performs one real event but deliberately remains registered.
+class ScheduledPrimaryComponent : public Component {
+public:
+  ScheduledPrimaryComponent(std::string name, Tick event_tick)
+      : Component(std::move(name)), event_tick_(event_tick) {
+    timer_event_.set_handler([this](Tick tick, Message *) {
+      handled = true;
+      handled_tick = tick;
+    });
+  }
+
+  void startup() override {
+    engine()->register_as_primary();
+    schedule_event(&timer_event_, event_tick_);
+  }
+
+  bool handled = false;
+  Tick handled_tick = 0;
+
+private:
+  Tick event_tick_;
+  Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Primary that releases itself after processing one scheduled event.
+class ReleasingPrimaryComponent : public Component {
+public:
+  ReleasingPrimaryComponent(std::string name, Tick event_tick)
+      : Component(std::move(name)), event_tick_(event_tick) {
+    timer_event_.set_handler([this](Tick tick, Message *) {
+      handled_tick = tick;
+      engine()->primary_release();
+    });
+  }
+
+  void startup() override {
+    engine()->register_as_primary();
+    schedule_event(&timer_event_, event_tick_);
+  }
+
+  Tick handled_tick = 0;
+
+private:
+  Tick event_tick_;
+  Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
 /// Component with IN/OUT ports that replies to each received message.
 /// Optionally registers as primary (default: true).
 class PingPongComponent : public Component {
@@ -840,7 +887,7 @@ TEST(TerminationTest, QuiescenceDetection) {
   auto exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
-  EXPECT_NE(exit.message.find("quiescent"), std::string::npos);
+  EXPECT_EQ(exit.cause, ExitCause::QUIESCENCE);
 }
 
 TEST(TerminationTest, AllPrimaryDoneTrigger) {
@@ -855,7 +902,7 @@ TEST(TerminationTest, AllPrimaryDoneTrigger) {
   auto exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
-  EXPECT_NE(exit.message.find("primaries"), std::string::npos);
+  EXPECT_EQ(exit.cause, ExitCause::ALL_PRIMARIES_COMPLETED);
   EXPECT_EQ(static_cast<ConsumerComponent *>(c)->received.size(), 5u);
 }
 
@@ -868,7 +915,191 @@ TEST(TerminationTest, MaxTicksSentinel) {
   auto exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
-  EXPECT_NE(exit.message.find("max ticks"), std::string::npos);
+  EXPECT_EQ(exit.cause, ExitCause::MAX_TICKS);
+}
+
+TEST(TerminationTest, MultiThreadedMaxTicksStopsAQuiescentPrimary) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary1"));
+  engine.topology().set_root(std::move(root));
+  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+
+  ExitStatus exit;
+  std::atomic<bool> finished{false};
+  std::thread runner([&]() {
+    exit = engine.run();
+    finished.store(true, std::memory_order_release);
+  });
+  const bool started = engine.wait_until_started();
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!finished.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  const bool finished_on_its_own = finished.load(std::memory_order_acquire);
+  if (!finished_on_its_own)
+    engine.request_exit("finite primary-stall regression timeout", 1);
+  runner.join();
+
+  EXPECT_TRUE(started);
+  ASSERT_TRUE(finished_on_its_own);
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(exit.cause, ExitCause::ACTIVE_PRIMARY_STALL);
+  EXPECT_EQ(exit.tick, 0u);
+}
+
+TEST(TerminationTest, SingleThreadedMaxTicksStopsAQuiescentPrimary) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  const auto exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(exit.cause, ExitCause::ACTIVE_PRIMARY_STALL);
+  EXPECT_EQ(exit.tick, 0u);
+}
+
+TEST(TerminationTest, StepModeMaxTicksStopsAQuiescentPrimary) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  EXPECT_FALSE(engine.step());
+  EXPECT_EQ(engine.last_exit().reason, ExitReason::COMPLETED);
+  EXPECT_EQ(engine.last_exit().cause, ExitCause::ACTIVE_PRIMARY_STALL);
+  EXPECT_EQ(engine.last_exit().tick, 0u);
+}
+
+TEST(TerminationTest, FinitePrimaryStallAppliesOnlyBeforeMaxTicks) {
+  for (const Tick event_tick : {Tick{99}, Tick{100}}) {
+    SCOPED_TRACE(::testing::Message() << "run event_tick=" << event_tick);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<ScheduledPrimaryComponent *>(
+        root->add_child(std::make_unique<ScheduledPrimaryComponent>("primary0", event_tick)));
+    engine.topology().set_root(std::move(root));
+    engine.create();
+
+    const ExitStatus exit = engine.run();
+    EXPECT_TRUE(component->handled);
+    EXPECT_EQ(component->handled_tick, event_tick);
+    EXPECT_EQ(exit.tick, event_tick);
+    EXPECT_EQ(exit.cause,
+              event_tick < 100 ? ExitCause::ACTIVE_PRIMARY_STALL : ExitCause::MAX_TICKS);
+  }
+
+  for (const Tick event_tick : {Tick{99}, Tick{100}}) {
+    SCOPED_TRACE(::testing::Message() << "step event_tick=" << event_tick);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<ScheduledPrimaryComponent *>(
+        root->add_child(std::make_unique<ScheduledPrimaryComponent>("primary0", event_tick)));
+    engine.topology().set_root(std::move(root));
+    engine.create();
+
+    while (engine.step()) {
+    }
+    EXPECT_TRUE(component->handled);
+    EXPECT_EQ(component->handled_tick, event_tick);
+    EXPECT_EQ(engine.last_exit().tick, event_tick);
+    EXPECT_EQ(engine.last_exit().cause,
+              event_tick < 100 ? ExitCause::ACTIVE_PRIMARY_STALL : ExitCause::MAX_TICKS);
+  }
+}
+
+TEST(TerminationTest, FiniteRunsReportEarlyPrimaryCompletionAtTheLastProcessedTick) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(::testing::Message() << "run partitions=" << partitions);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<ReleasingPrimaryComponent *>(
+        root->add_child(std::make_unique<ReleasingPrimaryComponent>("primary0", 10)));
+    engine.topology().set_root(std::move(root));
+    if (partitions == 1)
+      engine.create();
+    else
+      build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+
+    const ExitStatus exit = engine.run();
+    EXPECT_EQ(component->handled_tick, 10u);
+    EXPECT_EQ(exit.cause, ExitCause::ALL_PRIMARIES_COMPLETED);
+    EXPECT_EQ(exit.tick, 10u);
+  }
+
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<ReleasingPrimaryComponent *>(
+      root->add_child(std::make_unique<ReleasingPrimaryComponent>("primary0", 10)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+  while (engine.step()) {
+  }
+  EXPECT_EQ(component->handled_tick, 10u);
+  EXPECT_EQ(engine.last_exit().cause, ExitCause::ALL_PRIMARIES_COMPLETED);
+  EXPECT_EQ(engine.last_exit().tick, 10u);
+}
+
+TEST(TerminationTest, FiniteRunsReportEarlyQuiescenceWithoutPrimaries) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(::testing::Message() << "run partitions=" << partitions);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    root->add_child(std::make_unique<LifecycleCountingComponent>("component0"));
+    engine.topology().set_root(std::move(root));
+    if (partitions == 1) {
+      engine.create();
+    } else {
+      engine.topology().partition_balanced(partitions);
+      engine.create();
+    }
+
+    const ExitStatus exit = engine.run();
+    EXPECT_EQ(exit.cause, ExitCause::QUIESCENCE);
+    EXPECT_EQ(exit.tick, 0u);
+  }
+
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<LifecycleCountingComponent>("component0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+  while (engine.step()) {
+  }
+  EXPECT_EQ(engine.last_exit().cause, ExitCause::QUIESCENCE);
+  EXPECT_EQ(engine.last_exit().tick, 0u);
+}
+
+TEST(TerminationTest, MultiThreadedMaxTicksStillAwaitsTheFirstPrimary) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 2, .await_primaries = true});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<LifecycleCountingComponent>("component0"));
+  root->add_child(std::make_unique<LifecycleCountingComponent>("component1"));
+  engine.topology().set_root(std::move(root));
+  engine.topology().partition_balanced(2);
+  engine.create();
+
+  ExitStatus exit;
+  std::atomic<bool> finished{false};
+  std::thread runner([&]() {
+    exit = engine.run();
+    finished.store(true, std::memory_order_release);
+  });
+  const bool started = engine.wait_until_started();
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  const bool stayed_alive_while_idle = !finished.load(std::memory_order_acquire);
+  engine.request_exit("external stop", 7);
+  runner.join();
+
+  ASSERT_TRUE(started);
+  EXPECT_TRUE(stayed_alive_while_idle);
+  EXPECT_EQ(exit.reason, ExitReason::EXIT_REQUEST);
+  EXPECT_EQ(exit.code, 7);
+  EXPECT_EQ(exit.message, "external stop");
 }
 
 TEST(StartupReadinessTest, CleanStartupReportsReady) {
