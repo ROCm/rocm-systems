@@ -1720,7 +1720,9 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             f.plugin_group_->onInit();
 
             constexpr uint64_t kShared = 0x0001'0000'0000'0000ULL;
-            constexpr uint64_t kPrivate = 0x0002'0000'0000'0000ULL;
+            // CDNA5 identifies private pointers by address bits [63:58].
+            const uint64_t kPrivate =
+                arch == "cdna5" ? 0x1000'0000'0000'0000ULL : 0x0002'0000'0000'0000ULL;
             constexpr uint64_t kGlobal = 0x400000;
             constexpr uint64_t kScratch = 0x800000;
             constexpr uint32_t kCanary = 0xBAD0BAD0;
@@ -1740,10 +1742,12 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             for (uint32_t lane = 0; lane < wave_size; ++lane) {
               const bool scratch =
                   space == Space::Scratch || (space == Space::GlobalAndScratch && (lane & 1));
-              // CDNA5 embeds the lane in the pointer; older targets use the
-              // private aperture and obtain the lane from the issuing thread.
-              const uint64_t private_address =
-                  arch == "cdna5" ? kScratch + (uint64_t{lane} << 52) + 0x20 : kPrivate + 0x20;
+              // CDNA5 embeds the lane in the pointer, a wave32 pointer being
+              // {prefix, 0, lane, SCRATCH_BASE[56:7] + dword, byte}; older
+              // targets obtain the lane from the issuing thread.
+              const uint64_t private_address = arch == "cdna5" ? kPrivate + ((kScratch >> 7) << 2) +
+                                                                     (uint64_t{lane} << 52) + 0x20
+                                                               : kPrivate + 0x20;
               const uint64_t address = space == Space::Lds ? kShared + lane * 16
                                        : scratch           ? private_address
                                                            : kGlobal + lane * 16;

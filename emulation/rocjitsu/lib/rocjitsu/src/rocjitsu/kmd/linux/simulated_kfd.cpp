@@ -2891,13 +2891,25 @@ int SimulatedKfd::get_process_apertures_ioctl(void *arg) {
 
 kfd_process_device_apertures SimulatedKfd::gpu_apertures(uint32_t ordinal) const {
   const uint64_t offset = static_cast<uint64_t>(ordinal) * kApertureStride;
-  const uint64_t lds_base = 0x1000000000000ULL + offset;
-  const uint64_t scratch_base = 0x2000000000000ULL + offset;
+  uint64_t lds_base = 0x1000000000000ULL + offset;
+  uint64_t scratch_base = 0x2000000000000ULL + offset;
+  uint64_t scratch_size = uint64_t{1} << 32;
+  // CDNA5 identifies a scratch pointer by address bits [63:58] (section 10.2),
+  // so the legacy windows (prefix 0) would claim every low canonical address.
+  // Use the GC 12.1 apertures Linux programs (gmc_v12_0_early_init): private
+  // at 0x1000000000000000 spanning 2^57 bytes, shared at 0x2000000000000000.
+  // Every device shares them, as on hardware.
+  if (ordinal < gpus_.size() && gpus_[ordinal].soc &&
+      gpus_[ordinal].soc->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+    lds_base = 0x2000000000000000ULL;
+    scratch_base = 0x1000000000000000ULL;
+    scratch_size = uint64_t{1} << 57;
+  }
   return {
       .lds_base = lds_base,
       .lds_limit = lds_base + 0xFFFFFFFFULL,
       .scratch_base = scratch_base,
-      .scratch_limit = scratch_base + 0xFFFFFFFFULL,
+      .scratch_limit = scratch_base + scratch_size - 1,
       // rocjitsu maps GPU VAs directly to host pointers, so the aperture must
       // cover the host addresses accepted by the runtime.
       .gpuvm_base = 0x10000ULL,

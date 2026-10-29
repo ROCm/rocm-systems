@@ -709,15 +709,21 @@ TEST(RegisterAccessTest, LanePair32ReadsGfx1250FlatScratchBase) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(fx.wf, nullptr);
 
-  constexpr uint64_t kScratchBase = 0x7777777766666666ull;
+  // CDNA5 section 6.10, wave32: {PRIVATE_BASE[63:58], 0, 5'b0,
+  // SCRATCH_BASE[56:7], 2'b0}.
+  constexpr uint64_t kPrivateBase = 0x1000'0000'0000'0000ull;
+  constexpr uint64_t kScratchBase = 0x0001'2345'6789'ab80ull;
+  fx.wf->set_apertures(0x2000'0000'0000'0000ull, 0x2000'0000'ffff'ffffull, kPrivateBase,
+                       kPrivateBase + (uint64_t{1} << 57) - 1);
   fx.wf->set_scratch_base(kScratchBase);
   cdna5::Operand flat_scratch_base(
       64, cdna5::OperandType::OPR_SRC,
       static_cast<int>(cdna5::OpSelSrc::OPR_SRC_SRC_FLAT_SCRATCH_BASE_LO));
 
+  constexpr uint64_t kExpected = kPrivateBase | (kScratchBase >> 7) << 2;
   const OperandPair32 pair = RegisterAccess(*fx.wf).read_lane_pair32(flat_scratch_base, 0);
-  EXPECT_EQ(pair.lo, 0x66666666u);
-  EXPECT_EQ(pair.hi, 0x77777777u);
+  EXPECT_EQ(pair.lo, static_cast<uint32_t>(kExpected));
+  EXPECT_EQ(pair.hi, static_cast<uint32_t>(kExpected >> 32));
 }
 
 TEST(RegisterAccessTest, ReplicatedScalarPairObservesOnlyOneScalarWord) {

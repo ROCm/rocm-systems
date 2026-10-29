@@ -162,9 +162,10 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
                                               d.atomic_op != amdgpu::AtomicOp::NONE, d.elem_size))
         d.memviol_lane_mask |= uint64_t{1} << lane;
       if (translated.private_address) {
+        // The pointer names its owner's backing (section 10.2.1), so this
+        // wave's own scratch allocation is not required.
         addr = translated.value;
         d.scratch_swizzle = true;
-        d.requires_scratch_backing = true;
         d.scratch_addr_stride = wf.wf_size() * sizeof(uint32_t);
         d.scratch_lane_mask |= uint64_t{1} << lane;
       }

@@ -6544,25 +6544,29 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec(0x7ULL);
 
+  // CDNA5 sections 6.10 and 10.2: the private aperture is the address prefix
+  // [63:58], and a wave32 pointer is FLAT_SCRATCH_BASE = {prefix, 0, 5'b0,
+  // SCRATCH_BASE[56:7], 2'b0} plus lane << 52 plus the byte offset.
   constexpr uint64_t kScratchBase = 0x0002'0000'0000'0000ULL;
-  constexpr uint64_t kPrivateBase = 0x0007'0000'0000'0000ULL;
+  constexpr uint64_t kPrivateBase = 0x1000'0000'0000'0000ULL;
   constexpr uint32_t kPrivateSegmentSize = 0x80;
   wf->set_scratch_base(kScratchBase);
   wf->set_scratch_lane_size(kPrivateSegmentSize);
-  wf->set_apertures(0x0001'0000'0000'0000ULL, 0x0001'0000'ffff'ffffULL, kPrivateBase,
-                    kPrivateBase + 0xffff'ffffULL);
+  wf->set_apertures(0x2000'0000'0000'0000ULL, 0x2000'0000'ffff'ffffULL, kPrivateBase,
+                    kPrivateBase + (uint64_t{1} << 57) - 1);
 
+  constexpr uint64_t kFlatScratchBase = kPrivateBase | (kScratchBase >> 7) << 2;
   cdna5::Operand flat_scratch_base(
       64, cdna5::OperandType::OPR_SRC,
       static_cast<int>(cdna5::OpSelSrc::OPR_SRC_SRC_FLAT_SCRATCH_BASE_LO));
-  ASSERT_EQ(amdgpu::RegisterAccess(*wf).read_scalar64(flat_scratch_base), kScratchBase);
+  ASSERT_EQ(amdgpu::RegisterAccess(*wf).read_scalar64(flat_scratch_base), kFlatScratchBase);
 
   const uint64_t private_offsets[] = {0x10, 0x14, kPrivateSegmentSize + 0x20};
   uint32_t vbase = wf->vgpr_alloc().base;
   for (uint32_t lane = 0; lane < 3; ++lane) {
     uint64_t private_offset = private_offsets[lane];
     uint64_t flat_private_addr =
-        kScratchBase + (static_cast<uint64_t>(lane) << 52) + private_offset;
+        kFlatScratchBase + (static_cast<uint64_t>(lane) << 52) + private_offset;
     cu->write_vgpr(vbase, lane, static_cast<uint32_t>(flat_private_addr));
     cu->write_vgpr(vbase + 1, lane, static_cast<uint32_t>(flat_private_addr >> 32));
   }
@@ -6583,9 +6587,70 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
     EXPECT_EQ(d.per_lane_addr[lane], expected) << "lane " << lane;
   }
   EXPECT_TRUE(d.scratch_swizzle);
-  EXPECT_TRUE(d.requires_scratch_backing);
+  // A FLAT pointer names its owner's backing, so no own scratch is required.
+  EXPECT_FALSE(d.requires_scratch_backing);
   EXPECT_EQ(d.scratch_lane_mask, 0x7u);
   EXPECT_EQ(d.scratch_addr_stride, 32u * sizeof(uint32_t));
+}
+
+// CDNA5 section 10.2 identifies a private pointer by address bits [63:58]
+// alone, and section 10.2.1 lets any wave dereference another wave's pointer.
+// The old recognizer instead accepted addresses within 4 GiB of the issuing
+// wave's own scratch backing: it rejected a foreign wave's pointer as a hole
+// and treated a canonical global address that happened to lie in that window
+// as private, so a 64-bit atomic to it raised MEMVIOL.
+TEST(Gfx1250AddrCalcTest, PrivateApertureIsTheAddressPrefix) {
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
+  amdgpu::GpuMemory mem("gfx1250_private_prefix_mem");
+  amdgpu::L2Cache l2("gfx1250_private_prefix_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_private_prefix_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint64_t kPrivateBase = 0x1000'0000'0000'0000ULL;
+  constexpr uint64_t kOwnScratch = 0x40'0000'0000ULL;
+  constexpr uint64_t kForeignScratch = 0x50'0000'0000ULL;
+  wf->set_scratch_base(kOwnScratch);
+  wf->set_scratch_lane_size(128);
+  wf->set_apertures(0x2000'0000'0000'0000ULL, 0x2000'0000'ffff'ffffULL, kPrivateBase,
+                    kPrivateBase + (uint64_t{1} << 57) - 1);
+  // Lane 0: lane 7's dword 9 (+1 byte) of another wave's scratch.
+  // Lane 1: a canonical global address inside this wave's scratch backing.
+  // Lane 2: prefix 0b000001, which is neither the private aperture nor canonical.
+  const std::array<uint64_t, 3> addresses{kPrivateBase + ((kForeignScratch >> 7) << 2) +
+                                              (uint64_t{7} << 52) + 9 * 4 + 1,
+                                          kOwnScratch + 0x20, 0x0400'0000'0000'0000ULL};
+  for (const bool atomic64 : {false, true}) {
+    SCOPED_TRACE(atomic64);
+    wf->set_exec(0x7);
+    const uint32_t vbase = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < 3; ++lane) {
+      cu->write_vgpr(vbase, lane, static_cast<uint32_t>(addresses[lane]));
+      cu->write_vgpr(vbase + 1, lane, static_cast<uint32_t>(addresses[lane] >> 32));
+    }
+    cdna5::VflatMachineInst inst{};
+    inst.saddr = cdna5::OPR_SREG_NULL;
+    inst.vaddr = 0;
+    amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+    if (atomic64) {
+      d.atomic_op = amdgpu::AtomicOp::ADD;
+      d.elem_size = 8;
+      d.num_elems = 1;
+    }
+    cdna5::flat_calculate_addresses(inst, *wf, d);
+    EXPECT_EQ(d.per_lane_addr[0], kForeignScratch + 9 * 32 * 4 + 7 * 4 + 1);
+    EXPECT_EQ(d.per_lane_addr[1], kOwnScratch + 0x20);
+    EXPECT_EQ(d.scratch_lane_mask, 0x1u);
+    EXPECT_FALSE(d.requires_scratch_backing);
+    // The hole lane always violates; only the private lane is a private atomic64.
+    EXPECT_EQ(d.memviol_lane_mask, atomic64 ? 0x5u : 0x4u);
+  }
 }
 
 TEST(Gfx12AddrCalcTest, ScratchSignedOffsetsAreWidenedBeforeScalingAndAddressing) {

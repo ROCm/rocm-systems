@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -14,6 +15,13 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+
+/// @brief Value of SRC_FLAT_SCRATCH_BASE: CDNA5's architectural encoding
+/// (section 6.10), otherwise the raw scratch base.
+inline uint64_t flat_scratch_base_operand(const Wavefront &wf) {
+  return wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? cdna5_flat_scratch_base(wf)
+                                                    : wf.scratch_base();
+}
 
 inline bool scalar_pair_crosses_register_region(const Wavefront &wf, int ev) {
   if (ev == static_cast<int>(kScalarSgprSelectorLast) || ev == static_cast<int>(kVccSelectorLast) ||
@@ -69,9 +77,9 @@ inline uint32_t resolve_src_scalar_value(const Wavefront &wf, int ev, int m0_ev)
   if (ev >= 193 && ev <= 208)
     return static_cast<uint32_t>(static_cast<int32_t>(-(ev - 192)));
   if (ev == static_cast<int>(kFlatScratchBaseSelectorFirst))
-    return static_cast<uint32_t>(wf.scratch_base()); // SRC_FLAT_SCRATCH_BASE_LO
+    return static_cast<uint32_t>(flat_scratch_base_operand(wf)); // SRC_FLAT_SCRATCH_BASE_LO
   if (ev == static_cast<int>(kFlatScratchBaseSelectorLast))
-    return static_cast<uint32_t>(wf.scratch_base() >> 32); // SRC_FLAT_SCRATCH_BASE_HI
+    return static_cast<uint32_t>(flat_scratch_base_operand(wf) >> 32); // SRC_FLAT_SCRATCH_BASE_HI
   if (ev == 240)
     return 0x3F000000u; // 0.5f
   if (ev == 241)
@@ -183,7 +191,7 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
     if (ev == static_cast<int>(kExecSelectorFirst))
       return wf.exec_raw();
     if (ev == static_cast<int>(kFlatScratchBaseSelectorFirst))
-      return wf.scratch_base(); // SRC_FLAT_SCRATCH_BASE
+      return flat_scratch_base_operand(wf); // SRC_FLAT_SCRATCH_BASE
     wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
     return 0u;
   }

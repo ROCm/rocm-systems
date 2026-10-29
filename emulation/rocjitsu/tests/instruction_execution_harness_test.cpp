@@ -1166,6 +1166,15 @@ TEST(Gfx1250MemoryExecutionHarness, MisalignedLdsAtomicLanesDoNotBlockOtherLanes
       });
 }
 
+// CDNA5 sections 6.10 and 10.2: the private aperture is the address prefix
+// [63:58], and a wave32 private pointer is {prefix, 0, lane[4:0],
+// SCRATCH_BASE[56:7] + dword, byte}. Computed here from the manual rather than
+// from the emulator's helper.
+constexpr uint64_t kCdna5PrivateBase = 0x1000'0000'0000'0000ull;
+constexpr uint64_t cdna5_private_pointer(uint64_t scratch_base, uint32_t lane, uint32_t offset) {
+  return kCdna5PrivateBase + ((scratch_base >> 7) << 2) + (uint64_t{lane} << 52) + offset;
+}
+
 // Physical (VMID 0) memory has no translation to reject a misaligned global
 // atomic, which used to commit it within a page and report an unreported
 // Malformed across one. gfx1201 and gfx1100 suppress only the misaligned lane
@@ -1286,7 +1295,8 @@ void check_private_flat_atomic_width(rj_code_arch_t arch, Encode encode) {
           config.lds_size_kb = 64;
           MemoryTestCu<Isa> cu("private_atomic", config, &memory, &cache);
           constexpr uint64_t shared_base = uint64_t{1} << 48;
-          constexpr uint64_t private_base = uint64_t{2} << 48;
+          const bool cdna5 = arch == ROCJITSU_CODE_ARCH_CDNA5;
+          const uint64_t private_base = cdna5 ? kCdna5PrivateBase : uint64_t{2} << 48;
           constexpr uint64_t scratch_base = 0x8000;
           constexpr uint32_t offset = 32;
           cu.set_apertures(shared_base, shared_base + UINT32_MAX, private_base,
@@ -1296,9 +1306,8 @@ void check_private_flat_atomic_width(rj_code_arch_t arch, Encode encode) {
           wave->set_exec((mixed ? 1 : 0) | (private_active ? 2 : 0));
           wave->set_scratch_base(scratch_base);
           wave->set_scratch_lane_size(128);
-          const bool cdna5 = arch == ROCJITSU_CODE_ARCH_CDNA5;
           const uint64_t private_address =
-              cdna5 ? scratch_base + offset + (uint64_t{1} << 52) : private_base + offset;
+              cdna5 ? cdna5_private_pointer(scratch_base, 1, offset) : private_base + offset;
           const uint64_t backing =
               cdna5 ? scratch_base + (offset / 4) * 32 * 4 + 4 : scratch_base + 128 + offset;
           constexpr uint64_t initial = 0x1234567800000010ull;
@@ -1971,7 +1980,8 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       cfg.lds_size_kb = 64;
       MemoryTestCu<Isa> cu("three_way_flat", cfg, &memory, &l2);
       constexpr uint64_t shared_base = uint64_t{1} << 48;
-      constexpr uint64_t private_base = uint64_t{2} << 48;
+      const uint64_t private_base =
+          arch == ROCJITSU_CODE_ARCH_CDNA5 ? kCdna5PrivateBase : uint64_t{2} << 48;
       constexpr uint64_t global_base = 0x4000;
       constexpr uint64_t scratch_base = 0x8000;
       constexpr uint32_t offset = 32;
@@ -2008,7 +2018,7 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
         // CDNA5 private pointers encode the lane above bit 51. RDNA4 pointers
         // instead identify the private aperture; the issuing lane selects backing.
         const uint64_t private_address =
-            is_cdna5 ? scratch_base + offset + (uint64_t{lane} << 52) : private_base + offset;
+            is_cdna5 ? cdna5_private_pointer(scratch_base, lane, offset) : private_base + offset;
         const uint64_t address = lane == global_lane   ? global_base + lane * 128 + offset
                                  : lane == shared_lane ? shared_base + lane * 128 + offset
                                                        : private_address;

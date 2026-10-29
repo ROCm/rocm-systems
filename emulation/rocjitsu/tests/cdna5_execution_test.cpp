@@ -5031,12 +5031,14 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsVectorShiftPairsAndReplicatesScalarShif
   // https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp#L3695-L3712
   // Each scalar source supplies shift 1 to both elements: (2 << 1) + 7 = 11,
   // (3 << 1) + 11 = 17. The vector control supplies shifts (1, 2) instead.
+  // FLAT_SCRATCH_BASE keeps its low two bits zero (CDNA5 section 6.10), so its
+  // low word supplies shift 4: (2 << 4) + 7 = 39, (3 << 4) + 11 = 59.
   constexpr std::array kCases{
       SpecialSourceCase{"sgpr", {0xcc7e4004u, 0x1c401908u}, {11u, 17u}},
       SpecialSourceCase{"ttmp", {0xcc7e4004u, 0x1c40d908u}, {11u, 17u}},
       SpecialSourceCase{"vcc", {0xcc7e4004u, 0x1c40d508u}, {11u, 17u}},
       SpecialSourceCase{"exec", {0xcc7e4004u, 0x1c40fd08u}, {11u, 17u}},
-      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {11u, 17u}},
+      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {39u, 59u}},
       SpecialSourceCase{"scc", {0xcc7e4004u, 0x1c41fb08u}, {11u, 17u}},
       SpecialSourceCase{"vgpr", {0xcc7e4004u, 0x1c421908u}, {11u, 23u}},
   };
@@ -5061,7 +5063,8 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsVectorShiftPairsAndReplicatesScalarShif
       wf->set_ttmp(1, high_word);
       wf->set_exec_raw(scalar_pair);
       wf->set_vcc_raw(scalar_pair);
-      wf->set_scratch_base(scalar_pair);
+      // FLAT_SCRATCH_BASE = {prefix, 0, 5'b0, SCRATCH_BASE[56:7], 2'b0}: low word 4.
+      wf->set_scratch_base(uint64_t{1} << 7 | uint64_t{high_word} << 39);
       wf->write_scc(true);
       write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
       write_vgpr_packed_u32(*cu, *wf, 12, 0, {1u, 2u});

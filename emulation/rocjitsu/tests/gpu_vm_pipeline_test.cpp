@@ -731,49 +731,68 @@ TEST(GpuVmPipeline, ScalarMemviolPrecedesDebuggerTranslationProbe) {
   }
 }
 
-TEST(GpuVmPipeline, PrivateAtomicMemviolPrecedesDebuggerTranslationProbe) {
-  TranslatedPipelineContext context;
-  ASSERT_NO_FATAL_FAILURE(
-      context.initialize(/*legacy_cache_compatible=*/false, /*xcnt_checks=*/true));
-  ASSERT_NE(context.wf, nullptr);
-  constexpr uint64_t code = 0x1000;
-  constexpr uint64_t scratch_base = 0x8000;
-  const auto words = cdna5::build_vflat(cdna5::kFlatAtomicAddU64Vflat,
-                                        {.saddr = 124, .vdst = 8, .th = 1, .vsrc = 4});
-  context.external->store(code, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
-  context.wf->set_scratch_base(scratch_base);
-  context.wf->set_scratch_lane_size(128);
-  context.wf->set_exec(3);
-  context.wf->pc = code;
-  const uint32_t vb = context.wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < 2; ++lane) {
-    const uint64_t address = lane == 0 ? 0x20000 : scratch_base + 32 + (uint64_t{1} << 52);
-    context.cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
-    context.cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
-    context.cu->write_vgpr(vb + 4, lane, 1);
-    context.cu->write_vgpr(vb + 5, lane, 0);
-    context.cu->write_vgpr(vb + 8, lane, 0xdeadbeef);
+// A private 64-bit FLAT atomic raises MEMVIOL only for its own lane. On
+// gfx1201 a mapped global lane of the same instruction commits and the queue
+// reports an aperture violation, while an unmapped one turns the result into a
+// memory fault (gfx1100 agrees). With debugging on, the preflight must probe
+// the global lane and never the private one.
+TEST(GpuVmPipeline, PrivateAtomicMemviolYieldsToAnotherLanesTranslationFault) {
+  for (const bool global_mapped : {true, false}) {
+    for (const bool debug : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "global_mapped=" << global_mapped << " debug=" << debug);
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(
+          context.initialize(/*legacy_cache_compatible=*/false, /*xcnt_checks=*/true));
+      ASSERT_NE(context.wf, nullptr);
+      constexpr uint64_t code = 0x1000;
+      constexpr uint64_t scratch_base = 0x8000;
+      // CDNA5 sections 6.10 and 10.2: prefix [63:58] selects the private
+      // aperture; a wave32 pointer is {prefix, 0, lane, SCRATCH_BASE[56:7] + dword, byte}.
+      constexpr uint64_t private_base = 0x1000'0000'0000'0000ull;
+      const auto words = cdna5::build_vflat(cdna5::kFlatAtomicAddU64Vflat,
+                                            {.saddr = 124, .vdst = 8, .th = 1, .vsrc = 4});
+      context.external->store(code, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+      context.external->store<uint64_t>(0x2000, 10);
+      context.wf->set_apertures(0, 0, private_base, private_base + (uint64_t{1} << 57) - 1);
+      context.wf->set_scratch_base(scratch_base);
+      context.wf->set_scratch_lane_size(128);
+      context.wf->set_exec(3);
+      context.wf->pc = code;
+      const uint32_t vb = context.wf->vgpr_alloc().base;
+      for (uint32_t lane = 0; lane < 2; ++lane) {
+        const uint64_t address =
+            lane == 1       ? private_base + ((scratch_base >> 7) << 2) + (uint64_t{1} << 52) + 32
+            : global_mapped ? 0x2000
+                            : 0x20000;
+        context.cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
+        context.cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+        context.cu->write_vgpr(vb + 4, lane, 1);
+        context.cu->write_vgpr(vb + 5, lane, 0);
+        context.cu->write_vgpr(vb + 8, lane, 0xdeadbeef);
+      }
+      context.cu->set_debug_active(debug);
+      uint32_t faults = 0;
+      context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &wave, uint64_t, bool,
+                                                   uint64_t issue_pc,
+                                                   amdgpu::VmAccessOutcome outcome) {
+        ++faults;
+        EXPECT_EQ(outcome, global_mapped ? amdgpu::VmAccessOutcome::ApertureViolation
+                                         : amdgpu::VmAccessOutcome::Faulted);
+        EXPECT_EQ(issue_pc, code);
+        wave.set_fatal_exception_pending(true);
+        wave.set_debug_suspended(true);
+        return true;
+      });
+      context.cu->step();
+      EXPECT_EQ(faults, 1u);
+      EXPECT_EQ(context.reported_faults.size(), !global_mapped && !debug ? 1u : 0u);
+      EXPECT_EQ(context.wf->has_unreported_vm_fault(), !global_mapped && debug);
+      EXPECT_TRUE(context.wf->wait_counters().empty());
+      EXPECT_EQ(context.external->load<uint64_t>(0x2000), global_mapped ? 11u : 10u);
+      for (uint32_t lane = 0; lane < 2; ++lane)
+        EXPECT_EQ(context.cu->read_vgpr(vb + 8, lane), 0xdeadbeefu);
+    }
   }
-  context.cu->set_debug_active(true);
-  uint32_t faults = 0;
-  context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &wave, uint64_t, bool,
-                                               uint64_t issue_pc, amdgpu::VmAccessOutcome outcome) {
-    ++faults;
-    EXPECT_EQ(outcome, amdgpu::VmAccessOutcome::ApertureViolation);
-    EXPECT_EQ(issue_pc, code);
-    EXPECT_EQ(wave.pc, code + sizeof(words));
-    wave.set_fatal_exception_pending(true);
-    wave.set_debug_suspended(true);
-    return true;
-  });
-  context.cu->step();
-  EXPECT_EQ(faults, 1u);
-  EXPECT_TRUE(context.reported_faults.empty());
-  EXPECT_TRUE(context.wf->wait_counters().empty());
-  EXPECT_EQ(context.external->write_calls, 0u);
-  EXPECT_EQ(context.external->atomic_load_calls, 0u);
-  for (uint32_t lane = 0; lane < 2; ++lane)
-    EXPECT_EQ(context.cu->read_vgpr(vb + 8, lane), 0xdeadbeefu);
 }
 
 // MEMVIOL suppresses only the misaligned LDS lane, so the unmapped global lane

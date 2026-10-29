@@ -15,23 +15,42 @@ struct FlatAddress {
   bool swizzled = false;
 };
 
+/// CDNA5 private-aperture prefix: address bits [63:58] (section 10.2).
+inline constexpr unsigned kCdna5PrivatePrefixShift = 58;
+
+/// @brief CDNA5 FLAT_SCRATCH_BASE for this wave (section 6.10).
+/// @details wave32: {PRIVATE_BASE[63:58], 0, 5'b0, SCRATCH_BASE[56:7], 2'b0};
+/// wave64: {PRIVATE_BASE[63:58], 1, 6'b0, SCRATCH_BASE[56:8], 2'b0}. A thread
+/// forms its private pointer by adding its lane at bit 52 (51 for wave64) and
+/// its byte offset, which is what LLVM emits for gfx1250.
+inline uint64_t cdna5_flat_scratch_base(const Wavefront &wf) {
+  const uint64_t prefix = wf.private_aperture_base() >> kCdna5PrivatePrefixShift
+                                                            << kCdna5PrivatePrefixShift;
+  if (wf.wf_size() == 64)
+    return prefix | uint64_t{1} << 57 | (wf.scratch_base() >> 8 & ((uint64_t{1} << 49) - 1)) << 2;
+  return prefix | (wf.scratch_base() >> 7 & ((uint64_t{1} << 50) - 1)) << 2;
+}
+
 /// Pure address translation shared by execution and pre-execution wait planning.
+/// @details CDNA5 (EncodedLane) decodes the private aperture from the pointer
+/// alone, per section 10.2: the prefix selects the aperture, bit 57 the
+/// owning wave's width, the next bits its lane, and the rest the dword of
+/// that wave's swizzled scratch. Any wave may dereference another's pointer
+/// (section 10.2.1), so the issuing wave's own scratch state is not used.
 inline FlatAddress translate_flat_address(const Wavefront &wf, uint64_t address, unsigned lane,
                                           FlatPrivateLayout layout) {
   if (layout == FlatPrivateLayout::None)
     return {address};
   uint64_t offset;
   if (layout == FlatPrivateLayout::EncodedLane) {
-    if (!wf.scratch_lane_size())
+    const uint64_t prefix = wf.private_aperture_base() >> kCdna5PrivatePrefixShift;
+    if (prefix == 0 || address >> kCdna5PrivatePrefixShift != prefix)
       return {address};
-    const unsigned shift = wf.wf_size() == 64 ? 51 : 52;
-    const uint64_t mask = uint64_t{wf.wf_size() - 1} << shift;
-    const uint64_t base = wf.scratch_base() & ~mask;
-    const uint64_t without_lane = address & ~mask;
-    if (without_lane < base || without_lane - base > UINT32_MAX)
-      return {address};
-    offset = without_lane - base;
-    lane = (address & mask) >> shift;
+    const bool wave64 = (address >> 57) & 1;
+    const unsigned lane_shift = wave64 ? 51 : 52;
+    const uint64_t owner_lane = (address >> lane_shift) & (wave64 ? 63 : 31);
+    const uint64_t dword = (address >> 2) & ((uint64_t{1} << (lane_shift - 2)) - 1);
+    return {dword << (wave64 ? 8 : 7) | owner_lane << 2 | (address & 3), true, true};
   } else {
     const uint32_t private_hi = wf.private_aperture_base() >> 32;
     if (!private_hi || static_cast<uint32_t>(address >> 32) != private_hi)

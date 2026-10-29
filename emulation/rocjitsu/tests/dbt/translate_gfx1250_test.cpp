@@ -14872,6 +14872,8 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
   wf->set_scratch_base(kScratchBase);
+  constexpr uint64_t kPrivateBase = 0x1000'0000'0000'0000ull;
+  wf->set_apertures(0, 0, kPrivateBase, kPrivateBase + (uint64_t{1} << 57) - 1);
   const uint32_t vb = wf->vgpr_alloc().base;
   cu->write_vgpr(vb + 2, 0, 0u);
   cu->write_vgpr(vb + 3, 0, 0u);
@@ -14887,8 +14889,11 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank
     offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
   }
 
-  EXPECT_EQ(cu->read_vgpr(vb + 256, 0), static_cast<uint32_t>(kScratchBase));
-  EXPECT_EQ(cu->read_vgpr(vb + 257, 0), static_cast<uint32_t>(kScratchBase >> 32));
+  // CDNA5 section 6.10, wave32: {PRIVATE_BASE[63:58], 0, 5'b0, SCRATCH_BASE[56:7], 2'b0}.
+  constexpr uint64_t kFlatScratchBase =
+      kPrivateBase | ((kScratchBase >> 7) & ((uint64_t{1} << 50) - 1)) << 2;
+  EXPECT_EQ(cu->read_vgpr(vb + 256, 0), static_cast<uint32_t>(kFlatScratchBase));
+  EXPECT_EQ(cu->read_vgpr(vb + 257, 0), static_cast<uint32_t>(kFlatScratchBase >> 32));
   EXPECT_EQ(wf->vgpr_msb_mode(), kMatchingBankOneMode);
 }
 
