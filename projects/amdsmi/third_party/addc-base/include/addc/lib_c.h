@@ -17,7 +17,7 @@ extern "C"
 #define ADDC_API_VERSION 2u
 
 /** Common ADDC result-schema version emitted by this product. */
-#define ADDC_SCHEMA_VERSION "3.3.0"
+#define ADDC_SCHEMA_VERSION "3.4.0"
 
 /** AFID used when an event cannot be classified more specifically. */
 #define ADDC_UNCLASSIFIED_AFID 16999

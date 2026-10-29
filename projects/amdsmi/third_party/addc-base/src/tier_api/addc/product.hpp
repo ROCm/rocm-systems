@@ -11,7 +11,7 @@ namespace addc::product
 
 enum class ProductId : uint8_t
 {
-    firerange,
+    embedded_2005,
     genoa,
     mi300a,
     mi300c,

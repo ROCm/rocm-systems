@@ -3,35 +3,18 @@
 #include "cper-section-amd-epyc-mtl.hpp"
 
 #include "../base64.hpp"
+#include "../endian.hpp"
 #include "addc/detail/format.hpp"
 
 namespace addc::cper::sections
 {
 
+using addc::cper::read_u16_le;
+using addc::cper::read_u32_le;
+using addc::cper::read_u64_le;
+
 namespace
 {
-
-constexpr uint32_t readU32(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    if (o + 4U > d.size())
-    {
-        return 0U;
-    }
-    return static_cast<uint32_t>(d[o]) |
-           (static_cast<uint32_t>(d[o + 1U]) << 8U) |
-           (static_cast<uint32_t>(d[o + 2U]) << 16U) |
-           (static_cast<uint32_t>(d[o + 3U]) << 24U);
-}
-
-constexpr uint16_t readU16(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    if (o + 2U > d.size())
-    {
-        return 0U;
-    }
-    return static_cast<uint16_t>(d[o]) |
-           (static_cast<uint16_t>(d[o + 1U]) << 8U);
-}
 
 } // namespace
 
@@ -63,12 +46,12 @@ nlohmann::json parse_amd_epyc_mtl(
 {
     nlohmann::json j;
 
-    j["loggingEnabled"] = addc::format("0x{:08x}", readU32(body, 0U));
-    j["tailOffset"] = addc::format("0x{:x}", readU16(body, 4U) & 0xFFFFU);
-    j["entries"] = readU16(body, 6U);
-    j["logVersion"] = addc::format("0x{:08x}", readU32(body, 8U));
+    j["loggingEnabled"] = addc::format("0x{:08x}", read_u32_le(body, 0U));
+    j["tailOffset"] = addc::format("0x{:x}", read_u16_le(body, 4U) & 0xFFFFU);
+    j["entries"] = read_u16_le(body, 6U);
+    j["logVersion"] = addc::format("0x{:08x}", read_u32_le(body, 8U));
     j["usecTimestamp"] =
-        addc::format("0x{:08x}", readU32(body, 12U) & 0x0FFFFFFFU);
+        addc::format("0x{:08x}", read_u32_le(body, 12U) & 0x0FFFFFFFU);
     j["mtlRawData"] = detail::encode_binary(body, context);
 
     return j;

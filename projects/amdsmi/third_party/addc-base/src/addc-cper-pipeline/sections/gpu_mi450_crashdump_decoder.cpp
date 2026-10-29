@@ -13,7 +13,6 @@
 #include "addc/pipeline/section_data.hpp"
 #include "gpu_decode_helpers.hpp"
 
-#include <ctime>
 #include <stdexcept>
 
 namespace addc::pipeline
@@ -36,31 +35,6 @@ namespace
             return "MI450 Boot Status";
         default:
             return addc::format("MI450 Context Type {}", context_type);
-    }
-}
-
-// Parse "{unix_ts}" or "{unix_ts}_{disambiguator}" → ISO 8601 UTC string.
-[[nodiscard]] std::string decodeRedfishTimestamp(const std::string& raw)
-{
-    const auto sep = raw.find('_');
-    const std::string ts_part =
-        (sep == std::string::npos) ? raw : raw.substr(0, sep);
-    try
-    {
-        const auto unix_secs = static_cast<std::time_t>(std::stoull(ts_part));
-        std::tm utc{};
-#ifdef _WIN32
-        gmtime_s(&utc, &unix_secs);
-#else
-        gmtime_r(&unix_secs, &utc);
-#endif
-        return addc::format("{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}Z",
-                            utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
-                            utc.tm_hour, utc.tm_min, utc.tm_sec);
-    }
-    catch (const std::exception&)
-    {
-        return {};
     }
 }
 
@@ -99,25 +73,18 @@ namespace
             ei.fru_mpn_valid && !ei.fru_manufacturer_part_number.empty()
                 ? nlohmann::ordered_json(ei.fru_manufacturer_part_number)
                 : nlohmann::ordered_json(nullptr);
-        gpu_obj["redfish_event_log_id"] = nullptr;
-        if (ei.redfish_event_log_id_valid && !ei.redfish_event_log_id.empty())
-        {
-            const std::string ts =
-                decodeRedfishTimestamp(ei.redfish_event_log_id);
-            gpu_obj["redfish_event_log_timestamp"] =
-                ts.empty() ? nlohmann::ordered_json(nullptr)
-                           : nlohmann::ordered_json(ts);
-        }
-        else
-        {
-            gpu_obj["redfish_event_log_timestamp"] = nullptr;
-        }
+        const auto redfish = gpu::make_redfish_event_log(
+            ei.redfish_event_log_id_valid, ei.redfish_event_log_id);
+        gpu_obj["redfish_event_log_id"] = redfish["id"];
+        gpu_obj["redfish_event_log_timestamp"] = redfish["timestamp"];
+        gpu_obj["check_info"] = gpu::make_mi450_check_info(ei);
     }
     else
     {
         gpu_obj["fru_manufacturer_part_number"] = nullptr;
         gpu_obj["redfish_event_log_id"] = nullptr;
         gpu_obj["redfish_event_log_timestamp"] = nullptr;
+        gpu_obj["check_info"] = nullptr;
     }
 
     p["gpu"] = std::move(gpu_obj);
@@ -127,28 +94,45 @@ namespace
 [[nodiscard]] nlohmann::ordered_json makeFirmware(
     const AmdGpuMi450CrashdumpSection& s)
 {
-    nlohmann::ordered_json fw = nlohmann::ordered_json::object();
-    fw["fw_id"] = s.fw_id_valid && !s.fw_id.empty()
-                      ? nlohmann::ordered_json(s.fw_id)
-                      : nlohmann::ordered_json(nullptr);
-    if (s.pldm_bundle_valid)
-    {
-        fw["pldm_bundle"] = nlohmann::ordered_json{
-            {"minor", s.pldm_bundle.minor},
-            {"major", s.pldm_bundle.major},
-            {"year", s.pldm_bundle.year},
-            {"production_debug", s.pldm_bundle.production_debug},
-        };
-    }
-    else
-    {
-        fw["pldm_bundle"] = nullptr;
-    }
-    if (!s.fw_id_valid && !s.pldm_bundle_valid)
-    {
-        return nullptr;
-    }
-    return fw;
+    return gpu::make_mi450_firmware_json(s);
+}
+
+// Boot Status (type 9) and Break Event (type 3) contexts both carry one
+// 8-byte MP0_OutBndMsg value. Base keeps the raw value; Extended decodes the
+// message fields. Only Boot Status has a Base AFID.
+void emitMi450OutBndMsgEvent(const AmdGpuMi450CrashdumpSection& s,
+                             const DecodeContext& context,
+                             std::size_t context_index, uint16_t context_type,
+                             std::string_view event_class,
+                             std::string_view data_key, uint32_t msg_lo,
+                             uint32_t msg_hi, bool base_afid,
+                             std::vector<PipelineEvent>& events)
+{
+    PipelineEvent ev;
+    ev.metadata = makeMetadata(s, context, context_index, context_type,
+                               event_class, events.size());
+    ev.platform = makePlatform(s);
+    ev.firmware = makeFirmware(s);
+
+    ev.event_report = nullptr;
+
+    const uint64_t msg = (static_cast<uint64_t>(msg_hi) << 32U) |
+                         static_cast<uint64_t>(msg_lo);
+    ev.data_array[std::string{data_key}] = addc::format("0x{:016x}", msg);
+
+    ev.validation["struct"] = true;
+    ev.validation["bank"] = false;
+    ev.validation["corrupted"] = nullptr;
+    ev.validation["possible_non_mca_fatal"] = nullptr;
+    ev.validation["mtl_raw_data"] = false;
+
+    ev.analysis["afid"] = base_afid
+                              ? nlohmann::ordered_json::array(
+                                    {addc::boot_mi450::decode_afid(msg)})
+                              : nlohmann::ordered_json(
+                                    addc::afid_list(addc::kAfidSentinel));
+
+    events.push_back(std::move(ev));
 }
 
 void emitMi450McaEvent(
@@ -315,29 +299,20 @@ std::vector<PipelineEvent> decode_gpu_mi450_crashdump(
 
         if (mc.boot_status.has_value())
         {
-            PipelineEvent ev;
-            ev.metadata = makeMetadata(s, context, ci, mc.context_type,
-                                       "boot_status_eam", events.size());
-            ev.platform = makePlatform(s);
-            ev.firmware = makeFirmware(s);
+            emitMi450OutBndMsgEvent(s, context, ci, mc.context_type,
+                                    "boot_status_eam", "boot_msg",
+                                    mc.boot_status->boot_msg_lo,
+                                    mc.boot_status->boot_msg_hi,
+                                    /*base_afid=*/true, events);
+        }
 
-            ev.event_report = nullptr;
-
-            const uint64_t boot_msg =
-                (static_cast<uint64_t>(mc.boot_status->boot_msg_hi) << 32U) |
-                static_cast<uint64_t>(mc.boot_status->boot_msg_lo);
-            ev.data_array["boot_msg"] = addc::format("0x{:016x}", boot_msg);
-
-            int boot_afid = addc::boot_mi450::decode_afid(boot_msg);
-            ev.validation["struct"] = true;
-            ev.validation["bank"] = false;
-            ev.validation["corrupted"] = nullptr;
-            ev.validation["possible_non_mca_fatal"] = nullptr;
-            ev.validation["mtl_raw_data"] = false;
-
-            ev.analysis["afid"] = nlohmann::ordered_json::array({boot_afid});
-
-            events.push_back(std::move(ev));
+        if (mc.break_event.has_value())
+        {
+            emitMi450OutBndMsgEvent(s, context, ci, mc.context_type,
+                                    "break_event_eam", "break_event_msg",
+                                    mc.break_event->msg_lo,
+                                    mc.break_event->msg_hi,
+                                    /*base_afid=*/false, events);
         }
     }
 

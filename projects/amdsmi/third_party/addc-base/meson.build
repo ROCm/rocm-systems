@@ -2,7 +2,7 @@ project(
     'addc-base',
     'c',
     'cpp',
-    version: '3.3.0',
+    version: '3.4.0',
     default_options: [
         'cpp_std=c++20',
         'c_std=c11',
@@ -24,7 +24,7 @@ addc_version_str = meson.project_version()
 # CPER envelope is always present; private product section layouts and semantic
 # routes are limited to this exact set.
 base_all_projects = [
-    'firerange', 'genoa', 'mi300a', 'mi300c', 'mi300x',
+    'embedded_2005', 'genoa', 'mi300a', 'mi300c', 'mi300x',
     'mi325x', 'mi350', 'mi450', 'turin', 'venice',
 ]
 requested_projects = get_option('projects')
@@ -50,7 +50,7 @@ else
     endforeach
 endif
 
-enable_firerange = 'firerange' in selected_projects
+enable_embedded_2005 = 'embedded_2005' in selected_projects
 enable_genoa = 'genoa' in selected_projects
 enable_mi300a = 'mi300a' in selected_projects
 enable_mi300c = 'mi300c' in selected_projects
@@ -60,7 +60,7 @@ enable_mi350 = 'mi350' in selected_projects
 enable_mi450 = 'mi450' in selected_projects
 enable_turin = 'turin' in selected_projects
 enable_venice = 'venice' in selected_projects
-enable_cpu_project = enable_firerange or enable_genoa or enable_turin or enable_venice
+enable_cpu_project = enable_embedded_2005 or enable_genoa or enable_turin or enable_venice
 enable_mi300_gpu_project = enable_mi300a or enable_mi300c or enable_mi300x or enable_mi325x or enable_mi350
 
 base_product_cpp_args = []
@@ -114,7 +114,6 @@ addc_cper_parser_src = files(
     'src/addc-cper-parser/cper-parse.cpp',
     'src/addc-cper-parser/cper-record.cpp',
     'src/addc-cper-parser/section_dispatch.cpp',
-    'src/addc-cper-parser/sections/cper-section-ainic.cpp',
     'src/addc-cper-parser/sections/cper-section-ia32x64.cpp',
     'src/addc-cper-parser/sections/cper-section-pcie.cpp',
 )
@@ -134,20 +133,17 @@ if enable_cpu_project or enable_mi450
         'src/addc-cper-parser/sections/cper-section-amd-epyc-mtl.cpp',
     )
 endif
-if enable_mi300_gpu_project
-    addc_cper_parser_src += files(
-        'src/addc-cper-parser/sections/cper-section-amd-mi300-crashdump.cpp',
-    )
-endif
 if enable_mi300_gpu_project or enable_mi450
     addc_cper_parser_src += files(
-        'src/addc-cper-parser/sections/cper-section-amd-mi300-runtime.cpp',
+        'src/addc-cper-parser/sections/cper-section-amd-gpu-common.cpp',
+        'src/addc-cper-parser/sections/cper-section-amd-gpu-crashdump.cpp',
+        'src/addc-cper-parser/sections/cper-section-amd-gpu-runtime.cpp',
     )
 endif
 if enable_mi450
     addc_cper_parser_src += files(
-        'src/addc-cper-parser/sections/cper-section-amd-mi450-crashdump.cpp',
         'src/addc-cper-parser/sections/cper-section-amd-mi450-mtl.cpp',
+        'src/addc-cper-parser/sections/cper-section-amd-mi450-scaleup.cpp',
     )
 endif
 
@@ -243,11 +239,10 @@ addc_cper_pipeline_src = files(
     'src/addc-cper-pipeline/pipeline.cpp',
     'src/addc-cper-pipeline/section_dispatch.cpp',
     'src/addc-cper-parser/structural.cpp',
-    'src/addc-cper-pipeline/sections/ainic_decoder.cpp',
-    'src/addc-cper-pipeline/sections/ainic_section.cpp',
     'src/addc-cper-pipeline/sections/epyc_crashdump_section.cpp',
     'src/addc-cper-pipeline/sections/mtl_section.cpp',
     'src/addc-cper-pipeline/sections/mi450_mtl_section.cpp',
+    'src/addc-cper-pipeline/sections/mi450_scaleup_section.cpp',
     'src/addc-cper-pipeline/sections/cdd_section.cpp',
     'src/addc-cper-pipeline/sections/pmic_section.cpp',
     'src/addc-cper-pipeline/sections/gpu_crashdump_section.cpp',
@@ -258,9 +253,14 @@ addc_cper_pipeline_src = files(
     'src/addc-cper-pipeline/sections/pcie_section.cpp',
     'src/addc-cper-pipeline/sections/section_conversion.cpp',
 )
-if enable_cpu_project
+# MI300A/C crashdumps use the EPYC crashdump format.
+if enable_cpu_project or enable_mi300_gpu_project
     addc_cper_pipeline_src += files(
         'src/addc-cper-pipeline/sections/epyc_crashdump_decoder.cpp',
+    )
+endif
+if enable_cpu_project
+    addc_cper_pipeline_src += files(
         'src/addc-cper-pipeline/sections/cdd_decoder.cpp',
         'src/addc-cper-pipeline/sections/pmic_decoder.cpp',
         'src/addc-cper-pipeline/sections/ia32x64_decoder.cpp',
@@ -282,6 +282,7 @@ if enable_mi450
     addc_cper_pipeline_src += files(
         'src/addc-cper-pipeline/sections/gpu_mi450_crashdump_decoder.cpp',
         'src/addc-cper-pipeline/sections/gpu_mi450_runtime_decoder.cpp',
+        'src/addc-cper-pipeline/sections/mi450_scaleup_decoder.cpp',
     )
 endif
 
@@ -363,6 +364,16 @@ if enable_mi300x and enable_mi450
     test('descriptor-platform-smoke', descriptor_platform_smoke)
 endif
 
+if enable_mi450
+    mi450_cper_layout_test = executable(
+        'mi450-cper-layout-test',
+        'tests/mi450_cper_layout.cpp',
+        dependencies: addc_cper_pipeline_dep,
+        cpp_args: base_product_cpp_args,
+    )
+    test('mi450-cper-layout', mi450_cper_layout_test)
+endif
+
 if enable_cpu_project
     section_dispatch_test = executable(
         'section-dispatch-test',
@@ -370,6 +381,16 @@ if enable_cpu_project
         dependencies: addc_cper_pipeline_dep,
     )
     test('section-dispatch', section_dispatch_test)
+endif
+
+if enable_cpu_project or enable_mi300_gpu_project
+    epyc_crashdump_dispatch_test = executable(
+        'epyc-crashdump-dispatch-test',
+        'tests/epyc_crashdump_dispatch.cpp',
+        dependencies: addc_cper_pipeline_dep,
+        cpp_args: base_product_cpp_args,
+    )
+    test('epyc-crashdump-dispatch', epyc_crashdump_dispatch_test)
 endif
 
 parser_classification_test = executable(

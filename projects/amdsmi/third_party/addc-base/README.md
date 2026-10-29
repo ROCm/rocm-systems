@@ -1,6 +1,6 @@
 # addc-base (vendored)
 
-Snapshot of `AMD-DCTOOLS/addc-base` at commit `95a5331` (version 3.3.0), used only by
+Snapshot of `AMD-DCTOOLS/addc-base` at commit `3cf3184` (version 3.4.0), used only by
 `libamd_smi` to turn a CPER record into AFIDs and the JSON event report.
 
 Copied from the upstream tree: `CMakeLists.txt`, `cmake/`, `include/`, `LICENSE`, `meson.build` and

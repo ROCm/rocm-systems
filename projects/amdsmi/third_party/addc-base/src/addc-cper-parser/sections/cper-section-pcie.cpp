@@ -3,10 +3,16 @@
 #include "cper-section-pcie.hpp"
 
 #include "../base64.hpp"
+#include "../endian.hpp"
+#include "addc/cper/amd_section_ids.hpp"
 #include "addc/detail/format.hpp"
 
 namespace addc::cper::sections
 {
+
+using addc::cper::read_u16_le;
+using addc::cper::read_u32_le;
+using addc::cper::read_u64_le;
 
 namespace
 {
@@ -99,49 +105,13 @@ constexpr std::string_view passingName(uint32_t v) noexcept
 // LE readers
 // ------------------------------------------------------------------------------
 
-constexpr uint16_t readU16(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    if (o + 2U > d.size())
-    {
-        return 0U;
-    }
-    return static_cast<uint16_t>(d[o]) |
-           (static_cast<uint16_t>(d[o + 1U]) << 8U);
-}
-
-constexpr uint32_t readU32(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    if (o + 4U > d.size())
-    {
-        return 0U;
-    }
-    return static_cast<uint32_t>(d[o]) |
-           (static_cast<uint32_t>(d[o + 1U]) << 8U) |
-           (static_cast<uint32_t>(d[o + 2U]) << 16U) |
-           (static_cast<uint32_t>(d[o + 3U]) << 24U);
-}
-
-constexpr uint64_t readU64(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    if (o + 8U > d.size())
-    {
-        return 0U;
-    }
-    uint64_t v{};
-    for (std::size_t i = 0U; i < 8U; ++i)
-    {
-        v |= static_cast<uint64_t>(d[o + i]) << (8U * i);
-    }
-    return v;
-}
-
 // ------------------------------------------------------------------------------
 // DeviceID (16 bytes at offset 24)
 // ------------------------------------------------------------------------------
 nlohmann::json buildDeviceId(std::span<const uint8_t> body, std::size_t off)
 {
-    const uint16_t vendor_id = readU16(body, off + 0U);
-    const uint16_t device_id = readU16(body, off + 2U);
+    const uint16_t vendor_id = read_u16_le(body, off + 0U);
+    const uint16_t device_id = read_u16_le(body, off + 2U);
     const uint32_t class_code =
         (off + 7U < body.size())
             ? (static_cast<uint32_t>(body[off + 4U]) |
@@ -150,11 +120,11 @@ nlohmann::json buildDeviceId(std::span<const uint8_t> body, std::size_t off)
             : 0U;
     const uint8_t func_num = (off + 7U < body.size()) ? body[off + 7U] : 0U;
     const uint8_t dev_num = (off + 8U < body.size()) ? body[off + 8U] : 0U;
-    const uint16_t seg_num = readU16(body, off + 9U);
+    const uint16_t seg_num = read_u16_le(body, off + 9U);
     const uint8_t primary_bus =
         (off + 11U < body.size()) ? body[off + 11U] : 0U;
     const uint8_t second_bus = (off + 12U < body.size()) ? body[off + 12U] : 0U;
-    const uint16_t slot_num = readU16(body, off + 13U);
+    const uint16_t slot_num = read_u16_le(body, off + 13U);
 
     return nlohmann::json{
         {"deviceID_Hex", addc::format("0x{:04x}", device_id)},
@@ -191,23 +161,23 @@ nlohmann::json buildCapabilityStruct(std::span<const uint8_t> d,
         return nlohmann::json{{"data", encoded}};
     }
 
-    const uint16_t cap_hdr = readU16(d, 0U);
-    const uint16_t caps = readU16(d, 2U);
-    const uint32_t dev_cap = readU32(d, 4U);
-    const uint16_t dev_ctrl = readU16(d, 8U);
-    const uint16_t dev_sts = readU16(d, 10U);
-    const uint32_t lnk_cap = readU32(d, 12U);
-    const uint16_t lnk_ctrl = readU16(d, 16U);
-    const uint16_t lnk_sts = readU16(d, 18U);
-    const uint32_t slt_cap = readU32(d, 20U);
-    const uint16_t slt_ctrl = readU16(d, 24U);
-    const uint16_t slt_sts = readU16(d, 26U);
-    const uint32_t root_sts = readU32(d, 32U);
-    const uint32_t dev_cap2 = readU32(d, 36U);
-    const uint16_t dev_ctrl2 = readU16(d, 40U);
-    const uint32_t lnk_cap2 = readU32(d, 44U);
-    const uint16_t lnk_ctrl2 = readU16(d, 48U);
-    const uint16_t lnk_sts2 = readU16(d, 50U);
+    const uint16_t cap_hdr = read_u16_le(d, 0U);
+    const uint16_t caps = read_u16_le(d, 2U);
+    const uint32_t dev_cap = read_u32_le(d, 4U);
+    const uint16_t dev_ctrl = read_u16_le(d, 8U);
+    const uint16_t dev_sts = read_u16_le(d, 10U);
+    const uint32_t lnk_cap = read_u32_le(d, 12U);
+    const uint16_t lnk_ctrl = read_u16_le(d, 16U);
+    const uint16_t lnk_sts = read_u16_le(d, 18U);
+    const uint32_t slt_cap = read_u32_le(d, 20U);
+    const uint16_t slt_ctrl = read_u16_le(d, 24U);
+    const uint16_t slt_sts = read_u16_le(d, 26U);
+    const uint32_t root_sts = read_u32_le(d, 32U);
+    const uint32_t dev_cap2 = read_u32_le(d, 36U);
+    const uint16_t dev_ctrl2 = read_u16_le(d, 40U);
+    const uint32_t lnk_cap2 = read_u32_le(d, 44U);
+    const uint16_t lnk_ctrl2 = read_u16_le(d, 48U);
+    const uint16_t lnk_sts2 = read_u16_le(d, 50U);
 
     return nlohmann::json{
         {"data", encoded},
@@ -456,20 +426,20 @@ nlohmann::json buildAerInfo(std::span<const uint8_t> d,
     }
 
     const auto o = deviated_offset;
-    const uint32_t cap_hdr = readU32(d, o + 0U);
-    const uint32_t unc_sts = readU32(d, o + 4U);
-    const uint32_t unc_mask = readU32(d, o + 8U);
-    const uint32_t unc_sev = readU32(d, o + 12U);
-    const uint32_t cor_sts = readU32(d, o + 16U);
-    const uint32_t cor_mask = readU32(d, o + 20U);
-    const uint32_t adv_ctrl = readU32(d, o + 24U);
-    const uint32_t hdr_dw1 = readU32(d, o + 28U);
-    const uint32_t hdr_dw2 = readU32(d, o + 32U);
-    const uint32_t hdr_dw3 = readU32(d, o + 36U);
-    const uint32_t hdr_dw4 = readU32(d, o + 40U);
-    const uint32_t root_cmd = readU32(d, o + 44U);
-    const uint32_t root_sts = readU32(d, o + 48U);
-    const uint32_t err_src = readU32(d, o + 52U);
+    const uint32_t cap_hdr = read_u32_le(d, o + 0U);
+    const uint32_t unc_sts = read_u32_le(d, o + 4U);
+    const uint32_t unc_mask = read_u32_le(d, o + 8U);
+    const uint32_t unc_sev = read_u32_le(d, o + 12U);
+    const uint32_t cor_sts = read_u32_le(d, o + 16U);
+    const uint32_t cor_mask = read_u32_le(d, o + 20U);
+    const uint32_t adv_ctrl = read_u32_le(d, o + 24U);
+    const uint32_t hdr_dw1 = read_u32_le(d, o + 28U);
+    const uint32_t hdr_dw2 = read_u32_le(d, o + 32U);
+    const uint32_t hdr_dw3 = read_u32_le(d, o + 36U);
+    const uint32_t hdr_dw4 = read_u32_le(d, o + 40U);
+    const uint32_t root_cmd = read_u32_le(d, o + 44U);
+    const uint32_t root_sts = read_u32_le(d, o + 48U);
+    const uint32_t err_src = read_u32_le(d, o + 52U);
 
     result["aer_capability_header"] = nlohmann::json{
         {"capability_id", cap_hdr & 0xFFFFU},
@@ -664,13 +634,13 @@ nlohmann::json parse_pcie(std::span<const uint8_t> body,
         return nullptr;
     }
 
-    const uint64_t valid_bits = readU64(body, 0U);
-    const uint32_t port_type_raw = readU32(body, 8U);
-    const uint32_t version_raw = readU32(body, 12U);
-    const uint32_t cmd_sts_raw = readU32(body, 16U);
-    const uint64_t rcrb_hi = readU32(body, 20U);
-    const uint64_t device_serial = readU64(body, 40U);
-    const uint32_t bridge_sts = readU32(body, 48U);
+    const uint64_t valid_bits = read_u64_le(body, 0U);
+    const uint32_t port_type_raw = read_u32_le(body, 8U);
+    const uint32_t version_raw = read_u32_le(body, 12U);
+    const uint32_t cmd_sts_raw = read_u32_le(body, 16U);
+    const uint64_t rcrb_hi = read_u32_le(body, 20U);
+    const uint64_t device_serial = read_u64_le(body, 40U);
+    const uint32_t bridge_sts = read_u32_le(body, 48U);
 
     auto safe_span =
         [&](std::size_t off, std::size_t len) -> std::span<const uint8_t> {
@@ -708,9 +678,8 @@ nlohmann::json parse_pcie(std::span<const uint8_t> body,
     j["capabilityStructure"] =
         buildCapabilityStruct(safe_span(52U, 60U), context);
 
-    auto program_rev = static_cast<uint8_t>(desc.revision_major & 0xFU);
-    const auto gen_rev =
-        static_cast<uint8_t>((desc.revision_major >> 4U) & 0xFU);
+    auto program_rev = program_gen(desc.revision_major);
+    const auto gen_rev = ras_gen(desc.revision_major);
     const uint8_t minor_version = static_cast<uint8_t>(version_raw & 0xFFU);
     if (program_rev == 0U && gen_rev != 0U)
     {
@@ -736,7 +705,7 @@ nlohmann::json parse_pcie(std::span<const uint8_t> body,
     //       etc.) per PCIe 6.0+ spec. Currently raw base64 only - no decoding
     //       in either software decoder. See PCIe Gen 6 spec section on Flit
     //       Mode Logging.
-    const uint16_t flit_depth = (body.size() > 300U) ? readU16(body, 300U) : 0U;
+    const uint16_t flit_depth = (body.size() > 300U) ? read_u16_le(body, 300U) : 0U;
     j["flitLoggingDepth"] = static_cast<uint64_t>(flit_depth);
     const std::size_t flit_size = static_cast<std::size_t>(flit_depth) * 60U;
     j["flitLoggingInfo"] = nlohmann::json{

@@ -32,4 +32,9 @@ namespace addc::pipeline
 void append_parser_recovery(PipelineOutput& output,
                             const nlohmann::json& recovery);
 
+/// Mark every decoded event `validation.corrupted` when the parser recovered
+/// from a record whose section data may be shifted. Call it after the section
+/// decoders have added their events.
+void mark_events_from_parser_recovery(PipelineOutput& output);
+
 } // namespace addc::pipeline

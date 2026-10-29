@@ -3,10 +3,15 @@
 #include "cper-section-amd-epyc-cdd.hpp"
 
 #include "../base64.hpp"
+#include "../endian.hpp"
 #include "addc/detail/format.hpp"
 
 namespace addc::cper::sections
 {
+
+using addc::cper::read_u16_le;
+using addc::cper::read_u32_le;
+using addc::cper::read_u64_le;
 
 namespace
 {
@@ -28,30 +33,6 @@ inline constexpr Guid kCddGuid{
 //   (padding to 64 bytes)
 //   payload:   bytes from offset 64 onward
 constexpr std::size_t kCddHeaderSize = 64U;
-
-constexpr uint16_t readU16(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    if (o + 2U > d.size())
-    {
-        return 0U;
-    }
-    return static_cast<uint16_t>(d[o]) |
-           (static_cast<uint16_t>(d[o + 1U]) << 8U);
-}
-
-constexpr uint64_t readU64(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    if (o + 8U > d.size())
-    {
-        return 0U;
-    }
-    uint64_t v = 0U;
-    for (std::size_t i = 0U; i < 8U; ++i)
-    {
-        v |= static_cast<uint64_t>(d[o + i]) << (8U * i);
-    }
-    return v;
-}
 
 } // namespace
 
@@ -82,18 +63,18 @@ nlohmann::json parse_amd_epyc_cdd(
 {
     nlohmann::json j;
 
-    const uint16_t valid_bits = readU16(body, 0U);
+    const uint16_t valid_bits = read_u16_le(body, 0U);
     j["validBits"] = {
         {"raw", addc::format("0x{:04x}", valid_bits)},
         {"apicIdValid", bool(valid_bits & 0x1U)},
         {"cpuidValid", bool((valid_bits >> 1U) & 0x1U)},
     };
-    j["apicId"] = readU64(body, 2U);
+    j["apicId"] = read_u64_le(body, 2U);
     j["cpuidInfo"] = {
-        {"eax", addc::format("0x{:016x}", readU64(body, 10U))},
-        {"ebx", addc::format("0x{:016x}", readU64(body, 18U))},
-        {"ecx", addc::format("0x{:016x}", readU64(body, 26U))},
-        {"edx", addc::format("0x{:016x}", readU64(body, 34U))},
+        {"eax", addc::format("0x{:016x}", read_u64_le(body, 10U))},
+        {"ebx", addc::format("0x{:016x}", read_u64_le(body, 18U))},
+        {"ecx", addc::format("0x{:016x}", read_u64_le(body, 26U))},
+        {"edx", addc::format("0x{:016x}", read_u64_le(body, 34U))},
     };
 
     if (body.size() > kCddHeaderSize)

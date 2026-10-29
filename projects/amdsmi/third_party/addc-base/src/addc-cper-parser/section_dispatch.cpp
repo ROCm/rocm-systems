@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT
 #include "addc/cper/section_dispatch.hpp"
 
-#include "sections/cper-section-ainic.hpp"
-#if defined(ADDC_HAS_FIRERANGE) || defined(ADDC_HAS_GENOA) ||                 \
+#include "addc/cper/amd_section_ids.hpp"
+
+#if defined(ADDC_HAS_EMBEDDED_2005) || defined(ADDC_HAS_GENOA) ||                 \
     defined(ADDC_HAS_TURIN) || defined(ADDC_HAS_VENICE)
 #define ADDC_PARSER_HAS_CPU
 #endif
@@ -22,15 +23,13 @@
 #include "sections/cper-section-amd-epyc-cdd.hpp"
 #include "sections/cper-section-amd-epyc-pmic.hpp"
 #endif
-#ifdef ADDC_PARSER_HAS_MI300
-#include "sections/cper-section-amd-mi300-crashdump.hpp"
-#endif
 #if defined(ADDC_PARSER_HAS_MI300) || defined(ADDC_HAS_MI450)
-#include "sections/cper-section-amd-mi300-runtime.hpp"
+#include "sections/cper-section-amd-gpu-crashdump.hpp"
+#include "sections/cper-section-amd-gpu-runtime.hpp"
 #endif
 #ifdef ADDC_HAS_MI450
-#include "sections/cper-section-amd-mi450-crashdump.hpp"
 #include "sections/cper-section-amd-mi450-mtl.hpp"
+#include "sections/cper-section-amd-mi450-scaleup.hpp"
 #endif
 #include "sections/cper-section-ia32x64.hpp"
 #include "sections/cper-section-pcie.hpp"
@@ -45,18 +44,6 @@ SectionClassification describe_section(SectionKind kind) noexcept
         case SectionKind::AmdMi450Mtl:
             return {kind, "AmdMi450MTL", "AMD MI450 MPx Trace Log Section",
                     "An MI450 MPx Trace Log occurred"};
-        case SectionKind::AinicPlatformContext:
-            return {kind, "AinicPlatformContext", "AINIC Platform Context",
-                    "An AINIC Platform Context Error occurred"};
-        case SectionKind::AinicInterface:
-            return {kind, "AinicInterface", "AINIC Interface",
-                    "An AINIC Interface Error occurred"};
-        case SectionKind::AinicPoison:
-            return {kind, "AinicPoison", "AINIC Poison",
-                    "An AINIC Poison Error occurred"};
-        case SectionKind::AinicEcc:
-            return {kind, "AinicEcc", "AINIC ECC",
-                    "An AINIC ECC Error occurred"};
         case SectionKind::AmdEpycCrashdump:
             return {kind, "AmdEpyc", "AMD EPYC Crashdump",
                     "AMD EPYC Crashdump Occurred"};
@@ -83,6 +70,9 @@ SectionClassification describe_section(SectionKind kind) noexcept
             // reporting the correct platform in descriptor metadata.
             return {kind, "AmdMi300Runtime",
                     "AMD MI450 Runtime Error Section", {}};
+        case SectionKind::AmdMi450ScaleUp:
+            return {kind, "AmdMi450ScaleUp", "AMD MI450 Scale Up Section",
+                    "An MI450 Scale Up (UALoE) event occurred"};
         case SectionKind::Ia32X64:
             return {kind, "Ia32x64Processor", "Ia32X64Section",
                     "An IA32/x64 Processor Error occurred"};
@@ -95,13 +85,14 @@ SectionClassification describe_section(SectionKind kind) noexcept
     return {};
 }
 
+bool is_mi450_gpu_runtime_revision(uint8_t revision_major) noexcept
+{
+    return program_gen(revision_major) == 2U && ras_gen(revision_major) == 3U;
+}
+
 SectionKind section_kind_from_type_name(std::string_view type_name) noexcept
 {
     static constexpr SectionKind kinds[] = {
-        SectionKind::AinicPlatformContext,
-        SectionKind::AinicInterface,
-        SectionKind::AinicPoison,
-        SectionKind::AinicEcc,
 #if defined(ADDC_PARSER_HAS_CPU) || defined(ADDC_PARSER_HAS_MI300)
         SectionKind::AmdEpycCrashdump,
 #endif
@@ -120,10 +111,11 @@ SectionKind section_kind_from_type_name(std::string_view type_name) noexcept
 #endif
 #if defined(ADDC_PARSER_HAS_MI300) || defined(ADDC_HAS_MI450)
         SectionKind::AmdMi300Runtime,
+        SectionKind::AmdMi450Runtime,
 #endif
 #ifdef ADDC_HAS_MI450
-        SectionKind::AmdMi450Runtime,
         SectionKind::AmdMi450Crashdump,
+        SectionKind::AmdMi450ScaleUp,
 #endif
         SectionKind::Ia32X64,
         SectionKind::Pcie,
@@ -148,14 +140,6 @@ SectionClassification classify_section(
     if (matches_amd_mi450_mtl(header, descriptor))
         return describe_section(SectionKind::AmdMi450Mtl);
 #endif
-    if (matches_ainic_platform_context(header, descriptor))
-        return describe_section(SectionKind::AinicPlatformContext);
-    if (matches_ainic_interface(header, descriptor))
-        return describe_section(SectionKind::AinicInterface);
-    if (matches_ainic_poison(header, descriptor))
-        return describe_section(SectionKind::AinicPoison);
-    if (matches_ainic_ecc(header, descriptor))
-        return describe_section(SectionKind::AinicEcc);
 #if defined(ADDC_PARSER_HAS_CPU) || defined(ADDC_PARSER_HAS_MI300)
     if (matches_amd_epyc_crashdump(header, descriptor))
         return describe_section(SectionKind::AmdEpycCrashdump);
@@ -177,22 +161,22 @@ SectionClassification classify_section(
 #ifdef ADDC_HAS_MI450
     if (matches_amd_mi450_crashdump(header, descriptor))
         return describe_section(SectionKind::AmdMi450Crashdump);
+    if (matches_amd_mi450_scaleup(header, descriptor))
+        return describe_section(SectionKind::AmdMi450ScaleUp);
 #endif
     if (matches_ia32x64(header, descriptor))
         return describe_section(SectionKind::Ia32X64);
     if (matches_pcie(header, descriptor))
         return describe_section(SectionKind::Pcie);
 #if defined(ADDC_PARSER_HAS_MI300) || defined(ADDC_HAS_MI450)
-    if (matches_amd_mi300_runtime(header, descriptor))
+    if (matches_amd_gpu_runtime(header, descriptor))
     {
-#ifdef ADDC_HAS_MI450
-        if ((descriptor.revision_major & 0xFU) == 2U &&
-            ((descriptor.revision_major >> 4U) & 0xFU) == 3U)
-        {
-            return describe_section(SectionKind::AmdMi450Runtime);
-        }
-#endif
-        return describe_section(SectionKind::AmdMi300Runtime);
+        // Both runtime layouts are built with the runtime parser, so the
+        // revision alone selects the kind in every product build.
+        return describe_section(
+            is_mi450_gpu_runtime_revision(descriptor.revision_major)
+                ? SectionKind::AmdMi450Runtime
+                : SectionKind::AmdMi300Runtime);
     }
 #endif
     return {};
@@ -206,14 +190,6 @@ nlohmann::json parse_section_json(SectionKind kind,
     using namespace sections;
     switch (kind)
     {
-        case SectionKind::AinicPlatformContext:
-            return parse_ainic_platform_context(body, descriptor);
-        case SectionKind::AinicInterface:
-            return parse_ainic_interface(body, descriptor);
-        case SectionKind::AinicPoison:
-            return parse_ainic_poison(body, descriptor);
-        case SectionKind::AinicEcc:
-            return parse_ainic_ecc(body, descriptor);
         case SectionKind::AmdEpycCrashdump:
 #if defined(ADDC_PARSER_HAS_CPU) || defined(ADDC_PARSER_HAS_MI300)
             return parse_amd_epyc_crashdump(body, descriptor, context);
@@ -246,20 +222,35 @@ nlohmann::json parse_section_json(SectionKind kind,
 #endif
         case SectionKind::AmdMi300Crashdump:
 #ifdef ADDC_PARSER_HAS_MI300
-            return parse_amd_mi300_crashdump(body, descriptor, context);
+            return parse_amd_gpu_crashdump(body, descriptor,
+                                           AmdGpuLayout::Mi300, context);
 #else
             return nullptr;
 #endif
         case SectionKind::AmdMi450Crashdump:
 #ifdef ADDC_HAS_MI450
-            return parse_amd_mi450_crashdump(body, descriptor, context);
+            return parse_amd_gpu_crashdump(body, descriptor,
+                                           AmdGpuLayout::Mi450, context);
 #else
             return nullptr;
 #endif
         case SectionKind::AmdMi300Runtime:
+#if defined(ADDC_PARSER_HAS_MI300) || defined(ADDC_HAS_MI450)
+            return parse_amd_gpu_runtime(body, descriptor,
+                                         AmdGpuLayout::Mi300, context);
+#else
+            return nullptr;
+#endif
         case SectionKind::AmdMi450Runtime:
 #if defined(ADDC_PARSER_HAS_MI300) || defined(ADDC_HAS_MI450)
-            return parse_amd_mi300_runtime(body, descriptor, context);
+            return parse_amd_gpu_runtime(body, descriptor,
+                                         AmdGpuLayout::Mi450, context);
+#else
+            return nullptr;
+#endif
+        case SectionKind::AmdMi450ScaleUp:
+#ifdef ADDC_HAS_MI450
+            return parse_amd_mi450_scaleup(body, descriptor, context);
 #else
             return nullptr;
 #endif

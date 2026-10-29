@@ -73,7 +73,7 @@ DecodedWdt decode_base_wdt(std::string_view project,
         case addc::product::ProductId::venice:
             return decode_venice_base_wdt(wdt_data, cpuid_eax);
 #endif
-        case addc::product::ProductId::firerange:
+        case addc::product::ProductId::embedded_2005:
         case addc::product::ProductId::genoa:
         case addc::product::ProductId::turin:
         case addc::product::ProductId::mi450:

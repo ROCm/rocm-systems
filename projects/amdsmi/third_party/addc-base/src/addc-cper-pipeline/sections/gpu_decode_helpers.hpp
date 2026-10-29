@@ -116,16 +116,88 @@ template <typename GpuSection>
     return fw;
 }
 
+/// Firmware block for MI450 sections.
+template <typename GpuSection>
+[[nodiscard]] nlohmann::ordered_json make_mi450_firmware_json(
+    const GpuSection& s)
+{
+    if (!s.fw_id_valid && !s.pldm_bundle_valid)
+        return nullptr;
+    nlohmann::ordered_json fw = nlohmann::ordered_json::object();
+    fw["fw_id"] = s.fw_id_valid && !s.fw_id.empty()
+                      ? nlohmann::ordered_json(s.fw_id)
+                      : nlohmann::ordered_json(nullptr);
+    if (s.pldm_bundle_valid)
+    {
+        fw["pldm_bundle"] = nlohmann::ordered_json{
+            {"patch", s.pldm_bundle.patch},
+            {"minor", s.pldm_bundle.minor},
+            {"major_year", s.pldm_bundle.major_year},
+            {"build_type", s.pldm_bundle.build_type},
+            {"product_id", s.pldm_bundle.product_id},
+        };
+    }
+    else
+    {
+        fw["pldm_bundle"] = nullptr;
+    }
+    return fw;
+}
+
+/// MS Check structure of an MI450 GPU Error Info structure. Null when Check
+/// Info Valid is clear. A field is null when its MS Check valid bit is clear.
+[[nodiscard]] inline nlohmann::ordered_json make_mi450_check_info(
+    const GpuErrorInfoStructure& ei)
+{
+    if (!ei.check_info_valid)
+        return nullptr;
+    auto field = [&](unsigned bit, nlohmann::ordered_json value) {
+        return (ei.ms_check_valid_bits & (1u << bit)) != 0u
+                   ? std::move(value)
+                   : nlohmann::ordered_json(nullptr);
+    };
+    std::string_view error_type = "Reserved";
+    switch (ei.error_type)
+    {
+        case 0u:
+            error_type = "No Error";
+            break;
+        case 1u:
+            error_type = "Unclassified";
+            break;
+        case 3u:
+            error_type = "External Error";
+            break;
+        case 4u:
+            error_type = "FRC Error";
+            break;
+        case 5u:
+            error_type = "Internal Unclassified Error";
+            break;
+        default:
+            break;
+    }
+    nlohmann::ordered_json check;
+    check["error_type"] = field(0u, error_type);
+    check["pcc"] = field(1u, ei.pcc);
+    check["uncorrected"] = field(2u, ei.uncorrected);
+    check["precise_ip"] = field(3u, ei.precise_ip);
+    check["restartable_ip"] = field(4u, ei.restartable_ip);
+    check["overflow"] = field(5u, ei.overflow);
+    return check;
+}
+
 [[nodiscard]] inline nlohmann::ordered_json make_redfish_event_log(
     bool valid, const std::string& raw)
 {
     nlohmann::ordered_json obj;
-    obj["id"] = nullptr;
     if (!valid || raw.empty())
     {
+        obj["id"] = nullptr;
         obj["timestamp"] = nullptr;
         return obj;
     }
+    obj["id"] = raw;
     // Format: {unix_timestamp}[_{disambiguator}] — always decode as timestamp.
     const auto sep = raw.find('_');
     const std::string ts_part =

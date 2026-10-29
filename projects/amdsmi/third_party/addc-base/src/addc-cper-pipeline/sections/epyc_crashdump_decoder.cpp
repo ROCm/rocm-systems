@@ -127,7 +127,12 @@ std::vector<PipelineEvent> decode_epyc_crashdump(
                 }
 
                 const auto decoded = context.decode_mca(
-                    s.platform, addc::mca::BankCapture{regs, bank.transaddr});
+                    s.platform,
+                    addc::mca::BankCapture{
+                        regs, bank.transaddr,
+                        s.cpuid_valid ? std::optional<uint32_t>{
+                                            static_cast<uint32_t>(s.cpuid.eax)}
+                                      : std::nullopt});
                 if (!decoded)
                 {
                     continue;
@@ -285,7 +290,7 @@ std::vector<PipelineEvent> decode_epyc_crashdump(
                 !decoded.code_type_name.empty() || !decoded.sub_type_name.empty() ||
                 !decoded.description.empty() || !decoded.runtime_error_bits.empty();
 
-            ev.validation["struct"] = false;
+            ev.validation["struct"] = true;
             ev.validation["decoded"] = outbound_decoded;
             ev.validation["corrupted"] =
                 decoded.corrupted ? nlohmann::ordered_json(true)

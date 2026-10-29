@@ -3,6 +3,8 @@
 #include "cper-section-amd-epyc-crashdump.hpp"
 
 #include "../base64.hpp"
+#include "../endian.hpp"
+#include "addc/cper/amd_section_ids.hpp"
 #include "addc/detail/format.hpp"
 
 #include <algorithm>
@@ -10,16 +12,12 @@
 namespace addc::cper::sections
 {
 
+using addc::cper::read_u16_le;
+using addc::cper::read_u32_le;
+using addc::cper::read_u64_le;
+
 namespace
 {
-
-// --- AMD EPYC Crashdump GUID (b0d0 variant - the only registered one) --------
-//   String: 32ac0c78-2623-48f6-b0d0-7365725fd6ae
-inline constexpr Guid kAmdCrashdumpGuid{
-    0x32ac0c78U,
-    0x2623U,
-    0x48f6U,
-    {0xb0U, 0xd0U, 0x73U, 0x65U, 0x72U, 0x5fU, 0xd6U, 0xaeU}};
 
 // --- ValidBits field constants -----------------------------------------------
 constexpr uint64_t kValidApicId = 0x01U;
@@ -84,42 +82,6 @@ constexpr std::size_t kProcessorContextSize = 65408U;
 
 // --- Portable LE readers -----------------------------------------------------
 
-constexpr uint16_t readU16(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    return static_cast<uint16_t>(d[o]) |
-           static_cast<uint16_t>(static_cast<uint16_t>(d[o + 1U]) << 8U);
-}
-
-constexpr uint32_t readU32(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    return static_cast<uint32_t>(d[o]) |
-           (static_cast<uint32_t>(d[o + 1U]) << 8U) |
-           (static_cast<uint32_t>(d[o + 2U]) << 16U) |
-           (static_cast<uint32_t>(d[o + 3U]) << 24U);
-}
-
-constexpr uint64_t readU64(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    uint64_t v = 0U;
-    for (std::size_t i = 0U; i < 8U; ++i)
-    {
-        v |= static_cast<uint64_t>(d[o + i]) << (8U * i);
-    }
-    return v;
-}
-
-/// Safe read: returns 0 if offset+width exceeds data.size().
-template <typename Fn>
-auto safeRead(std::span<const uint8_t> d, std::size_t offset, std::size_t width,
-              Fn reader) noexcept -> decltype(reader(d, offset))
-{
-    if (offset + width > d.size())
-    {
-        return {};
-    }
-    return reader(d, offset);
-}
-
 } // anonymous namespace
 
 // --- EPYC crashdump classification ------------------------------------------
@@ -136,15 +98,14 @@ bool matches_amd_epyc_crashdump(const RecordHeader& /*header*/,
     {
         return false;
     }
-    const uint8_t rev_major = desc.revision_major;
-    const uint32_t program_gen = static_cast<uint32_t>(rev_major) & 0xFU;
-    const uint32_t ras_gen = (static_cast<uint32_t>(rev_major) >> 4U) & 0xFU;
+    const uint8_t program = program_gen(desc.revision_major);
+    const uint8_t ras = ras_gen(desc.revision_major);
 
-    if (program_gen == 0x0U || program_gen == 0x1U || program_gen == 0x4U)
+    if (program == 0x0U || program == 0x1U || program == 0x4U)
     {
         return true; // EPYC / Embedded
     }
-    if (program_gen == 0x2U && ras_gen == 0x1U)
+    if (program == 0x2U && ras == 0x1U)
     {
         return true; // MI300A / MI300C
     }
@@ -174,7 +135,7 @@ nlohmann::json parse_amd_epyc_crashdump(
     nlohmann::json j;
 
     // -- Valid-bits decomposition ------------------------------------------
-    const uint64_t valid_bits = safeRead(body, kOffValidBits, 8U, readU64);
+    const uint64_t valid_bits = read_u64_le(body, kOffValidBits);
 
     j["sectionValidBits"] = addc::format("0x{:016X}", valid_bits);
     j["apicIdValid"] = (valid_bits & kValidApicId) != 0U;
@@ -186,14 +147,14 @@ nlohmann::json parse_amd_epyc_crashdump(
     j["processorContextInfoNum"] = static_cast<int64_t>(declared_context_count);
 
     // -- APIC ID -----------------------------------------------------------
-    j["apicId"] = safeRead(body, kOffApicId, 8U, readU64);
+    j["apicId"] = read_u64_le(body, kOffApicId);
 
     // -- CPUID info --------------------------------------------------------
     j["cpuidInfo"] = {
-        {"eax", safeRead(body, kOffCpuidEax, 8U, readU64)},
-        {"ebx", safeRead(body, kOffCpuidEbx, 8U, readU64)},
-        {"ecx", safeRead(body, kOffCpuidEcx, 8U, readU64)},
-        {"edx", safeRead(body, kOffCpuidEdx, 8U, readU64)},
+        {"eax", read_u64_le(body, kOffCpuidEax)},
+        {"ebx", read_u64_le(body, kOffCpuidEbx)},
+        {"ecx", read_u64_le(body, kOffCpuidEcx)},
+        {"edx", read_u64_le(body, kOffCpuidEdx)},
     };
 
     // -- ProcessorErrorInfo - always "Reserved" -------------------------
@@ -219,10 +180,10 @@ nlohmann::json parse_amd_epyc_crashdump(
 
     if (body.size() >= kCtxMinSize)
     {
-        const uint16_t ctx_type = readU16(body, kOffCtxType);
-        const uint16_t declared_ctx_arr_sz = readU16(body, kOffCtxArrSz);
-        const uint32_t ucode = readU32(body, kOffCtxUcode);
-        const uint64_t ppin = readU64(body, kOffCtxPpin);
+        const uint16_t ctx_type = read_u16_le(body, kOffCtxType);
+        const uint16_t declared_ctx_arr_sz = read_u16_le(body, kOffCtxArrSz);
+        const uint32_t ucode = read_u32_le(body, kOffCtxUcode);
+        const uint64_t ppin = read_u64_le(body, kOffCtxPpin);
 
         // Raw ProcessorContext bytes -> base64 (entire struct, capped at known
         // size).
