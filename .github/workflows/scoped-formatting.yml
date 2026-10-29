@@ -9,7 +9,7 @@ on:
   push:
     branches: [develop]
     paths:
-      - 'projects/cuid/**'
+      - 'shared/cuid/**'
       - 'projects/rocprofiler-compute/**'
 
 permissions:
@@ -37,7 +37,7 @@ jobs:
           - scope: rocjitsu
             # The base-branch PR bot still requires this name during rollout.
             check-name: pre-commit
-            include: '^(emulation/(mirage|rocjitsu)/|\.github/workflows/rocjitsu-[^/]*\.yml\Z|\.pre-commit-config\.yaml\Z)'
+            include: '^(emulation/(mirage|rocjitsu)/|\.github/scripts/(tests/test_)?(collect_rocjitsu_afl_results\.py|rocjitsu_fuzz_report\.js|run_rocjitsu_afl_campaign\.py)\Z|\.github/workflows/rocjitsu-[^/]*\.yml\Z|\.pre-commit-config\.yaml\Z)'
             sparse-checkout: |
               emulation/mirage
               emulation/rocjitsu
@@ -45,9 +45,9 @@ jobs:
 
           - scope: cuid
             check-name: pre-commit / cuid
-            include: '^projects/cuid/'
-            exclude: '(\.(md|rst|rtf)\Z|(^|/)\.readthedocs\.yaml\Z|^projects/cuid/docs/)'
-            config: projects/cuid/.pre-commit-config.yaml
+            include: '^shared/cuid/'
+            exclude: '(\.(md|rst|rtf)\Z|(^|/)\.readthedocs\.yaml\Z|^shared/cuid/docs/)'
+            config: shared/cuid/.pre-commit-config.yaml
 
           - scope: rocprofiler-compute
             check-name: pre-commit / rocprofiler-compute

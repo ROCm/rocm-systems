@@ -125,17 +125,43 @@ class WorkflowScopeTests(unittest.TestCase):
         self.assertTrue(self.affected("rocjitsu", "emulation/mirage/src/lib.rs"))
         self.assertTrue(self.affected("rocjitsu", "emulation/rocjitsu/test.py"))
 
+    def test_rocjitsu_fuzzing_scripts_activate_formatting(self) -> None:
+        for filename in (
+            "collect_rocjitsu_afl_results.py",
+            "rocjitsu_fuzz_report.js",
+            "run_rocjitsu_afl_campaign.py",
+        ):
+            for relative in (filename, f"tests/test_{filename}"):
+                with self.subTest(path=relative):
+                    self.assertTrue(
+                        self.affected("rocjitsu", f".github/scripts/{relative}")
+                    )
+        self.assertFalse(self.affected("rocjitsu", ".github/scripts/other.py"))
+        self.assertIn(
+            ".github", workflow_scope("rocjitsu")["sparse-checkout"].splitlines()
+        )
+
+    def test_cuid_uses_shared_directory_for_configuration_and_pushes(self) -> None:
+        self.assertEqual(
+            workflow_scope("cuid")["config"], "shared/cuid/.pre-commit-config.yaml"
+        )
+        self.assertIn("shared/cuid/**", WORKFLOW["on"]["push"]["paths"])
+        self.assertFalse(self.affected("cuid", "projects/cuid/src/runtime.cpp"))
+
     def test_project_scopes_and_documentation_exclusions(self) -> None:
-        for name in ("cuid", "rocprofiler-compute"):
+        for name, directory in (
+            ("cuid", "shared/cuid"),
+            ("rocprofiler-compute", "projects/rocprofiler-compute"),
+        ):
             with self.subTest(name=name):
-                self.assertTrue(self.affected(name, f"projects/{name}/src/runtime.cpp"))
+                self.assertTrue(self.affected(name, f"{directory}/src/runtime.cpp"))
                 self.assertTrue(
                     self.affected(name, ".github/workflows/scoped-formatting.yml")
                 )
                 for path in ("README.md", "docs/conf.py", ".readthedocs.yaml"):
-                    self.assertFalse(self.affected(name, f"projects/{name}/{path}"))
+                    self.assertFalse(self.affected(name, f"{directory}/{path}"))
                 self.assertFalse(self.affected(name, "runtimes/src/lib.rs"))
-                self.assertTrue(self.affected(name, f"projects/{name}/README.md\n"))
+                self.assertTrue(self.affected(name, f"{directory}/README.md\n"))
 
     def test_shared_infrastructure_changes_activate_every_scope(self) -> None:
         for name in ("runtimes", "rocjitsu", "cuid", "rocprofiler-compute"):
@@ -147,14 +173,17 @@ class WorkflowScopeTests(unittest.TestCase):
                     self.assertTrue(self.affected(name, path))
 
     def test_documentation_exclusions_apply_only_to_pull_requests(self) -> None:
-        for name in ("cuid", "rocprofiler-compute"):
+        for name, directory in (
+            ("cuid", "shared/cuid"),
+            ("rocprofiler-compute", "projects/rocprofiler-compute"),
+        ):
             for relative in (
                 "README.md",
                 "guide.rst",
                 "docs/conf.py",
                 ".readthedocs.yaml",
             ):
-                path = f"projects/{name}/{relative}"
+                path = f"{directory}/{relative}"
                 with self.subTest(scope=name, path=path):
                     self.assertFalse(self.affected(name, path, "pull_request"))
                     self.assertTrue(self.affected(name, path, "push"))
