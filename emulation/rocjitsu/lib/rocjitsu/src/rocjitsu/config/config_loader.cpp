@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/config/config_loader.h"
+#include "util/diagnostic.h"
 
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
@@ -862,7 +863,9 @@ void do_wire_cps(simdojo::CompositeComponent *root, uint32_t cus_per_shader_arra
             throw std::logic_error("Full-mode CP wiring requires a constructed compute unit");
           cu->set_shader_engine_location(shader_engine_id, cu_index, cus_per_shader_array,
                                          cus_per_shader_array ? expected_cus : 0);
-          cp->add_compute_unit(cu);
+          // Wiring precedes exposing the fresh topology or starting execution.
+          [[maybe_unused]] const util::Result attached = cp->add_compute_unit(cu);
+          assert(attached.succeeded());
         });
   }
 }
@@ -1021,7 +1024,8 @@ build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_c
         // (no SoC) keeps this per-XCD store; when a SoC owns the XCD, add_xcd
         // below supersedes it with the one device-wide store shared across every
         // XCD, so a dispatch under XCD fan-out still rendezvouses.
-        xcd->wire_gws_to_cus();
+        [[maybe_unused]] const util::Result wired = xcd->wire_gws_to_cus();
+        assert(wired.succeeded() && "new topology cannot contain active CUs");
         if (soc)
           soc->add_xcd(xcd);
       } else if (auto *iod = dynamic_cast<amdgpu::Iod *>(c)) {

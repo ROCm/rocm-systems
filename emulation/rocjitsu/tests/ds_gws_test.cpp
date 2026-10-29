@@ -32,6 +32,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/instruction_family.h"
+#include "util/diagnostic.h"
 #include "util/except.h"
 
 #include <gtest/gtest.h>
@@ -1189,8 +1190,8 @@ TEST_P(DsGwsTest, DirectlyAttachedCpCuSharesGwsStore) {
   // custom topology would produce.
   auto direct_cu = make_cu();
   ASSERT_NE(&direct_cu->gws_device(), store); // Starts on its private default store.
-  xcd.command_processor()->add_compute_unit(direct_cu.get());
-  xcd.wire_gws_to_cus();
+  ASSERT_TRUE(xcd.command_processor()->add_compute_unit(direct_cu.get()).succeeded());
+  ASSERT_TRUE(xcd.wire_gws_to_cus().succeeded());
 
   EXPECT_EQ(&direct_cu->gws_device(), store)
       << "a directly-attached CP-visible CU did not share the XCD GWS store";
@@ -1845,15 +1846,56 @@ TEST_P(DsGwsTest, XcdAndCpRejectStoreReplacementBeforeAnyMutation) {
   auto *wave = cu1->dispatch_wf(0, 0, 102, 16);
   ASSERT_NE(wave, nullptr);
   cu1->begin_workgroup(0, 0, 1);
-  EXPECT_THROW(xcd.adopt_gws_store(replacement), std::logic_error);
-  EXPECT_THROW(xcd.command_processor()->set_gws_device(replacement), std::logic_error);
+  cu1->gws_sema_p(*wave, 0);
+  ASSERT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(xcd.adopt_gws_store(replacement, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot replace XCD GWS store with active waves or workgroups");
+  EXPECT_TRUE(xcd.command_processor()->set_gws_device(replacement, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot replace GWS store with active waves or workgroups");
+  // Exercise the no-CP wiring path using the same live CUs.
+  amdgpu::Xcd standalone("standalone");
+  standalone.add_shader_engine(xcd.shader_engine(0));
+  const auto standalone_store = standalone.gws_device();
+  EXPECT_TRUE(standalone.wire_gws_to_cus(diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot wire GWS store with active waves or workgroups");
+  EXPECT_TRUE(standalone.adopt_gws_store(replacement, diagnostic.emitter()).failed());
+  EXPECT_EQ(standalone.gws_device(), standalone_store);
+  EXPECT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
+  cu1->gws_sema_v(*wave, 0);
+  EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(xcd.gws_device(), old);
   EXPECT_EQ(&cu0->gws_device(), old.get());
   EXPECT_EQ(&cu1->gws_device(), old.get());
   wave->halt();
-  EXPECT_NO_THROW(xcd.adopt_gws_store(replacement));
+  ASSERT_TRUE(xcd.adopt_gws_store(replacement).succeeded());
   EXPECT_EQ(&cu0->gws_device(), replacement.get());
   EXPECT_EQ(&cu1->gws_device(), replacement.get());
+}
+
+TEST_P(DsGwsTest, CpRejectsActiveCuAttachmentWithoutChangingOwnership) {
+  amdgpu::CommandProcessor cp("cp");
+  auto store = std::make_shared<amdgpu::GwsDevice>();
+  ASSERT_TRUE(cp.set_gws_device(store).succeeded());
+  auto cu = make_cu();
+  amdgpu::GwsDevice *original = &cu->gws_device();
+  auto *wave = cu->dispatch_wf(0, 0, 102, 16);
+  ASSERT_NE(wave, nullptr);
+  cu->begin_workgroup(0, 0, 1);
+  cu->gws_sema_p(*wave, 0);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(cp.add_compute_unit(cu.get(), diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot attach an active CU to a different GWS store");
+  EXPECT_TRUE(cp.compute_units().empty());
+  EXPECT_EQ(cu->command_processor(), nullptr);
+  EXPECT_EQ(&cu->gws_device(), original);
+  EXPECT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
+  cu->gws_sema_v(*wave, 0);
+  EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
+  wave->halt();
+  ASSERT_TRUE(cp.add_compute_unit(cu.get()).succeeded());
+  EXPECT_EQ(cu->command_processor(), &cp);
+  EXPECT_EQ(&cu->gws_device(), store.get());
 }
 
 } // namespace

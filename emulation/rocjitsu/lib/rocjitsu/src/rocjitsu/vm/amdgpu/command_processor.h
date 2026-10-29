@@ -38,6 +38,7 @@
 
 #include "simdojo/sim/component.h"
 #include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <array>
@@ -116,15 +117,18 @@ public:
 
   /// @brief Replace the GWS store across this CP's drained compute units.
   /// @details The caller serializes topology changes. Preflights every CU and
-  /// throws std::logic_error if any active CU would change stores, before
+  /// returns failure if any active CU would change stores, before
   /// updating any CU or the CP's shared owner.
-  void set_gws_device(std::shared_ptr<GwsDevice> device) {
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_gws_device(std::shared_ptr<GwsDevice> device,
+                              util::DiagnosticEmitter emit_error = {}) {
     for (ComputeUnitCore *cu : cus_)
       if (!cu->can_set_gws_device(device))
-        throw std::logic_error("Cannot replace GWS store with active waves or workgroups");
+        return emit_error.emit() << "Cannot replace GWS store with active waves or workgroups";
     for (ComputeUnitCore *cu : cus_)
       (void)cu->set_gws_device(device);
     gws_device_ = std::move(device);
+    return util::Result::success();
   }
   void add_l2_cache(L2Cache *l2) {
     // Idempotent: the config-driven builder and the Xcd full constructor may
@@ -276,9 +280,13 @@ public:
 
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
 
-  void add_compute_unit(ComputeUnitCore *cu) {
+  /// @brief Attach a CU after checking compatibility with the CP's GWS store.
+  /// @details An incompatible active CU fails before ownership or wiring changes.
+  /// The caller serializes topology changes. Allocation failures may still throw.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result add_compute_unit(ComputeUnitCore *cu, util::DiagnosticEmitter emit_error = {}) {
     if (gws_device_ && !cu->can_set_gws_device(gws_device_))
-      throw std::logic_error("Cannot attach an active CU to a different GWS store");
+      return emit_error.emit() << "Cannot attach an active CU to a different GWS store";
     auto port_id = static_cast<simdojo::PortID>(dispatch_ports_.size());
     auto port = std::make_unique<simdojo::Port>("req_" + cu->name(), port_id, this,
                                                 simdojo::PortDirection::OUT,
@@ -301,6 +309,7 @@ public:
     cu->set_on_idle([this]() { on_cu_idle(); });
     cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
     on_cu_pool_ready(cu);
+    return util::Result::success();
   }
 
   void startup() override;
