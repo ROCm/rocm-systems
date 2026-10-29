@@ -117,9 +117,7 @@ private:
 
     int recvPeer(int r, int d) const
     {
-        bool fromNext = !rs_ && !shared_;
-        return (r + (fromNext ? (1 << d) : cfg_.nranks - (1 << d))) %
-               cfg_.nranks;
+        return patRecvPeer(r, cfg_.nranks, d, /*mirrored=*/!rs_ && !shared_);
     }
 
     void fail(const std::string& why)
@@ -166,7 +164,7 @@ private:
         // As in reduce_scatter.h: group g runs steps g, g+nGroups, ... in lockstep via patBarrier.
         const int nworkers  = NCCL_PAT_NWORKERS;
         const int warp      = nworkers / cfg_.maxParallelFactor;
-        const int groupSize = nworkers / (warp * pf) * warp;
+        const int groupSize = patWorkerGroupSize(nworkers, warp, pf);
         st.nGroups          = nworkers / groupSize;
         st.groupDone.assign(st.nGroups, false);
         st.sendStep.assign(nDims_, 0);
