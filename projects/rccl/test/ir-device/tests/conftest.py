@@ -54,11 +54,20 @@ IR_OUTDIR = os.environ.get("IR_OUTDIR", os.path.join(WORKDIR, "ir_test_build"))
 
 IR_DIR = os.path.join(RCCL_DIR, "bindings", "ir")
 IR_TEST_SRC = os.path.join(IR_DIR, "test", "IR_test.cpp")
+IR_IMPL_SRC = os.path.join(IR_DIR, "nccl_device_wrapper__impl.h")
 BITCODE = os.path.join(RCCL_BUILD, "lib", "librccl_device.bc")
 HIPIFY_INC = os.path.join(RCCL_BUILD, "hipify", "src", "include")
 GENERATED_INC = os.path.join(RCCL_BUILD, "include")
 AMDCLANGPP = os.path.join(ROCM_PATH, "bin", "amdclang++")
 TEST_EXE = os.path.join(IR_OUTDIR, "IR_test.exe")
+
+# --- LTO IR artifact (NCCL_EMIT_LTO_IR) ---
+# Same translation unit and same public surface as librccl_device.bc, but
+# compiled with the optimizer not yet run so inlining is deferred to the
+# consumer's device link. See bindings/ir/Makefile's ltoir target.
+LTO_IR = os.path.join(RCCL_BUILD, "lib", "librccl_device.ltoir")
+LTO_IR_TEST_EXE = os.path.join(IR_OUTDIR, "IR_test_ltoir.exe")
+LLVM_BIN = os.path.join(ROCM_PATH, "llvm", "bin")
 
 # --- Multi-rank GIN/composite barrier functional test (separate MPI binary) ---
 # This one needs the host RCCL library + MPI in addition to the bitcode, so it
@@ -125,6 +134,30 @@ def _missing_prerequisite():
     return None
 
 
+def _missing_static_prerequisite():
+    """Reason string if the static IR analyses cannot run, else None.
+
+    Deliberately weaker than _missing_prerequisite(): inspecting the emitted
+    artifacts needs only the ROCm LLVM tools and the hipify staging dir. No
+    GoogleTest, and no GPU -- cross-compiling for --offload-arch does not
+    require the device to be present.
+    """
+    if not os.path.isfile(IR_IMPL_SRC):
+        return f"nccl_device_wrapper__impl.h not found at {IR_IMPL_SRC}"
+    if not os.path.isfile(AMDCLANGPP):
+        return f"amdclang++ not found at {AMDCLANGPP} (set ROCM_PATH)"
+    for tool in ("llvm-dis", "opt", "llvm-nm"):
+        path = os.path.join(LLVM_BIN, tool)
+        if not os.path.isfile(path):
+            return f"{tool} not found at {path} (install the ROCm LLVM tools)"
+    if not os.path.isdir(HIPIFY_INC):
+        return (
+            f"hipify staging dir not found at {HIPIFY_INC} "
+            "(build RCCL once so the staged nccl_device headers exist)"
+        )
+    return None
+
+
 def _build_bitcode():
     """Emit librccl_device.bc via the standalone bindings/ir Makefile.
 
@@ -155,7 +188,42 @@ def _build_bitcode():
     return build_log
 
 
-def _build_test_binary():
+def _build_lto_ir():
+    """Emit librccl_device.ltoir via the standalone bindings/ir Makefile.
+
+    Equivalent to building RCCL with -DNCCL_EMIT_LTO_IR=ON. EMIT_LLVM_IR=0 so
+    only the LTO IR is produced: the two artifacts are independent outputs of
+    the same source and the .bc is built separately by _build_bitcode().
+
+    Returns the build log path; raises on failure.
+    """
+    env = os.environ.copy()
+    env.update({"ROCM_PATH": ROCM_PATH})
+    args = [
+        "make", "-C", IR_DIR,
+        "EMIT_LLVM_IR=0",
+        "NCCL_EMIT_LTO_IR=1",
+        f"LTO_IR_ARCH={ARCH}",
+        f"BUILDDIR={RCCL_BUILD}",
+        f"ROCM_PATH={ROCM_PATH}",
+        "ltoir",
+    ]
+    build_log = os.path.join(LOGDIR, "ir_ltoir_build.log")
+    with open(build_log, "w") as log:
+        log.write("$ " + " ".join(args) + "\n\n")
+        log.flush()
+        proc = subprocess.run(
+            args, env=env, stdout=log, stderr=subprocess.STDOUT,
+            universal_newlines=True,
+        )
+    assert proc.returncode == 0, (
+        f"Failed to build librccl_device.ltoir (see {build_log})"
+    )
+    assert os.path.isfile(LTO_IR), f"LTO IR not produced at {LTO_IR}"
+    return build_log
+
+
+def _build_test_binary(device_lib=None, exe=None, log_name="ir_test_build.log"):
     """Compile IR_test.cpp into a GoogleTest binary linked against the bitcode.
 
     Ports the hipcc invocation that previously lived in run_IR_test.sh:
@@ -168,8 +236,15 @@ def _build_test_binary():
         (vtable) dispatch this test exercises at -O1/-O2 (hang or error 700).
         This is a correctness test, not a benchmark, so -O0 is fine.
 
+    device_lib defaults to librccl_device.bc; pass LTO_IR to link the same
+    consumer against the LTO IR artifact instead. The link recipe is
+    identical either way -- that it is identical is the point of the LTO IR
+    smoke test.
+
     Returns the build log path; raises on failure.
     """
+    device_lib = BITCODE if device_lib is None else device_lib
+    exe = TEST_EXE if exe is None else exe
     os.makedirs(IR_OUTDIR, exist_ok=True)
     gtest_inc = os.path.join(GTEST_ROOT, "include")
     gtest_libdir = _find_gtest_libdir()
@@ -189,13 +264,13 @@ def _build_test_binary():
         f"-I{gtest_inc}",
         f"-I{os.path.join(ROCM_PATH, 'include')}",
         IR_TEST_SRC,
-        "-Xoffload-linker", BITCODE,
+        "-Xoffload-linker", device_lib,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
         f"-L{os.path.join(ROCM_PATH, 'lib')}", "-lamdhip64",
         f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
-        "-o", TEST_EXE,
+        "-o", exe,
     ]
-    build_log = os.path.join(LOGDIR, "ir_test_build.log")
+    build_log = os.path.join(LOGDIR, log_name)
     with open(build_log, "w") as log:
         log.write("$ " + " ".join(args) + "\n\n")
         log.flush()
@@ -204,7 +279,7 @@ def _build_test_binary():
             stderr=subprocess.STDOUT, universal_newlines=True,
         )
     assert proc.returncode == 0, f"Failed to compile IR_test (see {build_log})"
-    assert os.path.isfile(TEST_EXE), f"Test binary not produced at {TEST_EXE}"
+    assert os.path.isfile(exe), f"Test binary not produced at {exe}"
     return build_log
 
 
@@ -387,6 +462,51 @@ def ir_test_binary():
 
 
 @pytest.fixture(scope="session")
+def ir_artifacts():
+    """Build librccl_device.{bc,ltoir} and return both paths.
+
+    For the static IR analyses in test_lto_ir.py, which compare the two
+    artifacts against each other and never run anything on a GPU. Both are
+    rebuilt through the standalone Makefile so dependency timestamps -- not
+    the mere existence of a file -- decide whether they are current.
+    """
+    reason = _missing_static_prerequisite()
+    if reason:
+        pytest.skip(f"IR artifact analyses skipped: {reason}")
+
+    logger.info("Updating librccl_device.bc at %s (arch=%s)...", BITCODE, ARCH)
+    bc_log = _build_bitcode()
+    logger.info("librccl_device.bc READY (log: %s)", bc_log)
+
+    logger.info("Updating librccl_device.ltoir at %s (arch=%s)...", LTO_IR, ARCH)
+    lto_log = _build_lto_ir()
+    logger.info("librccl_device.ltoir READY (log: %s)", lto_log)
+
+    return SimpleNamespace(BITCODE=BITCODE, LTO_IR=LTO_IR, LLVM_BIN=LLVM_BIN)
+
+
+@pytest.fixture(scope="session")
+def lto_ir_test_binary(ir_artifacts):
+    """Compile IR_test.cpp against librccl_device.ltoir instead of the .bc.
+
+    Same consumer, same link recipe -- only the device library differs. Needs
+    the full prerequisite set (GoogleTest, GPU nodes) because this one runs.
+    """
+    reason = _missing_prerequisite()
+    if reason:
+        pytest.skip(f"LTO IR link-and-run test skipped: {reason}")
+
+    logger.info(
+        "Compiling IR_test.cpp against the LTO IR -> %s ...", LTO_IR_TEST_EXE)
+    log = _build_test_binary(
+        device_lib=LTO_IR, exe=LTO_IR_TEST_EXE,
+        log_name="ir_test_ltoir_build.log",
+    )
+    logger.info("LTO IR test binary BUILT at %s (log: %s)", LTO_IR_TEST_EXE, log)
+    return LTO_IR_TEST_EXE
+
+
+@pytest.fixture(scope="session")
 def paths():
     return SimpleNamespace(
         WORKDIR=WORKDIR,
@@ -397,14 +517,20 @@ def paths():
         GTEST_ROOT=GTEST_ROOT,
         IR_OUTDIR=IR_OUTDIR,
         BITCODE=BITCODE,
+        LTO_IR=LTO_IR,
+        LLVM_BIN=LLVM_BIN,
+        IR_DIR=IR_DIR,
+        HIPIFY_INC=HIPIFY_INC,
+        GENERATED_INC=GENERATED_INC,
+        AMDCLANGPP=AMDCLANGPP,
         TEST_EXE=TEST_EXE,
+        LTO_IR_TEST_EXE=LTO_IR_TEST_EXE,
         LOGDIR=LOGDIR,
     )
 
 
-@pytest.fixture(scope="session")
-def run_gtest(ir_test_binary):
-    """Return a helper that runs the IR_test binary for a --gtest_filter.
+def _make_gtest_runner(binary):
+    """Return a helper that runs `binary` for a given --gtest_filter.
 
     The helper returns (subprocess.CompletedProcess, log_file_path). Output is
     tee'd to a log file under logs/ for post-mortem inspection.
@@ -419,8 +545,7 @@ def run_gtest(ir_test_binary):
         elif "HIP_VISIBLE_DEVICES" not in env:
             env["HIP_VISIBLE_DEVICES"] = "0"
 
-        args = [ir_test_binary, f"--gtest_filter={gtest_filter}",
-                "--gtest_color=no"]
+        args = [binary, f"--gtest_filter={gtest_filter}", "--gtest_color=no"]
         log_file = os.path.join(LOGDIR, log_name)
         with open(log_file, "w") as log:
             proc = subprocess.run(
@@ -434,3 +559,15 @@ def run_gtest(ir_test_binary):
         return proc, log_file
 
     return _run
+
+
+@pytest.fixture(scope="session")
+def run_gtest(ir_test_binary):
+    """Run the IR_test binary linked against librccl_device.bc."""
+    return _make_gtest_runner(ir_test_binary)
+
+
+@pytest.fixture(scope="session")
+def run_lto_ir_gtest(lto_ir_test_binary):
+    """Run the same IR_test binary, linked against librccl_device.ltoir."""
+    return _make_gtest_runner(lto_ir_test_binary)
