@@ -776,7 +776,11 @@ TEST(GpuVmPipeline, PrivateAtomicMemviolPrecedesDebuggerTranslationProbe) {
     EXPECT_EQ(context.cu->read_vgpr(vb + 8, lane), 0xdeadbeefu);
 }
 
-TEST(GpuVmPipeline, LdsAlignmentMemviolPrecedesDebuggerTranslationProbe) {
+// MEMVIOL suppresses only the misaligned LDS lane, so the unmapped global lane
+// still executes and its translation fault is what the owner sees -- with
+// debugging on through the preflight. gfx1201 and gfx1100 report a memory
+// fault, not an aperture violation, when both happen in one instruction.
+TEST(GpuVmPipeline, TranslationFaultTakesPrecedenceOverLdsAlignmentMemviol) {
   for (bool debug : {false, true}) {
     for (uint32_t width : {4u, 8u}) {
       for (bool misaligned : {false, true}) {
@@ -813,14 +817,12 @@ TEST(GpuVmPipeline, LdsAlignmentMemviolPrecedesDebuggerTranslationProbe) {
             context.cu->write_vgpr(vb + 8, lane, 0xdeadbeef);
           }
           context.cu->set_debug_active(debug);
-          const bool aperture = misaligned && lds_active;
           uint32_t faults = 0;
           context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &wave, uint64_t, bool,
                                                        uint64_t issue_pc,
                                                        amdgpu::VmAccessOutcome outcome) {
             ++faults;
-            EXPECT_EQ(outcome, aperture ? amdgpu::VmAccessOutcome::ApertureViolation
-                                        : amdgpu::VmAccessOutcome::Faulted);
+            EXPECT_EQ(outcome, amdgpu::VmAccessOutcome::Faulted);
             EXPECT_EQ(issue_pc, code);
             EXPECT_EQ(wave.pc, code + sizeof(words));
             wave.set_fatal_exception_pending(true);
@@ -833,8 +835,8 @@ TEST(GpuVmPipeline, LdsAlignmentMemviolPrecedesDebuggerTranslationProbe) {
           // translation fault is withheld here and recorded on the wave; KFD
           // reports it if it hands the fault to the runtime instead (see
           // KfdMemoryFaultPcTest.RuntimeOwnedMemoryViolationsRaiseTheirVmEvent).
-          EXPECT_EQ(context.reported_faults.size(), aperture || debug ? 0u : 1u);
-          EXPECT_EQ(context.wf->has_unreported_vm_fault(), debug && !aperture);
+          EXPECT_EQ(context.reported_faults.size(), debug ? 0u : 1u);
+          EXPECT_EQ(context.wf->has_unreported_vm_fault(), debug);
           for (uint32_t byte = 0; byte < 32; ++byte)
             EXPECT_EQ(context.wf->lds().read8(context.wf->lds_base() + byte), 0x5a);
           EXPECT_TRUE(context.wf->wait_counters().empty());
@@ -844,6 +846,60 @@ TEST(GpuVmPipeline, LdsAlignmentMemviolPrecedesDebuggerTranslationProbe) {
             EXPECT_EQ(context.cu->read_vgpr(vb + 8, lane), 0xdeadbeefu);
         }
       }
+    }
+  }
+}
+
+// Translated address spaces used to reject a misaligned atomic lane as a
+// reported Malformed access after earlier lanes committed, and to leave later
+// lanes undone. Hardware suppresses only the misaligned lane, commits all
+// others, and raises MEMVIOL rather than a VM fault (gfx1201, gfx1100). The
+// misaligned lane is never probed or reported, even when it is also unmapped,
+// and debugging does not change the result.
+TEST(GpuVmPipeline, MisalignedTranslatedAtomicLanesRaiseMemviol) {
+  for (const bool debug : {false, true}) {
+    for (const uint64_t misaligned : {uint64_t{0x3002}, uint64_t{0x20002}}) {
+      SCOPED_TRACE(testing::Message()
+                   << "debug=" << debug << " misaligned=" << std::hex << misaligned);
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize());
+      ASSERT_NE(context.wf, nullptr);
+      constexpr uint64_t kCode = 0x1000;
+      const auto words = cdna5::build_vglobal(cdna5::kGlobalAtomicAddU32Vglobal,
+                                              {.saddr = 124, .vdst = 8, .th = 1, .vsrc = 4});
+      context.external->store(kCode, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+      context.external->store<uint32_t>(0x2000, 10);
+      context.external->store<uint32_t>(0x2008, 30);
+      context.external->store<uint32_t>(0x3000, 0x11111111);
+      context.external->store<uint32_t>(0x3004, 0x22222222);
+      context.wf->pc = kCode;
+      context.wf->set_exec(7);
+      const uint32_t vb = context.wf->vgpr_alloc().base;
+      for (uint32_t lane = 0; lane < 3; ++lane) {
+        const uint64_t address = lane == 1 ? misaligned : 0x2000 + lane * 4;
+        context.cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
+        context.cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+        context.cu->write_vgpr(vb + 4, lane, 1);
+      }
+      context.cu->set_debug_active(debug);
+      uint32_t faults = 0;
+      context.cu->set_memory_violation_handler(
+          [&](amdgpu::Wavefront &wave, uint64_t, bool, uint64_t, amdgpu::VmAccessOutcome outcome) {
+            ++faults;
+            EXPECT_EQ(outcome, amdgpu::VmAccessOutcome::ApertureViolation);
+            wave.set_fatal_exception_pending(true);
+            wave.set_debug_suspended(true);
+            return true;
+          });
+      context.cu->step();
+      EXPECT_EQ(faults, 1u);
+      EXPECT_TRUE(context.reported_faults.empty());
+      EXPECT_FALSE(context.wf->has_unreported_vm_fault());
+      EXPECT_EQ(context.external->load<uint32_t>(0x2000), 11u);
+      EXPECT_EQ(context.external->load<uint32_t>(0x2008), 31u);
+      EXPECT_EQ(context.external->load<uint32_t>(0x3000), 0x11111111u);
+      EXPECT_EQ(context.external->load<uint32_t>(0x3004), 0x22222222u);
+      EXPECT_TRUE(context.wf->wait_counters().empty());
     }
   }
 }

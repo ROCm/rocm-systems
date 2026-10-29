@@ -1005,10 +1005,15 @@ TEST(Rdna4MemoryExecutionHarness, HighSharedFlatAddressesUseUnsigned17BitOffsets
   check_high_shared_flat_addresses<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4);
 }
 
-// gfx1201 faults on both misaligned widths. RDNA3/3.5 and CDNA5 follow their ISA
-// requirement; this matrix does not claim a physical measurement for them.
-// encode(width, ds) returns DS_ADD_RTN when ds is set, else FLAT_ATOMIC_ADD with
-// return. Each supported wave size checks the second lane at 1 and at the top.
+// A misaligned atomic lane raises MEMVIOL and performs no access, while every
+// other lane of the instruction commits. Measured on gfx1201 (aperture
+// violation) and gfx1100 (dispatch hangs; no exception reaches the host) with
+// mixed FLAT: the aligned global lane commits beside a misaligned LDS lane.
+// LDS contents cannot be read back after the fault, so the aligned LDS lane
+// committing is inferred from the global lanes. RDNA3.5 and CDNA5 follow the
+// same rule unmeasured. encode(width, ds) returns DS_ADD_RTN when ds is set,
+// else FLAT_ATOMIC_ADD with return. Each supported wave size checks the second
+// lane at 1 and at the top.
 template <typename Isa, typename Encode>
 void check_lds_atomic_alignment(rj_code_arch_t arch, std::initializer_list<uint32_t> wave_sizes,
                                 Encode encode) {
@@ -1067,11 +1072,12 @@ void check_lds_atomic_alignment(rj_code_arch_t arch, std::initializer_list<uint3
                               : amdgpu::VmAccessOutcome::Complete);
               cu.flush_all();
               for (uint32_t byte = 0; byte < 64; ++byte) {
-                const bool written = !fault && ((route != 2 && byte == 8) ||
-                                                (second_lane_active && byte == second_offset));
+                const bool written = (route != 2 && byte == 8) ||
+                                     (second_lane_active && !misaligned && byte == second_offset);
                 EXPECT_EQ(wave->lds().read8(wave->lds_base() + byte), written ? 1 : 0) << byte;
               }
-              EXPECT_EQ(memory.read64(0x2000), !fault && route == 2 ? 1u : 0u);
+              EXPECT_EQ(memory.read64(0x2000), route == 2 ? 1u : 0u);
+              // A faulting instruction writes back no results.
               for (const uint32_t lane : {0u, second_lane}) {
                 const bool completed = !fault && (lane == 0 || second_lane_active);
                 EXPECT_EQ(cu.read_vgpr(vb + 8, lane), completed ? 0u : 0xdeadbeefu);
@@ -1087,7 +1093,7 @@ void check_lds_atomic_alignment(rj_code_arch_t arch, std::initializer_list<uint3
   }
 }
 
-TEST(Rdna3MemoryExecutionHarness, MisalignedLdsAtomicsRejectBeforeAnyLaneCommits) {
+TEST(Rdna3MemoryExecutionHarness, MisalignedLdsAtomicLanesDoNotBlockOtherLanes) {
   check_lds_atomic_alignment<rdna3::Isa>(
       ROCJITSU_CODE_ARCH_RDNA3, {32u, 64u}, [](uint32_t width, bool ds) {
         std::array<uint32_t, 3> words{};
@@ -1106,7 +1112,7 @@ TEST(Rdna3MemoryExecutionHarness, MisalignedLdsAtomicsRejectBeforeAnyLaneCommits
       });
 }
 
-TEST(Rdna3_5MemoryExecutionHarness, MisalignedLdsAtomicsRejectBeforeAnyLaneCommits) {
+TEST(Rdna3_5MemoryExecutionHarness, MisalignedLdsAtomicLanesDoNotBlockOtherLanes) {
   check_lds_atomic_alignment<rdna3_5::Isa>(
       ROCJITSU_CODE_ARCH_RDNA3_5, {32u, 64u}, [](uint32_t width, bool ds) {
         std::array<uint32_t, 3> words{};
@@ -1125,7 +1131,7 @@ TEST(Rdna3_5MemoryExecutionHarness, MisalignedLdsAtomicsRejectBeforeAnyLaneCommi
       });
 }
 
-TEST(Rdna4MemoryExecutionHarness, MisalignedLdsAtomicsRejectBeforeAnyLaneCommits) {
+TEST(Rdna4MemoryExecutionHarness, MisalignedLdsAtomicLanesDoNotBlockOtherLanes) {
   check_lds_atomic_alignment<rdna4::Isa>(
       ROCJITSU_CODE_ARCH_RDNA4, {32u, 64u}, [](uint32_t width, bool ds) {
         std::array<uint32_t, 3> words{};
@@ -1143,7 +1149,7 @@ TEST(Rdna4MemoryExecutionHarness, MisalignedLdsAtomicsRejectBeforeAnyLaneCommits
 }
 
 // CDNA5 supports only wave32.
-TEST(Gfx1250MemoryExecutionHarness, MisalignedLdsAtomicsRejectBeforeAnyLaneCommits) {
+TEST(Gfx1250MemoryExecutionHarness, MisalignedLdsAtomicLanesDoNotBlockOtherLanes) {
   check_lds_atomic_alignment<cdna5::Isa>(
       ROCJITSU_CODE_ARCH_CDNA5, {32u}, [](uint32_t width, bool ds) {
         std::array<uint32_t, 3> words{};
@@ -1160,8 +1166,108 @@ TEST(Gfx1250MemoryExecutionHarness, MisalignedLdsAtomicsRejectBeforeAnyLaneCommi
       });
 }
 
+// Physical (VMID 0) memory has no translation to reject a misaligned global
+// atomic, which used to commit it within a page and report an unreported
+// Malformed across one. gfx1201 and gfx1100 suppress only the misaligned lane
+// -- in a page, across a 128-byte line and across a 4 KiB page alike -- and
+// commit every other lane; gfx1201 then reports an aperture violation (gfx1100
+// hangs the dispatch). RDNA3.5 and CDNA5 follow the same rule unmeasured.
+template <typename Isa, typename Encode>
+void check_misaligned_global_atomics(rj_code_arch_t arch, Encode encode) {
+  for (const uint32_t width : {4u, 8u}) {
+    for (const uint64_t misaligned : {uint64_t{0x3000} + width / 2, uint64_t{0x3080} - width / 2,
+                                      uint64_t{0x4000} - width / 2, uint64_t{0x3000}}) {
+      for (const bool misaligned_first : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "width=" << width << " address=" << std::hex
+                                        << misaligned << " misaligned_first=" << misaligned_first);
+        amdgpu::GpuMemory memory("global_atomic_alignment");
+        amdgpu::L2Cache cache("global_atomic_alignment_cache");
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 256;
+        config.lds_size_kb = 64;
+        MemoryTestCu<Isa> cu("global_atomic_alignment", config, &memory, &cache);
+        auto *wave = cu.dispatch_wf(0, 0, 128, 256, 32);
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(3);
+        for (uint64_t address = 0x2000; address < 0x4100; address += 4)
+          memory.write32(address, static_cast<uint32_t>(address));
+        const uint32_t bad_lane = misaligned_first ? 0 : 1;
+        const uint32_t vb = wave->vgpr_alloc().base;
+        for (uint32_t lane = 0; lane < 2; ++lane) {
+          const uint64_t address = lane == bad_lane ? misaligned : 0x2000;
+          cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
+          cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+          cu.write_vgpr(vb + 4, lane, 1);
+          cu.write_vgpr(vb + 5, lane, 0);
+        }
+        const auto words = encode(width);
+        auto decoder = Decoder::create(arch);
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        ASSERT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
+        const bool fault = misaligned % width != 0;
+        EXPECT_EQ(cu.route_memory_inst(inst.release(), *wave),
+                  fault ? amdgpu::VmAccessOutcome::ApertureViolation
+                        : amdgpu::VmAccessOutcome::Complete);
+        cu.flush_all();
+        EXPECT_EQ(memory.read32(0x2000), 0x2001u) << "the aligned lane commits";
+        for (uint64_t address = 0x2004; address < 0x4100; address += 4) {
+          const bool touched = !fault && address == misaligned;
+          EXPECT_EQ(memory.read32(address), static_cast<uint32_t>(address) + (touched ? 1 : 0))
+              << std::hex << address;
+        }
+        EXPECT_TRUE(wave->wait_counters().empty());
+        wave->halt();
+      }
+    }
+  }
+}
+
+TEST(Rdna3MemoryExecutionHarness, MisalignedGlobalAtomicLanesRaiseMemviol) {
+  check_misaligned_global_atomics<rdna3::Isa>(ROCJITSU_CODE_ARCH_RDNA3, [](uint32_t width) {
+    std::array<uint32_t, 3> words{};
+    std::ranges::copy(
+        rdna3::build_flat(width == 4 ? rdna3::kFlatAtomicAddU32Flat : rdna3::kFlatAtomicAddU64Flat,
+                          {.glc = 1, .seg = 2, .addr = 0, .data = 4, .saddr = 127, .vdst = 8}),
+        words.begin());
+    return words;
+  });
+}
+
+TEST(Rdna3_5MemoryExecutionHarness, MisalignedGlobalAtomicLanesRaiseMemviol) {
+  check_misaligned_global_atomics<rdna3_5::Isa>(ROCJITSU_CODE_ARCH_RDNA3_5, [](uint32_t width) {
+    std::array<uint32_t, 3> words{};
+    std::ranges::copy(
+        rdna3_5::build_flat(width == 4 ? rdna3_5::kFlatAtomicAddU32Flat
+                                       : rdna3_5::kFlatAtomicAddU64Flat,
+                            {.glc = 1, .seg = 2, .addr = 0, .data = 4, .saddr = 127, .vdst = 8}),
+        words.begin());
+    return words;
+  });
+}
+
+TEST(Rdna4MemoryExecutionHarness, MisalignedGlobalAtomicLanesRaiseMemviol) {
+  check_misaligned_global_atomics<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4, [](uint32_t width) {
+    return rdna4::build_vglobal(width == 4 ? rdna4::kGlobalAtomicAddU32Vglobal
+                                           : rdna4::kGlobalAtomicAddU64Vglobal,
+                                {.saddr = 124, .vdst = 8, .th = 1, .vsrc = 4, .vaddr = 0});
+  });
+}
+
+TEST(Gfx1250MemoryExecutionHarness, MisalignedGlobalAtomicLanesRaiseMemviol) {
+  check_misaligned_global_atomics<cdna5::Isa>(ROCJITSU_CODE_ARCH_CDNA5, [](uint32_t width) {
+    return cdna5::build_vglobal(width == 4 ? cdna5::kGlobalAtomicAddU32Vglobal
+                                           : cdna5::kGlobalAtomicAddU64Vglobal,
+                                {.saddr = 124, .vdst = 8, .th = 1, .vsrc = 4, .vaddr = 0});
+  });
+}
+
 // RDNA3/3.5/4 and CDNA5 forbid private FLAT atomic64 independently of
-// the backing layout. An ordinary global lane must not commit first.
+// the backing layout. Only the private lane is suppressed: gfx1201 and gfx1100
+// commit an ordinary global lane of the same instruction.
 template <typename Isa, typename Encode>
 void check_private_flat_atomic_width(rj_code_arch_t arch, Encode encode) {
   for (const bool wide : {false, true}) {
@@ -1219,7 +1325,7 @@ void check_private_flat_atomic_width(rj_code_arch_t arch, Encode encode) {
                     fault ? amdgpu::VmAccessOutcome::ApertureViolation
                           : amdgpu::VmAccessOutcome::Complete);
           cu.flush_all();
-          EXPECT_EQ(memory.read64(0x2000), initial + (!fault && mixed ? 1 : 0));
+          EXPECT_EQ(memory.read64(0x2000), initial + (mixed ? 1 : 0));
           EXPECT_EQ(memory.read64(backing), initial + (!fault && private_active ? 1 : 0));
           for (uint32_t lane = 0; lane < 2; ++lane) {
             const bool completed = !fault && returns && (lane == 0 ? mixed : private_active);
@@ -1338,7 +1444,8 @@ void check_flat_hole_addresses(rj_code_arch_t arch, Encode encode) {
                   fault ? amdgpu::VmAccessOutcome::ApertureViolation
                         : amdgpu::VmAccessOutcome::Complete);
         cu.flush_all();
-        EXPECT_EQ(memory.read32(0x2000), store && !fault ? 42u : 10u);
+        // Only the hole lane is suppressed; gfx1201 and gfx1100 commit the other.
+        EXPECT_EQ(memory.read32(0x2000), store ? 42u : 10u);
         EXPECT_EQ(memory.read32(second_target), store && !fault && hole_lane_active ? 43u : 20u);
         EXPECT_EQ(cu.read_vgpr(vb + 8, 0), !store && !fault ? 10u : 0xdeadbeefu);
         EXPECT_EQ(cu.read_vgpr(vb + 8, 1),

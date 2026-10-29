@@ -29,21 +29,16 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
-/// @brief Whether an LDS atomic must be rejected because a requesting lane's
-/// address is not aligned to the atomic's access width.
-/// @details Called before any LDS side effect, both by the local pipeline and
-/// by the debugger preflight, which sees FLAT addresses before routing.
-/// Non-atomics, byte atomics and architectures other than RDNA3/3.5/4 and
-/// CDNA5 never reject.
-/// @param d Decoded vector memory instruction.
-/// @param wf Issuing wavefront; selects the architecture.
-/// @param lds_lanes Lanes that request LDS; other lanes are ignored.
+/// @brief Lanes whose atomic is not aligned to its access width.
+/// @details Non-atomics, byte atomics and architectures other than RDNA3/3.5/4
+/// and CDNA5 have none. Two-address DS atomics check both addresses.
+/// @param lanes Lanes to check; others are ignored.
 /// @param address_bias Added to each lane address before checking alignment.
-///        Pre-routing callers pass `lds_base - shared_aperture_base` so FLAT
-///        addresses are checked as the workgroup LDS addresses routing forms.
-/// @return True if any requesting lane is misaligned.
-bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf, uint64_t lds_lanes,
-                                   uint64_t address_bias = 0);
+///        Pre-routing callers pass `lds_base - shared_aperture_base` for FLAT
+///        LDS lanes, so they are checked as the workgroup LDS addresses routing
+///        forms.
+uint64_t misaligned_atomic_lanes(const VectorMemState &d, const Wavefront &wf, uint64_t lanes,
+                                 uint64_t address_bias = 0);
 
 /// @brief A byte range a memory instruction requests from memory.
 struct MemoryRequestRange {
@@ -51,20 +46,18 @@ struct MemoryRequestRange {
   uint32_t size = 0;
 };
 
-/// @brief Instruction-level rejection checked before any vector memory side effect.
-/// @details Shared by the global and local pipelines and by the debugger
-/// preflight, so enabling a debugger cannot replace an instruction rejection
-/// with a translation fault. Performs no memory access and no logging. Checks,
-/// in order: address-formation MEMVIOL, CDNA5 FLAT DDS, misaligned LDS atomics.
+/// @brief Lanes that raise MEMVIOL and therefore perform no memory access.
+/// @details Address-formation MEMVIOL (FLAT hole, private 64-bit atomic) and
+/// misaligned atomics. Hardware suppresses only these lanes: gfx1100 and
+/// gfx1201 commit every other lane of the instruction, and report a
+/// translation fault on another lane instead of the aperture violation.
+/// Shared by the global and local pipelines and by the debugger preflight,
+/// which must not probe these lanes.
 /// @param request_lanes Lanes that issue; see transpose_request_lane_mask.
 /// @param lds_lanes Requesting lanes that address LDS.
-/// @param dds_lanes Lanes that address CDNA5 DDS. Routing records these in
-///        flat_dds_lane_mask; the preflight runs before routing and classifies them.
-/// @param lds_bias See rejects_misaligned_lds_atomic's address_bias.
-/// @return ApertureViolation, Unsupported, or Complete when admitted.
-VmAccessOutcome vector_memory_admission(const VectorMemState &d, const Wavefront &wf,
-                                        uint64_t request_lanes, uint64_t lds_lanes,
-                                        uint64_t dds_lanes, uint64_t lds_bias = 0);
+/// @param lds_bias See misaligned_atomic_lanes' address_bias, for @p lds_lanes.
+uint64_t vector_memviol_lanes(const VectorMemState &d, const Wavefront &wf, uint64_t request_lanes,
+                              uint64_t lds_lanes, uint64_t lds_bias = 0);
 
 /// @brief Instruction-level rejection checked before any scalar memory side effect.
 /// @return Malformed for an invalid atomic shape, ApertureViolation for

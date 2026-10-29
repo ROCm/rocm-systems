@@ -1299,12 +1299,12 @@ VmAccessOutcome warn_unsupported_flat_dds(const Instruction &inst, Wavefront &wf
 } // namespace
 
 // RDNA3/3.5 section 12.7, RDNA4 section 3.3.5.1 and CDNA5 section 3.3.4.1
-// require payload-aligned LDS atomics. Validate every requesting LDS lane
-// before a mixed FLAT instruction can commit global or LDS side effects.
-bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf, uint64_t lds_lanes,
-                                   uint64_t address_bias) {
+// require payload-aligned atomics; the RDNA3.5/4 and CDNA5 memory sections add
+// that a misaligned one returns MEMVIOL. This applies to LDS and global lanes.
+uint64_t misaligned_atomic_lanes(const VectorMemState &d, const Wavefront &wf, uint64_t lanes,
+                                 uint64_t address_bias) {
   if (d.atomic_op == AtomicOp::NONE || d.elem_size <= 1)
-    return false;
+    return 0;
   switch (wf.cu().arch()) {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
@@ -1312,32 +1312,23 @@ bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf,
   case ROCJITSU_CODE_ARCH_CDNA5:
     break;
   default:
-    return false;
+    return 0;
   }
-  const auto misaligned = [&](const std::array<uint64_t, 64> &addresses) {
-    for (uint64_t lanes = lds_lanes; lanes; lanes &= lanes - 1)
-      if ((addresses[std::countr_zero(lanes)] + address_bias) % d.elem_size != 0)
-        return true;
-    return false;
-  };
-  return misaligned(d.per_lane_addr) || (d.ds2_active && misaligned(d.ds2_per_lane_addr));
+  uint64_t misaligned = 0;
+  for (uint64_t mask = lanes; mask; mask &= mask - 1) {
+    const uint32_t lane = std::countr_zero(mask);
+    if ((d.per_lane_addr[lane] + address_bias) % d.elem_size != 0 ||
+        (d.ds2_active && (d.ds2_per_lane_addr[lane] + address_bias) % d.elem_size != 0))
+      misaligned |= uint64_t{1} << lane;
+  }
+  return misaligned;
 }
 
-VmAccessOutcome vector_memory_admission(const VectorMemState &d, const Wavefront &wf,
-                                        uint64_t request_lanes, uint64_t lds_lanes,
-                                        uint64_t dds_lanes, uint64_t lds_bias) {
-  // Address-formation violations must precede all transport and LDS side effects.
-  if (d.memviol_lane_mask & request_lanes)
-    return VmAccessOutcome::ApertureViolation;
-  // DDS requires a separate backing implementation. Reject the complete
-  // instruction before global or LDS side effects rather than narrowing a
-  // DDS address into another workgroup's LDS allocation. Uniform
-  // shared-aperture FLAT must reject it too.
-  if (dds_lanes & request_lanes)
-    return VmAccessOutcome::Unsupported;
-  if (rejects_misaligned_lds_atomic(d, wf, lds_lanes, lds_bias))
-    return VmAccessOutcome::ApertureViolation;
-  return VmAccessOutcome::Complete;
+uint64_t vector_memviol_lanes(const VectorMemState &d, const Wavefront &wf, uint64_t request_lanes,
+                              uint64_t lds_lanes, uint64_t lds_bias) {
+  return (d.memviol_lane_mask & request_lanes) |
+         misaligned_atomic_lanes(d, wf, lds_lanes & request_lanes, lds_bias) |
+         misaligned_atomic_lanes(d, wf, request_lanes & ~lds_lanes);
 }
 
 VmAccessOutcome scalar_memory_admission(const ScalarMemState &d) {
@@ -1405,19 +1396,27 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   d.wf_id = wf.wf_id();
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
-  if (const VmAccessOutcome admission =
-          vector_memory_admission(d, wf, request_lanes, shared_lanes, d.flat_dds_lane_mask);
-      admission != VmAccessOutcome::Complete)
-    return admission == VmAccessOutcome::Unsupported ? warn_unsupported_flat_dds(inst, wf)
-                                                     : admission;
-  const VmAccessOutcome outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
-  if (outcome != VmAccessOutcome::Complete || shared_lanes == 0)
+  // DDS requires a separate backing implementation. Reject the complete
+  // instruction before global or LDS side effects rather than narrowing a
+  // DDS address into another workgroup's LDS allocation.
+  if (d.flat_dds_lane_mask & request_lanes)
+    return warn_unsupported_flat_dds(inst, wf);
+  // MEMVIOL suppresses only the violating lanes: gfx1100 and gfx1201 commit
+  // every other lane of the instruction, global and LDS, whatever the lane
+  // order. A translation fault on another lane is reported instead of the
+  // aperture violation, so global work runs first.
+  const uint64_t memviol_lanes = vector_memviol_lanes(d, wf, request_lanes, shared_lanes);
+  const uint64_t lanes = request_lanes & ~memviol_lanes;
+  const VmAccessOutcome outcome = initiate_global_access(d, wf, lanes & ~shared_lanes);
+  if (outcome != VmAccessOutcome::Complete)
     return outcome;
 
   // Commit LDS only after all retryable global work completes. In particular,
   // a global retry must not repeat an LDS atomic or discard either result set.
-  execute_lds_access(d, wf.lds(), d.per_lane_addr, shared_lanes, d.store_data, d.response_data);
-  return VmAccessOutcome::Complete;
+  if (lanes & shared_lanes)
+    execute_lds_access(d, wf.lds(), d.per_lane_addr, lanes & shared_lanes, d.store_data,
+                       d.response_data);
+  return memviol_lanes ? VmAccessOutcome::ApertureViolation : VmAccessOutcome::Complete;
 }
 
 VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wavefront &wf,
@@ -1539,11 +1538,13 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
-  if (const VmAccessOutcome admission =
-          vector_memory_admission(d, wf, request_lanes, request_lanes, d.flat_dds_lane_mask);
-      admission != VmAccessOutcome::Complete)
-    return admission == VmAccessOutcome::Unsupported ? warn_unsupported_flat_dds(inst, wf)
-                                                     : admission;
+  // Uniform shared-aperture FLAT must reject unsupported DDS too.
+  if (d.flat_dds_lane_mask & request_lanes)
+    return warn_unsupported_flat_dds(inst, wf);
+  // As in the global pipeline, MEMVIOL suppresses only the violating lanes.
+  const uint64_t memviol_lanes = vector_memviol_lanes(d, wf, request_lanes, request_lanes);
+  const VmAccessOutcome result =
+      memviol_lanes ? VmAccessOutcome::ApertureViolation : VmAccessOutcome::Complete;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   if (d.lds_stack_inputs) {
@@ -1556,12 +1557,13 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
     if (d.ds2_active)
       d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
   }
-  execute_lds_access(d, lds, d.per_lane_addr, request_lanes, d.store_data, d.response_data);
+  execute_lds_access(d, lds, d.per_lane_addr, request_lanes & ~memviol_lanes, d.store_data,
+                     d.response_data);
   if (d.ds2_active)
-    execute_lds_access(d, lds, d.ds2_per_lane_addr, d.lane_mask, d.ds2_store_data,
+    execute_lds_access(d, lds, d.ds2_per_lane_addr, d.lane_mask & ~memviol_lanes, d.ds2_store_data,
                        d.ds2_response_data);
   if (d.atomic_op != AtomicOp::NONE)
-    return VmAccessOutcome::Complete;
+    return result;
 
   if (d.is_load) {
     // Per-lane LDS load trace: log addresses and loaded values for first 4 lanes.
@@ -1626,7 +1628,7 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
       }
     });
   }
-  return VmAccessOutcome::Complete;
+  return result;
 }
 
 MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,

@@ -2336,10 +2336,10 @@ template <bool EnableAsync>
   // it. Gated on debug_active_ so non-debugged runs pay no per-access cost.
   const bool debug_probe = debugger_active && inst->is_memory_op() && inst->data() &&
                            (inst->data()->tag() == GLOBAL_MEM || inst->data()->tag() == SCALAR_MEM);
-  // Probe exactly what the pipeline will request. Instruction-level rejections
-  // (MEMVIOL, DDS, LDS alignment, malformed atomics) use the pipeline's own
-  // admission and are left for it to raise; masked lanes, buffer-OOB elements
-  // and descriptor-masked dwords request nothing and must not fault.
+  // Probe exactly what the pipeline will request. Rejections (DDS, malformed
+  // scalar atomics, scalar MEMVIOL) and MEMVIOL lanes use the pipeline's own
+  // rules and are left for it to raise; masked lanes, buffer-OOB elements and
+  // descriptor-masked dwords request nothing and must not fault.
   std::vector<MemoryRequestRange> dbg_ranges;
   bool dbg_is_write = false;
   bool dbg_is_atomic = false;
@@ -2365,9 +2365,13 @@ template <bool EnableAsync>
       // Routing subtracts the aperture base and adds the workgroup base.
       // RDNA4's 17-bit wrapping preserves payload alignment for LDS atomics.
       const uint64_t lds_bias = active->lds_base() - shared_aperture_base_;
-      if (vector_memory_admission(d, *active, request_lanes, lds_lanes, shared_lanes.dds,
-                                  lds_bias) == VmAccessOutcome::Complete)
-        append_vector_request_ranges(d, request_lanes & ~lds_lanes, dbg_ranges);
+      // DDS is rejected as a whole; MEMVIOL lanes never reach memory.
+      if ((shared_lanes.dds & request_lanes) == 0)
+        append_vector_request_ranges(
+            d,
+            request_lanes & ~lds_lanes &
+                ~vector_memviol_lanes(d, *active, request_lanes, lds_lanes, lds_bias),
+            dbg_ranges);
     }
   }
   // One predicate for the whole access, used both to decide that this
