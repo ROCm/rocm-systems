@@ -11,41 +11,41 @@ Several frameworks and applications already call hipFile to move data between st
 LMCache
 =======
 
-`LMCache <https://github.com/LMCache/LMCache>`_ is a KV cache layer for LLM serving that offloads KV cache chunks to CPU memory, local disk, or remote storage. Its GDS storage backend reads and writes those chunks directly between GPU memory and NVMe, and loads ``libhipfile.so`` on ROCm.
+`LMCache <https://docs.lmcache.ai/index.html>`_ is a KV cache layer for LLM serving. It offloads KV cache chunks to CPU memory, local disk, or remote storage. Its GDS storage backend reads and writes those chunks directly between GPU memory and storage.
 
-The backend is selected with the ``gds_backend`` configuration key (``LMCACHE_GDS_BACKEND`` as an environment variable), which accepts ``hipfile`` as well as ``auto``. The remaining GDS options, such as ``gds_path`` and ``gds_buffer_size``, apply to both backends. See the `LMCache GDS backend documentation <https://docs.lmcache.ai/kv_cache/storage_backends/gds.html>`_.
+Set the ``gds_backend`` configuration key to ``hipfile`` or set the ``LMCACHE_GDS_BACKEND`` environment variable to ``hipfile``.  See the `LMCache GDS backend documentation <https://docs.lmcache.ai/kv_cache/storage_backends/gds.html>_` for more information.
 
 fastsafetensors
 ===============
 
-`fastsafetensors <https://github.com/foundation-model-stack/fastsafetensors>`_ is a high-performance loader for safetensors model files. It reads tensor data from the file straight into GPU memory, which avoids the host bounce buffer and the page cache copy that the default safetensors deserializer performs.
+`fastsafetensors <https://pypi.org/project/fastsafetensors/>`_ loads tensor data from safetensors model files into GPU memory. It uses hipFile for direct storage-to-GPU I/O on ROCm when ``libhipfile.so`` is available.
 
-On ROCm, its GDS code path uses hipFile transparently when ``libhipfile.so`` is available; otherwise it falls back to its own bounce-buffer path, which is also what passing ``nogds=True`` to ``SafeTensorsFileLoader`` or ``fastsafe_open()`` forces. Build it against ROCm by setting ``ROCM_PATH`` when installing the package.
+If ``libhipfile.so`` isn't on the dynamic linker search path, fastsafetensors uses the bounce-buffer path.  Ensure that ``ROCM_PATH`` has been set before installing the package.
 
 rocAL
 =====
 
-`rocAL <https://github.com/ROCm/rocAL>`_ is AMD's augmentation library, the data loading and augmentation pipeline used for training. Its numpy reader can read ``.npy`` files directly into GPU memory using hipFile instead of reading them through the host.
+`rocAL <https://rocm.docs.amd.com/projects/rocAL/en/latest/>`_ is AMD's augmentation library, the data loading and augmentation pipeline used for training. Its numpy reader can read ``.npy`` files directly into GPU memory using hipFile instead of reading them through the host.
 
-rocAL's build looks for the hipFile CMake package and, when it finds one, compiles the reader with ``ENABLE_HIPFILE=1`` and links against ``hip::hipfile``. The feature is off by default at run time; set ``ROCAL_USE_HIPFILE=1`` to enable it.
+rocAL's build looks for the hipFile CMake package and, when it finds one, compiles the reader with ``ENABLE_HIPFILE=1`` and links against ``hip::hipfile``. You need to set ``ROCAL_USE_HIPFILE=1`` to enable this feature.
 
 PyTorch
 =======
 
-The ``torch.cuda.gds`` APIs, including ``GdsFile`` and the buffer registration helpers, are implemented with hipFile on ROCm. Each wrapper calls the matching hipFile function: ``hipFileRead()``, ``hipFileWrite()``, ``hipFileBufRegister()``, ``hipFileBufDeregister()``, ``hipFileHandleRegister()``, and ``hipFileHandleDeregister()``.
+`PyTorch <https://github.com/pytorch/pytorch>`_ is a machine learning framework. On ROCm, its ``torch.cuda.gds`` APIs use hipFile. GdsFile reads and writes GPU storage with ``hipFileRead()`` and ``hipFileWrite()``. The buffer and file registration helpers use the matching hipFile APIs.
 
-As elsewhere in PyTorch's HIP port, the build option keeps its original name, so ``USE_CUFILE=0`` is what disables GDS support in a ROCm build, and ``torch.cuda.gds.is_available()`` reports whether it was built in. If you are porting code that depends on specific error codes, review :doc:`cuFile compatibility <hipFile-cuFile-compatibility>` first. PyTorch's own ROCm notes cover the rest.
+Build options in PyTorch's HIP port keep their original names. ``torch.cuda.gds.is_available()`` reports whether it was built with GDS support in a ROCm build. See :doc:`cuFile compatibility <hipFile-cuFile-compatibility>`  and `PyTorch's ROCm notes <https://docs.pytorch.org/docs/main/notes/hip.html>`_ for more information.
 
 fio
 ===
 
-`fio <https://github.com/axboe/fio>`_ is a flexible I/O tester widely used for storage benchmarking. AMD maintains a fork at `ROCm/fio <https://github.com/ROCm/fio>`_ that adds a ``libhipfile`` I/O engine, so fio job files can drive hipFile reads and writes against GPU memory. This is the usual way to measure hipFile throughput on a given system.
+`fio <https://github.com/axboe/fio>`_ is a flexible I/O tester widely used for storage benchmarking. AMD maintains a fork at `ROCm/fio <https://github.com/ROCm/fio>`_ that adds a ``libhipfile`` I/O engine, so fio job files can drive hipFile reads and writes against GPU memory.
 
 For build and run instructions, see :doc:`/how-to/use-with-fio`.
 
 IOR
 ===
 
-`IOR <https://github.com/hpc/ior>`_ is the parallel file system I/O benchmark used throughout HPC, usually alongside its companion metadata benchmark mdtest. IOR selects a GPU I/O backend at configure time, and now has a hipFile one (``src/gpu_io_hipfile.c``), so it can read and write directly between GPU memory and storage on ROCm.
+`IOR <https://ior.readthedocs.io/en/latest/>`_  is a parallel file system I/O benchmark used in HPC, often with mdtest from the same repository. Its hipFile backend, `src/gpu_io_hipfile.c`, reads and writes directly between GPU memory and storage on ROCm.
 
-Configure IOR with ``--with-gpu-direct-backend=hipfile`` to build the backend in; the backend defaults to ``none``, so this flag is required. Add ``--with-hipfile=<prefix>`` and ``--with-hip=<prefix>`` if hipFile and the HIP runtime aren't found automatically. It is not in an IOR release yet, so build from the project's ``main`` branch: the initial merge was followed by correctness fixes and by a fix for a build regression, both in October 2026.
+Build IOR from the `main branch <https://github.com/hpc/ior>`_. Run ``./bootstrap`` first, then run ``./configure`` with the  ``--with-gpu-direct-backend=hipfile`` option before building IOR. If ``./configure`` doesn't find hipFile or the HIP runtime, add the ``--with-hipfile=hipfile_prefix`` and ``--with-hip=hip_prefix`` options to the ``./configure`` command.
