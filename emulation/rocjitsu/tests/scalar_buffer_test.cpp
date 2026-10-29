@@ -205,6 +205,77 @@ TEST_P(ScalarBufferInstructionTest, ScalarBufferLoadsZeroOnlyOutOfRangeDwords) {
   }
 }
 
+// RDNA3/3.5/4 and CDNA5 return MEMVIOL for a negative immediate offset applied
+// to S_BUFFER. RDNA1/2 and CDNA1-4 leave the sign unqualified.
+TEST_P(ScalarBufferInstructionTest, NegativeBufferImmediateRaisesMemviol) {
+  const auto arch = GetParam();
+  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const bool memviol =
+      gfx12 || arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  amdgpu::GpuMemory mem("scalar_buffer_mem");
+  amdgpu::L2Cache l2("scalar_buffer_l2");
+  l2.set_backing_memory(&mem);
+  amdgpu::L1ScalarCache l1(&l2);
+  amdgpu::ScalarMemPipeline pipeline(&l1);
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("scalar_buffer", cfg, &mem, &l2);
+  auto decoder = Decoder::create(arch);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+  ASSERT_NE(wf, nullptr);
+  const auto sb = wf->sgpr_alloc().base;
+  constexpr uint64_t base = 0x1000;
+  for (const uint32_t records : {0u, 32u}) {
+    for (const uint32_t register_offset : {0u, 8u}) {
+      if (gfx9() && register_offset != 0)
+        continue;
+      for (const bool negative : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "records=" << records << " register_offset="
+                                        << register_offset << " negative=" << negative);
+        const bool fault = memviol && negative;
+        for (uint32_t i = 0; i < 8; ++i)
+          mem.write32(base + 4 * i, 100 + i);
+        cu->write_sgpr(sb, base);
+        cu->write_sgpr(sb + 1, arch == ROCJITSU_CODE_ARCH_CDNA5 ? records << 25 : 0);
+        cu->write_sgpr(sb + 2, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : records);
+        cu->write_sgpr(sb + 3, 0);
+        for (uint32_t i = 0; i < 4; ++i)
+          cu->write_sgpr(sb + 8 + i, 0xdeadbeef);
+        // A positive register offset cannot make a negative immediate legal, and
+        // descriptor masking cannot suppress its MEMVIOL.
+        cu->write_sgpr(sb + 4, register_offset);
+        const uint32_t null_offset =
+            (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) ? 0xfa000000u
+                                                                                   : 0xf8000000u;
+        const uint32_t immediate = negative ? (gfx12 ? 0xfffffcu : 0x1ffffcu) : 0u;
+        const uint32_t soffset = register_offset == 0 ? null_offset : 4u << 25;
+        const std::array<uint32_t, 2> words{gfx9()  ? 0xc02a0200u
+                                            : gfx12 ? 0xf4024200u
+                                                    : 0xf4280200u,
+                                            immediate | (gfx9() ? 0u : soffset)};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+        ASSERT_NE(inst->data(), nullptr);
+        EXPECT_EQ(inst->data_as<amdgpu::ScalarMemState>()->memviol, fault);
+        EXPECT_EQ(pipeline.issue(inst.release(), *wf),
+                  fault ? amdgpu::VmAccessOutcome::ApertureViolation
+                        : amdgpu::VmAccessOutcome::Complete);
+        if (fault) {
+          for (uint32_t i = 0; i < 4; ++i)
+            EXPECT_EQ(cu->read_sgpr(sb + 8 + i), 0xdeadbeefu) << "dword=" << i;
+        }
+        EXPECT_TRUE(wf->wait_counters().empty());
+      }
+    }
+  }
+  wf->halt();
+}
+
 TEST(RdnaAddrCalcTest, ScalarAndVectorBuffersUseCanonicalHighAddresses) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
     SCOPED_TRACE(static_cast<int>(arch));

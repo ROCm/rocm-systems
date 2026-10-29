@@ -21,6 +21,11 @@ inline constexpr uint64_t kAqlQueueWaveAbort = uint64_t{1};
 /// @details Matches KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION).
 inline constexpr uint64_t kAqlQueueMemoryViolation = uint64_t{1} << 4;
 
+/// @brief ROCr queue exception status for MEMVIOL without a translation fault.
+/// @details Matches KFD_EC_MASK(EC_QUEUE_WAVE_APERTURE_VIOLATION), which ROCr's
+/// trap handler raises when EXCP_FLAG_PRIV.MEMVIOL is set without XNACK_ERROR.
+inline constexpr uint64_t kAqlQueueApertureViolation = uint64_t{1} << 5;
+
 /// @brief Normalized cluster dimensions decoded from an extended AQL dispatch packet.
 struct ClusterDispatchShape {
   uint32_t count_x = 0;

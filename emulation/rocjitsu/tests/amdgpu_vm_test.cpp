@@ -6664,6 +6664,63 @@ TEST(CommandProcessorGwsPlacementTest, UnsatisfiedGwsGridFailsWithoutCompletion)
   }
 }
 
+// gfx90a raises MEMVIOL for an S_ATOMIC_*_X2 that is 4 mod 8. VMID 0 has no VM
+// fault reporter and no runtime owner, so the compute unit must publish the
+// aperture violation itself; otherwise the dispatch never completes or fails.
+TEST(CommandProcessorAqlTest, MisalignedScalarAtomicPublishesApertureViolation) {
+  constexpr uint64_t kData = 0x9000;
+  struct Case {
+    uint32_t offset;
+    bool deliver;
+  };
+  for (const Case test : {Case{0, true}, Case{4, true}, Case{4, false}}) {
+    const uint32_t offset = test.offset;
+    const bool misaligned = offset != 0;
+    SCOPED_TRACE(testing::Message() << "offset=" << offset << " deliver=" << test.deliver);
+    VmFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize("cdna3", 1, 4));
+    std::atomic<uint64_t> exception_status = 0;
+    f.cu()->set_queue_exception_handler([&](uint32_t, uint32_t, uint64_t status, bool,
+                                            amdgpu::QueueExceptionDeliveryPolicy policy) {
+      EXPECT_EQ(policy, amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail);
+      exception_status.store(status);
+      return test.deliver;
+    });
+    f.mem()->write64(kData, 5);
+    f.mem()->write64(kData + 8, 5);
+
+    constexpr uint8_t kZero = 128, kOne = 129;
+    const auto atomic = cdna3::build_smem(
+        cdna3::kSAtomicDecX2Smem,
+        {.sbase = 1, .sdata = 4, .glc = 1, .imm = 1, .offset = uint32_t(kData + offset)});
+    const uint32_t code[] = {cdna3::build_sop1(cdna3::kSMovB32Sop1, {.ssrc0 = kZero, .sdst = 2})[0],
+                             cdna3::build_sop1(cdna3::kSMovB32Sop1, {.ssrc0 = kZero, .sdst = 3})[0],
+                             cdna3::build_sop1(cdna3::kSMovB32Sop1, {.ssrc0 = kOne, .sdst = 4})[0],
+                             cdna3::build_sop1(cdna3::kSMovB32Sop1, {.ssrc0 = kZero, .sdst = 5})[0],
+                             atomic[0],
+                             atomic[1],
+                             cdna3::build_sopp(cdna3::kSWaitcntSopp, {.simm16 = 0})[0],
+                             cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]};
+    const uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+    constexpr uint64_t kSignal = 0x7000;
+    init_completion_signal(f.mem(), kSignal);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(make_dispatch_packet(ko, kSignal, /*grid_size_x=*/64, /*workgroup_size_x=*/64));
+
+    ASSERT_NO_THROW(f.engine->run());
+    EXPECT_EQ(f.engine->last_exit().code, test.deliver ? 0 : 1);
+    if (!test.deliver)
+      EXPECT_NE(f.engine->last_exit().message.find("Failed to deliver queue exception"),
+                std::string::npos);
+    EXPECT_FALSE(f.cu()->has_active_wfs());
+    EXPECT_EQ(completion_signal_value(f.mem(), kSignal), misaligned ? 1 : 0);
+    EXPECT_EQ(f.cp()->queue_faulted_for_test(1, 0), misaligned);
+    EXPECT_EQ(exception_status.load(), misaligned ? amdgpu::kAqlQueueApertureViolation : 0u);
+    EXPECT_EQ(f.mem()->read64(kData), misaligned ? 5u : 1u);
+    EXPECT_EQ(f.mem()->read64(kData + 8), 5u);
+  }
+}
+
 TEST(CommandProcessorAqlTest, InvalidPm4IbFaultsWithoutCompletionOrSuccessorExecution) {
   for (const auto *arch : {"cdna3", "cdna4"}) {
     SCOPED_TRACE(arch);

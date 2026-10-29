@@ -75,9 +75,11 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   // RDNA4 section 8.1.1 restricts the immediate for buffer loads, the sum otherwise.
   const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
   const bool ordinary_load = amdgpu::addr_calc::gfx12_smem_is_ordinary_load_op(inst.op);
-  if ((buffer_load && immediate < 0) || (ordinary_load && immediate + *soffset < 0))
-    wf.report_undefined_behavior(buffer_load ? "negative scalar-buffer load immediate"
-                                             : "negative combined scalar-memory offset");
+  if (ordinary_load && immediate + *soffset < 0)
+    wf.report_undefined_behavior("negative combined scalar-memory offset");
+  // A negative IOFFSET applied to S_BUFFER returns MEMVIOL (section 8.1, SMEM fields).
+  if (state && buffer_load && immediate < 0)
+    state->memviol = true;
   if (buffer_load) {
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state, align_mask,
                                                     align_mask);

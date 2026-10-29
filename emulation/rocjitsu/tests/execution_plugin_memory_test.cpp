@@ -948,7 +948,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
   EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
   EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave),
-            VmAccessOutcome::Faulted);
+            VmAccessOutcome::Unsupported);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();

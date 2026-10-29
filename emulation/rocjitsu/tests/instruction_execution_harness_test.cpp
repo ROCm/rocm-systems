@@ -1218,7 +1218,8 @@ TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAlloca
           std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-          EXPECT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Faulted);
+          EXPECT_EQ(cu.route_memory_inst(inst.release(), *wf),
+                    amdgpu::VmAccessOutcome::Unsupported);
           EXPECT_TRUE(wf->wait_counters().empty());
           EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
           for (uint32_t address = 0; address < 512; address += 4)

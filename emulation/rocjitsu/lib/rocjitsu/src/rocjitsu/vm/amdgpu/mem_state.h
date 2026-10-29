@@ -96,6 +96,8 @@ public:
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
   uint16_t load_dword_mask = 0xffff;
+  /// Address formation raised MEMVIOL; the access must not reach memory.
+  bool memviol = false;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
   TranslatedMemoryProgress translated;

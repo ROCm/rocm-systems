@@ -112,8 +112,10 @@ SdmaPacketExecutionOutcome map_outcome(VmAccessOutcome outcome) {
   case VmAccessOutcome::Unavailable:
     return SdmaPacketExecutionOutcome::Unavailable;
   case VmAccessOutcome::Faulted:
+  case VmAccessOutcome::ApertureViolation:
     return SdmaPacketExecutionOutcome::Faulted;
   case VmAccessOutcome::Malformed:
+  case VmAccessOutcome::Unsupported:
     return SdmaPacketExecutionOutcome::Malformed;
   case VmAccessOutcome::Revoked:
     return SdmaPacketExecutionOutcome::Faulted;

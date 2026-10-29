@@ -256,8 +256,10 @@ AqlAdmissionResult admission_from_vm_outcome(VmAccessOutcome outcome) {
   case VmAccessOutcome::Unavailable:
     return {.status = AqlAdmissionStatus::Blocked};
   case VmAccessOutcome::Faulted:
+  case VmAccessOutcome::ApertureViolation:
     return {.status = AqlAdmissionStatus::Faulted};
   case VmAccessOutcome::Malformed:
+  case VmAccessOutcome::Unsupported:
     return {.status = AqlAdmissionStatus::Malformed};
   case VmAccessOutcome::Revoked:
     return {.status = AqlAdmissionStatus::Faulted};

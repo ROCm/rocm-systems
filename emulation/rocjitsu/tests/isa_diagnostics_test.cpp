@@ -151,12 +151,13 @@ TEST_P(IsaDiagnosticsTest, ScalarLoadOffsetBoundaryAndCdna5Exception) {
 }
 
 TEST_P(IsaDiagnosticsTest, BufferImmediateRuleDependsOnArchitecture) {
+  // RDNA3/3.5/4 and CDNA5 return MEMVIOL rather than undefined behavior; RDNA1/2
+  // and CDNA1-4 buffer offsets are unqualified. Neither case is diagnosed.
   wf->debug_write_sgpr(4, 8);
-  execute(smem(-4, true), gfx12() ? 1 : 0, "s_buffer_load_");
+  execute(smem(-4, true), 0, "s_buffer_load_");
   execute(smem(0, true), 0, "s_buffer_load_");
   wf->debug_write_sgpr(4, 0);
-  // RDNA3 specifies a MEMVIOL; CDNA3/4 buffer offsets are unqualified.
-  execute(smem(-4, true), gfx12(), "s_buffer_load_");
+  execute(smem(-4, true), 0, "s_buffer_load_");
   // A positive offset beyond the descriptor is a defined zero-fill load.
   execute(smem(0x2000, true), 0, "s_buffer_load_");
 }

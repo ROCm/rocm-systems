@@ -502,14 +502,23 @@ void ComputeUnitCore::handle_memory_access_failure(Wavefront &wf, VmAccessOutcom
   }
   // Only architectural data faults belong to the runtime exception owner.
   // Fetch faults are offered once at the fetch site, with their real address.
-  if (outcome == VmAccessOutcome::Faulted && memory_violation_handler_ &&
-      memory_violation_handler_(wf, 0, false, issue_pc))
+  const bool architectural =
+      outcome == VmAccessOutcome::Faulted || outcome == VmAccessOutcome::ApertureViolation;
+  if (architectural && memory_violation_handler_ &&
+      memory_violation_handler_(wf, 0, false, issue_pc, outcome))
     return;
   handle_terminal_vm_fault(wf, outcome);
 }
 
 void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  if (outcome == VmAccessOutcome::Unsupported) {
+    util::Logger::warn("unsupported memory access: process=", wf.process_id(),
+                       " queue=", wf.queue_id(), " dispatch=", wf.dispatch_id(), " cu=", name(),
+                       " wave=", wf.wf_id(), " pc=", std::format("{:#x}", wf.pc));
+    fail_wave_execution(wf, "unsupported memory access");
+    return;
+  }
   if (wf.fail_pm4_submission()) {
     abort_dispatch(wf.dispatch_id());
     return;
@@ -527,6 +536,14 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
     defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueMemoryViolation,
                           /*clear_debug_stop_on_success=*/false,
                           /*retain_failure_for_debugger=*/false);
+  } else if (outcome == VmAccessOutcome::ApertureViolation) {
+    // No runtime owner claimed the wave and no VM fault reporter saw the
+    // access. ROCr waits for a VM fault event before acting on a memory
+    // violation, so only the aperture status terminates the queue.
+    defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueApertureViolation,
+                          /*clear_debug_stop_on_success=*/false,
+                          /*retain_failure_for_debugger=*/false,
+                          QueueExceptionDeliveryPolicy::PublishOrFail);
   }
   abort_dispatch(wf.dispatch_id());
 }
@@ -536,6 +553,10 @@ void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
                      " dispatch=", wf.dispatch_id(), " cu=", name(), " wave=", wf.wf_id(),
                      " resource=", wf.gws_wait_rid_, " pc=", std::format("{:#x}", wf.pc),
                      " gws_wait_limit=", config_.gws_wait_limit);
+  fail_wave_execution(wf, reason);
+}
+
+void ComputeUnitCore::fail_wave_execution(Wavefront &wf, std::string_view reason) {
   const uint32_t dispatch_id = wf.dispatch_id();
   const bool pm4_failed = wf.fail_pm4_submission();
   if (!pm4_failed &&
@@ -1847,7 +1868,7 @@ template <bool EnableAsync>
       drain_async_window();
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(MissingGpuVm) pc=0x",
                        std::hex, active->pc, std::dec, " vmid=", vmid);
-      handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
+      handle_terminal_vm_fault(*active, VmAccessOutcome::Unsupported);
       return;
     }
     if (vm_access == nullptr) {
@@ -1876,7 +1897,7 @@ template <bool EnableAsync>
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
                        " HALT(StaleAddressSpace) pc=0x", std::hex, active->pc, std::dec,
                        " vmid=", vmid);
-      handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
+      handle_terminal_vm_fault(*active, VmAccessOutcome::Revoked);
       return;
     }
   }
@@ -1924,7 +1945,8 @@ template <bool EnableAsync>
       return;
     }
     if (fetch_outcome == VmAccessOutcome::Faulted && memory_violation_handler_ &&
-        memory_violation_handler_(*active, active->pc, false, active->pc)) {
+        memory_violation_handler_(*active, active->pc, false, active->pc,
+                                  VmAccessOutcome::Faulted)) {
       return;
     }
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -2274,7 +2296,9 @@ template <bool EnableAsync>
       dbg_is_atomic = d.atomic_op != AtomicOp::NONE;
       dbg_is_write = !d.is_load || dbg_is_atomic;
       dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_dwords * d.elem_size);
-      dbg_addrs.push_back(d.addr);
+      // Address-formation MEMVIOL must reach the pipeline before any VM probe.
+      if (!d.memviol)
+        dbg_addrs.push_back(d.addr);
     } else {
       auto &d = *inst->data_as<VectorMemState>();
       dbg_is_atomic = (d.atomic_op != AtomicOp::NONE);
@@ -2345,7 +2369,8 @@ template <bool EnableAsync>
     // range walk; only the lanes after it still have to be tested.
     for (auto it = first_fault; it != dbg_addrs.end(); ++it) {
       if ((it == first_fault || access_faults(*it)) &&
-          memory_violation_handler_(*active, *it, dbg_is_write, issue_pc)) {
+          memory_violation_handler_(*active, *it, dbg_is_write, issue_pc,
+                                    VmAccessOutcome::Faulted)) {
         fault_claimed = true;
         break;
       }

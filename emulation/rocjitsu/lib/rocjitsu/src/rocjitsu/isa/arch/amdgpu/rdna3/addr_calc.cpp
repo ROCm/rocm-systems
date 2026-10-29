@@ -45,18 +45,23 @@ std::optional<uint32_t> read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf
 std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                                amdgpu::ScalarMemState *state) {
   const uint32_t sbase_sel = inst.sbase * 2;
+  const bool buffer_load = amdgpu::addr_calc::smem_is_buffer_load_op(inst.op);
   auto base = amdgpu::try_read_scalar_selector64(wf, sbase_sel);
   if (!base)
     return std::nullopt;
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
+  const bool negative_immediate = off < 0;
   auto soffset = read_smem_offset(inst.soffset, wf);
   if (!soffset)
     return std::nullopt;
   off += *soffset;
   // RDNA3 section 8.1.1 permits negative immediates only when the sum is nonnegative.
-  if (!amdgpu::addr_calc::smem_is_buffer_load_op(inst.op) && off < 0)
+  if (!buffer_load && off < 0)
     wf.report_undefined_behavior("negative combined scalar-memory offset");
-  if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op)) {
+  // A negative immediate applied to S_BUFFER returns MEMVIOL (section 8.1, SMEM fields).
+  if (state && buffer_load && negative_immediate)
+    state->memviol = true;
+  if (buffer_load) {
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state);
   }
   return (*base + off) & ~0x3ULL;

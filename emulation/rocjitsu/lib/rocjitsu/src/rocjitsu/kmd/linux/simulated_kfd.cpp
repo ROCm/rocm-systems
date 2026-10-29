@@ -1523,10 +1523,11 @@ void SimulatedKfd::init_command_processors_locked() {
         });
         cu->set_alu_exception_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_alu_exception(wf); });
-        cu->set_memory_violation_handler(
-            [this](amdgpu::Wavefront &wf, uint64_t address, bool is_write, uint64_t issue_pc) {
-              return on_wave_memory_violation(wf, address, is_write, issue_pc);
-            });
+        cu->set_memory_violation_handler([this](amdgpu::Wavefront &wf, uint64_t address,
+                                                bool is_write, uint64_t issue_pc,
+                                                amdgpu::VmAccessOutcome outcome) {
+          return on_wave_memory_violation(wf, address, is_write, issue_pc, outcome);
+        });
       }
     });
     g.cps_initialized = true;
@@ -5539,9 +5540,15 @@ bool SimulatedKfd::on_wave_execution_failure(amdgpu::Wavefront &wave, bool retai
       retain_wave);
 }
 
-bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, bool,
-                                            uint64_t issue_pc) {
+bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t /*addr*/,
+                                            bool /*is_write*/, uint64_t issue_pc,
+                                            amdgpu::VmAccessOutcome outcome) {
+  assert(outcome == amdgpu::VmAccessOutcome::Faulted ||
+         outcome == amdgpu::VmAccessOutcome::ApertureViolation);
+  const bool translation_fault = outcome == amdgpu::VmAccessOutcome::Faulted;
+  constexpr uint32_t kTrapstsMemViol = 1u << 8;
   constexpr uint32_t kTrapstsXnackError = 1u << 28;
+  const uint32_t cause = translation_fault ? kTrapstsXnackError : kTrapstsMemViol;
   auto proc = find_process(wave.process_id());
   if (!proc)
     return false;
@@ -5565,17 +5572,21 @@ bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, b
     gpu_id = queue->second.gpu_id;
     has_runtime_signal = queue->second.has_runtime_exception_signal;
   }
-  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  // ROCr defers a memory violation to its VM fault handler, which only a
+  // translation fault wakes; an aperture violation terminates the queue itself.
+  const uint64_t exception = translation_fault ? KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION)
+                                               : KFD_EC_MASK(EC_QUEUE_WAVE_APERTURE_VIOLATION);
+  const bool replay = translation_fault && proc->xnack_enabled_.load(std::memory_order_relaxed);
   if (!debugger_attached || ctx_base == 0 || !debug_stop_publishable(gpu_id)) {
     if (!has_runtime_signal)
       return false;
-    if (proc->xnack_enabled_.load(std::memory_order_relaxed))
+    if (replay)
       wave.pc = issue_pc;
-    wave.set_trapsts(wave.trapsts() | kTrapstsXnackError);
+    wave.set_trapsts(wave.trapsts() | cause);
     // ROCr removes its async handler after acknowledging the first fault on
     // a queue. Later waves transfer ownership on publication, without waiting
     // for another acknowledgment or retaining a stop for an absent debugger.
-    return defer_wave_exception_to_runtime(wave, kException,
+    return defer_wave_exception_to_runtime(wave, exception,
                                            /*suspend_while_pending=*/true,
                                            /*clear_debug_stop_on_success=*/false,
                                            /*runtime_already_reserved=*/false,
@@ -5583,18 +5594,18 @@ bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, b
                                            amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail);
   }
   const auto saved = wave.debug_stop_state();
-  if (proc->xnack_enabled_.load(std::memory_order_relaxed))
+  if (replay)
     wave.pc = issue_pc;
-  wave.set_trapsts(wave.trapsts() | kTrapstsXnackError);
+  wave.set_trapsts(wave.trapsts() | cause);
   wave.debug_trap(0);
   bool runtime_failure_debuggable = false;
-  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size, kException,
+  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size, exception,
                            /*retain_on_rejection=*/true, &runtime_failure_debuggable)) {
     wave.restore_debug_stop_state(saved);
     // Roll back the debugger stop without losing the runtime-owned fault's reason.
     if (has_runtime_signal)
-      wave.set_trapsts(wave.trapsts() | kTrapstsXnackError);
-    return defer_wave_exception_to_runtime(wave, kException,
+      wave.set_trapsts(wave.trapsts() | cause);
+    return defer_wave_exception_to_runtime(wave, exception,
                                            /*suspend_while_pending=*/true,
                                            /*clear_debug_stop_on_success=*/false,
                                            /*runtime_already_reserved=*/true,

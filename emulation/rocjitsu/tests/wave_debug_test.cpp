@@ -348,14 +348,15 @@ TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget
   fx.cu->write_sgpr(wf->sgpr_alloc().base + 1, 0);
 
   uint64_t fault_address = 0;
-  fx.cu->set_memory_violation_handler(
-      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write, uint64_t) {
-        EXPECT_EQ(&faulting_wave, wf);
-        EXPECT_FALSE(is_write);
-        fault_address = address;
-        faulting_wave.debug_trap(0);
-        return true;
-      });
+  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &faulting_wave, uint64_t address,
+                                          bool is_write, uint64_t /*issue_pc*/,
+                                          amdgpu::VmAccessOutcome /*outcome*/) {
+    EXPECT_EQ(&faulting_wave, wf);
+    EXPECT_FALSE(is_write);
+    fault_address = address;
+    faulting_wave.debug_trap(0);
+    return true;
+  });
 
   fx.cu->step();
   EXPECT_EQ(wf->pc, kBranchTarget);
@@ -388,14 +389,15 @@ TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
   fx.cu->set_debug_active(true);
 
   uint64_t fault_address = ~uint64_t{0};
-  fx.cu->set_memory_violation_handler(
-      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write, uint64_t) {
-        EXPECT_EQ(&faulting_wave, wave);
-        EXPECT_FALSE(is_write);
-        fault_address = address;
-        faulting_wave.debug_trap(0);
-        return true;
-      });
+  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &faulting_wave, uint64_t address,
+                                          bool is_write, uint64_t /*issue_pc*/,
+                                          amdgpu::VmAccessOutcome /*outcome*/) {
+    EXPECT_EQ(&faulting_wave, wave);
+    EXPECT_FALSE(is_write);
+    fault_address = address;
+    faulting_wave.debug_trap(0);
+    return true;
+  });
 
   fx.cu->step();
   EXPECT_EQ(fault_address, 0u);
@@ -839,7 +841,9 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
   std::memcpy(data_page.data(), &kExpectedValue, sizeof(kExpectedValue));
 
   bool handler_called = false;
-  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool, uint64_t issue_pc) {
+  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront & /*wf*/, uint64_t /*address*/,
+                                          bool /*is_write*/, uint64_t issue_pc,
+                                          amdgpu::VmAccessOutcome /*outcome*/) {
     handler_called = true;
     EXPECT_EQ(issue_pc, kKernelAddr);
     return false; // no debug session for this wave's process
@@ -910,14 +914,15 @@ TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) 
   fx.cu->write_sgpr(sbase + 1, static_cast<uint32_t>(straddle >> 32));
 
   uint64_t fault_address = ~uint64_t{0};
-  fx.cu->set_memory_violation_handler(
-      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write, uint64_t) {
-        EXPECT_EQ(&faulting_wave, wave);
-        EXPECT_FALSE(is_write);
-        fault_address = address;
-        faulting_wave.debug_trap(0);
-        return true;
-      });
+  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &faulting_wave, uint64_t address,
+                                          bool is_write, uint64_t /*issue_pc*/,
+                                          amdgpu::VmAccessOutcome /*outcome*/) {
+    EXPECT_EQ(&faulting_wave, wave);
+    EXPECT_FALSE(is_write);
+    fault_address = address;
+    faulting_wave.debug_trap(0);
+    return true;
+  });
 
   fx.cu->step();
   EXPECT_EQ(fault_address, straddle);
@@ -968,7 +973,9 @@ TEST(WaveDebugTest, ScalarAtomicX2AtPageEndChecksOnlyItsAccessWidth) {
   fx.cu->write_sgpr(sbase + 3, 0);
 
   unsigned violations = 0;
-  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool, uint64_t) {
+  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront & /*wf*/, uint64_t /*address*/,
+                                          bool /*is_write*/, uint64_t /*issue_pc*/,
+                                          amdgpu::VmAccessOutcome /*outcome*/) {
     ++violations;
     return true;
   });

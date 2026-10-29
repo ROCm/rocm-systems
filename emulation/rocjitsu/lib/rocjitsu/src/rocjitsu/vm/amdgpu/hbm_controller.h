@@ -132,8 +132,10 @@ private:
     case VmAccessOutcome::Unavailable:
       return simdojo::MessageStatus::Unavailable;
     case VmAccessOutcome::Faulted:
+    case VmAccessOutcome::ApertureViolation:
       return simdojo::MessageStatus::Faulted;
     case VmAccessOutcome::Malformed:
+    case VmAccessOutcome::Unsupported:
       return simdojo::MessageStatus::Malformed;
     case VmAccessOutcome::Revoked:
       return simdojo::MessageStatus::Faulted;
