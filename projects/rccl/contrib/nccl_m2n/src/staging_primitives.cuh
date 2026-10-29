@@ -68,14 +68,22 @@
 // Store with release semantics at system scope.
 // Ensures all prior writes (data) are ordered before this store (signal).
 __device__ __forceinline__ void st_release_sys(uint64_t* ptr, uint64_t val) {
+#if defined(__HIP_PLATFORM_AMD__)
+  __hip_atomic_store(ptr, val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
   asm volatile("st.release.sys.global.u64 [%0], %1;" ::"l"(ptr), "l"(val) : "memory");
+#endif
 }
 
 // Load with acquire semantics at system scope.
 // Ensures all subsequent reads (data) are ordered after this load (signal).
 __device__ __forceinline__ uint64_t ld_acquire_sys(const uint64_t* ptr) {
   uint64_t val;
+#if defined(__HIP_PLATFORM_AMD__)
+  val = __hip_atomic_load(ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
   asm volatile("ld.acquire.sys.global.u64 %0, [%1];" : "=l"(val) : "l"(ptr) : "memory");
+#endif
   return val;
 }
 
@@ -83,13 +91,21 @@ __device__ __forceinline__ uint64_t ld_acquire_sys(const uint64_t* ptr) {
 
 // Store with release semantics at GPU scope.
 __device__ __forceinline__ void st_release_gpu(uint64_t* ptr, uint64_t val) {
+#if defined(__HIP_PLATFORM_AMD__)
+  __hip_atomic_store(ptr, val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+#else
   asm volatile("st.release.gpu.global.u64 [%0], %1;" ::"l"(ptr), "l"(val) : "memory");
+#endif
 }
 
 // Load with acquire semantics at GPU scope.
 __device__ __forceinline__ uint64_t ld_acquire_gpu(const uint64_t* ptr) {
   uint64_t val;
+#if defined(__HIP_PLATFORM_AMD__)
+  val = __hip_atomic_load(ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+#else
   asm volatile("ld.acquire.gpu.global.u64 %0, [%1];" : "=l"(val) : "l"(ptr) : "memory");
+#endif
   return val;
 }
 
