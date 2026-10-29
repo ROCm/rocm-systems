@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from pc_sampling.per_kernel_isa_export import PER_KERNEL_DIRECTORY_NAME
+from pc_sampling.per_source_line_export import SOURCE_LINE_FILE_SUFFIX
 from tests.integration import common as integration_common
 
 config = {}
@@ -973,12 +974,20 @@ def test_analyze_per_kernel_export_output_format(
         return
 
     # Every exported file sits under the absolute path the CSV records for
-    # it, so the paths below are the fixture's own capture-host paths.
-    assert set(common.read_binary_file_tree(workload_export_path / "source")) == {
+    # it, so the paths below are the fixture's own capture-host paths. Each
+    # copy has its per-source-line file beside it.
+    exported_sources = {
         Path("app/projects/rocprofiler-compute/sample/vcopy.cpp"),
         Path(
             "rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel"
             "/include/hip/amd_detail/amd_hip_runtime.h"
+        ),
+    }
+    assert set(common.read_binary_file_tree(workload_export_path / "source")) == {
+        *exported_sources,
+        *(
+            source.with_name(f"{source.name}{SOURCE_LINE_FILE_SUFFIX}")
+            for source in exported_sources
         ),
     }
 

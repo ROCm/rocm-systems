@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 
 from pc_sampling.source_snapshot_analysis import parse_source_frames
 from utils.analysis_orm import (
-    PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT,
     CodeObjectStore,
     Database,
     Dispatch,
@@ -29,6 +28,7 @@ from utils.analysis_orm import (
     SourceFile,
     SourceLine,
     Workload,
+    per_kernel_isa_file_key_columns,
 )
 
 PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
@@ -221,6 +221,25 @@ def fetch_pc_sampling_summary_rows(session: Session) -> list[dict[str, object]]:
             decoded_row["stall_reason"] = json.loads(stall_reason)
         decoded_rows.append(decoded_row)
     return decoded_rows
+
+
+def add_captured_source_file(
+    session: Session,
+    workload: Workload,
+    file_path: str,
+    line_count: int,
+) -> SourceFile:
+    """Store a file read from the source snapshot, with every one of its lines."""
+    source_file = SourceFile(workload=workload, file_path=file_path, md5_checksum="aa")
+    session.add_all([
+        SourceLine(
+            source_file=source_file,
+            line_number=line_number,
+            content=f"line {line_number}",
+        )
+        for line_number in range(1, line_count + 1)
+    ])
+    return source_file
 
 
 # =============================================================================
@@ -1060,7 +1079,7 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
     """The exporter slices the key off by count, so order and count must hold."""
     statement = Database._per_kernel_isa_statement(workload_id=1, stall_reasons=[])
     leading_columns = list(statement.selected_columns)[
-        :PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT
+        : len(per_kernel_isa_file_key_columns())
     ]
 
     assert [column.name for column in leading_columns] == [
@@ -1071,3 +1090,102 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
         "code_object_id",
         "pid",
     ]
+
+
+def test_per_source_line_rows_read_each_lines_state_and_instructions(db_session):
+    """Each source line of a captured file has its sample state and instructions."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    source_file = add_captured_source_file(db_session, workload, "/s/a.cpp", 3)
+    add_captured_source_file(db_session, workload, "/s/hip.h", 2)
+    instruction_lines = {
+        code_object_id: add_pc_sampling_state(
+            db_session,
+            workload=workload,
+            kernel=kernel,
+            pid=42,
+            code_object_id=code_object_id,
+            source=source,
+        ).instruction_line
+        for code_object_id, source in (
+            (5, "/s/hip.h:2 -> /s/a.cpp:2"),
+            (6, "/s/a.cpp:2"),
+            (7, "/s/a.cpp:?"),
+            (8, "/s/absent.cpp:1"),
+        )
+    }
+    # Only a.cpp:2 has a sample state, so hip.h:2 has instructions but no counts.
+    line_state = PCSampleState(
+        source_line=source_file.source_lines[1],
+        total_count=8,
+        issue_count=5,
+        stall_count=3,
+        wave_occupancy_percent=25.0,
+        active_thread_percent=80.0,
+    )
+    db_session.add_all([
+        PCSampleStallReason(
+            pc_sample_state=line_state,
+            stall_reason_lookup=Database.get_or_create_type(
+                PCSampleStallReasonLookup, reason
+            ),
+            count=count,
+        )
+        for reason, count in (("NONE", 1), ("WAITCNT", 2))
+    ])
+    db_session.commit()
+
+    code_object_ids = {
+        instruction_line.instruction_uuid: code_object_id
+        for code_object_id, instruction_line in instruction_lines.items()
+    }
+    rows = [
+        (
+            *row[:-1],
+            sorted(code_object_ids[int(uuid)] for uuid in row[-1].split(",") if uuid),
+        )
+        for row in Database.stream_per_source_line_rows(
+            workload.workload_id, ["NONE", "WAITCNT"]
+        )
+    ]
+
+    empty_counts = (None,) * 7
+    assert rows == [
+        # The "?" row comes first, with the instruction without a source line number.
+        ("w", "s", "/s/a.cpp", None, None, *empty_counts, [7]),
+        ("w", "s", "/s/a.cpp", 1, "line 1", *empty_counts, []),
+        ("w", "s", "/s/a.cpp", 2, "line 2", 8, 5, 3, 25.0, 80.0, 1, 2, [5, 6]),
+        ("w", "s", "/s/a.cpp", 3, "line 3", *empty_counts, []),
+        ("w", "s", "/s/hip.h", 1, "line 1", *empty_counts, []),
+        ("w", "s", "/s/hip.h", 2, "line 2", *empty_counts, [5]),
+    ]
+
+
+@pytest.mark.parametrize("owner_count", [0, 2], ids=["neither", "both"])
+def test_pc_sample_state_needs_exactly_one_owner(db_session, owner_count):
+    """A sample state belongs to an instruction line or a source line, not both."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="k", workload=workload)
+    source_file = add_captured_source_file(db_session, workload, "/s/a.cpp", 1)
+    instruction_line = InstructionLine(
+        code_object_offset=0x10,
+        instruction="v_mov",
+        kernel_symbol=KernelSymbol(
+            code_object_store=CodeObjectStore(
+                code_object_id=5, pid=42, load_base=0x1000, workload=workload
+            ),
+            kernel=kernel,
+        ),
+    )
+    owners = (
+        {
+            "instruction_line": instruction_line,
+            "source_line": source_file.source_lines[0],
+        }
+        if owner_count == 2
+        else {}
+    )
+    db_session.add_all([instruction_line, PCSampleState(total_count=1, **owners)])
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
