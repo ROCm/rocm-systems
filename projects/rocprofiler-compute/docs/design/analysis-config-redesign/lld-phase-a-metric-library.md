@@ -285,9 +285,10 @@ New module `src/utils/metric_library.py`.
 6. Load `variables.yaml` (inherited like the metric files) into
    `MetricLibrary.variables`, in file order.
 
-7. Load `sets.yaml` from the arch directory (inherited along `METRIC_LIBRARY_PARENT_ARCH` like the
-   metric files) into `MetricLibrary.sets: dict[str, SetDefinition]`. Sets only reference
-   metric ids; see [Sets migration](#sets-migration).
+7. Load `sets.yaml` from the arch directory (inherited along
+   `METRIC_LIBRARY_PARENT_ARCH` like the metric files) into `MetricLibrary.sets` (set
+   option -> `title` and `metrics`). Sets only reference metric ids; see
+   [Sets migration](#sets-migration).
 
 `MetricLibrary` class:
 
@@ -295,7 +296,7 @@ New module `src/utils/metric_library.py`.
 class MetricLibrary:
     metrics: dict[str, dict]        # metric id -> its fields
     variables: dict[str, dict]      # variable name -> {formula}, in file order
-    sets: dict[str, SetDefinition]  # Stage 4, sets migration
+    sets: dict[str, dict]           # set option -> {title, metrics}
 
     def get_counters_for_metrics(
         self, metric_ids: list[str], gpu_series: str
@@ -648,10 +649,11 @@ How a set's results are displayed is a Layer 3 concern (see
 
 Sets move from `profile_configs/sets/{arch}_sets.yaml` to
 `metric_library/{arch}/sets.yaml` and switch from numeric positional IDs to string metric
-IDs:
+IDs. Like a metric file, the file maps each set option to its fields: a `title` and the
+list of `metrics`. The unread `description` (every set said "Placeholder") is dropped.
 
 ```yaml
-# Before
+# Before: profile_configs/sets/gfx908_sets.yaml
 sets:
 - title: Compute Throughput Utilization
   set_option: compute_thruput_util
@@ -660,12 +662,10 @@ sets:
   - 11.2.2: SALU Utilization
   - 11.2.3: VALU Utilization
 
-# After
-sets:
-- title: Compute Throughput Utilization
-  set_option: compute_thruput_util
-  description: Placeholder
-  metric:
+# After: metric_library/gfx908/sets.yaml
+compute_thruput_util:
+  title: Compute Throughput Utilization
+  metrics:
   - compute.salu_util
   - compute.valu_util
 ```
@@ -673,13 +673,17 @@ sets:
 - **References only.** A set entry references a metric id and carries no metric fields,
   so a metric is still defined exactly once per architecture. Every referenced id must
   exist on that architecture.
-- **Inheritance.** `sets.yaml` follows the same `inherit` chain as the metric files; for
-  example, gfx941 and gfx942 use gfx940's sets unchanged.
-- **Single-pass check.** Validation uses `get_counters_for_metrics()` to confirm that each
-  set's counters fit in one pass.
+- **Inheritance.** `sets.yaml` follows the same `inherit` chain as the metric files; a
+  child overrides a set's fields, and a list replaces the parent's. gfx941 and gfx942
+  use gfx940's sets unchanged.
+- **Single-pass check.** `tools/validate_metric_library.py` uses
+  `get_counters_for_metrics()` to confirm that each set's counters fit in one pass on
+  every GPU arch the directory serves.
 - **Transition.** Production `--set` and `--list-sets` keep reading
   `profile_configs/sets/` until the cutover. The equivalence checks prove that each
-  string-ID set yields the same counters as the numeric set it replaces.
+  string-ID set yields the same counters as the numeric set it replaces. gfx908 has no
+  `compute_thruput_flops` set: it has no MFMA counters, so the numeric set's rows show
+  no equation and collect nothing (`SETS_WITHOUT_METRICS`).
 
 ### Built-in variable migration
 
@@ -696,7 +700,7 @@ unchanged -- it receives the same `dict[str, str]` regardless of source.
 
 | Tool | What changes |
 |---|---|
-| `validate_sets_metric_ids.py` | Validate `metric_library/{arch}/sets.yaml`: references resolve through `MetricLibrary`, and each set fits one pass. The numeric files keep their positional check until the cutover. |
+| `validate_sets_metric_ids.py` | No change in what it checks: the numeric files keep their positional and one-pass checks until the cutover. Its per-block limit check moves to `utils_counter_defs.counters_over_block_limits()`, which `tools/validate_metric_library.py` also uses for `metric_library/{arch}/sets.yaml`. |
 | `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula`, `peak` and `peak_empirical` keys, with the `!remove` tag accepted, and sorts their top-level keys. Core equation formatting logic (factoring constants out of aggregation) is unchanged. |
 | `hash_manager.py` | No change: it keeps hashing the analysis configs, and `tools/validate_metric_library.py` checks the metric library files. |
 | `verify_against_config_template.py` | No change: `tools/validate_metric_library.py` checks the metric library files, and this script keeps checking the old panel files until the cutover. |
