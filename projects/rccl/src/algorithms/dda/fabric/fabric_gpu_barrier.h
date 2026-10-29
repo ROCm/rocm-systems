@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <memory>
 
-#include "hip_compat.h"
+#include "nccl_device.h"
 #include "algorithms/dda/device/dda_kernel_params.h"
 #include "algorithms/dda/device/device_buffer.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"

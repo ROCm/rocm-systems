@@ -1826,6 +1826,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaColl
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
 target_compile_options(rccl-UnitTestsMicroDdaColl PRIVATE
   "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
+# dda_alltoall_fabric.cu.cpp pulls in alltoall_dda_fabric_tdm.h, which includes "tdm/tdmCopy.h".
+target_include_directories(rccl-UnitTestsMicroDdaColl PRIVATE
+  ${RCCL_HOST_HIPIFY_DIR}/src/device)
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroRmaProxy
