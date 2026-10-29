@@ -12,6 +12,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Resolved issues
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
+* Fixed the cached GPU Direct RDMA verdict being keyed on the GPU alone. The verdict is read off a communicator's own network plugin, and the Socket plugin reports `NCCL_PTR_CUDA` on no device, so a Socket communicator's "no GDR" answered for every later IB communicator on the same GPU in the process — including the children of `ncclCommSplit`. The affected communicator fell back to host staging with nothing in the log explaining it. The cache is now keyed on the plugin as well as the GPU, and a scan that fails part way leaves the slot unprobed instead of caching "no".
 
 ### Known issues
 

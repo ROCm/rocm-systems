@@ -1018,10 +1018,12 @@ TEST_F(PluginNetGdrMicrotestIsolated, ADevicesFailureIsRetried) {
   });
 }
 
-// The slot is zeroed before the scan, so one getProperties failure caches "no GDR".
-// Pins AICOMRCCL-2985; a fix (#11701) flips this pin.
-TEST_F(PluginNetGdrMicrotestIsolated, KnownBug_GetPropertiesFailureCachesNoGdr) {
-  RUN_ISOLATED_TEST("PluginNetGdr_KnownBug_GetPropertiesFailureCachesNoGdr", [this]() {
+// Was KnownBug_GetPropertiesFailureCachesNoGdr, pinning AICOMRCCL-2985: the slot was zeroed
+// before the scan, so a getProperties failure left "no GDR" cached and the GPU never recovered.
+// The verdict is now written once the scan finishes, so a failed scan leaves the slot unprobed
+// and the next call retries -- the same shape as ADevicesFailureIsRetried above. (#11701)
+TEST_F(PluginNetGdrMicrotestIsolated, AGetPropertiesFailureIsRetried) {
+  RUN_ISOLATED_TEST("PluginNetGdr_AGetPropertiesFailureIsRetried", [this]() {
     int gdr = -1;
     g_net[kIb].cudaDevMask = 0b1;
     g_net[kIb].propsResult = ncclRemoteError;
@@ -1029,8 +1031,35 @@ TEST_F(PluginNetGdrMicrotestIsolated, KnownBug_GetPropertiesFailureCachesNoGdr) 
 
     g_net[kIb].propsResult = ncclSuccess;
     ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
+    EXPECT_EQ(gdr, 1);
+    EXPECT_EQ(g_net[kIb].devicesCalls, 2);
+  });
+}
+
+// ROCM-27737. The verdict is read off the communicator's own net, and the Socket plugin reports
+// NCCL_PTR_CUDA on no device. Keyed on the GPU alone, a Socket communicator's "no" answered for
+// every later IB communicator in the process, and the IB net was never probed at all: the GDR
+// path went quiet with nothing in the log to say why. Both GDR tests above use one plugin index,
+// so they pass either way -- this is the case the per-plugin key exists for.
+TEST_F(PluginNetGdrMicrotestIsolated, ASocketVerdictDoesNotAnswerForIb) {
+  RUN_ISOLATED_TEST("PluginNetGdr_ASocketVerdictDoesNotAnswerForIb", [this]() {
+    ncclNet_t socketNet = FakeNet<kSocket>::Make("Socket");
+    g_net[kSocket].ndev = 2;  // cudaDevMask stays 0: Socket offers NCCL_PTR_CUDA nowhere
+    g_net[kIb].ndev = 2;
+    g_net[kIb].cudaDevMask = 0b1;
+
+    int gdr = -1;
+    comm_->ncclNet = &socketNet;
+    comm_->netPluginIndex = 1;
+    ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
     EXPECT_EQ(gdr, 0);
-    EXPECT_EQ(g_net[kIb].devicesCalls, 1);
+
+    // Same process, same GPU, different plugin -- what ncclCommSplit on a Socket parent produces.
+    comm_->ncclNet = &net_;
+    comm_->netPluginIndex = 0;
+    ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
+    EXPECT_EQ(gdr, 1);
+    EXPECT_EQ(g_net[kIb].devicesCalls, 1) << "IB was answered from Socket's slot, not probed";
   });
 }
 
