@@ -3278,6 +3278,53 @@ TEST(WrapMicrotestIsolated, OptThreadBlockSize_SingleNodeUsesHalfThreads) {
       });
 }
 
+// gfx1250's default block is 192 even though the 256-thread cap is unchanged.
+// Covers single-node (which otherwise forces RCCL_SINGLE_NODE_MAX_NTHREADS)
+// and multi-node ring LL (which otherwise forces RCCL_LL_MAX_NTHREADS).
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250DefaultIs192) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250DefaultIs192",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = -1;
+        comm->nNodes = 1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_GFX1250_DEFAULT_NTHREADS, nThreads);
+        comm->nNodes = 2;
+        info.protocol = NCCL_PROTO_LL;
+        nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_GFX1250_DEFAULT_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The 192 default must not lower the cap: an explicit 256-thread request on
+// gfx1250 still launches 256.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250UserOverrideKeeps256) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250UserOverrideKeeps256",
+      []() {
+        g_loadParam = ForceParam("RCCL_THREADS_PER_BLOCK", int64_t(256));
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        comm->nNodes = 1;
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(256, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, OptThreadBlockSize_ReduceScatterSmallCountUsesLLThreads) {
   RUN_ISOLATED_TEST(
       "Wrap_OptThreadBlockSize_ReduceScatterSmallCountUsesLLThreads",

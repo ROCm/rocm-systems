@@ -3359,7 +3359,9 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
     }
     info->algorithm = NCCL_ALGO_RING;
     info->protocol = NCCL_PROTO_SIMPLE;
-    info->nWarps = comm->maxThreads[info->algorithm][info->protocol] / comm->WarpSize;
+    int nt = comm->maxThreads[info->algorithm][info->protocol];
+    rcclOptThreadBlockSize(comm, info, nBytes, nt);
+    info->nWarps = nt / comm->WarpSize;
   }
   return ncclSuccess;
 }

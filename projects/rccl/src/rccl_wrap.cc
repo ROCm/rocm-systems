@@ -2948,6 +2948,14 @@ void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, si
     }
     return;
   }
+  // gfx1250 DPX: 192 threads (6 waves of 32) is the default block. Large-message
+  // scale-up bandwidth is higher than with 256. RCCL_THREADS_PER_BLOCK still
+  // overrides this, and the 256-thread cap is unchanged. Channel selection
+  // still uses maxThreads.
+  if (comm->archName && IsArchMatch(comm->archName, "gfx1250")) {
+    nThreads = RCCL_GFX1250_DEFAULT_NTHREADS;
+    return;
+  }
   if (info->algorithm == NCCL_ALGO_TREE) nThreads = maxNthreads[NCCL_PROTO_SIMPLE]; // Tree now uses all threads always.
   if (info->algorithm == NCCL_ALGO_PAT) nThreads = maxNthreads[NCCL_PROTO_SIMPLE];
   if (comm->nNodes == 1)
