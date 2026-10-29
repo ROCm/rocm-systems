@@ -44,6 +44,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -368,6 +369,14 @@ RunStats run_input_once(
   if (!wf)
     throw std::runtime_error("execution fuzz wave allocation failed");
   wf->set_process_id(1);
+  // Arbitrary streams may contain a GWS barrier without a preceding GWS INIT.
+  // A compute unit without a CP or engine rejects such a barrier by throwing.
+  // Arm every process-scoped resource at zero so fuzzing starts from a defined
+  // state and can exercise GWS instructions. This deliberately trades detection
+  // of missing guest setup for that coverage; a direct compute-unit test still
+  // covers the rejection.
+  for (uint32_t rid = 0; rid < amdgpu::GwsDevice::kResourceCount; ++rid)
+    cu->gws_init(*wf, rid, 0);
   wf->set_address_space(address_space);
   wf->set_lds_size(arch_lds_bytes(info.arch));
   const uint64_t initial_exec = next_random(seed) | 1;

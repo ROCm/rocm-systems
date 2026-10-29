@@ -75,7 +75,11 @@ diagnostics, independently of filters.
 
 ## Preparing and publishing measurements
 
-The benchmark workflow runs on relevant develop pushes or manual dispatch, not a scheduled trigger. It invokes the corpus `performance-v1.toml` manifest once with both target configs and no target, case, or thread-policy selector, using the manifest's sampling defaults. The selected corpus revision is defined by `CORPUS_SHA` in the [benchmark workflow](../../../../../.github/workflows/rocjitsu-benchmarks.yml). This configuration does not establish native or hosted execution acceptance. The runner selects supported combinations and checkpoints one consolidated `run.json`, alongside per-target/policy diagnostics. Before a side-branch benchmark starts, a lightweight job snapshots `develop` and records the dispatched commit's merge-base with that immutable revision. The optional `pull_request_number` input also records an open same-repository PR when its head branch and SHA match the selected workflow branch; without that input, the run keeps its base but has no PR metadata. Develop runs reject the PR input and omit both fields.
+The benchmark workflow runs on relevant develop pushes or manual dispatch, not a scheduled trigger. It invokes the corpus `performance-v1.toml` manifest once with both target configs and no target, case, or thread-policy selector, using the manifest's sampling defaults. The selected corpus revision is defined by `CORPUS_SHA` in the [benchmark workflow](../../../../../.github/workflows/rocjitsu-benchmarks.yml). This configuration does not establish native or hosted execution acceptance. The runner selects supported combinations and checkpoints one consolidated `run.json`, alongside per-target/policy diagnostics.
+
+For manual runs, **Use workflow from** selects the branch and workflow/tooling revision. The optional `source_commit` accepts a full SHA or an unambiguous 7–40 hexadecimal prefix from that branch's history; blank snapshots the selected branch tip once before preparation. Short prefixes resolve to a full SHA before ancestry validation or checkout; unknown, ambiguous and out-of-branch commits fail. Benchmark checkout, build checks and runner attribution use that immutable source SHA, which may be older than the workflow SHA. Automatic develop pushes measure the event SHA even if develop moves afterward. The optional `pull_request_number` is metadata only: for a side branch it must identify an open same-repository PR from that branch to develop, with the selected commit in its head history. The early metadata job records the selected source commit's merge-base with a frozen develop tip. Develop runs reject PR metadata and omit base/PR fields.
+
+Manual `publish_results` defaults to true and applies to both develop and side-branch workflows. The input warns that side-branch runs use side-branch workflow tooling. Disable publishing for artifact-only tests. Automatic develop pushes still publish normally. Before artifact upload, result JSON records the workflow SHA in the existing `publication.workflow_commit_sha` field, including when publishing is disabled. Preparation tooling and publication validation come from the workflow revision, so selecting an older source commit does not select older orchestration code. Publication retains the measured SHA in raw provenance and the workflow SHA in `publication.workflow_commit_sha`; source branch/message/base/PR describe the selected benchmark source.
 
 ### Isolated preparation before measurement
 
@@ -95,9 +99,10 @@ The workflow is the timeout authority. The benchmark job has a 120-minute ceilin
 Prepare pinned dependencies, wheel, native adapter and four generated variants
   → validate preparation provenance and artifacts
   → run supported target/policy combinations in one corpus invocation
+  → record publication.workflow_commit_sha in run.json (also for artifact-only runs)
   → upload raw result directories as a GitHub Actions artifact
   → publish job downloads that artifact
-  → fill publication context only
+  → fill remaining publication context without changing measured results
   → copy the run into the branch-appropriate results directory
   → structurally update index.json once
   → ordinary Git commit + push
