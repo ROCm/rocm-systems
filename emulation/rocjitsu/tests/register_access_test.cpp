@@ -456,7 +456,7 @@ TEST(RegisterAccessTest, WriteRegionStoresOnlyObservedBytes) {
   EXPECT_EQ(fx.cu->read_vgpr(reg, 3), 0xAA2233DDu);
 }
 
-TEST(RegisterAccessTest, BulkLaneWritesMatchScalarWritesAndObserveEachRegisterOnce) {
+TEST(RegisterAccessTest, WriteRegionSetLanesMatchesScalarWritesAndObservesEachRegisterOnce) {
   for (uint32_t wave_size : {32u, 64u}) {
     Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, kVgprsPerWave, wave_size);
     ASSERT_NE(fx.wf, nullptr);
@@ -470,24 +470,24 @@ TEST(RegisterAccessTest, BulkLaneWritesMatchScalarWritesAndObserveEachRegisterOn
     RegisterAccess regs(*fx.wf);
     for (uint64_t mask : {uint64_t{0}, full_mask, full_mask & uint64_t{0xaaaaaaaaaaaaaaaa},
                           uint64_t{1} << (wave_size - 1)}) {
-      for (uint8_t bytes = 0; bytes < 16; ++bytes) {
+      for (uint8_t byte_mask = 0; byte_mask < 16; ++byte_mask) {
         for (uint32_t reg = 0; reg < 2; ++reg)
           for (uint32_t lane = 0; lane < wave_size; ++lane) {
             fx.cu->write_vgpr(bulk_base + reg, lane, 0xAABBCC00u + lane);
             fx.cu->write_vgpr(scalar_base + reg, lane, 0xAABBCC00u + lane);
           }
         fx.plugin->writes.clear();
-        auto bulk = regs.write_vgpr_region(bulk_base, 2, mask, bytes);
+        auto bulk = regs.write_vgpr_region(bulk_base, 2, mask, byte_mask);
         bulk.set_lanes(0, values);
         bulk.set_lanes(1, values);
-        ASSERT_EQ(fx.plugin->writes.size(), mask && bytes ? 2u : 0u);
+        ASSERT_EQ(fx.plugin->writes.size(), mask && byte_mask ? 2u : 0u);
         for (const auto &event : fx.plugin->writes) {
           EXPECT_EQ(event.lane_mask, mask);
-          EXPECT_EQ(event.byte_mask, bytes);
+          EXPECT_EQ(event.byte_mask, byte_mask);
         }
         EXPECT_TRUE(fx.plugin->reads.empty());
 
-        auto scalar = regs.write_vgpr_region(scalar_base, 2, mask, bytes);
+        auto scalar = regs.write_vgpr_region(scalar_base, 2, mask, byte_mask);
         for (uint32_t reg = 0; reg < 2; ++reg)
           for (uint32_t lane = 0; lane < wave_size; ++lane) {
             scalar.set_lane(reg, lane, values[lane]);
@@ -499,23 +499,23 @@ TEST(RegisterAccessTest, BulkLaneWritesMatchScalarWritesAndObserveEachRegisterOn
   }
 }
 
-TEST(RegisterAccessTest, BulkLaneWritesSnapshotOverlappingInput) {
+TEST(RegisterAccessTest, WriteRegionSetLanesSnapshotsOverlappingInput) {
   Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(fx.wf, nullptr);
   ASSERT_EQ(fx.wf->wf_size(), 32u);
   const uint32_t reg = fx.vgpr_base() + 7;
   RegisterAccess regs(*fx.wf);
   for (uint64_t mask : {0xffffffffULL, 0xaaaaaaaaULL}) {
-    for (uint8_t bytes : {0xFu, 0x5u}) {
+    for (uint8_t byte_mask : {0xFu, 0x5u}) {
       // A wave32 occupies half of this physical wave64 register. The source
       // starts one word later to exercise overlapping source and destination.
       for (uint32_t lane = 0; lane < 64; ++lane)
         fx.cu->write_vgpr(reg, lane, 0xAABB0000u + lane);
       const auto *storage =
           reinterpret_cast<const uint32_t *>(std::as_const(*fx.cu).raw_vgpr_data(reg));
-      auto writes = regs.write_vgpr_region(reg, 1, mask, bytes);
+      auto writes = regs.write_vgpr_region(reg, 1, mask, byte_mask);
       writes.set_lanes(0, std::span<const uint32_t>(storage + 1, 32));
-      const uint32_t bit_mask = bytes == 0xF ? 0xffffffffu : 0x00ff00ffu;
+      const uint32_t bit_mask = byte_mask == 0xF ? 0xffffffffu : 0x00ff00ffu;
       for (uint32_t lane = 0; lane < 64; ++lane) {
         uint32_t expected = 0xAABB0000u + lane;
         if (lane < 32 && (mask & (uint64_t{1} << lane)))
@@ -526,7 +526,7 @@ TEST(RegisterAccessTest, BulkLaneWritesSnapshotOverlappingInput) {
   }
 }
 
-TEST(RegisterAccessTest, BulkLaneWritesRespectDeniedOwnership) {
+TEST(RegisterAccessTest, WriteRegionSetLanesRespectsDeniedOwnership) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, 2);
   ASSERT_NE(fx.wf, nullptr);
   auto *other = fx.cu->dispatch_wf(1, 0, kSgprsPerWave, kVgprsPerWave);
