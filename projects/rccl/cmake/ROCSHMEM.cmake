@@ -86,6 +86,19 @@ function(add_rocshmem_targets)
         endif()
     endif()
 
+    set(_rocshmem_config_in "${ROCSHMEM_SOURCE_DIR}/cmake/rocshmem_config.h.in")
+    if(EXISTS "${_rocshmem_config_in}")
+        file(STRINGS "${_rocshmem_config_in}" _constmem_gate REGEX "cmakedefine[ \t]+USE_CONSTMEM")
+        if(NOT _constmem_gate)
+            message(FATAL_ERROR
+                "rocSHMEM source at ${ROCSHMEM_SOURCE_DIR} predates the USE_CONSTMEM "
+                "gate (cmake/rocshmem_config.h.in lacks '#cmakedefine USE_CONSTMEM'). "
+                "rccl's GIN build no longer copies constmem.hpp and requires the gate. "
+                "Bump ROCSHMEM_MONO_HASH (cmake/ROCSHMEM.cmake:27) to a commit that "
+                "includes it, or point -DROCSHMEM_SOURCE_DIR at such a tree.")
+        endif()
+    endif()
+
     # Acquiring the rocSHMEM *library* (pre-built find or build-from-source) is
     # only for ENABLE_ROCSHMEM, which links librocshmem.a into librccl.so. A GIN
     # build needs nothing from that library: its host code is compiled in from
