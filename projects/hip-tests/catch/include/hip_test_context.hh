@@ -145,6 +145,17 @@ class TestContext {
 
 static bool _log_enable = (!TestContext::getEnvVar("HT_LOG_ENABLE").empty() ? true : false);
 
+// AMD only: set when a HIP API call returns an error, via the interposed
+// __hipOnError hook in the listener. Process-wide and sticky. Used as the
+// AMD signal that the HIP runtime is initialized (NVIDIA probes CUDA directly);
+// every sticky last-error flows through __hipOnError, so it covers direct HIP
+// calls that bypass the check macros.
+inline std::atomic<bool> g_hipErrorWasSet{false};
+
+// Set by the last-error-reset listener when strict mode saw an unconsumed error;
+// main() turns it into a non-zero exit after Catch and context cleanup finish.
+inline std::atomic<bool> g_hipStrictLastErrorFailed{false};
+
 // printing logs
 #define LogPrintf(format, ...)                                                                     \
   {                                                                                                \

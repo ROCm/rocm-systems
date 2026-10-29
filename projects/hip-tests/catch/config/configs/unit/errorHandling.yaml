@@ -48,6 +48,8 @@ errorHandling:
   Unit_hipGetLastError_With_Thread: *level_default
   Unit_hipGetLastError_MultiProcess: *level_default
   Unit_hipGetLastError_Kernel_Invalid_Config: *level_default
+  Unit_hipLastErrorReset_LeaveError: *level_default
+  Unit_hipLastErrorReset_SeesCleanState: *level_default
   Unit_hipPeekAtLastError_Positive_Basic:
     <<: *level_default
     tags: [smoke, P0]
