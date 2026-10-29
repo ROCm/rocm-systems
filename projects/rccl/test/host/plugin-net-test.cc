@@ -1018,10 +1018,12 @@ TEST_F(PluginNetGdrMicrotestIsolated, ADevicesFailureIsRetried) {
   });
 }
 
-// The slot is zeroed before the scan, so one getProperties failure caches "no GDR".
-// Pins AICOMRCCL-2985; a fix (#11701) flips this pin.
-TEST_F(PluginNetGdrMicrotestIsolated, KnownBug_GetPropertiesFailureCachesNoGdr) {
-  RUN_ISOLATED_TEST("PluginNetGdr_KnownBug_GetPropertiesFailureCachesNoGdr", [this]() {
+// Was KnownBug_GetPropertiesFailureCachesNoGdr, pinning AICOMRCCL-2985: the slot was zeroed
+// before the scan, so a getProperties failure left "no GDR" cached and the GPU never recovered.
+// The verdict is now written once the scan finishes, so a failed scan leaves the slot unprobed
+// and the next call retries -- the same shape as ADevicesFailureIsRetried above. (#11701)
+TEST_F(PluginNetGdrMicrotestIsolated, AGetPropertiesFailureIsRetried) {
+  RUN_ISOLATED_TEST("PluginNetGdr_AGetPropertiesFailureIsRetried", [this]() {
     int gdr = -1;
     g_net[kIb].cudaDevMask = 0b1;
     g_net[kIb].propsResult = ncclRemoteError;
@@ -1029,8 +1031,8 @@ TEST_F(PluginNetGdrMicrotestIsolated, KnownBug_GetPropertiesFailureCachesNoGdr) 
 
     g_net[kIb].propsResult = ncclSuccess;
     ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
-    EXPECT_EQ(gdr, 0);
-    EXPECT_EQ(g_net[kIb].devicesCalls, 1);
+    EXPECT_EQ(gdr, 1);
+    EXPECT_EQ(g_net[kIb].devicesCalls, 2);
   });
 }
 
