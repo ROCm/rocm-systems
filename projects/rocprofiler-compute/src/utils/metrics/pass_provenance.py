@@ -223,12 +223,12 @@ def select_pass_with_normalization_fallback(
     layout: PassLayout,
     gpu_series: str,
 ) -> Tuple[Optional[str], bool]:
-    """Select one pass. SQ_WAVES and GRBM_GUI_ACTIVE are never dropped.
+    """Select one pass. SQ_WAVES, GRBM_GUI_ACTIVE, and GRBM_GUI_ACTIVE_sum stay.
 
     Returns (pass_key, relaxed). pass_key is None when no pass holds the
     counters that must stay together. relaxed is true only when removing a
-    runtime normalization counter other than SQ_WAVES or GRBM_GUI_ACTIVE
-    produced a qualifying pass.
+    runtime normalization counter other than those three produced a qualifying
+    pass. GRBM_GUI_ACTIVE_sum is the gfx1250 per-cycle divisor.
     """
     chosen = select_pass(required, layout)
     if chosen is not None:
@@ -252,7 +252,11 @@ def select_pass_with_normalization_fallback(
 
 # Dividing by these counters across passes is not a same-pass result.
 # Relaxing them would read another pass's copy.
-_SAME_PASS_COUNTERS = frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"})
+_SAME_PASS_COUNTERS = frozenset({
+    "SQ_WAVES",
+    "GRBM_GUI_ACTIVE",
+    "GRBM_GUI_ACTIVE_sum",
+})
 
 _UNSET_EXPRESSION = "None"
 

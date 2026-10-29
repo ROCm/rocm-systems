@@ -268,7 +268,11 @@ class cli_analysis(OmniAnalyze_Base):
                 process_ml_api_trace_output(workload, path_info[0])
                 pmc_group_keys = self.apply_operator_filter(workload, path_info[0])
                 labels = _labels_for_backends(list(workload.operator_patterns))
-                workload.raw_pmc, slot_to_id = file_io.create_df_pmc_with_slot_ids(
+                (
+                    workload.raw_pmc,
+                    slot_to_id,
+                    workload.pmc_pass_layout,
+                ) = file_io.create_df_pmc_with_slot_ids(
                     path_info[0],
                     args.verbose,
                 )
