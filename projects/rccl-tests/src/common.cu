@@ -2528,7 +2528,7 @@ testResult_t run() {
   }
 
   const char* tlsPsk = getenv("NCCL_TESTS_TLS_PSK");
-  if (tlsPsk && tlsPsk[0]) {
+  if (tlsPsk) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,32,0)
     // Looked up at run time: a direct reference would keep the binary from loading against
     // an older librccl when it is linked with -z now or run with LD_BIND_NOW.
