@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "aql_queue.h"
 #include "config_test_util.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -465,6 +466,44 @@ protected:
   uint32_t completions = 0, successors = 0;
 };
 
+TEST_F(Pm4DispatchFlushTest, AqlVendorIbFlushFailurePreventsWritesCompletionAndSuccessor) {
+  constexpr uint64_t kWritePointer = 0x210;
+  constexpr uint64_t kDoorbell = 0x218;
+  constexpr uint64_t kSignal = 0x800;
+  constexpr uint32_t kIb = 0x900;
+  constexpr uint32_t kSuccessorIb = 0xa00;
+  constexpr uint32_t kOutput = 0xb00;
+  constexpr uint32_t kSuccessorOutput = 0xb04;
+  const std::array words{0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+  const std::array successor{0xc0033700u, 5u << 8, kSuccessorOutput, 0u, 99u};
+  for (size_t index = 0; index < words.size(); ++index) {
+    memory->store<uint32_t>(kIb + index * 4, words[index]);
+    memory->store<uint32_t>(kSuccessorIb + index * 4, successor[index]);
+  }
+  memory->store(kRing, test::make_pm4_ib_packet(kIb, words.size(), kSignal));
+  memory->store(kRing + kAqlPacketBytes, test::make_pm4_ib_packet(kSuccessorIb, successor.size()));
+  memory->store<uint64_t>(kSignal + 8, 1);
+  memory->store<uint64_t>(kWritePointer, 2);
+  memory->store<uint64_t>(kDoorbell, 2);
+  ASSERT_NE(cp->register_queue({.address_space = address_space,
+                                .queue_id = 1,
+                                .ring_base_va = kRing,
+                                .ring_size = 2 * kAqlPacketBytes,
+                                .read_ptr_va = kReadPointer,
+                                .write_ptr_va = kWritePointer,
+                                .doorbell_va = kDoorbell,
+                                .doorbell_mode = QueueDoorbellMode::VmPolled}),
+            0u);
+  ASSERT_NO_FATAL_FAILURE(inject_flush_failure());
+  engine->schedule_event_now(cp->doorbell_event());
+  for (unsigned step = 0; step < 100 && !cp->queue_faulted_for_test(1, 0); ++step)
+    EXPECT_NO_THROW(service());
+  EXPECT_TRUE(cp->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kSuccessorOutput), 0u);
+  EXPECT_EQ(memory->load<uint64_t>(kSignal + 8), 1u);
+}
+
 TEST_F(Pm4DispatchFlushTest, AdmissionFlushFailurePreventsDispatchAndSuccessor) {
   ASSERT_NO_FATAL_FAILURE(inject_flush_failure());
   ASSERT_NO_FATAL_FAILURE(submit_dispatch(false));
@@ -499,7 +538,8 @@ TEST_F(Pm4ComputeQueueTest, ForeignFlushFailureDoesNotBlockFreshQueues) {
   ASSERT_EQ(l2->writeback_line(kDirtyLine, dirty.data(), Mtype::RW, 1), VmAccessOutcome::Complete);
   memory->fail_write(kDirtyLine, VmAccessOutcome::Faulted);
   auto healthy_memory = std::make_shared<Pm4QueueMemory>();
-  const auto healthy_space = gpu_vm.register_translated(2, healthy_memory, healthy_memory);
+  const AddressSpaceHandle healthy_space =
+      gpu_vm.register_translated(2, healthy_memory, healthy_memory);
   ASSERT_TRUE(healthy_space);
   constexpr uint32_t kOutput = 0x300;
   const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
