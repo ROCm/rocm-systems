@@ -133,7 +133,7 @@ struct IpcHandleKeyHash {
 /// @brief Exported IPC object stored in the driver's global IPC store.
 struct IpcObject {
   uint32_t share_handle[4];
-  int backing_memfd = -1;
+  int backing_fd = -1;
   std::shared_ptr<GemObject> bo_state;
   uint64_t allocation_size = 0;
   uint32_t allocation_flags = 0;
@@ -307,6 +307,9 @@ public:
   int ioctl(unsigned long request, void *arg) override;
   void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) override;
   int munmap(void *addr, size_t length) override;
+
+  /// @brief Look up KFD mmap backing using the local process.
+  [[nodiscard]] int get_mmap_backing(off_t offset) const;
   /// @}
 
   /// @brief Daemon-mode process lifecycle. Thread-safe for concurrent clients.
@@ -363,11 +366,11 @@ public:
   /// WAIT_EVENTS unblock and their jthread joins can complete.
   void close_all_processes();
 
-  [[nodiscard]] int get_mmap_memfd(uint32_t process_id, off_t offset) const;
+  /// @brief Look up backing for a process's KFD mmap offset.
+  /// @details Returns a borrowed BO, doorbell, or event-page descriptor (memfd or socket token),
+  /// or -1 when no backing is available.
+  [[nodiscard]] int get_mmap_backing(uint32_t process_id, off_t offset) const;
   /// @}
-
-  /// @brief Local-mode get_mmap_memfd (uses local process).
-  [[nodiscard]] int get_mmap_memfd(off_t offset) const;
 
   void setup_topology(const Sysfs::GpuInfo &gpu);
   void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
@@ -571,7 +574,7 @@ private:
   void *dispatch_mmap(KfdProcess &proc, void *addr, size_t length, int prot, int flags,
                       off_t offset);
   int dispatch_munmap(KfdProcess &proc, void *addr, size_t length);
-  int dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const;
+  int dispatch_get_mmap_backing(KfdProcess &proc, off_t offset) const;
 
   int get_process_apertures_ioctl(void *arg) override;
   int acquire_vm_ioctl(void *arg) override;

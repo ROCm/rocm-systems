@@ -28,9 +28,9 @@ on:
         default: "ROCm/rocjitsu-test-corpus"
         required: true
       corpus_ref:
-        description: "Branch, tag, or SHA used by HIP, race, and DBT corpus tests"
-        # Last updated on 2026/10/16.
-        default: "e191fc247b8c04f984f41cf2b2a83ff89d6a0854"
+        description: "Branch, tag, or SHA used by HIP, race, file-limit, and DBT corpus tests"
+        # Last updated on 2026/10/23.
+        default: "ce33677b60a4223972e910c9a04b468c2284e4c3"
         required: true
       vulkan_corpus_ref:
         description: "Branch, tag, or SHA used by the Vulkan compute/buffer CTS tests"
@@ -56,8 +56,8 @@ env:
   ROCJITSU_VULKAN_CORPUS_REF: 4c7fdd08d55bc1801cf1525732d6cabad06e05de
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
-  # Pins HIP, race, and DBT together; keep this equal to the corpus_ref default.
-  ROCJITSU_DBT_CORPUS_REF: e191fc247b8c04f984f41cf2b2a83ff89d6a0854
+  # Pins HIP, race, file-limit, and DBT tests; keep equal to the corpus_ref default.
+  ROCJITSU_DBT_CORPUS_REF: ce33677b60a4223972e910c9a04b468c2284e4c3
   ROCJITSU_DBT_SHA_FRAGMENTS: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/fragments
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
   ROCM_SDK_VERSION: 10.1.0a20260812
@@ -205,7 +205,6 @@ jobs:
             shared/machine-readable-isa/isa
 
       - name: Checkout corpus
-        if: matrix.run_simulator_corpus
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
@@ -447,6 +446,12 @@ jobs:
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      - name: Test HIP file limits from the corpus
+        shell: bash
+        run: |
+          ROCM_PATH="$(rocm-sdk path --root)" \
+            bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-file-limit-tests.sh"
 
       # This lane exists to race the engine's worker threads against each
       # other, and the shipped configs get there by omitting num_threads and
