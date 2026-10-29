@@ -222,6 +222,78 @@ TEST(RefCounted, ForwardsMoveOnlyValuesAndValueInitializesScalars) {
   EXPECT_EQ(zero->value, 0);
 }
 
+using NonAtomicIntPtr = util::IntrusiveSharedPtr<util::RefCountedNonAtomic<int>>;
+using ConstNonAtomicIntPtr = util::IntrusiveSharedPtr<const util::RefCountedNonAtomic<int>>;
+
+static_assert(!std::is_copy_constructible_v<util::RefCountedNonAtomic<int>>);
+static_assert(!std::is_move_constructible_v<util::RefCountedNonAtomic<int>>);
+static_assert(!std::is_copy_assignable_v<util::RefCountedNonAtomic<int>>);
+static_assert(!std::is_move_assignable_v<util::RefCountedNonAtomic<int>>);
+static_assert(
+    std::is_same_v<decltype(std::declval<ConstNonAtomicIntPtr>()->ref_count()), uint32_t>);
+static_assert(std::is_same_v<decltype((std::declval<ConstNonAtomicIntPtr>()->value)), const int &>);
+
+TEST(RefCountedNonAtomic, CopiesRetainAndMovesTransferUntilFinalRelease) {
+  using Pointer = util::IntrusiveSharedPtr<util::RefCountedNonAtomic<Tracked>>;
+  std::atomic<int> destroyed{0};
+  {
+    auto owner = Pointer::make(destroyed);
+    EXPECT_EQ(owner->ref_count(), 1u);
+    auto copy = owner;
+    EXPECT_EQ(owner->ref_count(), 2u);
+    auto moved = std::move(copy);
+    EXPECT_FALSE(copy);
+    EXPECT_EQ(moved.get(), owner.get());
+    EXPECT_EQ(moved->ref_count(), 2u);
+    owner.reset();
+    EXPECT_EQ(moved->ref_count(), 1u);
+    EXPECT_EQ(destroyed.load(), 0);
+  }
+  EXPECT_EQ(destroyed.load(), 1);
+}
+
+TEST(RefCountedNonAtomic, ConstConversionRetainsOrTransfersOwnership) {
+  auto owner = NonAtomicIntPtr::make(42);
+  ConstNonAtomicIntPtr copy = owner;
+  EXPECT_EQ(owner->ref_count(), 2u);
+  ConstNonAtomicIntPtr moved = std::move(owner);
+  EXPECT_FALSE(owner);
+  EXPECT_EQ(copy.get(), moved.get());
+  EXPECT_EQ(moved->ref_count(), 2u);
+  copy.reset();
+  EXPECT_EQ(moved->ref_count(), 1u);
+  EXPECT_EQ(moved->value, 42);
+}
+
+TEST(RefCountedNonAtomic, ForwardsMoveOnlyValuesAndValueInitializesScalars) {
+  using Pointer = util::IntrusiveSharedPtr<util::RefCountedNonAtomic<std::unique_ptr<int>>>;
+  auto value = Pointer::make(std::make_unique<int>(17));
+  EXPECT_EQ(*value->value, 17);
+  auto zero = NonAtomicIntPtr::make();
+  EXPECT_EQ(zero->value, 0);
+}
+
+TEST(RefCountedNonAtomic, ConstructionFailureUnwindsMembers) {
+  using Pointer = util::IntrusiveSharedPtr<util::RefCountedNonAtomic<Throws>>;
+  std::atomic<int> destroyed{0};
+  EXPECT_THROW(static_cast<void>(Pointer::make(destroyed)), std::runtime_error);
+  EXPECT_EQ(destroyed.load(), 1);
+}
+
+TEST(RefCountedNonAtomic, DetachedVectorPreservesOtherOwners) {
+  using Pointer = util::IntrusiveSharedPtr<util::RefCountedNonAtomic<std::vector<int>>>;
+  auto owner = Pointer::make(std::vector<int>{1, 2});
+  auto copy = owner;
+  EXPECT_EQ(owner->ref_count(), 2u);
+  copy = Pointer::make(copy->value);
+  copy->value[0] = 3;
+  copy->value.push_back(4);
+  EXPECT_EQ(owner->value, (std::vector<int>{1, 2}));
+  EXPECT_EQ(copy->value, (std::vector<int>{3, 2, 4}));
+  EXPECT_EQ(owner->ref_count(), 1u);
+  EXPECT_EQ(copy->ref_count(), 1u);
+}
+
 template <typename T> void expect_isolated(const util::RefCountedCacheAligned<T> &object) {
   constexpr auto size = util::detail::kDestructiveInterferenceSize;
   const auto counter = reinterpret_cast<std::uintptr_t>(&object.ref_count());

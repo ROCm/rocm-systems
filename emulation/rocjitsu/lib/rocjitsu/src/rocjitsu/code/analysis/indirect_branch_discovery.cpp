@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/intrusive_shared_ptr.h"
 
 #include <algorithm>
 #include <array>
@@ -2348,6 +2349,8 @@ class RestoredSgprFacts {
   };
 
   using Storage = std::vector<Entry>;
+  using CountedStorage = util::RefCountedNonAtomic<Storage>;
+  using StoragePtr = util::IntrusiveSharedPtr<CountedStorage>;
 
 public:
   [[nodiscard]] const StashedPcHalf *find(uint16_t sgpr) const {
@@ -2374,64 +2377,66 @@ public:
   void erase(uint16_t sgpr) {
     if (!values_)
       return;
-    const auto found = std::ranges::lower_bound(*values_, sgpr, {}, &Entry::sgpr);
-    if (found == values_->end() || found->sgpr != sgpr)
+    const auto found = std::ranges::lower_bound(values_->value, sgpr, {}, &Entry::sgpr);
+    if (found == values_->value.end() || found->sgpr != sgpr)
       return;
-    const size_t index = static_cast<size_t>(found - values_->begin());
+    const size_t index = static_cast<size_t>(found - values_->value.begin());
     Storage &updated = writable_values();
     updated.erase(updated.begin() + static_cast<Storage::difference_type>(index));
     reset_if_empty();
   }
 
   template <typename Predicate> void erase_if(Predicate &&predicate) {
-    if (!values_ ||
-        std::ranges::none_of(*values_, [&](const Entry &entry) { return predicate(entry.sgpr); }))
+    if (!values_ || std::ranges::none_of(values_->value,
+                                         [&](const Entry &entry) { return predicate(entry.sgpr); }))
       return;
     std::erase_if(writable_values(), [&](const Entry &entry) { return predicate(entry.sgpr); });
     reset_if_empty();
   }
 
   void intersect_with(const RestoredSgprFacts &other) {
-    if (!values_ || values_ == other.values_)
+    if (!values_ || values_.get() == other.values_.get())
       return;
     const auto conflicts = [&](const Entry &entry) {
       const StashedPcHalf *incoming = other.find(entry.sgpr);
       return incoming == nullptr || *incoming != entry.half;
     };
-    if (std::ranges::none_of(*values_, conflicts))
+    if (std::ranges::none_of(values_->value, conflicts))
       return;
     std::erase_if(writable_values(), conflicts);
     reset_if_empty();
   }
 
-  [[nodiscard]] bool empty() const { return !values_ || values_->empty(); }
-  [[nodiscard]] size_t size() const { return values_ ? values_->size() : 0; }
+  [[nodiscard]] bool empty() const { return !values_ || values_->value.empty(); }
+  [[nodiscard]] size_t size() const { return values_ ? values_->value.size() : 0; }
   void clear() { values_.reset(); }
 
   friend bool operator==(const RestoredSgprFacts &lhs, const RestoredSgprFacts &rhs) {
-    return lhs.values_ == rhs.values_ || lhs.values() == rhs.values();
+    return lhs.values_.get() == rhs.values_.get() || lhs.values() == rhs.values();
   }
 
 private:
   [[nodiscard]] const Storage &values() const {
     static const Storage empty;
-    return values_ ? *values_ : empty;
+    return values_ ? values_->value : empty;
   }
 
   [[nodiscard]] Storage &writable_values() {
     if (!values_)
-      values_ = std::make_shared<Storage>();
-    else if (!values_.unique())
-      values_ = std::make_shared<Storage>(*values_);
-    return *values_;
+      values_ = StoragePtr::make();
+    else if (values_->ref_count() != 1)
+      values_ = StoragePtr::make(values_->value);
+    return values_->value;
   }
 
   void reset_if_empty() {
-    if (values_->empty())
+    if (values_->value.empty())
       values_.reset();
   }
 
-  std::shared_ptr<Storage> values_;
+  // All owners are local flow states in one synchronous analysis invocation.
+  // Concurrent invocations allocate independent backing storage.
+  StoragePtr values_;
 };
 
 struct VectorLaneFlowState {

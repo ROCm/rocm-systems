@@ -125,6 +125,33 @@ template <typename T> struct RefCounted final : detail::ReferenceCount<RefCounte
   T value;
 };
 
+/// @brief Compact non-atomic counter and value storage for IntrusiveSharedPtr.
+/// @details All ownership operations, including handle destruction and count
+/// inspection, must be confined to one thread or externally synchronized across
+/// every handle sharing the object. Access the wrapped T via value.
+template <typename T> struct RefCountedNonAtomic final {
+  template <typename... Args>
+  explicit RefCountedNonAtomic(Args &&...args) : value(std::forward<Args>(args)...) {}
+
+  RefCountedNonAtomic(const RefCountedNonAtomic &) = delete;
+  RefCountedNonAtomic(RefCountedNonAtomic &&) = delete;
+  RefCountedNonAtomic &operator=(const RefCountedNonAtomic &) = delete;
+  RefCountedNonAtomic &operator=(RefCountedNonAtomic &&) = delete;
+
+  void add_ref() const noexcept { ++refs_; }
+  void release_ref() const noexcept {
+    if (--refs_ == 0)
+      delete this;
+  }
+
+  [[nodiscard]] uint32_t ref_count() const noexcept { return refs_; }
+
+  T value;
+
+private:
+  mutable uint32_t refs_{1};
+};
+
 /// @brief Counter and value storage with the value isolated from the counter.
 /// @details Padding separates the value from the counter by the compile-time
 /// destructive interference size (128 bytes if the standard constant is absent).
