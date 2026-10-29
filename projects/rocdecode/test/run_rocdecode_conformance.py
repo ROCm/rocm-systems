@@ -65,6 +65,10 @@ SKIP_BANNER = "SKIPPING rocDecode conformance"
 
 PASSED = "PASSED"
 FAILED = "FAILED"
+# Every stream in the codec's set was skipped because this GPU cannot handle that
+# codec. Nothing was decoded, so it is not a pass; nothing was wrong either, so it
+# does not fail the sweep.
+SKIPPED = "SKIPPED"
 # A requested codec whose corpus is absent. Reported separately from FAILED so the
 # summary distinguishes "decoded wrong" from "never had the streams", but counted
 # as a failure either way.
@@ -421,6 +425,14 @@ def build_videodecode(env: Dict[str, str], rocm_path: Path, build_dir: Path) -> 
     return exe
 
 
+# run_rocDecode_Conformance.py ends by printing one of three verdicts: PASSED,
+# FAILED or SKIPPED. Only two of those reach the exit status -- a sweep whose
+# streams the GPU cannot decode has nothing to report as failed, so it exits 0
+# exactly like a pass. The verdict line is therefore the only place the skip is
+# visible, which is why this is matched rather than read off the exit code.
+CHILD_SKIP_VERDICT = "Conformance test SKIPPED"
+
+
 def run_codec(
     env: Dict[str, str],
     conformance_script: Path,
@@ -428,8 +440,8 @@ def run_codec(
     videodecode_exe: Path,
     results_dir: Path,
     gpu_device_id: int,
-) -> bool:
-    """Run one codec's sweep. Returns True on a clean pass.
+) -> str:
+    """Run one codec's sweep and return its status: PASSED, FAILED or SKIPPED.
 
     Each codec gets its own results directory. Without that they share one
     rocDecode_output.log, which run_rocDecode_Conformance.py appends to, and each
@@ -448,8 +460,19 @@ def run_codec(
         str(gpu_device_id),
     ]
     logging.info(f"++ Exec $ {shlex.join(cmd)}")
-    # run_rocDecode_Conformance.py reports the outcome through its exit code.
-    return subprocess.run(cmd, env=env).returncode == 0
+    # stderr is folded into stdout so a traceback from the child is printed rather
+    # than swallowed, and so the whole transcript is echoed in order.
+    result = subprocess.run(
+        cmd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True,
+    )
+    print(result.stdout, end="")
+    if result.returncode != 0:
+        return FAILED
+    return SKIPPED if CHILD_SKIP_VERDICT in result.stdout else PASSED
 
 
 def report(results: Dict[str, str]) -> None:
@@ -542,7 +565,7 @@ def main() -> int:
             continue
         logging.info("")
         logging.info(f"=== Running conformance: {codec} ({codec_dir.name}) ===")
-        ok = run_codec(
+        results[codec] = run_codec(
             env,
             conformance_script,
             codec_dir,
@@ -550,11 +573,12 @@ def main() -> int:
             results_dir / codec,
             args.gpu_device_id,
         )
-        results[codec] = PASSED if ok else FAILED
 
     report(results)
 
-    return 0 if all(status == PASSED for status in results.values()) else 1
+    # SKIPPED is a GPU that cannot handle the codec, which is not this build's
+    # fault. MISSING is a corpus that should have been there and was not.
+    return 1 if any(s in (FAILED, MISSING) for s in results.values()) else 0
 
 
 if __name__ == "__main__":
