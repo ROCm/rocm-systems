@@ -10,10 +10,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "hip_playback.h"
+#include "hrr/hrr_api_args.h"
+#include "hrr_reader.h"
 #include "hrr_launch_event.h"
 
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -42,6 +47,27 @@ std::string capture_stderr(Fn&& fn) {
   ::unlink(path);
   return out;
 }
+
+// Call the handler the dispatch table holds for `id` with a crafted record.
+inline hipError_t dispatch(PlaybackContext& ctx, hrr_api_id_t id, const uint8_t* record) {
+  REQUIRE(hrr_playback_dispatch[id] != nullptr);
+  return hrr_playback_dispatch[id](ctx, record);
+}
+
+// An archive directory holding one blob, with hash (1, 2), named for this
+// process so concurrent runs do not remove each other's.
+struct BlobDir {
+  std::filesystem::path root;
+  explicit BlobDir(const std::string& bytes) {
+    root = std::filesystem::temp_directory_path() /
+           ("hrr_handler_test_blobs_" + std::to_string(getpid()));
+    std::filesystem::remove_all(root);
+    const std::string hex = hrr::hash_hex(1, 2);
+    std::filesystem::create_directories(root / "blobs" / hex.substr(0, 2));
+    std::ofstream(root / "blobs" / hex.substr(0, 2) / (hex + ".blob"), std::ios::binary) << bytes;
+  }
+  ~BlobDir() { std::filesystem::remove_all(root); }
+};
 
 // A record held in a buffer of exactly sizeof(T), so a read past it is a heap
 // overflow AddressSanitizer can see.

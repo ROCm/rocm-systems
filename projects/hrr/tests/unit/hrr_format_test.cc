@@ -18,7 +18,6 @@
 
 #include "hrr_test_common.hh"
 #include "hrr_reader.h"
-#include "hrr_launch_event.h"
 #include "hrr/hrr_api_args.h"
 #include "hip_playback.h"
 
@@ -467,16 +466,6 @@ HRR_TEST_CASE(Unit_HRR_Format_UnknownEventType) {
   REQUIRE(archive.events.size() == 1);
   CHECK(archive.events[0].header().event_type == 0xFFFFu);
   CHECK(archive.events[0].malloc_ev.ptr_handle == 0u);
-}
-
-// A kernel launch event with no arguments and one pinned host snapshot record,
-// cut `cut` bytes short of a whole record (v10 layout, as capture writes it).
-static std::vector<uint8_t> make_launch_with_snapshot(uint64_t seq,
-                                                      const std::vector<uint8_t>& rec,
-                                                      size_t cut = 0) {
-  const std::vector<uint8_t> records(rec.begin(), rec.end() - static_cast<ptrdiff_t>(cut));
-  return hrr_test::make_launch_event(seq, "k", /*num_args=*/0, /*num_snapshots=*/1, records,
-                                     /*attrs_tail=*/!cut);
 }
 
 /**

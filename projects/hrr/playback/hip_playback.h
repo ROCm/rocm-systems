@@ -1104,6 +1104,13 @@ void hrr_decode_kernel_args(PlaybackContext& ctx, const uint8_t* p,
 // that capture shows failing that way fails the same way here.
 hipCtx_t hrr_live_ctx(uint64_t recorded);
 
+// Replaces the srcArray and dstArray handles of a recorded hipMemcpy3DParms with
+// the live arrays replay created for them. A handle replay never created is an
+// archive-chosen address the runtime would dereference, so it is named on stderr
+// and false is returned; the copy must then not reach HIP. A null handle stays null.
+bool hrr_translate_memcpy3d_arrays(const PlaybackContext& ctx, const char* api,
+                                   hipMemcpy3DParms& parms);
+
 // Thread-local sequence ID — set by dispatch_event before calling any handler.
 // Kernel-launch handlers read this to wait for their submission turn at the
 // exact point of the HIP call, allowing preparation work to run in parallel.
