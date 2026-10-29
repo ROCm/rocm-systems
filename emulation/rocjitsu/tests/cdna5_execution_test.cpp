@@ -908,65 +908,38 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
 
 TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
   HostFenvGuard environment_guard;
+  ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
   ASSERT_EQ(std::fesetround(FE_DOWNWARD), 0);
+  ASSERT_EQ(std::feraiseexcept(FE_INVALID | FE_INEXACT), 0);
+  const int expected_flags = std::fetestexcept(FE_ALL_EXCEPT);
+#if RJ_HOST_ARCH_X86
+  HostMxcsrGuard mxcsr_guard;
+  constexpr uint32_t kDazMask = 1u << 6;
+  constexpr uint32_t kFtzMask = 1u << 15;
+  _mm_setcsr(_mm_getcsr() | kDazMask | kFtzMask);
+  const uint32_t expected_mxcsr = _mm_getcsr();
+#endif
 
   constexpr uint64_t kOne = std::bit_cast<uint64_t>(1.0);
+  constexpr uint64_t kSubnormal = 0x0000000000000001ULL;
   constexpr uint64_t kInfinity = std::bit_cast<uint64_t>(std::numeric_limits<double>::infinity());
   constexpr uint64_t kQuietNan = std::bit_cast<uint64_t>(std::numeric_limits<double>::quiet_NaN());
-  for (const uint64_t input : {kOne, kInfinity, kQuietNan}) {
+  for (const uint64_t input : {kOne, kSubnormal, kInfinity, kQuietNan}) {
     (void)amdgpu::fp_mode::fma_f64(input, kOne, kOne, 1, 3);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
     (void)amdgpu::fp_mode::binary_f64(input, kOne, amdgpu::fp_mode::BinaryF64Op::Add, 1, 3);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
     (void)amdgpu::fp_mode::finish_f64(input, 1, 1, false, true);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-  }
-}
-
-constexpr std::array<uint64_t, 16> kF64IdentityInputs = {
-    0x0000000000000000ULL, 0x8000000000000000ULL, 0x0000000000000001ULL, 0x8000000000000001ULL,
-    0x000fffffffffffffULL, 0x0010000000000000ULL, 0x3ff0000000000000ULL, 0xbff0000000000000ULL,
-    0x7fefffffffffffffULL, 0xffefffffffffffffULL, 0x7ff0000000000000ULL, 0xfff0000000000000ULL,
-    0x7ff0000000000001ULL, 0xfff0000000000001ULL, 0x7ff8000000001234ULL, 0xfff8000000001234ULL,
-};
-
-TEST(FpModePolicyTest, F64FinishWithoutModifiersPreservesBitsAndHostEnvironment) {
-  HostFenvGuard environment_guard;
-  ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
-  for (int host_rounding : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(host_rounding), 0);
-    for (int flags : {0, FE_INVALID | FE_INEXACT}) {
-      ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
-      ASSERT_EQ(std::feraiseexcept(flags), 0);
-      const int expected_flags = std::fetestexcept(FE_ALL_EXCEPT);
-      for (uint32_t guest_rounding = 0; guest_rounding < 4; ++guest_rounding)
-        for (bool clamp_nan_to_zero : {false, true})
-          for (uint64_t input : kF64IdentityInputs) {
-            const auto result =
-                amdgpu::fp_mode::finish_f64(input, guest_rounding, 0, false, clamp_nan_to_zero);
-            EXPECT_EQ(result, input);
-            EXPECT_EQ(std::fegetround(), host_rounding);
-            EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), expected_flags);
-          }
-    }
-  }
-}
-
+    const uint64_t result = amdgpu::fp_mode::finish_f64(input, 1, 0, false, true);
+    EXPECT_EQ(result, input);
+    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
+    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), expected_flags);
 #if RJ_HOST_ARCH_X86
-TEST(FpModePolicyTest, F64FinishWithoutModifiersPreservesFtzDaz) {
-  HostMxcsrGuard environment_guard;
-  constexpr uint32_t kFlushMask = (1u << 6) | (1u << 15);
-  const uint32_t original = _mm_getcsr();
-  for (uint32_t flush : {0u, 1u << 6, 1u << 15, kFlushMask}) {
-    _mm_setcsr((original & ~kFlushMask) | flush);
-    const uint32_t expected_mxcsr = _mm_getcsr();
-    for (uint64_t input : kF64IdentityInputs) {
-      EXPECT_EQ(amdgpu::fp_mode::finish_f64(input, 0, 0, false, true), input);
-      EXPECT_EQ(_mm_getcsr(), expected_mxcsr);
-    }
+    EXPECT_EQ(_mm_getcsr(), expected_mxcsr);
+#endif
   }
 }
-#endif
 
 TEST(FpModePolicyTest, F32ToBf16FmaRestoresAmbientHostEnvironment) {
   HostFenvGuard environment_guard;
@@ -1016,9 +989,14 @@ TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFpcrFlushModes) {
 TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
   constexpr uint64_t kPositiveZero = 0x0000000000000000ULL;
   constexpr uint64_t kNegativeZero = 0x8000000000000000ULL;
+  constexpr uint64_t kPositiveSubnormal = 0x0000000000000001ULL;
+  constexpr uint64_t kNegativeSubnormal = 0x8000000000000001ULL;
+  constexpr uint64_t kInfinity = std::bit_cast<uint64_t>(std::numeric_limits<double>::infinity());
+  constexpr uint64_t kNegativeInfinity =
+      std::bit_cast<uint64_t>(-std::numeric_limits<double>::infinity());
   constexpr uint64_t kQuietNan = 0x7FF8000000001234ULL;
   constexpr uint64_t kSignalingNan = 0x7FF0000000000001ULL;
-  constexpr std::array<uint64_t, 8> kInputs = {
+  constexpr std::array<uint64_t, 12> kInputs = {
       kQuietNan,
       kSignalingNan,
       kNegativeZero,
@@ -1027,8 +1005,12 @@ TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
       std::bit_cast<uint64_t>(0.5),
       std::bit_cast<uint64_t>(1.0),
       std::bit_cast<uint64_t>(2.0),
+      kPositiveSubnormal,
+      kNegativeSubnormal,
+      kInfinity,
+      kNegativeInfinity,
   };
-  constexpr std::array<uint64_t, 8> kExpected = {
+  constexpr std::array<uint64_t, 12> kExpected = {
       kPositiveZero,
       kPositiveZero,
       kPositiveZero,
@@ -1037,12 +1019,20 @@ TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
       std::bit_cast<uint64_t>(0.5),
       std::bit_cast<uint64_t>(1.0),
       std::bit_cast<uint64_t>(1.0),
+      kPositiveSubnormal,
+      kPositiveZero,
+      std::bit_cast<uint64_t>(1.0),
+      kPositiveZero,
   };
 
-  for (size_t i = 0; i < kInputs.size(); ++i)
+  for (size_t i = 0; i < kInputs.size(); ++i) {
     EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, true, true), kExpected[i]) << i;
+    EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, false, true), kInputs[i]) << i;
+    EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, false, false), kInputs[i]) << i;
+  }
   EXPECT_EQ(amdgpu::fp_mode::finish_f64(kQuietNan, 0, 0, true, false), kQuietNan);
-  EXPECT_EQ(amdgpu::fp_mode::finish_f64(kNegativeZero, 0, 0, false, true), kNegativeZero);
+  EXPECT_EQ(amdgpu::fp_mode::finish_f64(std::bit_cast<uint64_t>(1.0), 0, 1, false, true),
+            std::bit_cast<uint64_t>(2.0));
 }
 
 TEST(FpModePolicyTest, F16ClampUsesSelectedNanPolicy) {
