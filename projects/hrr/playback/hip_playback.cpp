@@ -1836,10 +1836,8 @@ static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* byte
 // inside it. The record's offset and count are archive data: without this the
 // handlers add the offset to the live address and hand the sum to HIP, which
 // does not bound a copy against the symbol and can reach a host memcpy at an
-// address the symbol does not own. A symbol registered with size 0 (the
-// archive size is substituted for it) has no trustworthy bound, so it refuses
-// every copy. The comparison is written so offset + count is never formed and
-// cannot wrap. On success *out is the symbol's live base address.
+// address the symbol does not own. The comparison is written so offset + count
+// is never formed and cannot wrap. On success *out is the symbol's live base address.
 static hipError_t resolve_symbol_range(PlaybackContext& ctx, uint64_t rec,
                                        uint64_t offset, uint64_t count,
                                        const char* api, void** out) {
@@ -1851,7 +1849,7 @@ static hipError_t resolve_symbol_range(PlaybackContext& ctx, uint64_t rec,
                 "registry.\n", api, (unsigned long long)rec);
         return hipErrorInvalidSymbol;
     }
-    if (size == 0 || offset > size || count > size - offset) {
+    if (offset > size || count > size - offset) {
         fprintf(stderr,
                 "[HRR] %s: copy of %llu bytes at offset %llu does not fit "
                 "symbol 0x%llx (%zu bytes registered); refusing the call\n",

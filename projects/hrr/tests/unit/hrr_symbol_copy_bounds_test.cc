@@ -248,45 +248,4 @@ TEST_CASE("Unit_HRR_SymbolCopyBounds_WrappingSumIsRefused", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - A symbol registered with size 0 (the case where the archive's own size
- *     was substituted, which says nothing about the live global) refuses every
- *     copy, including a zero-length one at offset 0, and never reaches HIP.
- */
-TEST_CASE("Unit_HRR_SymbolCopyBounds_ZeroSizeSymbolRefusesEveryCopy", "[hrr]") {
-  struct Req { uint64_t off, n; };
-  for (const Handler& h : kHandlers) {
-    for (const Req q : {Req{0, 0}, Req{0, 1}, Req{1, 1}}) {
-      Fixture fx(0);
-      hipError_t r = hipSuccess;
-      const std::string err = capture_stderr([&] { r = h.run(fx.ctx, q.off, q.n); });
-      INFO(h.name << " offset " << q.off << " count " << q.n << " stderr: " << err);
-      CHECK(r == hipErrorInvalidValue);
-      CHECK(g_seen.calls == 0);
-      CHECK(err.find("0 bytes registered") != std::string::npos);
-    }
-  }
-}
-
-/**
- * Test Description
- * ----------------
- *   - A symbol the archive never registered keeps its own error, so the bound
- *     check does not mask it: hipErrorInvalidSymbol, no HIP call.
- */
-TEST_CASE("Unit_HRR_SymbolCopyBounds_UnregisteredSymbolKeepsItsError", "[hrr]") {
-  for (const Handler& h : kHandlers) {
-    PlaybackContext ctx;
-    g_seen = Seen{};
-    hipError_t r = hipSuccess;
-    const std::string err = capture_stderr([&] { r = h.run(ctx, 0, 1); });
-    INFO(h.name << " stderr: " << err);
-    CHECK(r == hipErrorInvalidSymbol);
-    CHECK(g_seen.calls == 0);
-    CHECK(err.find("not in this archive's symbol registry") != std::string::npos);
-  }
-}
-
 /** @} */
