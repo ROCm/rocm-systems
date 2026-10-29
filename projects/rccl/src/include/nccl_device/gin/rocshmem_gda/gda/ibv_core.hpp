@@ -38,7 +38,7 @@
 #else
 #include <linux/types.h>
 #include <linux/if_ether.h>
-#include "ibvcore.h"
+#include "nccl_device/gin/rocshmem_gda/ibvcore.h"
 #endif
 
 /* define ETHERNET_LL_SIZE */

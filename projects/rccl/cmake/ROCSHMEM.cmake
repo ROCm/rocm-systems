@@ -210,8 +210,24 @@ function(copy_files FILE_LIST_VAR SRC_DIR DST_DIR OUTPUT_LIST_VAR)
       OUTPUT "${dst_file}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_file_dir}"
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${src_file}" "${dst_file}"
-      # Qualify log.hpp include to prevent shadowing by consumer headers.
-      COMMAND sed -i "s|#include \"log\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/log.hpp\"|g" "${dst_file}"
+      # Re-root the rocSHMEM headers' own includes to the nccl_device/ base so the
+      # device-API path resolves from -I<prefix>/include alone (same convention as
+      # the other GIN backends), needing no extra -I<prefix>/.../rocshmem_gda on a
+      # consumer. These headers are copied verbatim and assume rocshmem_gda/ as the
+      # include root; rewrite the rooted families (rocshmem/, gda/, containers/,
+      # and the top-level *.hpp) while leaving relative-to-self includes
+      # (queue_pair_mux.hpp, queue_pair/...) alone. Each rule anchors on the
+      # #include token, so re-running on an already-rewritten file is a no-op.
+      COMMAND sed -i
+        -e "s|#include \"log\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/log.hpp\"|g"
+        -e "s|#include \"rocshmem/rocshmem_config\\.h\"|#include \"nccl_device/gin/rocshmem_gda/gda_config.h\"|g"
+        -e "s|#include \"gda/|#include \"nccl_device/gin/rocshmem_gda/gda/|g"
+        -e "s|#include \"containers/|#include \"nccl_device/gin/rocshmem_gda/containers/|g"
+        -e "s|#include \"bit\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/bit.hpp\"|g"
+        -e "s|#include \"constants\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/constants.hpp\"|g"
+        -e "s|#include \"gda_enums\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/gda/gda_enums.hpp\"|g"
+        -e "s|#include \"util\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/util.hpp\"|g"
+        "${dst_file}"
       DEPENDS "${src_file}"
       COMMENT "Copying ${src_file} -> ${dst_file}"
       VERBATIM

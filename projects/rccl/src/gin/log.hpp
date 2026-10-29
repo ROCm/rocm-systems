@@ -12,7 +12,7 @@
 #define RCCL_GIN_LOG_HOST_HPP
 
 #include "debug.h"
-#include "rocshmem/rocshmem_config.h"  // BUILD_DEBUG_DEVICE (guarded)
+#include "nccl_device/gin/rocshmem_gda/gda_config.h"  // BUILD_DEBUG_DEVICE (guarded)
 #include <cstdlib>
 
 #define LOG_ERROR(fmt, ...)       WARN("GIN: " fmt, ##__VA_ARGS__)

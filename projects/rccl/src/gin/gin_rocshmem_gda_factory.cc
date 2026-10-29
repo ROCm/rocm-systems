@@ -48,7 +48,6 @@
 #include <bit.hpp>
 #include <util.hpp>
 #include <constants.hpp>
-#include <rocshmem/rocshmem_common.hpp>
 
 #include <hip/hip_runtime.h>
 #include <hsa/hsa.h>

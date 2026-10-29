@@ -13,7 +13,7 @@
 // For BUILD_DEBUG_DEVICE. Guarded, so double-inclusion with the QP headers that
 // also pull it is harmless; including it here makes the LOGD gating below robust
 // regardless of consumer include order.
-#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "nccl_device/gin/rocshmem_gda/gda_config.h"
 
 // Host-side: no-ops (device headers should not emit host log calls).
 #define LOG_ERROR(...)             ((void)0)

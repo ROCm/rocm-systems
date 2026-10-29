@@ -646,7 +646,6 @@ if(ENABLE_ROCSHMEM_GIN)
     src/include/nccl_device/gin/rocshmem_gda/util.hpp
     src/include/nccl_device/gin/rocshmem_gda/containers/free_list.hpp
     src/include/nccl_device/gin/rocshmem_gda/gda/ibv_core.hpp
-    src/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_common.hpp
     # rocshmem GDA + Anvil SDMA device entry/support headers: GIN-only, so they
     # are hipified + installed solely in this build. gin_device_api.h reaches them
     # only under #if NCCL_GIN_{ROCSHMEM_GDA,ANVIL_SDMA}_ENABLE, which self-detect
@@ -1147,21 +1146,20 @@ if (ENABLE_ROCSHMEM_GIN)
   # from here.
   target_include_directories(rccl BEFORE PRIVATE ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda)
 
-  # Need to add the GIN GDA directory to the public interface:
-  # internal rocSHMEM headers assume that the source directory is in the include search path
+  # Build-tree dir for the factory's in-tree <gda/...> angle-includes.
   target_include_directories(rccl BEFORE INTERFACE
     $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/rocshmem_gda>
   )
 
   # Add target for copying the rocSHMEM headers
   add_custom_target(copy_rocshmem_headers)
   add_dependencies(rccl copy_rocshmem_headers)
 
-  # rccl owns the rocshmem_config.h the copied GIN QueuePair headers include,
-  # generated from projects/rccl/src/include/nccl_device/gin/rocshmem_gda/
-  # rocshmem_config.h.in. This decouples the GIN header path from a rocSHMEM
-  # *build* — only the macros the GIN host+device headers actually consult are
+  # rccl owns the GDA config the copied GIN QueuePair headers include (their
+  # rocshmem/rocshmem_config.h include is rewritten to this gda_config.h by the
+  # header copy step), generated from gda_config.h.in. This decouples the GIN
+  # header path from a rocSHMEM *build* — only the macros the GIN host+device
+  # headers actually consult are
   # emitted. The GDA provider set and GDA_MUX are fixed by rccl's design (all
   # three providers, runtime mux); USE_CONSTMEM is OFF (GIN reads the provider
   # from the QueuePair instance); BUILD_DEBUG_DEVICE / USE_FUNC_CALL stay OFF.
@@ -1190,11 +1188,22 @@ if (ENABLE_ROCSHMEM_GIN)
   endif()
   # USE_CONSTMEM intentionally left unset.
   configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/gin/rocshmem_gda/rocshmem_config.h.in"
-    "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_config.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/gin/rocshmem_gda/gda_config.h.in"
+    "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/gda_config.h"
     @ONLY)
+  # ibvcore.h is a top-level rccl header the copied gda/ibv_core.hpp needs; place a
+  # copy under rocshmem_gda/ so its nccl_device/-rooted include resolves in both
+  # the build tree and an installed consumer, with no extra -I.
+  add_custom_command(
+    OUTPUT "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/ibvcore.h"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${HIPIFY_DIR}/src/include/ibvcore.h"
+            "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/ibvcore.h"
+    DEPENDS "${HIPIFY_DIR}/src/include/ibvcore.h"
+    VERBATIM)
   add_custom_target(copy_rocshmem_include_headers
-    DEPENDS "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_config.h")
+    DEPENDS "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/gda_config.h"
+            "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/ibvcore.h")
   add_dependencies(copy_rocshmem_headers copy_rocshmem_include_headers)
 
   if (ROCSHMEM_SOURCE_DIR)
@@ -1208,8 +1217,8 @@ if (ENABLE_ROCSHMEM_GIN)
       gda/queue_pair/queue_pair_device.hpp
       gda/queue_pair_provider.hpp
       # GDA_MUX (Multiplexing provider). Copied verbatim: with USE_CONSTMEM OFF in
-      # rccl's copied rocshmem_config.h, its device dispatch reads the per-QP
-      # provider member instead of __constant__ constmem (no sed needed).
+      # rccl's gda_config.h, its device dispatch reads the per-QP provider member
+      # instead of __constant__ constmem (no sed needed).
       gda/queue_pair_mux.hpp
       # GDA_IONIC (AMD Pensando IONIC RDMA provider)
       gda/ionic/queue_pair_ionic.hpp

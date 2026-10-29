@@ -5,13 +5,10 @@
  *****************************************************************************/
 
 /*
- * rccl-owned rocshmem_config.h for the GIN rocshmem-GDA device path.
- *
- * The copied rocSHMEM GDA QueuePair headers include "rocshmem/rocshmem_config.h".
- * Historically rccl copied that header from a rocSHMEM *build*, which tied rccl's
- * GIN build to running rocSHMEM's CMake. This template lets rccl generate the
- * header itself (configure_file from projects/rccl/src/CMakeLists.txt), so the
- * GIN header path needs no rocSHMEM build.
+ * rccl-owned GDA config for the GIN rocshmem-GDA device path. The copied rocSHMEM
+ * QueuePair headers include rocSHMEM's "rocshmem/rocshmem_config.h"; the header
+ * copy step rewrites that to this generated gda_config.h (configure_file from
+ * projects/rccl/src/CMakeLists.txt), so the GIN header path needs no rocSHMEM build.
  *
  * Only the macros the GIN headers actually consult are emitted. Everything else
  * in rocSHMEM's full config (USE_GDA/USE_SDMA/USE_IPC/USE_RO, the HAVE_* probes,
