@@ -179,8 +179,8 @@ TEST(TraceMemoryManagerTest, MultiSEDrainResetsAllSwapCountersOnCallbackError)
     {
         mgr->buffer_swaps = {1, 0, 2, 0};
         for(size_t se = 0; se < info.se_num; ++se)
-            control[se].cntr = mgr->buffer_swaps[se] * mgr->config.capacity_per_se / 32 +
-                               control[se].wptr;
+            control[se].cntr =
+                mgr->buffer_swaps[se] * mgr->config.capacity_per_se / 32 + control[se].wptr;
         auto state = state_t{mgr.get(), {}, status};
         EXPECT_EQ(aqlprofile_att_iterate_data({mgr->GetHandler()}, callback, &state), status);
         EXPECT_EQ(state.engines,

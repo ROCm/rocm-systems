@@ -91,10 +91,10 @@ struct capture_t
     rocprofiler_thread_trace_decoder_id_t       decoder{};
     std::vector<std::unique_ptr<agent_trace_t>> agents{};
     // Zero-filled up front so callbacks copy into resident memory.
-    std::vector<char>                           arena = std::vector<char>(MAX_CAPTURE_BYTES);
-    std::atomic<size_t>                         byte_count{0};
-    bool                                        started{};
-    bool                                        validated{};
+    std::vector<char>   arena = std::vector<char>(MAX_CAPTURE_BYTES);
+    std::atomic<size_t> byte_count{0};
+    bool                started{};
+    bool                validated{};
 };
 
 // Owned from tool_init through tool_fini, including all SDK worker callbacks.
@@ -126,8 +126,7 @@ collect(rocprofiler_thread_trace_shader_data_t data, rocprofiler_user_data_t use
     auto chunk  = chunk_t{};
     chunk.bytes = capture->arena.data() + offset;
     chunk.size  = size;
-    if(size > 0)
-        std::memcpy(capture->arena.data() + offset, data.data, size);
+    if(size > 0) std::memcpy(capture->arena.data() + offset, data.data, size);
     chunk.end = (data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END) != 0;
     // Supported GFX9/GFX12 hardware retires a full per-SE buffer on each swap.
     // Neither the small GFX9 header nor the final END/drain chunk counts as a swap.
