@@ -24,15 +24,18 @@ TEST(CliPlugin, RetainedFlagPinsLibraryBeyondTreeLifetime) {
   std::weak_ptr<void> library;
   {
     rocjitsu::cli::Command root{"tool"};
-    auto loaded = load_plugin(plugin_path(), root, diagnostic.emitter());
+    util::FailureOr<std::shared_ptr<void>> loaded =
+        load_plugin(plugin_path(), root, diagnostic.emitter());
     ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
     library = loaded.value();
     loaded.value().reset();
     const std::array<std::string_view, 5> args{"plugin", "inspect", "-f", "json", "input.bin"};
-    auto parsed = rocjitsu::cli::parse(root, args, diagnostic.emitter());
+    util::FailureOr<rocjitsu::cli::ParsedArguments> parsed =
+        rocjitsu::cli::parse(root, args, diagnostic.emitter());
     ASSERT_TRUE(parsed.succeeded()) << diagnostic.message();
     EXPECT_EQ(parsed.value().positional, std::vector<std::string>{"input.bin"});
-    retained = parsed.value().command->find_flag("--format");
+    std::shared_ptr<rocjitsu::cli::Flag> format = parsed.value().command->find_flag("--format");
+    retained = format;
     EXPECT_EQ(retained->format_value(), "json");
   }
   ASSERT_FALSE(library.expired());
@@ -52,7 +55,8 @@ TEST(CliPlugin, MissingLibraryAndRegistrationCollisionFail) {
   util::StringDiagnostic diagnostic;
   rocjitsu::cli::Command root{"tool"};
   EXPECT_TRUE(load_plugin("/no/such/rocjitsu-cli-plugin.so", root, diagnostic.emitter()).failed());
-  auto first = load_plugin(plugin_path(), root, diagnostic.emitter());
+  util::FailureOr<std::shared_ptr<void>> first =
+      load_plugin(plugin_path(), root, diagnostic.emitter());
   ASSERT_TRUE(first.succeeded());
   EXPECT_TRUE(load_plugin(plugin_path(), root, diagnostic.emitter()).failed());
   EXPECT_NE(diagnostic.message().find("duplicate command 'plugin'"), std::string::npos);

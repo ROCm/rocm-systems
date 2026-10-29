@@ -34,10 +34,10 @@ private:
 util::Result register_cli_plugin_impl(rocjitsu::cli::Command &root, const PluginHost &host,
                                       util::DiagnosticEmitter diagnostic) {
   using namespace rocjitsu::cli;
-  auto plugin = root.add_command("plugin", diagnostic);
+  util::FailureOr<Command *> plugin = root.add_command("plugin", diagnostic);
   if (plugin.failed())
     return util::Result::failure();
-  auto inspect = plugin.value()->add_command("inspect", diagnostic);
+  util::FailureOr<Command *> inspect = plugin.value()->add_command("inspect", diagnostic);
   if (inspect.failed())
     return util::Result::failure();
   for (Command *command : {plugin.value(), inspect.value()}) {
