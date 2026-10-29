@@ -7717,8 +7717,8 @@ TEST(WrapMicrotestIsolated, InfoMacroSweep_CtaDirectCallSiteForcedOpenByNegative
 // selection. The arch table
 // is a hand-built copy of the gfx1250 A2A windows (the micro build fakes
 // rcclGetArchThresholds to nullptr); the DDA eligibility fakes encode the real
-// predicates' contracts: every path needs P % 16 == 0, LL128
-// also 16-byte aligned buffers.
+// predicates' contracts: every path needs P % 16 == 0, and neither LL
+// nor LL128 checks the buffer pointers.
 // ===========================================================================
 namespace {
 
@@ -7731,14 +7731,13 @@ rcclArchThresholds Gfx1250A2aTable() {
 }
 
 bool A2aPerPeer16(size_t count, ncclDataType_t t) { return (count * ncclTypeSize(t)) % 16 == 0; }
-bool A2aPtrs16(const void* s, const void* r) { return (((uintptr_t)s | (uintptr_t)r) % 16) == 0; }
 
 void InstallA2aFabricFakes() {
   g_allToAllDdaFabricLLEligible = [](ncclComm*, const void*, void*, size_t c, ncclDataType_t t) {
     return A2aPerPeer16(c, t);
   };
-  g_allToAllDdaFabricLL128Eligible = [](ncclComm*, const void* s, void* r, size_t c, ncclDataType_t t) {
-    return A2aPerPeer16(c, t) && A2aPtrs16(s, r);
+  g_allToAllDdaFabricLL128Eligible = [](ncclComm*, const void*, void*, size_t c, ncclDataType_t t) {
+    return A2aPerPeer16(c, t);
   };
 }
 
@@ -7778,12 +7777,14 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceWithoutCorrectPathIsInv
           EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, true, &d));
           EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
         }
-        // aligned size, misaligned in-place buffer above LL: LL128 needs 16 B buffers
+        // aligned size, misaligned in-place buffer above the LL128 window: no fabric path
         rcclCollDecision d{};
         EXPECT_EQ(ncclInvalidUsage, SelectA2aGfx1250(comm, 4u << 20, misaligned, misaligned, false, &d));
-        // ... but LL (no pointer alignment requirement) still serves small in-place calls
+        // ... but LL and LL128 ignore the buffer pointers, so they still serve misaligned in-place calls
         EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 512, misaligned, misaligned, false, &d));
         EXPECT_EQ((int)RCCL_DDA_FABRIC_LL, d.algo);
+        EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 64u << 10, misaligned, misaligned, false, &d));  // T 512 KiB
+        EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
         // an empty in-place call (count 0, e.g. empty tensors with nullptr buffers) stays a no-op success
         EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 0, nullptr, nullptr, false, &d));
         EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 0, kA2aRecv, kA2aRecv, false, &d));
@@ -8002,6 +8003,54 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceRefusalInGroupFailsTheG
         ncclGroupError = ncclSuccess;
         EXPECT_EQ(ncclInvalidUsage, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, false, &d));
         EXPECT_EQ(ncclSuccess, ncclGroupError);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The same refusal driven through ncclGroupStart / ncclAlltoAll's selector / ncclGroupEnd: ncclGroupEnd returns
+// ncclInvalidUsage with nothing queued and resets the group error, and a grouped in-place call that fits the scratch
+// takes CE-Scratch (DDA is off inside a group) and leaves ncclGroupEnd successful.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceGroupStartEnd) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250InPlaceGroupStartEnd",
+      []() {
+        InstallA2aFabricFakes();
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        uint8_t scratch[64];  // only the pointer and ddaScratchBytes are read
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &tbl;
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->ddaScratch = scratch;
+        comm->ddaScratchBytes = 64u << 20;
+        const auto nothingQueued = []() {
+          for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+            if (ncclGroupCommHead[type] != nullptr) return false;
+          }
+          return ncclIntruQueueEmpty(&ncclAsyncJobs);
+        };
+        rcclCollDecision d{};
+        // above the scratch: refused, ncclGroupEnd fails the group
+        ASSERT_EQ(ncclSuccess, ncclGroupStartInternal());
+        EXPECT_EQ(ncclInvalidUsage, SelectA2aGfx1250(comm, (8u << 20) + 4, kA2aRecv, kA2aRecv, false, &d));
+        EXPECT_TRUE(nothingQueued());
+        EXPECT_EQ(ncclInvalidUsage, ncclGroupEndInternal());
+        EXPECT_EQ(0, ncclGroupDepth);
+        EXPECT_EQ(ncclSuccess, ncclGroupError);
+        EXPECT_TRUE(nothingQueued());
+        // fits the scratch: CE-Scratch, including an aligned size that outside a group would take LL
+        ASSERT_EQ(ncclSuccess, ncclGroupStartInternal());
+        for (size_t perPeer : {size_t(4u << 20) + 4, size_t(512)}) {
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, false, &d)) << perPeer;
+          EXPECT_EQ((int)RCCL_CE_SCRATCH, d.algo) << perPeer;
+        }
+        EXPECT_EQ(ncclSuccess, ncclGroupError);
+        EXPECT_EQ(ncclSuccess, ncclGroupEndInternal());
+        EXPECT_EQ(0, ncclGroupDepth);
+        comm->ddaScratch = nullptr;
+        comm->ddaScratchBytes = 0;
         DeleteCommWithArch(comm);
       });
 }

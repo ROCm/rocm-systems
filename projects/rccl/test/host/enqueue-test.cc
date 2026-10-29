@@ -4123,8 +4123,24 @@ TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllNoDecisionOutOfPlace_ForcedCeScratch
   EXPECT_EQ(0, scene.cc.get()->planner.nTasksP2p);
 }
 
-// An ncclAlltoAll whose decision is a DDA fabric path but which reached taskAppend anyway (check mode or a
-// suspended comm divert to enqueue): in place it must fail before the Send/Recv decomposition.
+// An ncclAlltoAll whose decision is a DDA fabric path but which reached taskAppend anyway (NCCL_CHECK_MODE
+// diverts it to enqueue): in place it takes CE-Scratch where it fits, like an undecided call.
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllFabricDecisionInPlace_FitsTheScratch_TakesCeScratch) {
+  g_rcclAlltoAllCeScratchInPlace = [](const ncclComm*, const void* s, const void* r) { return s == r; };
+  for (int algo : {RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128}) {
+    A2aTaskAppendScene scene;
+    ncclInfo info = scene.InPlace(4);
+    info.decisionValid = true;
+    info.decision.algo = algo;
+    ASSERT_EQ(ncclSuccess, taskAppend(scene.cc.get(), &info)) << algo;
+    ASSERT_TRUE(scene.CeQueued()) << algo;
+    EXPECT_TRUE(ncclIntruQueueHead(&scene.cc.get()->planner.collCeTaskQueue)->useDda) << algo;
+    EXPECT_EQ(0, g_rcclAlltoAllInPlaceGuardCalls) << algo;
+    EXPECT_EQ(0, scene.cc.get()->planner.nTasksP2p) << algo;
+  }
+}
+
+// ... and where it does not (here: CE-Scratch off), it fails before the Send/Recv decomposition.
 TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllFabricDecisionInPlace_FailsBeforeSendRecv) {
   A2aTaskAppendScene scene;
   ncclInfo info = scene.InPlace(4);

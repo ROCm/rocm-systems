@@ -4732,7 +4732,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       const bool allGatherDecided = (info->coll == ncclFuncAllGather && info->decisionValid);
       const bool alltoAllDecided = (info->coll == ncclFuncAlltoAll && info->decisionValid);
       // An AllToAll without a decision (ncclAlltoAllConfig) gets the same in-place CE-Scratch exception
-      // as rcclSelectAlltoAll; the Send/Recv decomposition below refuses in place on gfx1250.
+      // as rcclSelectAlltoAll; the Send/Recv decomposition below refuses in place on gfx1250. So does a
+      // decided one whose decision is not CE: only a DDA fabric decision diverted here by NCCL_CHECK_MODE
+      // reaches this funnel in place (a live Direct decision in place was already refused by the selector).
       const bool a2aCeScratchInPlace =
         info->coll == ncclFuncAlltoAll && rcclAlltoAllCeScratchInPlace(comm, info->sendbuff, info->recvbuff);
       // The undecided symmetric-window CE arm below. In place on gfx1250 an AllToAll must not take it
@@ -4788,7 +4790,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));
 
-      } else if (!allGatherDecided && !alltoAllDecided &&
+      } else if (!allGatherDecided && (!alltoAllDecided || a2aCeScratchInPlace) &&
                  ((!rcclNcclAlgoEnvIsSet() && rcclForceCeScratchEnabled(comm)) || a2aCeScratchInPlace) &&
                  CeScratchAvailable && !hasSysmemSegment &&
                  comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {

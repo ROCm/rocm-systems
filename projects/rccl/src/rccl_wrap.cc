@@ -988,9 +988,8 @@ ncclResult_t rcclAlltoAllInPlaceGuard(const ncclComm* comm, const void* sendbuff
     }
     break;
   case rcclA2aSiteAlltoAllEnqueue:
-    fabric = "the call was diverted to the enqueue path (NCCL_CHECK_MODE or a suspended comm), which has no DDA "
-             "fabric AllToAll and decomposes it into per-peer Send/Recv";
-    ceConsidered = false;
+    fabric = "the call was diverted to the enqueue path (NCCL_CHECK_MODE), which has no DDA fabric AllToAll and "
+             "decomposes it into per-peer Send/Recv";
     break;
   case rcclA2aSiteAlltoAllConfig:
     entry = "ncclAlltoAllConfig";
