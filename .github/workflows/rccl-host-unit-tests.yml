@@ -3,8 +3,7 @@ name: RCCL host unit tests
 # Builds and runs RCCL's CPU-only host unit-test binary (rccl-HostUnitTests, added
 # in PR #9320) on every PR to develop touching projects/rccl/**. No GPU or network
 # hardware is required: the binary is compiled with `hipcc --offload-host-only` and
-# links no HIP/ROCm runtime. The workflow's own path is in the trigger so it
-# self-runs on the PR that introduces it. JIRA ID: AICOMRCCL-1711
+# links no HIP/ROCm runtime.
 #
 # rccl-coco-pr.yml skips host-only test and test_runner PRs to develop because
 # this workflow covers them. Keep its COVERAGE_RULES entries in
@@ -14,12 +13,11 @@ name: RCCL host unit tests
 # gate stabilizes
 
 on:
+  # No `paths:` filter, so the gate reports on every PR and can be a required
+  # check. The `changes` job decides whether the tests run.
   pull_request:
     branches:
       - develop
-    paths:
-      - 'projects/rccl/**'
-      - '.github/workflows/rccl-host-unit-tests.yml'
 
 permissions:
   contents: read
@@ -29,8 +27,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect RCCL host-test changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      rccl: ${{ steps.filter.outputs.rccl }}
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          # HEAD^ on a PR merge commit is the base branch tip.
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Check for RCCL changes
+        id: filter
+        run: python3 .github/scripts/rccl_detect_host_test_changes.py --base-ref HEAD^
+
   rccl-ci-script-tests:
     name: RCCL CI script tests (CPU-only)
+    needs: changes
+    if: needs.changes.outputs.rccl == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout RCCL CI scripts and tests
@@ -48,6 +67,8 @@ jobs:
 
   rccl-host-unit-tests:
     name: Host unit tests (CPU-only)
+    needs: changes
+    if: needs.changes.outputs.rccl == 'true'
     runs-on: ubuntu-24.04
     container:
       image: rocm/dev-ubuntu-22.04:7.2
@@ -101,3 +122,32 @@ jobs:
           path: |
             projects/rccl/test/host/host_tests.log
             projects/rccl/test/host/host_tests.xml
+
+  host-gate:
+    name: RCCL host test gate
+    if: always()
+    needs: [changes, rccl-ci-script-tests, rccl-host-unit-tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Require the host tests to have passed
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RCCL_CHANGED: ${{ needs.changes.outputs.rccl }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "::error::Change detection did not complete (${CHANGES_RESULT})."
+            exit 1
+          fi
+          if [[ "${RCCL_CHANGED}" != "true" ]]; then
+            echo "No RCCL changes; host tests not required."
+            exit 0
+          fi
+          for result in ${RESULTS}; do
+            if [[ "${result}" != "success" ]]; then
+              echo "::error::Host tests did not pass (${RESULTS})."
+              exit 1
+            fi
+          done

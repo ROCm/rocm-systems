@@ -4,6 +4,7 @@
 """Tests for rccl_change_sets.py."""
 
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -12,7 +13,13 @@ from pathlib import Path
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 sys.path.insert(0, os.fspath(Path(__file__).parent))
 import rccl_change_sets as sets
-from workflow_filters import DEFAULT_TYPES, STATUS_ONLY_IFS, pull_request_trigger
+import rccl_detect_host_test_changes as host_detect
+from workflow_filters import (
+    DEFAULT_TYPES,
+    STATUS_ONLY_IFS,
+    job_lines,
+    pull_request_trigger,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OTHER_BRANCHES = ["", "main", "rccl-develop", "rocprofiler-compute-develop"]
@@ -55,6 +62,17 @@ EXAMPLES = {
         ],
     ),
 }
+
+
+# rccl-host-unit-tests.yml runs on every path. Its `changes` job runs the
+# detector, and the test jobs skip unless it says the tests are needed.
+HOST_TESTS_WORKFLOW = ".github/workflows/rccl-host-unit-tests.yml"
+HOST_TESTS_SKIP_IF = "needs.changes.outputs.rccl == 'true'"
+HOST_TESTS_CHANGES_LINES = [
+    "rccl: ${{ steps.filter.outputs.rccl }}",
+    "id: filter",
+    "run: python3 .github/scripts/rccl_detect_host_test_changes.py --base-ref HEAD^",
+]
 
 
 class CoverageRulesTest(unittest.TestCase):
@@ -104,13 +122,53 @@ class CoverageWorkflowTest(unittest.TestCase):
             with self.subTest(rule=rule.name):
                 trigger = pull_request_trigger(REPO_ROOT / rule.workflow)
                 self.assertLessEqual(DEFAULT_TYPES, trigger.types)
+                allowed = set(STATUS_ONLY_IFS)
+                if rule.workflow == HOST_TESTS_WORKFLOW:
+                    allowed.add(HOST_TESTS_SKIP_IF)
                 self.assertLessEqual(
-                    set(trigger.ifs), STATUS_ONLY_IFS, "an if: can skip the tests"
+                    set(trigger.ifs), allowed, "an if: can skip the tests"
                 )
+
+    def test_change_detection_covers_rule(self):
+        for rule in sets.COVERAGE_RULES:
+            with self.subTest(rule=rule.name):
+                if rule.workflow != HOST_TESTS_WORKFLOW:
+                    trigger = pull_request_trigger(REPO_ROOT / rule.workflow)
+                    self.assertTrue(trigger.paths, "no paths: and no detector")
+                    continue
+                for path in [*rule.patterns, *EXAMPLES[rule.name][0]]:
+                    self.assertTrue(host_detect.touches_host_tests([path]), path)
+
+    def test_host_tests_wiring(self):
+        workflow = REPO_ROOT / HOST_TESTS_WORKFLOW
+        # Either would turn a failed detection or test into a pass.
+        text = workflow.read_text(encoding="utf-8")
+        for forbidden in ("continue-on-error", "|| true"):
+            self.assertNotIn(forbidden, text)
+
+        jobs = job_lines(workflow)
+        for line in HOST_TESTS_CHANGES_LINES:
+            self.assertIn(line, jobs["changes"])
+
+        # The gate must run always and wait on every job that can be skipped.
+        gate = jobs["host-gate"]
+        self.assertEqual([l for l in gate if l.startswith("if:")], ["if: always()"])
+        needs = next((l for l in gate if l.startswith("needs: [")), None)
+        self.assertIsNotNone(needs, "gate needs: must be a flow list")
+        skipped = {
+            job for job, lines in jobs.items() if f"if: {HOST_TESTS_SKIP_IF}" in lines
+        }
+        self.assertTrue(skipped)
+        self.assertEqual(
+            set(re.findall(r"[\w-]+", needs.removeprefix("needs:"))),
+            {"changes", *skipped},
+        )
 
     def test_workflow_paths_include_rule_patterns(self):
         for rule in sets.COVERAGE_RULES:
             paths = pull_request_trigger(REPO_ROOT / rule.workflow).paths
+            if not paths:
+                continue  # Covered by test_change_detection_covers_rule.
             prefixes = [p.removesuffix("**") for p in paths if p.endswith("/**")]
             for pattern in rule.patterns:
                 with self.subTest(rule=rule.name, pattern=pattern):
@@ -162,6 +220,21 @@ class WorkflowFiltersTest(unittest.TestCase):
             trigger.ifs,
             ["contains(labels, 'x')", "always()", "github.event_name == 'push'"],
         )
+
+    def test_job_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / "wf.yml"
+            wf.write_text(
+                "on:\n  pull_request:\n\n"
+                "jobs:\n"
+                "  a:\n    runs-on: x  # note\n    # comment\n\n"
+                "  b-c:\n    needs: [a]\n    steps:\n      - run: y\n"
+                "env:\n  Z: 1\n"
+            )
+            self.assertEqual(
+                job_lines(wf),
+                {"a": ["runs-on: x"], "b-c": ["needs: [a]", "steps:", "- run: y"]},
+            )
 
     def test_rejects_what_it_cannot_vouch_for(self):
         for body in [
