@@ -7,8 +7,7 @@
 /// public wave records and rocjitsu-private queue progress storage. Frontends
 /// own the save-area mapping and queue suspension/resumption.
 
-#ifndef ROCJITSU_VM_AMDGPU_CWSR_H_
-#define ROCJITSU_VM_AMDGPU_CWSR_H_
+#pragma once
 
 #include "rocjitsu/code/rj_code.h"
 #include "uapi/linux/kfd_ioctl.h"
@@ -446,5 +445,3 @@ bool deserialize_queue_cwsr_bulk(
     uint32_t control_stack_capacity = 0);
 
 } // namespace rocjitsu::amdgpu
-
-#endif // ROCJITSU_VM_AMDGPU_CWSR_H_
