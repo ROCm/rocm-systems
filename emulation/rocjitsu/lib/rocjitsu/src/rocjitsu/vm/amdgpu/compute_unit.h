@@ -264,6 +264,8 @@ public:
   /// only while the command processor keeps one dispatch thread: with more, its
   /// dispatch pool can run run_quantum() on pool-driven CUs, and changing the
   /// count with set_dispatch_threads() rewrites every CU's pool-driven mode.
+  /// Debug builds assert both conditions; the replaced callback and the
+  /// deferred cycle below remain the driver's responsibility.
   ///
   /// Dispatch invokes the pool-ready callback synchronously, before the command
   /// processor has finished initializing the wave, so the callback must only
@@ -484,8 +486,10 @@ public:
   /// each slot's state and dispatch generation after dispatch and after every
   /// cycle, not from this callback, halts or issued bits. The handler must not
   /// take locks or dispatch.
-  using WaveLaunchHandler = std::function<void(Wavefront &wf)>;
-  void set_wave_launch_handler(WaveLaunchHandler cb) { wave_launch_handler_ = std::move(cb); }
+  using WaveReservationHandler = std::function<void(Wavefront &wf)>;
+  void set_wave_reservation_handler(WaveReservationHandler cb) {
+    wave_reservation_handler_ = std::move(cb);
+  }
 
   /// @brief Mark a debug session as attached to or detached from this CU.
   /// @details Every transition publishes an I$ invalidation. A debugger writes
@@ -1347,10 +1351,15 @@ protected:
   /// @brief Update wavefront states (WAITCNT, BARRIER, ENDING transitions).
   void update_wf_states();
 
+  /// @brief Whether issue_instruction() issued an instruction. One that issues
+  /// and then fails, faults or halts the wave still issued.
+  enum class IssueOutcome : uint8_t {
+    /// None was fetched and decoded, or VSKIP skipped it.
+    NotIssued,
+    Issued,
+  };
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
-  /// @returns Whether an instruction issued: false when none was fetched and
-  /// decoded, or VSKIP skipped it.
-  bool issue_instruction(Wavefront *wf);
+  IssueOutcome issue_instruction(Wavefront *wf);
   /// @brief Try the diagnostic adjacent-MMA batch modes before ordinary issue.
   /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
   void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
@@ -1362,7 +1371,7 @@ protected:
   /// @brief Share ordinary instruction execution with the optional scoreboard adapter.
   /// @returns Whether an instruction issued, as for issue_instruction().
   template <bool EnableAsync>
-  bool issue_instruction_impl(
+  IssueOutcome issue_instruction_impl(
       Wavefront *wf,
       std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {},
       std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
@@ -1585,7 +1594,7 @@ protected:
   ExecutionFailureHandler execution_failure_handler_;
   MemoryViolationHandler memory_violation_handler_;
   AluExceptionHandler alu_exception_handler_;
-  WaveLaunchHandler wave_launch_handler_;
+  WaveReservationHandler wave_reservation_handler_;
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
   GpuVm *gpu_vm_ = nullptr;

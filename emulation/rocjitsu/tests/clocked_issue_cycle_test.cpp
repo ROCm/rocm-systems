@@ -178,13 +178,13 @@ TEST(ClockedIssueCycleVskipTest, SkippedInstructionDoesNotIssue) {
   wave->halt();
 }
 
-TEST(ClockedIssueCycleLaunchTest, LaunchHandlerSeesEachDispatchedWave) {
-  GpuMemory memory{"launch_memory"};
-  L2Cache l2{"launch_l2"};
+TEST(ClockedIssueCycleReservationTest, ReservationHandlerSeesEachReservedSlot) {
+  GpuMemory memory{"reservation_memory"};
+  L2Cache l2{"reservation_l2"};
   std::unique_ptr<ComputeUnitCore> cu = make_cu(memory, l2);
-  std::vector<std::pair<uint32_t, uint64_t>> launched;
-  cu->set_wave_launch_handler([&](Wavefront &wf) {
-    launched.emplace_back(wf.wf_id(), wf.dispatch_generation());
+  std::vector<std::pair<uint32_t, uint64_t>> reserved;
+  cu->set_wave_reservation_handler([&](Wavefront &wf) {
+    reserved.emplace_back(wf.wf_id(), wf.dispatch_generation());
     EXPECT_EQ(wf.state(), WfState::RUNNING);
     EXPECT_EQ(wf.pc, kProgram);
   });
@@ -192,17 +192,17 @@ TEST(ClockedIssueCycleLaunchTest, LaunchHandlerSeesEachDispatchedWave) {
   Wavefront *second = cu->dispatch_wf(/*wg_id=*/1, kProgram, kSgprs, kVgprs);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(second, nullptr);
-  ASSERT_EQ(launched.size(), 2u);
-  EXPECT_EQ(launched[0].first, 0u);
-  EXPECT_EQ(launched[1].first, 1u);
-  // A slot reused after its wave halts launches again, with a new generation.
+  ASSERT_EQ(reserved.size(), 2u);
+  EXPECT_EQ(reserved[0].first, 0u);
+  EXPECT_EQ(reserved[1].first, 1u);
+  // A slot reused after its wave halts is reserved again, with a new generation.
   const uint64_t generation = first->dispatch_generation();
   first->halt();
   // A third workgroup takes the slot the first wave freed.
   ASSERT_EQ(cu->dispatch_wf(/*wg_id=*/2, kProgram, kSgprs, kVgprs), first);
-  ASSERT_EQ(launched.size(), 3u);
-  EXPECT_EQ(launched[2].first, 0u);
-  EXPECT_NE(launched[2].second, generation);
+  ASSERT_EQ(reserved.size(), 3u);
+  EXPECT_EQ(reserved[2].first, 0u);
+  EXPECT_NE(reserved[2].second, generation);
   first->halt();
   second->halt();
 }
