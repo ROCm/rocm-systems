@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-
 // Pure-logic unit tests for the agent CU bitmap helpers: the un-fold of the
 // legacy drm_amdgpu_info_device.cu_bitmap[4][4] (used when the kernel lacks
 // AMDGPU_INFO_CU_BITMAP) and the per-WGP activity lookup used by thread trace.
@@ -74,7 +73,7 @@ TEST(cu_bitmap, unfold_legacy_folds_upper_shader_engines)
     EXPECT_EQ(unfolded->get_mask(0, 3, 1), 0xFFu);
 
     // 8 SE x 1 SA folds into column 2 (stride 2), not column 1.
-    bitmap[2][2] = 0x300u;
+    bitmap[2][2]        = 0x300u;
     const auto eight_se = agent::unfold_legacy_cu_bitmap(bitmap, 8, 1, 120000);
     ASSERT_TRUE(eight_se);
     EXPECT_EQ(eight_se->get_mask(0, 6, 0), 0x300u);
@@ -91,17 +90,25 @@ TEST(cu_bitmap, unfold_legacy_rejects_lossy_topologies)
     EXPECT_TRUE(agent::unfold_legacy_cu_bitmap(bitmap, 4, 4, 110000));
 }
 
-// Other generations use different packings (gfx9_0 folds with stride 1,
-// gfx9_4_3 packs per XCC unfolded), so only GFX11/GFX12 are un-folded.
-TEST(cu_bitmap, unfold_legacy_only_gfx11_gfx12)
+// Other generations pack SEs above 3 differently (gfx9_0 folds with stride 1,
+// gfx9_4_3 packs per XCC), so only SEs 0-3 are reported for them.
+TEST(cu_bitmap, unfold_legacy_other_generations_first_four_se)
 {
     uint32_t bitmap[4][4] = {};
-    bitmap[0][0]          = 0xFu;
-    EXPECT_FALSE(agent::unfold_legacy_cu_bitmap(bitmap, 4, 1, 90402));   // gfx942
-    EXPECT_FALSE(agent::unfold_legacy_cu_bitmap(bitmap, 4, 2, 100300));  // gfx1030
-    EXPECT_FALSE(agent::unfold_legacy_cu_bitmap(bitmap, 4, 2, 130000));
-    EXPECT_TRUE(agent::unfold_legacy_cu_bitmap(bitmap, 4, 2, 110000));
-    EXPECT_TRUE(agent::unfold_legacy_cu_bitmap(bitmap, 4, 2, 120501));
+    for(uint32_t se = 0; se < 4; ++se)
+        bitmap[se][0] = 0x100u + se;
+
+    // MI100-like: 8 SE x 1 SA, one bit per CU
+    const auto gfx9 = agent::unfold_legacy_cu_bitmap(bitmap, 8, 1, 90008);
+    ASSERT_TRUE(gfx9);
+    EXPECT_EQ(gfx9->num_se, 4u);
+    EXPECT_EQ(gfx9->cu_bits_per_wgp, 1u);
+    for(uint32_t se = 0; se < 4; ++se)
+        EXPECT_EQ(gfx9->get_mask(0, se, 0), 0x100u + se);
+
+    const auto gfx10 = agent::unfold_legacy_cu_bitmap(bitmap, 4, 2, 100300);
+    ASSERT_TRUE(gfx10);
+    EXPECT_EQ(gfx10->cu_bits_per_wgp, 2u);
 }
 
 TEST(cu_bitmap, is_wgp_active)

@@ -59,6 +59,7 @@
 #include <cstring>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <set>
 #include <shared_mutex>
 #include <stdexcept>
@@ -458,8 +459,9 @@ query_amdgpu_info(int drm_fd, uint32_t query, void* data, size_t size)
 uint32_t
 get_cu_bits_per_wgp(uint32_t gfx_target_version)
 {
-    // gfx1250 defines 1 WGP = 1 CU; everything else in GFX11+ has 2 CUs per WGP
-    return (gfx_target_version == 120500) ? 1 : 2;
+    // GFX9 has no WGPs (each CU is its own unit) and gfx1250 defines 1 WGP = 1 CU;
+    // everything else has 2 CUs per WGP
+    return (gfx_target_version < 100000 || gfx_target_version == 120500) ? 1 : 2;
 }
 
 std::optional<cu_bitmap>
@@ -490,17 +492,16 @@ query_cu_bitmap(int drm_fd, const rocprofiler_agent_t* agent)
 }
 
 // Fallback for kernels without AMDGPU_INFO_CU_BITMAP: drm_amdgpu_info_device
-// only carries a folded 4x4 bitmap of XCC 0.
+// only carries a 4x4 bitmap of XCC 0 (num_shader_engines is per XCC).
 std::optional<cu_bitmap>
 query_legacy_cu_bitmap(int drm_fd, const rocprofiler_agent_t* agent)
 {
-    if(agent->num_xcc != 1) return std::nullopt;
-
     auto dev_info = drm_amdgpu_info_device{};
     if(query_amdgpu_info(drm_fd, AMDGPU_INFO_DEV_INFO, &dev_info, sizeof(dev_info)) != 0)
         return std::nullopt;
 
-    if(dev_info.num_shader_engines != agent->num_shader_banks ||
+    if(agent->num_xcc == 0 ||
+       dev_info.num_shader_engines * agent->num_xcc != agent->num_shader_banks ||
        dev_info.num_shader_arrays_per_engine != agent->simd_arrays_per_engine)
         return std::nullopt;
 
@@ -510,18 +511,10 @@ query_legacy_cu_bitmap(int drm_fd, const rocprofiler_agent_t* agent)
                                    agent->gfx_target_version);
 }
 
-// The CU bitmap is only consumed on GFX11+: by the SQ-counter WGP iteration in
-// source/lib/aqlprofile/pm4/pmc_builder.h and the thread-trace target_cu
-// check. On GFX9 (MI100/200/300) and GFX10 it is unused, and a per-process
-// drmOpenRender on the shared /dev/dri/renderD* node serializes on the kernel
-// DRM mutex, inflating CI runtime under parallel loads. gfx_target_version is
-// the KFD-populated numeric encoding (major*10000 + minor*100 + patch), so the
-// >= 110000 threshold selects GFX11 / GFX12 / future families.
 std::optional<cu_bitmap>
 load_cu_bitmap(const rocprofiler_agent_t* agent)
 {
-    if(agent->type != ROCPROFILER_AGENT_TYPE_GPU || agent->drm_render_minor <= 0 ||
-       agent->gfx_target_version < 110000)
+    if(agent->type != ROCPROFILER_AGENT_TYPE_GPU || agent->drm_render_minor <= 0)
         return std::nullopt;
 
     int drm_fd = drmOpenRender(agent->drm_render_minor);
@@ -546,20 +539,6 @@ load_cu_bitmap(const rocprofiler_agent_t* agent)
         return std::nullopt;
 
     return bitmap;
-}
-
-// One entry per agent, in get_agents() order
-const std::vector<std::optional<cu_bitmap>>&
-get_cu_bitmaps()
-{
-    static auto*& _v = common::static_object<std::vector<std::optional<cu_bitmap>>>::construct(
-        []() {
-            auto _bitmaps = std::vector<std::optional<cu_bitmap>>{};
-            for(const auto* agent : get_agents())
-                _bitmaps.emplace_back(load_cu_bitmap(agent));
-            return _bitmaps;
-        }());
-    return *CHECK_NOTNULL(_v);
 }
 
 // Registers every agent with aqlprofile and returns the handles.
@@ -607,32 +586,35 @@ register_aql_handles()
             bdf.function,
             agent->name);
 
-        // V2 registration carries the CU bitmap of available WGPs.
-        const auto& bitmap  = get_cu_bitmaps().at(agent_handles.size());
-        auto        info_v2 = aqlprofile_agent_info_v2_t{
-                   .agent_gfxip          = agent->name,
-                   .xcc_num              = agent->num_xcc,
-                   .se_num               = agent->num_shader_banks,
-                   .cu_num               = agent->cu_count,
-                   .shader_arrays_per_se = agent->simd_arrays_per_engine,
-                   .domain               = agent->domain,
-                   .location_id          = agent->location_id,
-                   .cu_bitmap_num_xcc    = bitmap ? bitmap->num_xcc : 0,
-                   .cu_bitmap_num_se     = bitmap ? bitmap->num_se : 0,
-                   .cu_bitmap_num_sa     = bitmap ? bitmap->num_sa : 0,
-                   .cu_bitmap            = bitmap ? bitmap->masks.data() : nullptr,
+        // V2 registration carries the CU bitmap of available WGPs. It is only
+        // consumed by the GFX11+ per-WGP counter path, and opening the shared
+        // /dev/dri/renderD* node serializes on the kernel DRM mutex, so other
+        // generations skip it.
+        const auto* bitmap =
+            (agent->gfx_target_version >= 110000) ? get_cu_bitmap(agent->id) : nullptr;
+        auto info_v2 = aqlprofile_agent_info_v2_t{
+            .agent_gfxip          = agent->name,
+            .xcc_num              = agent->num_xcc,
+            .se_num               = agent->num_shader_banks,
+            .cu_num               = agent->cu_count,
+            .shader_arrays_per_se = agent->simd_arrays_per_engine,
+            .domain               = agent->domain,
+            .location_id          = agent->location_id,
+            .cu_bitmap_num_xcc    = bitmap ? bitmap->num_xcc : 0,
+            .cu_bitmap_num_se     = bitmap ? bitmap->num_se : 0,
+            .cu_bitmap_num_sa     = bitmap ? bitmap->num_sa : 0,
+            .cu_bitmap            = bitmap ? bitmap->masks.data() : nullptr,
         };
 
         if(aqlprofile_register_agent_info(&handle, &info_v2, AQLPROFILE_AGENT_VERSION_V2) !=
            HSA_STATUS_SUCCESS)
         {
-            ROCP_WARNING << fmt::format(
-                "Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
-                bdf.domain,
-                bdf.bus,
-                bdf.device,
-                bdf.function,
-                agent->name);
+            ROCP_WARNING << fmt::format("Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
+                                        bdf.domain,
+                                        bdf.bus,
+                                        bdf.device,
+                                        bdf.function,
+                                        agent->name);
         }
 #endif
         agent_handles.push_back(handle);
@@ -713,17 +695,18 @@ cu_bitmap::is_wgp_active(uint32_t xcc, uint32_t se, uint32_t sa, uint32_t wgp) c
 const cu_bitmap*
 get_cu_bitmap(rocprofiler_agent_id_t id)
 {
-    size_t pos = 0;
-    for(const auto& itr : get_agents())
+    using cache_t      = std::unordered_map<uint64_t, std::optional<cu_bitmap>>;
+    static auto*& _mtx = common::static_object<std::mutex>::construct();
+    static auto*& _v   = common::static_object<cache_t>::construct();
+
+    auto _lk = std::lock_guard<std::mutex>{*CHECK_NOTNULL(_mtx)};
+    auto itr = CHECK_NOTNULL(_v)->find(id.handle);
+    if(itr == _v->end())
     {
-        if(itr && itr->id.handle == id.handle)
-        {
-            const auto& bitmap = get_cu_bitmaps().at(pos);
-            return bitmap ? &bitmap.value() : nullptr;
-        }
-        pos++;
+        const auto* agent = get_agent(id);
+        itr = _v->emplace(id.handle, agent ? load_cu_bitmap(agent) : std::nullopt).first;
     }
-    return nullptr;
+    return itr->second ? &itr->second.value() : nullptr;
 }
 
 std::optional<cu_bitmap>
@@ -732,20 +715,15 @@ unfold_legacy_cu_bitmap(const uint32_t (&bitmap)[4][4],
                         uint32_t num_sa,
                         uint32_t gfx_target_version)
 {
-    // Only GFX11/GFX12 pack the bitmap this way; other generations (e.g.
-    // gfx9_4_3 packs per XCC without folding) are not handled here.
-    if(gfx_target_version < 110000 || gfx_target_version >= 130000) return std::nullopt;
-    if(num_se == 0 || num_sa == 0) return std::nullopt;
+    // GFX11/GFX12 fold SEs 4-7 into SA columns 2-3 (the kernel's
+    // gfx_v11_0/gfx_v12_0_get_cu_info packing bitmap[se % 4][sa + (se / 4) * 2]).
+    // Other generations pack differently above SE 3 (e.g. gfx9_4_3 is per XCC),
+    // so only SEs 0-3 are reported for them.
+    const bool fold = (gfx_target_version >= 110000 && gfx_target_version < 130000);
+    if(!fold) num_se = std::min(num_se, 4u);
 
-    // Mirrors the kernel's gfx_v11_0/gfx_v12_0_get_cu_info packing
-    // bitmap[se % 4][sa + (se / 4) * 2].
-    constexpr uint32_t sh_mul = 2;
-
-    // Shader engines 4 apart share a row, sh_mul columns apart: with more SAs
-    // than that they overlap, and every column must stay inside the 4x4 tile.
-    // Either way the kernel already lost data, so report no bitmap rather
-    // than another shader array's mask.
-    if((num_se > 4 && num_sa > sh_mul) || (num_sa - 1) + ((num_se - 1) / 4) * sh_mul > 3)
+    // Topologies the 4x4 tile cannot hold: the kernel already lost data there
+    if(num_se == 0 || num_sa == 0 || num_sa > 4 || (num_se > 4 && (num_se > 8 || num_sa > 2)))
         return std::nullopt;
 
     auto _bitmap            = cu_bitmap{};
@@ -755,7 +733,7 @@ unfold_legacy_cu_bitmap(const uint32_t (&bitmap)[4][4],
     _bitmap.cu_bits_per_wgp = get_cu_bits_per_wgp(gfx_target_version);
     for(uint32_t se = 0; se < num_se; ++se)
         for(uint32_t sa = 0; sa < num_sa; ++sa)
-            _bitmap.masks.emplace_back(bitmap[se % 4][sa + (se / 4) * sh_mul]);
+            _bitmap.masks.emplace_back(bitmap[se % 4][sa + (se / 4) * 2]);
     return _bitmap;
 }
 

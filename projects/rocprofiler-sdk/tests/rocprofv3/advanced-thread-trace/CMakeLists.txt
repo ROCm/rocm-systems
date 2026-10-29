@@ -58,7 +58,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input
-        --att-target-cu 1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
+        --att-target-cu -1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
         --att-buffer-size 0x6000000 --att-simd-select 0x3 --att-serialize-all 1 -o out --
         $<TARGET_FILE:hsa_code_object_testapp>
     DEPENDS hsa_code_object_testapp
@@ -172,8 +172,8 @@ rocprofiler_add_integration_execute_test(
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-env-var
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/envvar --
-            $<TARGET_FILE:hsa_code_object_testapp>
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/envvar
+            --att-target-cu -1 -- $<TARGET_FILE:hsa_code_object_testapp>
     DEPENDS hsa_code_object_testapp
     TIMEOUT 45
     LABELS "integration-tests"
@@ -185,7 +185,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-hsa-multiqueue-plus-pmc
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input --pmc
-            SQ_WAVES -o pmc -- $<TARGET_FILE:vector-ops>
+            SQ_WAVES --att-target-cu -1 -o pmc -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
@@ -245,7 +245,7 @@ set(PCS_ARGS --pc-sampling-beta-enabled 1 --pc-sampling-unit cycles
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-plus-pc-sampling
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input
-            ${PCS_ARGS} -o out -- $<TARGET_FILE:vector-ops>
+            ${PCS_ARGS} --att-target-cu -1 -o out -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 90
     LABELS "integration-tests;thread-trace;pc-sampling"
@@ -254,8 +254,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-gpu-index-two-gpus
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d att-multi-gpu --att --att-gpu-index
-        0,1 --att-consecutive-kernels 1 --kernel-trace --output-format csv --
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d att-multi-gpu --att --att-target-cu -1
+        --att-gpu-index 0,1 --att-consecutive-kernels 1 --kernel-trace --output-format csv --
         $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
@@ -332,7 +332,7 @@ if(attdecoder_FOUND
         rocprofv3-test-att-event-tracing
         COMMAND
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/event_tracing -o
-            out --kernel-include-regex matrixTranspose -- $<TARGET_FILE:simple-transpose>
+            out --att-target-cu -1 --kernel-include-regex matrixTranspose -- $<TARGET_FILE:simple-transpose>
         DEPENDS simple-transpose
         TIMEOUT 45
         LABELS "integration-tests"
@@ -364,7 +364,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-no-detail
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_NO_DETAIL_OUT_DIR} --att
-        --att-no-detail --output-format json --kernel-include-regex matrixTranspose --
+        --att-target-cu -1 --att-no-detail --output-format json --kernel-include-regex matrixTranspose --
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
@@ -398,7 +398,8 @@ set(OTHER_SIMD_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-other-simd")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-other-simd
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${OTHER_SIMD_OUT_DIR} --att --
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${OTHER_SIMD_OUT_DIR} --att
+            --att-target-cu -1 --
             $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
@@ -428,7 +429,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-marker-trace
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_MARKER_TRACE_OUT_DIR} --att
-        --selected-regions --att-shader-engine-mask 0xF --output-format json --log-level
+        --att-target-cu -1 --selected-regions --att-shader-engine-mask 0xF --output-format json --log-level
         env -o out -- $<TARGET_FILE:att-marker-trace>
     DEPENDS att-marker-trace
     LABELS "integration-tests;thread-trace"
@@ -478,7 +479,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-no-intercept
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_NO_INTERCEPT_OUT_DIR}
-        --att-no-intercept --kernel-include-regex looping_lds_kernel --output-format json
+        --att-target-cu -1 --att-no-intercept --kernel-include-regex looping_lds_kernel --output-format json
         --log-level env -o out -- $<TARGET_FILE:thread-trace-test-app>
     DEPENDS thread-trace-test-app
     LABELS "integration-tests;thread-trace"
@@ -507,7 +508,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-code-object-resources
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_CODE_OBJECT_OUT_DIR} --att
-        --att-resource-mode code-object --output-format json -o out --
+        --att-target-cu -1 --att-resource-mode code-object --output-format json -o out --
         $<TARGET_FILE:thread-trace-test-app>
     DEPENDS thread-trace-test-app
     TIMEOUT 45
@@ -536,7 +537,7 @@ set(ATT_HSA_FALLBACK_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-hsa-fallback-out")
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-hsa-fallback
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_HSA_FALLBACK_OUT_DIR} --att
-            --output-format json -o out -- $<TARGET_FILE:thread-trace-test-app>
+            --att-target-cu -1 --output-format json -o out -- $<TARGET_FILE:thread-trace-test-app>
     DEPENDS thread-trace-test-app
     TIMEOUT 45
     LABELS "integration-tests;thread-trace"
@@ -563,7 +564,8 @@ set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-shaderdata
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${SHADERDATA_OUT_DIR} --att --
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${SHADERDATA_OUT_DIR} --att
+            --att-target-cu -1 --
             $<TARGET_FILE:thread-trace-test-app>
     DEPENDS thread-trace-test-app
     TIMEOUT 45

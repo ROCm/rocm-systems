@@ -6,7 +6,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
-- Thread trace warns when `ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU` selects a WGP that is not available on any selected shader engine of a gfx11 or later agent.
+- A negative thread trace `target_cu` selects a CU or WGP available on the traced shader engines. A warning is logged when `target_cu` is not available on one of them.
 
 ### Changed
 
