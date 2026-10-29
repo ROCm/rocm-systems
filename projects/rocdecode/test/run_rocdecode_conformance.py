@@ -235,7 +235,9 @@ def make_client(region: str, bucket: str):
         headers = exc.response.get("ResponseMetadata", {}).get("HTTPHeaders", {})
         actual = headers.get("x-amz-bucket-region")
         if actual and actual != region:
-            logging.info(f"++ bucket {bucket} is in {actual}, not {region}; reconnecting")
+            logging.info(
+                f"++ bucket {bucket} is in {actual}, not {region}; reconnecting"
+            )
             return boto3.client("s3", region_name=actual)
         # head_bucket also fails when the caller may read the object but not the
         # bucket itself, which is a legitimate least-privilege policy. Carry on
@@ -274,7 +276,9 @@ def download_corpus(client, bucket: str, key: str, dest: Path, size: int) -> Non
     dest.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="rocdecode-conformance-") as scratch:
         archive_path = Path(scratch) / "corpus.zip"
-        logging.info(f"++ Downloading s3://{bucket}/{key} ({size / (1024 ** 2):.1f} MiB)")
+        logging.info(
+            f"++ Downloading s3://{bucket}/{key} ({size / (1024 ** 2):.1f} MiB)"
+        )
         with archive_path.open("wb") as handle:
             client.download_fileobj(bucket, key, handle)
 
@@ -345,7 +349,9 @@ def resolve_corpus(args: argparse.Namespace) -> Optional[Path]:
         logging.warning(f"{SKIP_BANNER}: no AWS credentials available.")
         logging.warning("")
         logging.warning("The stream corpus lives in a private bucket. GitHub does not")
-        logging.warning("expose repository secrets to pull requests from forks, so this")
+        logging.warning(
+            "expose repository secrets to pull requests from forks, so this"
+        )
         logging.warning("is expected on fork PRs and is not a failure.")
         logging.warning("=" * 72)
         logging.warning("")
@@ -453,7 +459,11 @@ def main() -> int:
     )
 
     conformance_script = (
-        rocm_path / "share" / PROJECT_NAME / "test" / "testScripts"
+        rocm_path
+        / "share"
+        / PROJECT_NAME
+        / "test"
+        / "testScripts"
         / "run_rocDecode_Conformance.py"
     )
     if not conformance_script.is_file():
