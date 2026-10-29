@@ -99,6 +99,24 @@ enum InstFlags : uint64_t {
   MISALIGNED_SCALAR_DATA = (1ULL << 29)
 };
 
+namespace amdgpu {
+
+/// @brief The AMDGPU block an instruction issues to.
+/// @details A static classification of the decoded instruction: it does not
+/// see address routing, so generic FLAT is VMEM even when its address resolves
+/// to LDS.
+enum class ExecutionBlock : uint8_t {
+  UNKNOWN, ///< In no block below, e.g. exports and non-AMDGPU instructions.
+  SALU,    ///< Scalar ALU, including waits, barriers, messages and no-ops.
+  VALU,    ///< Vector ALU, including matrix and transcendental operations.
+  BRANCH,  ///< Instructions that may write the PC; see Instruction::writes_pc().
+  SMEM,    ///< Scalar memory and scalar cache maintenance.
+  VMEM,    ///< Vector memory: buffer, global, scratch, flat, image and tensor.
+  LDS,     ///< LDS, including LDS-direct, GWS and the ds_ no-op.
+};
+
+} // namespace amdgpu
+
 class BasicBlock;
 
 /// @brief Base class for opaque per-instruction dynamic state.
@@ -352,6 +370,65 @@ public:
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
 
+  /// @brief Whether this instruction ends the program (e.g. s_endpgm).
+  bool is_program_terminator() const { return flags_ & PROGRAM_TERMINATOR; }
+
+  /// @brief Whether this instruction may leave the PC somewhere other than the
+  /// next instruction.
+  /// @details The control-flow flags, plus the AMDGPU PC-write, call, trap entry
+  /// and trap return families, which carry none.
+  bool writes_pc() const {
+    constexpr uint64_t pc_flags =
+        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
+    return (flags_ & pc_flags) != 0 ||
+           mnemonic_has_prefix({"s_setpc", "s_swappc", "s_call", "s_rfe", "s_trap"});
+  }
+
+  /// @brief Whether this is an AMDGPU VALU transcendental:
+  /// v_{rcp,rsq,sqrt,exp,log,sin,cos}*.
+  bool is_transcendental() const {
+    return mnemonic_has_prefix(
+        {"v_rcp_", "v_rsq_", "v_sqrt_", "v_exp_", "v_log_", "v_sin_", "v_cos_"});
+  }
+
+  /// @brief Whether this instruction sleeps or halts its wave:
+  /// s_sleep, s_sethalt and s_sendmsghalt.
+  bool suspends_wave() const {
+    return mnemonic_has_prefix({"s_sleep", "s_sethalt", "s_sendmsghalt"});
+  }
+
+  /// @brief The AMDGPU block this instruction issues to.
+  /// @details Memory comes first: by mnemonic family, since whole families
+  /// carry no memory-issue metadata on some architectures (image, LDS-direct,
+  /// scalar cache maintenance), then by the decoded metadata, which catches
+  /// memory encodings outside those families (e.g. CDNA5 cluster loads). Then
+  /// PC writes, then the scalar and vector ALUs by mnemonic.
+  [[nodiscard]] amdgpu::ExecutionBlock amdgpu_execution_block() const {
+    using amdgpu::ExecutionBlock;
+    if (mnemonic_has_prefix({"ds_", "lds_"}))
+      return ExecutionBlock::LDS;
+    if (mnemonic_has_prefix(
+            {"buffer_", "tbuffer_", "global_", "scratch_", "flat_", "image_", "tensor_"}))
+      return ExecutionBlock::VMEM;
+    if (mnemonic_has_prefix({"s_load", "s_store", "s_atomic", "s_buffer", "s_scratch", "s_dcache",
+                             "s_prefetch", "s_atc_probe", "s_gl1_inv"}))
+      return ExecutionBlock::SMEM;
+    if (const auto *issue = amdgpu_memory_issue_info()) {
+      for (const auto obligation : issue->counter_obligations())
+        if (obligation.completion_class() == amdgpu::MemoryCompletionClass::LDS)
+          return ExecutionBlock::LDS;
+    }
+    if (is_memory_op())
+      return mnemonic_has_prefix({"s_"}) ? ExecutionBlock::SMEM : ExecutionBlock::VMEM;
+    if (writes_pc())
+      return ExecutionBlock::BRANCH;
+    if (mnemonic_has_prefix({"s_"}))
+      return ExecutionBlock::SALU;
+    if (mnemonic_has_prefix({"v_"}))
+      return ExecutionBlock::VALU;
+    return ExecutionBlock::UNKNOWN;
+  }
+
   /// @brief Signed byte offset for a direct branch target.
   ///
   /// @details Generated ISA subclasses override this for direct branches whose
@@ -437,6 +514,14 @@ public:
       build_modifiers(disassembly_);
     }
     return disassembly_;
+  }
+
+private:
+  bool mnemonic_has_prefix(std::initializer_list<std::string_view> prefixes) const {
+    for (const auto prefix : prefixes)
+      if (mnemonic_.starts_with(prefix))
+        return true;
+    return false;
   }
 
 protected:
