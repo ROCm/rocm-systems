@@ -830,7 +830,7 @@ add_dependencies(hipify_all net_ib_header_symlinks rma_header_symlinks)
 # nccl_device/{core,comm,gin}.h share basenames with the top-level src/include/
 # {core,comm,gin}.h, so add_file_unique() renames the nccl_device copies to
 # *_tmp.h in the hipify tree. Hipified sources have their #includes rewritten to
-# the _tmp names, but the IR bitcode wrapper (bindings/ir/nccl_device_wrapper.h)
+# the _tmp names, but the IR bitcode ABI header (bindings/ir/nccl_device_ir.h)
 # is staged verbatim (not hipified) and includes "nccl_device/core.h" directly.
 # Symlink the un-suffixed names back to the _tmp outputs, same as net_ib/ and
 # rma/ above, so the EMIT_LLVM_IR build can resolve them.

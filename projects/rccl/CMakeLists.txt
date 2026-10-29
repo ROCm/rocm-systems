@@ -842,7 +842,7 @@ endif()
 # LLVM IR / bitcode for nccl_device APIs (HIP / AMDGPU)
 #==================================================================================================
 # When EMIT_LLVM_IR=ON, build a standalone LLVM bitcode artifact (librccl_device.bc)
-# plus a C wrapper header (nccl_device_wrapper.h) from src/include/nccl_device/.
+# plus the public C ABI header (nccl_device_ir.h) from src/include/nccl_device/.
 # The bitcode is generated from the hipify-staged headers that librccl.so itself
 # is compiled from, so the IR is guaranteed to match the host library.
 if(EMIT_LLVM_IR)
@@ -902,13 +902,13 @@ if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/anvil_sdma/sdma)
 endif()
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
-## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
+## librccl_device.bc, nccl_device_ir.h, hipified nccl_device headers,
 ## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
 ## before install because rccl_with_ir is part of ALL.
 if(EMIT_LLVM_IR)
   rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
                DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
-  rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device_wrapper.h
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device_ir.h
                            ${PROJECT_BINARY_DIR}/include/nccl_device.h
                            ${PROJECT_BINARY_DIR}/include/nccl.h
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)

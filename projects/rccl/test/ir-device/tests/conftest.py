@@ -208,8 +208,8 @@ def _build_test_binary(bitcode=BITCODE, exe=TEST_EXE,
         HIPCC,
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
-        # Source wrapper first: cmake -DEMIT_LLVM_IR=OFF does not restage
-        # build/include/nccl_device_wrapper.h, so a generated copy can be stale.
+        # Source header first: cmake -DEMIT_LLVM_IR=OFF does not restage
+        # build/include/nccl_device_ir.h, so a generated copy can be stale.
         f"-I{IR_DIR}",
         f"-I{HIPIFY_INC}",
         f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",

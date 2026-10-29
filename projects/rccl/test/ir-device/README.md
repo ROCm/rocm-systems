@@ -4,14 +4,14 @@
 
 This directory contains a pytest harness that builds and runs the GoogleTest
 binary defined in `bindings/ir/test/IR_test.cpp`. That test exercises every
-active API exported by `nccl_device_ir.cu` (formerly `nccl_device_wrapper__impl.h`) on real GPU hardware:
+active API exported by `nccl_device_ir.cu` on real GPU hardware:
 
 | Group | API |
 |-------|-----|
-| A | `ncclGetPeerPointerTeam` |
-| B1–B5 | `ncclCoopAnyInit{Thread,Warp,Lanes,WarpSpan,Cta}` + `ncclCoopSize/ThreadRank/NumThreads` |
-| B6 | `ncclCoopSync` (all five coop types) |
-| B7 | `ncclLsaBarrierSession_C` structural check (runtime calls skipped) |
+| A | `ncclIrGetPeerPointerTeam` |
+| B1–B5 | `ncclIrCoopAnyInit{Thread,Warp,Lanes,WarpSpan,Cta}` + `ncclIrCoopSize/ThreadRank/NumThreads` |
+| B6 | `ncclIrCoopSync` (all five coop types) |
+| B7 | `ncclIrLsaBarrierSession` structural check (runtime calls skipped) |
 
 Unlike the rest of `rccl-UnitTests`, this test cannot be built by the default
 RCCL CMake invocation: it links `librccl_device.bc` into the AMDGPU device-side

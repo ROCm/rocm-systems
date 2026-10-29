@@ -1,4 +1,25 @@
-"""Low-level CuTeDSL bindings for ``bindings/ir/nccl_device_wrapper.h``.
+"""Low-level CuTeDSL bindings for ``bindings/ir/nccl_device_ir.h``.
+
+.. warning::
+
+   **Stale as of the nccl_device_ir.h rename -- knowingly not updated.**
+
+   Every ``@cute.extern`` below names a bitcode symbol by its exact pre-rename
+   spelling (``ncclCoopSync``, ``ncclLsaReduceSum_F32``, ...). The artifact now
+   exports those entry points as ``ncclIr*`` (``ncclIrCoopSync``,
+   ``ncclIrLsaReduceSum_F32``), and the three
+   ``ncclXxxBarrierSession_C_size()`` getters are gone entirely -- the opaque
+   ``ncclIr*BarrierSession`` structs carry a compile-time size instead.
+
+   This module is left as-is deliberately rather than half-ported. It is not
+   built, imported, or tested by any RCCL target (``make nccl4py`` does not
+   reach it, and there is no CuTeDSL dependency in the build), and the port of
+   NVIDIA's CuTeDSL layer onto RCCL is explicitly out of scope for the
+   LTO-IR work. Updating the names here without a consumer to exercise them
+   would produce bindings that *look* current and have never been run, which is
+   strictly worse than an honest staleness note. Re-derive this file from the
+   ``extern "C"`` block in ``bindings/ir/nccl_device_ir.h`` when the CuTeDSL
+   path is actually taken up.
 
 Fixed symbols use ``@cute.extern``. ReduceCopy symbols are selected by dtype
 through overloaded ``@cute.extern`` declarations. Callers handle argument

@@ -99,24 +99,24 @@ typedef enum {
 ////////////////////////////////////////////////////////////////////////////////
 // Team API:
 #ifdef __CUDACC__
-ncclTeam ncclTeamWorld(ncclDevComm const&);
+NCCL_DEVICE_INLINE ncclTeam ncclTeamWorld(ncclDevComm const&);
 #endif
 #ifdef __CUDACC__
-ncclTeam ncclTeamLsa(ncclDevComm const&);
+NCCL_DEVICE_INLINE ncclTeam ncclTeamLsa(ncclDevComm const&);
 #endif
 
 #ifdef __CUDACC__
-ncclTeam ncclTeamCft(ncclDevComm const&, ncclCftTeamMode_t mode = NCCL_CFT_TEAM_FLAT);
-ncclTeam ncclTeamCftMultimem(ncclDevComm const&);
+NCCL_DEVICE_INLINE ncclTeam ncclTeamCft(ncclDevComm const&, ncclCftTeamMode_t mode = NCCL_CFT_TEAM_FLAT);
+NCCL_DEVICE_INLINE ncclTeam ncclTeamCftMultimem(ncclDevComm const&);
 #endif
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE bool ncclTeamRankIsMember(ncclTeam_t a, ncclTeam_t b, int bPeer);
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE int ncclTeamRankToTeam(ncclTeam_t a, ncclTeam_t b, int bPeer);
 
 #ifdef __CUDACC__
-int ncclTeamRankToWorld(ncclDevComm const&, ncclTeam, int rank);
+NCCL_DEVICE_INLINE int ncclTeamRankToWorld(ncclDevComm const&, ncclTeam, int rank);
 #endif
 #ifdef __CUDACC__
-int ncclTeamRankToLsa(ncclDevComm const&, ncclTeam, int rank);
+NCCL_DEVICE_INLINE int ncclTeamRankToLsa(ncclDevComm const&, ncclTeam, int rank);
 #endif
 
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE ncclTeam_t ncclTeamInnerFactor(ncclTeam_t parent, int innerSize);
@@ -130,7 +130,7 @@ NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE int ncclTeamRankInDifference(ncclTeam_t pa
 
 // Equivalent to ncclTeamOuterFactor of lsa team.
 #ifdef __CUDACC__
-ncclTeam ncclTeamRail(ncclDevComm const&);
+NCCL_DEVICE_INLINE ncclTeam ncclTeamRail(ncclDevComm const&);
 #endif
 // Get offset of resource buffer within `comm.resourceWindow`.
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE size_t ncclGetResourceBufferOffset(ncclDevResourceHandle_t h);
@@ -144,41 +144,41 @@ NCCL_DEVICE_INLINE ncclSymPtr<char> ncclGetResourceBuffer(ncclDevComm const&, nc
 
 #ifdef __CUDACC__
 // VA pointer based query functions
-void* ncclGetLocalPointer(ncclWindow_t w, size_t offset);
-void* ncclGetLsaPointer(ncclWindow_t w, size_t offset, int peer);
-void* ncclGetPeerPointer(ncclWindow_t w, size_t offset, int peer);
+NCCL_DEVICE_INLINE void* ncclGetLocalPointer(ncclWindow_t w, size_t offset);
+NCCL_DEVICE_INLINE void* ncclGetLsaPointer(ncclWindow_t w, size_t offset, int peer);
+NCCL_DEVICE_INLINE void* ncclGetPeerPointer(ncclWindow_t w, size_t offset, int peer);
 NCCL_DEVICE_INLINE void* ncclGetPeerPointer(ncclWindow_t w, size_t offset, ncclTeam tm, int peer);
-void* ncclGetMultimemPointer(ncclWindow_t w, size_t offset,
+NCCL_DEVICE_INLINE void* ncclGetMultimemPointer(ncclWindow_t w, size_t offset,
                                                                  ncclMultimemHandle mmHandle);
-void* ncclGetLsaMultimemPointer(ncclWindow_t w, size_t offset, ncclDevComm const&);
+NCCL_DEVICE_INLINE void* ncclGetLsaMultimemPointer(ncclWindow_t w, size_t offset, ncclDevComm const&);
 
 // CFT handle based query functions
-void ncclGetCftLeInfo(ncclWindow_t w, size_t offset, int peerCft, ncclTeam cftTeam,
+NCCL_DEVICE_INLINE void ncclGetCftLeInfo(ncclWindow_t w, size_t offset, int peerCft, ncclTeam cftTeam,
                                                           ncclDevComm const& comm, ncclCftLeId* leId, size_t* leOffset);
-void ncclGetPeerLeInfo(
+NCCL_DEVICE_INLINE void ncclGetPeerLeInfo(
   ncclWindow_t w, size_t offset, int peerWorld, ncclDevComm const& comm, ncclCftLeId* leId, size_t* leOffset);
-void ncclGetMultimemLeInfo(ncclWindow_t w, size_t offset, ncclDevComm const&,
+NCCL_DEVICE_INLINE void ncclGetMultimemLeInfo(ncclWindow_t w, size_t offset, ncclDevComm const&,
                                                                ncclCftLeId* leId, size_t* leOffset);
 #endif
 
 #if __CUDACC__
 // Convenience for combining ncclGet***Pointer() with resource handle.
-void* ncclGetResourceBufferLocalPointer(ncclDevComm const&, ncclDevResourceHandle);
-void* ncclGetResourceBufferLsaPointer(ncclDevComm const&, ncclDevResourceHandle,
+NCCL_DEVICE_INLINE void* ncclGetResourceBufferLocalPointer(ncclDevComm const&, ncclDevResourceHandle);
+NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaPointer(ncclDevComm const&, ncclDevResourceHandle,
                                                                           int peer);
-void* ncclGetResourceBufferPeerPointer(ncclDevComm const&, ncclDevResourceHandle,
+NCCL_DEVICE_INLINE void* ncclGetResourceBufferPeerPointer(ncclDevComm const&, ncclDevResourceHandle,
                                                                            ncclTeam, int peer);
-void* ncclGetResourceBufferMultimemPointer(
+NCCL_DEVICE_INLINE void* ncclGetResourceBufferMultimemPointer(
   ncclDevComm const&, ncclDevResourceHandle, ncclMultimemHandle);
-void* ncclGetResourceBufferLsaMultimemPointer(ncclDevComm const&,
+NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaMultimemPointer(ncclDevComm const&,
                                                                                   ncclDevResourceHandle);
 
 // Convenience for combining ncclGet***LeInfo() with resource handle.
-void ncclGetResourceBufferCftLeInfo(
+NCCL_DEVICE_INLINE void ncclGetResourceBufferCftLeInfo(
   ncclDevComm const&, ncclDevResourceHandle, int peerCft, ncclCftLeId* leId, size_t* leOffset);
-void ncclGetResourceBufferPeerLeInfo(
+NCCL_DEVICE_INLINE void ncclGetResourceBufferPeerLeInfo(
   ncclDevComm const&, ncclDevResourceHandle, int peerWorld, ncclCftLeId* leId, size_t* leOffset);
-void ncclGetResourceBufferMultimemLeInfo(ncclDevComm const&, ncclDevResourceHandle,
+NCCL_DEVICE_INLINE void ncclGetResourceBufferMultimemLeInfo(ncclDevComm const&, ncclDevResourceHandle,
                                                                              ncclCftLeId* leId, size_t* leOffset);
 #endif
 

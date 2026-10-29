@@ -8,8 +8,8 @@
  * binary stands up a real 2-rank ncclComm with an established GIN connection
  * and drives the four bitcode thunks end-to-end on device:
  *
- *   ncclGinBarrierSessionInit / ncclGinBarrierSessionSync   (rail GIN barrier)
- *   ncclBarrierSessionInit     / ncclBarrierSessionSync     (composite barrier)
+ *   ncclIrGinBarrierSessionInit / ncclIrGinBarrierSessionSync   (rail GIN barrier)
+ *   ncclIrBarrierSessionInit     / ncclIrBarrierSessionSync     (composite barrier)
  *
  * It is a separate binary because a GIN barrier is inherently collective: it
  * signals peer ranks over the network, so it needs MPI (>=2 ranks on >=2
@@ -42,7 +42,7 @@
 
 #include <nccl.h>
 #include <nccl_device.h>
-#include <nccl_device_wrapper.h>
+#include <nccl_device_ir.h>
 
 /* -----------------------------------------------------------------------
  * Error-checking macros — fail the current assertion rather than abort the
@@ -150,17 +150,17 @@ __global__ void k_ir_gin_barrier(int iters, struct ncclDevComm devComm) {
                 NCCL_GIN_RESOURCE_SHARING_GPU);
 
   ncclCoopAny coop;
-  ncclCoopAnyInitCta(&coop);
+  ncclIrCoopAnyInitCta(&coop);
 
-  __attribute__((aligned(alignof(ncclGinBarrierSession_C))))
-      char sbuf[sizeof(ncclGinBarrierSession_C)];
-  ncclGinBarrierSession_C* session =
-      reinterpret_cast<ncclGinBarrierSession_C*>(sbuf);
+  __attribute__((aligned(alignof(ncclIrGinBarrierSession))))
+      char sbuf[sizeof(ncclIrGinBarrierSession)];
+  ncclIrGinBarrierSession* session =
+      reinterpret_cast<ncclIrGinBarrierSession*>(sbuf);
 
-  ncclGinBarrierSessionInit(session, coop, net, ncclTeamRail(devComm),
+  ncclIrGinBarrierSessionInit(session, coop, net, ncclTeamRail(devComm),
                             devComm.railGinBarrier, /*index=*/0);
   for (int i = 0; i < iters; ++i) {
-    ncclGinBarrierSessionSync(session, coop, cuda::memory_order_relaxed,
+    ncclIrGinBarrierSessionSync(session, coop, cuda::memory_order_relaxed,
                               ncclGinFenceLevel::Relaxed);
   }
 }
@@ -172,14 +172,14 @@ __global__ void k_ir_composite_barrier(int iters, struct ncclDevComm devComm) {
                 NCCL_GIN_RESOURCE_SHARING_GPU);
 
   ncclCoopAny coop;
-  ncclCoopAnyInitCta(&coop);
+  ncclIrCoopAnyInitCta(&coop);
 
-  __attribute__((aligned(alignof(ncclBarrierSession_C))))
-      char sbuf[sizeof(ncclBarrierSession_C)];
-  ncclBarrierSession_C* session =
-      reinterpret_cast<ncclBarrierSession_C*>(sbuf);
+  __attribute__((aligned(alignof(ncclIrBarrierSession))))
+      char sbuf[sizeof(ncclIrBarrierSession)];
+  ncclIrBarrierSession* session =
+      reinterpret_cast<ncclIrBarrierSession*>(sbuf);
 
-  ncclBarrierSessionInit(session, coop,
+  ncclIrBarrierSessionInit(session, coop,
                          /*innerTeam=*/ncclTeamLsa(devComm),
                          /*outerTeam=*/ncclTeamRail(devComm),
                          net,
@@ -189,7 +189,7 @@ __global__ void k_ir_composite_barrier(int iters, struct ncclDevComm devComm) {
                          /*multimem=*/false,
                          /*innerMmHandle=*/ncclMultimemHandle{});
   for (int i = 0; i < iters; ++i) {
-    ncclBarrierSessionSync(session, coop, cuda::memory_order_relaxed,
+    ncclIrBarrierSessionSync(session, coop, cuda::memory_order_relaxed,
                            ncclGinFenceLevel::Relaxed);
   }
 }

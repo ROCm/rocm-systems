@@ -4,20 +4,20 @@
  * IR_test.cpp — Comprehensive functional test for librccl_device.bc
  *
  * GoogleTest port of the original standalone driver. Tests every active API
- * exported by nccl_device_wrapper__impl.h, with one GTest case per API group
+ * exported by nccl_device_ir.cu, with one GTest case per API group
  * so the suite can be filtered with --gtest_filter and consumed by the RCCL
  * test_runner / CI exactly like the other rccl-UnitTests* binaries:
  *
- *   [A]  ncclGetPeerPointerTeam
- *   [B1] ncclCoopAnyInitThread   + ncclCoopSize/ThreadRank/NumThreads
- *   [B2] ncclCoopAnyInitWarp     + ncclCoopSize/ThreadRank/NumThreads
- *   [B3] ncclCoopAnyInitLanes    + ncclCoopSize/ThreadRank/NumThreads
+ *   [A]  ncclIrGetPeerPointerTeam
+ *   [B1] ncclIrCoopAnyInitThread   + ncclIrCoopSize/ThreadRank/NumThreads
+ *   [B2] ncclIrCoopAnyInitWarp     + ncclIrCoopSize/ThreadRank/NumThreads
+ *   [B3] ncclIrCoopAnyInitLanes    + ncclIrCoopSize/ThreadRank/NumThreads
  *          tested with full mask (0xFFFF…), sparse mask, single-bit mask
- *   [B4] ncclCoopAnyInitWarpSpan + ncclCoopSize/ThreadRank/NumThreads
+ *   [B4] ncclIrCoopAnyInitWarpSpan + ncclIrCoopSize/ThreadRank/NumThreads
  *          tested with 1-warp and 2-warp spans
- *   [B5] ncclCoopAnyInitCta      + ncclCoopSize/ThreadRank/NumThreads
+ *   [B5] ncclIrCoopAnyInitCta      + ncclIrCoopSize/ThreadRank/NumThreads
  *          tested with block-size 64 and 128
- *   [B6] ncclCoopSync — all five coop types; kernel-completion check
+ *   [B6] ncclIrCoopSync — all five coop types; kernel-completion check
  *   [B7] ncclLsaBarrierSession{Init,Arrive,Wait,Sync}
  *          — sizeof / alignment structural check: PASS
  *          — runtime invocations: SKIP (require a live ncclDevComm)
@@ -30,9 +30,10 @@
  *   [C2] ncclBarrierSession{Init,Sync}  (composite inner-LSA + outer-GIN)
  *          — sizeof / alignment structural check: PASS
  *          — runtime invocations: SKIP (require a live ncclDevComm + GIN net)
- *   [D0] the three ncclXBarrierSession_C_size() getters — *called* on device
- *          and compared against host-side sizeof
- *   [D1] the ten ncclDevComm_* accessors + three *SessionDestroy thunks —
+ *   [D0] the three opaque ncclIr*BarrierSession storage structs — exact
+ *          sizeof/alignof match against the C++ session templates they stand
+ *          in for (host-side; the sizes are compile-time constants now)
+ *   [D1] the ten ncclIrDevComm_* accessors + three *SessionDestroy thunks —
  *          address-taken so each must resolve from the bitcode (they need a
  *          live ncclDevComm / session to actually invoke)
  *
@@ -52,28 +53,36 @@
 #include <vector>
 
 #include <nccl.h>
-#include <nccl_device_wrapper.h>
+#include <nccl_device_ir.h>
 
 /* -----------------------------------------------------------------------
- * Compile-time structural checks — these fire during compilation, not at
- * runtime, so any failure here means the build itself breaks.
+ * Compile-time ABI checks — these fire during compilation, not at runtime,
+ * so any failure here means the build itself breaks.
+ *
+ * nccl_device_ir.h already static_asserts these on the producer side; the
+ * point of repeating them here is that this TU is a *consumer*, compiled with
+ * neither __clang_llvm_bitcode_lib__ nor __RCCL_DEVICE_LTO_BC_LIB__. If the
+ * opaque storage ever came out a different size under consumer macros than it
+ * does inside the artifact, every session the consumer alloca'd would be the
+ * wrong size and the producer's placement-new would scribble past it. These
+ * are the assertions that make that unrepresentable.
  * ---------------------------------------------------------------------- */
-static_assert(sizeof(ncclLsaBarrierSession_C) > 0,
-              "ncclLsaBarrierSession_C must have non-zero size");
-static_assert(alignof(ncclLsaBarrierSession_C) >= 1,
-              "ncclLsaBarrierSession_C must have valid alignment");
+static_assert(sizeof(ncclIrLsaBarrierSession) == sizeof(ncclLsaBarrierSession<ncclCoopAny>),
+              "ncclIrLsaBarrierSession storage must match ncclLsaBarrierSession<ncclCoopAny>");
+static_assert(alignof(ncclIrLsaBarrierSession) >= alignof(ncclLsaBarrierSession<ncclCoopAny>),
+              "ncclIrLsaBarrierSession is under-aligned for ncclLsaBarrierSession<ncclCoopAny>");
 
 /* [C] GIN + composite barrier session structs — enabling bucket [C] makes
  * these compile; the static_asserts guard against a regression that would
- * silently strip the wrapper structs back out of the build. */
-static_assert(sizeof(ncclGinBarrierSession_C) > 0,
-              "ncclGinBarrierSession_C must have non-zero size");
-static_assert(alignof(ncclGinBarrierSession_C) >= 1,
-              "ncclGinBarrierSession_C must have valid alignment");
-static_assert(sizeof(ncclBarrierSession_C) > 0,
-              "ncclBarrierSession_C must have non-zero size");
-static_assert(alignof(ncclBarrierSession_C) >= 1,
-              "ncclBarrierSession_C must have valid alignment");
+ * silently strip the opaque session structs back out of the build. */
+static_assert(sizeof(ncclIrGinBarrierSession) == sizeof(ncclGinBarrierSession<ncclCoopAny>),
+              "ncclIrGinBarrierSession storage must match ncclGinBarrierSession<ncclCoopAny>");
+static_assert(alignof(ncclIrGinBarrierSession) >= alignof(ncclGinBarrierSession<ncclCoopAny>),
+              "ncclIrGinBarrierSession is under-aligned for ncclGinBarrierSession<ncclCoopAny>");
+static_assert(sizeof(ncclIrBarrierSession) == sizeof(ncclBarrierSession<ncclCoopAny>),
+              "ncclIrBarrierSession storage must match ncclBarrierSession<ncclCoopAny>");
+static_assert(alignof(ncclIrBarrierSession) >= alignof(ncclBarrierSession<ncclCoopAny>),
+              "ncclIrBarrierSession is under-aligned for ncclBarrierSession<ncclCoopAny>");
 
 /* -----------------------------------------------------------------------
  * Error checking — fail the current GTest assertion rather than exit(),
@@ -113,7 +122,7 @@ class IRDeviceTest : public ::testing::Test {
 int IRDeviceTest::warpSize_ = 0;
 
 /* =====================================================================
- * [A] Bucket A — ncclGetPeerPointerTeam
+ * [A] Bucket A — ncclIrGetPeerPointerTeam
  * ==================================================================== */
 
 struct PeerCase {
@@ -170,7 +179,7 @@ __global__ void k_peer_ptr(char* base, const PeerCase* cases, int N, void** out)
   w.stride4G    = c.stride4G;
   w.mcOffset4K  = 0;
   ncclTeam tm{ c.tm_nRanks, c.tm_rank, c.tm_stride };
-  out[t] = ncclGetPeerPointerTeam(&w, c.offset, tm, c.peer);
+  out[t] = ncclIrGetPeerPointerTeam(&w, c.offset, tm, c.peer);
 }
 
 TEST_F(IRDeviceTest, A_GetPeerPointerTeam) {
@@ -216,62 +225,62 @@ TEST_F(IRDeviceTest, A_GetPeerPointerTeam) {
  * ==================================================================== */
 
 __global__ void k_coop_thread_r(CoopResult* out) {
-  ncclCoopAny coop; ncclCoopAnyInitThread(&coop);
+  ncclCoopAny coop; ncclIrCoopAnyInitThread(&coop);
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  out[tid] = { ncclCoopSize(&coop),
-               ncclCoopThreadRank(&coop),
-               ncclCoopNumThreads(&coop) };
+  out[tid] = { ncclIrCoopSize(&coop),
+               ncclIrCoopThreadRank(&coop),
+               ncclIrCoopNumThreads(&coop) };
 }
 
 __global__ void k_coop_warp_r(CoopResult* out) {
-  ncclCoopAny coop; ncclCoopAnyInitWarp(&coop);
+  ncclCoopAny coop; ncclIrCoopAnyInitWarp(&coop);
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  out[tid] = { ncclCoopSize(&coop),
-               ncclCoopThreadRank(&coop),
-               ncclCoopNumThreads(&coop) };
+  out[tid] = { ncclIrCoopSize(&coop),
+               ncclIrCoopThreadRank(&coop),
+               ncclIrCoopNumThreads(&coop) };
 }
 
 __global__ void k_coop_lanes_r(CoopResult* out, uint64_t mask) {
-  ncclCoopAny coop; ncclCoopAnyInitLanes(&coop, mask);
+  ncclCoopAny coop; ncclIrCoopAnyInitLanes(&coop, mask);
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  out[tid] = { ncclCoopSize(&coop),
-               ncclCoopThreadRank(&coop),
-               ncclCoopNumThreads(&coop) };
+  out[tid] = { ncclIrCoopSize(&coop),
+               ncclIrCoopThreadRank(&coop),
+               ncclIrCoopNumThreads(&coop) };
 }
 
 __global__ void k_coop_warpspan_r(CoopResult* out, int warp0, int nWarps, int id) {
   /* Data-only kernel (size/rank accessors, no sync) -> no barrier scratch needed. */
-  ncclCoopAny coop; ncclCoopAnyInitWarpSpan(&coop, warp0, nWarps, id, /*barrierLds=*/nullptr);
+  ncclCoopAny coop; ncclIrCoopAnyInitWarpSpan(&coop, warp0, nWarps, id, /*barrierLds=*/nullptr);
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  out[tid] = { ncclCoopSize(&coop),
-               ncclCoopThreadRank(&coop),
-               ncclCoopNumThreads(&coop) };
+  out[tid] = { ncclIrCoopSize(&coop),
+               ncclIrCoopThreadRank(&coop),
+               ncclIrCoopNumThreads(&coop) };
 }
 
 __global__ void k_coop_cta_r(CoopResult* out) {
-  ncclCoopAny coop; ncclCoopAnyInitCta(&coop);
+  ncclCoopAny coop; ncclIrCoopAnyInitCta(&coop);
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  out[tid] = { ncclCoopSize(&coop),
-               ncclCoopThreadRank(&coop),
-               ncclCoopNumThreads(&coop) };
+  out[tid] = { ncclIrCoopSize(&coop),
+               ncclIrCoopThreadRank(&coop),
+               ncclIrCoopNumThreads(&coop) };
 }
 
 /* =====================================================================
  * [B6] Sync kernels — write 1 after sync, host checks all slots == 1
  * ==================================================================== */
 
-__global__ void k_sync_thread  (int* out)                               { ncclCoopAny c; ncclCoopAnyInitThread  (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
-__global__ void k_sync_warp    (int* out)                               { ncclCoopAny c; ncclCoopAnyInitWarp    (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
-__global__ void k_sync_lanes   (int* out, uint64_t mask)                { ncclCoopAny c; ncclCoopAnyInitLanes   (&c, mask);          ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
+__global__ void k_sync_thread  (int* out)                               { ncclCoopAny c; ncclIrCoopAnyInitThread  (&c);                ncclIrCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
+__global__ void k_sync_warp    (int* out)                               { ncclCoopAny c; ncclIrCoopAnyInitWarp    (&c);                ncclIrCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
+__global__ void k_sync_lanes   (int* out, uint64_t mask)                { ncclCoopAny c; ncclIrCoopAnyInitLanes   (&c, mask);          ncclIrCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
 __global__ void k_sync_warpspan(int* out, int warp0, int nWarps, int id){
   /* Kernel owns the named-barrier LDS and hands it to the bitcode thunk, so the
    * backend sizes it into THIS kernel's group segment (see coop.h rationale). */
   __shared__ ncclCoopNamedBarrierSlot bar[ncclCoopNamedBarrierSlots];
   ncclCoopNamedBarrierInit(bar);
-  ncclCoopAny c; ncclCoopAnyInitWarpSpan(&c, warp0, nWarps, id, bar);
-  ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1;
+  ncclCoopAny c; ncclIrCoopAnyInitWarpSpan(&c, warp0, nWarps, id, bar);
+  ncclIrCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1;
 }
-__global__ void k_sync_cta     (int* out)                               { ncclCoopAny c; ncclCoopAnyInitCta     (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
+__global__ void k_sync_cta     (int* out)                               { ncclCoopAny c; ncclIrCoopAnyInitCta     (&c);                ncclIrCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
 
 /* =====================================================================
  * Helpers: launch-check-free pattern
@@ -328,7 +337,7 @@ static int lane_rank_in_mask(uint64_t mask, int t) {
 }
 
 /* =====================================================================
- * [B1] ncclCoopAnyInitThread
+ * [B1] ncclIrCoopAnyInitThread
  * ==================================================================== */
 TEST_F(IRDeviceTest, B1_CoopInitThread) {
   /* Launch one warp so we test every lane position.
@@ -340,7 +349,7 @@ TEST_F(IRDeviceTest, B1_CoopInitThread) {
 }
 
 /* =====================================================================
- * [B2] ncclCoopAnyInitWarp
+ * [B2] ncclIrCoopAnyInitWarp
  * ==================================================================== */
 TEST_F(IRDeviceTest, B2_CoopInitWarp) {
   auto h = launch_coop_r(k_coop_warp_r, warpSize_);
@@ -351,7 +360,7 @@ TEST_F(IRDeviceTest, B2_CoopInitWarp) {
 }
 
 /* =====================================================================
- * [B3] ncclCoopAnyInitLanes — mask variants (uint64_t lane_mask)
+ * [B3] ncclIrCoopAnyInitLanes — mask variants (uint64_t lane_mask)
  * ==================================================================== */
 TEST_F(IRDeviceTest, B3a_CoopInitLanes_FullMask) {
   const uint64_t mask = ~0ull;
@@ -430,7 +439,7 @@ TEST_F(IRDeviceTest, B3f_CoopTileLaneMask_AlignedGroupOfFour) {
 }
 
 /* =====================================================================
- * [B4] ncclCoopAnyInitWarpSpan — 1-warp and 2-warp spans
+ * [B4] ncclIrCoopAnyInitWarpSpan — 1-warp and 2-warp spans
  * rank = threadIdx.x - WARP_SIZE * warp0  (WARP_SIZE == device warpSize)
  * ==================================================================== */
 TEST_F(IRDeviceTest, B4a_CoopInitWarpSpan_OneWarp) {
@@ -455,7 +464,7 @@ TEST_F(IRDeviceTest, B4b_CoopInitWarpSpan_TwoWarp) {
 }
 
 /* =====================================================================
- * [B5] ncclCoopAnyInitCta — two block sizes
+ * [B5] ncclIrCoopAnyInitCta — two block sizes
  * ==================================================================== */
 TEST_F(IRDeviceTest, B5_CoopInitCta) {
   for (int blk : {64, 128}) {
@@ -468,30 +477,30 @@ TEST_F(IRDeviceTest, B5_CoopInitCta) {
 }
 
 /* =====================================================================
- * [B6] ncclCoopSync — one test per coop type
+ * [B6] ncclIrCoopSync — one test per coop type
  * ==================================================================== */
 TEST_F(IRDeviceTest, B6_CoopSync) {
   /* Thread: every thread syncs its own singleton coop independently. */
   EXPECT_TRUE(launch_sync(k_sync_thread, warpSize_))
-      << "ncclCoopSync (Thread) kernel did not complete";
+      << "ncclIrCoopSync (Thread) kernel did not complete";
 
   /* Warp: full warp participates. */
   EXPECT_TRUE(launch_sync(k_sync_warp, warpSize_))
-      << "ncclCoopSync (Warp) kernel did not complete";
+      << "ncclIrCoopSync (Warp) kernel did not complete";
 
   /* Lanes (full mask): all lanes in the warp participate. */
   EXPECT_TRUE(launch_sync(k_sync_lanes, warpSize_, ~0ull))
-      << "ncclCoopSync (Lanes full mask) kernel did not complete";
+      << "ncclIrCoopSync (Lanes full mask) kernel did not complete";
 
   /* WarpSpan (2 warps): __syncthreads() on AMD — all CTA threads must
    * call it, so launch exactly 2*warpSize threads. */
   EXPECT_TRUE(launch_sync(k_sync_warpspan, 2 * warpSize_,
                           /*warp0=*/0, /*nWarps=*/2, /*id=*/0))
-      << "ncclCoopSync (WarpSpan 2-warp) kernel did not complete";
+      << "ncclIrCoopSync (WarpSpan 2-warp) kernel did not complete";
 
   /* CTA: standard __syncthreads(). */
   EXPECT_TRUE(launch_sync(k_sync_cta, 128))
-      << "ncclCoopSync (Cta blk=128) kernel did not complete";
+      << "ncclIrCoopSync (Cta blk=128) kernel did not complete";
 }
 
 /* =====================================================================
@@ -500,8 +509,8 @@ TEST_F(IRDeviceTest, B6_CoopSync) {
 TEST_F(IRDeviceTest, B7a_LsaBarrierSessionStructural) {
   /* sizeof / alignment checks are compile-time (static_assert at top of
    * file); re-assert at runtime so the case shows up in the summary. */
-  EXPECT_GT(sizeof(ncclLsaBarrierSession_C), 0u);
-  EXPECT_GE(alignof(ncclLsaBarrierSession_C), 1u);
+  EXPECT_GT(sizeof(ncclIrLsaBarrierSession), 0u);
+  EXPECT_GE(alignof(ncclIrLsaBarrierSession), 1u);
 }
 
 TEST_F(IRDeviceTest, B7b_LsaBarrierSessionRuntime) {
@@ -525,10 +534,10 @@ TEST_F(IRDeviceTest, B7b_LsaBarrierSessionRuntime) {
  * functions (which would require live resources).
  * ==================================================================== */
 __global__ void k_bucketC_symbol_addrs(uint64_t* out) {
-  out[0] = (uint64_t)(uintptr_t)(void*)&ncclGinBarrierSessionInit;
-  out[1] = (uint64_t)(uintptr_t)(void*)&ncclGinBarrierSessionSync;
-  out[2] = (uint64_t)(uintptr_t)(void*)&ncclBarrierSessionInit;
-  out[3] = (uint64_t)(uintptr_t)(void*)&ncclBarrierSessionSync;
+  out[0] = (uint64_t)(uintptr_t)(void*)&ncclIrGinBarrierSessionInit;
+  out[1] = (uint64_t)(uintptr_t)(void*)&ncclIrGinBarrierSessionSync;
+  out[2] = (uint64_t)(uintptr_t)(void*)&ncclIrBarrierSessionInit;
+  out[3] = (uint64_t)(uintptr_t)(void*)&ncclIrBarrierSessionSync;
 }
 
 TEST_F(IRDeviceTest, C0_BucketCSymbolsLinkable) {
@@ -545,8 +554,8 @@ TEST_F(IRDeviceTest, C0_BucketCSymbolsLinkable) {
   HIP_ASSERT(hipFree(d));
 
   const char* names[N] = {
-      "ncclGinBarrierSessionInit", "ncclGinBarrierSessionSync",
-      "ncclBarrierSessionInit",    "ncclBarrierSessionSync"};
+      "ncclIrGinBarrierSessionInit", "ncclIrGinBarrierSessionSync",
+      "ncclIrBarrierSessionInit",    "ncclIrBarrierSessionSync"};
   for (int i = 0; i < N; ++i) {
     SCOPED_TRACE(names[i]);
     EXPECT_NE(got[i], 0ull) << names[i] << " did not resolve from the bitcode";
@@ -559,15 +568,15 @@ TEST_F(IRDeviceTest, C0_BucketCSymbolsLinkable) {
 TEST_F(IRDeviceTest, C1a_GinBarrierSessionStructural) {
   /* Mirrors B7a: the sizeof / alignof static_asserts at the top of the file
    * fire at compile time; re-assert at runtime so the case appears in the
-   * summary and proves bucket [C]'s ncclGinBarrierSession_C is instantiated. */
-  EXPECT_GT(sizeof(ncclGinBarrierSession_C), 0u);
-  EXPECT_GE(alignof(ncclGinBarrierSession_C), 1u);
+   * summary and proves bucket [C]'s ncclIrGinBarrierSession is instantiated. */
+  EXPECT_GT(sizeof(ncclIrGinBarrierSession), 0u);
+  EXPECT_GE(alignof(ncclIrGinBarrierSession), 1u);
 }
 
 TEST_F(IRDeviceTest, C1b_GinBarrierSessionRuntime) {
-  /* ncclGinBarrierSessionInit takes an ncclGin_C, ncclTeam and
+  /* ncclIrGinBarrierSessionInit takes an ncclGin_C, ncclTeam and
    * ncclGinBarrierHandle bound to live GPU-Initiated-Networking resources;
-   * ncclGinBarrierSessionSync then issues network fences against them. Both
+   * ncclIrGinBarrierSessionSync then issues network fences against them. Both
    * require a live ncclDevComm with an established GIN connection, which is
    * not available in this standalone device-API test. */
   GTEST_SKIP() << "ncclGinBarrierSession{Init,Sync} require a live ncclDevComm "
@@ -579,8 +588,8 @@ TEST_F(IRDeviceTest, C1b_GinBarrierSessionRuntime) {
  *      + skip runtime
  * ==================================================================== */
 TEST_F(IRDeviceTest, C2a_BarrierSessionStructural) {
-  EXPECT_GT(sizeof(ncclBarrierSession_C), 0u);
-  EXPECT_GE(alignof(ncclBarrierSession_C), 1u);
+  EXPECT_GT(sizeof(ncclIrBarrierSession), 0u);
+  EXPECT_GE(alignof(ncclIrBarrierSession), 1u);
 }
 
 TEST_F(IRDeviceTest, C2b_BarrierSessionRuntime) {
@@ -593,74 +602,58 @@ TEST_F(IRDeviceTest, C2b_BarrierSessionRuntime) {
 }
 
 /* =====================================================================
- * [D] Bucket-D export coverage for the 16 accessor / size-getter /
- *     session-destroy thunks
+ * [D] Bucket-D coverage for the session storage layout and the 13 accessor
+ *     / session-destroy thunks
  *
- * These 16 symbols were declared `NCCL_IR_EXTERN_C __device__` rather than
- * `NCCL_IR_EXPORT`, so they were absent from the exact-name
+ * These 13 symbols were once declared `NCCL_IR_EXTERN_C __device__` (a bare
+ * `extern "C"` macro, since removed) rather than `NCCL_IR_EXPORT`, so they
+ * carried neither `used` nor `retain` and were absent from the exact-name
  * RCCL_DEVICE_BC_PUBLIC_API list that
- * `opt --passes=internalize,inline,globaldce` consumes: internalize demoted
+ * `opt --passes=internalize,inline,globaldce` consumed: internalize demoted
  * them to `internal` and globaldce deleted them outright. Nothing in the
- * suite referenced them, so the breakage was invisible.
+ * suite referenced them, so the breakage was invisible. The export list is
+ * gone now -- NCCL_IR_EXPORT's `used, retain` puts every thunk in @llvm.used,
+ * which internalize honours -- but D1 remains the guard that proves it.
  *
  * Coverage is split by what each thunk needs to run:
- *   D0 — the three `_size()` getters take no arguments and touch no device
- *        state, so they are *called* and checked against host-side sizeof.
- *        This is a true end-to-end check: the symbol must link AND return
- *        the right value.
- *   D1 — the ten ncclDevComm_* accessors and the three *SessionDestroy
+ *   D0 — the three opaque session storage structs. These replaced the
+ *        ncclXxxBarrierSession_C_size() device getters a consumer used to
+ *        *call* to size its alloca; the extent is a compile-time constant
+ *        now, so there is nothing to launch. The check is instead the one
+ *        that matters: that the consumer-side storage is exactly as large as
+ *        the C++ session the producer placement-news into it.
+ *   D1 — the ten ncclIrDevComm_* accessors and the three *SessionDestroy
  *        thunks need a live ncclDevComm / session, so (matching the B7b /
  *        C1b / C2b skip rationale) they are address-taken only. Storing the
  *        pointer value forces a real consumer -> bitcode relocation per
  *        symbol, so an internalized export fails the device link or yields
  *        a null address here.
  * ==================================================================== */
-__global__ void k_bucketD_sizes(uint64_t* out) {
-  out[0] = (uint64_t)ncclLsaBarrierSession_C_size();
-  out[1] = (uint64_t)ncclGinBarrierSession_C_size();
-  out[2] = (uint64_t)ncclBarrierSession_C_size();
-}
-
-TEST_F(IRDeviceTest, D0_BucketDSizeGettersCallable) {
-  constexpr int N = 3;
-  uint64_t* d = nullptr;
-  HIP_ASSERT(hipMalloc(&d, sizeof(uint64_t) * N));
-  HIP_ASSERT(hipMemset(d, 0, sizeof(uint64_t) * N));
-  k_bucketD_sizes<<<1, 1>>>(d);
-  HIP_ASSERT(hipGetLastError());
-  HIP_ASSERT(hipDeviceSynchronize());
-
-  uint64_t got[N] = {};
-  HIP_ASSERT(hipMemcpy(got, d, sizeof got, hipMemcpyDeviceToHost));
-  HIP_ASSERT(hipFree(d));
-
-  const char* names[N] = {"ncclLsaBarrierSession_C_size",
-                          "ncclGinBarrierSession_C_size",
-                          "ncclBarrierSession_C_size"};
-  const uint64_t want[N] = {(uint64_t)sizeof(ncclLsaBarrierSession_C),
-                            (uint64_t)sizeof(ncclGinBarrierSession_C),
-                            (uint64_t)sizeof(ncclBarrierSession_C)};
-  for (int i = 0; i < N; ++i) {
-    SCOPED_TRACE(names[i]);
-    EXPECT_EQ(got[i], want[i])
-        << names[i] << " returned " << got[i] << ", host sizeof is " << want[i];
-  }
+TEST_F(IRDeviceTest, D0_OpaqueSessionStorageMatchesCxxLayout) {
+  /* Compile-time at the top of the file; re-asserted here so the case shows
+   * up in the summary alongside D1. */
+  EXPECT_EQ(sizeof(ncclIrLsaBarrierSession), sizeof(ncclLsaBarrierSession<ncclCoopAny>));
+  EXPECT_GE(alignof(ncclIrLsaBarrierSession), alignof(ncclLsaBarrierSession<ncclCoopAny>));
+  EXPECT_EQ(sizeof(ncclIrGinBarrierSession), sizeof(ncclGinBarrierSession<ncclCoopAny>));
+  EXPECT_GE(alignof(ncclIrGinBarrierSession), alignof(ncclGinBarrierSession<ncclCoopAny>));
+  EXPECT_EQ(sizeof(ncclIrBarrierSession), sizeof(ncclBarrierSession<ncclCoopAny>));
+  EXPECT_GE(alignof(ncclIrBarrierSession), alignof(ncclBarrierSession<ncclCoopAny>));
 }
 
 __global__ void k_bucketD_symbol_addrs(uint64_t* out) {
-  out[0]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_Rank;
-  out[1]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_NRanks;
-  out[2]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_LsaRank;
-  out[3]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_LsaSize;
-  out[4]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_LsaBarrier;
-  out[5]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_RailGinBarrier;
-  out[6]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_HybridLsaBarrier;
-  out[7]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_HybridRailGinBarrier;
-  out[8]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_WorldGinBarrier;
-  out[9]  = (uint64_t)(uintptr_t)(void*)&ncclDevComm_LsaMultimem;
-  out[10] = (uint64_t)(uintptr_t)(void*)&ncclLsaBarrierSessionDestroy;
-  out[11] = (uint64_t)(uintptr_t)(void*)&ncclGinBarrierSessionDestroy;
-  out[12] = (uint64_t)(uintptr_t)(void*)&ncclBarrierSessionDestroy;
+  out[0]  = (uint64_t)(uintptr_t)(void*)&ncclIrDevComm_Rank;
+  out[1]  = (uint64_t)(uintptr_t)(void*)&ncclIrDevComm_NRanks;
+  out[2]  = (uint64_t)(uintptr_t)(void*)&ncclIrDevComm_LsaRank;
+  out[3]  = (uint64_t)(uintptr_t)(void*)&ncclIrDevComm_LsaSize;
+  out[4]  = (uint64_t)(uintptr_t)(void*)&ncclIrDevComm_LsaBarrier;
+  out[5]  = (uint64_t)(uintptr_t)(void*)&ncclIrDevComm_RailGinBarrier;
+  out[6]  = (uint64_t)(uintptr_t)(void*)&ncclIrDevComm_HybridLsaBarrier;
+  out[7]  = (uint64_t)(uintptr_t)(void*)&ncclIrDevComm_HybridRailGinBarrier;
+  out[8]  = (uint64_t)(uintptr_t)(void*)&ncclIrDevComm_WorldGinBarrier;
+  out[9]  = (uint64_t)(uintptr_t)(void*)&ncclIrDevComm_LsaMultimem;
+  out[10] = (uint64_t)(uintptr_t)(void*)&ncclIrLsaBarrierSessionDestroy;
+  out[11] = (uint64_t)(uintptr_t)(void*)&ncclIrGinBarrierSessionDestroy;
+  out[12] = (uint64_t)(uintptr_t)(void*)&ncclIrBarrierSessionDestroy;
 }
 
 TEST_F(IRDeviceTest, D1_BucketDSymbolsLinkable) {
@@ -676,19 +669,19 @@ TEST_F(IRDeviceTest, D1_BucketDSymbolsLinkable) {
   HIP_ASSERT(hipMemcpy(got, d, sizeof got, hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(d));
 
-  const char* names[N] = {"ncclDevComm_Rank",
-                          "ncclDevComm_NRanks",
-                          "ncclDevComm_LsaRank",
-                          "ncclDevComm_LsaSize",
-                          "ncclDevComm_LsaBarrier",
-                          "ncclDevComm_RailGinBarrier",
-                          "ncclDevComm_HybridLsaBarrier",
-                          "ncclDevComm_HybridRailGinBarrier",
-                          "ncclDevComm_WorldGinBarrier",
-                          "ncclDevComm_LsaMultimem",
-                          "ncclLsaBarrierSessionDestroy",
-                          "ncclGinBarrierSessionDestroy",
-                          "ncclBarrierSessionDestroy"};
+  const char* names[N] = {"ncclIrDevComm_Rank",
+                          "ncclIrDevComm_NRanks",
+                          "ncclIrDevComm_LsaRank",
+                          "ncclIrDevComm_LsaSize",
+                          "ncclIrDevComm_LsaBarrier",
+                          "ncclIrDevComm_RailGinBarrier",
+                          "ncclIrDevComm_HybridLsaBarrier",
+                          "ncclIrDevComm_HybridRailGinBarrier",
+                          "ncclIrDevComm_WorldGinBarrier",
+                          "ncclIrDevComm_LsaMultimem",
+                          "ncclIrLsaBarrierSessionDestroy",
+                          "ncclIrGinBarrierSessionDestroy",
+                          "ncclIrBarrierSessionDestroy"};
   for (int i = 0; i < N; ++i) {
     SCOPED_TRACE(names[i]);
     EXPECT_NE(got[i], 0ull) << names[i] << " did not resolve from the bitcode";

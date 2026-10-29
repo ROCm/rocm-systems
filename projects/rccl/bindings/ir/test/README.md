@@ -1,6 +1,6 @@
 # IR_test — Comprehensive functional test for `librccl_device.bc`
 
-`IR_test` verifies every active API exported by `nccl_device_wrapper__impl.h`,
+`IR_test` verifies every active API exported by `nccl_device_ir.cu`,
 covering the full bitcode path end-to-end: C-ABI thunks → vtable dispatch →
 per-implementation device code. It runs on real GPU hardware as a **GoogleTest**
 binary (`IRDeviceTest.*`), so it integrates with `--gtest_filter`, the RCCL
@@ -19,28 +19,38 @@ LTO link) and the run are driven by the pytest harness in `test/ir-device/`.
 
 | GTest case | API / group |
 |------------|-------------|
-| `A_GetPeerPointerTeam` | `ncclGetPeerPointerTeam` — 20 pointer-arithmetic cases |
-| `B1_CoopInitThread` | `ncclCoopAnyInitThread` + `ncclCoopSize/ThreadRank/NumThreads` |
-| `B2_CoopInitWarp` | `ncclCoopAnyInitWarp` + accessors |
-| `B3a_…/B3b_…/B3c_…/B3d_CoopInitLanes_*` | `ncclCoopAnyInitLanes` — full/sparse/single-bit/lane-63 masks |
-| `B4a_…/B4b_CoopInitWarpSpan_*` | `ncclCoopAnyInitWarpSpan` — 1-warp and 2-warp spans |
-| `B5_CoopInitCta` | `ncclCoopAnyInitCta` — block sizes 64 and 128 |
-| `B6_CoopSync` | `ncclCoopSync` — all five coop types |
-| `B7a_LsaBarrierSessionStructural` | `ncclLsaBarrierSession_C` sizeof / alignment |
-| `B7b_LsaBarrierSessionRuntime` | `ncclLsaBarrierSession{Init,Arrive,Wait,Sync}` — **SKIP** (require a live `ncclDevComm`) |
-| `C0_BucketCSymbolsLinkable` | `ncclGinBarrierSession{Init,Sync}` + `ncclBarrierSession{Init,Sync}` — address-taken export check |
-| `C1a_GinBarrierSessionStructural` | `ncclGinBarrierSession_C` sizeof / alignment |
-| `C1b_GinBarrierSessionRuntime` | `ncclGinBarrierSession{Init,Sync}` — **SKIP** (require a live `ncclDevComm` + GIN net) |
-| `C2a_BarrierSessionStructural` | `ncclBarrierSession_C` sizeof / alignment |
-| `C2b_BarrierSessionRuntime` | `ncclBarrierSession{Init,Sync}` — **SKIP** (require a live `ncclDevComm` + GIN net) |
-| `D0_BucketDSizeGettersCallable` | `nccl{Lsa,Gin,}BarrierSession_C_size` — *called* on device, compared against host `sizeof` |
-| `D1_BucketDSymbolsLinkable` | 10 × `ncclDevComm_*` accessors + `nccl{Lsa,Gin,}BarrierSessionDestroy` — address-taken export check |
+| `A_GetPeerPointerTeam` | `ncclIrGetPeerPointerTeam` — 20 pointer-arithmetic cases |
+| `B1_CoopInitThread` | `ncclIrCoopAnyInitThread` + `ncclIrCoopSize/ThreadRank/NumThreads` |
+| `B2_CoopInitWarp` | `ncclIrCoopAnyInitWarp` + accessors |
+| `B3a_…/B3b_…/B3c_…/B3d_CoopInitLanes_*` | `ncclIrCoopAnyInitLanes` — full/sparse/single-bit/lane-63 masks |
+| `B4a_…/B4b_CoopInitWarpSpan_*` | `ncclIrCoopAnyInitWarpSpan` — 1-warp and 2-warp spans |
+| `B5_CoopInitCta` | `ncclIrCoopAnyInitCta` — block sizes 64 and 128 |
+| `B6_CoopSync` | `ncclIrCoopSync` — all five coop types |
+| `B7a_LsaBarrierSessionStructural` | `ncclIrLsaBarrierSession` sizeof / alignment |
+| `B7b_LsaBarrierSessionRuntime` | `ncclIrLsaBarrierSession{Init,Arrive,Wait,Sync}` — **SKIP** (require a live `ncclDevComm`) |
+| `C0_BucketCSymbolsLinkable` | `ncclIrGinBarrierSession{Init,Sync}` + `ncclIrBarrierSession{Init,Sync}` — address-taken export check |
+| `C1a_GinBarrierSessionStructural` | `ncclIrGinBarrierSession` sizeof / alignment |
+| `C1b_GinBarrierSessionRuntime` | `ncclIrGinBarrierSession{Init,Sync}` — **SKIP** (require a live `ncclDevComm` + GIN net) |
+| `C2a_BarrierSessionStructural` | `ncclIrBarrierSession` sizeof / alignment |
+| `C2b_BarrierSessionRuntime` | `ncclIrBarrierSession{Init,Sync}` — **SKIP** (require a live `ncclDevComm` + GIN net) |
+| `D0_OpaqueSessionStorageMatchesCxxLayout` | `ncclIr{Lsa,Gin,}BarrierSession` opaque storage — exact `sizeof`/`alignof` match against the C++ session templates |
+| `D1_BucketDSymbolsLinkable` | 10 × `ncclIrDevComm_*` accessors + `ncclIr{Lsa,Gin,}BarrierSessionDestroy` — address-taken export check |
 
-> `D0`/`D1` cover the 16 thunks that were declared `NCCL_IR_EXTERN_C` instead of
-> `NCCL_IR_EXPORT`, which left them off the `RCCL_DEVICE_BC_PUBLIC_API` list so
+> `D1` covers the 13 thunks that were declared `NCCL_IR_EXTERN_C` (a bare
+> `extern "C"` macro, since removed) instead of `NCCL_IR_EXPORT`, which left
+> them without `used`/`retain` and off the then-hand-maintained
+> `RCCL_DEVICE_BC_PUBLIC_API` list, so
 > `opt --passes=internalize,inline,globaldce` deleted them from the bitcode.
-> Against a pre-fix `librccl_device.bc` the device link fails with exactly 16
-> `lld: error: undefined hidden symbol` lines.
+> Against a pre-fix `librccl_device.bc` the device link fails with
+> `lld: error: undefined hidden symbol`. That list is gone now —
+> `NCCL_IR_EXPORT`'s `used, retain` puts every thunk in `@llvm.used`, which
+> `internalize` honours — so `D1` is the guard on that mechanism.
+>
+> `D0` used to *call* three `ncclXxxBarrierSession_C_size()` device getters.
+> Those are gone: the opaque `ncclIr*BarrierSession` structs carry a
+> compile-time size, so there is nothing to launch. It now checks the
+> invariant the getters existed to serve — that consumer-side storage is
+> exactly as large as the session the producer placement-news into it.
 
 ## Prerequisites
 

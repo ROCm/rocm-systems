@@ -55,14 +55,22 @@ def _summarize_gtest(proc, log, what):
         reason = " ".join(m.group(1).split()) if m else "all cases skipped"
         pytest.skip(f"{what}: {reason} (see {log})")
 
+    # Nothing ran at all. GoogleTest exits 0 when --gtest_filter matches no
+    # case, so without this a renamed or deleted TEST_F turns its pytest case
+    # into a silent green -- which is exactly what happened when the exported
+    # thunks were renamed to ncclIr* and the D0 filter went stale.
+    if passed == 0 and skipped == 0:
+        raise AssertionError(
+            f"{what}: --gtest_filter matched no test case, see {log}")
+
 
 @pytest.mark.ir_device
 @pytest.mark.peer_pointer
 def test_get_peer_pointer_team(run_gtest):
-    """[A] ncclGetPeerPointerTeam — 20 pointer-arithmetic cases."""
+    """[A] ncclIrGetPeerPointerTeam — 20 pointer-arithmetic cases."""
     proc, log = run_gtest("IRDeviceTest.A_GetPeerPointerTeam",
                           "ir_peer_pointer.log")
-    _summarize_gtest(proc, log, "ncclGetPeerPointerTeam")
+    _summarize_gtest(proc, log, "ncclIrGetPeerPointerTeam")
 
 
 @pytest.mark.ir_device
@@ -126,27 +134,34 @@ def test_composite_barrier_session(run_gtest):
 
 @pytest.mark.ir_device
 @pytest.mark.device_accessors
-def test_bucket_d_size_getters_callable(run_gtest):
-    """[D0] The three ncclXBarrierSession_C_size() getters link AND are correct.
+def test_opaque_session_storage_layout(run_gtest):
+    """[D0] The opaque ncclIr*BarrierSession storage matches the C++ sessions.
 
-    They take no arguments and touch no device state, so they are actually
-    called on device and compared against host-side sizeof -- an end-to-end
-    check, not just a relocation check.
+    This replaces a check that *called* three ncclXxxBarrierSession_C_size()
+    device getters: the ABI no longer has them, because the storage extent is
+    a compile-time constant a consumer can take sizeof() on. What is left to
+    verify is the invariant those getters existed to serve -- that the storage
+    a consumer allocates is exactly as large as the session the producer
+    placement-news into it, as measured under *consumer* preprocessor macros.
     """
-    proc, log = run_gtest("IRDeviceTest.D0_BucketDSizeGettersCallable",
-                          "ir_bucket_d_sizes.log")
-    _summarize_gtest(proc, log, "bucket D size getters")
+    proc, log = run_gtest("IRDeviceTest.D0_OpaqueSessionStorageMatchesCxxLayout",
+                          "ir_opaque_session_layout.log")
+    _summarize_gtest(proc, log, "opaque session storage layout")
 
 
 @pytest.mark.ir_device
 @pytest.mark.device_accessors
 def test_bucket_d_symbols_linkable(run_gtest):
-    """[D1] The 10 ncclDevComm_* accessors + 3 *SessionDestroy thunks export.
+    """[D1] The 10 ncclIrDevComm_* accessors + 3 *SessionDestroy thunks export.
 
-    These were declared NCCL_IR_EXTERN_C instead of NCCL_IR_EXPORT, so they
-    were missing from RCCL_DEVICE_BC_PUBLIC_API and `opt`'s
-    internalize/globaldce pass deleted them. Address-taken only, since
-    invoking them needs a live ncclDevComm / session.
+    These were declared NCCL_IR_EXTERN_C (a bare `extern "C"` macro, since
+    removed) instead of NCCL_IR_EXPORT, so they carried neither `used` nor
+    `retain`, were missing from the then-hand-maintained
+    RCCL_DEVICE_BC_PUBLIC_API list, and `opt`'s internalize/globaldce pass
+    deleted them. The list is gone now -- NCCL_IR_EXPORT's `used, retain` puts
+    every thunk in @llvm.used, which internalize honours -- so this case is
+    the guard on that mechanism. Address-taken only, since invoking them needs
+    a live ncclDevComm / session.
     """
     proc, log = run_gtest("IRDeviceTest.D1_BucketDSymbolsLinkable",
                           "ir_bucket_d_symbols.log")
