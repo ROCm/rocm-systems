@@ -13,12 +13,12 @@
 //! communicate through a channel so callbacks and worker joins occur without
 //! holding the process-global runtime lock.
 
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering, fence};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -56,6 +56,70 @@ const MAX_POOLED_SIGNAL_EVENTS: usize = 256;
 static HAS_FLUSH_BATCHES: AtomicBool = AtomicBool::new(false);
 /// Address ranges of live signal batches requiring HDP flushes.
 static FLUSH_BATCHES: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
+/// Public signal slots whose storage can be read without the lifecycle lock.
+/// Destruction takes the write lock through native release; blocked waits use
+/// their own per-slot async reference after leaving this short read section.
+static WAIT_SIGNAL_HANDLES: LazyLock<RwLock<HashMap<usize, u64>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+/// Distinguishes a recycled address from its earlier public signal lifetime.
+static NEXT_WAIT_SIGNAL_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Reserves registry space before a new signal can be published.
+fn reserve_wait_signal_slots(count: usize) -> Result<(), Status> {
+    WAIT_SIGNAL_HANDLES
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .try_reserve(count)
+        .map_err(|_| OUT_OF_RESOURCES)
+}
+
+/// Publishes a live slot after its backing has been initialized.
+fn publish_wait_signal(address: usize) {
+    let mut handles = WAIT_SIGNAL_HANDLES
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    handles
+        .entry(address)
+        .or_insert_with(|| NEXT_WAIT_SIGNAL_GENERATION.fetch_add(1, Ordering::Relaxed));
+}
+
+/// Locally owned IPC handles; the kind word in their shared storage is mutable
+/// by another process and cannot authorize host doorbell operations.
+static IPC_SIGNAL_HANDLES: LazyLock<RwLock<HashSet<usize>>> =
+    LazyLock::new(|| RwLock::new(HashSet::new()));
+
+/// Records a newly created or imported IPC signal before publishing its handle.
+pub(crate) fn register_ipc_signal(address: usize) -> Result<(), Status> {
+    let mut handles = IPC_SIGNAL_HANDLES
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    handles.try_reserve(1).map_err(|_| OUT_OF_RESOURCES)?;
+    if !handles.insert(address) {
+        return Err(OUT_OF_RESOURCES);
+    }
+    Ok(())
+}
+
+/// Clears local IPC metadata after the native mapping has been released.
+pub(crate) fn unregister_ipc_signal(address: usize) {
+    IPC_SIGNAL_HANDLES
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(&address);
+}
+
+/// Treats a peer-modified IPC kind as an ordinary signal for host stores.
+pub(crate) fn host_store_kind(address: usize, kind: i64) -> i64 {
+    if kind == AMD_SIGNAL_KIND_DOORBELL || kind == AMD_SIGNAL_KIND_LEGACY_DOORBELL {
+        let handles = IPC_SIGNAL_HANDLES
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if handles.contains(&address) {
+            return AMD_SIGNAL_KIND_USER;
+        }
+    }
+    kind
+}
 
 /// Locks the address ranges whose device writes require an HDP readback.
 fn flush_batches() -> MutexGuard<'static, Vec<(usize, usize)>> {
@@ -435,8 +499,18 @@ impl SignalState {
 
     /// Releases HSA signal records after workers and native queues have stopped.
     pub(crate) fn clear_storage(&mut self) {
+        let mut wait_handles = WAIT_SIGNAL_HANDLES
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        wait_handles.clear();
         self.signal_groups.clear();
         self.async_signal_refs.clear();
+        for &address in self.imported_ipc_signals.keys() {
+            unregister_ipc_signal(address);
+        }
+        for &address in self.owned_ipc_signals.keys() {
+            unregister_ipc_signal(address);
+        }
         self.imported_ipc_signals.clear();
         self.owned_ipc_signals.clear();
         self.recycled_signals.clear();
@@ -464,10 +538,12 @@ impl HsaState {
 
     /// Allocates signal for runtime use.
     fn allocate_signal(&mut self, signal: AmdSignal) -> Result<HsaSignal, Status> {
+        reserve_wait_signal_slots(1)?;
         if let Some(address) = self.signal_state.recycled_signals.pop() {
             // SAFETY: The slot was invalidated after its final asynchronous
             // registration retired. Its slab remains mapped until shutdown.
             unsafe { (address as *mut AmdSignal).write(signal) };
+            publish_wait_signal(address);
             return Ok(HsaSignal {
                 handle: address as u64,
             });
@@ -479,7 +555,9 @@ impl HsaState {
             .last_mut()
             .ok_or(OUT_OF_RESOURCES)?;
         // SAFETY: The selected slab has one unused aligned slot.
-        Ok(unsafe { slab.allocate(signal) })
+        let handle = unsafe { slab.allocate(signal) };
+        publish_wait_signal(handle.handle as usize);
+        Ok(handle)
     }
 
     /// Creates signal batch and records its ownership.
@@ -569,6 +647,7 @@ impl HsaState {
             .batch_members
             .try_reserve(values.len())
             .map_err(|_| OUT_OF_RESOURCES)?;
+        reserve_wait_signal_slots(values.len())?;
         if interrupt {
             self.signal_state
                 .interrupt_signals
@@ -604,6 +683,7 @@ impl HsaState {
             self.signal_state
                 .batch_members
                 .insert(address, batch.handle);
+            publish_wait_signal(address);
             signals.push(HsaSignal {
                 handle: address as u64,
             });
@@ -636,12 +716,11 @@ impl HsaState {
     pub(crate) fn create_signal_event(
         &mut self,
     ) -> Option<(crate::platform::event::SignalEvent, usize, u32)> {
-        let (gpu, rest) = self.gpus.split_first()?;
-        let peers = rest.iter().map(|peer| &peer.device).collect::<Vec<_>>();
+        let gpu = self.gpus.first()?;
         let (event, mailbox) = self
             .signal_state
             .event_service
-            .create(&gpu.device, &peers, SignalEventAddressing::Identity)
+            .create(&gpu.device, SignalEventAddressing::Identity)
             .ok()?;
         let id = event.info().kfd_event_id;
         Some((event, mailbox.host, id))
@@ -808,6 +887,21 @@ impl SignalState {
 
     /// Destroys signal and releases its owned resources.
     pub(crate) fn destroy_signal(&mut self, signal: HsaSignal) -> Status {
+        // A fast completed wait holds the read lock across its atomic load.
+        // Keep it excluded until native storage release has either succeeded
+        // or been rolled back for a retry.
+        let mut wait_handles = WAIT_SIGNAL_HANDLES
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let status = self.destroy_signal_inner(signal);
+        if status == SUCCESS && !self.owns_signal(signal) {
+            wait_handles.remove(&(signal.handle as usize));
+        }
+        status
+    }
+
+    /// Retires public ownership while the wait registry excludes fast readers.
+    fn destroy_signal_inner(&mut self, signal: HsaSignal) -> Status {
         let address = signal.handle as usize;
         if !self.owns_signal(signal) {
             if self.async_signal_refs.get(&address).is_some_and(|record| {
@@ -856,7 +950,10 @@ impl SignalState {
     fn finish_signal_storage(&mut self, address: usize) -> Status {
         if let Some(mut imported) = self.imported_ipc_signals.remove(&address) {
             return match imported.allocation.free() {
-                Ok(()) => SUCCESS,
+                Ok(()) => {
+                    unregister_ipc_signal(address);
+                    SUCCESS
+                }
                 Err(error) => {
                     self.imported_ipc_signals.insert(address, imported);
                     map_error(error)
@@ -865,7 +962,10 @@ impl SignalState {
         }
         if let Some(mut owned) = self.owned_ipc_signals.remove(&address) {
             return match owned.allocation.free() {
-                Ok(()) => SUCCESS,
+                Ok(()) => {
+                    unregister_ipc_signal(address);
+                    SUCCESS
+                }
                 Err(error) => {
                     self.owned_ipc_signals.insert(address, owned);
                     map_error(error)
