@@ -6,10 +6,12 @@
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -2573,6 +2575,97 @@ TEST(GpuVmService, AqlContextRestoresProgressAfterDestroyingTheOriginalBinding) 
   });
   EXPECT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
+TEST(GpuVmService, AqlContextGroupsMustReferenceRetainedDispatches) {
+  constexpr uint32_t kDispatchId = 10;
+  for (const std::optional<uint32_t> retained_dispatch :
+       {std::optional<uint32_t>{}, std::optional<uint32_t>{kDispatchId},
+        std::optional<uint32_t>{kDispatchId + 1}}) {
+    SCOPED_TRACE(retained_dispatch.value_or(0));
+    GpuVm gpu_vm;
+    GpuMemory memory("memory");
+    L2Cache l2("l2");
+    l2.set_gpu_vm(&gpu_vm);
+    ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 64;
+    config.lds_size_kb = 64;
+    std::unique_ptr<ComputeUnitCore> cu = ComputeUnitCore::create("cu", config, &memory, &l2);
+    CommandProcessor cp("cp");
+    GpuQueueRegistry queues(gpu_vm);
+    const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
+    cp.set_gpu_vm(&gpu_vm);
+    cp.add_compute_unit(cu.get());
+    QueueRegistrationRequest request = queue_request(address_space, cp, 1);
+    QueueHandle queue = queues.register_queue(request);
+    ASSERT_TRUE(queue);
+    cp.set_queue_debug_suspended(1, 7, true);
+    if (retained_dispatch) {
+      CommandProcessorCloseTestAccess::with_first_queue(cp, [&](auto &state, auto &) {
+        DispatchEntry entry{};
+        entry.kind = DispatchPacketKind::Kernel;
+        entry.dispatch_id = *retained_dispatch;
+        entry.kernel_entry_pc = 0x4000;
+        entry.wfs_per_workgroup = 1;
+        entry.sgprs_per_wf = 106;
+        entry.vgprs_per_wf = 64;
+        entry.kernel_wave_size = 32;
+        entry.workgroup_size_x = entry.grid_size_x = 32;
+        entry.total_wgs = entry.dispatched_wgs = 1;
+        entry.group_segment_fixed_size = 256;
+        state.entries.push_back(std::move(entry));
+      });
+    }
+    Wavefront *wave = cu->dispatch_wf(0, 0x4000, 106, 64, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_dispatch_id(kDispatchId);
+    wave->set_process_id(7);
+    wave->set_queue_id(1);
+    wave->set_address_space(address_space);
+    wave->set_debug_suspended(true);
+    wave->set_lds_base(cu->allocate_lds(256));
+    wave->set_lds_size(256);
+    cu->begin_workgroup(kDispatchId, 0, 1);
+
+    // Produce each image through the serializer rather than duplicating its
+    // wire offsets. An unrelated retained dispatch makes the group an orphan;
+    // an empty dispatch list remains valid for directly constructed test waves.
+    std::vector<uint8_t> context;
+    ASSERT_EQ(cp.save_queue_context(request.identity, context), VmAccessOutcome::Complete);
+    cp.release_queue_context(request.identity);
+    ASSERT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
+    ASSERT_FALSE(cu->has_active_wfs());
+    request.identity.queue_id = 2;
+    queue = queues.register_queue(request);
+    ASSERT_TRUE(queue);
+    cp.set_queue_debug_suspended(2, 7, true);
+    CommandProcessorCloseTestAccess::with_first_queue(
+        cp, [](auto &state, auto &) { state.fetch_cursor = 99; });
+
+    const bool orphan = retained_dispatch && *retained_dispatch != kDispatchId;
+    EXPECT_EQ(cp.restore_queue_context(request.identity, context),
+              orphan ? VmAccessOutcome::Malformed : VmAccessOutcome::Complete);
+    EXPECT_EQ(cu->has_active_wfs(), !orphan);
+    CommandProcessorCloseTestAccess::with_first_queue(cp, [&](auto &state, auto &metadata) {
+      if (orphan) {
+        EXPECT_EQ(state.fetch_cursor, 99u);
+        EXPECT_TRUE(state.entries.empty());
+        EXPECT_TRUE(metadata.empty());
+        EXPECT_TRUE(cu->can_accept_workgroup(1, 64 * 1024));
+      } else if (retained_dispatch) {
+        ASSERT_EQ(state.entries.size(), 1u);
+        EXPECT_EQ(cu->wf(0)->dispatch_id(), state.entries.front().dispatch_id);
+      } else {
+        EXPECT_TRUE(state.entries.empty());
+      }
+    });
+    cp.release_queue_context(request.identity);
+    EXPECT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
+    EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+  }
 }
 
 TEST(GpuVmService, AqlContextRejectsTruncationAndDifferentRingsBeforeChangingState) {

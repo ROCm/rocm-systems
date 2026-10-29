@@ -521,8 +521,11 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
       return VmAccessOutcome::Malformed;
     dispatch_ids.emplace(entry.dispatch_id, 0);
   }
-  for (const auto &group : saved.groups)
+  for (const auto &group : saved.groups) {
+    if (!restored.entries.empty() && !dispatch_ids.contains(group.dispatch))
+      return VmAccessOutcome::Malformed;
     dispatch_ids.try_emplace(group.dispatch, 0);
+  }
 
   // Keep all affected CUs stable until resource admission and rollback finish.
   std::vector<std::unique_lock<std::recursive_mutex>> wave_locks;
