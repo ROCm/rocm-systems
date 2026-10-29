@@ -1794,7 +1794,7 @@
         {
           "name": "NetIB_MultiSeg_Stress_Nightly",
           "description": "NET and RMA boundary stress plus opt-in send-queue oversubscribe",
-          "test_filter": "NetIbMultiSegmentMPITest.SendQueueFatChainOversubscribe:NetIbMultiSegmentMPITest.DeepEP_MultiNodeAsymmetricCrossBoundaryStress:RmaMultiSegmentMPITest.IPutSignalSendQueueOversubscribe:RmaMultiSegmentMPITest.BoundaryStressNoCorruption:RmaMultiSegmentMPITest.MultiNodeAsymmetricIGetBoundaryStress:RmaMultiSegmentMPITest.DeepEP_MultiNodeEngramMixedWindowIGetStress"
+          "test_filter": "NetIbMultiSegmentMPITest.SendQueueFatChainOversubscribe:NetIbMultiSegmentMPITest.DeepEP_MultiNodeAsymmetricCrossBoundaryStress:RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe:RmaMultiSegmentMPITest.BoundaryStressNoCorruption:RmaMultiSegmentMPITest.MultiNodeAsymmetricIGetBoundaryStress:RmaMultiSegmentMPITest.DeepEP_MultiNodeEngramMixedWindowIGetStress"
         }
       ]
     },

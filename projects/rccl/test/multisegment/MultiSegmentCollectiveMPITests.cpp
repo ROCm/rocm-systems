@@ -163,13 +163,6 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowFallsBack)
 }
 
 /**
- * @brief Same past-window geometry as RecvRangePastWindowFallsBack, but
- *        totalBytes larger than the CE staging buffer. The fast path is closed
- *        and the slow path chunks through one staging slot, so the collective
- *        still completes.
- */
-
-/**
  * @brief Past-window receive range whose payload starts on a segment boundary
  *        and spans two segments. Range containment must fall back off the
  *        pointer-only LSA fast path.
@@ -251,6 +244,12 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowChunkedFallback)
     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
 }
 
+/**
+ * @brief Same past-window geometry as RecvRangePastWindowFallsBack, but
+ *        totalBytes larger than the CE staging buffer. The fast path is closed
+ *        and the slow path chunks through one staging slot, so the collective
+ *        still completes.
+ */
 TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowStagingOverflow)
 {
     if (!validateTestPrerequisites(
@@ -270,7 +269,6 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowStagingOverflow)
     int dev = 0;
     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
 
-    constexpr size_t kSegmentSize = 32 * 1024 * 1024;
     constexpr int kAllocSegments = 5;
     constexpr int kWinSegments = 4;
 
@@ -279,8 +277,16 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowStagingOverflow)
     ncclCommUserRank(getActiveCommunicator(), &rank);
     ncclCommCount(getActiveCommunicator(), &nRanks);
 
+    // Capacity is two slots of the staging buffer (~2 * NCCL_CE_AR_STAGING_BYTES).
+    // Two segments have to be larger than that, or this case is the same as
+    // ChunkedFallback and the ASSERT_GT below fails at the 256 MiB default.
+    const size_t capacity = ceAllReduceStagingBufCapacity(nRanks);
+    size_t segmentSize = 32ull * 1024 * 1024;
+    const size_t overflowSegment = capacity / 2 + 2ull * 1024 * 1024;
+    if (overflowSegment > segmentSize) segmentSize = overflowSegment;
+
     MultiSegmentBuffer buf;
-    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kAllocSegments, buf));
+    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, segmentSize, kAllocSegments, buf));
     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
     {
         const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
@@ -295,7 +301,7 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowStagingOverflow)
     ASSERT_GT(recvOffset + totalBytes, windowBytes);
     ASSERT_LE(recvOffset + totalBytes, buf.totalSize);
     ASSERT_EQ(totalBytes % sizeof(T), 0u);
-    ASSERT_GT(totalBytes, ceAllReduceStagingBufCapacity(nRanks));
+    ASSERT_GT(totalBytes, capacity);
 
     char* base = reinterpret_cast<char*>(buf.vaBase);
     void* sendBuf = base;

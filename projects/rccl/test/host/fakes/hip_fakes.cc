@@ -708,6 +708,15 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize,
     return g_hipMemGetAddressRange(pbase, psize, dptr);
 }
 
+// CAST multi-segment registration calls this. The host binary does not link
+// libamdhip64, and the symbol there is versioned hip_6.5, so an unversioned
+// reference does not resolve. Unexercised callers get a HIP error.
+hipError_t hipMemGetHandleForAddressRange(void*, hipDeviceptr_t, size_t,
+                                          hipMemRangeHandleType, unsigned long long)
+{
+    return hipErrorInvalidValue;
+}
+
 hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
                                         void* addr)
 {
