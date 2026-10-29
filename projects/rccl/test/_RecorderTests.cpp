@@ -12,7 +12,10 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <thread>
 
@@ -133,6 +136,69 @@ namespace RcclUnitTesting
       },
       {{"RCCL_REPLAY_FILE", "/tmp/test_redop.json"}}
     );
+  }
+
+  /**
+   * \brief Run a named-call record with RCCL_LOG_LEVEL=level; the record is written only when the parsed level > 1
+   * ******************************************************************************************/
+  static void runLogLevelCase(const char* testName, const char* level, bool expectRecord)
+  {
+    // The re-exec'd child re-runs this body; only the original process creates (and removes) the directory.
+    bool isChild = getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr;
+    std::string dir;
+    if (!isChild)
+    {
+      char tmpl[] = "/tmp/rccl_recorder_XXXXXX"; // dot-free: the Recorder splits RCCL_REPLAY_FILE at the first dot
+      ASSERT_NE(mkdtemp(tmpl), nullptr);
+      dir = tmpl;
+    }
+    RUN_ISOLATED_TEST_WITH_ENV(
+      testName,
+      [expectRecord]()
+      {
+        ASSERT_NO_THROW((void)rccl::Recorder::instance());
+        rccl::Recorder::instance().record("LogLevelNamedCall");
+
+        char host[256];
+        gethostname(host, sizeof(host));
+        std::string base = getenv("RCCL_REPLAY_FILE");
+        std::string filename = base.substr(0, base.find(".json")) + "." + std::to_string(getpid()) + "." +
+                               std::string(host) + ".json";
+        std::ifstream fp(filename);
+        ASSERT_TRUE(fp.is_open()) << "Recorder did not create expected file: " << filename;
+        std::string content((std::istreambuf_iterator<char>(fp)), std::istreambuf_iterator<char>());
+        fp.close();
+        std::remove(filename.c_str());
+        EXPECT_EQ(content.find("LogLevelNamedCall") != std::string::npos, expectRecord) << "content: " << content;
+      },
+      {{"RCCL_REPLAY_FILE", dir + "/out.json"}, {"RCCL_LOG_LEVEL", level}}
+    );
+    if (!isChild)
+      std::filesystem::remove_all(dir);
+  }
+
+  /**
+   * \brief Verify a non-numeric RCCL_LOG_LEVEL neither throws nor raises the level above the default of 1
+   * ******************************************************************************************/
+  TEST(Recorder, LogLevelNonNumeric)
+  {
+    runLogLevelCase("LogLevelNonNumeric", "abc", false);
+  }
+
+  /**
+   * \brief Verify a numeric RCCL_LOG_LEVEL above 1 enables named-call records
+   * ******************************************************************************************/
+  TEST(Recorder, LogLevelNumeric)
+  {
+    runLogLevelCase("LogLevelNumeric", "2", true);
+  }
+
+  /**
+   * \brief Verify a numeric prefix of RCCL_LOG_LEVEL is kept, like other RCCL parameters
+   * ******************************************************************************************/
+  TEST(Recorder, LogLevelNumericPrefix)
+  {
+    runLogLevelCase("LogLevelNumericPrefix", "2abc", true);
   }
 
   /**
