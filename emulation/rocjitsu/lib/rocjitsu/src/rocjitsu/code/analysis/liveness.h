@@ -211,7 +211,7 @@ public:
   /// analysis because deferred CFG queries retain and later dereference them.
   /// @param blocks Blocks in one kernel CFG scope.
   /// @param wave_size Wave width in lanes the scope executes at, 32 or 64.
-  /// Forwarded to InstDefUse. A Wave32 RDNA scope analyzed at 64 can report a
+  /// Forwarded to @ref InstDefUse. A Wave32 RDNA scope analyzed at 64 can report a
   /// live SGPR dead.
   /// @param exec Optional program-point EXEC-state analysis over the same
   /// @p blocks scope and @p wave_size; lets EXEC-masked vector defs count as

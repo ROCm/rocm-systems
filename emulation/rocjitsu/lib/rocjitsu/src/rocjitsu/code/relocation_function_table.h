@@ -133,8 +133,9 @@ struct RelocationPairAnalysis {
 /// `tables` affects only `dispatches`. A chained second add, a write to either
 /// half, or a CFG join whose predecessors disagree leaves the pair unreported.
 /// A table or GOT address followed by an indexed load and `s_swap_pc_i64`
-/// produces a dispatch only when every step is proven. @p wave_size is the
-/// width the object's code executes at, 32 or 64; see InstDefUse.
+/// produces a dispatch only when every step is proven.
+/// @param wave_size Wave width in lanes the object's code executes at, 32 or 64;
+/// see @ref InstDefUse for how it sizes wave-mask operands.
 [[nodiscard]] RelocationPairAnalysis
 analyze_relocation_pairs(std::span<const std::unique_ptr<BasicBlock>> blocks,
                          std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
