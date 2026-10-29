@@ -928,6 +928,22 @@ static void collectSweepSizes(std::vector<size_t>& sizes, size_t minB, size_t ma
   std::sort(sizes.begin(), sizes.end());
 }
 
+// Result rows are written after every size. The globals publishLayout sets
+// belong to whichever range was allocated last, so point them at this size.
+static void noteLayoutReport(void* send, void* recv) {
+  std::lock_guard<std::mutex> lock(vmmMu);
+  const VmmRange* best = nullptr;
+  for (const auto& r : vmmRanges) {
+    if (r.ptr != send && r.ptr != recv) continue;
+    if (best == nullptr || r.totalSize > best->totalSize) best = &r;
+  }
+  if (best == nullptr) return;
+  layoutMappedBytes = best->totalSize;
+  layoutSegBytes = best->segSizes.empty() ? 0 : best->segSizes[0];
+  layoutGpuSegs = best->nGpu;
+  layoutHostSegs = best->nHost;
+}
+
 static testResult_t bindLayoutForSize(struct threadArgs* args, size_t size, ncclDataType_t type) {
   if (bufferLayout == kLayoutDefault) return testSuccess;
   const size_t delta = (size_t)unalign * wordSize(type);
@@ -953,6 +969,7 @@ static testResult_t bindLayoutForSize(struct threadArgs* args, size_t size, nccl
     if (args->sendRegHandles) args->sendRegHandles[i] = slot->sendReg;
     if (args->recvRegHandles) args->recvRegHandles[i] = slot->recvReg;
 #endif
+    if (i == 0) noteLayoutReport(slot->send, slot->recv);
   }
   return testSuccess;
 }
@@ -2028,16 +2045,32 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
         // input is the send size, so that pass has to run on the send allocation.
         const bool inplaceUsesSend = bufferLayout != kLayoutDefault && args->sendBytes > args->expectedBytes;
         std::vector<void*> savedRecv;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+        std::vector<void*> savedRecvReg;
+#endif
         if (inplaceUsesSend) {
           savedRecv.resize(args->nGpus);
           for (int i = 0; i < args->nGpus; i++) {
             savedRecv[i] = args->recvbuffs[i];
             args->recvbuffs[i] = args->sendbuffs[i];
           }
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+          // The device path passes the window, not the raw pointer.
+          if (args->recvRegHandles && args->sendRegHandles) {
+            savedRecvReg.resize(args->nGpus);
+            for (int i = 0; i < args->nGpus; i++) {
+              savedRecvReg[i] = args->recvRegHandles[i];
+              args->recvRegHandles[i] = args->sendRegHandles[i];
+            }
+          }
+#endif
         }
         TESTCHECK(BenchTime(args, type, op, root, 1));
         if (inplaceUsesSend) {
           for (int i = 0; i < args->nGpus; i++) args->recvbuffs[i] = savedRecv[i];
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+          for (int i = 0; i < (int)savedRecvReg.size(); i++) args->recvRegHandles[i] = savedRecvReg[i];
+#endif
         }
       }
       if(output_algo_proto_channels) {
