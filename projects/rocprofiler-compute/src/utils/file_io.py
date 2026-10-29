@@ -446,13 +446,22 @@ def create_df_pmc(
 def create_df_pmc_with_slot_ids(
     raw_data_dir: str,
     verbose: int,
-) -> tuple[pd.DataFrame, dict[tuple, int]]:
-    """Read pmc counters and the map from process_rocpd_csv group keys to 1..N ids."""
+) -> tuple[pd.DataFrame, dict[tuple, int], PassLayout]:
+    """Read pmc counters, slot ids, and the pass layout used to bind metrics.
+
+    Operator filtering uses this loader. It keeps the same pass provenance as
+    ``load_df_pmc`` so a later metric bind cannot read a divisor from another
+    pass.
+    """
     counter_rows = _read_counter_rows(Path(raw_data_dir))
     if counter_rows.empty:
-        return pd.DataFrame(), {}
+        return pd.DataFrame(), {}, PassLayout.empty()
 
-    df, slot_to_id = utils_analysis.process_rocpd_csv(counter_rows)
+    layout = build_pass_layout(counter_rows)
+    df, slot_to_id = utils_analysis.process_rocpd_csv(
+        counter_rows,
+        pass_layout=layout,
+    )
 
     utils_analysis.add_unit_counter(df)
 
@@ -460,7 +469,7 @@ def create_df_pmc_with_slot_ids(
         frame_info = io.StringIO()
         df.info(buf=frame_info)
         console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
-    return df, slot_to_id
+    return df, slot_to_id, layout
 
 
 def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
