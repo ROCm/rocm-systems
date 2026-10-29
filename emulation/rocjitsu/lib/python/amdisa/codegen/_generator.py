@@ -1464,6 +1464,17 @@ class CodeGenerator:
         )
 
     @staticmethod
+    def _encoded_source_operands(inst: Instruction) -> list[Operand]:
+        # Read/write destinations such as V_FMAC's accumulator are semantic
+        # inputs, but they are not the encoded src0/src1 fields modified by
+        # DPP or SDWA.
+        return [
+            op
+            for op in inst.operands
+            if op.is_input and not op.is_output and not op.fieldless
+        ]
+
+    @staticmethod
     def _semantic_source_operands(
         inst: Instruction, src_operands: list[Operand]
     ) -> list[Operand]:
@@ -1483,6 +1494,14 @@ class CodeGenerator:
         ordered_names = {op.name for op in ordered}
         ordered.extend(op for op in src_operands if op.name not in ordered_names)
         return ordered
+
+    @staticmethod
+    def _semantic_stages_src0(sem: InstructionSemantics | None) -> bool:
+        return (
+            sem is not None
+            and sem.semantic_class == 'vector_movrel'
+            and sem.operation in ('src', 'srcdst', 'srcdst2')
+        )
 
     @classmethod
     def _execute_operand_participates(cls, opnd: Operand) -> bool:
@@ -1673,17 +1692,6 @@ class CodeGenerator:
                 ),
             )
         )
-
-    @staticmethod
-    def _encoded_source_operands(inst: Instruction) -> list[Operand]:
-        # Read/write destinations such as V_FMAC's accumulator are semantic
-        # inputs, but they are not the encoded src0/src1 fields modified by
-        # DPP or SDWA.
-        return [
-            op
-            for op in inst.operands
-            if op.is_input and not op.is_output and not op.fieldless
-        ]
 
     def _instruction_supports_dpp8(self, inst: Instruction, enc_name: str) -> bool:
         supported = self._dpp_opcode_rule(
@@ -7066,7 +7074,7 @@ class CodeGenerator:
             ),
             result_writer=result_writer,
         )
-        if ctx.supports_dpp8 and op in ('src', 'srcdst', 'srcdst2'):
+        if ctx.supports_dpp8 and self._semantic_stages_src0(sem):
             # MOVREL builds rel_src from the semantic src[0], which can differ
             # from the encoded source selected for ordinary DPP staging.
             assert (
@@ -13446,11 +13454,7 @@ class CodeGenerator:
                                 _reads_all_outputs
                                 and (_supports_dpp_encoding or _supports_dpp8)
                             ), f'{inst.name}: reads-all-output semantics do not support DPP/DPP8'
-                            _semantic_stages_src0 = (
-                                sem is not None
-                                and sem.semantic_class == 'vector_movrel'
-                                and sem.operation in ('src', 'srcdst', 'srcdst2')
-                            )
+                            _semantic_stages_src0 = self._semantic_stages_src0(sem)
                             if (
                                 not _reads_all_outputs
                                 and not _semantic_stages_src0

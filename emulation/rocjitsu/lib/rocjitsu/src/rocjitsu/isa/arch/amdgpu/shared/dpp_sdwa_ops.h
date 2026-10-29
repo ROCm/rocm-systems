@@ -534,7 +534,8 @@ inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
 inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
                        std::optional<StagedOperand> &storage, amdgpu::Wavefront &wf,
                        uint8_t source_byte_mask = 0) {
-  // Generator DPP8 admission enforces this for ordinary and MOVREL sources.
+  // Generator _instruction_supports_dpp8 checks the encoded source width;
+  // _gen_execute_body separately checks the semantic source used by MOVREL.
   assert(source.size_bits() <= 32 && "DPP8 requires a source no wider than 32 bits");
   const DppPlan plan = make_dpp8_plan(wf.wf_size(), lane_sel, fi, wf.exec());
   stage_dpp_operand(source, plan, wf.exec(), storage, wf, source_byte_mask);
