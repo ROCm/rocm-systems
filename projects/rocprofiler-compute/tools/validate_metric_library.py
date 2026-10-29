@@ -103,9 +103,12 @@ VARIABLE_FIELDS = ("formula",)
 # by a different measured ceiling.
 SHARED_FORMULA_IDS = {}
 # Ids that hold another id's formula on a different arch (id -> that id): one label
-# shows two equations on an arch (D8 Kind 3), and the parent arch's equation keeps
-# the id until the metric owners choose one.
-SPLIT_FORMULA_IDS = {}
+# shows two equations on gfx940 and gfx941 (D8 Kind 3), and the parent arch's equation
+# keeps the id until the metric owners choose one.
+SPLIT_FORMULA_IDS = {
+    "fabric.rd_bw_incl_128b": "fabric.rd_bw",
+    "vl1d.cache_bw_128b": "vl1d.cache_bw",
+}
 
 # A row's equation comes from the first of these columns it has; a row with none
 # shows one equation in each of its table's value columns.
@@ -133,6 +136,11 @@ _ROOFLINE_L2_BW = (
     "L2 Cache Bandwidth",
     "vl1d.l2_bw",
     _ROOFLINE_L2_BW_EQUATION.format(64),
+)
+_ROOFLINE_L2_BW_128B = (
+    "L2 Cache Bandwidth",
+    "vl1d.l2_bw",
+    _ROOFLINE_L2_BW_EQUATION.format(128),
 )
 _ROOFLINE_LDS_BW = (
     "LDS Bandwidth",
@@ -163,9 +171,23 @@ DISPLAY_VARIANTS = {
     },
 }
 DISPLAY_VARIANTS["gfx941"] = DISPLAY_VARIANTS["gfx940"]
+DISPLAY_VARIANTS["gfx942"] = {
+    **DISPLAY_VARIANTS["gfx940"],
+    "4.1.10": _ROOFLINE_L2_BW_128B,
+    # TODO(AIPROFCOMP-820): the clamp is deferred (FOLLOWUPS); the other vL1D hit rate
+    # rows have no NOISE_CLAMP.
+    "16.3.5": (
+        "Cache Hit Rate",
+        "vl1d.hit_rate",
+        "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum "
+        "+ TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+        "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
+        "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
+    ),
+}
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
-UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a")}
+UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942")}
 # gfx940 and gfx941 label integer ops in FLOPs.
 _GFX940_UNIT_VARIANTS = {
     **_CDNA_UNIT_VARIANTS,
