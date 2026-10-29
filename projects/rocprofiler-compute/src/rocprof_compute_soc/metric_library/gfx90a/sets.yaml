@@ -1,0 +1,15 @@
+inherit: ../gfx908/sets.yaml
+compute_thruput_flops:
+  title: Compute Throughput FLOPS
+  metrics:
+  - compute.mfma_flops_bf16
+  - compute.mfma_flops_f16
+  - compute.mfma_flops_f32
+  - compute.mfma_flops_f64
+  - compute.mfma_iops_int8
+compute_thruput_util:
+  metrics:
+  - compute.valu_util
+  - compute.vmem_util
+  - compute.branch_util
+  - compute.valu_active_threads

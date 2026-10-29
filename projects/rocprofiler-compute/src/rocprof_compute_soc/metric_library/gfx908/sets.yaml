@@ -1,0 +1,23 @@
+compute_thruput_util:
+  title: Compute Throughput Utilization
+  metrics:
+  - compute.salu_util
+  - compute.valu_util
+launch_stats:
+  title: Launch Stats
+  metrics:
+  - dispatch.grid_size
+  - dispatch.workgroup_size
+  - spi.dispatched_wavefronts
+  - dispatch.vgprs
+  - dispatch.agprs
+  - dispatch.sgprs
+  - dispatch.lds_allocation
+  - dispatch.scratch_allocation
+mem_thruput:
+  title: Memory Throughput
+  metrics:
+  - lds.theoretical_bw
+  - lds.bank_conflicts_access
+  - vl1d.util
+  - l2.util
