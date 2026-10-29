@@ -6,6 +6,7 @@
 import pytest
 
 from utils.utils_counter_defs import (
+    counters_over_block_limits,
     extract_counters_and_variables,
     get_build_in_vars,
     metric_expressions,
@@ -151,3 +152,23 @@ class TestMetricExpressions:
         }
         metric = {"expr": "TCC_HIT[::_1]", "unit": "Hits"}
         assert metric_expressions(table, metric) == ["TCC_HIT[::_1]"]
+
+
+# =============================================================================
+# Tests for utils.utils_counter_defs.counters_over_block_limits
+# =============================================================================
+
+
+def test_counters_over_block_limits_reports_only_full_blocks():
+    counters = {
+        "SQ_WAVES",
+        "SQ_BUSY_CYCLES",
+        "SQ_INSTS_VALU",
+        "SQ_INST_LEVEL_VMEM_ACCUM",
+        "TA_TA_BUSY",
+        "GRBM_COUNT",
+    }
+    limits = {"SQ": 2, "TA": 2, "TCC_channels": 16}
+    assert counters_over_block_limits(counters, limits) == {
+        "SQ": {"SQ_WAVES", "SQ_BUSY_CYCLES", "SQ_INSTS_VALU"}
+    }
