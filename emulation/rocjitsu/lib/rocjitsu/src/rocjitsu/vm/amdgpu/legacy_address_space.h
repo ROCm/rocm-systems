@@ -17,6 +17,7 @@
 #include "simdojo/components/sparse_memory.h"
 #include "simdojo/sim/component.h"
 #include "util/conditional_wake_spinlock.h"
+#include "util/diagnostic.h"
 #include "util/distributed_shared_mutex.h"
 #include "util/log.h"
 #include "util/unique_handle.h"
@@ -36,7 +37,6 @@
 #include <mutex>
 #include <shared_mutex>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <sys/syscall.h>
 #include <sys/uio.h>
@@ -263,13 +263,16 @@ public:
   /// @param request_mutex Optional lease that stabilizes batched page-table
   ///        lookups. Omitting it disables cross-chunk MTYPE reuse.
   /// @param page_table_cache_state Copied-policy admissions; requires request_mutex.
-  /// @throws std::invalid_argument if a policy cache has no shared request mutex.
-  void register_process(uint32_t pid, LegacyPageTable *pt, util::DistributedSharedMutex *mu,
-                        const uint64_t *generation = nullptr,
-                        std::shared_ptr<util::DistributedSharedMutex> request_mutex = {},
-                        std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state = {}) {
+  /// @returns Failure with a diagnostic if a policy cache has no shared request mutex.
+  /// A failed registration leaves any existing VMID registration unchanged.
+  util::Result
+  register_process(uint32_t pid, LegacyPageTable *pt, util::DistributedSharedMutex *mu,
+                   const uint64_t *generation = nullptr,
+                   std::shared_ptr<util::DistributedSharedMutex> request_mutex = {},
+                   std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state = {},
+                   util::DiagnosticEmitter emit_error = {}) {
     if (page_table_cache_state && !request_mutex)
-      throw std::invalid_argument("cached page-table policies require a shared request mutex");
+      return emit_error.emit() << "cached page-table policies require a shared request mutex";
     util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec, " pt_size=", pt->size());
     update_vmid_registration(pid, [&](auto) {
@@ -286,6 +289,7 @@ public:
       };
       return true;
     });
+    return util::Result::success();
   }
 
   /// @brief Stabilize a registered process's page table for one MTYPE lookup.
@@ -1640,9 +1644,11 @@ private:
   bool register_address_space(uint32_t vmid, LegacyAddressSpaceRegistration registration) {
     if (registration.page_table == nullptr || registration.page_table_mutex == nullptr)
       return false;
-    register_process(vmid, registration.page_table, registration.page_table_mutex,
-                     registration.page_table_generation, std::move(registration.request_mutex),
-                     std::move(registration.page_table_cache_state));
+    if (register_process(vmid, registration.page_table, registration.page_table_mutex,
+                         registration.page_table_generation, std::move(registration.request_mutex),
+                         std::move(registration.page_table_cache_state))
+            .failed())
+      return false;
     set_process_client_pid(vmid, registration.client_pid);
     set_process_mem_fd(vmid, registration.client_mem_fd);
     set_process_passthrough(vmid, registration.passthrough);

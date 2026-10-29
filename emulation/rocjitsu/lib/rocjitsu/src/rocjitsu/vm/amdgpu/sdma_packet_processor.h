@@ -91,7 +91,9 @@ public:
   std::function<VmAccessOutcome(uint32_t data)> deliver_interrupt;
   /// The returned lease spans every direct memory effect. It is released when
   /// execution yields and reacquired before the effect resumes.
-  std::function<SdmaCacheLease(SdmaCacheOperation operation)> acquire_cache_maintenance;
+  /// Failure stops the packet before its protected effect and holds retirement.
+  std::function<util::FailureOr<SdmaCacheLease>(SdmaCacheOperation operation)>
+      acquire_cache_maintenance;
   std::function<uint64_t()> timestamp;
 };
 

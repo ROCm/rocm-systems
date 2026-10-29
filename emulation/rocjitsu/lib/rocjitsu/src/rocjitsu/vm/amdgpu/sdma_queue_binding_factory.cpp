@@ -5,6 +5,7 @@
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_scheduler.h"
+#include "util/log.h"
 
 #include <chrono>
 #include <utility>
@@ -86,7 +87,8 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
   if (!callbacks.acquire_cache_maintenance) {
     callbacks.acquire_cache_maintenance =
         [coherence = scheduler_->cache_coherence()](SdmaCacheOperation operation) {
-          return coherence->acquire_cache_maintenance(operation);
+          auto report = [](std::string_view message) { util::Logger::warn(message); };
+          return coherence->acquire_cache_maintenance(operation, util::DiagnosticEmitter(report));
         };
   }
   if (!callbacks.timestamp) {

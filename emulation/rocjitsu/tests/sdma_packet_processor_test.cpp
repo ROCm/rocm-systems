@@ -349,6 +349,79 @@ TEST(SdmaPacketProcessorTest, SignalPublicationRetryDoesNotReplayCommittedAtomic
   EXPECT_EQ(interrupts, 1u);
 }
 
+TEST(SdmaPacketProcessorTest, FailedCacheMaintenanceStopsEffectsAndRetirement) {
+  constexpr uint64_t kSource = 0x1800;
+  constexpr uint64_t kDestination = 0x2800;
+  const auto copy = copy_packet(kSource, kDestination, 4);
+  const std::vector<std::vector<uint32_t>> packets = {
+      {copy.begin(), copy.end()},
+      {5, static_cast<uint32_t>(kDestination), 0, 0x11223344},
+      {17, 0, 0, 1u << 15, 0, 0},
+      {17, 0, 0, 1u << 14, 0, 0},
+  };
+  for (const auto &packet : packets) {
+    SCOPED_TRACE(packet[0]);
+    PacketProcessorFixture fixture;
+    ASSERT_TRUE(fixture.access);
+    uint32_t maintenance_calls = 0;
+    SdmaPacketCallbacks callbacks;
+    callbacks.acquire_cache_maintenance =
+        [&](SdmaCacheOperation) -> util::FailureOr<SdmaCacheLease> {
+      ++maintenance_calls;
+      return util::Result::failure();
+    };
+    SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+    const SdmaPacketProcessResult result =
+        processor.process({.available_dwords = packet,
+                           .access = *fixture.access,
+                           .continuation = fixture.continuation});
+    EXPECT_EQ(maintenance_calls, 1u);
+    EXPECT_EQ(result.packet.status, PacketProcessStatus::Faulted);
+    EXPECT_EQ(result.packet.retirement, PacketRetirement::Hold);
+    EXPECT_FALSE(result.operation_committed);
+    EXPECT_FALSE(result.completion_published);
+    EXPECT_EQ(fixture.memory->write_calls(kDestination), 0u);
+    EXPECT_TRUE(fixture.continuation.pending());
+  }
+}
+
+TEST(SdmaPacketProcessorTest, FailedCacheReacquisitionPreservesCommittedCopyProgress) {
+  PacketProcessorFixture fixture;
+  ASSERT_TRUE(fixture.access);
+  constexpr uint64_t kSource = 0x100;
+  constexpr uint64_t kDestination = 0x200;
+  for (uint32_t index = 0; index < 32; ++index)
+    fixture.memory->store<uint8_t>(kSource + index, static_cast<uint8_t>(index + 1));
+  fixture.memory->set_unavailable_write(kDestination + 16);
+  uint32_t maintenance_calls = 0;
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation) -> util::FailureOr<SdmaCacheLease> {
+    if (++maintenance_calls == 2)
+      return util::Result::failure();
+    return SdmaCacheLease{};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+  const auto packet = copy_packet(kSource, kDestination, 32);
+  const auto first = processor.process({.available_dwords = packet,
+                                        .access = *fixture.access,
+                                        .continuation = fixture.continuation});
+  ASSERT_EQ(first.packet.status, PacketProcessStatus::Blocked);
+  ASSERT_TRUE(first.operation_committed);
+  const auto failed = processor.process(
+      {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
+  EXPECT_EQ(failed.packet.status, PacketProcessStatus::Faulted);
+  EXPECT_EQ(failed.packet.retirement, PacketRetirement::Hold);
+  EXPECT_TRUE(failed.operation_committed);
+  EXPECT_FALSE(failed.completion_published);
+  EXPECT_TRUE(fixture.continuation.pending());
+  const auto resumed = processor.process(
+      {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
+  EXPECT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(fixture.memory->write_calls(kDestination), 1u);
+  for (uint32_t index = 0; index < 32; ++index)
+    EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + index), static_cast<uint8_t>(index + 1));
+}
+
 TEST(SdmaPacketProcessorTest, CacheLeaseIsReleasedOnUnavailableAndReacquiredOnResume) {
   PacketProcessorFixture fixture;
   ASSERT_TRUE(fixture.access);

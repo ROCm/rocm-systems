@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "util/diagnostic.h"
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -117,8 +119,11 @@ public:
   /// @details WritebackInvalidate publishes dirty state before returning. The
   /// returned lease advances the data and instruction epochs only after the
   /// protected access has completed and the lease is destroyed.
-  [[nodiscard]] DeviceCacheMaintenanceLease
-  acquire_cache_maintenance(DeviceCacheOperation operation);
+  /// A missing backing or failed writeback returns failure with a diagnostic.
+  /// Failure releases acquired locks and does not advance either epoch.
+  util::FailureOr<DeviceCacheMaintenanceLease>
+  acquire_cache_maintenance(DeviceCacheOperation operation,
+                            util::DiagnosticEmitter emit_error = {});
   /// @brief Return the epoch observed by data caches during ordinary accesses.
   uint64_t current_epoch() const { return data_epoch_.load(std::memory_order_acquire); }
   /// @brief Return the epoch observed by private instruction caches.

@@ -5,12 +5,10 @@
 
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
-#include "util/except.h"
 
 #include <algorithm>
 #include <cassert>
 #include <functional>
-#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -106,8 +104,9 @@ DeviceCacheCoherence::AtomicBoundary DeviceCacheCoherence::acquire_atomic_bounda
   return AtomicBoundary(this, locked_l2_count, std::move(atomic_lock), std::move(coherence_lock));
 }
 
-DeviceCacheMaintenanceLease
-DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation) {
+util::FailureOr<DeviceCacheMaintenanceLease>
+DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
+                                                util::DiagnosticEmitter emit_error) {
   std::unique_lock atomic_lock(atomic_mutex_);
   std::unique_lock coherence_lock(mutex_);
 
@@ -119,7 +118,7 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation) 
           return !cache->has_legacy_maintenance_backing();
         });
     if (missing_l2_backing || missing_memory_side_backing)
-      throw util::ConfigError("cache hierarchy lacks legacy maintenance backing");
+      return emit_error.emit() << "cache hierarchy lacks legacy maintenance backing";
   }
 
   size_t locked_l2_count = 0;
@@ -135,8 +134,11 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation) 
     // directly to the SoC's GpuMemory backing while cache access is excluded.
     if (operation == DeviceCacheOperation::WritebackInvalidate) {
       for (L2Cache *cache : l2_caches_) {
-        if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete)
-          throw util::Exception(std::string_view("L2 cache maintenance backing write failed"));
+        if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
+          release_cache_locks(std::exchange(locked_l2_count, 0),
+                              std::exchange(locked_memory_side_count, 0));
+          return emit_error.emit() << "L2 cache maintenance backing write failed";
+        }
       }
     }
 
@@ -147,9 +149,11 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation) 
 
     if (operation == DeviceCacheOperation::WritebackInvalidate) {
       for (MemorySideCache *cache : memory_side_caches_) {
-        if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete)
-          throw util::Exception(
-              std::string_view("memory-side cache maintenance backing write failed"));
+        if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
+          release_cache_locks(std::exchange(locked_l2_count, 0),
+                              std::exchange(locked_memory_side_count, 0));
+          return emit_error.emit() << "memory-side cache maintenance backing write failed";
+        }
       }
     }
 

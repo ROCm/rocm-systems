@@ -61,7 +61,7 @@ void SoC::release_vm_resources() {
 void SoC::add_xcd(amdgpu::Xcd *xcd) {
   if (xcd == nullptr)
     throw std::invalid_argument("cannot add a null XCD");
-  xcd->set_coherence_domain(cache_coherence_);
+  (void)xcd->set_coherence_domain(cache_coherence_);
   if (xcd->l2_cache()) {
     xcd->l2_cache()->set_legacy_maintenance_memory(memory_);
     xcd->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
@@ -84,7 +84,7 @@ void SoC::wire_gws_to_xcds() {
 void SoC::add_iod(amdgpu::Iod *iod) {
   if (iod == nullptr)
     throw std::invalid_argument("cannot add a null IOD");
-  iod->set_coherence_domain(cache_coherence_);
+  (void)iod->set_coherence_domain(cache_coherence_);
   iod->set_gpu_vm(&gpu_vm_);
   iod->set_legacy_maintenance_memory(memory_);
   iod->msc()->set_legacy_maintenance_vm(&gpu_vm_);

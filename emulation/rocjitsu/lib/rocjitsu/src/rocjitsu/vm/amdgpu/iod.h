@@ -9,6 +9,8 @@
 
 #include "simdojo/sim/component.h"
 
+#include "util/diagnostic.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -30,7 +32,9 @@ public:
   Iod(std::string name, const Config &config, GpuMemory *memory,
       std::shared_ptr<DeviceCacheCoherence> coherence = std::make_shared<DeviceCacheCoherence>());
 
-  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
+  /// @brief Replace the coherence domain; a null domain fails without changing registration.
+  util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                    util::DiagnosticEmitter emit_error = {});
   void set_gpu_vm(GpuVm *gpu_vm) {
     msc_->set_gpu_vm(gpu_vm);
     hbm_->set_gpu_vm(gpu_vm);

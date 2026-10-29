@@ -15,6 +15,8 @@
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
 
+#include "util/diagnostic.h"
+
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -53,7 +55,9 @@ public:
   /// @brief Set typed child pointers after the builder populates children.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
   void set_l2_cache(L2Cache *l2);
-  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
+  /// @brief Replace the coherence domain; a null domain fails without changing registration.
+  util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                    util::DiagnosticEmitter emit_error = {});
   void add_shader_engine(ShaderEngine *se) { shader_engines_.push_back(se); }
 
   /// @brief Point every CU the command processor can dispatch to at this XCD's

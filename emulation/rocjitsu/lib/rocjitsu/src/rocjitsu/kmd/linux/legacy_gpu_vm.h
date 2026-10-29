@@ -37,7 +37,8 @@ public:
 
   [[nodiscard]] AddressSpaceHandle
   register_address_space(uint32_t vmid, LegacyAddressSpaceRegistration registration,
-                         std::shared_ptr<void> frontend_lifetime = {});
+                         std::shared_ptr<void> frontend_lifetime = {},
+                         util::DiagnosticEmitter emit_error = {});
   [[nodiscard]] AddressSpaceHandle
   register_address_space(uint32_t vmid, LegacyPageTable *page_table,
                          util::DistributedSharedMutex *page_table_mutex,
