@@ -776,6 +776,26 @@ TEST(WaitcheckStream, ScalarMaskDestinationsFollowWaveWidth) {
   }
 }
 
+TEST(WaitcheckStream, Cdna5CompareDestinationIsOneSgprAtEitherWaveSize) {
+  // gfx1250 decodes v_cmp_eq_u32_e64 s2, v1, v2 as s2 alone, so Wave64 (the
+  // default options) must not widen it to s[2:3]. Encodings checked with LLVM's
+  // assembler.
+  for (uint32_t wave_size : {32u, 64u}) {
+    for (uint32_t loaded : {2u, 3u}) {
+      const auto report =
+          analyze({0xf4000002u | (loaded << 6), 0xf8000000u, 0xd44a0002u, 0x00020501u},
+                  ROCJITSU_CODE_ARCH_CDNA5, false, wave_size);
+      ASSERT_FALSE(report.incomplete);
+      const bool conflicts = loaded == 2;
+      ASSERT_EQ(report.diagnostics.size(), conflicts ? 1u : 0u);
+      if (conflicts) {
+        EXPECT_EQ(report.diagnostics[0].reg.index, loaded);
+        EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+      }
+    }
+  }
+}
+
 TEST(WaitcheckStream, LegacyMadScalarDestinationsFollowWaveWidth) {
   // RDNA3/3.5 use v_mad_{u64_u32,i64_i32}; RDNA4 adds _co to their names.
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
