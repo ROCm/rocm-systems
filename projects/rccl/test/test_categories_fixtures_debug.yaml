@@ -36,6 +36,8 @@ test_categories:
       - "RcclDdaTierThresholds.*"
       - "CeAllReduceEligibilityTest.*"
       - "RcclCeAllReduceEligibility.*"
+      - "CeReduceScatterEligibilityTest.*"
+      - "RcclCeReduceScatterEligibility.*"
       - "RcclAllGatherCeRegisteredWindow.*"
       - "RcclCeGraphLatch.*"
       - "RcclAlltoAllDecision.*"
