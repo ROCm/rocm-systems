@@ -1,0 +1,81 @@
+{
+  "_comment": "Help text for the initial embedded options. An environment name is set only when that variable already exists. This is not the full settings list.",
+  "schema_version": "1.0",
+  "categories": [
+    { "id": "configuration", "name": "Configuration" },
+    { "id": "logging", "name": "Logging" },
+    { "id": "tracing", "name": "Tracing" }
+  ],
+  "params": [
+    {
+      "id": "output_path",
+      "name": "Output path",
+      "description": "Directory for output files",
+      "category": "configuration",
+      "type": "path",
+      "path_kind": "directory",
+      "env": { "name": "ROCPROFSYS_OUTPUT_PATH" },
+      "arg": { "name": "--output", "form": "value" }
+    },
+    {
+      "id": "preset",
+      "name": "Preset",
+      "description": "Named preset to apply",
+      "category": "configuration",
+      "type": "string",
+      "arg": { "name": "--preset", "form": "value" }
+    },
+    {
+      "id": "config_file",
+      "name": "Config file",
+      "description": "JSON file of parameter values",
+      "category": "configuration",
+      "type": "path",
+      "path_kind": "file",
+      "env": { "name": "ROCPROFSYS_CONFIG_FILE" },
+      "arg": { "name": "--config", "form": "value" }
+    },
+    {
+      "id": "verbose",
+      "name": "Verbose",
+      "description": "Verbosity level from 0 to 4",
+      "category": "logging",
+      "type": "integer",
+      "default_value": 0,
+      "min": 0,
+      "max": 4,
+      "env": { "name": "ROCPROFSYS_VERBOSE" },
+      "arg": { "name": "--verbose", "form": "value" }
+    },
+    {
+      "id": "debug",
+      "name": "Debug",
+      "description": "Enable debug mode",
+      "category": "logging",
+      "type": "bool",
+      "default_value": false,
+      "env": { "name": "ROCPROFSYS_DEBUG" },
+      "arg": { "name": "--debug", "form": "flag" }
+    },
+    {
+      "id": "trace",
+      "name": "Trace",
+      "description": "Enable Perfetto tracing",
+      "category": "tracing",
+      "type": "bool",
+      "default_value": false,
+      "env": { "name": "ROCPROFSYS_TRACE" },
+      "arg": { "name": "--trace", "form": "flag" }
+    },
+    {
+      "id": "profile",
+      "name": "Profile",
+      "description": "Enable call-stack profiling",
+      "category": "tracing",
+      "type": "bool",
+      "default_value": false,
+      "env": { "name": "ROCPROFSYS_PROFILE" },
+      "arg": { "name": "--profile", "form": "flag" }
+    }
+  ]
+}
