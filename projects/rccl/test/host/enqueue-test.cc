@@ -4527,6 +4527,7 @@ TEST_F(EnqueueMicrotest, TaskAppend_RearchEnabled_RoutesSendThroughTheRawTaskQue
 
 namespace {
 // CE not yet initialized and the rearch path on, so ceCollTaskAppend hands its init job to the management queue.
+// The hook mirrors ncclMgmtTaskEnqueue's ownership: it keeps the job on success and frees it on failure.
 struct RearchCeInitScene : CeAppendScene {
   ncclAsyncJob* job = nullptr;
   ncclResult_t (*jobFn)(ncclAsyncJob*) = nullptr;
@@ -4540,6 +4541,9 @@ struct RearchCeInitScene : CeAppendScene {
         jobFn = fn;
         jobFree = d;
         jobComm = comm;
+        if (enqueueResult != ncclSuccess && d != nullptr) {
+          d(j);
+        }
         return enqueueResult;
       }};
   RearchCeInitScene() {
