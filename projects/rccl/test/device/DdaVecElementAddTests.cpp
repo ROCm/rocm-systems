@@ -181,16 +181,17 @@ std::vector<E> PseudoRandomBits(size_t n, uint32_t seed) {
   return v;
 }
 
-// Same prologue and epilogue as the LL kernels.
+// Same prologue and epilogue as the LL kernels, with the 2-D flat block id the fabric kernels use.
 __global__ void LLEpochKernel(uint32_t* epochDev, int epochLen, uint32_t* out) {
-  const uint32_t flag = dda::common::ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
-  if (threadIdx.x == 0) out[blockIdx.x] = flag;
-  dda::common::ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
+  const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
+  const int total = gridDim.x * gridDim.y;
+  const uint32_t flag = dda::common::ddaGetLLEpochInc(epochDev, flatBlockId, 1);
+  if (threadIdx.x == 0) out[flatBlockId] = flag;
+  dda::common::ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
 }
 
 constexpr int kLLEpochMaxGrid = 8;
 constexpr int kLLEpochPad = 16;
-
 
 } // namespace
 
@@ -353,30 +354,30 @@ TEST_F(DdaVecElementAdd, Fp8E5m2MatchesCoreForAllPairs) {
   ExpectFp8MatchesCoreForAllPairs<fp8e5m2>();
 }
 
-// ddaSetLLEpoch must leave every epoch cell in [0, epochLen) at the new flag whatever the grid and
-// block size, so a later launch with a different grid reads one consistent epoch.
+// Every cell in [0, epochLen) must hold the new flag after each launch, whatever the grid and block size.
 TEST_F(DdaVecElementAdd, LLEpochAllCellsSetAcrossGridChanges) {
-  struct Launch { int grid, block; };
-  const Launch launches[] = {{1, 64}, {3, 64}, {1, 256}, {5, 128}, {2, 64}};
+  struct Launch { dim3 grid; int block; };
+  const Launch launches[] = {
+      {dim3(1), 64}, {dim3(3), 64}, {dim3(1), 256}, {dim3(5), 128}, {dim3(2, 3), 64}, {dim3(2), 64}};
   for (int epochLen : {1, 200, 1152}) {
     SCOPED_TRACE(testing::Message() << "epochLen=" << epochLen);
     const size_t cells = epochLen + kLLEpochPad;
     DeviceBuffer<uint32_t> epoch(cells);
     DeviceBuffer<uint32_t> out(kLLEpochMaxGrid);
-    epoch.copyFrom(std::vector<uint32_t>(cells, 0u));
+    ASSERT_NO_FATAL_FAILURE(epoch.zero());
 
     uint32_t prevFlag = 0;
     for (const Launch& l : launches) {
-      SCOPED_TRACE(testing::Message() << "grid=" << l.grid << " block=" << l.block);
-      out.copyFrom(std::vector<uint32_t>(kLLEpochMaxGrid, 0u));
+      const int nBlocks = static_cast<int>(l.grid.x * l.grid.y);
+      SCOPED_TRACE(testing::Message() << "grid=" << l.grid.x << "x" << l.grid.y << " block=" << l.block);
+      ASSERT_NO_FATAL_FAILURE(out.zero());
       LLEpochKernel<<<l.grid, l.block>>>(epoch.ptr, epochLen, out.ptr);
-      ASSERT_EQ(hipGetLastError(), hipSuccess);
-      ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+      ASSERT_NO_FATAL_FAILURE(syncAndCheck());
 
       const std::vector<uint32_t> flags = out.copyTo();
       const uint32_t flag = prevFlag + 1;
       // Blocks whose epoch cell lies outside [0, epochLen) read a cell nobody maintains.
-      for (int b = 0; b < l.grid && b < epochLen; ++b) {
+      for (int b = 0; b < nBlocks && b < epochLen; ++b) {
         EXPECT_EQ(flags[b], flag) << "block " << b;
       }
       const std::vector<uint32_t> cellsHost = epoch.copyTo();
