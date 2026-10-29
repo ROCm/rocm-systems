@@ -431,6 +431,19 @@ namespace {
            {kCodeSwapCopy11, sizeof(kCodeSwapCopy11), 19, 16},        // gfx11
            {kCodeSwapCopy12, sizeof(kCodeSwapCopy12), 19, 16},        // gfx12
            {kCodeSwapCopy1250, sizeof(kCodeSwapCopy1250), 19, 16},    // gfx1250
+       }},
+      {"BroadcastCopy",
+       {
+           {NULL, 0, 0, 0},                                                   // gfx7
+           {NULL, 0, 0, 0},                                                   // gfx8
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 20, 17},        // gfx9
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 20, 17},        // gfx90a
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 20, 17},        // gfx942
+           {kCodeBroadcastCopy1010, sizeof(kCodeBroadcastCopy1010), 20, 17},  // gfx1010
+           {kCodeBroadcastCopy10, sizeof(kCodeBroadcastCopy10), 20, 17},      // gfx10
+           {kCodeBroadcastCopy11, sizeof(kCodeBroadcastCopy11), 20, 17},      // gfx11
+           {kCodeBroadcastCopy12, sizeof(kCodeBroadcastCopy12), 20, 17},      // gfx12
+           {kCodeBroadcastCopy1250, sizeof(kCodeBroadcastCopy1250), 20, 17},  // gfx1250
        }}};
 
   // @brief Returns the shader named func_name built for isa, or NULL when this
@@ -1984,12 +1997,16 @@ bool GpuAgent::PrefersSdmaBlit() const {
 }
 
 uint32_t GpuAgent::MaxBroadcastDestinations() const {
-  // Only the SDMA engines carry a broadcast. When SDMA is unavailable
-  // DmaCopyBatchFallback has no shader equivalent for broadcast and rejects the
-  // op, so nothing can service it and the agent accepts no destinations at all.
-  // Answered from the SDMA preference rather than from a blit object so that
-  // querying this attribute does not force a blit - and its queue - to be
-  // created as a side effect.
+  // Mirrors how DmaCopyBatch routes a broadcast. On the SDMA engines one
+  // always completes: the dedicated multicast packet carries it where that
+  // exists and per-entry fan-out covers the rest. With SDMA unavailable the
+  // compute-shader fallback carries it instead, and that shader is not built
+  // for every generation - where it is absent nothing can service the op and
+  // the agent accepts no destinations at all.
+  //
+  // Answered from the SDMA preference and the shader table rather than from a
+  // blit object so that querying this attribute does not force a blit - and
+  // its queue - to be created as a side effect.
   //
   // The preference is what the agent is configured for, which is not identical
   // to what DmaCopyBroadcast finds at submit time: it tests the H2D blit's
@@ -1999,21 +2016,25 @@ uint32_t GpuAgent::MaxBroadcastDestinations() const {
   // agent's configuration, not the momentary availability of DMA resources, so
   // it stays stable across queries and cannot be perturbed by asking. The
   // header documents that a copy within the ceiling may still be rejected.
-  if (!PrefersSdmaBlit()) return 0;
+  if (!PrefersSdmaBlit() && !IsShaderAvailable("BroadcastCopy")) return 0;
 
-  // No routing inside DmaCopyBroadcast caps the destination count below the
-  // API's own. The dedicated multicast packet describes at most
+  // Reported for both routings, because neither caps the destination count
+  // below the API's own. The dedicated multicast packet describes at most
   // BlitSdmaBase::kMaxMulticastDsts destinations, but a request exceeding that
-  // is sent to per-entry fan-out rather than refused, so the count an agent
-  // accepts does not depend on which engine happens to service the copy - or,
-  // equivalently, on the transfer size that selects between them. That matters
-  // because this query carries no size and so could not describe a
-  // size-dependent ceiling honestly.
+  // is sent to per-entry fan-out rather than refused; the shader path likewise
+  // splits a request across dispatches. So the count an agent accepts does not
+  // depend on which engine happens to service the copy - or, equivalently, on
+  // the transfer size that selects between them. That matters because this
+  // query carries no size and so could not describe a size-dependent ceiling
+  // honestly.
   //
   // What remains is the limit of the request itself:
   // hsa_amd_memory_copy_op_t::num_entries is a uint16_t, so no larger count
   // can even be expressed.
-  return std::numeric_limits<decltype(hsa_amd_memory_copy_op_t::num_entries)>::max();
+  static_assert(BlitKernel::kMaxBroadcastDestinations ==
+                    std::numeric_limits<decltype(hsa_amd_memory_copy_op_t::num_entries)>::max(),
+                "the shader path's ceiling must be the API's own");
+  return BlitKernel::kMaxBroadcastDestinations;
 }
 
 hsa_status_t GpuAgent::DmaCopyBroadcast(
@@ -2292,15 +2313,32 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
     return blit_dev->SubmitSwapCopyCommand(op.num_entries, op.src_list, op.dst_list,
                                            op.size_list, dep_signals, out_signal);
   }
-  case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST: {
+    // Broadcast shader fallback: one source written to each of op.dst_list.
+    SetCopyRequestRefCount(true);
+    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
+
+    lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
+
+    // Route by capability rather than assuming the fallback blit implements
+    // broadcast; where the shader is not built for this generation, reject
+    // rather than silently completing without copying anything.
+    if (!blit_dev->SupportsBroadcastCopyCommand())
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (profiling_enabled())
+      out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+
+    return blit_dev->SubmitBroadcastCopyCommand(op.src, op.dst_list, op.num_entries, op.size,
+                                                dep_signals, out_signal);
+  }
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
   case HSA_AMD_MEMORY_COPY_OP_RECT:
-    // No shader-blit equivalent for broadcast, indirect or rect yet; broadcast
-    // is the slot for the 1-to-N blit shader once added, indirect copy is served
-    // only by the native SDMA wait/signal-indirect path, and rect has no shader
-    // form. Until then, reject under SDMA=0 (same as the SDMA fan-out path would),
+    // Neither indirect copy nor rect has a shader-blit equivalent; indirect is
+    // served only by the native SDMA wait/signal-indirect path, and rect has no
+    // shader form. Reject under SDMA=0 (same as the SDMA fan-out path would),
     // leaving the completion signal untouched as above.
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
