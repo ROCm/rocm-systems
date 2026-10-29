@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <limits>
 #include <set>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -21,9 +20,10 @@
 namespace rocjitsu::config {
 namespace {
 
-std::string required_name(const flatbuffers::String *name, std::string_view field) {
+util::FailureOr<std::string> required_name(const flatbuffers::String *name, std::string_view field,
+                                           util::DiagnosticEmitter emit_error) {
   if (!name || name->str().empty())
-    throw std::invalid_argument(std::string(field) + " must be nonempty");
+    return emit_error.emit() << std::string(field) + " must be nonempty";
   return name->str();
 }
 
@@ -113,13 +113,13 @@ util::FailureOr<SystemGraph> manifest_graph(const fb::SimulationConfig *config,
   const auto *manifest = config->system();
   if (!config->vm() || !config->vm()->gpu() || !config->vm()->gpu()->device() ||
       !config->topology())
-    throw std::invalid_argument("system requires a top-level vm.gpu.device and topology profile");
+    return emit_error.emit() << "system requires a top-level vm.gpu.device and topology profile";
   if (config->vm()->gpu()->num_gpus() != 1)
-    throw std::invalid_argument("system cannot be combined with vm.gpu.num_gpus replication");
+    return emit_error.emit() << "system cannot be combined with vm.gpu.num_gpus replication";
   if (config->dbt_guest() && config->dbt_guest()->enabled())
-    throw std::invalid_argument("system cannot be combined with dbt_guest mode");
+    return emit_error.emit() << "system cannot be combined with dbt_guest mode";
   if (!manifest->nodes() || manifest->nodes()->size() == 0)
-    throw std::invalid_argument("system.nodes must contain at least one node");
+    return emit_error.emit() << "system.nodes must contain at least one node";
 
   SystemGraph graph;
   graph.explicit_manifest = true;
@@ -131,43 +131,48 @@ util::FailureOr<SystemGraph> manifest_graph(const fb::SimulationConfig *config,
   std::unordered_set<uint64_t> unique_ids;
   for (const auto *node_def : *manifest->nodes()) {
     SystemNode node;
-    node.id = required_name(node_def->id(), "system.nodes[].id");
+    auto name = required_name(node_def->id(), "system.nodes[].id", emit_error);
+    if (name.failed())
+      return util::Result::failure();
+    node.id = std::move(name.value());
     if (!node_ids.insert(node.id).second)
-      throw std::invalid_argument("duplicate system node id: " + node.id);
+      return emit_error.emit() << "duplicate system node id: " + node.id;
     if (!node_def->gpus() || node_def->gpus()->size() == 0)
-      throw std::invalid_argument("system node has no GPUs: " + node.id);
+      return emit_error.emit() << "system node has no GPUs: " + node.id;
 
     std::unordered_set<uint32_t> gpu_ids;
     std::unordered_set<uint32_t> locations;
     std::unordered_set<uint32_t> render_minors;
     for (const auto *gpu_def : *node_def->gpus()) {
       SystemGpuInstance instance;
-      instance.id = required_name(gpu_def->id(), "system.nodes[].gpus[].id");
+      auto name = required_name(gpu_def->id(), "system.nodes[].gpus[].id", emit_error);
+      if (name.failed())
+        return util::Result::failure();
+      instance.id = std::move(name.value());
       if (!gpu_nodes.emplace(instance.id, node.id).second)
-        throw std::invalid_argument("duplicate system GPU instance id: " + instance.id);
+        return emit_error.emit() << "duplicate system GPU instance id: " + instance.id;
       instance.profile = gpu_def->profile() ? gpu_def->profile()->str() : "vm";
       if (instance.profile != "vm")
-        throw std::invalid_argument("unsupported GPU profile for " + instance.id + ": " +
-                                    instance.profile);
+        return emit_error.emit() << "unsupported GPU profile for " + instance.id + ": " +
+                                        instance.profile;
       instance.device = base.value();
       instance.device.gpu_id = gpu_def->gpu_id();
       instance.device.unique_id = gpu_def->unique_id();
       instance.device.location_id = gpu_def->location_id();
       instance.device.drm_render_minor = gpu_def->drm_render_minor();
       if (!instance.device.gpu_id || !gpu_ids.insert(instance.device.gpu_id).second)
-        throw std::invalid_argument("system node has missing or duplicate KFD GPU ID: " + node.id);
+        return emit_error.emit() << "system node has missing or duplicate KFD GPU ID: " + node.id;
       if (!instance.device.unique_id)
-        throw std::invalid_argument("system GPU instance has no unique ID: " + instance.id);
+        return emit_error.emit() << "system GPU instance has no unique ID: " + instance.id;
       if (!unique_ids.insert(instance.device.unique_id).second)
-        throw std::invalid_argument("duplicate system GPU unique ID: " +
-                                    std::to_string(instance.device.unique_id));
+        return emit_error.emit() << "duplicate system GPU unique ID: " +
+                                        std::to_string(instance.device.unique_id);
       if (!instance.device.location_id || !locations.insert(instance.device.location_id).second)
-        throw std::invalid_argument("system node has missing or duplicate PCI location: " +
-                                    node.id);
+        return emit_error.emit() << "system node has missing or duplicate PCI location: " + node.id;
       if (instance.device.drm_render_minor < 128 ||
           !render_minors.insert(instance.device.drm_render_minor).second)
-        throw std::invalid_argument("system node has invalid or duplicate DRM render minor: " +
-                                    node.id);
+        return emit_error.emit() << "system node has invalid or duplicate DRM render minor: " +
+                                        node.id;
       node.gpus.push_back(std::move(instance));
     }
     graph.nodes.push_back(std::move(node));
@@ -177,29 +182,40 @@ util::FailureOr<SystemGraph> manifest_graph(const fb::SimulationConfig *config,
   if (manifest->endpoints())
     for (const auto *endpoint_def : *manifest->endpoints()) {
       SystemEndpoint endpoint;
-      endpoint.id = required_name(endpoint_def->id(), "system.endpoints[].id");
+      auto name = required_name(endpoint_def->id(), "system.endpoints[].id", emit_error);
+      if (name.failed())
+        return util::Result::failure();
+      endpoint.id = std::move(name.value());
       if (!endpoint_indices.emplace(endpoint.id, graph.endpoints.size()).second)
-        throw std::invalid_argument("duplicate system endpoint id: " + endpoint.id);
+        return emit_error.emit() << "duplicate system endpoint id: " + endpoint.id;
       switch (endpoint_def->kind()) {
-      case fb::SystemEndpointKind_gpu:
+      case fb::SystemEndpointKind_gpu: {
         endpoint.kind = SystemEndpointKind::Gpu;
-        endpoint.gpu = required_name(endpoint_def->gpu(), "GPU endpoint gpu");
+        auto name = required_name(endpoint_def->gpu(), "GPU endpoint gpu", emit_error);
+        if (name.failed())
+          return util::Result::failure();
+        endpoint.gpu = std::move(name.value());
         if (!gpu_nodes.contains(endpoint.gpu) || endpoint_def->node())
-          throw std::invalid_argument("invalid GPU endpoint: " + endpoint.id);
+          return emit_error.emit() << "invalid GPU endpoint: " + endpoint.id;
         break;
+      }
       case fb::SystemEndpointKind_switch_:
         endpoint.kind = SystemEndpointKind::Switch;
         if (endpoint_def->gpu() || endpoint_def->node())
-          throw std::invalid_argument("switch endpoint cannot name a GPU or node: " + endpoint.id);
+          return emit_error.emit() << "switch endpoint cannot name a GPU or node: " + endpoint.id;
         break;
-      case fb::SystemEndpointKind_network:
+      case fb::SystemEndpointKind_network: {
         endpoint.kind = SystemEndpointKind::Network;
-        endpoint.node = required_name(endpoint_def->node(), "network endpoint node");
+        auto name = required_name(endpoint_def->node(), "network endpoint node", emit_error);
+        if (name.failed())
+          return util::Result::failure();
+        endpoint.node = std::move(name.value());
         if (!node_ids.contains(endpoint.node) || endpoint_def->gpu())
-          throw std::invalid_argument("invalid network endpoint: " + endpoint.id);
+          return emit_error.emit() << "invalid network endpoint: " + endpoint.id;
         break;
+      }
       default:
-        throw std::invalid_argument("invalid system endpoint kind: " + endpoint.id);
+        return emit_error.emit() << "invalid system endpoint kind: " + endpoint.id;
       }
       graph.endpoints.push_back(std::move(endpoint));
     }
@@ -208,36 +224,43 @@ util::FailureOr<SystemGraph> manifest_graph(const fb::SimulationConfig *config,
   if (manifest->links())
     for (const auto *link_def : *manifest->links()) {
       SystemLink link;
-      link.src = required_name(link_def->src(), "system.links[].src");
-      link.dst = required_name(link_def->dst(), "system.links[].dst");
+      auto src_name = required_name(link_def->src(), "system.links[].src", emit_error);
+      if (src_name.failed())
+        return util::Result::failure();
+      link.src = std::move(src_name.value());
+      auto dst_name = required_name(link_def->dst(), "system.links[].dst", emit_error);
+      if (dst_name.failed())
+        return util::Result::failure();
+      link.dst = std::move(dst_name.value());
       if (link.src == link.dst || !endpoint_indices.contains(link.src) ||
           !endpoint_indices.contains(link.dst))
-        throw std::invalid_argument("invalid system link: " + link.src + " -> " + link.dst);
+        return emit_error.emit() << "invalid system link: " + link.src + " -> " + link.dst;
+      // Both endpoint memberships were checked above.
       const auto &src = graph.endpoints[endpoint_indices.at(link.src)];
       const auto &dst = graph.endpoints[endpoint_indices.at(link.dst)];
       switch (link_def->link_class()) {
       case fb::SystemLinkClass_scale_up:
         link.link_class = SystemLinkClass::ScaleUp;
         if (src.kind == SystemEndpointKind::Network || dst.kind == SystemEndpointKind::Network)
-          throw std::invalid_argument("scale-up link has a network endpoint");
+          return emit_error.emit() << "scale-up link has a network endpoint";
         break;
       case fb::SystemLinkClass_infinity_fabric:
         link.link_class = SystemLinkClass::InfinityFabric;
         if (src.kind == SystemEndpointKind::Network || dst.kind == SystemEndpointKind::Network)
-          throw std::invalid_argument("Infinity Fabric link has a network endpoint");
+          return emit_error.emit() << "Infinity Fabric link has a network endpoint";
         break;
       case fb::SystemLinkClass_net:
         link.link_class = SystemLinkClass::Net;
         if (src.kind != SystemEndpointKind::Network || dst.kind != SystemEndpointKind::Network ||
             src.node == dst.node)
-          throw std::invalid_argument("NET link must join different system nodes");
+          return emit_error.emit() << "NET link must join different system nodes";
         break;
       default:
-        throw std::invalid_argument("invalid system link class");
+        return emit_error.emit() << "invalid system link class";
       }
       const auto &[first, second] = std::minmax(link.src, link.dst);
       if (!links_seen.emplace(first, second).second)
-        throw std::invalid_argument("duplicate system link: " + first + " <-> " + second);
+        return emit_error.emit() << "duplicate system link: " + first + " <-> " + second;
       graph.links.push_back(std::move(link));
     }
 
@@ -246,19 +269,25 @@ util::FailureOr<SystemGraph> manifest_graph(const fb::SimulationConfig *config,
   if (manifest->coherence_domains())
     for (const auto *domain_def : *manifest->coherence_domains()) {
       SystemCoherenceDomain domain;
-      domain.id = required_name(domain_def->id(), "system.coherence_domains[].id");
+      auto name = required_name(domain_def->id(), "system.coherence_domains[].id", emit_error);
+      if (name.failed())
+        return util::Result::failure();
+      domain.id = std::move(name.value());
       if (!domain_ids.insert(domain.id).second)
-        throw std::invalid_argument("duplicate coherence domain id: " + domain.id);
+        return emit_error.emit() << "duplicate coherence domain id: " + domain.id;
       if (!domain_def->gpus() || domain_def->gpus()->size() == 0)
-        throw std::invalid_argument("coherence domain has no GPUs: " + domain.id);
+        return emit_error.emit() << "coherence domain has no GPUs: " + domain.id;
       std::string owner_node;
       for (const auto *member : *domain_def->gpus()) {
-        const std::string gpu = required_name(member, "coherence domain GPU");
+        auto name = required_name(member, "coherence domain GPU", emit_error);
+        if (name.failed())
+          return util::Result::failure();
+        const std::string gpu = std::move(name.value());
         const auto found = gpu_nodes.find(gpu);
         if (found == gpu_nodes.end() || !assigned_gpus.insert(gpu).second)
-          throw std::invalid_argument("unknown or repeated coherence-domain GPU: " + gpu);
+          return emit_error.emit() << "unknown or repeated coherence-domain GPU: " + gpu;
         if (!owner_node.empty() && owner_node != found->second)
-          throw std::invalid_argument("coherence domain spans system nodes: " + domain.id);
+          return emit_error.emit() << "coherence domain spans system nodes: " + domain.id;
         owner_node = found->second;
         domain.gpus.push_back(gpu);
       }
@@ -269,27 +298,36 @@ util::FailureOr<SystemGraph> manifest_graph(const fb::SimulationConfig *config,
 
 } // namespace
 
-const SystemNode &SystemGraph::select_node(std::string_view node_id) const {
+util::FailureOr<const SystemNode *> SystemGraph::select_node(util::DiagnosticEmitter emit_error,
+                                                             std::string_view node_id) const {
   if (node_id.empty()) {
     if (nodes.size() != 1)
-      throw std::invalid_argument("multi-node system requires a local node ID");
-    return nodes.front();
+      return emit_error.emit() << "multi-node system requires a local node ID";
+    return &nodes.front();
   }
   const auto it = std::find_if(nodes.begin(), nodes.end(),
                                [&](const SystemNode &node) { return node.id == node_id; });
   if (it == nodes.end())
-    throw std::invalid_argument("unknown local node ID: " + std::string(node_id));
-  return *it;
+    return emit_error.emit() << "unknown local node ID: " + std::string(node_id);
+  return &*it;
 }
 
-std::span<const SystemGpuInstance> SystemGraph::local_gpus(std::string_view node_id) const {
-  return select_node(node_id).gpus;
+util::FailureOr<std::span<const SystemGpuInstance>>
+SystemGraph::local_gpus(util::DiagnosticEmitter emit_error, std::string_view node_id) const {
+  auto node = select_node(emit_error, node_id);
+  if (node.failed())
+    return util::Result::failure();
+  return std::span<const SystemGpuInstance>(node.value()->gpus);
 }
 
-SystemPeerRouteProjection SystemGraph::local_peer_routes(std::string_view node_id) const {
-  const SystemNode &selected = select_node(node_id);
+util::FailureOr<SystemPeerRouteProjection>
+SystemGraph::local_peer_routes(util::DiagnosticEmitter emit_error, std::string_view node_id) const {
+  auto node = select_node(emit_error, node_id);
+  if (node.failed())
+    return util::Result::failure();
+  const SystemNode &selected = *node.value();
   if (!explicit_manifest)
-    return {selected.id, {}};
+    return SystemPeerRouteProjection(selected.id, {});
 
   std::unordered_set<std::string> local_gpu_names;
   for (const auto &gpu : selected.gpus)
@@ -395,13 +433,13 @@ SystemPeerRouteProjection SystemGraph::local_peer_routes(std::string_view node_i
       routes.push_back(std::move(route));
     }
   }
-  return {selected.id, std::move(routes)};
+  return SystemPeerRouteProjection(selected.id, std::move(routes));
 }
 
 util::FailureOr<SystemGraph> system_graph_from_fb(const fb::SimulationConfig *config,
                                                   util::DiagnosticEmitter emit_error) {
   if (!config)
-    throw std::invalid_argument("missing simulation config");
+    return emit_error.emit() << "missing simulation config";
   return config->system() ? manifest_graph(config, emit_error) : legacy_graph(config, emit_error);
 }
 

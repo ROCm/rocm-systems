@@ -33,7 +33,6 @@ resolve_valid_execution_threads(config::ExecutionThreadAllocation &output,
   return testing::AssertionSuccess();
 }
 
-
 /// Restore an expected-valid checkpoint, preserving the caller's output on failure.
 /// Call with ASSERT_TRUE so a failure stops the consuming test or fixture.
 [[nodiscard]] inline testing::AssertionResult
