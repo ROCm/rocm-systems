@@ -1060,8 +1060,8 @@ sudo amd-smi metric --nic 0 --rdma
 sudo amd-smi metric --nic 0001:01:00.0 --rdma 0 --json
 ```
 
-Only AI-NIC (ionic) RDMA devices are reported. Broadcom RDMA devices are not part of
-the NIC list. ``rdma statistic show mr``, ``rdma statistic mode supported``, and
+RDMA ports are reported for AI-NIC (ionic) and Broadcom (``bnxt_re``, ``bng_re``) NICs.
+UALoE endpoints have none. ``rdma statistic show mr``, ``rdma statistic mode supported``, and
 setting optional counters are not supported.
 
 ### Hardware-monitor sensors with ``metric --nic --sensors``
