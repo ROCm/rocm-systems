@@ -24,7 +24,7 @@ use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
-use crate::runtime::{CallbackScope, initialized_mut, lock, map_error};
+use crate::runtime::{CallbackScope, InFlightTracker, initialized_mut, lock, map_error};
 use crate::signal::AmdSignal;
 
 /// Packet size in bytes.
@@ -223,6 +223,8 @@ pub(crate) struct InterceptQueue {
     signal_address: usize,
     /// Stop flag observed by the forwarding worker.
     active: AtomicBool,
+    /// Counts worker and caller-thread drains through tool callbacks.
+    drains: Arc<InFlightTracker>,
     /// Worker joined before proxy backing is released.
     worker: Mutex<Option<JoinHandle<()>>>,
     /// Serialized read cursor and packets awaiting lower-ring space.
@@ -312,6 +314,7 @@ impl InterceptQueue {
             ring_address,
             signal_address: public + SIGNAL_OFFSET,
             active: AtomicBool::new(true),
+            drains: Arc::new(InFlightTracker::new()),
             worker: Mutex::new(None),
             state: Mutex::new(InterceptState {
                 next_packet: 0,
@@ -347,6 +350,10 @@ impl InterceptQueue {
     /// Stops this session.
     pub(crate) fn stop(&self) -> Result<(), Status> {
         self.active.store(false, Ordering::Release);
+        self.drains.close();
+        if CallbackScope::active() {
+            return Err(INVALID_RUNTIME_STATE);
+        }
         let mut worker = self.worker.lock().map_err(|_| ERROR)?;
         if worker
             .as_ref()
@@ -354,6 +361,9 @@ impl InterceptQueue {
         {
             return Err(INVALID_RUNTIME_STATE);
         }
+        // A public doorbell store can drain on its caller thread. The worker
+        // join alone does not wait for that tool callback to return.
+        self.drains.wait_idle();
         if let Some(worker) = worker.take() {
             let _ = worker.join();
         }
@@ -388,6 +398,9 @@ impl InterceptQueue {
 
     /// Drains pending work.
     fn drain(&self) {
+        let Some(_drain) = self.drains.enter() else {
+            return;
+        };
         if !self.active.load(Ordering::Acquire) {
             return;
         }
