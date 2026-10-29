@@ -117,7 +117,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
                                         program.accesses, error)
               .failed())
         return Result::failure();
-      const InstDefUse effects(instruction);
+      const InstDefUse effects(instruction, program.wave_size);
       used |= effects.uses;
       used |= effects.defs;
       const std::optional<int64_t> branch = instruction.branch_offset_bytes();

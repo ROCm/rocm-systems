@@ -199,7 +199,8 @@ std::optional<RegisterSet> live_ins(const std::vector<uint32_t> &body, std::stri
   const AmdGpuCodeObject obj(image.data(), image.size());
   return analyze_probe_live_ins(
       obj, whole_body_symbol(body), arch,
-      *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, num_arg_dwords), err);
+      *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, num_arg_dwords),
+      /*wave_size=*/64, err);
 }
 
 std::optional<RegisterSet> rdna4_live_ins(const std::vector<uint32_t> &body, std::string *err,
@@ -362,10 +363,11 @@ TEST(ProbeLiveInTest, RejectsCdna5) {
   const AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(analyze_probe_live_ins(
-                   obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA5,
-                   *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), &err)
-                   .has_value());
+  EXPECT_FALSE(
+      analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA5,
+                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
+                             /*wave_size=*/64, &err)
+          .has_value());
   EXPECT_NE(err.find("VGPR_MSB"), std::string::npos) << err;
 }
 
@@ -380,13 +382,13 @@ TEST(ProbeLiveInTest, Cdna5ProvenZeroBanksResolveGuestArgumentRegisters) {
   const std::optional<RegisterSet> live =
       analyze_probe_live_ins(object, whole_body_symbol(body), kArch,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, 1),
-                             &error, ProbeEntryState::ZeroVgprBanks);
+                             /*wave_size=*/32, &error, ProbeEntryState::ZeroVgprBanks);
   ASSERT_TRUE(live) << error;
   EXPECT_TRUE(live->none()) << format_register_set(*live);
   const std::optional<RegisterSet> missing_argument =
       analyze_probe_live_ins(object, whole_body_symbol(body), kArch,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
-                             &error, ProbeEntryState::ZeroVgprBanks);
+                             /*wave_size=*/32, &error, ProbeEntryState::ZeroVgprBanks);
   ASSERT_TRUE(missing_argument) << error;
   EXPECT_EQ(format_register_set(*missing_argument), "v0");
 }
@@ -400,7 +402,7 @@ TEST(ProbeLiveInTest, RejectsUnusableAbi) {
   // would understate the footprint. Refuse rather than answer.
   std::string err;
   EXPECT_FALSE(analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
-                                      ProbeAbi{}, &err)
+                                      ProbeAbi{}, /*wave_size=*/64, &err)
                    .has_value());
   EXPECT_NE(err.find("probe ABI"), std::string::npos) << err;
 }
@@ -414,10 +416,11 @@ TEST(ProbeLiveInTest, RejectsSymbolOutsideText) {
   sym.section_index = 2; // .shstrtab, not .text.
 
   std::string err;
-  EXPECT_FALSE(analyze_probe_live_ins(
-                   obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
-                   *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), &err)
-                   .has_value());
+  EXPECT_FALSE(
+      analyze_probe_live_ins(obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
+                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
+                             /*wave_size=*/64, &err)
+          .has_value());
   EXPECT_NE(err.find("not in the code object's .text"), std::string::npos) << err;
 }
 
@@ -431,10 +434,11 @@ TEST(ProbeLiveInTest, RejectsEntryThatDoesNotStartABlock) {
   sym.body_size = 4;
 
   std::string err;
-  EXPECT_FALSE(analyze_probe_live_ins(
-                   obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
-                   *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), &err)
-                   .has_value());
+  EXPECT_FALSE(
+      analyze_probe_live_ins(obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
+                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
+                             /*wave_size=*/64, &err)
+          .has_value());
   EXPECT_NE(err.find("basic block"), std::string::npos) << err;
 }
 
@@ -449,10 +453,11 @@ TEST(ProbeLiveInTest, RejectsMultipleTextSections) {
   ASSERT_EQ(obj.text_sections().size(), 2u) << "fixture did not produce two .text sections";
 
   std::string err;
-  EXPECT_FALSE(analyze_probe_live_ins(
-                   obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
-                   *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), &err)
-                   .has_value());
+  EXPECT_FALSE(
+      analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
+                             /*wave_size=*/64, &err)
+          .has_value());
   EXPECT_NE(err.find("exactly one .text"), std::string::npos) << err;
 }
 
@@ -467,10 +472,11 @@ TEST(ProbeLiveInTest, RejectsBodyBeforeItsTextSection) {
   sym.body_file_offset = 0; // ahead of .text at kTextOffset.
 
   std::string err;
-  EXPECT_FALSE(analyze_probe_live_ins(
-                   obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
-                   *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), &err)
-                   .has_value());
+  EXPECT_FALSE(
+      analyze_probe_live_ins(obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
+                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
+                             /*wave_size=*/64, &err)
+          .has_value());
   EXPECT_NE(err.find("starts before"), std::string::npos) << err;
 }
 
@@ -483,10 +489,11 @@ TEST(ProbeLiveInTest, RejectsMissingDecoder) {
   ASSERT_EQ(obj.target_id(), ROCJITSU_CODE_TARGET_INVALID);
 
   std::string err;
-  EXPECT_FALSE(analyze_probe_live_ins(
-                   obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_INVALID,
-                   *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), &err)
-                   .has_value());
+  EXPECT_FALSE(
+      analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_INVALID,
+                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
+                             /*wave_size=*/64, &err)
+          .has_value());
   EXPECT_NE(err.find("no decoder"), std::string::npos) << err;
 }
 
@@ -498,10 +505,11 @@ TEST(ProbeLiveInTest, RejectsUndecodableText) {
   const AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(analyze_probe_live_ins(
-                   obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
-                   *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), &err)
-                   .has_value());
+  EXPECT_FALSE(
+      analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
+                             /*wave_size=*/64, &err)
+          .has_value());
   EXPECT_NE(err.find("failed to decode"), std::string::npos) << err;
 }
 

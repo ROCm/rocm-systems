@@ -1,78 +1,66 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// gfx11/gfx12 Wave32/Wave64 FP16 fused multiply-add, with explicit EXEC and whole-VGPR aliases.
+// gfx11/gfx12 FP16 FMA with guest rounding and optional FP status.
+// Owns public entry points and their validation/dispatch policy.
 
-#include "common/float_formats.h"
+#include "common/alu.h"
 #include "common/internal.h"
 #include "fp/half_fma_scalar.h"
+#include "register/dpp.h"
 #include "rj_arith/rj_arith.h"
 
-#include <cmath>
 #include <stdint.h>
 
-namespace rocjitsu::arith {
+namespace {
 
-// Evaluate loose FP16 FMA, correcting FP32 intermediates at FP16 midpoints.
-static uint16_t loose_half_fma(float x, float y, float z, bool saturate) {
-  float value = std::fma(x, y, z);
-  const uint32_t magnitude = as_bits(value) & 0x7fffffffU;
-  const int exponent = int(magnitude >> 23);
-  // Midpoints from half of the smallest subnormal through the overflow boundary.
-  if (exponent >= 102 && exponent <= 142) {
-    const int shift = exponent >= 113 ? 13 : 126 - exponent;
-    const uint32_t significand = (magnitude & 0x7fffffU) | 0x800000U;
-    if ((significand & ((1U << shift) - 1)) == (1U << (shift - 1))) {
-      const double precise = std::fma(double(x), double(y), double(z));
-      // One FP32 step restores which side of the half midpoint the result lies on.
-      if (precise != double(value)) {
-        value = std::nextafter(value, precise > value ? INFINITY : -INFINITY);
-      }
-    }
+// Evaluate FP16 fused multiply-add for the selected lanes. Reject invalid controls before
+// changing outputs.
+template <bool Rdna3 = false>
+int run(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint32_t *const *d,
+        const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
+        uint32_t *excp_flag_user) {
+  bool report = rocjitsu::arith::reports_fp_status(flags);
+  if (instruction_flags >> 32) {
+
+    return rocjitsu::arith::execute_dpp(
+        exec_mask, instruction_flags, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
+          return run<Rdna3>(flags, exec_mask, uint32_t(instruction_flags), d, source, b, c,
+                            excp_flag_user);
+        });
   }
-  return float_to_f16(value, saturate);
-}
-
-} // namespace rocjitsu::arith
-
-// Evaluate the low halfword and preserve the high half and inactive lanes.
-// Modes 0..2 do not access FP status; mode 3 accumulates gfx12 active-lane
-// causes and rejects unsupported gfx11 TRAPSTS reporting before any write.
-template <int Lanes, bool Rdna3 = false>
-static int fma(uint64_t flags, rocjitsu::arith::ExecMask<Lanes> exec_mask,
-               uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
-               const uint32_t *const *b, const uint32_t *const *c, uint32_t *excp_flag_user) {
-  if (instruction_flags) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  if (int error = rocjitsu::arith::validate(flags)) {
+  const uint32_t known = rocjitsu::arith::kFma16InstructionFlags;
+  if (int error = rocjitsu::arith::validate(flags, instruction_flags & ~known,
+                                            rocjitsu::arith::kFmaGuestFpFlags |
+                                                (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0))) {
     return error;
   }
-  if (Rdna3 && rocjitsu::arith::reports_fp_status(flags)) {
+  if constexpr (Rdna3) {
+    instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
+  }
+  if (report && rocjitsu::arith::half_fma_reporting_unsupported(flags, Rdna3)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  if (!exec_mask) {
+  if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
-  const bool report = rocjitsu::arith::reports_fp_status(flags);
+  int a_shift = instruction_flags & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
+  int b_shift = instruction_flags & RJ_ARITH_ALU_HIGH_B ? 16 : 0;
+  int c_shift = instruction_flags & RJ_ARITH_ALU_HIGH_C ? 16 : 0;
+  int d_shift = instruction_flags & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
   uint32_t exceptions = 0;
-  uint16_t result[Lanes];
-  for (int lane = 0; lane < Lanes; ++lane) {
-    if (rocjitsu::arith::is_exact(flags)) {
-      result[lane] = rocjitsu::arith::half_fma_value<!Rdna3>(
-          uint16_t(a[0][lane]), uint16_t(b[0][lane]), uint16_t(c[0][lane]),
-          bool(flags & RJ_ARITH_FP16_OVFL),
-          report && ((exec_mask >> lane) & 1) ? &exceptions : nullptr);
-    } else {
-      float x = rocjitsu::arith::f16_to_float(uint16_t(a[0][lane]));
-      float y = rocjitsu::arith::f16_to_float(uint16_t(b[0][lane]));
-      float z = rocjitsu::arith::f16_to_float(uint16_t(c[0][lane]));
-      result[lane] = rocjitsu::arith::loose_half_fma(x, y, z, flags & RJ_ARITH_FP16_OVFL);
-    }
+  uint16_t result[32];
+  for (int lane = 0; lane < 32; ++lane) {
+    uint16_t x = uint16_t(a[0][lane] >> a_shift), y = uint16_t(b[0][lane] >> b_shift);
+    uint16_t z = uint16_t(c[0][lane] >> c_shift);
+
+    result[lane] = rocjitsu::arith::half_fma_value<Rdna3>(
+        x, y, z, instruction_flags, flags,
+        report && ((exec_mask >> lane) & 1) ? &exceptions : nullptr);
   }
-  for (int lane = 0; lane < Lanes; ++lane) {
+  for (int lane = 0; lane < 32; ++lane) {
     if ((exec_mask >> lane) & 1) {
-      d[0][lane] = (d[0][lane] & 0xffff0000U) | result[lane];
+      d[0][lane] = (d[0][lane] & ~(0xffffU << d_shift)) | (uint32_t(result[lane]) << d_shift);
     }
   }
   if (report) {
@@ -81,32 +69,84 @@ static int fma(uint64_t flags, rocjitsu::arith::ExecMask<Lanes> exec_mask,
   return RJ_ARITH_SUCCESS;
 }
 
-// Evaluate F16 fused A*B+C for a Wave32 EXEC mask.
+// Evaluate FP16 fused multiply-add for Wave64. Reject invalid controls before changing
+// outputs.
+template <bool Rdna3 = false>
+int run_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags, uint32_t *const *d,
+               const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
+               uint32_t *excp_flag_user) {
+  // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
+  if (int error = run<Rdna3>(flags, 0, instruction_flags, nullptr, nullptr, nullptr, nullptr,
+                             excp_flag_user)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  bool report = rocjitsu::arith::reports_fp_status(flags);
+  uint32_t exceptions = 0;
+  for (int half = 0; half < 2; ++half) {
+    uint64_t half_instruction_flags =
+        rocjitsu::arith::dpp_half_wave_instruction_flags(instruction_flags, half);
+    uint32_t *dest = d[0] + half * 32;
+    const uint32_t *x = a[0] + half * 32, *y = b[0] + half * 32;
+    const uint32_t *z = c[0] + half * 32;
+    if (int error = run<Rdna3>(flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags,
+                               &dest, &x, &y, &z, report ? &exceptions : nullptr)) {
+      return error;
+    }
+  }
+  // The global output may alias an upper-half source: update only after all reads.
+  if (report) {
+    *excp_flag_user |= exceptions;
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
+} // namespace
+
+// Compute fused A*B+C for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fma_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *excp_flag_user) {
-  return fma<32>(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  return run(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user);
 }
 
-// Evaluate F16 fused A*B+C for a Wave64 EXEC mask.
+// Compute fused A*B+C for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fma_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *excp_flag_user) {
-  return fma<64>(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  return run_wave64(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user);
 }
 
-// Evaluate gfx11 FP16 FMA for Wave32; required TRAPSTS reporting is unsupported.
+// Compute fused A*B+C for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fma_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            const uint32_t *const *c, uint32_t *trapsts) {
-  return fma<32, true>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  return run<true>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }
 
-// Evaluate gfx11 FP16 FMA for Wave64; required TRAPSTS reporting is unsupported.
+// Compute fused A*B+C for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fma_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            const uint32_t *const *c, uint32_t *trapsts) {
-  return fma<64, true>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  return run_wave64<true>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }

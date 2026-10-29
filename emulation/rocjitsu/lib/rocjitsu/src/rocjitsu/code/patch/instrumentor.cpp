@@ -234,6 +234,20 @@ KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
   };
 }
 
+// The wave size every kernel in @p kernels runs at, or nullopt when there are
+// none or they disagree.
+std::optional<uint8_t> common_wavefront_size(rj_code_arch_t arch,
+                                             std::span<const KernelDescriptorInfo> kernels) {
+  std::optional<uint8_t> common;
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    const uint8_t wave_size = kernel_wavefront_size(arch, kernel.descriptor);
+    if (common && *common != wave_size)
+      return std::nullopt;
+    common = wave_size;
+  }
+  return common;
+}
+
 // Special machine state preserved across a probe call: SCC (via the trampoline
 // envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
 // plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
@@ -829,8 +843,15 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
         return std::nullopt;
       }
       const uint16_t destination = planned->storage.entry_temp_base + index;
-      const std::array<uint32_t, 2> words =
-          build_v_readlane_b32(destination, sources[index], 0, arch_);
+      util::StringDiagnostic lane_error;
+      const util::DiagnosticEmitter emit_lane_error = lane_error.emitter();
+      const util::FailureOr<std::array<uint32_t, 2>> maybe_words =
+          build_v_readlane_b32(destination, sources[index], 0, arch_, &emit_lane_error);
+      if (maybe_words.failed()) {
+        report(error_out, lane_error.message().c_str());
+        return std::nullopt;
+      }
+      const std::array<uint32_t, 2> &words = maybe_words.value();
       patch.words.insert(patch.words.end(), words.begin(), words.end());
       patch.captured_vgprs.push_back({sources[index], destination});
     }
@@ -923,7 +944,9 @@ const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offs
   return it == offset_to_inst_.end() ? nullptr : it->second;
 }
 
-bool Instrumentor::ensure_liveness_built(std::string *error_out) {
+bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
+                                         std::span<const KernelDescriptorInfo> kernels,
+                                         std::string *error_out) {
   if (liveness_)
     return true;
   if (!ensure_blocks_built(error_out) || obj_.text_sections().size() != 1) {
@@ -931,9 +954,6 @@ bool Instrumentor::ensure_liveness_built(std::string *error_out) {
     return false;
   }
   const Section *text = obj_.text_sections().front();
-  const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
-                                       obj_.image_size());
-  kernels_ = scan_kernel_descriptors(image, text->sectionOffset(), text->size());
   std::vector<BasicBlock *> scope;
   LivenessAnalysisOptions options;
   if (arch_ == ROCJITSU_CODE_ARCH_CDNA5) {
@@ -942,10 +962,11 @@ bool Instrumentor::ensure_liveness_built(std::string *error_out) {
   }
   for (const std::unique_ptr<BasicBlock> &block : blocks_) {
     scope.push_back(block.get());
-    if (kernels_.size() == 1 && block->start_offset() == kernels_.front().entry_text_offset)
+    if (kernels.size() == 1 && block->start_offset() == kernels.front().entry_text_offset)
       options.entry_block = block.get();
   }
-  liveness_ = std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), nullptr, options);
+  liveness_ =
+      std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size, nullptr, options);
   return true;
 }
 
@@ -984,6 +1005,13 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
+  // A probe call is analyzed and planned at the wave size the object's kernels
+  // share, with temps bounded by their SGPR allocation. The point loop refuses a
+  // probe call before any of that when either is missing.
+  const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                       obj_.image_size());
+  out.kernels = scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+  out.wave_size = common_wavefront_size(arch_, out.kernels);
 
   const auto &registry = default_isa_target_registry();
   const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
@@ -997,12 +1025,12 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   };
   const rj_code_target_id_t destination_target = effective_target(obj_);
   ProbeEntryState probe_entry_state = ProbeEntryState::Unknown;
-  if (arch_ == ROCJITSU_CODE_ARCH_CDNA5) {
-    if (!ensure_liveness_built(&err)) {
+  if (arch_ == ROCJITSU_CODE_ARCH_CDNA5 && out.wave_size) {
+    if (!ensure_liveness_built(*out.wave_size, out.kernels, &err)) {
       out.errors.push_back(err);
       return out;
     }
-    if (kernels_.size() == 1) {
+    if (out.kernels.size() == 1) {
       bool has_call = false;
       for (const std::unique_ptr<BasicBlock> &block : blocks_) {
         for (const Instruction &instruction : block->instructions())
@@ -1118,8 +1146,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // which a trampoline at an arbitrary site cannot reproduce, so the probe
     // would read whatever the instrumented kernel left behind. An ordinary
     // uninitialized read lands here too, and is equally unusable.
-    std::optional<RegisterSet> live_ins =
-        analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->abi, &perr, probe_entry_state);
+    std::optional<RegisterSet> live_ins = analyze_probe_live_ins(
+        *pt.probe_obj, *sym, arch_, callable->abi, *out.wave_size, &perr, probe_entry_state);
     if (!live_ins)
       return std::nullopt;
     if (!live_ins->none()) {
@@ -1172,6 +1200,21 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // Resolve the probe request. An unresolvable or non-relocatable probe is
     // a fatal, all-or-nothing validation error.
     if (pt.probe_obj != nullptr) {
+      // A temp past the kernel's .sgpr_count would be unallocated, so the call
+      // needs a descriptor to bound SGPR selection or explicit register growth.
+      if (out.kernels.empty()) {
+        out.errors.push_back("probe call at anchor_offset " + std::to_string(pt.anchor_offset) +
+                             " requires a discovered kernel descriptor to bound SGPR "
+                             "selection, but none was found");
+        continue;
+      }
+      if (!out.wave_size) {
+        out.errors.push_back("probe call at anchor_offset " + std::to_string(pt.anchor_offset) +
+                             " is in a code object whose kernels mix Wave32 and Wave64; "
+                             "DBI currently analyzes kernels and probes at one wave size "
+                             "per code object");
+        continue;
+      }
       auto index = resolve_probe_index(pt, perr);
       if (!index) {
         out.errors.push_back(std::move(perr));
@@ -1262,16 +1305,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // local code cave (as in the current DBT design).
   CodeObjectPatcher patcher(obj_);
   const uint64_t cave_start = patcher.text_size();
-  std::string analysis_error;
-  if (!ensure_liveness_built(&analysis_error)) {
-    result.errors.push_back(std::move(analysis_error));
-    return result;
-  }
-  const std::vector<KernelDescriptorInfo> &kernels = kernels_;
+  const std::vector<KernelDescriptorInfo> &kernels = resolved.kernels;
 
-  // Liveness over the decoded blocks, built once and reused by every probe-call
-  // site. validate_points() already built blocks_, and obj_ owns the
-  // Instructions live_before() is keyed on.
+  // Reuse the bank proof from resolution when present, and otherwise build
+  // liveness only for probe calls or register growth.
+  // resolve_points() built blocks_ and resolved those probes only because the
+  // kernels share a wave size. obj_ owns the Instructions live_before() is keyed
+  // on.
   // TODO: scope this to the kernel containing each anchor, like the DBT path,
   // rather than treating every decoded block as one CFG. Safe here: kernels end
   // in s_endpgm, so there are no false cross-kernel fallthrough edges.
@@ -1279,7 +1319,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   liveness_scope.reserve(blocks_.size());
   for (const auto &block : blocks_)
     liveness_scope.push_back(block.get());
-  const LivenessAnalysis &liveness = *liveness_;
+  if (options_.register_growth && kernels.size() != 1) {
+    result.errors.emplace_back("register growth needs one kernel with enumerable register uses");
+    return result;
+  }
+  if (!resolved.probes.empty() || options_.register_growth) {
+    std::string analysis_error;
+    if (!ensure_liveness_built(*resolved.wave_size, kernels, &analysis_error)) {
+      result.errors.push_back(std::move(analysis_error));
+      return result;
+    }
+  }
 
   // Lay out the appended region as [probe bodies][s_nop padding][entry stub]
   // [trampolines], the padding and stub only when the kernel has an entry
@@ -1296,10 +1346,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     cave_cursor += probe.body_words.size() * sizeof(uint32_t);
   }
 
-  // Register spilling targets a single-kernel code object for now: any site that
-  // must spill grows that one kernel's per-lane scratch. The SpillManager is
-  // created lazily on the first spilling site and shared by the rest; its final
-  // size is written back to the descriptor after all sites succeed.
   // Temporary SGPR-allocation bound. The probe-call return-link pair is fixed
   // by the calling convention, so the kernel must allocate up to it. Derived from
   // the descriptors already scanned above.
@@ -1322,7 +1368,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   probe_summaries.reserve(resolved.probes.size());
   for (const ProbeCallable &probe : resolved.probes) {
     std::string probe_err;
-    auto summary = build_probe_clobber_summary(probe, &probe_err);
+    auto summary = build_probe_clobber_summary(probe, *resolved.wave_size, &probe_err);
     if (!summary) {
       result.errors.push_back(std::move(probe_err));
       continue;
@@ -1346,13 +1392,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     });
   };
   if (options_.register_growth) {
-    const util::FailureOr<bool> complete = liveness.global_vgpr_usage_is_complete();
+    const util::FailureOr<bool> complete = liveness_->global_vgpr_usage_is_complete();
     if (complete.failed()) {
       result.errors.emplace_back("register growth's liveness is unavailable");
       return result;
     }
-    if (kernels.size() != 1 || !complete.value() ||
-        accesses_sgprs_indirectly_via_movrel(liveness_scope)) {
+    if (!complete.value() || accesses_sgprs_indirectly_via_movrel(liveness_scope)) {
       result.errors.emplace_back("register growth needs one kernel with enumerable register uses");
       return result;
     }
@@ -1361,7 +1406,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     RegisterSet guest_registers;
     for (const std::unique_ptr<BasicBlock> &block : blocks_)
       for (const Instruction &instruction : block->instructions()) {
-        const InstDefUse effects(instruction, liveness.gfx1250_vgpr_msb(),
+        const InstDefUse effects(instruction, *resolved.wave_size, liveness_->gfx1250_vgpr_msb(),
                                  UnknownVgprDefPolicy::ExpandAll);
         guest_registers |= effects.uses | effects.defs;
       }
@@ -1436,6 +1481,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     cave_cursor = entry_patch->stub_offset + entry_patch->words.size() * sizeof(uint32_t);
   }
 
+  // Register spilling targets a single-kernel code object for now: any site that
+  // must spill grows that one kernel's per-lane scratch. The SpillManager is
+  // created lazily on the first spilling site and shared by the rest; its final
+  // size is written back to the descriptor after all sites succeed.
   std::optional<SpillManager> spills;
 
   std::vector<AppliedSite> applied;
@@ -1453,19 +1502,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     // clobber
     if (site.is_probe_call()) {
       const ProbeCallable &probe = resolved.probes[*site.probe_index];
-
-      // A probe call selects temp SGPRs (link/target/SCC/special-state) bounded by
-      // the kernel's own allocation. Without a discovered descriptor that bound is
-      // unknown, so a temp could land past the kernel's .sgpr_count; fail closed
-      // rather than fall back to the device-wide default without an explicit
-      // register-growth request.
-      if (!kernel_sgpr_count) {
-        result.errors.push_back("probe call at anchor_offset " +
-                                std::to_string(site.anchor_offset) +
-                                " requires a discovered kernel descriptor to bound SGPR "
-                                "selection, but none was found");
-        continue;
-      }
 
       // The kernel must own the fixed return-link pair.
       if (const uint16_t link_base = probe.abi.link_pair_base;
@@ -1545,7 +1581,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("internal: anchor instruction vanished after validation");
         continue;
       }
-      const util::FailureOr<const RegisterSet *> maybe_live = liveness.live_before(*anchor);
+      const util::FailureOr<const RegisterSet *> maybe_live = liveness_->live_before(*anchor);
       if (maybe_live.failed()) {
         result.errors.emplace_back("internal: anchor liveness is unavailable");
         continue;

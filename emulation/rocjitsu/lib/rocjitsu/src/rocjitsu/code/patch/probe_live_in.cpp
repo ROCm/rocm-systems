@@ -54,7 +54,7 @@ std::string format_register_set(const RegisterSet &regs) {
 std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
                                                   rj_code_arch_t arch, const ProbeAbi &abi,
-                                                  std::string *error_out,
+                                                  uint8_t wave_size, std::string *error_out,
                                                   ProbeEntryState entry_state) {
   if (!is_valid_probe_abi(abi)) {
     report(error_out, "probe ABI is not usable, cannot analyze live-ins");
@@ -145,7 +145,7 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
   // Only the entry block's live-in is needed, so skip materializing
   // per-instruction snapshots for the whole scope.
   options.restrict_live_before_to_instructions = true;
-  const LivenessAnalysis liveness{KernelBlockScope(scope), nullptr, options};
+  const LivenessAnalysis liveness{KernelBlockScope(scope), wave_size, nullptr, options};
 
   // Relative and GPR-indexed access displace an encoded VGPR index at runtime,
   // so the decoded operands no longer name every register the body reads. That

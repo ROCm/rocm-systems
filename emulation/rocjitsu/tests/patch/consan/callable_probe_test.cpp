@@ -37,11 +37,13 @@ TEST_P(ConSanCallableProbe, CompiledBodiesAreSelfContainedAndUseOnlyTheirArgumen
     const std::optional<ProbeCallable> body =
         build_probe_callable(object, *symbol, target_profile(mode.target)->arch, arguments, &error);
     ASSERT_TRUE(body) << error;
-    const std::optional<RegisterSet> live = analyze_probe_live_ins(
-        object, *symbol, body->arch, body->abi, &error, ProbeEntryState::ZeroVgprBanks);
+    const std::optional<RegisterSet> live =
+        analyze_probe_live_ins(object, *symbol, body->arch, body->abi, mode.wave_size, &error,
+                               ProbeEntryState::ZeroVgprBanks);
     ASSERT_TRUE(live) << error;
     EXPECT_TRUE(live->none());
-    const std::optional<ProbeClobberSummary> clobbers = build_probe_clobber_summary(*body, &error);
+    const std::optional<ProbeClobberSummary> clobbers =
+        build_probe_clobber_summary(*body, mode.wave_size, &error);
     ASSERT_TRUE(clobbers) << error;
     EXPECT_FALSE(clobbers->uses_private_segment);
     EXPECT_FALSE(clobbers->touches_flat_scratch);

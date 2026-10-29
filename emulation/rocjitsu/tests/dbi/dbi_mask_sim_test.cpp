@@ -79,8 +79,8 @@ struct MaskSimArch {
   uint32_t e_flags;
   uint32_t wave_size;
   // The descriptor's wave32 bit drives the patch-time gates, which is all this
-  // selects. It does not reach execution: DbiSim synthesizes its own descriptor
-  // without the bit, so every target dispatches Wave64 and wave_size only says
+  // selects. It does not reach execution: this suite does not opt DbiSim into a
+  // Wave32 dispatch, so every target dispatches Wave64 and wave_size only says
   // how many lanes to read back (see dbi_sim.h). Only RDNA has a bit to set;
   // CDNA is Wave64 by construction.
   bool wave32;

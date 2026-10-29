@@ -520,7 +520,6 @@ private:
   std::unique_ptr<Decoder> decoder_;
   std::vector<std::unique_ptr<BasicBlock>> blocks_;
   std::unique_ptr<LivenessAnalysis> liveness_;
-  std::vector<KernelDescriptorInfo> kernels_;
   // .text-relative byte offset -> decoded Instruction. Populated alongside
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
@@ -535,7 +534,9 @@ private:
   // in that case *error_out is set and blocks_built_ stays false so the failure
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
-  [[nodiscard]] bool ensure_liveness_built(std::string *error_out = nullptr);
+  [[nodiscard]] bool ensure_liveness_built(uint8_t wave_size,
+                                           std::span<const KernelDescriptorInfo> kernels,
+                                           std::string *error_out = nullptr);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
 
   // The DBI entry prologue as a dispatch-only stub in the cave: the descriptor
@@ -564,6 +565,10 @@ private:
     std::vector<ResolvedInstrumentationSite> sites;
     std::vector<ProbeCallable> probes;
     std::vector<std::string> errors;
+    // The object's kernel descriptors and the wave size they share. A probe-call
+    // site is resolved only when there is at least one kernel and one wave size.
+    std::vector<KernelDescriptorInfo> kernels;
+    std::optional<uint8_t> wave_size;
   };
 
   // Validate and resolve every queued point in one pass.
