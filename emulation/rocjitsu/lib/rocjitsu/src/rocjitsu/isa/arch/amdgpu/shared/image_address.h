@@ -3,10 +3,9 @@
 
 /// @file image_address.h
 /// @brief Dependency-light image address encoding helpers.
-/// @details Generated decoder-model sources use these helpers to describe
-/// register operands without depending on VM or execution state. Keep this
-/// header limited to encoding-level value types; image_access.h layers the
-/// Wavefront and memory-access implementation on top.
+/// @details Generated decoder-model sources include this header to describe
+/// register operands, so it must remain free of VM dependencies. Keep only
+/// encoding-level value types here; execution helpers belong in image_access.h.
 
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ADDRESS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ADDRESS_H_
