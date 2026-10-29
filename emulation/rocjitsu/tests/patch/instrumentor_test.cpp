@@ -2024,11 +2024,14 @@ TEST(InstrumentorProbePatch, RejectsGfx1251ProbeForGfx1250Destination) {
 // RDNA3's unsupported boundary drain without publishing a partial patch or ELF.
 TEST(InstrumentorProbePatch, RejectsNoSpillRdna3BoundaryDrainWithoutOutput) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
-  const uint32_t nop = build_s_nop(0, arch);
-  auto target = make_amdgpu_kernel_elf({nop, nop}, /*private_bytes=*/0,
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  static_assert(nop.succeeded());
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, arch);
+  static_assert(setpc.succeeded());
+  auto target = make_amdgpu_kernel_elf({nop.value(), nop.value()}, /*private_bytes=*/0,
                                        /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1100);
-  auto probe = make_amdgpu_probe_elf("rj_test_probe", {build_s_setpc_b64(30, arch)},
-                                     EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  auto probe =
+      make_amdgpu_probe_elf("rj_test_probe", {setpc.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1100);
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
   ASSERT_TRUE(obj.is_valid());
