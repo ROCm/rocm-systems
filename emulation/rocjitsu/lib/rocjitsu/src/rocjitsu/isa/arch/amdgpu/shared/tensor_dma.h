@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -388,6 +389,8 @@ public:
   bool store_from_lds = false;
   bool completion_committed = false;
   bool observation_reported = false;
+  /// Some element's global address left the global aperture (section 10.11.6).
+  bool memviol = false;
 };
 
 // Bound one in-flight instruction to roughly 40 MiB of host transfer metadata.
@@ -550,6 +553,19 @@ inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t global_el
 
   const uint32_t lds_address =
       static_cast<uint32_t>(uint64_t{wf.lds_base()} + uint64_t{desc.lds_base} + lds_byte);
+  // CDNA5 section 10.11.6: a global address outside the global aperture (the
+  // hole, LDS or scratch) raises MEMVIOL without aborting. The element is
+  // dropped like one beyond the tensor, the rest of the descriptor proceeds,
+  // and the violation is reported once when the operation completes.
+  if (in_bounds &&
+      (flat_address_in_hole(wf, global_address, kCdna5FlatVaBits, FlatPrivateLayout::EncodedLane) ||
+       translate_flat_address(wf, global_address, 0, FlatPrivateLayout::EncodedLane)
+           .private_address ||
+       (wf.shared_aperture_base() != 0 && global_address >= wf.shared_aperture_base() &&
+        global_address <= wf.shared_aperture_limit()))) {
+    state.memviol = true;
+    in_bounds = false;
+  }
   TensorDmaTransferElement element{
       .global_address = global_address, .lds_address = lds_address, .in_bounds = in_bounds};
   if (state.store_from_lds && in_bounds) {
@@ -857,7 +873,7 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
       arrive_atomic_barrier(state.desc, wf);
     state.completion_committed = true;
   }
-  state.outcome = VmAccessOutcome::Complete;
+  state.outcome = state.memviol ? VmAccessOutcome::ApertureViolation : VmAccessOutcome::Complete;
   return state.outcome;
 }
 

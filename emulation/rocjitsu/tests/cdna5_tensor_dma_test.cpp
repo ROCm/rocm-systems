@@ -946,6 +946,58 @@ TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
   }
 }
 
+// CDNA5 section 10.11.6: a tile element whose global address leaves the
+// global aperture raises MEMVIOL, but the TDM does not abort. It finishes the
+// descriptor -- here the two canonical elements below the 57-bit hole still
+// transfer -- and reports the violation once, at completion.
+TEST(Gfx1250ExecutionTest, TensorDmaHoleElementsReportMemviolAfterCompleting) {
+  for (const bool store : {false, true}) {
+    SCOPED_TRACE(store);
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_lds_base(cu->allocate_lds(256));
+    wf->set_lds_size(256);
+    constexpr uint32_t kElements = 4;
+    constexpr uint64_t kGlobal = 0x00ff'ffff'ffff'fff8ull; // Elements 2 and 3 enter the hole.
+    auto write_sgpr = [&](uint32_t reg, uint32_t value) {
+      cu->write_sgpr(wf->sgpr_alloc().base + reg, value);
+    };
+    write_sgpr(0, 1);
+    write_sgpr(1, 0);
+    write_sgpr(2, static_cast<uint32_t>(kGlobal));
+    write_sgpr(3, static_cast<uint32_t>((kGlobal >> 32) & 0x01ffffffu) | 0x80000000u);
+    write_sgpr(12, 2u << 16);        // i32 elements.
+    write_sgpr(13, kElements << 16); // tensor dim0.
+    write_sgpr(14, 0);
+    write_sgpr(15, kElements << 16); // tile dim0.
+    for (uint32_t reg = 16; reg < 20; ++reg)
+      write_sgpr(reg, 0);
+    for (uint32_t i = 0; i < 2; ++i)
+      sim.memory->write32(kGlobal + i * 4, 0x11000000u + i);
+    for (uint32_t i = 0; i < kElements; ++i)
+      cu->lds().write32(wf->lds_base() + i * 4, store ? 0x22000000u + i : 0xdeadbeefu);
+    const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                           0x7c7c0c00u};
+    cdna5::TensorStoreFromLdsVimage store_inst(words.data());
+    cdna5::TensorLoadToLdsVimage load_inst(words.data());
+    Instruction &inst = store ? static_cast<Instruction &>(store_inst) : load_inst;
+    if (store)
+      store_inst.execute_impl(*wf);
+    else
+      load_inst.execute_impl(*wf);
+    EXPECT_EQ(amdgpu::tensor_dma_outcome(inst), amdgpu::VmAccessOutcome::ApertureViolation);
+    for (uint32_t i = 0; i < 2; ++i) {
+      if (store)
+        EXPECT_EQ(sim.memory->read32(kGlobal + i * 4), 0x22000000u + i);
+      else
+        EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * 4), 0x11000000u + i);
+    }
+  }
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaDecodeExecuteCoversLoadStoreD2D4Forms) {
   constexpr uint32_t kNullSgpr = 124;
   constexpr std::array<uint32_t, 3> kLoadD2 = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
