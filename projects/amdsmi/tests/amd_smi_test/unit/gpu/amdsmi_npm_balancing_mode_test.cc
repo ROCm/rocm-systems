@@ -41,6 +41,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "test_common.h"
 
 #if defined(ENABLE_WSL_BACKEND)
 #include "amd_smi/impl/amd_smi_wsl_device.h"
@@ -99,10 +100,7 @@ class TempBoardDir {
     ofs << contents;
   }
   std::string ReadFile(const std::string& filename) const {
-    std::ifstream ifs(path_ / filename);
-    std::string line;
-    std::getline(ifs, line);
-    return line;
+    return ReadFirstLine((path_ / filename).string());
   }
 
  private:

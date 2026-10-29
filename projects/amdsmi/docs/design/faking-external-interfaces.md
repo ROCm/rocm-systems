@@ -106,14 +106,15 @@ Reusable test infrastructure (not RAS-specific) lives in
 - `ScopedRocmSmiDevice` and `ScopedAmdsmiInit`: reusable by any GPU unit test
   needing a fake `rocm_smi::Device` or a no-hardware-discovery `amdsmi_init()`, not
   just this RAS fix.
+- `FakeGpu`: a synthetic GPU registered with amd-smi (rocm_smi device, `AMDSmiDrm`,
+  `AMDSmiGPUDevice` and the registration), used by the RAS and KFD event tests.
 - `ScopedFakeIoctl`: fakes the `ioctl()` calls product code issues, per request
   code (`fake.RegisterHandler<ArgStruct>(REQ, [](auto& args) { ...; return 0; })`). See
   "Faking ioctl and libdrm" below.
 - `ScopedFakeKfdEventStream`: built on `ScopedFakeIoctl` and a fake `/dev/kfd`
   path, so the real `amdsmi_init/set_mask/get/stop_gpu_event_notification()` run
   without hardware. It starts with an empty event mask, as the kernel does.
-  Examples: `unit/gpu/kfd_event_formats_test.cc` (wraps the stream and a synthetic GPU in its
-  own `FakeGpuWithKfdEvents` helper) and `unit/system/fake_ioctl_test.cc` (the fake ioctl alone).
+  Examples: `unit/gpu/kfd_event_formats_test.cc` (wraps the stream and a `FakeGpu` in its own `FakeGpuWithKfdEvents` helper) and `unit/system/fake_ioctl_test.cc` (the fake ioctl alone).
 
 The one piece that must live in production code (compiled into
 `libamd_smi`/`amd_smi_static`, since production code calls the getter) stays in

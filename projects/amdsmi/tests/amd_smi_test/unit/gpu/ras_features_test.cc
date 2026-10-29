@@ -27,19 +27,14 @@
 #include <string>
 
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/amd_smi_drm.h"
-#include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "test_common.h"
 #include "test_fixture_utils.h"
 
 namespace {
 
-using amd::smi::AMDSmiDrm;
-using amd::smi::AMDSmiGPUDevice;
 using amd::smi::testing::ScopedFileWatch;
 using amd::smi::testing::ScopedOverride;
-using amd::smi::testing::ScopedProcessorRegistration;
 namespace test_hooks = amd::smi::test_hooks;
 
 // Fixture content for a real, arbitrary-but-valid RAS features mask, shared
@@ -64,14 +59,11 @@ constexpr char kAllOnesFeatureMaskLine[] = "feature mask: 0xffffffffffffffff\n";
 //      only to satisfy SMIGPUDEVICE_MUTEX -- not read from in these tests.
 amdsmi_status_t CallTotalEccCount(const FakeSysfsTree& tree, const std::string& card,
                                   amdsmi_error_count_t* ec, amdsmi_status_t expected) {
-  ScopedRocmSmiDevice rocm_device(tree.root() + "/" + card);
-  AMDSmiDrm drm;
-  AMDSmiGPUDevice gpu_device(rocm_device.index(), card, amdsmi_bdf_t{}, drm);
-  ScopedProcessorRegistration registration(&gpu_device);
+  FakeGpu gpu(tree, card);
 
-  const bool verbose = GetTestVerbosity() >= TestBase::VERBOSE_STANDARD;
+  const bool verbose = IsTestVerbose();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_total_ecc_count", "card=" + card, verbose);
-  amdsmi_status_t ret = amdsmi_get_gpu_total_ecc_count(registration.handle(), ec);
+  amdsmi_status_t ret = amdsmi_get_gpu_total_ecc_count(gpu.handle(), ec);
   DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, ret, expected);
   return ret;
 }
@@ -81,16 +73,12 @@ amdsmi_status_t CallTotalEccCount(const FakeSysfsTree& tree, const std::string& 
 amdsmi_status_t CallFeaturesEnabled(const FakeSysfsTree& tree, const std::string& card,
                                     amdsmi_gpu_block_t block, amdsmi_ras_err_state_t* state,
                                     amdsmi_status_t expected) {
-  ScopedRocmSmiDevice rocm_device(tree.root() + "/" + card);
-  AMDSmiDrm drm;
-  AMDSmiGPUDevice gpu_device(rocm_device.index(), card, amdsmi_bdf_t{}, drm);
-  ScopedProcessorRegistration registration(&gpu_device);
+  FakeGpu gpu(tree, card);
 
-  const bool verbose = GetTestVerbosity() >= TestBase::VERBOSE_STANDARD;
+  const bool verbose = IsTestVerbose();
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_ras_block_features_enabled",
                      "card=" + card + ", block=" + GetBlockNameStr(block), verbose);
-  amdsmi_status_t ret =
-      amdsmi_get_gpu_ras_block_features_enabled(registration.handle(), block, state);
+  amdsmi_status_t ret = amdsmi_get_gpu_ras_block_features_enabled(gpu.handle(), block, state);
   DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, ret, expected);
   return ret;
 }

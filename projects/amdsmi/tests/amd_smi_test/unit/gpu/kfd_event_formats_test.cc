@@ -54,8 +54,6 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/amd_smi_drm.h"
-#include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/kfd_ioctl.h"
@@ -68,17 +66,148 @@ extern char** environ;
 
 namespace {
 
-using amd::smi::AMDSmiDrm;
-using amd::smi::AMDSmiGPUDevice;
 using amd::smi::testing::RegisterFakeKfdVersion;
 using amd::smi::testing::ScopedFakeIoctl;
 using amd::smi::testing::ScopedOverride;
-using amd::smi::testing::ScopedProcessorRegistration;
+
+// An enum as {entry name -> value}, e.g. {"KFD_SMI_EVENT_VMFAULT", 1}.
+using EnumValues = std::map<std::string, long>;
+
+// Builds a payload with the kernel's own KFD_EVENT_FMT_* macro; the macro stringifies the call.
+#define KFD_PAYLOAD(call) \
+  KfdPayload { Payload(call), #call, __FILE__, __LINE__ }
+
+// A macro call that expands to a format followed by its arguments, reduced to the format.
+#define KFD_FIRST_ARG_(first, ...) first
+#define KFD_FIRST_ARG(...) KFD_FIRST_ARG_(__VA_ARGS__)
+
+// `event` is the suffix shared by AMDSMI_EVT_NOTIF_<event> and KFD_SMI_EVENT_<event>, `format` the
+// suffix of KFD_EVENT_FMT_<format>, and `args` any arguments with the right count for the macro.
+#define KFD_EVENT_ROW(event, format, args, unreported)                          \
+  {AMDSMI_EVT_NOTIF_##event, "KFD_SMI_EVENT_" #event, "KFD_EVENT_FMT_" #format, \
+   KFD_FIRST_ARG(KFD_EVENT_FMT_##format args), unreported}
+
+struct FetchResult {
+  std::string text;
+  std::string unable_reason;  // empty when text was obtained
+  std::string source;         // where text came from, for verbose output
+};
+
+struct DownloadTool {
+  std::string name;
+  std::vector<std::string> argv;  // run directly, never through a shell
+};
+
+struct CommandResult {
+  bool started = false;
+  int status = 0;      // as returned by pclose(); 0 on success
+  std::string output;  // the body on success; the tool's error text, or why it did not start
+};
+
+// A payload plus the source text that built it and where, for verbose and failure output.
+struct KfdPayload {
+  std::string text;
+  const char* built_with;
+  const char* file = "";
+  int line = 0;
+};
+
+// A synthetic GPU with a fake KFD event stream.
+class FakeGpuWithKfdEvents {
+ public:
+  FakeGpuWithKfdEvents() : gpu_(tree_), stream_(gpu_.index()) {}
+
+  amdsmi_processor_handle handle() const { return gpu_.handle(); }
+  uint32_t index() const { return gpu_.index(); }
+  const FakeGpu& gpu() const { return gpu_; }
+  ScopedFakeKfdEventStream& stream() { return stream_; }
+
+ private:
+  ScopedAmdsmiInit smi_init_;
+  FakeSysfsTree tree_;
+  FakeGpu gpu_;
+  ScopedFakeKfdEventStream stream_;
+};
+
+// Every kernel event the library reports, with the kernel's format for its line. The formats are
+// the committed KFD_EVENT_FMT_* macros, so one that changes upstream changes the line the tests
+// send; KFD_EVENT_FMT__MatchesMainlineKernelHeader checks the macros against upstream.
+struct EventFormat {
+  amdsmi_evt_notification_type_t event;
+  const char* kernel_event;  // its entry in enum kfd_smi_event
+  const char* format_name;   // its macro in kfd_event_formats.h
+  const char* format;        // that macro's printf format
+  int unreported;            // values in the line that the library leaves out on purpose
+};
+
+// A kernel line with a sample value for every conversion in `format`, and how many there are.
+struct SampleLine {
+  std::string text;
+  int values = 0;
+};
 
 constexpr size_t kPayloadBufferSize = 256;  // larger than any message the tests build
 constexpr size_t kDownloadChunkSize = 4096;
 constexpr int kConnectTimeoutSeconds = 5;
 constexpr int kDownloadTimeoutSeconds = 20;
+
+constexpr const char* kMainlineHeaderUrl =
+    "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/kfd_ioctl.h";
+
+// python3 fallback: argv[1] is the URL and argv[2] the timeout; refuses a redirect off https.
+constexpr const char* kPythonFetchScript =
+    "import sys, urllib.request\n"
+    "r = urllib.request.urlopen(sys.argv[1], timeout=float(sys.argv[2]))\n"
+    "if not r.geturl().startswith('https://'):\n"
+    "    sys.exit('redirected to a non-https URL: ' + r.geturl())\n"
+    "sys.stdout.write(r.read().decode())\n";
+
+// Where the tests package installs the two local headers, relative to the test binary.
+constexpr const char* kInstalledHeadersDir = "kfd_headers";
+
+// Stands in for a value that is not a plain integer, so a comparison reports it instead of
+// quietly reading a wrong number.
+constexpr long kUnreadableValue = LONG_MIN;
+
+// strtol base 0: "0x10" is read as hex and "16" as decimal, as in C source.
+constexpr int kAutoDetectBase = 0;
+
+// The enums whose numbers the library relies on: the event ids and the trigger values.
+constexpr const char* kKfdEnums[] = {"kfd_smi_event", "KFD_MIGRATE_TRIGGERS",
+                                     "KFD_QUEUE_EVICTION_TRIGGERS", "KFD_SVM_UNMAP_TRIGGERS"};
+
+// The library's copy of kfd_ioctl.h, relative to this test directory.
+constexpr const char* kTestDirectory = "/tests/amd_smi_test/";
+constexpr const char* kLibraryKfdHeader = "/rocm_smi/include/rocm_smi/kfd_ioctl.h";
+
+// What the library's SMI event ioctl calls are built from.
+constexpr const char* kSmiIoctlDefines[] = {
+    "AMDKFD_IOCTL_BASE",     "AMDKFD_IOR",
+    "AMDKFD_IOWR",           "AMDKFD_IOC_GET_VERSION",
+    "AMDKFD_IOC_SMI_EVENTS", "KFD_SMI_EVENT_MASK_FROM_INDEX",
+    "KFD_SMI_EVENT_MSG_SIZE"};
+constexpr const char* kSmiIoctlStructs[] = {"kfd_ioctl_get_version_args",
+                                            "kfd_ioctl_smi_events_args"};
+
+// GPU_POST_RESET sends the reset cause too but reports only the sequence number, on purpose.
+const EventFormat kEventFormats[] = {
+    KFD_EVENT_ROW(VMFAULT, VMFAULT, (0, 0), 0),
+    KFD_EVENT_ROW(THERMAL_THROTTLE, THERMAL_THROTTLING, (0, 0), 0),
+    KFD_EVENT_ROW(GPU_PRE_RESET, UPDATE_GPU_RESET, (0, 0), 0),
+    KFD_EVENT_ROW(GPU_POST_RESET, UPDATE_GPU_RESET, (0, 0), 1),
+    KFD_EVENT_ROW(MIGRATE_START, MIGRATE_START, (0, 0, 0, 0, 0, 0, 0, 0, 0), 0),
+    KFD_EVENT_ROW(MIGRATE_END, MIGRATE_END, (0, 0, 0, 0, 0, 0, 0, 0), 0),
+    KFD_EVENT_ROW(PAGE_FAULT_START, PAGEFAULT_START, (0, 0, 0, 0, 0), 0),
+    KFD_EVENT_ROW(PAGE_FAULT_END, PAGEFAULT_END, (0, 0, 0, 0, 0), 0),
+    KFD_EVENT_ROW(QUEUE_EVICTION, QUEUE_EVICTION, (0, 0, 0, 0), 0),
+    KFD_EVENT_ROW(QUEUE_RESTORE, QUEUE_RESTORE, (0, 0, 0, 0), 0),
+    KFD_EVENT_ROW(UNMAP_FROM_GPU, UNMAP_FROM_GPU, (0, 0, 0, 0, 0, 0), 0),
+    KFD_EVENT_ROW(PROCESS_START, PROCESS, (0, 0), 0),
+    KFD_EVENT_ROW(PROCESS_END, PROCESS, (0, 0), 0),
+};
+
+// What FormatEvtNotifMessage() reports for an event number it has no case for.
+constexpr const char* kUnknownEventMessage = "Unknown event received";
 
 // The reader strips the trailing newline before handing the payload to the parser.
 __attribute__((format(printf, 1, 2))) std::string Payload(const char* fmt, ...) {
@@ -94,44 +223,12 @@ __attribute__((format(printf, 1, 2))) std::string Payload(const char* fmt, ...) 
   return out;
 }
 
-constexpr const char* kMainlineHeaderUrl =
-    "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/kfd_ioctl.h";
-
-// python3 fallback: argv[1] is the URL and argv[2] the timeout; refuses a redirect off https.
-constexpr const char* kPythonFetchScript =
-    "import sys, urllib.request\n"
-    "r = urllib.request.urlopen(sys.argv[1], timeout=float(sys.argv[2]))\n"
-    "if not r.geturl().startswith('https://'):\n"
-    "    sys.exit('redirected to a non-https URL: ' + r.geturl())\n"
-    "sys.stdout.write(r.read().decode())\n";
-
-std::string ReadFile(const std::string& path) {
-  std::ifstream in(path);
-  std::stringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
-}
-
-// Where the tests package installs the two local headers, relative to the test binary.
-constexpr const char* kInstalledHeadersDir = "kfd_headers";
-
 // kfd_event_formats.h sits next to this source file.
 std::string CommittedHeaderPath() {
   const std::string source = __FILE__;
   return FindTestDataFile(kInstalledHeadersDir, "kfd_event_formats.h",
                           source.substr(0, source.find_last_of('/') + 1) + "kfd_event_formats.h");
 }
-
-struct FetchResult {
-  std::string text;
-  std::string unable_reason;  // empty when text was obtained
-  std::string source;         // where text came from, for verbose output
-};
-
-struct DownloadTool {
-  std::string name;
-  std::vector<std::string> argv;  // run directly, never through a shell
-};
 
 bool OnPath(const std::string& tool) {
   const char* path = std::getenv("PATH");
@@ -144,12 +241,6 @@ bool OnPath(const std::string& tool) {
   }
   return false;
 }
-
-struct CommandResult {
-  bool started = false;
-  int status = 0;      // as returned by pclose(); 0 on success
-  std::string output;  // the body on success; the tool's error text, or why it did not start
-};
 
 // Runs argv[0] (found on PATH) directly with no shell, stdin from /dev/null and stderr merged
 // into the captured output.
@@ -213,7 +304,7 @@ std::string LastLine(std::string text) {
 
 FetchResult FetchMainlineHeader() {
   if (const char* local = std::getenv("AMDSMI_KFD_IOCTL_MAINLINE_FILE")) {
-    std::string text = ReadFile(local);
+    std::string text = ReadTextFile(local);
     if (text.empty()) {
       return {"", std::string("AMDSMI_KFD_IOCTL_MAINLINE_FILE=") + local + " is missing or empty",
               ""};
@@ -320,23 +411,6 @@ std::map<std::string, std::string> ExtractFormats(const std::string& text) {
   }
   return formats;
 }
-
-// An enum as {entry name -> value}, e.g. {"KFD_SMI_EVENT_VMFAULT", 1}.
-using EnumValues = std::map<std::string, long>;
-
-// Stands in for a value that is not a plain integer, so a comparison reports it instead of
-// quietly reading a wrong number.
-constexpr long kUnreadableValue = LONG_MIN;
-// strtol base 0: "0x10" is read as hex and "16" as decimal, as in C source.
-constexpr int kAutoDetectBase = 0;
-
-// The enums whose numbers the library relies on: the event ids and the trigger values.
-constexpr const char* kKfdEnums[] = {"kfd_smi_event", "KFD_MIGRATE_TRIGGERS",
-                                     "KFD_QUEUE_EVICTION_TRIGGERS", "KFD_SVM_UNMAP_TRIGGERS"};
-
-// The library's copy of kfd_ioctl.h, relative to this test directory.
-constexpr const char* kTestDirectory = "/tests/amd_smi_test/";
-constexpr const char* kLibraryKfdHeader = "/rocm_smi/include/rocm_smi/kfd_ioctl.h";
 
 std::string LibraryKfdHeaderPath() {
   const std::string source = __FILE__;
@@ -448,15 +522,6 @@ std::string ExtractStruct(const std::string& text, const std::string& name) {
   return NormalizeCode(text.substr(start, end + 2 - start));
 }
 
-// What the library's SMI event ioctl calls are built from.
-constexpr const char* kSmiIoctlDefines[] = {
-    "AMDKFD_IOCTL_BASE",     "AMDKFD_IOR",
-    "AMDKFD_IOWR",           "AMDKFD_IOC_GET_VERSION",
-    "AMDKFD_IOC_SMI_EVENTS", "KFD_SMI_EVENT_MASK_FROM_INDEX",
-    "KFD_SMI_EVENT_MSG_SIZE"};
-constexpr const char* kSmiIoctlStructs[] = {"kfd_ioctl_get_version_args",
-                                            "kfd_ioctl_smi_events_args"};
-
 void ReportUnableToVerify(const std::string& what, const std::string& reason) {
   std::cerr << "[  UNVERIFIED ] Unable to compare " << what << " with upstream "
             << kMainlineHeaderUrl << "\n                Reason: " << reason
@@ -488,58 +553,6 @@ std::string LocalFileMissingReason(const std::string& path, const FetchResult& u
          "/ next to the test binary, and runs from the build directory use the source tree";
 }
 
-bool Verbose() { return GetTestVerbosity() >= TestBase::VERBOSE_STANDARD; }
-
-// A payload plus the source text that built it and where, for verbose and failure output.
-struct KfdPayload {
-  std::string text;
-  const char* built_with;
-  const char* file = "";
-  int line = 0;
-};
-
-// Builds a payload with the kernel's own KFD_EVENT_FMT_* macro; the macro stringifies the call.
-#define KFD_PAYLOAD(call) \
-  KfdPayload { Payload(call), #call, __FILE__, __LINE__ }
-
-// A synthetic GPU, reached by the public APIs as a real one is. Create it after ScopedAmdsmiInit.
-class FakeGpu {
- public:
-  explicit FakeGpu(const std::string& card = "card0")
-      : card_(card),
-        rocm_device_(tree_.root() + "/" + card),
-        gpu_device_(rocm_device_.index(), card, amdsmi_bdf_t{}, drm_),
-        registration_(&gpu_device_) {}
-
-  amdsmi_processor_handle handle() const { return registration_.handle(); }
-  uint32_t index() const { return rocm_device_.index(); }
-  const std::string& card() const { return card_; }
-
- private:
-  std::string card_;
-  FakeSysfsTree tree_;
-  ScopedRocmSmiDevice rocm_device_;
-  AMDSmiDrm drm_;
-  AMDSmiGPUDevice gpu_device_;
-  ScopedProcessorRegistration registration_;
-};
-
-// A synthetic GPU with a fake KFD event stream.
-class FakeGpuWithKfdEvents {
- public:
-  FakeGpuWithKfdEvents() : stream_(gpu_.index()) {}
-
-  amdsmi_processor_handle handle() const { return gpu_.handle(); }
-  uint32_t index() const { return gpu_.index(); }
-  const FakeGpu& gpu() const { return gpu_; }
-  ScopedFakeKfdEventStream& stream() { return stream_; }
-
- private:
-  ScopedAmdsmiInit smi_init_;
-  FakeGpu gpu_;
-  ScopedFakeKfdEventStream stream_;
-};
-
 // Every event type, as the functional events test selects them.
 constexpr uint64_t AllEventsMask() {
   uint64_t mask = 0;
@@ -551,7 +564,7 @@ constexpr uint64_t AllEventsMask() {
 
 amdsmi_status_t InitEventNotification(const FakeGpu& gpu,
                                       amdsmi_status_t expected = AMDSMI_STATUS_SUCCESS) {
-  const bool verbose = Verbose();
+  const bool verbose = IsTestVerbose();
   DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "card=" + gpu.card(), verbose);
   const amdsmi_status_t ret = amdsmi_init_gpu_event_notification(gpu.handle());
   DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, ret, expected);
@@ -559,7 +572,7 @@ amdsmi_status_t InitEventNotification(const FakeGpu& gpu,
 }
 
 amdsmi_status_t StopEventNotification(const FakeGpu& gpu) {
-  const bool verbose = Verbose();
+  const bool verbose = IsTestVerbose();
   DISPLAY_AMDSMI_API("amdsmi_stop_gpu_event_notification", "card=" + gpu.card(), verbose);
   const amdsmi_status_t ret = amdsmi_stop_gpu_event_notification(gpu.handle());
   DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
@@ -568,7 +581,7 @@ amdsmi_status_t StopEventNotification(const FakeGpu& gpu) {
 
 amdsmi_status_t SetEventMask(const FakeGpu& gpu, uint64_t mask,
                              amdsmi_status_t expected = AMDSMI_STATUS_SUCCESS) {
-  const bool verbose = Verbose();
+  const bool verbose = IsTestVerbose();
   std::ostringstream desc;
   desc << "card=" << gpu.card() << ", mask=0x" << std::hex << mask;
   DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", desc.str(), verbose);
@@ -595,7 +608,7 @@ amdsmi_status_t SetEventMask(FakeGpuWithKfdEvents& gpu, uint64_t mask,
 amdsmi_status_t GetEvents(uint32_t capacity, std::vector<amdsmi_evt_notification_data_t>* data,
                           uint32_t* num_elem, amdsmi_status_t expected) {
   constexpr int kNoWaitMs = 0;
-  const bool verbose = Verbose();
+  const bool verbose = IsTestVerbose();
   data->assign(capacity, amdsmi_evt_notification_data_t{});
   *num_elem = capacity;
   DISPLAY_AMDSMI_API(
@@ -619,7 +632,7 @@ void ExpectEvtMessage(const char* what, uint32_t event, const KfdPayload& payloa
   constexpr uint32_t kBufferSize = 4;  // room for more than the one event queued
 
   FakeGpuWithKfdEvents gpu;
-  const bool verbose = Verbose();
+  const bool verbose = IsTestVerbose();
   if (verbose) {
     std::cout << "\t### " << what << "\n"
               << "\t      built with               : " << payload.built_with << "\n"
@@ -645,53 +658,6 @@ void ExpectEvtMessage(const char* what, uint32_t event, const KfdPayload& payloa
   EXPECT_EQ(actual, expected);
   EXPECT_EQ(StopEventNotification(gpu), AMDSMI_STATUS_SUCCESS);
 }
-
-// Every kernel event the library reports, with the kernel's format for its line. The formats are
-// the committed KFD_EVENT_FMT_* macros, so one that changes upstream changes the line the tests
-// below send, and the format macros are checked against upstream by the drift test above.
-struct EventFormat {
-  amdsmi_evt_notification_type_t event;
-  const char* kernel_event;  // its entry in enum kfd_smi_event
-  const char* format_name;   // its macro in kfd_event_formats.h
-  const char* format;        // that macro's printf format
-  int unreported;            // values in the line that the library leaves out on purpose
-};
-
-// A macro call that expands to a format followed by its arguments, reduced to the format.
-#define KFD_FIRST_ARG_(first, ...) first
-#define KFD_FIRST_ARG(...) KFD_FIRST_ARG_(__VA_ARGS__)
-
-// `event` is the suffix shared by AMDSMI_EVT_NOTIF_<event> and KFD_SMI_EVENT_<event>, `format` the
-// suffix of KFD_EVENT_FMT_<format>, and `args` any arguments with the right count for the macro.
-#define KFD_EVENT_ROW(event, format, args, unreported)                          \
-  {AMDSMI_EVT_NOTIF_##event, "KFD_SMI_EVENT_" #event, "KFD_EVENT_FMT_" #format, \
-   KFD_FIRST_ARG(KFD_EVENT_FMT_##format args), unreported}
-
-// GPU_POST_RESET sends the reset cause too but reports only the sequence number, on purpose.
-const EventFormat kEventFormats[] = {
-    KFD_EVENT_ROW(VMFAULT, VMFAULT, (0, 0), 0),
-    KFD_EVENT_ROW(THERMAL_THROTTLE, THERMAL_THROTTLING, (0, 0), 0),
-    KFD_EVENT_ROW(GPU_PRE_RESET, UPDATE_GPU_RESET, (0, 0), 0),
-    KFD_EVENT_ROW(GPU_POST_RESET, UPDATE_GPU_RESET, (0, 0), 1),
-    KFD_EVENT_ROW(MIGRATE_START, MIGRATE_START, (0, 0, 0, 0, 0, 0, 0, 0, 0), 0),
-    KFD_EVENT_ROW(MIGRATE_END, MIGRATE_END, (0, 0, 0, 0, 0, 0, 0, 0), 0),
-    KFD_EVENT_ROW(PAGE_FAULT_START, PAGEFAULT_START, (0, 0, 0, 0, 0), 0),
-    KFD_EVENT_ROW(PAGE_FAULT_END, PAGEFAULT_END, (0, 0, 0, 0, 0), 0),
-    KFD_EVENT_ROW(QUEUE_EVICTION, QUEUE_EVICTION, (0, 0, 0, 0), 0),
-    KFD_EVENT_ROW(QUEUE_RESTORE, QUEUE_RESTORE, (0, 0, 0, 0), 0),
-    KFD_EVENT_ROW(UNMAP_FROM_GPU, UNMAP_FROM_GPU, (0, 0, 0, 0, 0, 0), 0),
-    KFD_EVENT_ROW(PROCESS_START, PROCESS, (0, 0), 0),
-    KFD_EVENT_ROW(PROCESS_END, PROCESS, (0, 0), 0),
-};
-
-// What FormatEvtNotifMessage() reports for an event number it has no case for.
-constexpr const char* kUnknownEventMessage = "Unknown event received";
-
-// A kernel line with a sample value for every conversion in `format`, and how many there are.
-struct SampleLine {
-  std::string text;
-  int values = 0;
-};
 
 SampleLine MakeSampleLine(const std::string& format) {
   constexpr const char* kFlagsWidthAndLength = "0123456789.-+ #lhzjt";
@@ -793,7 +759,7 @@ void ExpectInitFailsThenRecovers(const char* what,
   const long healthy_change = HealthyFdChange();
   FakeGpuWithKfdEvents gpu;
   const size_t fds_before = OpenFdCount();
-  if (Verbose()) {
+  if (IsTestVerbose()) {
     std::cout << "\t### " << what << std::endl;
   }
   {
@@ -1066,7 +1032,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__MatchesMainlineKernelHeader) {
                                  << "layouts may have moved or been renamed upstream.";
 
   const std::string committed_path = CommittedHeaderPath();
-  const auto committed = ExtractFormats(ReadFile(committed_path));
+  const auto committed = ExtractFormats(ReadTextFile(committed_path));
   if (committed.empty()) {
     ReportUnableToVerify("kfd_event_formats.h", LocalFileMissingReason(committed_path, upstream));
     return;
@@ -1096,7 +1062,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__MatchesMainlineKernelHeader) {
       detail << "\t      " << entry.first << ": ADDED upstream\n";
     }
   }
-  if (Verbose()) {
+  if (IsTestVerbose()) {
     std::cout << "\t### drift check: kfd_event_formats.h vs " << upstream.source << "\n"
               << detail.str() << "\t      " << identical << " of " << committed.size()
               << " KFD_EVENT_FMT_* macros identical (whitespace and line breaks ignored)\n"
@@ -1124,7 +1090,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__EnumsMatchMainlineKernelHeader) {
     return;
   }
   const std::string library_path = LibraryKfdHeaderPath();
-  const std::string library_text = ReadFile(library_path);
+  const std::string library_text = ReadTextFile(library_path);
   if (library_text.empty()) {
     ReportUnableToVerify(what, LocalFileMissingReason(library_path, upstream));
     return;
@@ -1139,7 +1105,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__EnumsMatchMainlineKernelHeader) {
     ASSERT_FALSE(library.empty()) << "Found no enum " << name << " in " << library_path;
 
     const std::string differences = DescribeEnumDifferences(library, kernel);
-    if (Verbose()) {
+    if (IsTestVerbose()) {
       std::cout << "\t### enum " << name << ": " << library.size() << " entries here, "
                 << kernel.size() << " upstream (" << upstream.source << ")\n"
                 << "\t===> " << (differences.empty() ? "VERIFIED" : "MISMATCH") << std::endl;
@@ -1173,7 +1139,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__SmiIoctlMatchesMainlineKernelHeader) {
     return;
   }
   const std::string library_path = LibraryKfdHeaderPath();
-  const std::string library_text = ReadFile(library_path);
+  const std::string library_text = ReadTextFile(library_path);
   if (library_text.empty()) {
     ReportUnableToVerify(what, LocalFileMissingReason(library_path, upstream));
     return;
@@ -1194,11 +1160,11 @@ TEST(GpuUnit, KFD_EVENT_FMT__SmiIoctlMatchesMainlineKernelHeader) {
                   << "\n    upstream: " << kernel << "\n";
       verdict = "CHANGED";
     }
-    if (Verbose()) {
+    if (IsTestVerbose()) {
       std::cout << "\t      " << item << ": " << verdict << "\n";
     }
   };
-  if (Verbose()) {
+  if (IsTestVerbose()) {
     std::cout << "\t### drift check: " << what << " vs " << upstream.source << "\n";
   }
   for (const char* name : kSmiIoctlDefines) {
@@ -1208,7 +1174,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__SmiIoctlMatchesMainlineKernelHeader) {
     compare(std::string("struct ") + name, ExtractStruct(library_text, name),
             ExtractStruct(upstream.text, name));
   }
-  if (Verbose()) {
+  if (IsTestVerbose()) {
     std::cout << "\t      " << checked
               << " definitions compared (comments and whitespace ignored)\n"
               << "\t===> " << (differences.str().empty() ? "VERIFIED" : "MISMATCH") << std::endl;
@@ -1240,7 +1206,7 @@ TEST(GpuUnit, KFD_EVENT_FMT__EveryKernelValueIsReported) {
     const std::string message = ReadReportedMessage(gpu, row.event, line.text);
     const int reported = CountReportedFields(message);
     const int required = line.values - row.unreported;
-    if (Verbose()) {
+    if (IsTestVerbose()) {
       std::cout << "\t### " << row.kernel_event << " (" << row.format_name << ")\n"
                 << "\t      kernel line (input)      : " << line.text << "\n"
                 << "\t      library message (output) : " << message << "\n"
@@ -1271,10 +1237,10 @@ TEST(GpuUnit, KFD_EVENT_FMT__EveryKernelValueIsReported) {
 // How a mismatch shows: the test FAILS and names the event or macro with no entry.
 TEST(GpuUnit, KFD_EVENT_FMT__EveryKernelEventAndFormatIsHandled) {
   const std::string library_path = LibraryKfdHeaderPath();
-  const EnumValues events = ParseEnum(ReadFile(library_path), "kfd_smi_event");
+  const EnumValues events = ParseEnum(ReadTextFile(library_path), "kfd_smi_event");
   ASSERT_FALSE(events.empty()) << "Found no enum kfd_smi_event in " << library_path;
   const std::string formats_path = CommittedHeaderPath();
-  const auto formats = ExtractFormats(ReadFile(formats_path));
+  const auto formats = ExtractFormats(ReadTextFile(formats_path));
   ASSERT_FALSE(formats.empty()) << "Found no KFD_EVENT_FMT_* macros in " << formats_path;
 
   constexpr const char* kHowToAdd =
@@ -1433,7 +1399,8 @@ TEST(GpuUnit, KFD_EVENT_FMT__TwoGpusShareOneKfdHandle) {
   ASSERT_EQ(InitEventNotification(first), AMDSMI_STATUS_SUCCESS);
 
   // Created after the first init, so the second stream's fake kernel serves only the second GPU.
-  FakeGpu second("card1");
+  FakeSysfsTree second_tree;
+  FakeGpu second(second_tree, "card1");
   ScopedFakeKfdEventStream second_stream(second.index());
   ASSERT_EQ(InitEventNotification(second), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(second_stream.VersionQueryCount(), 0) << "the second GPU reuses the open /dev/kfd";

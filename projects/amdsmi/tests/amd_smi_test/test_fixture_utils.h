@@ -18,6 +18,8 @@
 #include <utility>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_drm.h"
+#include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 
 namespace amd::smi {
@@ -260,6 +262,32 @@ class ScopedAmdsmiInit {
 
   ScopedAmdsmiInit(const ScopedAmdsmiInit&) = delete;
   ScopedAmdsmiInit& operator=(const ScopedAmdsmiInit&) = delete;
+};
+
+// RAII: a synthetic GPU registered with amd-smi, so the public APIs reach it as they would a real
+// one: a rocm_smi device at `<tree root>/<card>`, an AMDSmiDrm, an AMDSmiGPUDevice and the
+// registration. Create it after ScopedAmdsmiInit when the test needs amdsmi_init().
+class FakeGpu {
+ public:
+  explicit FakeGpu(const FakeSysfsTree& tree, const std::string& card = "card0")
+      : card_(card),
+        rocm_device_(tree.root() + "/" + card),
+        gpu_device_(rocm_device_.index(), card, amdsmi_bdf_t{}, drm_),
+        registration_(&gpu_device_) {}
+
+  FakeGpu(const FakeGpu&) = delete;
+  FakeGpu& operator=(const FakeGpu&) = delete;
+
+  amdsmi_processor_handle handle() const { return registration_.handle(); }
+  uint32_t index() const { return rocm_device_.index(); }
+  const std::string& card() const { return card_; }
+
+ private:
+  std::string card_;
+  ScopedRocmSmiDevice rocm_device_;
+  amd::smi::AMDSmiDrm drm_;
+  amd::smi::AMDSmiGPUDevice gpu_device_;
+  amd::smi::testing::ScopedProcessorRegistration registration_;
 };
 
 // RAII: stands in for /dev/kfd and the KFD SMI event stream it hands out, so the real
