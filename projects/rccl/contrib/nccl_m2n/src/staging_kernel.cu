@@ -28,6 +28,20 @@
 #include <mutex>
 #include <utility>
 
+/* Role partitioning in the staging kernels is done in hardware warps. A split
+ * on 32-lane boundaries would put two roles into one 64-lane AMD wavefront, and
+ * a lane-0 spin in one role then stalls the other role for good. Host (launch
+ * geometry) and device passes must agree, so this cannot use WARP_SIZE, which
+ * is 32 in the HIP host pass. */
+#if defined(__HIP_PLATFORM_AMD__)
+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__GFX9__)
+#error "nccl_m2n staging kernels require a wave64 (GFX9) target on AMD"
+#endif
+#define STAGING_WARP_SIZE 64
+#else
+#define STAGING_WARP_SIZE 32
+#endif
+
 // ============================================================================
 // Error-check macros (host-side only)
 // ============================================================================
@@ -165,16 +179,24 @@ __device__ __forceinline__ void barrier_subset_init() {
   }
   __syncthreads();
 }
+// Lanes of one wavefront cannot spin independently: if the releasing lane
+// shares a wavefront with spinning lanes it is never scheduled. Arrive and
+// wait once per wavefront, through its lowest active lane.
 __device__ __forceinline__ void barrier_sync_subset(int id, int count) {
-  unsigned s = m2n_bar_sense[id];
+  const unsigned long long active = __ballot(1);
+  const int leader = __ffsll((long long)active) - 1;
   __threadfence_block();
-  unsigned a = atomicInc(&m2n_bar_arrive[id], 0x7fffffffu) + 1u;
-  if (a == (unsigned)count) {
-    m2n_bar_arrive[id] = 0u;
-    __threadfence_block();
-    atomicExch(&m2n_bar_sense[id], s ^ 1u);
-  } else {
-    while (atomicAdd(&m2n_bar_sense[id], 0u) == s) { }
+  if ((int)__lane_id() == leader) {
+    const unsigned s = atomicAdd(&m2n_bar_sense[id], 0u);
+    const unsigned n = (unsigned)__popcll(active);
+    const unsigned a = atomicAdd(&m2n_bar_arrive[id], n) + n;
+    if (a == (unsigned)count) {
+      atomicExch(&m2n_bar_arrive[id], 0u);
+      __threadfence_block();
+      atomicExch(&m2n_bar_sense[id], s ^ 1u);
+    } else {
+      while (atomicAdd(&m2n_bar_sense[id], 0u) == s) { }
+    }
   }
   __threadfence_block();
 }
@@ -202,8 +224,8 @@ __device__ __forceinline__ void barrier_sync_subset(int id, int count) {
 //
 // ============================================================================
 
-#define DIRECT_TYPE1_NUM_WARPS 8
-#define DIRECT_TYPE1_THREADS (DIRECT_TYPE1_NUM_WARPS * 32)
+#define DIRECT_TYPE1_THREADS 256
+#define DIRECT_TYPE1_NUM_WARPS (DIRECT_TYPE1_THREADS / STAGING_WARP_SIZE)
 #define DIRECT_TYPE1_BARRIER_ID 1
 
 #define DIRECT_TYPE4_NUM_WARPS 4
@@ -211,9 +233,9 @@ __device__ __forceinline__ void barrier_sync_subset(int id, int count) {
 #define DIRECT_SOURCE_TOTAL_WARPS (DIRECT_TYPE1_NUM_WARPS + DIRECT_TYPE4_NUM_WARPS)
 
 #define DIRECT_TYPE6_NUM_GROUPS 4
-#define DIRECT_TYPE6_WARPS_PER_GROUP 2
+#define DIRECT_TYPE6_THREADS_PER_GROUP 64
+#define DIRECT_TYPE6_WARPS_PER_GROUP (DIRECT_TYPE6_THREADS_PER_GROUP / STAGING_WARP_SIZE)
 #define DIRECT_TYPE6_TOTAL_WARPS (DIRECT_TYPE6_NUM_GROUPS * DIRECT_TYPE6_WARPS_PER_GROUP)
-#define DIRECT_TYPE6_THREADS_PER_GROUP (DIRECT_TYPE6_WARPS_PER_GROUP * 32)
 #define DIRECT_TYPE6_BARRIER_ID_BASE 2
 
 #define DIRECT_TOTAL_WARPS \
@@ -221,7 +243,7 @@ __device__ __forceinline__ void barrier_sync_subset(int id, int count) {
 
 /* __launch_bounds__ caps register usage to keep the per-CTA register
  * budget below the 65536 SM limit. */
-__global__ __launch_bounds__(DIRECT_TOTAL_WARPS * 32, 1) void StagingReshardKernel_Direct(
+__global__ __launch_bounds__(DIRECT_TOTAL_WARPS * STAGING_WARP_SIZE, 1) void StagingReshardKernel_Direct(
   StagingKernelParams* __restrict__ params, ncclDevComm devComm) {
   const int channel_id = (int)blockIdx.x;
 #if defined(__HIP_PLATFORM_AMD__)
@@ -232,8 +254,8 @@ __global__ __launch_bounds__(DIRECT_TOTAL_WARPS * 32, 1) void StagingReshardKern
   ncclGin gin{devComm, ginContext};
   ncclTeam world = ncclTeamWorld(devComm);
 
-  const int warp_id = threadIdx.x / 32;
-  const int lane_id = threadIdx.x % 32;
+  const int warp_id = threadIdx.x / STAGING_WARP_SIZE;
+  const int lane_id = threadIdx.x % STAGING_WARP_SIZE;
 
   const bool isSource = params->isSource;
   const bool isDest = params->isDest;
@@ -306,7 +328,7 @@ __global__ __launch_bounds__(DIRECT_TOTAL_WARPS * 32, 1) void StagingReshardKern
     // ================================================================
     if (warp_id < DIRECT_TYPE1_NUM_WARPS) {
       const bool is_root_warp = (warp_id == 0);
-      const int thread_in_group = warp_id * 32 + lane_id;
+      const int thread_in_group = warp_id * STAGING_WARP_SIZE + lane_id;
 
       for (int t = 0; t < numRdmaTargets; t++) {
         StagingFlowCtrl fc = params->localRdmaFc[channel_id][t];
@@ -452,8 +474,8 @@ __global__ __launch_bounds__(DIRECT_TOTAL_WARPS * 32, 1) void StagingReshardKern
       const int warp_in_group = warp_id % DIRECT_TYPE6_WARPS_PER_GROUP;
       const bool is_root_warp = (warp_in_group == 0);
       const int group_barrier = DIRECT_TYPE6_BARRIER_ID_BASE + group_id;
-      const int dst_copy_thread = warp_in_group * 32 + lane_id;
-      const int dst_copy_threads = DIRECT_TYPE6_WARPS_PER_GROUP * 32;
+      const int dst_copy_thread = warp_in_group * STAGING_WARP_SIZE + lane_id;
+      const int dst_copy_threads = DIRECT_TYPE6_THREADS_PER_GROUP;
 
       char* rdma_staging_base = (char*)ncclGetLocalPointer(rdma_region.window, 0);
       char* user_dst = (char*)params->dstBuffer;
@@ -545,7 +567,7 @@ __global__ __launch_bounds__(DIRECT_TOTAL_WARPS * 32, 1) void StagingReshardKern
 
 ncclResult_t launchStagingReshardDirect(StagingKernelParams* devParams, struct ncclDevComm* devComm, int numCtas,
                                         cudaStream_t stream, bool verbose) {
-  const int threads_per_cta = DIRECT_TOTAL_WARPS * 32;
+  const int threads_per_cta = DIRECT_TOTAL_WARPS * STAGING_WARP_SIZE;
 
   if (verbose) {
     printf("[STAGING_KERNEL_DIRECT] Launching: grid=%d, block=%d "
@@ -649,27 +671,28 @@ __device__ __forceinline__ void pipe_edge_chunk_range(const StagingPipePeerEdge&
 /* Per-CTA thread layout for source/trainer ranks.
  *   warp 0       : control path. It consumes locally packed chunks and issues
  *                  RDMA puts/signals to generator peers.
- *   warps 1..16  : pack path. They gather from the user source tensor into the
- *                  local staging FIFO and publish local tails to warp 0. */
+ *   warps 1..    : pack path (512 threads). They gather from the user source
+ *                  tensor into the local staging FIFO and publish local tails
+ *                  to warp 0. */
 #define PIPE_TRAINER_CONTROL_WARPS 1
-#define PIPE_TRAINER_PACK_WARPS 16
+#define PIPE_TRAINER_PACK_THREADS 512
+#define PIPE_TRAINER_PACK_WARPS (PIPE_TRAINER_PACK_THREADS / STAGING_WARP_SIZE)
 #define PIPE_TRAINER_PACK_WARP_START PIPE_TRAINER_CONTROL_WARPS
 #define PIPE_TRAINER_TOTAL_WARPS (PIPE_TRAINER_CONTROL_WARPS + PIPE_TRAINER_PACK_WARPS)
-#define PIPE_TRAINER_THREADS (PIPE_TRAINER_TOTAL_WARPS * 32)
-#define PIPE_TRAINER_PACK_THREADS (PIPE_TRAINER_PACK_WARPS * 32)
+#define PIPE_TRAINER_THREADS (PIPE_TRAINER_TOTAL_WARPS * STAGING_WARP_SIZE)
 #define PIPE_TRAINER_PACK_BARRIER_ID 1
 
 /* Per-CTA thread layout for destination/generator ranks.
  *   warp 0       : control path. It polls RDMA/LSA tails, optionally forwards
  *                  to ring/LSA peers, drives TMA pulls, and releases credits.
- *   warps 1..16  : unpack path. They scatter staged/TMA-pulled payload into
- *                  the user destination tensor. */
+ *   warps 1..    : unpack path (512 threads). They scatter staged/TMA-pulled
+ *                  payload into the user destination tensor. */
 #define PIPE_GENERATOR_CONTROL_WARPS 1
-#define PIPE_GENERATOR_UNPACK_WARPS 16
+#define PIPE_GENERATOR_UNPACK_THREADS 512
+#define PIPE_GENERATOR_UNPACK_WARPS (PIPE_GENERATOR_UNPACK_THREADS / STAGING_WARP_SIZE)
 #define PIPE_GENERATOR_UNPACK_WARP_START PIPE_GENERATOR_CONTROL_WARPS
 #define PIPE_GENERATOR_TOTAL_WARPS (PIPE_GENERATOR_CONTROL_WARPS + PIPE_GENERATOR_UNPACK_WARPS)
-#define PIPE_GENERATOR_THREADS (PIPE_GENERATOR_TOTAL_WARPS * 32)
-#define PIPE_GENERATOR_UNPACK_THREADS (PIPE_GENERATOR_UNPACK_WARPS * 32)
+#define PIPE_GENERATOR_THREADS (PIPE_GENERATOR_TOTAL_WARPS * STAGING_WARP_SIZE)
 #define PIPE_GENERATOR_UNPACK_BARRIER_ID 1
 #ifndef PIPE_GENERATOR_QUEUE_DEPTH
 #define PIPE_GENERATOR_QUEUE_DEPTH 2
@@ -951,9 +974,12 @@ __global__ __launch_bounds__(PIPE_TRAINER_THREADS, 1) void StagingReshardKernel_
     channel_id = pipe_plan->trainerRdmaLaunchChannels[launch_cta];
   }
 
-  const int warp_id = threadIdx.x / 32;
-  const int lane_id = threadIdx.x % 32;
+  const int warp_id = threadIdx.x / STAGING_WARP_SIZE;
+  const int lane_id = threadIdx.x % STAGING_WARP_SIZE;
   __shared__ int pack_slot;
+#if defined(__HIP_PLATFORM_AMD__)
+  barrier_subset_init();
+#endif
 
   if (!params->isSource || params->numRdmaTargets <= 0 || channel_id < 0 || channel_id >= params->numChannels) {
     return;
@@ -1057,7 +1083,7 @@ __global__ __launch_bounds__(PIPE_TRAINER_THREADS, 1) void StagingReshardKernel_
    * consumed by the control warp above. */
   if (warp_id >= PIPE_TRAINER_PACK_WARP_START && warp_id < PIPE_TRAINER_PACK_WARP_START + PIPE_TRAINER_PACK_WARPS) {
     const int pack_warp = warp_id - PIPE_TRAINER_PACK_WARP_START;
-    const int thread_in_group = pack_warp * 32 + lane_id;
+    const int thread_in_group = pack_warp * STAGING_WARP_SIZE + lane_id;
     const bool is_root_warp = (pack_warp == 0);
 
     for (int t = 0; t < params->numRdmaTargets; t++) {
@@ -1145,13 +1171,13 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
   const int phase = launch_map.phase;
   const bool run_rdma_sources = DoRdmaSources && (!split_mixed_role_ctas || phase == kPipeGeneratorRdmaPhase);
   const bool run_lsa_sources = DoLsaSources && (!split_mixed_role_ctas || phase == kPipeGeneratorLsaPhase);
-  const int warp_id = threadIdx.x / 32;
-  const int lane_id = threadIdx.x % 32;
+  const int warp_id = threadIdx.x / STAGING_WARP_SIZE;
+  const int lane_id = threadIdx.x % STAGING_WARP_SIZE;
   const bool is_control = (warp_id == 0);
   const bool is_unpack = (warp_id >= PIPE_GENERATOR_UNPACK_WARP_START &&
                           warp_id < PIPE_GENERATOR_UNPACK_WARP_START + PIPE_GENERATOR_UNPACK_WARPS);
   const int unpack_warp = warp_id - PIPE_GENERATOR_UNPACK_WARP_START;
-  const int unpack_thread = unpack_warp * 32 + lane_id;
+  const int unpack_thread = unpack_warp * STAGING_WARP_SIZE + lane_id;
   const bool is_unpack_leader = is_unpack && unpack_thread == 0;
 
   __shared__ volatile unsigned int q_tail;
@@ -1164,6 +1190,9 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
   __shared__ __align__(8) uint64_t tma_mbar[PIPE_GENERATOR_QUEUE_DEPTH];
   extern __shared__ char tma_tile_smem[];
   char* tma_tile_base = (char*)(((uintptr_t)tma_tile_smem + 127ULL) & ~127ULL);
+#if defined(__HIP_PLATFORM_AMD__)
+  barrier_subset_init();
+#endif
 
   if (!params->isDest || channel_id < 0 || channel_id >= num_channels) {
     return;
@@ -1345,7 +1374,7 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
               /* Publish each received RDMA chunk to LSA followers immediately,
                * allowing in-domain forwarding to overlap subsequent receives. */
               if constexpr (DoLsaForward) {
-                for (int fwd_lane = lane_id; fwd_lane < params->numLsaFollowers; fwd_lane += 32) {
+                for (int fwd_lane = lane_id; fwd_lane < params->numLsaFollowers; fwd_lane += STAGING_WARP_SIZE) {
                   const int fwd_tgt_idx = fwd_start + fwd_lane;
                   if (fwd_tgt_idx >= params->numLsaTargets) {
                     continue;
@@ -1384,7 +1413,7 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
               }
             }
             if constexpr (DoLsaForward) {
-              for (int fwd_lane = lane_id; fwd_lane < params->numLsaFollowers; fwd_lane += 32) {
+              for (int fwd_lane = lane_id; fwd_lane < params->numLsaFollowers; fwd_lane += STAGING_WARP_SIZE) {
                 const int fwd_tgt_idx = fwd_start + fwd_lane;
                 if (fwd_tgt_idx >= params->numLsaTargets) {
                   continue;
