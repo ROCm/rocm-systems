@@ -585,12 +585,6 @@ dead VGPR. Observed sources participate in resource exclusion even if the guest
 itself no longer uses them. Register-backup destinations must avoid live values,
 probe clobbers, fixed argument/link registers, and persistent entry storage.
 
-`DeviceWaveState` provides explicit memory-backed sequence and loss counters for
-compiled probes. A client supplies counter locations in runtime-owned storage;
-the helper knows no ConSan row or record layout. It requires full EXEC and one
-wave's exclusive counter ownership. This is bounded capture bookkeeping, not the
-future streaming transport or a per-record host acknowledgement protocol.
-
 `kernarg_segment_ptr_slot` and `CommandProcessor::init_wavefront_regs` walk the user-SGPR enable-bit order independently, and the CP interleaves register writes with its walk so it cannot call the helper. `tests/dbi/kernarg_sgpr_slot_test.cpp` dispatches every combination to pin the agreement; a drift would have the prologue load from an unrelated pair with no fault and every unit test still green.
 
 ### Fail-closed list

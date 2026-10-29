@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/consan/contract.h"
-#include "rocjitsu/code/patch/device_wave_state.h"
+#include "rocjitsu/code/patch/consan/wave_state.h"
 
 using u32 = unsigned int;
 using u64 = unsigned long long;
@@ -40,7 +40,8 @@ __device__ __attribute__((always_inline)) void publish(GlobalWords destination, 
   __atomic_store_n(destination, value, __ATOMIC_RELEASE);
 }
 
-__device__ __attribute__((always_inline)) rocjitsu::DeviceWaveState wave_state(GlobalWords output) {
+__device__ __attribute__((always_inline)) rocjitsu::consan::DeviceWaveState
+wave_state(GlobalWords output) {
   return {output + wire::kRowFinalSequence / 4, output + wire::kRowLoss / 4};
 }
 

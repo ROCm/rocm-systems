@@ -42,7 +42,7 @@ foreach(
         -I${ROCJITSU_SRC_DIR} -I${ROCJITSU_INCLUDE_DIR}
         -I${PROJECT_SOURCE_DIR}/lib/util/include
         DEPENDS ${ROCJITSU_SRC_DIR}/rocjitsu/code/consan/contract.h
-        ${ROCJITSU_SRC_DIR}/rocjitsu/code/patch/device_wave_state.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/wave_state.h
     )
     list(
         APPEND _probe_images

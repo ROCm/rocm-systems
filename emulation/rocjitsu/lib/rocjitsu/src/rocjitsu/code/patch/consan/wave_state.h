@@ -3,13 +3,14 @@
 
 #pragma once
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-/// @brief Explicit memory-backed ordering and loss state for callable probes.
-/// @details The runtime owns the storage until dispatch completion. Every lane
-/// must enter together under full EXEC; only lane zero writes the counters.
-/// The client supplies their locations, keeping record and transport layouts
-/// outside the DBI calling convention. No value survives in an implicit register.
+/// @brief Memory-backed per-wave ordering and loss state for ConSan probes.
+/// @details The runtime owns the storage until dispatch completion. Counter
+/// locations belong exclusively to one wave and are supplied by probes.hip,
+/// independently of this helper's implementation. Preparation requests full EXEC
+/// for every probe call; only lane zero writes the counters. No value survives
+/// in an implicit register.
 class DeviceWaveState {
 public:
   using Counter = volatile unsigned __attribute__((address_space(1))) *;
@@ -43,4 +44,4 @@ private:
   Counter losses_;
 };
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

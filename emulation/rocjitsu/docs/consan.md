@@ -93,6 +93,14 @@ are updated together by the shared code-object editor. Missing fields or integer
 encodings too narrow for the requested sizes reject preparation before artifact
 publication. ConSan keeps its own target, argument, and launch admission checks.
 
+The compiled probes use [`DeviceWaveState`](../lib/rocjitsu/src/rocjitsu/code/patch/consan/wave_state.h)
+for explicit memory-backed sequence and loss counters. Each wave exclusively
+owns its counters in runtime-owned storage retained through dispatch completion.
+`probes.hip` supplies their locations within the wave's report row; the helper
+is independent of the row and record layouts. `prepare.cpp` requests full EXEC
+for every probe call, and only lane zero writes the counters. Counter values
+persist in memory across calls rather than in implicit register state.
+
 ### Execution and capture
 
 The plugin matches the application's original object to the artifact and loads
