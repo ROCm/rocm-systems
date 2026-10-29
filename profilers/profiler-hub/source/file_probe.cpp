@@ -302,7 +302,7 @@ probe_sqlite(file_kind_t kind, const std::string& path)
     }
     if(find_support(kind, trace_schema_t::rocpd, resolved.version) == nullptr)
     {
-        return result_of(PH_RESULT_UNSUPPORTED_SCHEMA_VERSION,
+        return result_of(PH_RESULT_UNSUPPORTED_FILE,
                          "rocpd schema version is not supported",
                          trace_schema_t::rocpd,
                          resolved.version,

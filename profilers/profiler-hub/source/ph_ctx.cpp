@@ -1,4 +1,5 @@
 #include "ph_ctx.hpp"
+#include "trace_trim.hpp"
 #include "debug.hpp"
 #include "file_probe_failure.hpp"
 #include "ph_future.hpp"
@@ -27,12 +28,16 @@ to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
         case track_kind_t::thread: return PH_TRACK_CATEGORY_THREAD;
         case track_kind_t::thread_sample: return PH_TRACK_CATEGORY_THREAD_SAMPLE;
         case track_kind_t::pmc_agent: return PH_TRACK_CATEGORY_PMC_AGENT;
+        case track_kind_t::pmc_kernel: return PH_TRACK_CATEGORY_PMC_KERNEL;
+        case track_kind_t::pmc_memory: return PH_TRACK_CATEGORY_PMC_MEMORY;
         case track_kind_t::kernel_dispatch_agent_queue:
             return PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE;
         case track_kind_t::memory_allocate_agent_queue:
             return PH_TRACK_CATEGORY_MEMORY_ALLOCATE_AGENT_QUEUE;
         case track_kind_t::memory_copy_agent_queue:
             return PH_TRACK_CATEGORY_MEMORY_COPY_AGENT_QUEUE;
+        case track_kind_t::hip_event_agent_queue:
+            return PH_TRACK_CATEGORY_HIP_EVENT_AGENT_QUEUE;
         case track_kind_t::stream: return PH_TRACK_CATEGORY_STREAM;
     }
     return PH_TRACK_CATEGORY_THREAD;
@@ -70,6 +75,7 @@ to_reader_event_type(ph_event_type_t type)
         case PH_EVENT_TYPE_KERNEL_DISPATCH: return event_type_t::kernel_dispatch;
         case PH_EVENT_TYPE_MEMORY_COPY: return event_type_t::memory_copy;
         case PH_EVENT_TYPE_MEMORY_ALLOCATE: return event_type_t::memory_allocate;
+        case PH_EVENT_TYPE_HIP_EVENT: return event_type_t::hip_event;
     }
     return std::nullopt;
 }
@@ -84,6 +90,7 @@ to_c_event_type(profiler_hub::reader_types::event_type_t type)
         case event_type_t::kernel_dispatch: return PH_EVENT_TYPE_KERNEL_DISPATCH;
         case event_type_t::memory_copy: return PH_EVENT_TYPE_MEMORY_COPY;
         case event_type_t::memory_allocate: return PH_EVENT_TYPE_MEMORY_ALLOCATE;
+        case event_type_t::hip_event: return PH_EVENT_TYPE_HIP_EVENT;
         case event_type_t::sample:
         case event_type_t::pmc_event: break;
     }
@@ -105,10 +112,14 @@ track_holds_event(const profiler_hub::reader_types::track_info_ptr_t& track,
             return type == event_type_t::memory_allocate;
         case track_kind_t::memory_copy_agent_queue:
             return type == event_type_t::memory_copy;
+        case track_kind_t::hip_event_agent_queue:
+            return type == event_type_t::hip_event;
         case track_kind_t::stream: return type != event_type_t::region;
         case track_kind_t::thread:
         case track_kind_t::thread_sample: return true;
-        case track_kind_t::pmc_agent: return false;
+        case track_kind_t::pmc_agent:
+        case track_kind_t::pmc_kernel:
+        case track_kind_t::pmc_memory: return false;
     }
     return false;
 }
@@ -366,7 +377,8 @@ ph_ctx::accept_trace(std::string_view trace_path)
     return accepted_trace_t{ std::string{ trace_path },
                              ph_schema_version_t{ .major = probe.schema_version.major,
                                                   .minor = probe.schema_version.minor,
-                                                  .patch = probe.schema_version.patch } };
+                                                  .patch = probe.schema_version.patch },
+                             probe.trace_schema };
 }
 
 ph_ctx::ph_ctx(std::string_view trace_path)
@@ -376,6 +388,7 @@ ph_ctx::ph_ctx(std::string_view trace_path)
 ph_ctx::ph_ctx(accepted_trace_t accepted)
 : m_file_path{ std::move(accepted.path) }
 , m_schema_version{ accepted.version }
+, m_trace_schema{ accepted.schema }
 , m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
 {}
 
@@ -513,6 +526,7 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
 
     if(progress) progress(0.0, "Building reader catalog");
     populate_reader_catalog(m_thread_pool, m_connection_pool, *m_catalog);
+    m_catalog->publish_memory_activity_pmc_infos();
     if(stop_requested()) return false;
 
     if(progress) progress(0.0, "Building track list");
@@ -542,6 +556,22 @@ ph_schema_version_t
 ph_ctx::get_schema_version()
 {
     return m_schema_version;
+}
+
+ph_result_t
+ph_ctx::trim_trace(uint64_t    start_ts,
+                   uint64_t    end_ts,
+                   const char* output_path,
+                   ph_future*  future)
+{
+    if(output_path == nullptr || output_path[0] == '\0') return PH_RESULT_INVALID_ARGUMENT;
+    if(const ph_result_t ready = wait_until_ready(); ready != PH_RESULT_SUCCESS) return ready;
+
+    const profiler_hub::version_t version{ m_schema_version.major,
+                                           m_schema_version.minor,
+                                           m_schema_version.patch };
+    return profiler_hub::trim_trace_file(
+        m_file_path, output_path, m_trace_schema, version, start_ts, end_ts, future);
 }
 
 ph_track_list_t
@@ -883,6 +913,30 @@ ph_ctx::get_memory_alloc_details(uint64_t event_id)
     return view;
 }
 
+uint32_t
+ph_ctx::read_table_events(const profiler_hub::resolved_event_query& query,
+                          uint32_t                                  event_type,
+                          uint64_t                                  after_id,
+                          uint64_t                                  last_id,
+                          ph_table_event*                           rows,
+                          uint32_t                                  capacity)
+{
+    return m_connection_pool.with_connection(
+        [&](profiler_hub::common::connection& connection) {
+            return connection.reader().read_table_events(
+                query, event_type, after_id, last_id, rows, capacity);
+        });
+}
+
+bool
+ph_ctx::table_event_id_span(uint32_t event_type, uint64_t& first_id, uint64_t& last_id)
+{
+    return m_connection_pool.with_connection(
+        [&](profiler_hub::common::connection& connection) {
+            return connection.reader().table_event_id_span(event_type, first_id, last_id);
+        });
+}
+
 ph_sample_list_t
 ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
 {
@@ -973,21 +1027,21 @@ ph_ctx::initialize_track_list()
             .id          = static_cast<std::uint32_t>(track->id),
             .track_name  = track->name.c_str(),
             .nid         = track->node_info
-                               ? static_cast<std::uint32_t>(track->node_info->node_id)
+                               ? static_cast<std::uint64_t>(track->node_info->node_id)
                                : 0,
             .pid         = track->process_info
-                               ? static_cast<std::uint32_t>(track->process_info->pid)
+                               ? static_cast<std::uint64_t>(track->process_info->pid)
                                : 0,
             .tid         = track->thread_info  // Some tracks have no thread (e.g. per
                                        // agent+queue category tracks)
-                               ? static_cast<std::uint32_t>(track->thread_info->thread_id)
+                               ? static_cast<std::uint64_t>(track->thread_info->thread_id)
                                : 0,
             .event_count = static_cast<std::uint32_t>(std::min<size_t>(
                 track->event_count, std::numeric_limits<std::uint32_t>::max())),
-            .agent_id    = static_cast<std::uint32_t>(track->agent_id),
+            .agent_id    = static_cast<std::uint64_t>(track->agent_id),
             .category    = to_c_track_category(track->category),
-            .queue_id    = static_cast<std::uint32_t>(track->queue_id),
-            .stream_id   = static_cast<std::uint32_t>(track->stream_id),
+            .queue_id    = static_cast<std::uint64_t>(track->queue_id),
+            .stream_id   = static_cast<std::uint64_t>(track->stream_id),
             .start_ts    = static_cast<std::uint64_t>(track->start_ts),
             .end_ts      = static_cast<std::uint64_t>(track->end_ts),
             .value_range = track->value_range ? ph_value_range_t{ track->value_range->min,
@@ -1000,6 +1054,7 @@ ph_ctx::initialize_track_list()
             .thread_row_id  = track->thread_info
                                   ? static_cast<std::uint64_t>(track->thread_info->id)
                                   : 0,
+            .pmc_id = static_cast<std::uint64_t>(track->pmc_id),
         });
     }
 }
@@ -1020,9 +1075,16 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
         if(stop_requested()) return false;
 
         const auto& track = m_track_by_id.at(c_track.id);
-        if(track->category == profiler_hub::reader_types::track_kind_t::pmc_agent)
+        const auto kind = track->category;
+        if(kind == profiler_hub::reader_types::track_kind_t::pmc_agent ||
+           kind == profiler_hub::reader_types::track_kind_t::pmc_kernel ||
+           kind == profiler_hub::reader_types::track_kind_t::pmc_memory)
         {
-            std::ignore = m_track_reader.samples(track, 0, 0);
+            if(kind == profiler_hub::reader_types::track_kind_t::pmc_agent ||
+               kind == profiler_hub::reader_types::track_kind_t::pmc_memory)
+            {
+                std::ignore = m_track_reader.samples(track, 0, 0);
+            }
         }
         else
         {
@@ -1061,7 +1123,7 @@ ph_ctx::initialize_node_info()
     {
         const auto& node = m_nodes[0];
         m_c_node->info   = {
-              .id            = static_cast<uint32_t>(node->node_id),
+              .id            = static_cast<uint64_t>(node->node_id),
               .machine_id    = node->machine_id.c_str(),
               .system_name   = node->system_name.c_str(),
               .hostname      = node->hostname.c_str(),
@@ -1110,7 +1172,7 @@ ph_ctx::initialize_node_agents()
     for(const auto& agent : m_agents)
     {
         m_c_agents.push_back(ph_agent_t{
-            .id             = static_cast<std::uint32_t>(agent->type_index),
+            .id             = static_cast<std::uint64_t>(agent->type_index),
             .agent_type     = agent->agent_type.c_str(),
             .name           = agent->name.c_str(),
             .model_name     = agent->model_name.c_str(),
@@ -1135,7 +1197,7 @@ ph_ctx::initialize_node_processes()
     for(const auto& process : m_processes)
     {
         m_c_processes.push_back(ph_process_t{
-            .id          = static_cast<std::uint32_t>(process->pid),
+            .id          = static_cast<std::uint64_t>(process->pid),
             .command     = process->command.c_str(),
             .environment = process->environment.c_str(),
             .extdata     = process->extdata.c_str(),
@@ -1181,8 +1243,8 @@ ph_ctx::initialize_node_streams()
             .stream_id = static_cast<uint64_t>(stream->stream_id),
             .name      = stream->name.c_str(),
             .extdata   = stream->extdata.c_str(),
-            .nid       = static_cast<uint32_t>(stream->nid),
-            .pid       = static_cast<uint32_t>(stream->pid),
+            .nid       = static_cast<uint64_t>(stream->nid),
+            .pid       = static_cast<uint64_t>(stream->pid),
         });
     }
 }
@@ -1199,8 +1261,8 @@ ph_ctx::initialize_node_queues()
             .queue_id = static_cast<uint64_t>(queue->queue_id),
             .name     = queue->name.c_str(),
             .extdata  = queue->extdata.c_str(),
-            .nid      = static_cast<uint32_t>(queue->nid),
-            .pid      = static_cast<uint32_t>(queue->pid),
+            .nid      = static_cast<uint64_t>(queue->nid),
+            .pid      = static_cast<uint64_t>(queue->pid),
         });
     }
 }
@@ -1244,8 +1306,8 @@ ph_ctx::initialize_stream_hardware_links()
     {
         m_c_stream_hardware_links.push_back(ph_stream_hardware_link_t{
             .category          = to_c_track_category(link.category),
-            .nid               = static_cast<std::uint32_t>(link.nid),
-            .pid               = static_cast<std::uint32_t>(link.pid),
+            .nid               = static_cast<std::uint64_t>(link.nid),
+            .pid               = static_cast<std::uint64_t>(link.pid),
             .stream_id         = static_cast<std::uint64_t>(link.stream_id),
             .agent_id          = optional_uint64(link.agent_id),
             .queue_id          = optional_uint64(link.queue_id),

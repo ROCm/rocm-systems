@@ -1,3 +1,4 @@
+#include "event_query.hpp"
 #include "file_probe_failure.hpp"
 #include "ph_ctx.hpp"
 #include "ph_future.hpp"
@@ -70,7 +71,8 @@ is_duration_event_type(ph_event_type_t type)
         case PH_EVENT_TYPE_REGION:
         case PH_EVENT_TYPE_KERNEL_DISPATCH:
         case PH_EVENT_TYPE_MEMORY_COPY:
-        case PH_EVENT_TYPE_MEMORY_ALLOCATE: return true;
+        case PH_EVENT_TYPE_MEMORY_ALLOCATE:
+        case PH_EVENT_TYPE_HIP_EVENT: return true;
     }
     return false;
 }
@@ -583,5 +585,330 @@ ph_future_free(ph_future_t future)
     return guard_call([future]() {
         return future->release_user_reference() ? PH_RESULT_SUCCESS
                                                 : PH_RESULT_INVALID_ARGUMENT;
+    });
+}
+
+extern "C" struct ph_event_query
+{
+    ph_ctx*                            ctx;
+    profiler_hub::resolved_event_query query;
+};
+
+namespace
+{
+bool
+known_event_type(uint32_t type)
+{
+    return type == PH_EVENT_TYPE_REGION || type == PH_EVENT_TYPE_REGION_SAMPLE ||
+           type == PH_EVENT_TYPE_KERNEL_DISPATCH || type == PH_EVENT_TYPE_MEMORY_COPY ||
+           type == PH_EVENT_TYPE_MEMORY_ALLOCATE || type == PH_EVENT_TYPE_HIP_EVENT ||
+           type == PH_EVENT_TYPE_PMC_COUNTER ||
+           type == PH_EVENT_TYPE_PMC_SAMPLE || type == PH_EVENT_TYPE_MEMORY_ACTIVITY;
+}
+
+std::optional<uint64_t>
+copied_id(ph_optional_uint64_t value)
+{
+    if(value.is_valid == 0)
+    {
+        return std::nullopt;
+    }
+    return value.value;
+}
+
+ph_result_t
+copy_event_filter(const ph_event_filter_t& filter, profiler_hub::resolved_event_query& query)
+{
+    if(filter.size < sizeof(ph_event_filter_t))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+    if((filter.track_count > 0 && filter.tracks == nullptr) ||
+       (filter.event_type_count > 0 && filter.event_types == nullptr) ||
+       (filter.string_filter.search_strings_count > 0 &&
+        filter.string_filter.search_strings == nullptr))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    if(filter.time.is_valid != 0)
+    {
+        query.time = profiler_hub::time_window{ filter.time.start, filter.time.end };
+    }
+    query.node_id          = copied_id(filter.node_id);
+    query.agent_id         = copied_id(filter.agent_id);
+    query.process_id       = copied_id(filter.process_id);
+    query.thread_id        = copied_id(filter.thread_id);
+    query.include_category = filter.string_filter.include_category != 0;
+
+    if(filter.track_count > 0)
+    {
+        query.tracks.assign(filter.tracks, filter.tracks + filter.track_count);
+    }
+    query.event_types.reserve(filter.event_type_count);
+    for(uint32_t index = 0; index < filter.event_type_count; ++index)
+    {
+        if(!known_event_type(filter.event_types[index]))
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        query.event_types.push_back(filter.event_types[index]);
+    }
+
+    query.search_strings.reserve(filter.string_filter.search_strings_count);
+    for(uint32_t index = 0; index < filter.string_filter.search_strings_count; ++index)
+    {
+        const char* text = filter.string_filter.search_strings[index];
+        if(text == nullptr || text[0] == '\0')
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        query.search_strings.emplace_back(text);
+    }
+    return PH_RESULT_SUCCESS;
+}
+}  // namespace
+
+ph_result_t
+ph_event_query_create(ph_ctx_t ctx, const ph_event_filter_t* filter, ph_event_query_t* query)
+{
+    if(query != nullptr)
+    {
+        *query = nullptr;
+    }
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(filter == nullptr || query == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([ctx, filter, query]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        if(ctx->catalog() == nullptr)
+        {
+            return PH_RESULT_INVALID_CONTEXT;
+        }
+
+        auto resolved = std::make_unique<ph_event_query>();
+        resolved->ctx = ctx;
+        if(const auto copied = copy_event_filter(*filter, resolved->query);
+           copied != PH_RESULT_SUCCESS)
+        {
+            return copied;
+        }
+        profiler_hub::resolve_event_query_strings(
+            *ctx->catalog(),
+            resolved->query,
+            filter->string_filter.include_substring != 0,
+            filter->string_filter.partial_matching != 0);
+        *query = resolved.release();
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
+ph_event_query_free(ph_event_query_t query)
+{
+    if(query == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+    delete query;
+    return PH_RESULT_SUCCESS;
+}
+
+ph_result_t
+ph_event_query_read(ph_event_query_t  query,
+                    uint32_t          event_type,
+                    uint64_t          after_id,
+                    uint64_t          last_id,
+                    ph_table_event_t* rows,
+                    uint32_t          capacity,
+                    uint32_t*         count,
+                    ph_future_t       future)
+{
+    if(count != nullptr)
+    {
+        *count = 0;
+    }
+    if(query == nullptr || query->ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(rows == nullptr || count == nullptr || capacity == 0 || !known_event_type(event_type))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call(
+        [query, event_type, after_id, last_id, rows, capacity, count, future]() {
+            if(future != nullptr && future->stop_token().stop_requested())
+            {
+                return PH_RESULT_CANCELLED;
+            }
+            *count = query->ctx->read_table_events(
+                query->query, event_type, after_id, last_id, rows, capacity);
+            if(future != nullptr && future->stop_token().stop_requested())
+            {
+                return PH_RESULT_CANCELLED;
+            }
+            return PH_RESULT_SUCCESS;
+        });
+}
+
+ph_result_t
+ph_event_query_id_span(ph_event_query_t query,
+                       uint32_t         event_type,
+                       uint64_t*        first_id,
+                       uint64_t*        last_id,
+                       ph_future_t      future)
+{
+    if(first_id != nullptr) *first_id = 0;
+    if(last_id != nullptr) *last_id = 0;
+    if(query == nullptr || query->ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(first_id == nullptr || last_id == nullptr || !known_event_type(event_type))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([query, event_type, first_id, last_id, future]() {
+        if(future != nullptr && future->stop_token().stop_requested())
+        {
+            return PH_RESULT_CANCELLED;
+        }
+        uint64_t first = 0;
+        uint64_t last  = 0;
+        if(query->ctx->table_event_id_span(event_type, first, last))
+        {
+            *first_id = first;
+            *last_id  = last;
+        }
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
+ph_lookup_text(ph_ctx_t ctx, uint64_t id, uint32_t kind, const char** text)
+{
+    if(text != nullptr)
+    {
+        *text = nullptr;
+    }
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(text == nullptr ||
+       (kind != PH_TEXT_KIND_STRING && kind != PH_TEXT_KIND_KERNEL_SYMBOL))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([ctx, id, kind, text]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        if(ctx->catalog() == nullptr)
+        {
+            return PH_RESULT_INVALID_CONTEXT;
+        }
+        const auto& catalog = *ctx->catalog();
+        if(kind == PH_TEXT_KIND_STRING)
+        {
+            const auto it = catalog.strings_by_id.find(static_cast<size_t>(id));
+            if(it == catalog.strings_by_id.end())
+            {
+                return PH_RESULT_INVALID_ARGUMENT;
+            }
+            *text = it->second.c_str();
+            return PH_RESULT_SUCCESS;
+        }
+
+        const auto it = catalog.kernel_symbols_by_id.find(static_cast<size_t>(id));
+        if(it == catalog.kernel_symbols_by_id.end() || !it->second)
+        {
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        const auto& symbol = *it->second;
+        *text = symbol.display_name.empty() ? symbol.name.c_str() : symbol.display_name.c_str();
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
+ph_visit_text(ph_ctx_t ctx, uint32_t kind, ph_text_visitor_t visitor, void* user_data)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(visitor == nullptr ||
+       (kind != PH_TEXT_KIND_STRING && kind != PH_TEXT_KIND_KERNEL_SYMBOL))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([ctx, kind, visitor, user_data]() {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        if(ctx->catalog() == nullptr)
+        {
+            return PH_RESULT_INVALID_CONTEXT;
+        }
+        const auto& catalog = *ctx->catalog();
+        if(kind == PH_TEXT_KIND_STRING)
+        {
+            for(const auto& entry : catalog.strings_by_id)
+            {
+                visitor(static_cast<uint64_t>(entry.first), entry.second.c_str(),
+                        user_data);
+            }
+            return PH_RESULT_SUCCESS;
+        }
+
+        for(const auto& entry : catalog.kernel_symbols_by_id)
+        {
+            if(!entry.second)
+            {
+                continue;
+            }
+            const auto& symbol = *entry.second;
+            const char* text   = symbol.display_name.empty() ? symbol.name.c_str()
+                                                             : symbol.display_name.c_str();
+            visitor(static_cast<uint64_t>(entry.first), text, user_data);
+        }
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
+ph_trim_trace(ph_ctx_t    ctx,
+              uint64_t    start_ts,
+              uint64_t    end_ts,
+              const char* output_path,
+              ph_future_t future)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(output_path == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+    return run_operation(ctx, future, [=]() -> ph_result_t {
+        return ctx->trim_trace(start_ts, end_ts, output_path, future);
     });
 }

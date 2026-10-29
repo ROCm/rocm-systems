@@ -11,10 +11,16 @@
 #include <string>
 #include <utility>
 
+extern "C"
+{
+struct ph_table_event;
+}
+
 namespace profiler_hub
 {
 
 class reader_catalog_t;
+struct resolved_event_query;
 
 namespace common
 {
@@ -351,6 +357,22 @@ struct reader_t
      */
     [[nodiscard]] reader_types::event_counts_t get_event_counts(
         const reader_types::time_window_t& window = {}) const;
+
+    /** @brief Fills @p rows with the next page of table events whose id is in
+     *         (@p after_id, @p last_id]. Returns the number written. A short
+     *         page means there are no further rows. */
+    [[nodiscard]] uint32_t read_table_events(const resolved_event_query& query,
+                                             uint32_t                    event_type,
+                                             uint64_t                    after_id,
+                                             uint64_t                    last_id,
+                                             ph_table_event*             rows,
+                                             uint32_t                    capacity);
+
+    /** @brief Reads the smallest and largest row id of the table that holds
+     *         @p event_type. Returns false if the table is empty. */
+    [[nodiscard]] bool table_event_id_span(uint32_t  event_type,
+                                           uint64_t& first_id,
+                                           uint64_t& last_id);
 
 private:
     friend class common::connection;

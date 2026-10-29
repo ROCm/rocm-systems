@@ -27,8 +27,7 @@ extern "C"
      * @return PH_RESULT_SUCCESS when the file is a supported trace,
      *         PH_RESULT_UNSUPPORTED_FILE when it is not a supported format,
      *         PH_RESULT_INVALID_FILE when it is missing, unreadable, or not a
-     *         usable trace, PH_RESULT_UNSUPPORTED_SCHEMA_VERSION when the schema
-     *         version is recognized but not supported, PH_RESULT_INVALID_ARGUMENT
+     *         usable trace, PH_RESULT_INVALID_ARGUMENT
      *         if an argument is null, PH_RESULT_INTERNAL_ERROR on an unexpected
      *         failure.
      * @note The file is opened read-only and is not created or modified.
@@ -48,8 +47,7 @@ extern "C"
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p file_path is null
      *         or @p future already serves an operation,
-     *         PH_RESULT_UNSUPPORTED_FILE, PH_RESULT_INVALID_FILE, or
-     *         PH_RESULT_UNSUPPORTED_SCHEMA_VERSION
+     *         PH_RESULT_UNSUPPORTED_FILE or PH_RESULT_INVALID_FILE
      *         when the file is not a supported trace,
      *         PH_RESULT_CONTEXT_ALLOCATION_FAILED if the context could not be
      *         created or, without a future, the trace could not be read.
@@ -363,7 +361,9 @@ extern "C"
      *       the same track return the same storage, so the array must be
      *       treated as read-only. Samples of a whole track are ordered by
      *       ph_sample_t::timestamp. A request with a time window gets its own
-     *       private storage.
+     *       private storage and includes the nearest sample before the window
+     *       and the nearest sample after it. When no sample follows the
+     *       window, the last value is repeated at the track end.
      */
     ph_result_t ph_get_track_samples(ph_ctx_t          ctx,
                                      uint32_t          track_id,
@@ -450,6 +450,146 @@ extern "C"
      *       future alive until its on_finished callback has returned.
      */
     ph_result_t ph_future_free(ph_future_t future);
+
+    /**
+     * @brief Resolves @p filter against the open trace.
+     *        Search strings are matched in the loaded string table and kernel
+     *        symbol names. Later table reads use those ids.
+     * @param ctx Context whose catalog supplies the string table.
+     * @param filter Filter filled by the caller. filter->size must be
+     *        sizeof(ph_event_filter_t).
+     * @param query Out parameter. Set to null on failure. The caller releases
+     *        a successful query with ph_event_query_free().
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null or the trace is not loaded, PH_RESULT_INVALID_ARGUMENT
+     *         if @p filter or @p query is null, @p filter->size is too small, or
+     *         a list pointer is null while its count is non-zero,
+     *         PH_RESULT_CANCELLED if loading the trace was cancelled.
+     * @note Does not read event rows. A string filter that matches nothing is
+     *       still success; the query then selects no rows.
+     */
+    ph_result_t ph_event_query_create(ph_ctx_t                 ctx,
+                                      const ph_event_filter_t* filter,
+                                      ph_event_query_t*        query);
+
+    /**
+     * @brief Releases a query from ph_event_query_create().
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
+     *         @p query is null.
+     */
+    ph_result_t ph_event_query_free(ph_event_query_t query);
+
+    /**
+     * @brief Reads the next page of table rows for one event type.
+     * @param query Query from ph_event_query_create().
+     * @param event_type ph_event_type_t value. A type the query does not list
+     *        yields a successful empty page.
+     * @param after_id Return rows whose id is greater than this. Pass 0 to
+     *        start. Pass the last returned id to continue.
+     * @param last_id Return rows whose id is not greater than this. Pass
+     *        UINT64_MAX for no upper bound. Ranges from
+     *        ph_event_query_id_span() let several threads read one table.
+     * @param rows Caller-owned buffer. Filled with complete values; nothing
+     *        in a row points at profiler-hub memory.
+     * @param capacity Number of entries @p rows can hold. Must be non-zero.
+     * @param count Out parameter. Set to the number of rows written. A count
+     *        smaller than @p capacity means there are no further rows.
+     * @param future Optional cancellation source. This synchronous call does
+     *        not attach or complete it; it only observes cancellation while
+     *        reading the page.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
+     *         pointer is null, @p capacity is 0, or @p event_type is unknown,
+     *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
+     *         PH_RESULT_CANCELLED if @p future was cancelled.
+     */
+    ph_result_t ph_event_query_read(ph_event_query_t  query,
+                                    uint32_t          event_type,
+                                    uint64_t          after_id,
+                                    uint64_t          last_id,
+                                    ph_table_event_t* rows,
+                                    uint32_t          capacity,
+                                    uint32_t*         count,
+                                    ph_future_t       future);
+
+    /**
+     * @brief Reads the smallest and largest row id of the table that holds
+     *        @p event_type, ignoring the query filter.
+     * @param first_id Out parameter. Set to 0 if the table is empty.
+     * @param last_id Out parameter. Set to 0 if the table is empty.
+     * @param future Optional cancellation source, observed only.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
+     *         pointer is null or @p event_type is unknown,
+     *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
+     *         PH_RESULT_CANCELLED if @p future was cancelled.
+     */
+    ph_result_t ph_event_query_id_span(ph_event_query_t query,
+                                       uint32_t         event_type,
+                                       uint64_t*        first_id,
+                                       uint64_t*        last_id,
+                                       ph_future_t      future);
+
+    /**
+     * @brief Looks up text the trace catalog already loaded.
+     * @param kind PH_TEXT_KIND_STRING or PH_TEXT_KIND_KERNEL_SYMBOL.
+     * @param text Out parameter. Points at catalog memory owned by @p ctx.
+     *        Valid until @p ctx is freed.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
+     *         pointer is null, @p kind is unknown, or @p id is not in the
+     *         catalog, PH_RESULT_INVALID_CONTEXT if @p ctx is null or the
+     *         trace is not loaded.
+     */
+    ph_result_t ph_lookup_text(ph_ctx_t     ctx,
+                               uint64_t     id,
+                               uint32_t     kind,
+                               const char** text);
+
+    /**
+     * @brief Receives one catalog entry from ph_visit_text.
+     * @param text Catalog memory owned by the context. Valid until that
+     *        context is freed.
+     * @param user_data The pointer passed to ph_visit_text.
+     */
+    typedef void (*ph_text_visitor_t)(uint64_t id, const char* text, void* user_data);
+
+    /**
+     * @brief Calls @p visitor once for each catalog entry of @p kind.
+     * @param kind PH_TEXT_KIND_STRING or PH_TEXT_KIND_KERNEL_SYMBOL.
+     * @param user_data Forwarded to every call. May be null.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
+     *         @p visitor is null or @p kind is unknown,
+     *         PH_RESULT_INVALID_CONTEXT if @p ctx is null or the trace is
+     *         not loaded.
+     * @note @p visitor must not free @p ctx or start another operation on it.
+     */
+    ph_result_t ph_visit_text(ph_ctx_t           ctx,
+                              uint32_t           kind,
+                              ph_text_visitor_t  visitor,
+                              void*              user_data);
+
+    /**
+     * @brief Writes a trimmed copy of the trace opened in @p ctx.
+     * @param start_ts Inclusive overlap start, in absolute trace nanoseconds.
+     *        The caller adds the trace origin before calling.
+     * @param end_ts Exclusive overlap end, in absolute trace nanoseconds.
+     * @param output_path File to create. An existing file at this path is
+     *        replaced. It must not be the source trace.
+     * @param future Null to trim before returning. Otherwise a future from
+     *        ph_future_create() that was not passed to an operation yet.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null or the trace failed to load,
+     *         PH_RESULT_INVALID_ARGUMENT if @p output_path is null or names
+     *         the source file, PH_RESULT_INVALID_FILE if the output cannot be
+     *         replaced, PH_RESULT_UNSUPPORTED_FILE if this schema has no trim
+     *         rules, PH_RESULT_CANCELLED if @p future is cancelled.
+     * @note The copy keeps the source schema. Duration rows that overlap the
+     *       window are kept, and rows that belong to those events are kept
+     *       with them. Tables the schema does not describe are copied whole.
+     */
+    ph_result_t ph_trim_trace(ph_ctx_t    ctx,
+                              uint64_t    start_ts,
+                              uint64_t    end_ts,
+                              const char* output_path,
+                              ph_future_t future);
 
 #ifdef __cplusplus
 }

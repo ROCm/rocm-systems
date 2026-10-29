@@ -60,6 +60,21 @@ struct ph_ctx
      *         cancelled, PH_RESULT_INVALID_CONTEXT if it failed.
      */
     [[nodiscard]] ph_result_t wait_until_ready();
+    [[nodiscard]] const std::shared_ptr<profiler_hub::reader_catalog_t>& catalog() const
+    {
+        return m_catalog;
+    }
+
+    [[nodiscard]] uint32_t read_table_events(
+        const profiler_hub::resolved_event_query& query,
+        uint32_t                                  event_type,
+        uint64_t                                  after_id,
+        uint64_t                                  last_id,
+        ph_table_event*                           rows,
+        uint32_t                                  capacity);
+    [[nodiscard]] bool table_event_id_span(uint32_t  event_type,
+                                           uint64_t& first_id,
+                                           uint64_t& last_id);
 
     [[nodiscard]] ph_schema_version_t get_schema_version();
     [[nodiscard]] ph_track_list_t     get_track_list();
@@ -84,6 +99,12 @@ struct ph_ctx
                                                               uint64_t start_ts,
                                                               uint64_t end_ts);
     void build_histogram(uint32_t max_buckets, ph_histogram_t& histogram);
+
+    /** Writes one schema-specific trimmed database. Times are absolute. */
+    [[nodiscard]] ph_result_t trim_trace(uint64_t    start_ts,
+                                         uint64_t    end_ts,
+                                         const char* output_path,
+                                         ph_future*  future);
 
     profiler_hub::common::thread_pool& get_thread_pool() { return m_thread_pool; }
 
@@ -119,8 +140,10 @@ private:
 
     struct accepted_trace_t
     {
-        std::string         path;
-        ph_schema_version_t version;
+        std::string                            path;
+        ph_schema_version_t                    version;
+        profiler_hub::reader_types::trace_schema_t schema{
+            profiler_hub::reader_types::trace_schema_t::unknown };
     };
 
     explicit ph_ctx(accepted_trace_t accepted);
@@ -132,6 +155,8 @@ private:
     std::string                      m_file_path;
     profiler_hub::track_read_options m_read_options;
     ph_schema_version_t              m_schema_version;
+    profiler_hub::reader_types::trace_schema_t m_trace_schema{
+        profiler_hub::reader_types::trace_schema_t::unknown };
 
     std::shared_ptr<profiler_hub::reader_catalog_t> m_catalog;
     profiler_hub::common::connection_pool           m_connection_pool{ m_file_path,

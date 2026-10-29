@@ -90,7 +90,7 @@ static void
 print_node_info(const ph_node_info_t* info)
 {
     printf("\n=== Node ===\n");
-    printf("%-14s %d\n", "id:", info->id);
+    printf("%-14s %llu\n", "id:", (unsigned long long) info->id);
     printf("%-14s %s\n", "machine id:", info->machine_id);
     printf("%-14s %s\n", "system name:", info->system_name);
     printf("%-14s %s\n", "hostname:", info->hostname);
@@ -117,7 +117,7 @@ print_agents(const ph_agent_list_t* agents)
     for(uint32_t i = 0; i < agents->list_size; ++i)
     {
         const ph_agent_t* agent = &agents->agents[i];
-        printf("%-4d %-6s ", agent->id, agent->agent_type);
+        printf("%-4llu %-6s ", (unsigned long long) agent->id, agent->agent_type);
         if(agent->absolute_index.is_valid)
             printf("%-6llu ", (unsigned long long) agent->absolute_index.value);
         else
@@ -146,7 +146,7 @@ print_processes(const ph_process_list_t* processes)
     for(uint32_t i = 0; i < processes->list_size; ++i)
     {
         const ph_process_t* process = &processes->processes[i];
-        printf("%-8d %s\n", process->id, process->command);
+        printf("%-8llu %s\n", (unsigned long long) process->id, process->command);
     }
 }
 
@@ -197,17 +197,17 @@ print_tracks(const ph_track_list_t* tracks, uint32_t limit)
             snprintf(min_text, sizeof(min_text), "%.6g", track->value_range.min);
             snprintf(max_text, sizeof(max_text), "%.6g", track->value_range.max);
         }
-        printf("%-4d %-12d %-8d %-8d %-8d %-8d %-20s %-8d %-8d %-20llu %-20llu %-16s "
-               "%-16s %-8u %s\n",
+        printf("%-4d %-12llu %-8llu %-8llu %-8llu %-8d %-20s %-8llu %-8llu %-20llu "
+               "%-20llu %-16s %-16s %-8u %s\n",
                track->id,
-               track->nid,
-               track->pid,
-               track->tid,
-               track->agent_id,
+               (unsigned long long) track->nid,
+               (unsigned long long) track->pid,
+               (unsigned long long) track->tid,
+               (unsigned long long) track->agent_id,
                track->event_count,
                track_category_name(track->category),
-               track->queue_id,
-               track->stream_id,
+               (unsigned long long) track->queue_id,
+               (unsigned long long) track->stream_id,
                (unsigned long long) track->start_ts,
                (unsigned long long) track->end_ts,
                min_text,
@@ -493,7 +493,6 @@ probe_result_name(ph_result_t result)
         case PH_RESULT_SUCCESS: return "success";
         case PH_RESULT_UNSUPPORTED_FILE: return "unsupported_file";
         case PH_RESULT_INVALID_FILE: return "invalid_file";
-        case PH_RESULT_UNSUPPORTED_SCHEMA_VERSION: return "unsupported_schema_version";
         case PH_RESULT_INVALID_ARGUMENT: return "invalid_argument";
         case PH_RESULT_INTERNAL_ERROR: return "internal_error";
         default: return "error";
