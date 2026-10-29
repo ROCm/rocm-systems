@@ -14,12 +14,12 @@ import threading
 import uuid
 from pathlib import Path
 from threading import Thread
-from typing import Dict, Set
+from typing import Any, Dict, Set
 from unittest.mock import Mock
 
 import config
 from memory_chart.loader import Layouts, PanelConfigs
-from utils import csv_compression
+from utils import csv_compression, metric_library
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
@@ -331,3 +331,16 @@ compute.valu_util:
         inherit = f"inherit: ../{parent}/compute.yaml\n" if parent else ""
         files[arch] = write_text_file(root / arch / "compute.yaml", inherit + text)
     return files
+
+
+def use_metric_library_family(monkeypatch: Any, root: Path) -> Dict[str, Path]:
+    """Write the synthetic family under root and make it the only metric library chain.
+
+    Returns:
+        Each arch's file, keyed by arch.
+    """
+    monkeypatch.setattr(
+        metric_library, "METRIC_LIBRARY_PARENT_ARCH", METRIC_LIBRARY_FAMILY_PARENTS
+    )
+    monkeypatch.setattr(metric_library.MetricLibrary, "_cache", {})
+    return write_metric_library_family(root)
