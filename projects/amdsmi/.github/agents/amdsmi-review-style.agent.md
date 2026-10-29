@@ -1,7 +1,7 @@
 ---
 name: amdsmi-review-style
 description: "Style review subagent. Checks formatting, naming, pre-commit compliance. Use when: style review, formatting check, naming conventions."
-tools: execute/runInTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
+tools: execute/runInTerminal, execute/getTerminalOutput, execute/awaitTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
 model: "Claude Sonnet 5.5"
 user-invocable: false
 ---
@@ -21,6 +21,9 @@ The project uses **pre-commit** hooks. Style violations are **❌ BLOCKING** —
 | CMake | **gersemi** | `.gersemirc` (4-space indent, 120 col) |
 
 Additional hooks: `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files`.
+
+Run `cd "$(git rev-parse --show-toplevel)" && pre-commit run --config projects/amdsmi/.pre-commit-config.yaml --from-ref origin/develop --to-ref HEAD`. The root config skips amdsmi.
+Hooks auto-fix files: list each file pre-commit changed as a finding and leave the fixes in place.
 
 **Load `amdsmi-python-style-guide` skill when reviewing Python files.**
 
