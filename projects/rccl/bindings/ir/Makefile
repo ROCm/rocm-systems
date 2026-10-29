@@ -16,6 +16,7 @@
 # Usage (standalone, from projects/rccl/bindings/ir):
 #     make EMIT_LLVM_IR=1 BITCODE_LIB_ARCH=gfx942
 #     make EMIT_LLVM_IR=1 RCCL_ROOT=/path/to/projects/rccl BUILDDIR=/path/to/build
+#     make EMIT_LLVM_IR=0 NCCL_EMIT_LTO_IR=1 LTO_IR_ARCH=gfx942 ltoir
 #
 # Prerequisites:
 #   - ROCm LLVM toolchain (clang++, opt, llvm-dis, llvm-as) under
@@ -34,6 +35,19 @@
 # bindings/ir/Makefile has no guard at all -- and `make NCCL_EMIT_LTO_IR=1`
 # with EMIT_LLVM_IR=0 has to work.
 ##########################################################################
+
+##### Knob defaults #####
+# EMIT_LLVM_IR deliberately has no default here: standalone `make llvm_ir`
+# has always worked with the knob unset, and that stays true.
+#
+# NCCL_EMIT_LTO_IR is opt-in, matching the only other two places it is
+# spelled: `NCCL_EMIT_LTO_IR ?= 0` in projects/rccl/Makefile and
+# `option(NCCL_EMIT_LTO_IR ... OFF)` in projects/rccl/CMakeLists.txt.
+# Without this default, `$(NCCL_EMIT_LTO_IR)` expands to the empty string
+# when unset, `ifneq ($(NCCL_EMIT_LTO_IR), 0)` is true, and the plain
+# `make build` that used to produce only librccl_device.bc would silently
+# start producing a 12 MB librccl_device.ltoir as well.
+NCCL_EMIT_LTO_IR ?= 0
 
 ##### Source #####
 LLVM_SRC := nccl_device_wrapper__impl.h
