@@ -4741,12 +4741,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
             (info->count % (size_t)comm->nRanks != 0) || !rcclCeAllReduceEnabled(comm)) {
           ceAvailable = false;
         } else if (ceAllReduceOpSupported) {
-          // Unregistered 2-shot: table/env cap of 0 disables it; otherwise the
-          // message must fit the 2-shot window and the allocated buffer.
+          // Unregistered 2-shot: computed via rcclCeArNonRegCap (safe before ncclCeInit);
+          // returns 0 when disabled, NCCL_CE_AR_TMPBUF_DEFAULT_BYTES under ZERO policy
+          // for placeholder arches (e.g. gfx950 ceNonRegMax[AR]=0).
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          const size_t twoShotMax = rcclCeAr2ShotMax(comm);
+          const size_t twoShotMax = rcclCeArNonRegCap(comm);
           const size_t twoShotMin = rcclCeAr2ShotMin(comm);
-          if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) || totalBytes > comm->ceColl.ceArMaxBytes ||
+          if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) ||
               !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1 ||
               !ncclCeImplemented(info->coll, info->op, info->datatype) || !ncclDevrIsOneLsaTeam(comm)) {
             ceAllReduceFits = false;

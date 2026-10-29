@@ -451,6 +451,12 @@ void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
 }
 void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
+bool rcclCeAllReduceEnabled(const struct ncclComm*) {
+  if (g_rcclParamCeAllReduce >= 0) return g_rcclParamCeAllReduce != 0;
+  return true;  // arch default: enabled
+}
+bool rcclForceCeAllReduceEnabled(const struct ncclComm*) { return false; }
+
 // ===========================================================================
 // Fail-loud floor -- rccl_wrap.cc entry points no host-only microtest executes.
 // Reaching one aborts AND names itself on stderr, which is the point: an unfaked
@@ -467,22 +473,14 @@ void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rc
 void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
 }
-// taskAppend's CE arms (src/enqueue/enqueue.cc) read the next six. They fail loud unless a test opts in with
-// g_rcclTaskAppendCeFaked; then CE AllReduce and the CE AllGather window are off, and forced CE-Scratch and
-// NCCL_ALGO answer from their seams.
+// taskAppend's CE arms (src/enqueue/enqueue.cc) read the next four. They fail loud unless a test opts in with
+// g_rcclTaskAppendCeFaked; then the CE 2-shot cap is 0 and the CE AllGather window is off, and forced CE-Scratch
+// and NCCL_ALGO answer from their seams.
 bool g_rcclTaskAppendCeFaked = false;
 bool g_rcclForceCeScratchEnabled = false;
 bool g_rcclNcclAlgoEnvIsSet = false;
 static void TaskAppendCeFakedOrFailLoud(const char* fn) {
   if (!g_rcclTaskAppendCeFaked) FailLoudUnfaked("rccl_wrap_fakes", fn);
-}
-bool rcclCeAllReduceEnabled(const ncclComm*) {
-  TaskAppendCeFakedOrFailLoud("rcclCeAllReduceEnabled");
-  return false;
-}
-bool rcclForceCeAllReduceEnabled(const ncclComm*) {
-  TaskAppendCeFakedOrFailLoud("rcclForceCeAllReduceEnabled");
-  return false;
 }
 bool rcclForceCeScratchEnabled(const ncclComm*) {
   TaskAppendCeFakedOrFailLoud("rcclForceCeScratchEnabled");
@@ -491,6 +489,9 @@ bool rcclForceCeScratchEnabled(const ncclComm*) {
 size_t rcclCeAr2ShotMax(const ncclComm*) {
   TaskAppendCeFakedOrFailLoud("rcclCeAr2ShotMax");
   return 0;
+}
+size_t rcclCeArNonRegCap(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
 }
 size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");

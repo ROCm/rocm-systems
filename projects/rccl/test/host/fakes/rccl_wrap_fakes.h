@@ -170,7 +170,7 @@ extern bool g_rcclAlltoAllInPlaceGuardRegisteredCe;
 extern bool g_rcclAlltoAllRegisteredCeRefused;
 
 // taskAppend's CE arms: fail loud until g_rcclTaskAppendCeFaked; then rcclForceCeScratchEnabled and
-// rcclNcclAlgoEnvIsSet answer these, and CE AllReduce / the CE AllGather window are off.
+// rcclNcclAlgoEnvIsSet answer these, and the CE 2-shot cap / CE AllGather window are off.
 extern bool g_rcclTaskAppendCeFaked;
 extern bool g_rcclForceCeScratchEnabled;
 extern bool g_rcclNcclAlgoEnvIsSet;
