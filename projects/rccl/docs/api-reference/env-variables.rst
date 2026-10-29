@@ -805,19 +805,28 @@ These variables only take effect when the IB-CAST net plugin is loaded
 
     * - | ``RCCL_IB_QP_SCHED_ENABLE``
         | Enables the CAST QP scheduler.
-      - | ``-1``: Auto (default). Disabled unless ``NCCL_NET=IB-CAST`` is set,
-          which forces it on. Can be explicitly overridden regardless of
-          ``NCCL_NET``. Stays disabled, even with ``NCCL_NET=IB-CAST``, when
-          the connection's receiver matching scheme resolves to ``BY_ORDER``
-          — the default on AINIC, since CTS offload is enabled there by
-          default.
+      - | ``-1``: Auto (default). Enabled by default when
+          ``NCCL_NET=IB-CAST`` is set explicitly. Disabled by default
+          otherwise — on AINIC with ``NCCL_NET`` unset, or with
+          ``NCCL_NET=ROCM-IB`` — override either with
+          ``RCCL_IB_QP_SCHED_ENABLE=1``. Independent of that rule, disabled
+          whenever the connection resolves to ``BY_ORDER`` receive matching.
+          ``BY_ORDER`` is AINIC's default scheme for two reasons: CTS
+          offload (on by default for non-P2P AINIC connections) forces it,
+          and it's also the AINIC RoCE fallback even without CTS offload —
+          unless QP sharing, out-of-order receive queues, or port
+          failover/recovery force ``BY_ID`` instead, or
+          ``NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME`` is set explicitly.
         | ``0``: Force off.
-        | ``1``: Force on, except the scheduler is still disabled (with an
-          ``INFO`` log, not a warning) when port failover/recovery
+        | ``1``: Force on. On a ``BY_ORDER`` connection the scheduler still
+          reports "enabled", but WRR and split-data are no-ops there either
+          way, so it can't actually rebalance traffic — an unsupported
+          combination, flagged with a ``WARN`` instead of failing silently.
+        | Independent of the value above, the scheduler is always disabled
+          (``INFO`` log, not a ``WARN``) when port failover/recovery
           (``NCCL_IB_RESILIENCY_PORT_FAILOVER``/``_PORT_RECOVERY``) or QP
-          sharing (``RCCL_IB_QP_SHARING_ENABLE``) is enabled. On a
-          ``BY_ORDER`` comm it instead reports enabled (with a ``WARN``), but
-          WRR and split-data never run — an unsupported combination.
+          sharing (``RCCL_IB_QP_SHARING_ENABLE``) is active — load-balancer
+          integration with those features is still pending.
 
     * - | ``RCCL_IB_QP_SCHED_RESET_INTERVAL``
         | Interval at which accumulated RTT statistics are reset, to prevent
