@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/entry_prologue.h"
+#include "rocjitsu/code/patch/error_report.h"
 
 #include "rocjitsu/code/analysis/free_registers.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -158,10 +159,7 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
   prologue.original_kernarg_pointer_offset = layout->original_kernarg_pointer_offset;
 
   // TODO: Accept a DiagnosticEmitter in the prologue APIs and remove this error_out adapter.
-  auto record_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      error_out->assign(message);
-  };
+  OptionalStringDiagnosticSink record_error(error_out);
   const util::DiagnosticEmitter error(record_error);
   // Delegated failures use the adapter to populate error_out before returning failure.
   const auto offset_max = max_smem_byte_offset(arch, &error);

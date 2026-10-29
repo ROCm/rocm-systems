@@ -50,7 +50,8 @@ static_assert(cdna3::OPR_SSRC_SRC_LITERAL == kScalarSrcLiteral &&
 }
 
 /// @brief Encode `s_bcnt1_i32_b64 s<sdst>, s[ssrc0:ssrc0+1]`.
-/// @return Failure when the scalar operands do not fit their encoding fields.
+/// @return The encoded word on success, or failure for an unsupported architecture or
+/// scalar operands that do not fit their encoding fields.
 inline util::FailureOr<uint32_t> build_s_bcnt1_i32_b64(uint16_t sdst, uint16_t ssrc0,
                                                        rj_code_arch_t arch) {
   switch (arch) {
@@ -61,7 +62,7 @@ inline util::FailureOr<uint32_t> build_s_bcnt1_i32_b64(uint16_t sdst, uint16_t s
   case ROCJITSU_CODE_ARCH_RDNA4:
     return build_sop1_encoding(arch, rdna4::kSBcnt1I32B64Sop1, sdst, ssrc0);
   default:
-    throw util::UnimplementedInst("s_bcnt1_i32_b64 for target architecture");
+    return util::Result::failure();
   }
 }
 
@@ -69,7 +70,8 @@ inline util::FailureOr<uint32_t> build_s_bcnt1_i32_b64(uint16_t sdst, uint16_t s
 ///        s<sdst>, or -1 when none is set.
 /// @details `s_ff1_i32_b64` on CDNA; RDNA4 renames it `s_ctz_i32_b64`. Both store
 /// -1 for a zero input.
-/// @return Failure when the scalar operands do not fit their encoding fields.
+/// @return The encoded word on success, or failure for an unsupported architecture or
+/// scalar operands that do not fit their encoding fields.
 inline util::FailureOr<uint32_t> build_s_first_set_bit_b64(uint16_t sdst, uint16_t ssrc0,
                                                            rj_code_arch_t arch) {
   switch (arch) {
@@ -80,12 +82,13 @@ inline util::FailureOr<uint32_t> build_s_first_set_bit_b64(uint16_t sdst, uint16
   case ROCJITSU_CODE_ARCH_RDNA4:
     return build_sop1_encoding(arch, rdna4::kSCtzI32B64Sop1, sdst, ssrc0);
   default:
-    throw util::UnimplementedInst("s_ff1_i32_b64 for target architecture");
+    return util::Result::failure();
   }
 }
 
 /// @brief Encode `s_and_b32 s<sdst>, ssrc0, ssrc1`.
-/// @return Failure when the scalar operands do not fit their encoding fields.
+/// @return The encoded word on success, or failure for an unsupported architecture or
+/// scalar operands that do not fit their encoding fields.
 inline util::FailureOr<uint32_t> build_s_and_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1,
                                                  rj_code_arch_t arch) {
   switch (arch) {
@@ -96,12 +99,13 @@ inline util::FailureOr<uint32_t> build_s_and_b32(uint16_t sdst, uint16_t ssrc0, 
   case ROCJITSU_CODE_ARCH_RDNA4:
     return build_sop2_encoding(arch, rdna4::kSAndB32Sop2, sdst, ssrc0, ssrc1);
   default:
-    throw util::UnimplementedInst("s_and_b32 for target architecture");
+    return util::Result::failure();
   }
 }
 
 /// @brief Encode `s_cbranch_scc1` when @p scc1, else `s_cbranch_scc0`, branching
 ///        @p offset_dwords from the next instruction.
+/// @return The encoded word on success, or failure for an unsupported architecture.
 inline util::FailureOr<uint32_t> build_s_cbranch_scc(bool scc1, int16_t offset_dwords,
                                                      rj_code_arch_t arch) {
   const auto offset = static_cast<uint16_t>(offset_dwords);
@@ -116,7 +120,7 @@ inline util::FailureOr<uint32_t> build_s_cbranch_scc(bool scc1, int16_t offset_d
     return build_sopp_encoding(arch, scc1 ? rdna4::kSCbranchScc1Sopp : rdna4::kSCbranchScc0Sopp,
                                offset);
   default:
-    throw util::UnimplementedInst("s_cbranch_scc for target architecture");
+    return util::Result::failure();
   }
 }
 

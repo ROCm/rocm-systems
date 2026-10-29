@@ -164,6 +164,15 @@ TEST(InstructionBuilder, ScalarLayoutsRejectEveryOversizedFieldBeforeNarrowing) 
         ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
         ROCJITSU_CODE_ARCH_RDNA4}) {
     SCOPED_TRACE(static_cast<int>(arch));
+    std::string message;
+    auto record = [&](std::string_view text) { message = text; };
+    const util::DiagnosticEmitter error(record);
+    util::FailureOr<uint32_t> sopp = build_sopp_encoding(arch, 0x7f, 0);
+    ASSERT_TRUE(sopp.succeeded());
+    EXPECT_EQ(sopp.value(), pack_sopp(0x7f, 0));
+    EXPECT_TRUE(build_sopp_encoding(arch, 0x80, 0).failed());
+    EXPECT_TRUE(build_sopp_encoding(arch, 0x80, 0, &error).failed());
+    EXPECT_EQ(message, "SOPP encoding field out of range");
     EXPECT_TRUE(build_sop1_encoding(arch, 256, 0, 0).failed());
     EXPECT_TRUE(build_sop1_encoding(arch, 0, 128, 0).failed());
     EXPECT_TRUE(build_sop1_encoding(arch, 0, 0, 256).failed());
@@ -219,13 +228,20 @@ TEST(InstructionBuilder, UnsupportedPaddingAndIslandPoolLeaveOutputsUnchanged) {
   const std::vector<uint8_t> original{1, 2, 3, 4};
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_INVALID}) {
     std::vector<uint8_t> text = original;
-    ASSERT_NO_THROW(EXPECT_TRUE(append_nop_padding(text, 8, arch).failed()));
+    std::string message;
+    auto record = [&](std::string_view text) { message = text; };
+    const util::DiagnosticEmitter error(record);
+    ASSERT_NO_THROW(EXPECT_TRUE(append_nop_padding(text, 8, arch, &error).failed()));
+    EXPECT_EQ(message, "Unimplemented instruction: s_nop for target architecture");
+    message.clear();
     EXPECT_EQ(text, original);
     KernelTextLayout layout;
     layout.branch_island_slots = {42};
-    ASSERT_NO_THROW(EXPECT_TRUE(append_direct_branch_island_pool(text, layout, arch).failed()));
+    ASSERT_NO_THROW(
+        EXPECT_TRUE(append_direct_branch_island_pool(text, layout, arch, &error).failed()));
     EXPECT_EQ(text, original);
     EXPECT_EQ(layout.branch_island_slots, std::vector<uint64_t>{42});
+    EXPECT_EQ(message, "Unimplemented instruction: s_nop for target architecture");
     ASSERT_NO_THROW(EXPECT_FALSE(append_skipped_kernel_stub(text, {}, arch).ok));
     EXPECT_EQ(text, original);
   }

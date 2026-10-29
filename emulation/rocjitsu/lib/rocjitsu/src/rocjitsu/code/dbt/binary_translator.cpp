@@ -1492,11 +1492,14 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     bool require_every_text_symbol_mapped,
     const std::unordered_map<uint64_t, uint64_t> &canonical_code_pointer_placement,
     std::vector<TranslationDiagnostic> &diagnostics) {
+  auto record_builder_error = [&](std::string_view message) {
+    append_error(diagnostics, DiagnosticKind::Legalization, std::string(message));
+  };
+  const util::DiagnosticEmitter builder_error(record_builder_error);
   if (translated_text.size() < original_text_size &&
-      append_nop_padding(translated_text, original_text_size - translated_text.size(), host_arch)
+      append_nop_padding(translated_text, original_text_size - translated_text.size(), host_arch,
+                         &builder_error)
           .failed()) {
-    append_error(diagnostics, DiagnosticKind::Legalization,
-                 "Unimplemented instruction: s_nop for target architecture");
     return std::nullopt;
   }
 
@@ -3966,9 +3969,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .return_sreg = source_fixup.source_return_sreg,
                .is_call = source_fixup.source_is_call,
                .preserve_marked_long_transfer = true});
-          if (append_nop_padding(kernel_text, window_bytes, host_arch_).failed()) {
-            append_error(result.diagnostics, DiagnosticKind::Legalization,
-                         "Unimplemented instruction: s_nop for target architecture");
+          if (append_nop_padding(kernel_text, window_bytes, host_arch_, &builder_error).failed()) {
             return leave_unchanged();
           }
           active_marked_long_transfer = {
@@ -4132,10 +4133,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .target_inst_offset = target_offset,
                .target_window_bytes = branch_window_bytes,
                .translated_words = target_words});
-          if (append_nop_padding(kernel_text, branch_window_bytes - inst.size(), host_arch_)
+          if (append_nop_padding(kernel_text, branch_window_bytes - inst.size(), host_arch_,
+                                 &builder_error)
                   .failed()) {
-            append_error(result.diagnostics, DiagnosticKind::Legalization,
-                         "Unimplemented instruction: s_nop for target architecture");
             return leave_unchanged();
           }
           queue_trace(pending_traces, inst, offset, branch_leg, copied_original, false, changed,
@@ -4153,9 +4153,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .return_sreg = source_fixup.source_return_sreg,
                .is_call = source_fixup.source_is_call,
                .keep_dynamic_when_long = recovered_it->second.builder_is_contiguous});
-          if (append_nop_padding(kernel_text, sizeof(uint32_t), host_arch_).failed()) {
-            append_error(result.diagnostics, DiagnosticKind::Legalization,
-                         "Unimplemented instruction: s_nop for target architecture");
+          if (append_nop_padding(kernel_text, sizeof(uint32_t), host_arch_, &builder_error)
+                  .failed()) {
             return leave_unchanged();
           }
           continue;
@@ -4431,9 +4430,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       target_offset_by_source_offset.emplace(block->end_offset(), placement.target_end);
       if (!can_use_long_direct_branches && !preserve_generated_branch_island_pools &&
           block != scope.blocks.back() && kernel_text.size() >= next_branch_island_pool_offset) {
-        if (append_direct_branch_island_pool(kernel_text, layout, host_arch_).failed()) {
-          append_error(result.diagnostics, DiagnosticKind::Legalization,
-                       "Unimplemented instruction: s_nop for target architecture");
+        if (append_direct_branch_island_pool(kernel_text, layout, host_arch_, &builder_error)
+                .failed()) {
           return leave_unchanged();
         }
         next_branch_island_pool_offset = next_direct_branch_island_pool_offset(kernel_text.size());

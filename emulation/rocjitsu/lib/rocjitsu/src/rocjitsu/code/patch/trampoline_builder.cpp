@@ -211,10 +211,7 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
 
 std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &plan,
                                                         std::string *error_out) {
-  auto record_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      error_out->assign(message);
-  };
+  OptionalStringDiagnosticSink record_error(error_out);
   const util::DiagnosticEmitter error(record_error);
 
   if (!check_size_and_words(plan, error_out))
@@ -270,10 +267,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
                                         const RegisterSet &live_at_anchor,
                                         const RegisterSet &probe_body_clobbers,
                                         std::string *error_out) {
-  auto record_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      error_out->assign(message);
-  };
+  OptionalStringDiagnosticSink record_error(error_out);
   const util::DiagnosticEmitter error(record_error);
 
   // The link pair is whatever the probe's calling convention returns through,
@@ -518,10 +512,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
 
 std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const TrampolinePlan &plan,
                                                                   std::string *error_out) {
-  auto record_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      error_out->assign(message);
-  };
+  OptionalStringDiagnosticSink record_error(error_out);
   const util::DiagnosticEmitter error(record_error);
 
   if (!plan.is_probe_call) {

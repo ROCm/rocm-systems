@@ -702,11 +702,11 @@ bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const AmdGpuCodeObjec
 std::optional<TrampolinePlan> make_trampoline_plan(const ResolvedInstrumentationSite &site,
                                                    rj_code_arch_t arch, uint64_t trampoline_offset,
                                                    std::string *error_out) {
-  util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
-  if (nop.failed()) {
-    report(error_out, "Unimplemented instruction: s_nop for target architecture");
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> nop = build_s_nop(0, arch, &error);
+  if (nop.failed())
     return std::nullopt;
-  }
   TrampolinePlan plan = make_base_plan(site, arch, trampoline_offset);
   plan.before_items = {InlineAsmItem{{nop.value()}}};
   plan.after_items = {};
@@ -1544,8 +1544,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   for (const ProbeCallable &probe : resolved.probes)
     append_words(new_text, probe.body_words);
   if (entry_patch) {
-    if (append_nop_padding(new_text, entry_patch->padding_bytes, arch_).failed()) {
-      result.errors.emplace_back("Unimplemented instruction: s_nop for target architecture");
+    auto record_error = [&](std::string_view message) { result.errors.emplace_back(message); };
+    const util::DiagnosticEmitter error(record_error);
+    if (append_nop_padding(new_text, entry_patch->padding_bytes, arch_, &error).failed()) {
       return result;
     }
     append_words(new_text, entry_patch->words);

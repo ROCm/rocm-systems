@@ -117,11 +117,15 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 }
 
 /// @brief Build a SOPP word using the generated layout for @p arch.
-/// @returns Failure for a non-AMDGPU architecture.
-/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
                     const util::DiagnosticEmitter *error = nullptr) {
+  if (op > 0x7Fu)
+    return error != nullptr ? error->emit() << "SOPP encoding field out of range"
+                            : util::Result::failure();
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::build_sopp(op, {.simm16 = simm16})[0];
@@ -150,8 +154,9 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 }
 
 /// @brief Build a SOP1 word using the generated layout for @p arch.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_sop1_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ssrc0,
                     const util::DiagnosticEmitter *error = nullptr) {
@@ -197,8 +202,9 @@ build_sop1_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ss
 }
 
 /// @brief Build a SOP2 word using the generated layout for @p arch.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_sop2_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1,
                     const util::DiagnosticEmitter *error = nullptr) {
@@ -262,8 +268,9 @@ build_sop2_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ss
 }
 
 /// @brief Build a SOPC word using the generated layout for @p arch.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_sopc_encoding(rj_code_arch_t arch, uint16_t op, uint16_t ssrc0, uint16_t ssrc1,
                     const util::DiagnosticEmitter *error = nullptr) {
@@ -314,8 +321,9 @@ build_sopc_encoding(rj_code_arch_t arch, uint16_t op, uint16_t ssrc0, uint16_t s
 }
 
 /// @brief Build a SOPK word using the generated layout for @p arch.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_sopk_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t simm16,
                     const util::DiagnosticEmitter *error = nullptr) {
@@ -845,8 +853,8 @@ sopc_op_cmp_lg_u32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = n
 ///
 /// @param offset_dwords  Signed offset in dwords from (PC + 4).
 /// @param arch           Target ISA architecture.
-/// @returns The encoded 32-bit instruction word.
-/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_branch(int16_t offset_dwords, rj_code_arch_t arch,
                const util::DiagnosticEmitter *error = nullptr) {
@@ -857,8 +865,9 @@ build_s_branch(int16_t offset_dwords, rj_code_arch_t arch,
 }
 
 /// @brief Encode an s_getpc_b64 instruction for the given target ISA.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_getpc_b64(uint16_t sdst, rj_code_arch_t arch,
                   const util::DiagnosticEmitter *error = nullptr) {
@@ -872,8 +881,9 @@ build_s_getpc_b64(uint16_t sdst, rj_code_arch_t arch,
 }
 
 /// @brief Encode an s_setpc_b64 instruction for the given target ISA.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_setpc_b64(uint16_t ssrc0, rj_code_arch_t arch,
                   const util::DiagnosticEmitter *error = nullptr) {
@@ -887,8 +897,9 @@ build_s_setpc_b64(uint16_t ssrc0, rj_code_arch_t arch,
 }
 
 /// @brief Encode an s_swappc_b64 instruction for the given target ISA.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
                    const util::DiagnosticEmitter *error = nullptr) {
@@ -902,8 +913,9 @@ build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
 }
 
 /// @brief Encode an s_call_b64 instruction for the given target ISA.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rj_code_arch_t arch,
                  const util::DiagnosticEmitter *error = nullptr) {
@@ -950,8 +962,8 @@ build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rj_code_arch_t arch,
 ///
 /// @param cycles  Number of additional stall cycles (0-based).
 /// @param arch    Target ISA architecture.
-/// @returns The encoded 32-bit instruction word.
-/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4,
             const util::DiagnosticEmitter *error = nullptr) {
@@ -964,8 +976,8 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4,
 /// @brief Encode an s_endpgm instruction for the given target ISA.
 ///
 /// @param arch    Target ISA architecture.
-/// @returns The encoded 32-bit instruction word.
-/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_endpgm(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopp_op_endpgm(arch, error);
@@ -977,7 +989,8 @@ build_s_endpgm(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullp
 /// @brief Encode an s_trap instruction for the given target ISA.
 ///
 /// @details The immediate is a caller-defined trap code, not a printable message.
-/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_trap(rj_code_arch_t arch, uint16_t simm16 = 0,
              const util::DiagnosticEmitter *error = nullptr) {
@@ -989,7 +1002,7 @@ build_s_trap(rj_code_arch_t arch, uint16_t simm16 = 0,
 
 /// @brief Encode s_delay_alu for the given target ISA.
 /// @returns Failure when the target ISA has no s_delay_alu encoding.
-/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 [[nodiscard]] inline constexpr util::FailureOr<uint32_t>
 build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch,
                   const util::DiagnosticEmitter *error = nullptr) {
@@ -1013,8 +1026,9 @@ build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch,
 }
 
 /// @brief Encode s_mov_b32 for the given target ISA.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_mov_b32(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
                 const util::DiagnosticEmitter *error = nullptr) {
@@ -1028,8 +1042,9 @@ build_s_mov_b32(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
 }
 
 /// @brief Encode s_mov_b64 for the given target ISA (SGPR pair or EXEC/VCC).
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
                 const util::DiagnosticEmitter *error = nullptr) {
@@ -1043,8 +1058,9 @@ build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
 }
 
 /// @brief Encode s_lshl_b32 for the given target ISA.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
                  const util::DiagnosticEmitter *error = nullptr) {
@@ -1058,8 +1074,9 @@ build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t a
 }
 
 /// @brief Encode s_lshr_b32 for the given target ISA.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_lshr_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
                  const util::DiagnosticEmitter *error = nullptr) {
@@ -1073,8 +1090,9 @@ build_s_lshr_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t a
 }
 
 /// @brief Encode s_add_u32 for the given target ISA (SOP2 opcode 0, all gens).
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_add_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
                 const util::DiagnosticEmitter *error = nullptr) {
@@ -1086,8 +1104,9 @@ build_s_add_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t ar
 }
 
 /// @brief Encode s_addc_u32 for the given target ISA (SOP2 opcode 4, all gens).
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_addc_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
                  const util::DiagnosticEmitter *error = nullptr) {
@@ -1099,8 +1118,9 @@ build_s_addc_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t a
 }
 
 /// @brief Encode s_cselect_b32 for the given target ISA.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
                     const util::DiagnosticEmitter *error = nullptr) {
@@ -1114,8 +1134,9 @@ build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_
 }
 
 /// @brief Encode s_cmp_lg_u32 for the given target ISA.
-/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
-/// when @p error is supplied.
+/// @returns The encoded word on success, or failure for an unsupported architecture or
+/// an unrepresentable field.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
 build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
                    const util::DiagnosticEmitter *error = nullptr) {

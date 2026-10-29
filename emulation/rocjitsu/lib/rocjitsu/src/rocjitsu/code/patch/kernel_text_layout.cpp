@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
@@ -92,12 +93,12 @@ void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words) {
 }
 
 util::Result append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count,
-                                rj_code_arch_t arch) {
+                                rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
   assert(byte_count % sizeof(uint32_t) == 0 && "padding must be word-aligned");
   if (byte_count == 0)
     return util::Result::success();
 
-  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch, error);
   if (maybe_nop.failed())
     return util::Result::failure();
   const uint32_t nop = maybe_nop.value();
@@ -207,16 +208,17 @@ void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta) {
 KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
                                                   const SkippedKernelLayoutPlan &plan,
                                                   rj_code_arch_t arch) {
-  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(arch);
+  std::string builder_message;
+  OptionalStringDiagnosticSink record_error(&builder_message);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(arch, &error);
   if (maybe_endpgm.failed())
-    return kernel_text_append_error(plan.source_entry,
-                                    "Unimplemented instruction: s_endpgm for target architecture");
+    return kernel_text_append_error(plan.source_entry, builder_message);
   const uint64_t source_entry = plan.source_entry;
   const uint64_t padding =
       padding_for_residue(text.size(), source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
-  if (append_nop_padding(text, padding, arch).failed())
-    return kernel_text_append_error(source_entry,
-                                    "Unimplemented instruction: s_nop for target architecture");
+  if (append_nop_padding(text, padding, arch, &error).failed())
+    return kernel_text_append_error(source_entry, builder_message);
   const uint64_t target_entry = text.size();
 
   // Keep skipped symbols loadable without placing guest ISA bytes in the
@@ -228,9 +230,9 @@ KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
   const uint32_t endpgm = maybe_endpgm.value();
   append_words(text, std::span<const uint32_t>(&endpgm, 1));
   if (plan.has_kernarg_preload_firmware_skip) {
-    if (append_nop_padding(text, kKernargPreloadSkipBytes - sizeof(uint32_t), arch).failed())
-      return kernel_text_append_error(source_entry,
-                                      "Unimplemented instruction: s_nop for target architecture");
+    if (append_nop_padding(text, kKernargPreloadSkipBytes - sizeof(uint32_t), arch, &error)
+            .failed())
+      return kernel_text_append_error(source_entry, builder_message);
     append_words(text, std::span<const uint32_t>(&endpgm, 1));
   }
 
@@ -241,9 +243,11 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
                                                     KernelTextLayout &layout,
                                                     std::span<const uint8_t> kernel_text,
                                                     rj_code_arch_t arch) {
-  if (build_s_nop(0, arch).failed())
-    return kernel_text_append_error(layout.source_entry,
-                                    "Unimplemented instruction: s_nop for target architecture");
+  std::string builder_message;
+  OptionalStringDiagnosticSink record_error(&builder_message);
+  const util::DiagnosticEmitter error(record_error);
+  if (build_s_nop(0, arch, &error).failed())
+    return kernel_text_append_error(layout.source_entry, builder_message);
   auto body_entry = target_for_source_offset(layout, layout.source_entry);
   if (!body_entry) {
     return kernel_text_append_error(
@@ -278,15 +282,14 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     // the stubs are written after the body offsets have been rebased.
     const uint64_t launch_padding = padding_for_residue(
         translated_text.size(), layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
-    if (append_nop_padding(translated_text, launch_padding, arch).failed())
-      return kernel_text_append_error(layout.source_entry,
-                                      "Unimplemented instruction: s_nop for target architecture");
+    if (append_nop_padding(translated_text, launch_padding, arch, &error).failed())
+      return kernel_text_append_error(layout.source_entry, builder_message);
     layout.target_entry = translated_text.size();
     const uint64_t launch_end =
         layout.target_entry + kKernargPreloadSkipBytes + kernel_entry_stub_bytes(layout.entry_plan);
-    if (append_nop_padding(translated_text, launch_end - translated_text.size(), arch).failed())
-      return kernel_text_append_error(layout.source_entry,
-                                      "Unimplemented instruction: s_nop for target architecture");
+    if (append_nop_padding(translated_text, launch_end - translated_text.size(), arch, &error)
+            .failed())
+      return kernel_text_append_error(layout.source_entry, builder_message);
     target_delta = translated_text.size();
   } else if (has_descriptor_prologue) {
     // Descriptor ABI prologues are hardware-visible entry stubs. Place the stub
@@ -297,28 +300,25 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     // preserves the body placement invariant used by kernels without prologues.
     const uint64_t launch_padding = padding_for_residue(
         translated_text.size(), layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
-    if (append_nop_padding(translated_text, launch_padding, arch).failed())
-      return kernel_text_append_error(layout.source_entry,
-                                      "Unimplemented instruction: s_nop for target architecture");
+    if (append_nop_padding(translated_text, launch_padding, arch, &error).failed())
+      return kernel_text_append_error(layout.source_entry, builder_message);
     layout.target_entry = translated_text.size();
     const uint64_t launch_end = layout.target_entry + kernel_entry_stub_bytes(layout.entry_plan);
-    if (append_nop_padding(translated_text, launch_end - translated_text.size(), arch).failed())
-      return kernel_text_append_error(layout.source_entry,
-                                      "Unimplemented instruction: s_nop for target architecture");
+    if (append_nop_padding(translated_text, launch_end - translated_text.size(), arch, &error)
+            .failed())
+      return kernel_text_append_error(layout.source_entry, builder_message);
     const uint64_t body_padding =
         padding_for_residue(translated_text.size() + layout.target_body_entry,
                             layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
-    if (append_nop_padding(translated_text, body_padding, arch).failed())
-      return kernel_text_append_error(layout.source_entry,
-                                      "Unimplemented instruction: s_nop for target architecture");
+    if (append_nop_padding(translated_text, body_padding, arch, &error).failed())
+      return kernel_text_append_error(layout.source_entry, builder_message);
     target_delta = translated_text.size();
   } else {
     const uint64_t body_padding =
         padding_for_residue(translated_text.size() + layout.target_body_entry,
                             layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
-    if (append_nop_padding(translated_text, body_padding, arch).failed())
-      return kernel_text_append_error(layout.source_entry,
-                                      "Unimplemented instruction: s_nop for target architecture");
+    if (append_nop_padding(translated_text, body_padding, arch, &error).failed())
+      return kernel_text_append_error(layout.source_entry, builder_message);
     target_delta = translated_text.size();
   }
 
@@ -660,15 +660,17 @@ uint64_t next_direct_branch_island_pool_offset(uint64_t current_body_size) {
 }
 
 util::Result append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text,
-                                              KernelTextLayout &layout, rj_code_arch_t arch) {
-  util::FailureOr<uint32_t> maybe_marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
+                                              KernelTextLayout &layout, rj_code_arch_t arch,
+                                              const util::DiagnosticEmitter *error) {
+  util::FailureOr<uint32_t> maybe_marker =
+      build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch, error);
   if (maybe_marker.failed())
     return util::Result::failure();
   util::FailureOr<uint32_t> maybe_skip =
-      build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), arch);
+      build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), arch, error);
   if (maybe_skip.failed())
     return util::Result::failure();
-  util::FailureOr<uint32_t> maybe_placeholder = build_s_branch(0, arch);
+  util::FailureOr<uint32_t> maybe_placeholder = build_s_branch(0, arch, error);
   if (maybe_placeholder.failed())
     return util::Result::failure();
   const uint32_t marker = maybe_marker.value();
