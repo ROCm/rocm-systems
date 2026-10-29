@@ -129,6 +129,12 @@ if streamListSize != md5ListSize:
     print("Error: Bit stream file number and MD5 file number do not match\n")
     sys.exit(1)
 
+# A decoder that prints a matching digest and then exits non-zero -- crashing on
+# teardown, say -- would otherwise be counted as a pass purely on the strength of
+# its own output. Record the exit status alongside the digest comparison and keep
+# going, so one bad process does not cut the sweep short.
+decoderErrors = []
+
 for i in range(streamListSize):
     streamFilePath = streamFileDir + streamFileList[i]
     md5FilePath = md5FileDir + md5FileList[i]
@@ -137,7 +143,9 @@ for i in range(streamListSize):
         cmd.append(bsReaderOption)
     cmd += ['-md5_check', md5FilePath, '-d', str(gpuDeviceID)]
     logFilePath = resultsPath + '/rocDecode_output.log'
-    run_and_log(cmd, logFilePath)
+    returnCode = run_and_log(cmd, logFilePath)
+    if returnCode != 0:
+        decoderErrors.append((streamFileList[i], returnCode))
     print("======================================================================================\n")
 
 fileString = 'Input file'
@@ -171,12 +179,16 @@ with open(resultsPath + '/rocDecode_output.log', 'r') as logFile:
     print("     - The number of passing streams is", passNum)
     print("     - The number of failing streams is", failNum)
     print("     - The number of streams that did not finish decoding is " + str(unfinishedNum))
+    print("     - The number of streams whose decoder exited non-zero is " + str(len(decoderErrors)))
     resultFile.write("\n===================================================\n")
     resultFile.write("Conformance test result summary on the " + str(streamListSize) + " streams:\n")
     resultFile.write("===================================================")
     resultFile.write("\n     - The number of passing streams is " + str(passNum))
     resultFile.write("\n     - The number of failing streams is " + str(failNum))
     resultFile.write("\n     - The number of streams that did not finish decoding is " + str(unfinishedNum))
+    resultFile.write("\n     - The number of streams whose decoder exited non-zero is " + str(len(decoderErrors)))
+    for streamName, returnCode in decoderErrors:
+        resultFile.write("\n         " + streamName + " exited " + str(returnCode))
     resultFile.close()
 logFile.close()
 
@@ -193,7 +205,12 @@ if passNum > streamListSize:
     print("       --results_directory and re-run with nothing else decoding on this machine.")
     sys.exit(1)
 
-if failNum > 0 or unfinishedNum > 0:
+if decoderErrors:
+    print("\nThe decoder exited non-zero on " + str(len(decoderErrors)) + " stream(s):")
+    for streamName, returnCode in decoderErrors:
+        print("     " + streamName + " exited " + str(returnCode))
+
+if failNum > 0 or unfinishedNum > 0 or decoderErrors:
     print("\nConformance test FAILED")
     sys.exit(1)
 

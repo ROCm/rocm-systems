@@ -65,7 +65,10 @@ SKIP_BANNER = "SKIPPING rocDecode conformance"
 
 PASSED = "PASSED"
 FAILED = "FAILED"
-SKIPPED = "SKIPPED"
+# A requested codec whose corpus is absent. Reported separately from FAILED so the
+# summary distinguishes "decoded wrong" from "never had the streams", but counted
+# as a failure either way.
+MISSING = "MISSING"
 
 
 def parse_args() -> argparse.Namespace:
@@ -206,15 +209,35 @@ def resolve_corpus_root(dest: Path) -> Optional[Path]:
     return None
 
 
-def have_credentials() -> bool:
-    """Report whether boto3 can find any credentials at all.
+def fetch_feasibility() -> Optional[str]:
+    """Return what stops the corpus being fetched, or None if nothing does.
 
-    Checked up front so a job without them skips with a clear message instead of
-    failing on an opaque NoCredentialsError part-way through.
+    Both checks run before anything else so an environment that cannot reach the
+    corpus skips with an explanation, rather than failing part-way through on a
+    ModuleNotFoundError or an opaque NoCredentialsError.
+
+    boto3 is not part of the installed test payload. CI gets it from
+    requirements-test.txt, but someone running run_rocdecode.py from an installed
+    ROCm tree may not have it, and the CTest suite they came for does not need
+    it -- so a missing SDK skips the sweep rather than failing the whole run.
     """
-    import boto3
+    try:
+        import boto3
+    except ImportError:
+        return (
+            "boto3 is not installed, so the stream corpus cannot be downloaded.\n"
+            "Install it (pip install boto3) to run the conformance sweep."
+        )
 
-    return boto3.Session().get_credentials() is not None
+    if boto3.Session().get_credentials() is None:
+        return (
+            "no AWS credentials available.\n"
+            "\n"
+            "The stream corpus lives in a private bucket. GitHub does not\n"
+            "expose repository secrets to pull requests from forks, so this\n"
+            "is expected on fork PRs and is not a failure."
+        )
+    return None
 
 
 def make_client(region: str, bucket: str):
@@ -343,16 +366,12 @@ def resolve_corpus(args: argparse.Namespace) -> Optional[Path]:
             )
         return corpus
 
-    if not have_credentials():
+    blocker = fetch_feasibility()
+    if blocker is not None:
         logging.warning("")
         logging.warning("=" * 72)
-        logging.warning(f"{SKIP_BANNER}: no AWS credentials available.")
-        logging.warning("")
-        logging.warning("The stream corpus lives in a private bucket. GitHub does not")
-        logging.warning(
-            "expose repository secrets to pull requests from forks, so this"
-        )
-        logging.warning("is expected on fork PRs and is not a failure.")
+        for line in f"{SKIP_BANNER}: {blocker}".splitlines():
+            logging.warning(line)
         logging.warning("=" * 72)
         logging.warning("")
         return None
@@ -479,6 +498,12 @@ def main() -> int:
             f"Unknown codec(s): {', '.join(unknown)}. "
             f"Choose from {', '.join(CODEC_DIRS)}."
         )
+    # Otherwise the sweep runs nothing and the all-PASSED check below is vacuously
+    # true, which would report a clean pass for having done no work.
+    if not requested:
+        raise ValueError(
+            f"--codecs selected no codecs. Choose from {', '.join(CODEC_DIRS)}."
+        )
 
     corpus = resolve_corpus(args)
     if corpus is None:
@@ -505,9 +530,15 @@ def main() -> int:
     for codec in requested:
         codec_dir = available.get(codec)
         if codec_dir is None:
+            # A requested codec with no corpus is a failure, not a skip. Silently
+            # passing over it is how a partial download ends up reporting green
+            # having covered a quarter of the streams. Run a deliberate subset
+            # with --codecs instead.
             wanted = " or ".join(CODEC_DIRS[codec])
-            logging.warning(f"++ {codec}: no {wanted} under {corpus}, skipping")
-            results[codec] = SKIPPED
+            logging.error(
+                f"++ {codec}: no {wanted} containing Streams/ and MD5/ under {corpus}"
+            )
+            results[codec] = MISSING
             continue
         logging.info("")
         logging.info(f"=== Running conformance: {codec} ({codec_dir.name}) ===")
@@ -523,10 +554,7 @@ def main() -> int:
 
     report(results)
 
-    if all(status == SKIPPED for status in results.values()):
-        logging.error("No codec was actually run; treating that as a failure.")
-        return 1
-    return 1 if FAILED in results.values() else 0
+    return 0 if all(status == PASSED for status in results.values()) else 1
 
 
 if __name__ == "__main__":
