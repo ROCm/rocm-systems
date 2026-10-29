@@ -134,7 +134,7 @@ CRITICAL stale-build-dir pitfall: cmake configure is a no-op when a `build/` cac
 exists, so a STALE `samples/videoDecodePerf/build` dir silently keeps building against
 whatever `ROCM_PATH` it was first configured with. When switching install trees, delete the
 stale directory first. On Windows `rm -rf` may be blocked by permissions; use
-`cmd //c "rmdir /s /q samples/videoDecodePerf/build"`.
+`cmd //c "rmdir /s /q samples\videoDecodePerf\build"`.
 
 ### Step 3 — Run the regression check
 

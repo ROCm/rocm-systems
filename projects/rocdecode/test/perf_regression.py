@@ -361,17 +361,28 @@ def main():
         return 1
 
     label, detail = detect_gpu(args.device, args.gpu)
-    if label is None:
-        print(f"ERROR: could not identify the GPU ({detail}).", file=sys.stderr)
-        print("       Use --gpu <name> (e.g. --gpu Navi31) or set ROCDECODE_PERF_GPU.", file=sys.stderr)
-        return 1
     baseline = {}
     col = None
     measure_only = False
     measure_only_reason = ""
-    if not baseline_path.is_file():
-        # No baseline file — switch to measure-only mode so streams are still
-        # measured and saved to CSV (the CSV can serve as a future baseline).
+    if label is None:
+        if not baseline_path.is_file():
+            # GPU unknown and no baseline — measure-only is still useful for
+            # collecting FPS data. Use a generic label for the CSV.
+            label = f"device-{args.device}"
+            detail = f"unidentified ({detail}); labelled as {label}"
+            measure_only = True
+            measure_only_reason = (f"GPU could not be identified ({detail}) "
+                                   f"and baseline file not found: {baseline_path}")
+        else:
+            # GPU unknown but baseline exists — we need a column name to look up,
+            # so detection failure is fatal.
+            print(f"ERROR: could not identify the GPU ({detail}).", file=sys.stderr)
+            print("       Use --gpu <name> (e.g. --gpu Navi31) or set ROCDECODE_PERF_GPU.",
+                  file=sys.stderr)
+            return 1
+    elif not baseline_path.is_file():
+        # GPU known but no baseline file — measure-only mode.
         measure_only = True
         measure_only_reason = f"baseline file not found: {baseline_path}"
     else:
