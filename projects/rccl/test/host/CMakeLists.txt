@@ -494,6 +494,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/dda-coll-seams.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
