@@ -107,7 +107,8 @@ static void testMemsetCrossThread(hipStreamCaptureMode mode, bool nonblocking,
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
-  hipMemset(d_buf, 0, kDataSize * sizeof(float));
+  (void)hipMemset(d_buf, 0, kDataSize * sizeof(float));
+  (void)hipGetLastError();
 
   state.api_done = true;
   t.join();
@@ -158,7 +159,8 @@ static void testMemcpyCrossThread(hipStreamCaptureMode mode, bool nonblocking,
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
-  hipMemcpy(d_dst, d_src, kDataSize * sizeof(float), hipMemcpyDeviceToDevice);
+  (void)hipMemcpy(d_dst, d_src, kDataSize * sizeof(float), hipMemcpyDeviceToDevice);
+  (void)hipGetLastError();
 
   state.api_done = true;
   t.join();
@@ -222,9 +224,13 @@ static void captureWithBlockingParticipant(hipStreamCaptureMode mode,
   HIP_CHECK(hipStreamGetCaptureInfo(nbStream, &st, nullptr));
   status = st;
 
-  // Rejoin before ending capture
-  HIP_CHECK(hipEventRecord(joinEvent, bStream));
-  HIP_CHECK(hipStreamWaitEvent(nbStream, joinEvent, 0));
+  // Only rejoin if capture is still active — on invalidated captures these
+  // would return hipErrorStreamCaptureInvalidated and HIP_CHECK would assert
+  // inside a worker thread where Catch2 assertions are not thread-safe.
+  if (st == hipStreamCaptureStatusActive) {
+    HIP_CHECK(hipEventRecord(joinEvent, bStream));
+    HIP_CHECK(hipStreamWaitEvent(nbStream, joinEvent, 0));
+  }
 
   hipGraph_t graph;
   hipError_t endErr = hipStreamEndCapture(nbStream, &graph);
@@ -254,7 +260,8 @@ static void testMemsetWithBlockingParticipant(hipStreamCaptureMode mode,
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
-  hipMemset(d_buf, 0, kDataSize * sizeof(float));
+  (void)hipMemset(d_buf, 0, kDataSize * sizeof(float));
+  (void)hipGetLastError();
 
   done = true;
   t.join();
@@ -348,7 +355,8 @@ static void testSyncDiffStreamSameThread(hipStreamCaptureMode mode, bool cap_non
   HIP_CHECK(hipStreamBeginCapture(cap_stream, mode));
   captureKernel<<<1, kDataSize, 0, cap_stream>>>(d, kDataSize);
 
-  hipStreamSynchronize(sync_stream);
+  (void)hipStreamSynchronize(sync_stream);
+  (void)hipGetLastError();
 
   hipStreamCaptureStatus st;
   HIP_CHECK(hipStreamGetCaptureInfo(cap_stream, &st, nullptr));
@@ -442,7 +450,8 @@ static void testSyncDiffStreamCrossThread(hipStreamCaptureMode mode, bool cap_no
     HIP_CHECK(hipStreamCreate(&sync_stream));
   }
 
-  hipStreamSynchronize(sync_stream);
+  (void)hipStreamSynchronize(sync_stream);
+  (void)hipGetLastError();
 
   state.api_done = true;
   t.join();
