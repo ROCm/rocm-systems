@@ -825,6 +825,57 @@ def _cdna4_codegen() -> CodeGenerator:
     return codegen
 
 
+@pytest.mark.parametrize(
+    'arch_name,profile,pc_mask,has_rel32_tag',
+    [
+        ('cdna4', Cdna4Profile, '0x0000FFFFFFFFFFFFULL', True),
+        ('rdna4', Rdna4Profile, '0x0000FFFFFFFFFFFFULL', True),
+        ('cdna5', Cdna5Profile, '0x01FFFFFFFFFFFFFFULL', False),
+    ],
+)
+@pytest.mark.parametrize('operation', ['scalar_setpc', 'scalar_swappc'])
+def test_scalar_pc_target_decoding_preserves_raw_address_width(
+    arch_name, profile, pc_mask, has_rel32_tag, operation
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch_name,
+        profile=profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [_operand('ssrc0', 'OPR_SSRC', size=64, order=1)]
+    if operation == 'scalar_swappc':
+        operands.insert(
+            0,
+            _operand(
+                'sdst',
+                'OPR_SDST',
+                size=64,
+                is_input=False,
+                is_output=True,
+                order=0,
+            ),
+        )
+    name = 'S_SETPC_B64' if operation == 'scalar_setpc' else 'S_SWAPPC_B64'
+    inst = Instruction(name, 'ENC_SOP1', opcode=0, operands=operands)
+
+    body = codegen._gen_execute_body(
+        inst, InstructionSemantics(name, operation), 'ENC_SOP1'
+    )
+
+    assert f'constexpr uint64_t kPcAddressMask = {pc_mask};' in body
+    assert 'uint64_t target = encoded & kPcAddressMask;' in body
+    assert ('if (encoded >> 32 == 0x1FFFFu' in body) == has_rel32_tag
+    assert 'encoded >> 32 == 0xFFFFFFFFu' not in body
+    assert 'target |= ~kPcAddressMask' not in body
+    assert body.count('wf.pc = target - size_;') == 1
+    if operation == 'scalar_swappc':
+        assert body.index('wf.pc = target - size_;') < body.index(
+            'write_scalar64(sdst, next_pc)'
+        )
+
+
 def test_cbranch_fork_generated_execute_reads_mask_and_target_operands():
     codegen = _cdna4_codegen()
     i_fork = Instruction(
@@ -861,6 +912,12 @@ def test_cbranch_fork_generated_execute_reads_mask_and_target_operands():
     assert 'static_cast<int16_t>(simm16.encoding_value_)' in i_body
     assert 'compare = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);' in g_body
     assert 'encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc1);' in g_body
+    assert 'constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;' in g_body
+    assert 'uint64_t target = encoded & kPcAddressMask;' in g_body
+    assert 'if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)' in g_body
+    assert 'encoded >> 32 == 0xFFFFFFFFu' not in g_body
+    assert 'target |= ~kPcAddressMask' not in g_body
+    assert g_body.count('wf.pc =') == 1
     for body in (i_body, g_body):
         assert body.endswith(
             '  wf.pc = amdgpu::cbranch_fork(wf, compare, target, wf.pc + size_) - size_;'
