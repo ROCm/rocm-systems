@@ -3307,6 +3307,43 @@ TEST_F(SymWindowDestroyTest, Succeeds_ClearsTableSlotAndSortedEntry) {
   EXPECT_EQ(comm->devrState.memHead, nullptr);  // the memory went with it
 }
 
+// Destroying one of two windows at the same address removes only that entry.
+TEST_F(SymWindowDestroyTest, SameAddress_RemovesOnlyTheDestroyedEntry) {
+  void* userPtr = reinterpret_cast<void*>(0x100000);
+  ncclWindow_vidmem* first = MakeWindow(userPtr);
+  ncclWindow_vidmem* second = MakeWindow(userPtr);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  ASSERT_NE(first, second);
+
+  ncclDevrState* devr = &comm->devrState;
+  ASSERT_EQ(devr->winSortedCount, 2);
+  ASSERT_NE(devr->memHead, nullptr);
+  ASSERT_EQ(devr->memHead->next, nullptr);
+  ASSERT_EQ(devr->memHead->refCount, 2);
+  ncclDevrWindow* earlier = devr->winSorted[0].win;
+  ncclDevrWindow* later = devr->winSorted[1].win;
+  ASSERT_EQ(earlier->vidmem, first);
+  ASSERT_EQ(later->vidmem, second);
+  ASSERT_EQ(devr->winSorted[0].userAddr, reinterpret_cast<uintptr_t>(userPtr));
+  ASSERT_EQ(devr->winSorted[1].userAddr, reinterpret_cast<uintptr_t>(userPtr));
+
+  EXPECT_EQ(symWindowDestroy(comm, first, nullptr), ncclSuccess);
+  ASSERT_EQ(devr->winSortedCount, 1);
+  EXPECT_EQ(devr->winSorted[0].win, later);
+  EXPECT_EQ(devr->winSorted[0].userAddr, reinterpret_cast<uintptr_t>(userPtr));
+  ASSERT_NE(devr->memHead, nullptr);
+  EXPECT_EQ(devr->memHead->refCount, 1);
+
+  ncclDevrWindow* found = nullptr;
+  EXPECT_EQ(ncclDevrFindWindow(comm, userPtr, &found), ncclSuccess);
+  EXPECT_EQ(found, later);
+
+  EXPECT_EQ(symWindowDestroy(comm, second, nullptr), ncclSuccess);
+  EXPECT_EQ(devr->winSortedCount, 0);
+  EXPECT_EQ(devr->memHead, nullptr);
+}
+
 // Branch: the multi-segment window array is released only when one exists.
 TEST_F(SymWindowDestroyTest, MultiSegmentWins_AreFreed) {
   comm->devrState.ginEnabled = true;  // only the GIN arm attaches an array to free
@@ -6711,7 +6748,8 @@ TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
 // resource-window sizing that follows it, up to the cuMemCreate call.
 //
 // The rest of the devcomm build -- symmetric-memory window creation, GIN
-// window registration, barriers -- is not covered here.
+// window registration, barriers -- is not covered here beyond a failed GIN
+// connect.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -6826,6 +6864,35 @@ TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseLargestRoundedContextCoun
   EXPECT_EQ(create.calls, 1);
   // ROUNDUP(4, 3) = 6 contexts; shadow and Anvil regions each use 6 * 1 * 8 bytes.
   EXPECT_EQ(allocationSize, 96u);
+}
+
+// Branch: GIN connect fails. GIN must stay unlatched so the next create
+// reconnects; a latched retry would skip connect and reach ncclGinDevCommSetup
+// with ginCommCount still 0 (AICOMRCCL-2879).
+TEST_F(DevrCommCreateInternalTest, GinConnectFails_RetryConnectsAgain) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSystemError; });
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  ASSERT_FALSE(comm->devrState.ginEnabled);
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  EXPECT_EQ(connect.calls, 2);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
+}
+
+// Branch: a GIN request rejected after the support checks but before connect
+// leaves GIN unlatched, so a later valid create still connects.
+TEST_F(DevrCommCreateInternalTest, WorldGinBarrierOnRail_RejectedWithoutLatchingGin) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+  reqs.worldGinBarrierCount = 1;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(Create(), ncclInvalidArgument);
+  EXPECT_EQ(connect.calls, 0);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
 }
 
 

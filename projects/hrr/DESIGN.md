@@ -180,7 +180,7 @@ the parent that exited cleanly needs no repair. A sub-archive is skipped when
 payloads, finds it complete in the sense `load_archive` uses. `--info` on a
 root applies the same check before it shows a process as complete.
 
-### Archive Format (v10)
+### Archive Format (v12)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -298,7 +298,7 @@ projects/hrr/                     — standalone HRR project (portable layer)
                                     Not used by capture — it is the format an
                                     out-of-tree producer writes and playback reads
   playback/
-    hrr_reader.h/.cpp             — archive loader, v10 format; record framing
+    hrr_reader.h/.cpp             — archive loader, v12 format; record framing
                                     (read_raw_record / open_record_stream) shared
                                     with the region sidecars
     hrr_region_map.h/.cpp         — region timeline: merge, cursor, live block set,
@@ -383,13 +383,13 @@ The generator classifies each API:
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 When adding HIP API support, update this script to classify the API in the appropriate capture and playback policy sets. APIs requiring non-trivial serialization or replay belong in `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs belong in `NOOP_PLAYBACK_APIS`.
 
-## Archive Format (v10)
+## Archive Format (v12)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 10
+HRR_VERSION = 12
 ```
 
 Version history, so an archive written by an older runtime can be placed:
@@ -429,12 +429,18 @@ Version history, so an archive written by an older runtime can be placed:
 - **v10** puts pinned host snapshot records after a kernel launch's arguments
   (`num_snapshots` was always 0). A v9 reader would not restore them. See
   Pinned Host Snapshots below.
+- **v11** records `hipKernelSetCacheConfig`, appended to
+  `HipDispatchTable`, which shifts the compiler API IDs up by one again. A v10
+  reader would decode those events as the wrong API.
+- **v12** records `hipExtMemcpyBatchAsync`, appended to `HipDispatchTable`,
+  which shifts the compiler API IDs up by one again. A v11 reader would decode
+  those events as the wrong API.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 10)
+                      events.bin HRR_VERSION = 12)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     active             one line naming the process instance (boot id and
@@ -1543,7 +1549,7 @@ The event wire format (finding H5):
   shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
   (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
   normally instead of being dropped at 65535 bytes. This is the change that bumped
-  `HRR_VERSION` to 4; the current version is 10, see Archive Format above. The
+  `HRR_VERSION` to 4; the current version is 12, see Archive Format above. The
   writer's single-record buffer path now writes any oversized record straight through.
 - **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
   a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch
@@ -1573,6 +1579,7 @@ The event wire format (finding H5):
 - `events.bin` marks such an archive with `HRR_FILE_FLAG_PACKED_HOST_RECTS` in `hrr_file_header.reserved`, and the layout came with the v7 bump, since a v6 reader ignores the flag. Replay then gives the host side of each pitched copy the dense layout of its blob (pitch equal to width, no offsets) and keeps the device side as recorded, so the copy moves the same bytes. A D2H check re-runs the copy into a scratch buffer of the blob's size and compares the two. Neither side of replay grows with the host pitch.
 - An archive without the flag lays a pitched host blob out from the base pointer with the recorded pitch and offsets, or holds the flat `width*height*depth` bytes (3D and driver D2H, `hipMemcpy3D` H2D). Replay keeps the recorded layout for it and compares only the copied rows. It skips a copy whose blob does not span the recorded rect, such as the flat blob of a rect that is not dense from the base, rather than read past the blob or issue it from the capture-time host address. A recorded rect whose footprint overflows `size_t` is skipped too. An archive whose every D2H check is skipped fails the replay rather than passing as one with no validation blobs.
 - The H2D source of the four `hipMemcpy3D` spellings is recorded only for a copy the runtime accepted.
+- Replay translates the `srcArray` and `dstArray` of the four `hipMemcpy3D` spellings through the array map before calling HIP, because CLR dereferences them. A handle replay never created (any array API other than `hipArrayCreate` / `hipArray3DCreate`) refuses the copy with `hipErrorInvalidValue`, naming the end and the recorded address; the recorded value never reaches the runtime. `hipMemcpy3DBatchAsync` refuses the same way, and also an array operand with a null handle or an operand type that is neither pointer nor array. The `hipDrvGraph*MemcpyNode*` copies translate an unknown array to null, which CLR refuses with `hipErrorInvalidValue`. A `hipMemcpy3D` whose kind is `hipMemcpyHostToDevice` with an array destination, or `hipMemcpyDeviceToHost` with an array source, is not replayed: its extent is in array elements, but the host rect and blob are sized in bytes, so issuing it would read or write past them. Replay notes it as unreplayable and returns `hipErrorNotSupported` (a D2H check on it counts as failed), so the replay ends instead of passing. The kind decides: a `hipMemcpyDefault` copy between `hipHostMalloc` memory and an array is still issued, as a device-to-device copy.
 - `hipMemset3D` / `hipMemset3DAsync` drop the destination pitched pointer/extent at
   capture (`pitchedDevPtr = 0`) and no-op at replay, so 3D-memset-initialized regions
   are invisible to replay.
@@ -1646,6 +1653,16 @@ exits non-zero if the counts drift from its recorded baseline. The build does no
 the CI "Check API matrix" step derives the manifest, compares it with the baseline and
 checks that the checked-in expectations header is current, so a newly-captured
 struct-input API cannot lose its payload unnoticed.
+
+### Batch Memcpy — Device Operands, 16 Entries
+
+`hipMemcpyBatchAsync` and `hipExtMemcpyBatchAsync` record their per-entry arrays inline,
+up to 16 entries. A larger batch is recorded truncated to its first 16 entries; capture
+warns once and marks the archive unreplayable.
+
+`dsts`/`srcs` are replayed through pointer translation only, so device operands replay
+but host operands do not: a pageable pointer has no allocation entry and becomes null,
+and host-allocated memory is replayed without its contents.
 
 ### Fail-Loud Scope Exclusions
 

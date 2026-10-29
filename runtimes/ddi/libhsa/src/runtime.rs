@@ -18,7 +18,7 @@ use std::ffi::c_void;
 use std::fmt::Arguments;
 use std::io::Write;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -31,10 +31,10 @@ use rocddi::device::event::{
 };
 use rocddi::device::gpu::profiling::{PcSamplingConfiguration, PcSamplingConfigurationSet};
 use rocddi::memory::device::Allocation;
-use rocddi::session::{DriverContextLifetime, Session};
+use rocddi::session::{DriverContextLifetime, Session, SessionRetirement};
 use rocddi::topology::host::{CpuCacheKind, CpuInfo};
 use rocddi::topology::{
-    Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo, SourceKind, TopologySnapshot,
+    Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo, TopologySnapshot,
 };
 
 use crate::callback_arg::CallbackArg;
@@ -44,7 +44,9 @@ use crate::isa::isa_name;
 use crate::loader::LoaderState;
 use crate::memory::{CpuPoolKind, GpuPoolKind, MemoryState, POOL_HANDLE_STRIDE};
 use crate::pc_sampling::PcSamplingState;
+use crate::pc_sampling::session::SessionHandle;
 use crate::queue::QueueState;
+use crate::queue_intercept::InterceptQueue;
 use crate::signal::SignalState;
 
 mod agent;
@@ -70,8 +72,10 @@ mod logging;
 #[cfg(test)]
 pub(crate) use lifecycle::{HsaLifecycle, LIFECYCLE};
 pub(crate) use lifecycle::{
-    InFlightGeneration, InFlightToken, InFlightTracker, LifecycleTransition, VM_FAULT_CONDVAR,
-    boundary, initialized_mut, lock, map_error,
+    InFlightGeneration, InFlightToken, InFlightTracker, LIFECYCLE_CONDVAR, LifecycleCallScope,
+    LifecycleTransition, ShutdownWork, VM_FAULT_CONDVAR, begin_init_waiting, boundary,
+    close_public_raw_handles, enter_public_raw_handle, initialized_mut, lock, map_error,
+    wait_public_raw_handles_idle,
 };
 #[cfg(test)]
 use logging::logging_flag_enabled;
@@ -185,6 +189,8 @@ pub(crate) struct HsaState {
     system_event_handlers: Vec<(SystemEventHandler, CallbackArg)>,
     /// Native system event worker joined during final teardown.
     pub(crate) system_event_worker: Option<JoinHandle<()>>,
+    /// Sticky failure of system-event observation, separate from shutdown.
+    pub(crate) system_event_failed: Arc<AtomicBool>,
     /// Shared stop request observed by those workers.
     pub(crate) stop_workers: Arc<AtomicBool>,
     /// Counts native work that must finish before session release.
@@ -196,10 +202,94 @@ pub(crate) struct HsaState {
     /// Activated GPU agents and their native owners.
     pub(crate) gpus: Vec<Gpu>,
     /// Native session retained until all GPU and memory owners are gone.
-    pub(crate) session: Session,
+    pub(crate) session: Option<Session>,
     /// Lifetime policy for the KFD context used by this runtime generation.
     /// Memory-pool choices that require the primary context use this value.
     pub(crate) lifetime: DriverContextLifetime,
+}
+
+/// Callback work detached while HSA storage remains published for `OnUnload`.
+pub(crate) struct ToolShutdownWork {
+    /// Native operations admitted before the stop request.
+    inflight: Arc<InFlightTracker>,
+    /// Final event callbacks retained until synchronous notification.
+    system_handlers: Vec<(SystemEventHandler, CallbackArg)>,
+    /// Native system event callback worker.
+    system_worker: Option<JoinHandle<()>>,
+    /// Asynchronous memory operation workers.
+    memory_workers: Vec<JoinHandle<()>>,
+    /// Serialized signal callback worker.
+    signal_worker: Option<JoinHandle<()>>,
+    /// Per-queue error callback workers.
+    queue_workers: Vec<JoinHandle<()>>,
+    /// Proxy queues whose interception callbacks must stop.
+    intercept_queues: Vec<Arc<InterceptQueue>>,
+    /// Sampling sessions whose callbacks must finish before tool unload.
+    pc_sampling_sessions: Vec<Arc<SessionHandle>>,
+}
+
+impl ToolShutdownWork {
+    /// Joins every callback producer, then delivers the final system event.
+    pub(crate) fn quiesce(self) -> Status {
+        self.inflight.wait_idle();
+        let mut failed = false;
+        for queue in &self.intercept_queues {
+            failed |= queue.stop().is_err();
+        }
+        for worker in self.queue_workers {
+            failed |= worker.join().is_err();
+        }
+        if let Some(worker) = self.system_worker {
+            failed |= worker.join().is_err();
+        }
+        for worker in self.memory_workers {
+            failed |= worker.join().is_err();
+        }
+        if let Some(worker) = self.signal_worker {
+            failed |= worker.join().is_err();
+        }
+        for session in self.pc_sampling_sessions {
+            failed |= session.quiesce_for_tool_unload() != SUCCESS;
+        }
+        if failed {
+            return ERROR;
+        }
+        notify_system_shutdown(&self.system_handlers);
+        SUCCESS
+    }
+}
+
+/// Result of retiring one HSA generation. An unfinished native session stays
+/// owned while the process lifecycle is quarantined and can be retried.
+pub(crate) struct ShutdownOutcome {
+    /// Status reported for this shutdown attempt.
+    pub(crate) status: Status,
+    /// Native owner kept for another attempt when shutdown fails.
+    pub(crate) pending_session: Option<SessionRetirement>,
+}
+
+impl ShutdownOutcome {
+    /// Reports an HSA teardown failure with no independently retryable session.
+    fn failed(status: Status) -> Self {
+        Self {
+            status,
+            pending_session: None,
+        }
+    }
+
+    /// Retries a native session after all HSA objects have retired.
+    pub(crate) fn retry(mut retirement: SessionRetirement) -> Self {
+        match retirement.try_destroy() {
+            Ok(()) => Self {
+                status: SUCCESS,
+                pending_session: None,
+            },
+            Err(error) => Self {
+                status: map_error(error),
+                pending_session: Some(retirement),
+            },
+        }
+    }
 }
 
 /// Schedules cleanup after in-flight native work has released its borrows.
@@ -230,7 +320,18 @@ pub(crate) fn defer_cleanup<T: Send + 'static>(
     Ok(())
 }
 
+/// Publishes a shutdown request without waiting for the worker that called it.
+pub(crate) fn publish_stop_request(stop_workers: &AtomicBool, inflight: &InFlightTracker) {
+    stop_workers.store(true, Ordering::Release);
+    inflight.close();
+}
+
 impl HsaState {
+    /// Borrows the native session while this HSA generation is published.
+    pub(crate) fn session(&self) -> Option<&Session> {
+        self.session.as_ref()
+    }
+
     /// Checks whether the caller is one of this runtime’s callback workers.
     pub(crate) fn running_on_worker(&self) -> bool {
         self.signal_state.running_on_worker()
@@ -243,8 +344,24 @@ impl HsaState {
 
     /// Requests all runtime workers to stop before teardown.
     pub(crate) fn request_stop(&self) {
-        self.logging.stop();
-        self.stop_workers.store(true, Ordering::Release);
+        publish_stop_request(&self.stop_workers, &self.inflight);
+    }
+
+    /// Detaches callback workers under the lifecycle lock. Their joins and
+    /// the final event run after that lock is released, before tool `OnUnload`.
+    pub(crate) fn begin_tool_shutdown(&mut self) -> ToolShutdownWork {
+        self.request_stop();
+        let (queue_workers, intercept_queues) = self.queue_state.take_callback_workers();
+        ToolShutdownWork {
+            inflight: self.inflight.clone(),
+            system_handlers: std::mem::take(&mut self.system_event_handlers),
+            system_worker: self.system_event_worker.take(),
+            memory_workers: self.memory_state.take_workers(),
+            signal_worker: self.signal_state.take_worker(),
+            queue_workers,
+            intercept_queues,
+            pc_sampling_sessions: self.pc_sampling_state.sessions_for_tool_unload(),
+        }
     }
 
     /// Discovers host and GPU agents and constructs process HSA state.
@@ -474,13 +591,14 @@ impl HsaState {
             vm_fault_details: None,
             system_event_handlers: Vec::new(),
             system_event_worker: None,
+            system_event_failed: Arc::new(AtomicBool::new(false)),
             stop_workers: Arc::new(AtomicBool::new(false)),
             inflight: Arc::new(InFlightTracker::new()),
             pc_sampling_state: PcSamplingState::new(),
             caches,
             topology,
             gpus,
-            session,
+            session: Some(session),
             lifetime,
         })
     }
@@ -513,10 +631,7 @@ impl HsaState {
 
     /// Selects the CPU node nearest a GPU by exact KFD node routes.
     pub(crate) fn nearest_cpu_agent(&self, endpoint: &Endpoint) -> HsaAgent {
-        let gpu_node = self
-            .topology
-            .nodes_for_endpoint(endpoint)
-            .find(|node| self.topology.sources[node.source.0].kind == SourceKind::LinuxKfd);
+        let gpu_node = self.topology.native_nodes_for_endpoint(endpoint).next();
         let best = self.cpus.iter().enumerate().min_by_key(|(index, cpu)| {
             let distance = match (gpu_node, cpu.node) {
                 (Some(gpu), Some(node)) if gpu.id == node => Some((0, 0)),
@@ -546,8 +661,8 @@ impl HsaState {
             .min_by_key(|(index, gpu)| {
                 let gpu_node = self
                     .topology
-                    .nodes_for_endpoint(&gpu.endpoint)
-                    .find(|node| self.topology.sources[node.source.0].kind == SourceKind::LinuxKfd);
+                    .native_nodes_for_endpoint(&gpu.endpoint)
+                    .next();
                 let distance = match (cpu_node, gpu_node) {
                     (Some(cpu), Some(gpu)) if cpu == gpu.id => Some((0, 0)),
                     (Some(cpu), Some(gpu)) => self
@@ -571,10 +686,7 @@ impl HsaState {
         let endpoint = &self.gpus[gpu_index].endpoint;
         let cpu_index = self.cpu_index(self.nearest_cpu_agent(endpoint))?;
         let cpu_node = self.cpus[cpu_index].node?;
-        let gpu_node = self
-            .topology
-            .nodes_for_endpoint(endpoint)
-            .find(|node| self.topology.sources[node.source.0].kind == SourceKind::LinuxKfd)?;
+        let gpu_node = self.topology.native_nodes_for_endpoint(endpoint).next()?;
         self.topology.route_between_nodes(cpu_node, gpu_node.id)
     }
 
@@ -653,8 +765,7 @@ impl HsaState {
         };
         let mut banks = self
             .topology
-            .nodes_for_endpoint(&gpu.endpoint)
-            .filter(|node| self.topology.sources[node.source.0].kind == SourceKind::LinuxKfd)
+            .native_nodes_for_endpoint(&gpu.endpoint)
             .flat_map(|node| self.topology.banks_for_node(node.id))
             .filter(|bank| {
                 bank.capacity_bytes != 0
@@ -689,8 +800,8 @@ impl HsaState {
         let (index, kind) = self.decode_gpu_pool(pool)?;
         let node = self
             .topology
-            .nodes_for_endpoint(&self.gpus[index].endpoint)
-            .find(|node| self.topology.sources[node.source.0].kind == SourceKind::LinuxKfd)?;
+            .native_nodes_for_endpoint(&self.gpus[index].endpoint)
+            .next()?;
         self.topology.banks_for_node(node.id).find(|bank| {
             bank.capacity_bytes != 0
                 && if kind == GpuPoolKind::Group {
@@ -725,12 +836,13 @@ impl HsaState {
     }
 
     /// Stops this session.
-    pub(crate) fn stop(mut self) -> Status {
+    pub(crate) fn stop(mut self) -> ShutdownOutcome {
+        self.logging.stop();
         if self.running_on_worker() || CallbackScope::active() {
             // Releasing signal storage from its own callback worker is unsafe.
             self.request_stop();
             std::mem::forget(self);
-            return INVALID_RUNTIME_STATE;
+            return ShutdownOutcome::failed(INVALID_RUNTIME_STATE);
         }
         self.request_stop();
         // Multi-signal waits observe stop_workers and release their signal
@@ -738,7 +850,7 @@ impl HsaState {
         self.inflight.wait_idle();
         if self.inflight.is_quarantined() {
             std::mem::forget(self);
-            return INVALID_RUNTIME_STATE;
+            return ShutdownOutcome::failed(INVALID_RUNTIME_STATE);
         }
         notify_system_shutdown(&self.system_event_handlers);
         if let Some(worker) = self.system_event_worker.take() {
@@ -751,28 +863,42 @@ impl HsaState {
             // allocations and signals. Keep their entire ownership graph live.
             self.pc_sampling_state.quarantine_all();
             std::mem::forget(self);
-            return INVALID_RUNTIME_STATE;
+            return ShutdownOutcome::failed(INVALID_RUNTIME_STATE);
         }
         if !self.pc_sampling_state.shutdown() {
             std::mem::forget(self);
-            return INVALID_RUNTIME_STATE;
+            return ShutdownOutcome::failed(INVALID_RUNTIME_STATE);
         }
         if !self.queue_state.shutdown() {
             std::mem::forget(self);
-            return INVALID_RUNTIME_STATE;
+            return ShutdownOutcome::failed(INVALID_RUNTIME_STATE);
         }
         let signal_status = self.signal_state.destroy_events();
+        if signal_status != SUCCESS {
+            // A failed native event destroy can still retain its KFD context.
+            // Do not discard the session that owns the remaining driver state.
+            std::mem::forget(self);
+            return ShutdownOutcome::failed(signal_status);
+        }
         self.image_state.clear();
         self.loader.clear();
         self.memory_state.clear();
         self.signal_state.clear_storage();
         self.pc_sampling_state.clear_retired();
         self.gpus.clear();
-        let session_status = self.session.destroy().map_or_else(map_error, |()| SUCCESS);
-        if signal_status == SUCCESS {
-            session_status
-        } else {
-            signal_status
+        let Some(session) = self.session.take() else {
+            return ShutdownOutcome::failed(ERROR);
+        };
+        let mut retirement = session.into_retirement();
+        match retirement.try_destroy() {
+            Ok(()) => ShutdownOutcome {
+                status: SUCCESS,
+                pending_session: None,
+            },
+            Err(error) => ShutdownOutcome {
+                status: map_error(error),
+                pending_session: Some(retirement),
+            },
         }
     }
 }

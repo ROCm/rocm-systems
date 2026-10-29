@@ -99,6 +99,24 @@ TEST(ExecutionFuzzInputTest, InitialAddressPairsReachMappedMemory) {
   }
 }
 
+TEST(ExecutionFuzzInputTest, GwsBarrierWithoutInitExecutesFromHarnessState) {
+  for (const uint8_t rid : {0, 2, 34, 59, 63}) {
+    SCOPED_TRACE(rid);
+    std::vector<uint8_t> input{static_cast<uint8_t>(FuzzTarget::Gfx942), 0};
+    const auto append = [&](auto words) {
+      for (const uint32_t word : words)
+        for (unsigned byte = 0; byte < sizeof(word); ++byte)
+          input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+    };
+    append(cdna3::build_ds(cdna3::kDsGwsBarrierDs, {.offset0 = rid, .gds = 1, .addr = 0}));
+    const RunStats stats = run_input(input, FuzzTarget::Gfx942, nullptr, AsyncMode::Disabled, 1);
+    EXPECT_EQ(stats.inputs, 1u);
+    EXPECT_EQ(stats.executed, 2u);
+    EXPECT_EQ(stats.inputs_halted, 1u);
+    EXPECT_EQ(stats.budget_exhausted, 0u);
+  }
+}
+
 TEST(ExecutionFuzzInputTest, GeneratedInputsSelectSyncAsyncAndConcurrentExecution) {
   auto resources = make_async_execution_resources(2);
   struct Case {
