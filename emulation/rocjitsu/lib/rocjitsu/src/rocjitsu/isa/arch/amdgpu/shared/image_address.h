@@ -1,6 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+/// @file image_address.h
+/// @brief Dependency-light image address encoding helpers.
+/// @details Generated decoder-model sources use these helpers to describe
+/// register operands without depending on VM or execution state. Keep this
+/// header limited to encoding-level value types; image_access.h layers the
+/// Wavefront and memory-access implementation on top.
+
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ADDRESS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ADDRESS_H_
 
@@ -38,10 +45,16 @@ inline uint32_t image_coordinate_register_count(uint32_t dim, bool a16) {
   return a16 ? (count + 1) / 2 : count;
 }
 
+/// @brief Return the four consecutive address-register selectors beginning at @p first.
+/// @details Callers consume the prefix required by the instruction DIM.
 inline ImageAddressRegisters contiguous_image_address_registers(uint32_t first) {
   return {first, first + 1, first + 2, first + 3};
 }
 
+/// @brief Decode GFX11 MIMG address-register selectors.
+/// @details Non-NSA encodings select consecutive registers beginning at @p first.
+/// NSA encodings keep @p first as VADDR0 and read VADDR1-3 from encoding word 2.
+/// @pre When @p nsa is true, @p raw_encoding points to at least three words.
 inline ImageAddressRegisters gfx11_image_address_registers(bool nsa, uint32_t first,
                                                            const uint32_t *raw_encoding) {
   if (!nsa)
@@ -52,6 +65,8 @@ inline ImageAddressRegisters gfx11_image_address_registers(bool nsa, uint32_t fi
           (raw_encoding[2] >> 16) & 0xffu};
 }
 
+/// @brief Return the four explicit GFX12 VIMAGE address-register selectors.
+/// @tparam VimageMachineInst Machine encoding type exposing vaddr0 through vaddr3.
 template <typename VimageMachineInst>
 inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineInst &inst) {
   return {inst.vaddr0, inst.vaddr1, inst.vaddr2, inst.vaddr3};
