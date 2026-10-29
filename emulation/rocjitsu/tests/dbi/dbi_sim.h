@@ -70,6 +70,7 @@ public:
   /// @param arch Config/VM arch string: "cdna3", "cdna4", or "rdna4".
   /// @param wave_size 64 for CDNA, 32 for RDNA4.
   void initialize(std::string_view arch, uint32_t wave_size) {
+    util::StringDiagnostic admission_diagnostic;
     wave_size_ = wave_size;
     const std::string json =
         std::string(R"({"max_ticks":100000,"num_threads":1,"vm":{"arch":")") + std::string(arch) +
@@ -94,8 +95,10 @@ public:
     mem_ = loaded_.memory();
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
     engine_->topology().set_root(loaded_.take_root());
-    ASSERT_TRUE(loaded_.wire_links(engine_->topology()).succeeded());
-    ASSERT_TRUE(engine_->create().succeeded());
+    ASSERT_TRUE(loaded_.wire_links(engine_->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine_->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     plugin_group_ = make_halt_snapshot_group(&snapshot_plugin_);
     soc_->set_plugin_group(plugin_group_);
   }

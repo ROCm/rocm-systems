@@ -23,6 +23,7 @@ struct LoadedConfig;
 /// @param loaded A configuration with a primary SoC root.
 /// @param topology The topology that will own the assembled machine.
 /// @param daemon_mode Whether the machine's KFD driver serves daemon requests.
+/// @param emit_error Destination for failure diagnostics.
 /// @return The assembled machine, owned by topology, or a diagnosed failure.
 /// Invalid roots leave loaded untouched. Wiring failure consumes loaded and
 /// clears topology, so no partially wired machine can be used.

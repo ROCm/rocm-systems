@@ -659,12 +659,14 @@ TEST(XcdPartitioningTest, ClampPartitionCountUsesAllNonNullSocs) {
 }
 
 TEST(XcdPartitioningTest, ZeroPartitionsIsNoopWithoutManualPartitions) {
+  util::StringDiagnostic admission_diagnostic;
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   simdojo::Topology topology;
   topology.set_root(loaded.take_root());
-  ASSERT_TRUE(loaded.wire_links(topology).succeeded());
+  ASSERT_TRUE(loaded.wire_links(topology, admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   EXPECT_FALSE(amdgpu::partition_topology_by_xcds(topology, soc, 0));
   EXPECT_TRUE(topology.partitions().empty());
@@ -682,12 +684,14 @@ TEST(XcdPartitioningTest, NoXcdsIsNoopWithoutManualPartitions) {
 }
 
 TEST(XcdPartitioningTest, SinglePartitionAssignsAllComponentsToZero) {
+  util::StringDiagnostic admission_diagnostic;
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   simdojo::Topology topology;
   topology.set_root(loaded.take_root());
-  ASSERT_TRUE(loaded.wire_links(topology).succeeded());
+  ASSERT_TRUE(loaded.wire_links(topology, admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(topology, soc, 1));
   ASSERT_EQ(topology.partitions().size(), 1u);

@@ -29,14 +29,17 @@ public:
   /// @param name Human-readable domain name.
   /// @param frequency_hz Clock frequency in Hz.
   /// @param phase_offset Phase offset in simulation ticks.
-  /// @returns A domain, or failure with a diagnostic if the frequency is zero.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
+  /// @returns A domain, or failure with a diagnostic if the frequency is zero
+  /// or exceeds TICKS_PER_SECOND.
   static util::FailureOr<ClockDomain> create(std::string name, uint64_t frequency_hz,
                                              Tick phase_offset = 0,
                                              util::DiagnosticEmitter emit_error = {}) {
     if (frequency_hz == 0) {
-      emit_error.emit() << "Clock frequency must be positive";
-      return util::Result::failure();
+      return emit_error.emit() << "Clock frequency must be positive";
     }
+    if (frequency_hz > TICKS_PER_SECOND)
+      return emit_error.emit() << "Clock frequency must not exceed " << TICKS_PER_SECOND << " Hz";
     return ClockDomain(std::move(name), frequency_hz, phase_offset);
   }
 
@@ -44,12 +47,12 @@ public:
   /// @param[in] name Name for the derived domain.
   /// @param[in] divisor Frequency divisor (parent freq / divisor).
   /// @param[in] phase_offset Additional phase offset in simulation ticks.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns A domain, or diagnosed failure for a zero divisor or derived frequency.
   util::FailureOr<ClockDomain> derive(std::string name, uint32_t divisor, Tick phase_offset = 0,
                                       util::DiagnosticEmitter emit_error = {}) const {
     if (divisor == 0) {
-      emit_error.emit() << "Clock divisor must be positive";
-      return util::Result::failure();
+      return emit_error.emit() << "Clock divisor must be positive";
     }
     return create(std::move(name), frequency_ / divisor, phase_offset_ + phase_offset, emit_error);
   }
@@ -75,7 +78,7 @@ public:
   Tick first_edge() const { return phase_offset_ + period_; }
 
 private:
-  // Only create() calls this constructor, after validating a nonzero frequency.
+  // Only create() calls this constructor, after validating a usable frequency.
   ClockDomain(std::string name, uint64_t frequency_hz, Tick phase_offset)
       : name_(std::move(name)), frequency_(frequency_hz), period_(TICKS_PER_SECOND / frequency_hz),
         phase_offset_(phase_offset) {}

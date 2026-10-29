@@ -157,6 +157,7 @@ public:
   /// self-scheduling is deferred: the Clocked/Functional mixins enqueue their
   /// first event in startup() (invoked by the first run()/step() call), not
   /// here, so no events exist until execution begins.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns Failure with a diagnostic for invalid admission configuration. On
   /// failure no component engine pointers are changed and is_created() remains false.
   /// Allocations and component initialize callbacks can still throw.

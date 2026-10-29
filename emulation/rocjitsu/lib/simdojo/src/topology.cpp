@@ -23,15 +23,13 @@ util::FailureOr<Component *> resolve_comp(CompositeComponent *root, const std::s
     auto seg = (dot == std::string::npos) ? path.substr(pos) : path.substr(pos, dot - pos);
     pos = (dot == std::string::npos) ? path.size() : dot + 1;
     if (!cur->is_composite()) {
-      emit_error.emit() << "Path '" << path << "': '" << cur->name() << "' not composite";
-      return util::Result::failure();
+      return emit_error.emit() << "Path '" << path << "': '" << cur->name() << "' not composite";
     }
     auto *c = static_cast<CompositeComponent *>(cur);
     auto *ch = c->find_child(seg);
     if (!ch) {
-      emit_error.emit() << "Path '" << path << "': '" << seg << "' not found in '" << c->name()
-                        << "'";
-      return util::Result::failure();
+      return emit_error.emit() << "Path '" << path << "': '" << seg << "' not found in '"
+                               << c->name() << "'";
     }
     cur = ch;
   }
@@ -80,8 +78,7 @@ util::FailureOr<Port *> resolve_port_impl(CompositeComponent *root, const std::s
                                           util::DiagnosticEmitter emit_error) {
   auto last = path.rfind('.');
   if (last == std::string::npos) {
-    emit_error.emit() << "Port path needs '.': " << path;
-    return util::Result::failure();
+    return emit_error.emit() << "Port path needs '.': " << path;
   }
   auto maybe_comp = resolve_comp(root, path.substr(0, last), emit_error);
   if (maybe_comp.failed())
@@ -181,8 +178,7 @@ uint32_t Topology::num_components() const {
 util::FailureOr<Component *> Topology::resolve_component(const std::string &path,
                                                          util::DiagnosticEmitter emit_error) const {
   if (!root_) {
-    emit_error.emit() << "resolve_component: topology has no root";
-    return util::Result::failure();
+    return emit_error.emit() << "resolve_component: topology has no root";
   }
   return resolve_comp(root_.get(), path, emit_error);
 }
@@ -190,8 +186,7 @@ util::FailureOr<Component *> Topology::resolve_component(const std::string &path
 util::FailureOr<Port *> Topology::resolve_port(const std::string &path,
                                                util::DiagnosticEmitter emit_error) const {
   if (!root_) {
-    emit_error.emit() << "resolve_port: topology has no root";
-    return util::Result::failure();
+    return emit_error.emit() << "resolve_port: topology has no root";
   }
   return resolve_port_impl(root_.get(), path, emit_error);
 }
@@ -200,15 +195,13 @@ util::Result Topology::wire_links(const std::vector<LinkSpec> &specs, ExecMode m
                                   util::DiagnosticEmitter emit_error) {
   // Resolve every component and validate every path before creating ports or links.
   if (!root_) {
-    emit_error.emit() << "wire_links: topology has no root";
-    return util::Result::failure();
+    return emit_error.emit() << "wire_links: topology has no root";
   }
   for (const auto &ls : specs) {
     for (const auto *path : {&ls.src, &ls.dst}) {
       auto last = path->rfind('.');
       if (last == std::string::npos) {
-        emit_error.emit() << "Port path needs '.': " << *path;
-        return util::Result::failure();
+        return emit_error.emit() << "Port path needs '.': " << *path;
       }
       if (resolve_comp(root_.get(), path->substr(0, last), emit_error).failed())
         return util::Result::failure();
@@ -254,8 +247,7 @@ void Topology::dfs_visit(std::function<void(Component *, uint32_t)> visitor) con
 util::Result Topology::partition_balanced(uint32_t num_partitions,
                                           util::DiagnosticEmitter emit_error) {
   if (num_partitions == 0) {
-    emit_error.emit() << "partition_balanced: num_partitions must be nonzero";
-    return util::Result::failure();
+    return emit_error.emit() << "partition_balanced: num_partitions must be nonzero";
   }
 
   auto components = collect_all_components();
@@ -289,11 +281,10 @@ util::Result Topology::partition_balanced(uint32_t num_partitions,
 util::Result Topology::partition_manual(uint32_t num_partitions,
                                         std::function<PartitionID(Component *)> assigner,
                                         util::DiagnosticEmitter emit_error) {
-  if (num_partitions == 0 || !assigner) {
-    emit_error.emit()
-        << "partition_manual: num_partitions must be nonzero and assigner must be set";
-    return util::Result::failure();
-  }
+  if (num_partitions == 0)
+    return emit_error.emit() << "partition_manual: num_partitions must be nonzero";
+  if (!assigner)
+    return emit_error.emit() << "partition_manual: assigner must be set";
 
   auto components = collect_all_components();
   append_link_endpoint_owners(components);
@@ -303,8 +294,7 @@ util::Result Topology::partition_manual(uint32_t num_partitions,
   for (auto *comp : components) {
     PartitionID pid = assigner(comp);
     if (pid >= num_partitions) {
-      emit_error.emit() << "partition_manual: assigner returned out-of-range ID";
-      return util::Result::failure();
+      return emit_error.emit() << "partition_manual: assigner returned out-of-range ID";
     }
     assignments.push_back(pid);
   }

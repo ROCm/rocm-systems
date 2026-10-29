@@ -168,8 +168,9 @@ public:
   /// @param name Human-readable domain name.
   /// @param frequency_hz Clock frequency in Hz.
   /// @param phase_offset Phase offset in simulation ticks.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns Pointer to the created ClockDomain, or failure with a diagnostic for
-  /// zero frequency. Failure leaves the registered domains unchanged.
+  /// zero or above-limit frequency. Failure leaves the registered domains unchanged.
   util::FailureOr<ClockDomain *> add_clock_domain(std::string name, uint64_t frequency_hz,
                                                   Tick phase_offset = 0,
                                                   util::DiagnosticEmitter emit_error = {});
@@ -186,22 +187,26 @@ public:
   /// borrowed and must remain alive through every subsequent repartition and
   /// SimulationEngine create/run/shutdown operation that retains them.
   /// @param num_partitions Number of partitions to create (one per thread).
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns Failure with a diagnostic if @p num_partitions is zero; existing partitions are
   /// unchanged.
   util::Result partition_balanced(uint32_t num_partitions, util::DiagnosticEmitter emit_error = {});
 
   /// @brief Resolve a dotted path (e.g., "xcd0.se1.cu3") to a Component.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns The component, or diagnosed failure for a missing root or invalid path.
   util::FailureOr<Component *> resolve_component(const std::string &path,
                                                  util::DiagnosticEmitter emit_error = {}) const;
 
   /// @brief Resolve a dotted path to a Port (last segment is the port name).
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns The port (created on demand), or diagnosed failure for a missing
   /// root, missing component, or path without a port separator.
   util::FailureOr<Port *> resolve_port(const std::string &path,
                                        util::DiagnosticEmitter emit_error = {}) const;
 
   /// @brief Wire deferred link specs, creating ports on demand.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns Success, or diagnosed failure for invalid paths or a missing root.
   /// All paths are validated before changing ports or links. Allocations may throw.
   util::Result wire_links(const std::vector<LinkSpec> &specs, ExecMode mode,
@@ -218,6 +223,7 @@ public:
   /// create/run/shutdown operation that retains them.
   /// @param num_partitions Number of partitions to create.
   /// @param assigner Callback returning the partition ID for each component.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns Failure with a diagnostic for zero partitions, an empty assigner, or an
   /// out-of-range assignment. Existing partitions and component IDs are unchanged.
   /// Allocations and caller-supplied callbacks can still throw.

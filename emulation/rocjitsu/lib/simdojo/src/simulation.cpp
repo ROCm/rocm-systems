@@ -38,15 +38,13 @@ SimulationEngine::~SimulationEngine() {
 util::Result SimulationEngine::create(util::DiagnosticEmitter emit_error) {
   assert(!created_ && "create() called twice without shutdown()");
   if (config_.num_threads == 0) {
-    emit_error.emit() << "SimulationEngine requires at least one worker thread";
-    return util::Result::failure();
+    return emit_error.emit() << "SimulationEngine requires at least one worker thread";
   }
 
   if (topology_.partitions().empty()) {
     if (config_.num_threads > 1) {
-      emit_error.emit()
-          << "multi-threaded SimulationEngine requires an explicit topology partition policy";
-      return util::Result::failure();
+      return emit_error.emit()
+             << "multi-threaded SimulationEngine requires an explicit topology partition policy";
     }
     if (topology_.partition_balanced(1, emit_error).failed())
       return util::Result::failure();
@@ -106,23 +104,20 @@ void SimulationEngine::shutdown() {
 util::Result SimulationEngine::setup_partitions(util::DiagnosticEmitter emit_error) {
   const uint32_t num_threads = config_.num_threads;
   if (topology_.partitions().size() != num_threads) {
-    emit_error.emit()
-        << "SimulationEngine topology partition count must match the worker thread count";
-    return util::Result::failure();
+    return emit_error.emit()
+           << "SimulationEngine topology partition count must match the worker thread count";
   }
 
   // Validate cross-partition link constraints.
   for (auto &link : topology_.links()) {
     if (link->is_cross_partition()) {
       if (link->latency() == 0) {
-        emit_error.emit() << "SimulationEngine cross-partition link " << link_endpoints(*link)
-                          << " requires positive latency";
-        return util::Result::failure();
+        return emit_error.emit() << "SimulationEngine cross-partition link "
+                                 << link_endpoints(*link) << " requires positive latency";
       }
       if (dynamic_cast<QueuedLink *>(link.get()) != nullptr) {
-        emit_error.emit() << "SimulationEngine QueuedLink " << link_endpoints(*link)
-                          << " must not cross partition boundaries";
-        return util::Result::failure();
+        return emit_error.emit() << "SimulationEngine QueuedLink " << link_endpoints(*link)
+                                 << " must not cross partition boundaries";
       }
     }
   }

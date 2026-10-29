@@ -85,6 +85,7 @@ struct KfdFanoutFixture {
   std::thread sim_thread;
 
   void initialize() {
+    util::StringDiagnostic admission_diagnostic;
     ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
     // Both taken before take_root(): the loader owns the tree until then, and
     // its accessors stop resolving once ownership has moved out.
@@ -104,9 +105,11 @@ struct KfdFanoutFixture {
     auto vm = std::make_unique<VirtualMachine>(std::move(soc_root));
     driver = vm->driver();
     engine->topology().set_root(std::move(vm));
-    ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     soc->wire_backing(engine->topology());
-    ASSERT_TRUE(engine->create().succeeded());
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     engine->register_as_primary();
   }
 

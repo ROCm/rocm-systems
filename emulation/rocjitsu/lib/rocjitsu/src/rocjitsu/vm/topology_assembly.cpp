@@ -23,14 +23,12 @@ assemble_virtual_machine_topology(config::LoadedConfig &loaded, simdojo::Topolog
                                   bool daemon_mode, util::DiagnosticEmitter emit_error) {
   SoC *primary_soc = loaded.soc();
   if (primary_soc == nullptr) {
-    emit_error.emit() << "topology root must be an SoC";
-    return util::Result::failure();
+    return emit_error.emit() << "topology root must be an SoC";
   }
   if (loaded.num_gpus > 1) {
     for (const auto &extra_build : loaded.extra_gpu_builds) {
       if (!dynamic_cast<SoC *>(extra_build.root.get())) {
-        emit_error.emit() << "each GPU topology root must be an SoC";
-        return util::Result::failure();
+        return emit_error.emit() << "each GPU topology root must be an SoC";
       }
     }
   }

@@ -253,22 +253,23 @@ int run_vfio_server_impl(const std::string &config_path,
   }
   simdojo::SimulationEngine engine(engine_config);
 
+  util::StringDiagnostic diagnostic;
   VirtualMachine *machine_ptr = nullptr;
   try {
-    auto report_error = [](std::string_view message) { util::Logger::warn("vfu: ", message); };
-    auto machine = assemble_virtual_machine_topology(loaded, engine.topology(), false,
-                                                     util::DiagnosticEmitter(report_error));
-    if (machine.failed())
+    auto machine = assemble_virtual_machine_topology(loaded, engine.topology(),
+                                                     /*daemon_mode=*/false, diagnostic.emitter());
+    if (machine.failed()) {
+      util::Logger::warn("vfu: cannot assemble the local node: ", diagnostic.message());
       return 1;
+    }
     machine_ptr = machine.value();
   } catch (const std::exception &error) {
     util::Logger::warn(std::format("vfu: cannot assemble the local node: {}", error.what()));
     return 1;
   }
-  if (machine_ptr == nullptr || machine_ptr->num_socs() != socket_paths.size()) {
+  if (machine_ptr->num_socs() != socket_paths.size()) {
     util::Logger::warn(std::format("vfu: assembled node has {} local GPU(s), expected {}",
-                                   machine_ptr == nullptr ? 0 : machine_ptr->num_socs(),
-                                   socket_paths.size()));
+                                   machine_ptr->num_socs(), socket_paths.size()));
     return 1;
   }
 
@@ -315,9 +316,10 @@ int run_vfio_server_impl(const std::string &config_path,
       if (!device->usable())
         return 1;
     }
-    auto report_error = [](std::string_view message) { util::Logger::warn("vfu: ", message); };
-    if (engine.create(util::DiagnosticEmitter(report_error)).failed())
+    if (engine.create(diagnostic.emitter()).failed()) {
+      util::Logger::warn("vfu: cannot create the local GPU node: ", diagnostic.message());
       return 1;
+    }
   } catch (const std::exception &error) {
     util::Logger::warn(std::format("vfu: cannot create the local GPU node: {}", error.what()));
     return 1;

@@ -73,6 +73,7 @@ struct VectorAddRunResult {
 };
 
 void run_vector_add(uint32_t dispatch_threads, VectorAddRunResult &result) {
+  util::StringDiagnostic admission_diagnostic;
   // Load the compiled vector_add kernel.
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
@@ -92,8 +93,10 @@ void run_vector_add(uint32_t dispatch_threads, VectorAddRunResult &result) {
   soc->set_dispatch_threads(dispatch_threads);
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
-  ASSERT_TRUE(engine->create().succeeded());
+  ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   // Load code into GPU memory. Place .rodata (kernel descriptor) and .text (code)
   // at their virtual addresses relative to a base. The .kd symbol value matches
@@ -206,6 +209,7 @@ TEST(VectorAddStressTest, CpuDispatchThreadsPreserveOutputBytes) {
 // Exercises the barrier-based LBTS protocol with real GPU kernel execution.
 // Multi-threaded: exercises barrier-based LBTS with real GPU kernel execution.
 TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
+  util::StringDiagnostic admission_diagnostic;
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
   ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
@@ -219,10 +223,12 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   loaded.engine_config.num_threads = TOTAL_XCDS;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
+  ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, TOTAL_XCDS));
-  ASSERT_TRUE(engine->create().succeeded());
+  ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   co->load_to_memory(memory, KD_ADDR);
   uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");
@@ -291,6 +297,7 @@ TEST(VectorAddCodeObjectTest, LoadsAndDecodes) {
 // each XCD's caches are published before the dispatch retires, and that the
 // completion signal fires once, after the last workgroup anywhere on the device.
 void run_fanout_golden_reference(uint32_t num_threads) {
+  util::StringDiagnostic admission_diagnostic;
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
   ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
@@ -304,11 +311,13 @@ void run_fanout_golden_reference(uint32_t num_threads) {
   loaded.engine_config.num_threads = num_threads;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
+  ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
   if (num_threads > 1) {
     ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads));
   }
-  ASSERT_TRUE(engine->create().succeeded());
+  ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   co->load_to_memory(memory, KD_ADDR);
   uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");
@@ -549,6 +558,7 @@ private:
 // thread per XCD -- the case where an XCD can genuinely still be running while
 // the owner's share is done.
 void run_fanout_signal_ordering(uint32_t num_threads) {
+  util::StringDiagnostic admission_diagnostic;
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
@@ -561,11 +571,13 @@ void run_fanout_signal_ordering(uint32_t num_threads) {
   loaded.engine_config.num_threads = num_threads;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
+  ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
   if (num_threads > 1) {
     ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads));
   }
-  ASSERT_TRUE(engine->create().succeeded());
+  ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   co->load_to_memory(memory, KD_ADDR);
   const uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");

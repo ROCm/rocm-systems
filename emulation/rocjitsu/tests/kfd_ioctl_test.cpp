@@ -408,6 +408,7 @@ protected:
   // Split out so a fixture can bring up a different part. Uses ASSERT_*, so it
   // has to stay void-returning and be called directly from SetUp().
   void SetUpWithConfig(const std::string &config_path, bool publish_topology = true) {
+    util::StringDiagnostic admission_diagnostic;
     setenv("RJ_CONFIG", config_path.c_str(), 1);
     ASSERT_TRUE(rocjitsu::test::load_valid_config(config_path.c_str(), loaded_));
     auto root = loaded_.take_root();
@@ -429,9 +430,11 @@ protected:
     driver_ = vm->driver();
 
     engine_->topology().set_root(std::move(vm));
-    ASSERT_TRUE(loaded_.wire_links(engine_->topology()).succeeded());
+    ASSERT_TRUE(loaded_.wire_links(engine_->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     soc->wire_backing(engine_->topology());
-    ASSERT_TRUE(engine_->create().succeeded());
+    ASSERT_TRUE(engine_->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     engine_->register_as_primary();
 
     if (publish_topology)

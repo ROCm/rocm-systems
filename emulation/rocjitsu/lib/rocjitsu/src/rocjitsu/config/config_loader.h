@@ -274,6 +274,8 @@ struct LoadedConfig {
   std::unique_ptr<simdojo::CompositeComponent> take_root() { return std::move(build_result.root); }
 
   /// @brief Wire deferred link specs into a topology. Call after set_root().
+  /// @param topo Topology that owns the loaded root.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   util::Result wire_links(simdojo::Topology &topo, util::DiagnosticEmitter emit_error = {}) {
     return topo.wire_links(build_result.link_specs, exec_mode, emit_error);
   }

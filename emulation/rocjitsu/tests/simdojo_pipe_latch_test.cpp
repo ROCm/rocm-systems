@@ -114,8 +114,9 @@ private:
 };
 
 std::vector<std::pair<uint64_t, int>> run_pipeline(int count, bool back_to_front) {
-  auto maybe_domain = ClockDomain::create("clk", 1'000'000'000);
-  EXPECT_TRUE(maybe_domain.succeeded());
+  util::StringDiagnostic diagnostic;
+  auto maybe_domain = ClockDomain::create("clk", 1'000'000'000, 0, diagnostic.emitter());
+  EXPECT_TRUE(maybe_domain.succeeded()) << diagnostic.message();
   if (maybe_domain.failed())
     return {};
   const auto &domain = maybe_domain.value();
@@ -124,8 +125,8 @@ std::vector<std::pair<uint64_t, int>> run_pipeline(int count, bool back_to_front
   auto *pipeline = static_cast<ThreeStagePipeline *>(
       root->add_child(std::make_unique<ThreeStagePipeline>(domain, count, back_to_front)));
   engine.topology().set_root(std::move(root));
-  const auto created = engine.create();
-  EXPECT_TRUE(created.succeeded());
+  const auto created = engine.create(diagnostic.emitter());
+  EXPECT_TRUE(created.succeeded()) << diagnostic.message();
   if (created.failed())
     return {};
   const ExitStatus exit = engine.run();

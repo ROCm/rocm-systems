@@ -1304,6 +1304,7 @@ TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
 
 TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) {
   for (const char *arch : {"cdna3", "cdna4"}) {
+    util::StringDiagnostic admission_diagnostic;
     SCOPED_TRACE(arch);
     std::string json = R"({
       "num_threads": 1,
@@ -1329,8 +1330,10 @@ TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) 
     soc->set_dispatch_threads(1);
     simdojo::SimulationEngine engine(source.engine_config);
     engine.topology().set_root(source.take_root());
-    ASSERT_TRUE(source.wire_links(engine.topology()).succeeded());
-    ASSERT_TRUE(engine.create().succeeded());
+    ASSERT_TRUE(source.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     constexpr uint32_t kSlot = 7;
     for (auto *xcd : soc->xcds())
       for (auto *se : xcd->shader_engines())
@@ -1371,8 +1374,11 @@ TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) 
     restored_soc->set_dispatch_threads(1);
     simdojo::SimulationEngine restored_engine(restored.engine_config);
     restored_engine.topology().set_root(restored.take_root());
-    ASSERT_TRUE(restored.wire_links(restored_engine.topology()).succeeded());
-    ASSERT_TRUE(restored_engine.create().succeeded());
+    ASSERT_TRUE(
+        restored.wire_links(restored_engine.topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(restored_engine.create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     check_locations(restored_soc);
   }
 }
@@ -3273,6 +3279,7 @@ TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
+  util::StringDiagnostic admission_diagnostic;
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},
     "topology":{
@@ -3309,8 +3316,10 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
 
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  ASSERT_TRUE(loaded.wire_links(engine.topology()).succeeded());
-  ASSERT_TRUE(engine.create().succeeded());
+  ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
   auto plugin_group = rocjitsu::test::make_dispatch_count_group(&dispatch_count);
@@ -3642,24 +3651,36 @@ TEST(CheckpointTest, LegacyAutomaticDispatchKeepsHostSizingAcrossResaves) {
 
 TEST(CApiTest, InvalidTopologyLinkPreservesHandleAndEntryPointStatus) {
   // Parsing succeeds; rejection occurs while assembling the engine topology.
-  const std::string json = R"({"num_threads":1,"vm":{"arch":"cdna3"},
-    "topology":{"root":{"name":"soc","type":"soc","children":[
-      {"name":"vram","type":"gpu_memory"}]},
-      "links":[{"src":"missing.out","dst":"vram.in","latency":1}]}})";
-  util::StringDiagnostic diagnostic;
-  auto loaded =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
-  ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
-  rj_vm_t sentinel;
-  rj_vm_t *output = &sentinel;
-  EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &output),
-            ROCJITSU_STATUS_INVALID_ARGUMENT);
-  EXPECT_EQ(output, &sentinel);
-  test::ScopedTempFile config_file("rocjitsu-invalid-topology-link-");
-  std::ofstream(config_file.path()) << json;
-  EXPECT_EQ(rj_vm_create(config_file.path().c_str(), RJ_VM_MODE_DEFAULT, &output),
-            ROCJITSU_STATUS_INVALID_FILE);
-  EXPECT_EQ(output, &sentinel);
+  for (uint32_t num_gpus : {1u, 2u}) {
+    SCOPED_TRACE(::testing::Message() << "num_gpus=" << num_gpus);
+    const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3",
+      "gpu":{"device":{"gpu_id":1,"unique_id":1,"num_sdma_engines":0},"num_gpus":)") +
+                             std::to_string(num_gpus) +
+                             R"(}},
+      "topology":{"root":{"name":"soc","type":"soc","children":[
+        {"name":"vram","type":"gpu_memory"}]},
+        "links":[{"src":"missing.out","dst":"vram.in","latency":1}]}})";
+    util::StringDiagnostic diagnostic;
+    auto loaded =
+        config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
+    const config::LoadedConfig &loaded_config = loaded.value();
+    ASSERT_EQ(loaded_config.num_gpus, num_gpus);
+    ASSERT_EQ(loaded_config.extra_gpu_builds.size(), num_gpus - 1);
+    test::ScopedTempFile config_file("rocjitsu-invalid-topology-link-");
+    std::ofstream(config_file.path()) << json;
+    for (auto mode : {RJ_VM_MODE_DEFAULT, RJ_VM_MODE_DAEMON}) {
+      SCOPED_TRACE(::testing::Message() << "mode=" << mode);
+      rj_vm_t sentinel;
+      rj_vm_t *output = &sentinel;
+      EXPECT_EQ(rj_vm_create_from_string(json.c_str(), mode, &output),
+                ROCJITSU_STATUS_INVALID_ARGUMENT);
+      EXPECT_EQ(output, &sentinel);
+      EXPECT_EQ(rj_vm_create(config_file.path().c_str(), mode, &output),
+                ROCJITSU_STATUS_INVALID_FILE);
+      EXPECT_EQ(output, &sentinel);
+    }
+  }
 }
 
 TEST(CApiTest, CheckpointRoundTripPreservesAsyncHelperPolicy) {
