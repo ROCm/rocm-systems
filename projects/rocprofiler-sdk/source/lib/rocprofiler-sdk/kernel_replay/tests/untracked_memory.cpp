@@ -24,6 +24,8 @@
 
 #include <gtest/gtest.h>
 
+#include <sys/mman.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -241,6 +243,34 @@ TEST(kernel_replay_untracked_memory, host_mappings_hold_the_memory_a_kernel_coul
         if(!start) continue;  // not every kernel maps these
         EXPECT_FALSE(covers(mappings, *start)) << name << " holds nothing a kernel is handed";
     }
+
+    // PROT_WRITE without PROT_READ is `-w-` in /proc/self/maps. The guard never reads the mapping,
+    // and a pointer HSA does not know that lands there must still decline replay.
+    constexpr auto page = size_t{4096};
+    void* write_only    = ::mmap(nullptr, page, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT_NE(write_only, MAP_FAILED);
+    EXPECT_TRUE(covers(um::read_writable_host_mappings(), reinterpret_cast<uint64_t>(write_only)))
+        << "a writable-only mapping is host memory a kernel can be handed";
+    ::munmap(write_only, page);
+}
+
+TEST(kernel_replay_untracked_memory, addresses_in_the_56_bit_user_range_are_classified)
+{
+    // Just above the 47-bit canonical limit, and inside the 56-bit user range ROCr accepts.
+    constexpr auto wide = uint64_t{0x800000010000};
+    // One bit past that range is not a user address.
+    constexpr auto past  = uint64_t{1} << 56;
+    const auto     facts = [](uint64_t address) {
+        if(address == wide) return facts_of(type_t::vmem);
+        return facts_of(type_t::unknown);
+    };
+
+    const auto kernarg = kernarg_with({wide, past});
+    auto       seen    = std::unordered_set<uint64_t>{};
+    const auto hits    = um::scan_kernarg(kernarg.data(), kernarg.size(), nullptr, {}, facts, seen);
+    ASSERT_EQ(hits.size(), 1u);
+    EXPECT_EQ(hits[0].address, wide);
+    EXPECT_EQ(hits[0].region.kind, um::kind_t::virtual_mem);
 }
 
 TEST(kernel_replay_untracked_memory, fine_grained_memory_of_this_agent_is_restored_between_passes)
