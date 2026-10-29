@@ -1,0 +1,3 @@
+inherit: ../gfx908/lds.yaml
+lds.theoretical_bw:
+  peak_empirical: $LDSBw_empirical_peak
