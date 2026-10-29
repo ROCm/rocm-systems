@@ -38,7 +38,6 @@ static std::string get_test_name(rdc_diag_test_cases_t test_case) {
       {RDC_DIAG_NODE_TOPOLOGY, "Node topology check"},
       {RDC_DIAG_RVS_GST_TEST, "RVS check"},
       {RDC_DIAG_GPU_PARAMETERS, "GPU parameters check"},
-      {RDC_DIAG_POLL_LATENCY, "Poll latency check"},
       {RDC_DIAG_TEST_LAST, "Unknown"}};
 
   auto test_name = test_desc.find(test_case);
@@ -103,8 +102,7 @@ int main(int, char**) {
   }
 
   // (2) start to run short diagnostic.
-  // The response is about 8 MB, too big for the stack.
-  static rdc_diag_response_t response;
+  rdc_diag_response_t response;
   result =
       rdc_diagnostic_run(rdc_handle, group_id, RDC_DIAG_LVL_SHORT, nullptr, 0, &response, nullptr);
 

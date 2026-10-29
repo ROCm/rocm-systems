@@ -278,29 +278,9 @@ The diagnostic feature when run on a GPU group provides the following details:
     GPU parameters check:  Pass
     Compute Queue ready:  Pass
     System memory check:  Pass
-    Poll latency check:  Pass
     =============== Diagnostic Details ==================
     No compute process:  No processes running on any devices.
     Node topology check:  No link detected.
     GPU parameters check:  GPU 0 Critical Edge temperature in range.
     Compute Queue ready:  Run binary search task on GPU 0 Pass.
     System memory check:  Max Single Allocation Memory Test for GPU 0 Pass. CPUAccessToGPUMemoryTest for GPU 0 Pass. GPUAccessToCPUMemoryTest for GPU 0 Pass.
-    Poll latency check:  Read 9 fields from 1 GPU 20 times, 100 ms apart: median 2.04 ms, p95 2.10 ms, max 2.11 ms per poll. 180 values read, 0 failed, 0 not supported.
-     Device 0 median 2.04 ms, max 2.11 ms per read; 180 values read, 0 failed, 0 not supported
-
-The poll latency check measures how long RDC takes to read telemetry from the
-GPUs. It reads the fields that GPU monitoring polls most (GPU clock,
-temperatures, power, utilization, memory usage and ECC error counts) from every
-GPU in the group 20 times, 100 ms apart, with the code that ``rdcd`` uses to
-update the fields it watches. It reports the median, 95th percentile and
-maximum time to read all GPUs once (a poll), and the median and maximum time to
-read each GPU. The check warns when a value cannot be read or when a poll takes
-longer than 100 ms, and fails when no value can be read. Fields that a GPU does
-not support are counted, but are not a warning.
-
-To change the number of polls or the time between them, run the check with the
-``rdc_test_case_run()`` API, the ``RDC_DIAG_POLL_LATENCY`` test case and a
-configuration such as ``samples=50;interval_ms=1000``. ``samples`` accepts 1 to
-1000, and ``interval_ms`` accepts 0 to 60000, where 0 polls back to back. A run
-can take at most an hour: ``samples`` times ``interval_ms`` must not exceed
-3600000.

@@ -658,12 +658,11 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
       writer,
   };
 
-  // The response is about 8 MB, too big for the stack of a gRPC thread.
-  auto diag_response = std::make_unique<rdc_diag_response_t>();
+  rdc_diag_response_t diag_response;
   rdc_status_t result = rdc_diagnostic_run(
       rdc_handle_, request->group_id(), static_cast<rdc_diag_level_t>(request->level()),
       const_cast<char*>(request->config().c_str()), static_cast<size_t>(request->config().length()),
-      diag_response.get(), &callback);
+      &diag_response, &callback);
 
   ::rdc::DiagnosticRunResponse reply;
   reply.set_status(result);
@@ -672,15 +671,15 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   }
 
   ::rdc::DiagnosticResponse* to_response = reply.mutable_response();
-  if (diag_response->results_count > MAX_TEST_CASES) {
+  if (diag_response.results_count > MAX_TEST_CASES) {
     reply.set_status(RDC_ST_BAD_PARAMETER);
     writer->Write(reply);
     return ::grpc::Status::OK;
   }
-  to_response->set_results_count(diag_response->results_count);
+  to_response->set_results_count(diag_response.results_count);
 
-  for (uint32_t i = 0; i < diag_response->results_count; i++) {
-    const rdc_diag_test_result_t& test_result = diag_response->diag_info[i];
+  for (uint32_t i = 0; i < diag_response.results_count; i++) {
+    const rdc_diag_test_result_t& test_result = diag_response.diag_info[i];
     ::rdc::DiagnosticTestResult* to_diag_info = to_response->add_diag_info();
 
     to_diag_info->set_status(test_result.status);

@@ -6,8 +6,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Added
 
-- **`rdci diag` checks how long RDC takes to read telemetry from the GPUs**.
-  - The new Poll latency check reports how long a poll of the GPUs takes, warns when a poll takes longer than 100 ms or a value cannot be read, and fails when no value can be read. The diagnostic response (`rdc_diag_response_t`) is now about 8 MB, so keep it off the stack.
+- **RDC's test suite reports how long RDC takes to read telemetry from your GPUs**.
+  - The new poll latency test in `rdctst` prints the median, 95th percentile and maximum time to read 9 common fields from every GPU, so you can see RDC's run times in your own test environment.
 
 ### Changed
 

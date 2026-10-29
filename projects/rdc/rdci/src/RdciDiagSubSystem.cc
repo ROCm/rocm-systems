@@ -28,7 +28,6 @@ THE SOFTWARE.
 
 #include <ctime>
 #include <iomanip>
-#include <memory>
 #include <string>
 
 #include "common/rdc_utils.h"
@@ -135,7 +134,6 @@ std::string RdciDiagSubSystem::get_test_name(rdc_diag_test_cases_t test_case) co
       {RDC_DIAG_RVS_MEMBW_LONG_TEST, "RVS babel memory bandwidth long test"},
       {RDC_DIAG_RVS_H2DD2H_LONG_TEST, "RVS Host<->Device transfer speed long test"},
       {RDC_DIAG_RVS_IET_LONG_TEST, "RVS IET long test"},
-      {RDC_DIAG_POLL_LATENCY, "Poll latency check"},
       {RDC_DIAG_TEST_LAST, "Unknown"}};
 
   auto test_name = test_desc.find(test_case);
@@ -152,10 +150,9 @@ void RdciDiagSubSystem::process() {
   }
 
   rdc_status_t result;
-  // The response is about 8 MB, too big for the stack.
-  auto response = std::make_unique<rdc_diag_response_t>();
+  rdc_diag_response_t response;
   result = rdc_diagnostic_run(rdc_handle_, group_id_, run_level_, config_test_.c_str(),
-                              config_test_.length(), response.get(), nullptr);
+                              config_test_.length(), &response, nullptr);
 
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);
@@ -163,16 +160,16 @@ void RdciDiagSubSystem::process() {
   }
 
   // (3) Check diagnostic results
-  for (uint32_t i = 0; i < response->results_count; i++) {
-    const rdc_diag_test_result_t& test_result = response->diag_info[i];
+  for (uint32_t i = 0; i < response.results_count; i++) {
+    const rdc_diag_test_result_t& test_result = response.diag_info[i];
     std::cout << std::setw(26) << std::left << get_test_name(test_result.test_case) + ":"
               << rdc_diagnostic_result_string(test_result.status) << "\n";
   }
 
   // (4) diagnostic detail information
   std::cout << " =============== Diagnostic Details ==================\n";
-  for (uint32_t i = 0; i < response->results_count; i++) {
-    const rdc_diag_test_result_t& test_result = response->diag_info[i];
+  for (uint32_t i = 0; i < response.results_count; i++) {
+    const rdc_diag_test_result_t& test_result = response.diag_info[i];
     if (test_result.info[0] != '\0') {
       std::cout << std::setw(26) << std::left << get_test_name(test_result.test_case) + ":"
                 << test_result.info << "\n";

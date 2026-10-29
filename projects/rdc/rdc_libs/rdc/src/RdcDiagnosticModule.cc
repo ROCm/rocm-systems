@@ -90,7 +90,6 @@ rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpu
     tests_to_search_for.push_back(RDC_DIAG_GPU_PARAMETERS);
     tests_to_search_for.push_back(RDC_DIAG_COMPUTE_QUEUE);
     tests_to_search_for.push_back(RDC_DIAG_SYS_MEM_CHECK);
-    tests_to_search_for.push_back(RDC_DIAG_POLL_LATENCY);
   }
 
   std::vector<rdc_diag_test_cases_t> tests_to_run;

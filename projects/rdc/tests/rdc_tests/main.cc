@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "functional/rdc_poll_latency.h"
 #include "functional/rdci_discovery.h"
 #include "functional/rdci_dmon.h"
 #include "functional/rdci_fieldgroup.h"
@@ -101,6 +102,11 @@ TEST(rdctstReadOnly, TestRdciFieldgroup) {
 
 TEST(rdctstReadOnly, TestRdciStats) {
   TestRdciStats tst;
+  RunGenericTest(&tst);
+}
+
+TEST(rdctstReadOnly, TestRdcPollLatency) {
+  TestRdcPollLatency tst;
   RunGenericTest(&tst);
 }
 

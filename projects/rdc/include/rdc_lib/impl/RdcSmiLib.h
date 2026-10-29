@@ -23,7 +23,6 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RDCSMILIB_H_
 
 #include <memory>
-#include <mutex>
 
 #include "rdc_lib/RdcDiagnostic.h"
 #include "rdc_lib/RdcMetricFetcher.h"
@@ -68,19 +67,9 @@ class RdcSmiLib : public RdcTelemetry, public RdcDiagnostic {
   explicit RdcSmiLib(const RdcMetricFetcherPtr& mf);
 
  private:
-  // rdc_telemetry_fields_value_get() for a caller that holds fetch_mutex_.
-  rdc_status_t read_fields_locked(rdc_gpu_field_t* fields, uint32_t fields_count,
-                                  rdc_field_value_f callback, void* user_data);
-  rdc_status_t run_poll_latency(uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
-                                const char* config, size_t config_size,
-                                rdc_diag_test_result_t* result);
-
   RdcMetricFetcherPtr metric_fetcher_;
   bool bulk_fetch_enabled_;
   RdcSmiDiagnosticPtr smi_diag_;
-  // Serializes field reads, so that the poll latency check does not read
-  // fields while rdcd's collector reads them.
-  std::mutex fetch_mutex_;
 };
 
 typedef std::shared_ptr<RdcSmiLib> RdcSmiLibPtr;
