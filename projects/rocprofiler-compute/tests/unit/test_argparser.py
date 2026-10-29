@@ -147,6 +147,23 @@ def test_config_dir_requires_value(capsys):
 
 
 # =============================================================================
+# abbreviated options
+# =============================================================================
+
+
+def test_abbreviated_option_is_rejected(capsys):
+    assert (
+        build_args(["--list-metrics-gfx-id", "gfx950"]).list_metrics_gfx_id == "gfx950"
+    )
+    with pytest.raises(SystemExit) as exc:
+        build_args(["--list-metrics-gfx=gfx950"])
+    assert exc.value.code == 2
+    assert (
+        "unrecognized arguments: --list-metrics-gfx=gfx950" in capsys.readouterr().err
+    )
+
+
+# =============================================================================
 # profile -d / --output-directory
 # =============================================================================
 
