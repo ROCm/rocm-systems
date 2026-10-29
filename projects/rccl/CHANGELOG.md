@@ -11,6 +11,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed `net_ib_cast` ignoring `NCCL_IB_SPLIT_DATA_ON_QPS` and `RCCL_IB_SPLIT_DATA_THRESHOLD` when the CAST QP scheduler is off (the default on AINIC). Every request was split over every QP of every device. A request now uses one QP per device (`NCCL_IB_SPLIT_DATA_ON_QPS=0`, the default) or all QPs (`1`), as `net_ib` does, and sends smaller than `RCCL_IB_SPLIT_DATA_THRESHOLD` (default 128 bytes) go on a single QP.
 
 ### Known issues
 

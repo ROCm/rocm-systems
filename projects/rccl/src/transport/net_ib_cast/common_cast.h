@@ -677,11 +677,13 @@ static inline void IbCastCommBaseInitSchedParms(struct ncclIbNetCommBase* baseCo
   baseComm->schedParmsInit = true;
 }
 
-// Number of QPs a request is transferred over when the CAST scheduler is disabled
+// Number of QPs a request is transferred over when the CAST scheduler is disabled.
+// Clamped to nqps: RMA connections use a single QP even when nDataQps > 1.
 static inline int IbCastCommBaseGetDefaultNqpsPerRequest(struct ncclIbNetCommBase* baseComm) {
   assert(baseComm->nqps != -1);
   assert(baseComm->nDataQps != -1);
-  return (baseComm->splitDataOnQps == 1) ? baseComm->nqps : baseComm->nDataQps;
+  int nqps = (baseComm->splitDataOnQps == 1) ? baseComm->nqps : baseComm->nDataQps;
+  return (nqps < baseComm->nqps) ? nqps : baseComm->nqps;
 }
 
 static inline ncclResult_t IbCastPostRecvWorkRequest(struct ibv_qp* qp, struct ibv_recv_wr* wr) {

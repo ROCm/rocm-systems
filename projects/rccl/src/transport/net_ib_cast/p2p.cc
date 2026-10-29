@@ -643,7 +643,9 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
 // choice is WRR-driven and not reproducible here, so arm every QP.
 static inline int IbCastRecvCommGetNqps(struct ncclIbRecvComm* comm) {
   if (comm->useCtsOffload) return 1;
-  if (castGlobalQpSchedParms.enable) return comm->base.nqps;
+  // BY_ORDER senders never initialize schedParms (see IbCastUpdateSchedParmsTry), so they take the
+  // scheduler-off path even when the scheduler is globally enabled. Mirror that here.
+  if (castGlobalQpSchedParms.enable && comm->base.recvMatchingScheme != BY_ORDER) return comm->base.nqps;
   return IbCastCommBaseGetDefaultNqpsPerRequest(&comm->base);
 }
 

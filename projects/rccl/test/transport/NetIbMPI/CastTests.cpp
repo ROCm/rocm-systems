@@ -971,8 +971,13 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
 // White-box: Toggle schedEnable on an established connection.
 // Message is small (dataPerQp < splitDataMin) with splitData=true.
 //   enable=true  → WRR oneQp path → 1 token consumed
-//   enable=false → scheduler disabled, all-QP path → 0 tokens consumed
+//   enable=false → scheduler disabled, default QP set → 0 tokens consumed
 //   enable=true  → WRR resumes → 1 token consumed
+//
+// Only the sender is toggled; the receiver keeps arming every QP because the
+// scheduler is still globally on. With NCCL_IB_SPLIT_DATA_ON_QPS=1 the default
+// QP set is every QP, so both sides agree. With 0 it is one QP per device,
+// which leaves a receiver on a fused NIC waiting for QPs that never complete.
 // =============================================================================
 TEST_F(NetIbMPITest, CastEnableDisableSched) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
@@ -981,6 +986,11 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    {
+        const char* v = getenv("NCCL_IB_SPLIT_DATA_ON_QPS");
+        if (!v || strcmp(v, "1") != 0)
+            GTEST_SKIP() << "CastEnableDisableSched requires NCCL_IB_SPLIT_DATA_ON_QPS=1";
+    }
     CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
@@ -1030,7 +1040,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
         ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, false, true, true, GetSplitDataMin()), ncclSuccess);
     }
 
-    // Phase 2: enable=false → bypass (all-QP path)
+    // Phase 2: enable=false → scheduler bypassed, every QP (SPLIT_DATA_ON_QPS=1)
     int activeTotBefore2es = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};

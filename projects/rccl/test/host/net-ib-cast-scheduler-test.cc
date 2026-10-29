@@ -593,10 +593,28 @@ class NetIbCastSchedulerNqpsMicrotest : public NetIbCastSchedulerTxMicrotest {
 
 TEST_F(NetIbCastSchedulerNqpsMicrotest, EffectiveNqps_SchedulerOff_RotatesByRequestId) {
   req_.desc.parms.enable = false;
+  base().splitDataOnQps = 1;
+  base().nDataQps = 1;
   req_.id = 7;
   int start = -1;
   bool wrr = true;
   EXPECT_EQ(Pick(&start, &wrr), 3);
+  EXPECT_EQ(start, 7 % 3);
+  EXPECT_FALSE(wrr);
+}
+
+// NCCL_IB_SPLIT_DATA_ON_QPS=0 (the default): one QP per device, as net_ib does.
+TEST_F(NetIbCastSchedulerNqpsMicrotest, EffectiveNqps_SchedulerOffNoSplitOnQps_UsesTheDataQps) {
+  req_.desc.parms.enable = false;
+  // The scheduler parameters are ignored while it is off.
+  req_.desc.parms.splitData = true;
+  req_.desc.parms.doWrr = true;
+  base().splitDataOnQps = 0;
+  base().nDataQps = 2;
+  req_.id = 7;
+  int start = -1;
+  bool wrr = true;
+  EXPECT_EQ(Pick(&start, &wrr), 2);
   EXPECT_EQ(start, 7 % 3);
   EXPECT_FALSE(wrr);
 }
