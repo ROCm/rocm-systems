@@ -28,6 +28,8 @@ static int maxBlocksLsa(struct ncclComm* comm, enum ncclSymkKernelId kernelId) {
 #endif
   case ncclSymkKernelId_AllGather_HierLsaST:
     return ncclSymkAgHierMaxBlocks;
+  case ncclSymkKernelId_ReduceScatter_HierLsaLD:
+    return ncclSymkRsHierMaxBlocks;
   default:
     return ncclSymkMaxBlocks;
   }

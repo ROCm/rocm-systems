@@ -179,6 +179,12 @@ bool ncclSymkLsaBaseModel(struct ncclTuningInput_t* input, enum ncclSymkKernelId
     busBytes = (nRanks - 1) * nBytes; // Wrong. Should be nRanks*nBytes but we want to beat non-MC.
     busMultiplier = 0.55 * nRanks;
     break;
+  case ncclSymkKernelId_ReduceScatter_HierLsaLD:
+    // As many bytes reach a rank as with the flat kernel. The win is that each package sends a block's
+    // owner one partial sum rather than a copy per rank, which this model has no term for, so selection
+    // needs measurement first.
+    busBytes = (nRanks - 1) * nBytes;
+    break;
   }
 
   bool isTma = ncclSymkTmaKernelMask() >> kernelId & 1;

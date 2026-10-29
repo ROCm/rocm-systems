@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Shared by sym-kernels-index-test.cc and sym-kernels-test.cc: both #include the generated
-// sym_kernels_host.cc, which declares 86 kernels as __global__ -- a real definition needs
+// sym_kernels_host.cc, which declares 108 kernels as __global__ -- a real definition needs
 // hipLaunchKernel/__hipRegisterFunction, unavailable under -no-hip-rt. Include this AFTER
 // neutering __global__ (#undef/#define empty) and BEFORE #include SYM_KERNELS_HOST_CC_PATH.
 // The two callers compile into separate binaries, so including this from both is not an ODR
@@ -24,41 +24,51 @@
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_f32) \
   X(ncclSymkDevKernel_ReduceScatter_LD_sum_f32) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_sum_f32) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLD_sum_f32) \
   X(ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f16) \
   X(ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_f16) \
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_f16) \
   X(ncclSymkDevKernel_ReduceScatter_LD_sum_f16) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_sum_f16) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLD_sum_f16) \
   X(ncclSymkDevKernel_AllReduce_AGxLL_R_sum_bf16) \
   X(ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_LD_sum_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_sum_bf16) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLD_sum_bf16) \
   X(ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f8e4m3) \
   X(ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_LD_sum_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_sum_f8e4m3) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLD_sum_f8e4m3) \
   X(ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f8e5m2) \
   X(ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_LD_sum_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_sum_f8e5m2) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLD_sum_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_f32) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_f32) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f32) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLD_avg_f32) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_f16) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_f16) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f16) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLD_avg_f16) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_bf16) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLD_avg_bf16) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e4m3) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLD_avg_f8e4m3) \
   X(ncclSymkDevKernel_ReduceScatter_LL_avg_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_LD_avg_f8e5m2) \
   X(ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e5m2) \
+  X(ncclSymkDevKernel_ReduceScatter_HierLsaLD_avg_f8e5m2) \
   RCCL_SYMK_TEST_TMA_KERNEL_IDS(X)
 
 // The DMA-staged kernels, emitted only when gfx1250 is in GPU_TARGETS. Listed unconditionally:
