@@ -2888,16 +2888,21 @@ def main(argv=None):
         cli_pass_input_args = inp_args[0]
         input_pass_cmd_args = cmd_args
         if cli_has_pmc and input_has_pmc:
-            # In combined mode, output file names and directories are pass-local:
-            # CLI settings configure only CLI passes, while each input-file job
-            # retains its own output settings (or its own defaults).
+            # Only the artifact name and destination are pass-local in combined
+            # mode: CLI paths belong to CLI passes and each job's paths belong to
+            # that job. Formats, filters, and other options intentionally keep
+            # get_args' existing inheritance and conflict behavior.
+            #
+            # Mask both merge directions because get_args prefers CLI values and
+            # rejects unequal values. Leaving either side visible would leak its
+            # destination into the other source or reject independent paths.
             cli_pass_input_args = copy_args_without(
                 inp_args[0], PASS_LOCAL_OUTPUT_OPTIONS
             )
             input_pass_cmd_args = copy_args_without(cmd_args, PASS_LOCAL_OUTPUT_OPTIONS)
 
-        # Get base args for CLI-only passes. All non-output options retain the
-        # existing behavior of inheriting unspecified values from the first job.
+        # Build CLI passes against the masked first job; non-output options still
+        # inherit from it when unspecified on the command line.
         base_args = get_args(cmd_args, cli_pass_input_args)
 
         # Run each pass with its specific config
