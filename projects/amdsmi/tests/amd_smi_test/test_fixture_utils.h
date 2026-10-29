@@ -135,6 +135,9 @@ class ScopedFakeIoctl {
         request, Handler([fn = std::move(fn)](void* arg) { return fn(*static_cast<Arg*>(arg)); }));
   }
 
+  // Answers `request` by failing: ioctl() returns -1 with errno set to `error`.
+  void RegisterFailure(unsigned long request, int error);
+
   // How many times this fake's handler for `request` has run.
   int CallCount(unsigned long request) const;
 
@@ -147,6 +150,9 @@ class ScopedFakeIoctl {
   std::map<unsigned long, int> calls_;
   ScopedFakeIoctl* previous_active_;
 };
+
+// Answers AMDKFD_IOC_GET_VERSION on `ioctl` with the given KFD ioctl version.
+void RegisterFakeKfdVersion(ScopedFakeIoctl& ioctl, uint32_t major, uint32_t minor);
 
 // RAII: registers/unregisters a synthetic processor with AMDSmiSystem so
 // amd-smi's real public API dispatch (handle_to_processor()) can find it
@@ -273,6 +279,9 @@ class ScopedFakeKfdEventStream {
   // Queues one line as the kernel writes it ("<event number in hex> <payload>\n"), unless the mask
   // written so far excludes `event`. Event numbers outside 1..64 have no mask bit and always queue.
   void Write(uint32_t event, const std::string& payload);
+
+  // How many times the library has asked this fake for the KFD version.
+  int VersionQueryCount() const;
 
  private:
   uint32_t device_index_;

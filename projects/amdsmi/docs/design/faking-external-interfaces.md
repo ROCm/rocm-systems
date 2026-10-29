@@ -150,7 +150,8 @@ To fake another ioctl in a new test:
 2. Create a `ScopedFakeIoctl fake;` and add a handler per request:
    `fake.RegisterHandler<ArgStruct>(REQ, [](auto& args) { args.field = ...; return 0; });`.
    Return what the kernel would (0, or -1 with `errno` set) and fill the
-   argument's output fields; `fake.CallCount(REQ)` reports how often it ran.
+   argument's output fields; `fake.CallCount(REQ)` reports how often it ran. `fake.RegisterFailure(REQ, EPERM)` fails a request with that
+   errno, and `RegisterFakeKfdVersion(fake, major, minor)` answers the KFD version query.
 3. Call the public API and assert on its result.
 
 An unhandled request fails with `ENOTTY` and never reaches a device. Fakes nest
