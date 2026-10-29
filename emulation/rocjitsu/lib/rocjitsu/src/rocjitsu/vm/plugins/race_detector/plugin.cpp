@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
@@ -11,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/log.h"
 
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
@@ -364,10 +366,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   if (inst.data()->tag() == amdgpu::LOCAL_MEM || mixedFlat) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
     const uint64_t execMask = d.exec_mask;
-    // DDS participates in the instruction's dependencies, but its addresses
-    // do not describe bytes in the ordinary LDS allocation.
-    const uint64_t ldsMask =
-        (mixedFlat ? execMask & access.flat_local_lane_mask : execMask) & ~d.flat_dds_lane_mask;
+    // DDS and allocation-OOB lanes participate in the instruction's
+    // dependencies, but do not access bytes in the ordinary LDS allocation.
+    const uint64_t ldsMask = (mixedFlat ? execMask & access.flat_local_lane_mask : execMask) &
+                             ~(access.flat_dds_lane_mask | access.flat_local_oob_lane_mask);
     if (execMask == 0)
       return;
     auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
@@ -387,7 +389,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       if (!(ldsMask & (1ULL << lane)))
         continue;
       auto validate = [&](uint64_t address) {
-        const auto bytes = detector->ldsBytesInRange(address, perLaneBytes, d.elem_size);
+        auto bytes = detector->ldsBytesInRange(address, perLaneBytes, d.elem_size);
+        if (access.flat_local_allocation_end && d.elem_size != 0)
+          bytes = amdgpu::whole_element_bytes_in_range(address, bytes, d.elem_size,
+                                                       *access.flat_local_allocation_end);
         if (bytes == 0)
           return amdgpu::kInvalidLdsAddress;
         const auto addr = static_cast<uint32_t>(address);
@@ -418,7 +423,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     } else {
       rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
                            std::span<const uint32_t>(laneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder, ldsMask, d.elem_size);
+                           byte_mask, obligations, memoryOrder, ldsMask, d.elem_size,
+                           access.flat_local_allocation_end);
     }
     // A mixed instruction has one counter entry, with all register lanes but
     // only the ordinary LDS lanes' intervals. Do not also register a global event.
@@ -542,42 +548,26 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
 
 void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
                                                          amdgpu::Wavefront &wf) {
+  // Only explicit waits are handled here. Embedded waits (e.g. VINTERP wait_exp)
+  // remain unsupported by the plugin; they must retire events before the
+  // instruction's register accesses, as in MemoryWaitScoreboard::before.
+  if (!inst.is_waitcnt())
+    return;
+  const auto fields = amdgpu::WaitCounterPolicy::explicit_wait_fields(inst, wf.cu().arch());
+  if (fields.failed() || !fields.value())
+    return;
+
   auto *s = get_state(wf);
   assert(s && s->race_state);
-
-  const std::string_view mnemonic = inst.mnemonic();
-  const auto &target = wf.wait_target();
+  const auto model = amdgpu::waitcnt_model(wf.cu().arch()).value();
   PendingWaitCount wait;
-  if (mnemonic == "s_waitcnt") {
-    wait.add(amdgpu::WaitCounterType::VMCNT, target.vmcnt);
-    wait.add(amdgpu::WaitCounterType::LGKMCNT, target.lgkmcnt);
-    wait.add(amdgpu::WaitCounterType::EXPCNT, target.expcnt);
-  } else if (mnemonic == "s_waitcnt_vmcnt") {
-    wait.add(amdgpu::WaitCounterType::VMCNT, target.vmcnt);
-  } else if (mnemonic == "s_waitcnt_vscnt") {
-    wait.add(amdgpu::WaitCounterType::VSCNT, target.vscnt);
-  } else if (mnemonic == "s_waitcnt_lgkmcnt") {
-    wait.add(amdgpu::WaitCounterType::LGKMCNT, target.lgkmcnt);
-  } else if (mnemonic == "s_waitcnt_expcnt" || mnemonic == "s_wait_expcnt") {
-    wait.add(amdgpu::WaitCounterType::EXPCNT, target.expcnt);
-  } else if (mnemonic == "s_wait_loadcnt") {
-    wait.add(amdgpu::WaitCounterType::LOADCNT, target.vmcnt);
-  } else if (mnemonic == "s_wait_storecnt") {
-    wait.add(amdgpu::WaitCounterType::STORECNT, target.vscnt);
-  } else if (mnemonic == "s_wait_dscnt") {
-    wait.add(amdgpu::WaitCounterType::DSCNT, target.dscnt);
-  } else if (mnemonic == "s_wait_kmcnt") {
-    wait.add(amdgpu::WaitCounterType::KMCNT, target.kmcnt);
-  } else if (mnemonic == "s_wait_loadcnt_dscnt") {
-    wait.add(amdgpu::WaitCounterType::LOADCNT, target.vmcnt);
-    wait.add(amdgpu::WaitCounterType::DSCNT, target.dscnt);
-  } else if (mnemonic == "s_wait_storecnt_dscnt") {
-    wait.add(amdgpu::WaitCounterType::STORECNT, target.vscnt);
-    wait.add(amdgpu::WaitCounterType::DSCNT, target.dscnt);
-  } else if (mnemonic == "s_wait_asynccnt") {
-    wait.add(amdgpu::WaitCounterType::ASYNCCNT, target.asynccnt);
-  } else if (mnemonic == "s_wait_tensorcnt") {
-    wait.add(amdgpu::WaitCounterType::TENSORCNT, target.tensorcnt);
+  for (size_t i = 0; i < fields.value()->size(); ++i) {
+    const auto threshold = (*fields.value())[i];
+    if (!threshold)
+      continue;
+    if (const auto counter =
+            amdgpu::memory_wait_counter_type(static_cast<amdgpu::WaitCounterKind>(i), model))
+      wait.add(*counter, static_cast<int>(*threshold));
   }
   if (!wait.empty())
     s->race_state->dispatch(wait);

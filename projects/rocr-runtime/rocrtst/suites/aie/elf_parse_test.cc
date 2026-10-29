@@ -375,6 +375,72 @@ TEST(AieElfParse, ParsesTwoPdisInOneKernel) {
   EXPECT_EQ(Offsets(k.pdis[1].patch_sites), std::vector<std::uint32_t>{RelocationOffset(image, 2)});
 }
 
+TEST(AieElfParse, KeepsIdenticalPdiSectionsSeparate) {
+  // Two sites can name sections whose bytes happen to be equal (MLIR-AIR's control code loads the
+  // same empty PDI both before and after the design, as two separate sections). Each site's section
+  // must still get its own entry and so its own device placement: a kernel that shared one
+  // placement across two identical-content sections dispatched correctly once and incorrectly on
+  // every dispatch after.
+  //
+  // Same setup as ParsesTwoPdisInOneKernel, except the renamed section is also pointed at .pdi.1's
+  // own bytes (same offset and size), so its content is identical to .pdi.1's by construction
+  // rather than merely by the spare section's original content happening to differ.
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+  if (IsAie4()) GTEST_SKIP() << "no PDI construct to test on aie4";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+
+  const std::uint32_t alias_index = RenameSpareSection(image, ".pdi.2");
+  ASSERT_NE(alias_index, 0u) << "no spare section to rename";
+  const std::uint32_t pdi1_index = FindSection(image, ".pdi.1");
+  ASSERT_NE(pdi1_index, 0u);
+  Elf32_Shdr alias = SectionHeader(image, alias_index);
+  const Elf32_Shdr pdi1 = SectionHeader(image, pdi1_index);
+  alias.sh_offset = pdi1.sh_offset;
+  alias.sh_size = pdi1.sh_size;
+  SetSectionHeader(image, alias_index, alias);
+  ASSERT_EQ(SectionContents(image, ".pdi.2"), SectionContents(image, ".pdi.1"))
+      << "the alias must hold the same bytes, or this test proves nothing";
+
+  // Move and grow .dynstr so it can hold the new symbol name.
+  const std::uint32_t dynstr_index = FindSection(image, ".dynstr");
+  ASSERT_NE(dynstr_index, 0u);
+  Elf32_Shdr dynstr = SectionHeader(image, dynstr_index);
+  std::vector<std::uint8_t> strings(image.begin() + dynstr.sh_offset,
+                                    image.begin() + dynstr.sh_offset + dynstr.sh_size);
+  const std::uint32_t new_name_offset = static_cast<std::uint32_t>(strings.size());
+  strings.insert(strings.end(), std::begin(".pdi.2"), std::end(".pdi.2"));
+  dynstr.sh_offset = static_cast<Elf32_Off>(image.size());
+  dynstr.sh_size = static_cast<Elf32_Word>(strings.size());
+  image.insert(image.end(), strings.begin(), strings.end());
+  SetSectionHeader(image, dynstr_index, dynstr);
+
+  // Rename dynamic symbol 3 (the second kernel argument) to ".pdi.2". It already lives in the
+  // control-code section, which is what the reader requires of a patched symbol.
+  const std::uint32_t dynsym_index = FindSection(image, ".dynsym");
+  ASSERT_NE(dynsym_index, 0u);
+  const Elf32_Shdr dynsym = SectionHeader(image, dynsym_index);
+  ASSERT_GE(dynsym.sh_size, 4 * sizeof(Elf32_Sym));
+  std::memcpy(
+      image.data() + dynsym.sh_offset + 3 * sizeof(Elf32_Sym) + offsetof(Elf32_Sym, st_name),
+      &new_name_offset, sizeof(new_name_offset));
+
+  // Point the second argument relocation at it, as a PDI address.
+  ASSERT_TRUE(MutateRelocation(image, /*index=*/2, /*sym=*/3, kAddress64));
+
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  const auto& k = kernels.begin()->second;
+  ASSERT_EQ(k.pdis.size(), 2u);
+  EXPECT_EQ(k.pdis[0].bytes, SectionContents(image, ".pdi.1"));
+  EXPECT_EQ(Offsets(k.pdis[0].patch_sites), std::vector<std::uint32_t>{RelocationOffset(image, 0)});
+  EXPECT_EQ(k.pdis[1].bytes, SectionContents(image, ".pdi.2"));
+  EXPECT_EQ(Offsets(k.pdis[1].patch_sites), std::vector<std::uint32_t>{RelocationOffset(image, 2)});
+  EXPECT_EQ(k.pdis[0].bytes, k.pdis[1].bytes);
+}
+
 TEST(AieElfParse, RejectsAmbiguousPdiName) {
   // PDI sections are not group members, so a relocation names its PDI by section name alone. A
   // name shared by sections with different contents has no right answer, so it is refused rather
@@ -719,6 +785,125 @@ TEST(AieElfParse, Aie4OrdersPagesByNumber) {
   EXPECT_EQ(pages[0].ctrltext, second);
   EXPECT_EQ(pages[1].number, 10u);
   EXPECT_EQ(pages[1].ctrltext, first);
+}
+
+// The scratchpad design: like kElf, but its control code also takes the address of the control
+// scratchpad, which the ELF names but does not carry.
+constexpr const char* kParamElf = "kernel_full_elf_vsparam/aie.elf";
+constexpr const char* kScratchpad = "scratch-pad-ctrl";
+
+/**
+ * @brief Finds the .rela.dyn relocations whose symbol has a given name.
+ *
+ * @param image ELF contents
+ * @param name symbol name
+ * @param st_size receives the symbol's st_size, if any relocation names it
+ * @return the indices of those relocations in .rela.dyn
+ */
+std::vector<std::uint32_t> RelocationsNaming(const std::vector<std::uint8_t>& image,
+                                             const std::string& name, std::uint32_t* st_size) {
+  std::vector<std::uint32_t> found;
+  const std::uint32_t rela = FindSection(image, ".rela.dyn");
+  const std::uint32_t dynsym = FindSection(image, ".dynsym");
+  const std::uint32_t dynstr = FindSection(image, ".dynstr");
+  if (rela == 0 || dynsym == 0 || dynstr == 0) return found;
+  const Elf32_Shdr rela_sh = SectionHeader(image, rela);
+  const Elf32_Shdr sym_sh = SectionHeader(image, dynsym);
+  const Elf32_Shdr str_sh = SectionHeader(image, dynstr);
+  for (std::uint32_t r = 0; r < rela_sh.sh_size / sizeof(Elf32_Rela); ++r) {
+    Elf32_Rela rel{};
+    std::memcpy(&rel, image.data() + rela_sh.sh_offset + r * sizeof(Elf32_Rela), sizeof(rel));
+    Elf32_Sym sym{};
+    std::memcpy(&sym, image.data() + sym_sh.sh_offset + ELF32_R_SYM(rel.r_info) * sizeof(Elf32_Sym),
+                sizeof(sym));
+    const auto* sym_name =
+        reinterpret_cast<const char*>(image.data() + str_sh.sh_offset + sym.st_name);
+    if (name != sym_name) continue;
+    found.push_back(r);
+    *st_size = sym.st_size;
+  }
+  return found;
+}
+
+TEST(AieElfParse, ParsesScratchpadAsExternalSymbol) {
+  // The scratchpad is neither an argument nor a PDI. The reader records its sites and size for the
+  // loader to resolve.
+  const auto image = ReadFile(kParamElf);
+  if (image.empty()) GTEST_SKIP() << "scratchpad full-ELF artifact not built";
+
+  std::uint32_t st_size = 0;
+  const auto relocs = RelocationsNaming(image, kScratchpad, &st_size);
+  ASSERT_FALSE(relocs.empty()) << "artifact has no " << kScratchpad << " relocation";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  const auto& k = kernels.begin()->second;
+
+  ASSERT_EQ(k.external_symbols.size(), 1u);
+  const auto it = k.external_symbols.find(kScratchpad);
+  ASSERT_NE(it, k.external_symbols.end());
+  EXPECT_EQ(it->second.size, st_size);
+  ASSERT_EQ(it->second.sites.size(), relocs.size());
+  for (std::size_t i = 0; i < relocs.size(); ++i) {
+    EXPECT_EQ(it->second.sites[i].offset, RelocationOffset(image, relocs[i]));
+  }
+  // Its sites are not PDI sites, and the argument count is unchanged.
+  for (const auto& pdi : k.pdis) {
+    for (const auto& site : it->second.sites) {
+      for (const auto& pdi_site : pdi.patch_sites) {
+        EXPECT_FALSE(!site.in_ctrldata && pdi_site.page == site.page &&
+                     pdi_site.offset == site.offset);
+      }
+    }
+  }
+  EXPECT_EQ(k.num_args(), 2u);
+}
+
+TEST(AieElfParse, RejectsExternalSymbolWithAnotherScheme) {
+  // Only Address64 is defined for an external symbol.
+  auto image = ReadFile(kParamElf);
+  if (image.empty()) GTEST_SKIP() << "scratchpad full-ELF artifact not built";
+
+  std::uint32_t st_size = 0;
+  const auto relocs = RelocationsNaming(image, kScratchpad, &st_size);
+  ASSERT_FALSE(relocs.empty());
+  const std::uint32_t rela = FindSection(image, ".rela.dyn");
+  Elf32_Rela rel{};
+  std::memcpy(&rel,
+              image.data() + SectionHeader(image, rela).sh_offset + relocs[0] * sizeof(Elf32_Rela),
+              sizeof(rel));
+  // Same symbol, ShimDma48 instead of Address64.
+  ASSERT_TRUE(MutateRelocation(image, relocs[0], ELF32_R_SYM(rel.r_info), 5));
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS)
+      << "an external symbol with a ShimDma48 patch was accepted";
+  EXPECT_NE(error.find("external symbol"), std::string::npos)
+      << "rejected for the wrong reason: " << error;
+}
+
+TEST(AieElfParse, RejectsExternalSymbolPatchSiteOutOfRange) {
+  // The 8-byte store must lie inside the control code.
+  auto image = ReadFile(kParamElf);
+  if (image.empty()) GTEST_SKIP() << "scratchpad full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  // An aie2p control code is a single page with no ctrldata.
+  const std::size_t ctrl_code_size = kernels.begin()->second.pages.at(0).ctrltext.size();
+
+  std::uint32_t st_size = 0;
+  const auto relocs = RelocationsNaming(image, kScratchpad, &st_size);
+  ASSERT_FALSE(relocs.empty());
+  ASSERT_TRUE(
+      SetRelocationOffset(image, relocs[0], static_cast<std::uint32_t>(ctrl_code_size - 4)));
+  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS)
+      << "an out-of-range external symbol patch site was accepted";
+  EXPECT_NE(error.find("external symbol patch site"), std::string::npos)
+      << "rejected for the wrong reason: " << error;
 }
 
 }  // namespace

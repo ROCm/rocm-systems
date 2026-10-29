@@ -23,10 +23,11 @@ Two independent checks live here:
 from __future__ import annotations
 
 import os
-import subprocess
-import pytest
 import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 from conftest import RocprofsysTest
 from rocprofsys import RocprofsysConfig
 
@@ -120,8 +121,8 @@ def ainic_rocpd_rules(validation_rules_dir) -> list[Path]:
 class TestAINIC(RocprofsysTest):
     """Tests for AI NIC support and performance metric collection."""
 
-    PERFETTO_PASS_REGEX = [r"perfetto-trace\.pftrace validated"]
-    PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.pftrace"]
+    PERFETTO_PASS_REGEX = (r"perfetto-trace\.pftrace validated",)
+    PERFETTO_FAIL_REGEX = (r"Failure validating.*perfetto-trace\.pftrace",)
 
     # This test does _not_ requires NIC hardware, so "mark.ainic_required" is not added.
     @pytest.mark.timeout(30)
@@ -137,6 +138,7 @@ class TestAINIC(RocprofsysTest):
             capture_output=True,
             text=True,
             timeout=15,
+            check=False,
         )
         assert result.returncode == 0, f"rocprof-sys-avail failed: {result.stderr}"
 

@@ -351,8 +351,8 @@ void AieAgent::InitRegionList() {
   // We use HSA_HEAPTYPE_DEVICE_SVM so that the recommended
   // HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE is 0. We can use that to determine if a pool
   // is regular pool or dev heap.
-  // The system will report the max allocatable size as MemoryRegion::max_sysmem_alloc_size_, but
-  // this is incorrect. The pool is exactly XdnaDriver::GetDevHeapByteSize() bytes.
+  // The pool reports its max allocatable size as MemoryRegion::max_single_alloc_size_, which is
+  // exactly XdnaDriver::GetDevHeapByteSize() bytes.
   // UMQ (AIE4) devices have no dev heap at all, so this pool is omitted for them rather than
   // advertised with no capacity.
   auto& xdna_driver = static_cast<XdnaDriver&>(driver());

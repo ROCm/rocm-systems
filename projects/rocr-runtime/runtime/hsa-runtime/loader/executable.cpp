@@ -1909,6 +1909,59 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         }
       }
 
+      // External variables, such as the control scratchpad, are defined by the application with
+      // hsa_executable_agent_global_variable_define before loading, like a GPU code object's
+      // undefined symbols. Their addresses are plain stores, so they are written in here.
+      //
+      // Refused on aie4: UMQ dispatch does not list their BOs, and a plain address store would
+      // miss the DDR aperture that argument patches add.
+      if (is_aie4 && !kernel.external_symbols.empty()) {
+        log_warning_n(10, "AIE: kernel '%s' references external symbols, unsupported on aie4.\n",
+                      kernel_name.c_str());
+        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      }
+      for (const auto& [name, ext] : kernel.external_symbols) {
+        const auto var_it = agent_symbols_.find(std::make_pair(name, agent));
+        if (var_it == agent_symbols_.end() || !var_it->second->IsVariable() ||
+            var_it->second->address == 0) {
+          logger_ << "LoaderError: symbol \"" << name << "\" is undefined\n";
+          return HSA_STATUS_ERROR_VARIABLE_UNDEFINED;
+        }
+        void* va = reinterpret_cast<void*>(var_it->second->address);
+
+        // The NPU reaches the variable at its agent address, so all of it must lie in one
+        // allocation the driver knows. The extent is measured from the allocation base
+        // FindDriverMemoryHandle returns: for a VMM mapping, PtrInfo reports the queried pointer
+        // as the base but the whole mapping as the size.
+        auto* runtime = core::Runtime::runtime_singleton_;
+        hsa_amd_pointer_info_t info = {};
+        info.size = sizeof(info);
+        void* alloc_base = nullptr;
+        core::DriverMemoryHandle handle{};
+        bool known = runtime->PtrInfo(va, &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS;
+        known = known && info.type != HSA_EXT_POINTER_TYPE_UNKNOWN && info.agentBaseAddress;
+        known = known &&
+            runtime->FindDriverMemoryHandle(va, core_agent, &alloc_base, &handle) ==
+                HSA_STATUS_SUCCESS;
+        const auto offset_in_alloc =
+            reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(alloc_base);
+        if (!known || offset_in_alloc + ext.size > info.sizeInBytes) {
+          log_warning_n(10, "AIE: '%s' is not defined in %u bytes of AIE-accessible memory.\n",
+                        name.c_str(), ext.size);
+          return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+        }
+
+        const uint64_t dev_addr = reinterpret_cast<uint64_t>(info.agentBaseAddress) +
+            (reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(info.hostBaseAddress));
+        for (const AMD::aie_elf::PatchSite& site : ext.sites) {
+          const uint64_t value = dev_addr + site.addend;
+          auto& page = kernel.pages[site.page];
+          std::memcpy((site.in_ctrldata ? page.ctrldata : page.ctrltext).data() + site.offset,
+                      &value, sizeof(value));
+        }
+        desc->external_variables.push_back({va, ext.size, static_cast<uint32_t>(handle.handle)});
+      }
+
       // Lay the pages out as aiebu's elf_reader_gen2plus does: page N at N * Page::kAie4Size,
       // its ctrltext immediately followed by its ctrldata (matching the offsets aie_elf::Parse()
       // gave that page's argument sites), padded out to the next page. The firmware addresses
