@@ -193,12 +193,10 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* sigWinDevHost = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
-  static int64_t paramMax     = rcclParamCeArMaxMsgBytes();
   static int64_t paramStaging = rcclParamCeArStagingBytes();
-  static constexpr size_t kCeArMaxDefault = 256ULL * 1024 * 1024;
-  comm->ceColl.ceArMaxBytes     = (paramMax >= 0) ? (size_t)paramMax
-      : (comm->archThresholds != nullptr ? comm->archThresholds->ceNonRegMax[ncclFuncAllReduce] : kCeArMaxDefault);
+  comm->ceColl.ceArMaxBytes     = rcclCeArNonRegCap(comm);
   comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
+
   int i = 0;
   int targetStreams = 0;
   uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
