@@ -5,7 +5,7 @@
 #include "parser/cli_parser.hpp"
 #include "parser/config_store.hpp"
 #include "parser/default_parser.hpp"
-#include "parser/embedded_schema.hpp"
+#include "parser/default_schema.hpp"
 #include "parser/env_parser.hpp"
 #include "parser/file_parser.hpp"
 #include "parser/help.hpp"
@@ -273,7 +273,7 @@ load_requested_schema(std::string_view schema_path)
 {
     if(schema_path.empty())
     {
-        return load_schema(json::parse(get_embedded_schema_json()));
+        return get_default_schema();
     }
     return load_schema_file(std::string{ schema_path });
 }
