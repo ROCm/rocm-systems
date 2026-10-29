@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// AVX2 FP16 FMA/FMAC with guest rounding and optional FP status.
+// CPU-specific arithmetic stays here; public entry points select this backend.
+
+#include "fp/x86_64/half_fma_x86_64_v3.h"
+#include "common/simd.h"
+#include "common/x86_64/half_x86_64_v3.h"
+#include "rj_arith/rj_arith.h"
+
+#include <immintrin.h>
+#include <stdint.h>
+
+namespace rocjitsu::arith {
+
+// Evaluate FP16 fused multiply-add. Preserve destination lanes outside exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void half_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+                        const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+
+  int a_shift = instruction_flags & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
+  int b_shift = instruction_flags & RJ_ARITH_ALU_HIGH_B ? 16 : 0;
+  int c_shift = instruction_flags & RJ_ARITH_ALU_HIGH_C ? 16 : 0;
+  int d_shift = instruction_flags & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
+  auto keep = _mm256_set1_epi32(d_shift ? 65535 : -65536);
+  for (int lane = 0; lane < 32; lane += 8) {
+    auto x = half_input(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane)), a_shift,
+                        instruction_flags);
+    auto y = half_input(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane)), b_shift,
+                        instruction_flags >> 1);
+    auto z = half_input(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + lane)), c_shift,
+                        instruction_flags >> 2);
+
+    if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+      x = flush_denorm_f16(x);
+      y = flush_denorm_f16(y);
+      z = flush_denorm_f16(z);
+    }
+    auto result = half_fma_value(x, y, z, flags & RJ_ARITH_FP16_OVFL, instruction_flags,
+                                 flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                                 flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
+    result = _mm256_sll_epi32(result, _mm_cvtsi32_si128(d_shift));
+    auto old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));
+    result = _mm256_or_si256(result, _mm256_and_si256(old, keep));
+    auto lane_exec_mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
+                                            _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+    _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), lane_exec_mask, result);
+  }
+}
+
+} // namespace rocjitsu::arith

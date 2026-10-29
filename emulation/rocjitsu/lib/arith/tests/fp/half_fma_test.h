@@ -11,6 +11,7 @@
 #include "common/semantics.h"
 #include "fp/elementwise.h"
 #include "fp/fma_reference.h"
+#include "fp/fma_simd_test.h"
 #include "fp/half_fma_reference.h"
 #include "fp/reference.h"
 #include "rj_arith/rj_arith.h"
@@ -32,8 +33,31 @@ void check_half_fma(Call entry_point, bool gfx12, const Cases &status_cases) {
                   uint32_t *fp_status) {
     return entry_point(flags, exec_mask, instruction_flags, d, a, b, c, fp_status);
   };
+  check_fma_simd<16, Lanes>(call, {0, RJ_ARITH_ALU_NEG_A, RJ_ARITH_ALU_CLAMP, RJ_ARITH_ALU_OMOD_2,
+                                   RJ_ARITH_ALU_OMOD_4, RJ_ARITH_ALU_OMOD_HALF,
+                                   RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D,
+                                   RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_C, RJ_ARITH_DPP8,
+                                   RJ_ARITH_DPP16 | (0x1bULL << RJ_ARITH_DPP_CTRL_SHIFT) |
+                                       RJ_ARITH_DPP_ROW_MASK | RJ_ARITH_DPP_BANK_MASK,
+                                   RJ_ARITH_DPP16 | (0x101ULL << RJ_ARITH_DPP_CTRL_SHIFT) |
+                                       RJ_ARITH_DPP_ROW_MASK | RJ_ARITH_DPP_BANK_MASK});
   using Registers = rocjitsu::arith::test::Registers<10, Lanes>;
   Registers input = rocjitsu::arith::test::make_fp_inputs<16, Lanes>();
+  // Distinct halves make selecting low B/C observably different from high B/C.
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+      Registers r;
+      r.v[0][0] = 0x40003c00U;
+      r.v[2][0] = 0x44004200U;
+      r.v[4][0] = 0x46004500U;
+      r.v[6][0] = 0x12340000U;
+      ASSERT_EQ(call(cpu | semantics, Mask(1), RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_C, r.v + 6,
+                     r.v, r.v + 2, r.v + 4, nullptr),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(r.v[6][0], 0x12344900U);
+    }
+  }
 
   rocjitsu::arith::test::expect_invalid_fp_requests(
       [&](uint64_t flags, uint64_t instruction_flags) {

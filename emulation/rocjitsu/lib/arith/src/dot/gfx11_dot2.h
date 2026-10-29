@@ -9,11 +9,10 @@
 // Adapted from rocjitsu 39fd0ea559a shared/gfx11_dot2.h.
 // Empirical evidence: rocjitsu/tests/fixtures/float_dot/README.md.
 
-#include <algorithm>
-#include <bit>
+#include "common/bits.h"
 #include <cstdint>
 
-namespace rocjitsu::arith {
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 namespace gfx11_dot2_detail {
 
 inline constexpr uint32_t kFactorNan = 0xffc00a3d;
@@ -31,7 +30,8 @@ public:
 
   // Return the leading binary exponent, or the model's empty-exponent sentinel for zero.
   int leading_exponent() const {
-    return significand ? exponent + int(std::bit_width(significand)) - 1 : kEmptyExponent;
+    return significand ? exponent + int(rocjitsu::arith::bit_width(significand)) - 1
+                       : kEmptyExponent;
   }
 };
 
@@ -64,7 +64,9 @@ public:
   }
 
   // Return the binary exponent used to align this factor on the accumulation grid.
-  int alignment_exponent() const { return int(std::max(exponent_field(), 1u)) - bias; }
+  int alignment_exponent() const {
+    return int(rocjitsu::arith::maximum(exponent_field(), 1u)) - bias;
+  }
 
   // Form a gfx11 product term from two decoded factors, retaining its grid exponent.
   Term product(Factor other) const {
@@ -94,7 +96,7 @@ inline uint32_t pack(int64_t units, int grid, bool frame_negative) {
   }
   const uint32_t sign = uint32_t((units < 0) != frame_negative) << 31;
   const uint64_t magnitude = units < 0 ? uint64_t(-units) : uint64_t(units);
-  const int top = int(std::bit_width(magnitude)) - 1;
+  const int top = int(rocjitsu::arith::bit_width(magnitude)) - 1;
   int exponent = top + grid;
   uint64_t significand = shift_round_even(magnitude, top - 23);
   if (significand == 0x1000000) {
@@ -167,15 +169,18 @@ inline uint32_t gfx11_dot2_f32(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_b
     return 0;
   }
   const int product_grid =
-      std::max(p0.significand ? a0.alignment_exponent() + b0.alignment_exponent() : kEmptyExponent,
-               p1.significand ? a1.alignment_exponent() + b1.alignment_exponent()
-                              : kEmptyExponent) -
+      rocjitsu::arith::maximum(
+          p0.significand ? a0.alignment_exponent() + b0.alignment_exponent() : kEmptyExponent,
+          p1.significand ? a1.alignment_exponent() + b1.alignment_exponent() : kEmptyExponent) -
       24;
-  const int grid =
-      std::max(product_grid,
-               std::max({c.leading_exponent(), p0.leading_exponent(), p1.leading_exponent()}) - 26);
+  const int grid = rocjitsu::arith::maximum(
+      product_grid, rocjitsu::arith::maximum(
+                        c.leading_exponent(),
+                        rocjitsu::arith::maximum(p0.leading_exponent(), p1.leading_exponent())) -
+                        26);
   int64_t total = 0;
-  for (const Term t : {c, p0, p1}) {
+  const Term terms[] = {c, p0, p1};
+  for (const Term t : terms) {
     const int shift = t.exponent - grid;
     const uint64_t magnitude = !t.significand || shift <= -64 ? 0
                                : shift < 0                    ? t.significand >> -shift
@@ -185,4 +190,4 @@ inline uint32_t gfx11_dot2_f32(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_b
   return pack(total, grid, c.negative);
 }
 
-} // namespace rocjitsu::arith
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
