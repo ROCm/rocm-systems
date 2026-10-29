@@ -5,18 +5,38 @@
 
 use super::*;
 
+/// Wakes callers waiting for a VM fault notification.
+pub(crate) static VM_FAULT_CONDVAR: Condvar = Condvar::new();
+
 thread_local! {
     /// Whether this thread currently invokes an application callback.
     static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Marks application callbacks whose teardown would wait for the caller.
-pub(crate) struct CallbackScope(bool);
+pub(crate) struct CallbackScope {
+    /// Prior callback state restored when this invocation returns.
+    previous: bool,
+    /// Owns a worker callback's lease and thread-local inheritance marker.
+    _lease_scope: Option<ApiLeaseScope>,
+}
 
 impl CallbackScope {
     /// Marks entry into an application callback scope for reentrancy checks.
     pub(crate) fn enter() -> Self {
-        Self(IN_CALLBACK.with(|active| active.replace(true)))
+        let previous = IN_CALLBACK.with(|active| active.replace(true));
+        // A synchronous callback already runs under its caller's lease.
+        // Independent worker callbacks acquire one before invoking user code.
+        // After close, their owning worker is joined before state detachment;
+        // new HSA API calls from those callbacks are refused admission.
+        let lease_scope = (!ApiLeaseScope::current())
+            .then(|| process_admission().enter())
+            .flatten()
+            .map(ApiLeaseScope::enter);
+        Self {
+            previous,
+            _lease_scope: lease_scope,
+        }
     }
 
     /// Checks whether the current thread is executing an application callback.
@@ -28,7 +48,7 @@ impl CallbackScope {
 impl Drop for CallbackScope {
     /// Restores the previous callback reentrancy state for this thread.
     fn drop(&mut self) {
-        IN_CALLBACK.with(|active| active.set(self.0));
+        IN_CALLBACK.with(|active| active.set(self.previous));
     }
 }
 
