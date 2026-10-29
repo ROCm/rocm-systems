@@ -1,0 +1,28 @@
+compute_thruput_flops:
+  title: Compute Throughput FLOPS
+  metrics:
+  - compute.wmma_flops_fp16
+  - compute.wmma_flops_bf16
+  - compute.wmma_flops_fp8
+  - compute.wmma_flops_mxfp8
+  - compute.wmma_flops_fp6
+  - compute.wmma_flops_fp4
+  - compute.wmma_iops_int8
+gl1_cache_util:
+  title: Compute Throughput Utilization
+  metrics:
+  - gl1.gl1a_util
+  - gl1.gl1a_req_bus_util
+  - gl1.util
+launch_stats:
+  title: Launch Stats
+  metrics:
+  - wgp.util
+  - wgp.wall_clock
+mem_thruput:
+  title: Memory Throughput
+  metrics:
+  - txa.lds_bw_load
+  - txa.lds_bw_store
+  - utcl1.lookup_hit_rate
+  - grbm.gpu_active_cycles

@@ -22,6 +22,14 @@ from validate_metric_library import main, validate
 import config
 from utils.metric_library import MetricLibrary, arch_chain, default_metric_library_dir
 
+BASE_SETS = """\
+busy:
+  title: Busy
+  metrics:
+  - compute.salu_util
+  - compute.valu_util
+"""
+
 BASE_METRIC = """\
 compute.valu_util:
   name: VALU Utilization
@@ -330,6 +338,41 @@ def test_an_id_has_one_name_and_unit_on_every_arch(tree, field, shown):
     )
 
 
+@pytest.mark.parametrize(
+    "old, new, message",
+    [
+        ("busy:", "Busy:", "a set option must be snake_case"),
+        ("  title: Busy\n", "", "'title' is required"),
+        (
+            "title: Busy",
+            "title: Busy\n  description: x",
+            "'description' is not a known",
+        ),
+        ("title: Busy", "title: ' '", "'title' must be a non-empty string"),
+        ("  - compute.salu_util\n", "  - 5\n", "'metrics' must list metric ids"),
+        ("compute.salu_util", "compute.valu_util", "'metrics' lists an id twice"),
+        ("compute.salu_util", "compute.nope", "unknown metric ids ['compute.nope']"),
+    ],
+)
+def test_set_errors(tree, old, new, message):
+    write_text_file(tree / "gfx_base" / "sets.yaml", BASE_SETS.replace(old, new))
+    assert any(message in error for error in validate(tree))
+
+
+def test_set_must_fit_in_one_pass(shipped_copy, monkeypatch):
+    library, _ = shipped_copy("gfx908")
+    monkeypatch.setattr(
+        validate_metric_library.mi_gpu_specs,
+        "get_perfmon_config",
+        lambda arch: {"SQ": 2},
+    )
+    errors = validate(library)
+    assert (
+        "[gfx908] set compute_thruput_util: block SQ needs 3 counters "
+        "but one pass holds 2"
+    ) in errors
+
+
 def test_unknown_arch_directory(tree):
     (tree / "gfx_other").mkdir()
     assert "[gfx_other] is not a known metric library arch" in validate(tree)
@@ -557,3 +600,39 @@ def test_renamed_display_variant(shipped_copy):
     path = configs / "gfx908" / "0400_roofline.yaml"
     replace_in(path, "LDS Bandwidth:", "LDS BW:")
     assert any("4.1.11 is now" in error for error in validate(library, configs))
+
+
+def test_set_with_another_metric(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    replace_in(library / "gfx908" / "sets.yaml", "compute.salu_util", "l2.util")
+    errors = validate(library, configs)
+    assert any(
+        error.startswith("[gfx908] set compute_thruput_util: counters missing")
+        for error in errors
+    )
+
+
+def test_set_missing_from_the_library(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    path = library / "gfx908" / "sets.yaml"
+    text = path.read_text(encoding="utf-8")
+    path.write_text(
+        text[: text.index("launch_stats:")] + text[text.index("mem_thruput:") :]
+    )
+    assert (
+        "[gfx908] sets differ from profile_configs/sets: missing ['launch_stats'], "
+        "extra []"
+    ) in validate(library, configs)
+
+
+def test_set_without_metrics_must_collect_nothing(shipped_copy, monkeypatch):
+    library, configs = shipped_copy("gfx908")
+    monkeypatch.setattr(
+        validate_metric_library,
+        "SETS_WITHOUT_METRICS",
+        {"gfx908": ("compute_thruput_flops", "mem_thruput")},
+    )
+    assert (
+        "[gfx908] set mem_thruput is in SETS_WITHOUT_METRICS but has metrics; "
+        "remove the entry"
+    ) in validate(library, configs)

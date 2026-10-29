@@ -15,7 +15,9 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
      a view, and live in the file named after their category, so each id is unique on
      the arch;
   5. no two metrics on the arch share a formula (except SHARED_FORMULA_IDS) or a name,
-     and a formula has one id on every arch (except SPLIT_FORMULA_IDS);
+     and a formula has one id on every arch (except SPLIT_FORMULA_IDS); each set has a
+     title and a list of the arch's metric ids, and fits in one profiling pass on
+     every GPU arch it serves;
   6. units use one spelling, and each metric id has one name and one unit on every
      arch;
   7. the library matches analysis_configs: every equation a row shows is a library
@@ -23,8 +25,9 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
      formula is shown, every row's unit is its metric's unit (except UNIT_VARIANTS),
      each row's peak is its metric's "peak" or "peak_empirical" and each library peak
      is shown by a row, the no-filter counters equal detect_counters(), and the
-     variables equal get_build_in_vars(). Check 7 is temporary; see "Equivalence with
-     analysis_configs" below.
+     variables equal get_build_in_vars(); each set of profile_configs/sets is a library
+     set (except SETS_WITHOUT_METRICS) that collects the same counters as `--set`.
+     Check 7 is temporary; see "Equivalence with analysis_configs" below.
 """
 
 import re
@@ -56,6 +59,7 @@ import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
 from utils import metric_library
 from utils.metric_library import (
+    SETS_FILENAME,
     VARIABLES_FILENAME,
     MetricLibrary,
     arch_files,
@@ -64,8 +68,17 @@ from utils.metric_library import (
     load_metric_library,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import MEMBW_ANALYSIS_PANEL_ID, canonical_config_arch
-from utils.utils_counter_defs import get_build_in_vars, metric_value_keys
+from utils.utils_common import (
+    MEMBW_ANALYSIS_PANEL_ID,
+    canonical_config_arch,
+    parse_sets_yaml,
+)
+from utils.utils_counter_defs import (
+    counters_over_block_limits,
+    extract_counters_and_variables,
+    get_build_in_vars,
+    metric_value_keys,
+)
 from utils.yaml_inherit_loader import InheritanceError, declared_parent
 from vendored import yaml
 
@@ -106,6 +119,12 @@ ARCH_CEILINGS_WITHOUT_METRIC = {
     "gfx1250": ("FP16Flops", "FP32Flops", "FP64Flops"),
 }
 VARIABLE_FIELDS = ("formula",)
+SET_FIELDS = ("title", "metrics")
+SET_OPTION_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$")
+# Sets of profile_configs/sets with no library set, by arch: no row of the set shows an
+# equation on the arch, so `--set` collects only the normalization counters. gfx908 has
+# no MFMA counters.
+SETS_WITHOUT_METRICS = {"gfx908": ("compute_thruput_flops",)}
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
 # by a different measured ceiling. gfx950 and gfx1250 count MXF8 matrix work in the F8
 # counter.
@@ -385,9 +404,14 @@ def validate_arch(metric_dir: Path, arch: str) -> List[str]:
     ]
     load_errors: Dict[Path, Exception] = {}
     metrics: Dict[str, Any] = {}
+    sets: Dict[str, Any] = {}
     for path, document in iter_library_documents(metric_dir, arch, load_errors):
         if path.name == VARIABLES_FILENAME:
             errors.extend(_variables_errors(document, _source(path)))
+            continue
+        if path.name == SETS_FILENAME:
+            errors.extend(_sets_errors(document, _source(path)))
+            sets = document
             continue
         errors.extend(_metrics_errors(document, _source(path), path.stem))
         metrics.update(
@@ -399,6 +423,8 @@ def validate_arch(metric_dir: Path, arch: str) -> List[str]:
     errors.extend(_ceiling_errors(arch, metrics))
     errors.extend(_shared_formula_errors(arch, metrics))
     errors.extend(_shared_name_errors(arch, metrics))
+    if not errors:
+        errors.extend(_set_metric_errors(arch, sets, metrics))
     return errors
 
 
@@ -426,6 +452,7 @@ def equivalence_errors(metric_dir: Path, analysis_dir: Path, arch: str) -> List[
         *_unit_errors(arch, rows, metric_ids, library),
         *_peak_errors(arch, rows, metric_ids, library),
         *_counter_errors(arch, library, analysis_dir),
+        *_set_counter_errors(arch, library, analysis_dir),
         *_builtin_var_errors(arch, library),
         *_unused_variant_errors(arch, rows),
     ]
@@ -477,6 +504,57 @@ def _variables_errors(document: Dict[str, Any], source: str) -> List[str]:
         errors.extend(_field_errors(entry, VARIABLE_FIELDS, (), source, str(name)))
         if isinstance(entry, dict):
             errors.extend(_text_errors(entry, VARIABLE_FIELDS, source, str(name)))
+    return errors
+
+
+def _sets_errors(document: Dict[str, Any], source: str) -> List[str]:
+    errors = []
+    for set_option, entry in document.items():
+        item = str(set_option)
+        if not SET_OPTION_RE.match(item):
+            errors.append(f"[{source}] {item}: a set option must be snake_case")
+        field_errors = _field_errors(entry, SET_FIELDS, (), source, item)
+        errors.extend(field_errors)
+        if field_errors:
+            continue
+        errors.extend(_text_errors(entry, ("title",), source, item))
+        metric_ids = entry["metrics"]
+        if (
+            not isinstance(metric_ids, list)
+            or not metric_ids
+            or not all(isinstance(metric_id, str) for metric_id in metric_ids)
+        ):
+            errors.append(f"[{source}] {item}: 'metrics' must list metric ids")
+        elif len(set(metric_ids)) != len(metric_ids):
+            errors.append(f"[{source}] {item}: 'metrics' lists an id twice")
+    return errors
+
+
+def _set_metric_errors(
+    arch: str, sets: Dict[str, Any], metrics: Dict[str, Any]
+) -> List[str]:
+    """Check that each set lists the arch's metrics and fits in one pass."""
+    errors = []
+    library = MetricLibrary(metrics, {}, sets)
+    for set_option, entry in sets.items():
+        unknown = [
+            metric_id for metric_id in entry["metrics"] if metric_id not in metrics
+        ]
+        if unknown:
+            errors.append(f"[{arch}] set {set_option}: unknown metric ids {unknown}")
+            continue
+        for gpu_arch in _member_archs(arch):
+            limits = mi_gpu_specs.get_perfmon_config(gpu_arch)
+            counters = library.get_counters_for_metrics(
+                entry["metrics"], mi_gpu_specs.get_gpu_series(gpu_arch)
+            )
+            errors.extend(
+                f"[{gpu_arch}] set {set_option}: block {block} needs "
+                f"{len(block_counters)} counters but one pass holds {limits[block]}"
+                for block, block_counters in counters_over_block_limits(
+                    counters, limits
+                ).items()
+            )
     return errors
 
 
@@ -867,14 +945,20 @@ def _peak_errors(
     return errors
 
 
-def _make_soc(analysis_dir: Path, arch: str, membw_analysis: bool) -> OmniSoC_Base:
-    """Return an OmniSoC_Base that reads analysis_dir without a GPU (16 L2 channels)."""
+def _make_soc(
+    analysis_dir: Path,
+    arch: str,
+    membw_analysis: bool,
+    set_selected: Optional[str] = None,
+) -> OmniSoC_Base:
+    """Return an OmniSoC_Base that reads analysis_dir without a GPU (16 L2 channels),
+    with set_selected as the --set option, if any."""
     args = SimpleNamespace(
         config_dir=analysis_dir,
         filter_blocks=[],
         membw_analysis=membw_analysis,
         roof_only=False,
-        set_selected=None,
+        set_selected=set_selected,
     )
     machine_specs = SimpleNamespace(
         gpu_arch=arch,
@@ -928,6 +1012,45 @@ def _counter_errors(arch: str, library: MetricLibrary, analysis_dir: Path) -> Li
         errors.append(f"[{arch}] counters missing: {sorted(expected - actual)}")
     if actual - expected:
         errors.append(f"[{arch}] extra counters: {sorted(actual - expected)}")
+    return errors
+
+
+def _set_counter_errors(
+    arch: str, library: MetricLibrary, analysis_dir: Path
+) -> List[str]:
+    """Compare each library set with `--set` on profile_configs/sets."""
+    gpu_series = _gpu_series(arch)
+    without_metrics = SETS_WITHOUT_METRICS.get(arch, ())
+    shipped = set(parse_sets_yaml(_member_arch(arch)))
+    # Every collection includes the normalization counters.
+    no_metric_counters, _ = extract_counters_and_variables("", gpu_series)
+    errors = []
+    if set(library.sets) != shipped - set(without_metrics):
+        errors.append(
+            f"[{arch}] sets differ from profile_configs/sets: "
+            f"missing {sorted(shipped - set(without_metrics) - set(library.sets))}, "
+            f"extra {sorted(set(library.sets) - shipped)}"
+        )
+    for set_option in sorted(shipped & {*library.sets, *without_metrics}):
+        soc = _make_soc(analysis_dir, _member_arch(arch), False, set_option)
+        expected, _ = soc.detect_counters()
+        if set_option in without_metrics:
+            if expected - no_metric_counters or set_option in library.sets:
+                errors.append(
+                    f"[{arch}] set {set_option} is in SETS_WITHOUT_METRICS but has "
+                    "metrics; remove the entry"
+                )
+            continue
+        actual = soc._expand_tcc_template_counters(
+            library.get_counters_for_metrics(
+                library.sets[set_option]["metrics"], gpu_series
+            )
+        )
+        if actual != expected:
+            errors.append(
+                f"[{arch}] set {set_option}: counters missing "
+                f"{sorted(expected - actual)}, extra {sorted(actual - expected)}"
+            )
     return errors
 
 
@@ -991,11 +1114,16 @@ def _gpu_series(arch: str) -> Optional[str]:
 
 def _member_arch(arch: str) -> str:
     """Return a GPU arch that uses arch's analysis configs (gfx1150 for gfx115x)."""
-    return next(
+    return _member_archs(arch)[0]
+
+
+def _member_archs(arch: str) -> List[str]:
+    """Return the GPU archs that use arch's configs; none for an unknown arch."""
+    return [
         gpu_arch
         for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
         if canonical_config_arch(gpu_arch) == arch
-    )
+    ]
 
 
 # ---------------------------------------------------------------------------

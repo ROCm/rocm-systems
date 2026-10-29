@@ -6,7 +6,8 @@
 metric_library/<arch>/ defines each metric once per arch, keyed by id, with no display
 data. A metric lives in the file named after its id category (l2.yaml holds l2.*). A
 child arch keeps only the files that differ from its parent; each names its parent with
-an "inherit" key. variables.yaml holds the built-in variables.
+an "inherit" key. variables.yaml holds the built-in variables, and sets.yaml the
+metric sets (`--set`), each a list of metric ids that fits in one profiling pass.
 
 Only tests and tools use this module so far. At the cutover it becomes the source of
 metrics for analyze and profile, so its scope grows past loading. The file contents are
@@ -35,6 +36,7 @@ METRIC_LIBRARY_PARENT_ARCH: Dict[str, Optional[str]] = {
     "gfx1250": None,
 }
 VARIABLES_FILENAME = "variables.yaml"
+SETS_FILENAME = "sets.yaml"
 
 # Metric fields that may name counters.
 COUNTER_FIELDS = ("formula", "peak")
@@ -96,7 +98,7 @@ def load_metric_library(metric_dir: Path, arch: str) -> "MetricLibrary":
         arch: A GPU arch.
 
     Returns:
-        The arch's metrics and built-in variables.
+        The arch's metrics, built-in variables and sets.
     """
     key = (str(Path(metric_dir).resolve()), canonical_config_arch(arch))
     if key not in MetricLibrary._cache:
@@ -127,27 +129,35 @@ def iter_library_documents(
 def _read_metric_library(metric_dir: Path, arch: str) -> "MetricLibrary":
     metrics: Dict[str, Dict[str, Any]] = {}
     variables: Dict[str, Dict[str, Any]] = {}
+    sets: Dict[str, Dict[str, Any]] = {}
     for path, document in iter_library_documents(metric_dir, arch):
         if path.name == VARIABLES_FILENAME:
             variables = document
+            continue
+        if path.name == SETS_FILENAME:
+            sets = document
             continue
         duplicates = sorted(set(document) & set(metrics))
         if duplicates:
             raise ValueError(f"{path}: metric ids {duplicates} are defined twice")
         metrics.update(document)
-    return MetricLibrary(metrics, variables)
+    return MetricLibrary(metrics, variables, sets)
 
 
 class MetricLibrary:
-    """One arch's metrics and built-in variables."""
+    """One arch's metrics, built-in variables and sets."""
 
     _cache: Dict[Tuple[str, str], "MetricLibrary"] = {}
 
     def __init__(
-        self, metrics: Dict[str, Dict[str, Any]], variables: Dict[str, Dict[str, Any]]
+        self,
+        metrics: Dict[str, Dict[str, Any]],
+        variables: Dict[str, Dict[str, Any]],
+        sets: Dict[str, Dict[str, Any]],
     ) -> None:
         self.metrics = metrics
         self.variables = variables
+        self.sets = sets
 
     def get_counters_for_metrics(
         self, metric_ids: List[str], gpu_series: str
