@@ -60,10 +60,50 @@
 #include "nccl_device/utility.h"
 #undef NCCL_DEVICE_INLINE
 #undef NCCL_HOST_DEVICE_INLINE
+
+/*
+ * __NCCL_DEVICE_LTOIR_LIB__ selects a *variant* of the bitcode library build,
+ * never a replacement for it. It must always be defined together with
+ * __clang_llvm_bitcode_lib__. Two independent things break otherwise:
+ *
+ *   1. src/include/nccl_device/coop.h gates its caller-owned-LDS path on
+ *      __clang_llvm_bitcode_lib__. Without it the artifact carries a
+ *      function-local addrspace(3) barrier array reachable only through a
+ *      vtable indirect call, which the AMDGPU group-segment sizing pass
+ *      cannot see: lld reports "local memory global used by non-kernel
+ *      function", or it survives to runtime as HSA exception 0x1016.
+ *
+ *   2. NCCL_IR_EXPORT (below) only carries `used, retain` under
+ *      __clang_llvm_bitcode_lib__. Those attributes are what put every
+ *      exported thunk into @llvm.used, which is the root set opt's
+ *      `internalize` pass honours. Without them the LTO IR recipe --
+ *      which deliberately passes no -internalize-public-api-list -- would
+ *      internalize the entire public surface.
+ */
+#if defined(__NCCL_DEVICE_LTOIR_LIB__) && !defined(__clang_llvm_bitcode_lib__)
+#error "__NCCL_DEVICE_LTOIR_LIB__ must be defined together with __clang_llvm_bitcode_lib__, not instead of it. See the comment above this #error."
+#endif
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #if defined(__NCCL_DEVICE_LTOIR_LIB__)
-#define NCCL_DEVICE_INLINE __device__ __inline_hint__
-#define NCCL_HOST_DEVICE_INLINE __host__ __device__ __inline_hint__
+/*
+ * Deferred-inlining variant, the analogue of NCCL's `nvcc -dlto --ltoir`.
+ *
+ * NCCL spells this `__device__ __inline_hint__`. AMDGPU/clang has no
+ * __inline_hint__ -- the token appears nowhere in the ROCm headers and
+ * using it fails with "unknown type name '__inline_hint__'" (verified on
+ * ROCm 7.2.4) -- so this branch carries NO inlining attribute at all. An
+ * ordinary external __device__ function under the normal cost model is the
+ * closest available analogue of an advisory hint.
+ *
+ * Dropping always_inline is necessary but nowhere near sufficient: LLVM's
+ * inliner gives internal single-use callees a "last call to local" bonus and
+ * folds them into the thunks regardless of inlining attributes. What
+ * actually defers the inlining is `-Xclang -disable-llvm-passes` on the
+ * compile -- see LTO_IR_CLANG_FLAGS in bindings/ir/Makefile.
+ */
+#define NCCL_DEVICE_INLINE __device__
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__
 #elif defined(__clang_llvm_bitcode_lib__)
 #define NCCL_DEVICE_INLINE __device__ __attribute__((always_inline))
 #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __attribute__((always_inline))
