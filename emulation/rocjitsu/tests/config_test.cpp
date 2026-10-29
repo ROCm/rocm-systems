@@ -1101,6 +1101,26 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   EXPECT_EQ(soc->assign_queue_owner_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
 }
 
+TEST(ConfigLoaderTest, LoadGfx950Pci75a3Cu256Config) {
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_75a3_cu256.json", loaded));
+  auto *soc = loaded.soc();
+  ASSERT_NE(soc, nullptr);
+
+  EXPECT_EQ(loaded.device.gfx_target_version, 90500u);
+  EXPECT_EQ(loaded.device.vendor_id, 0x1002u);
+  EXPECT_EQ(loaded.device.device_id, 0x75a3u);
+  EXPECT_EQ(loaded.device.num_cu_per_sh, 8u);
+  EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 256u);
+  ASSERT_EQ(soc->num_xcds(), 8u);
+  for (uint32_t xcd_id = 0; xcd_id < soc->num_xcds(); ++xcd_id) {
+    auto *xcd = soc->xcd(xcd_id);
+    ASSERT_EQ(xcd->num_shader_engines(), 4u);
+    for (uint32_t se_id = 0; se_id < xcd->num_shader_engines(); ++se_id)
+      EXPECT_EQ(xcd->shader_engine(se_id)->num_compute_units(), 8u);
+  }
+}
+
 // The VMM reads the bus shape through these two entry points, and nothing else
 // in the suite does: the device tests build a PciDeviceConfig by hand, so a
 // field dropped in the loader, or a wrong default for an omitted section, would

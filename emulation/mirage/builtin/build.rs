@@ -157,17 +157,19 @@ fn json_files(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// What makes two configs the same machine.
-///
-/// `gfx_target_version` is the GPU's ISA version and is exactly the
-/// grouping wanted: rocjitsu's `_kmd` and `_Ngpu` variants of a device
-/// carry the same one, and no two devices share it. A config that does
-/// not name it stands alone under its own stem rather than being pooled
-/// with every other config that also omits it.
+/// Group variants of the same PCI device without merging distinct devices
+/// that run the same ISA.
 fn device_key(stem: &str, config: &serde_json::Value) -> String {
-    match config["vm"]["gpu"]["device"]["gfx_target_version"].as_u64() {
-        Some(version) => format!("gfx_target_version:{version}"),
-        None => format!("stem:{stem}"),
+    let device = &config["vm"]["gpu"]["device"];
+    match (
+        device["gfx_target_version"].as_u64(),
+        device["vendor_id"].as_u64(),
+        device["device_id"].as_u64(),
+    ) {
+        (Some(version), Some(vendor), Some(id)) => {
+            format!("gfx_target_version:{version}:vendor_id:{vendor}:device_id:{id}")
+        }
+        _ => format!("stem:{stem}"),
     }
 }
 

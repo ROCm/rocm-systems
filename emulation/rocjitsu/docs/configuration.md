@@ -16,6 +16,7 @@ Pre-built simulator configs are in `configs/`:
 | `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
+| `gfx950_75a3_cu256.json` | Synthetic gfx950 PCI `0x75a3` / 256-CU test profile |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x_kmd_2node_net.json` | Schematic two-node, one-GPU-per-node RCCL NET fixture |

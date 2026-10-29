@@ -29,8 +29,11 @@ RocJITsu configs and validated at build time. Every GPU RocJITsu has a
 config for becomes one builtin agent: `mi300x`, `mi350x` and `mi450x`
 from `gfx942_cdna3.json`, `gfx950_mi355x.json` and `gfx1250_mi455x.json`
 (including their 320, 288 and 256 CU topologies), and `gfx90a_mi210_kmd`,
-`gfx1100_w7900`, `gfx1151` and `gfx1201_r9700` under their config's own
-name. Where RocJITsu ships several configs for one GPU — a `_kmd`
+`gfx950_75a3_cu256`, `gfx1100_w7900`, `gfx1151` and `gfx1201_r9700` under
+their config's own name. The `gfx950_75a3_cu256` agent is a synthetic
+256-CU gfx950 variant with PCI device ID `0x75a3`; `mi350x` retains its
+distinct PCI device ID `0x75a0` and 288-CU topology. Where RocJITsu ships
+several configs for one GPU — a `_kmd`
 variant, an `_Ngpu` one — Mirage takes the plainest, because the GPU
 count is a Mirage topology setting (`--gpus-per-node`) that would
 override a baked-in one anyway. Mirage no longer maintains separate
