@@ -130,17 +130,17 @@ RegisterAgent(const aqlprofile_agent_info_v2_t* agent_info)
 
     // Only accept a bitmap that describes exactly this agent's topology; the
     // PMC builder indexes it with the agent's XCC/SE/SA counts.
-    const uint32_t xcc_num = agent_info->xcc_num;
-    const bool     bitmap_matches =
-        agent_info->cu_bitmap != nullptr && xcc_num > 0 &&
-        agent_info->cu_bitmap_num_xcc == xcc_num &&
-        agent_info->cu_bitmap_num_se * xcc_num == agent_info->se_num &&
-        agent_info->cu_bitmap_num_sa == agent_info->shader_arrays_per_se &&
-        agent_info->cu_bitmap_num_se > 0 && agent_info->cu_bitmap_num_sa > 0;
+    const uint32_t xcc_num        = agent_info->xcc_num;
+    const bool     bitmap_matches = agent_info->cu_bitmap != nullptr && xcc_num > 0 &&
+                                agent_info->cu_bitmap_num_xcc == xcc_num &&
+                                agent_info->cu_bitmap_num_se * xcc_num == agent_info->se_num &&
+                                agent_info->cu_bitmap_num_sa == agent_info->shader_arrays_per_se &&
+                                agent_info->cu_bitmap_num_se > 0 &&
+                                agent_info->cu_bitmap_num_sa > 0;
     if(bitmap_matches)
     {
-        const size_t count = size_t{agent_info->cu_bitmap_num_xcc} *
-                             agent_info->cu_bitmap_num_se * agent_info->cu_bitmap_num_sa;
+        const size_t count = size_t{agent_info->cu_bitmap_num_xcc} * agent_info->cu_bitmap_num_se *
+                             agent_info->cu_bitmap_num_sa;
         int_agent_info.cu_bitmap.assign(agent_info->cu_bitmap, agent_info->cu_bitmap + count);
     }
 

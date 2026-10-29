@@ -300,7 +300,7 @@ TEST(PmcBuilderHarvestTest, UBGuards)
         AgentInfo info = make_gfx11_agent(se_num, sa_per_se, /*cu_num=*/0, /*value=*/0u);
         info.cu_bitmap.clear();
         Gfx11PmcBuilder builder(&info);
-        const auto active = read_active_wgp_masks(builder, se_num, sa_per_se);
+        const auto      active = read_active_wgp_masks(builder, se_num, sa_per_se);
         for(uint32_t block = 0; block < sa_count; ++block)
             EXPECT_EQ(active[block], 0u) << "block " << block;
     }
