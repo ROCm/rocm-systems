@@ -76,6 +76,17 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+  # Local hook: metric library schema
+  - repo: local
+    hooks:
+      - id: metric-library-check
+        name: Metric library validation
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_metric_library.py'
+        language: system
+        files: (metric_library/.*\.yaml|utils/mi_gpu_spec\.(yaml|py)|utils/(metric_library|yaml_inherit_loader|utils_counter_defs|utils_common)\.py|tools/(validate_metric_library|format_yaml)\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Local hook: membw tree spec metric drift validation
   - repo: local
     hooks:
@@ -118,6 +129,6 @@ repos:
         entry: python projects/rocprofiler-compute/tools/format_yaml.py --fix
         language: python
         additional_dependencies: [pyyaml==6.0.3]
-        files: ^projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/gfx.*\.yaml$
+        files: ^projects/rocprofiler-compute/src/rocprof_compute_soc/(analysis_configs|metric_library)/gfx.*\.yaml$
         pass_filenames: true
         stages: [pre-commit]

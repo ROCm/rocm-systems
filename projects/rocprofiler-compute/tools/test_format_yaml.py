@@ -11,7 +11,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from format_yaml import normalize_equation  # noqa: E402
+from common import write_text_file
+from format_yaml import check_file, normalize_equation
 
 
 class TestCriticalCorrectness:
@@ -136,6 +137,100 @@ class TestErrorHandling:
         assert normalize_equation("42") == "42"
         assert normalize_equation("x") == "x"
         assert normalize_equation("SUM()") == "SUM()"
+
+
+class TestMetricLibraryFiles:
+    """Metric library files: formula and peak are checked, !remove is accepted, and
+    top-level keys are sorted."""
+
+    def write_library_file(self, tmp_path, text):
+        return write_text_file(tmp_path / "metric_library" / "gfx908" / "l2.yaml", text)
+
+    def test_unformatted_formula_fails(self, tmp_path):
+        path = self.write_library_file(
+            tmp_path, "l2.ai:\n  formula: ( SUM( (a * 2) ) / SUM(b) )\n"
+        )
+        is_valid, issues = check_file(path)
+        assert not is_valid
+        assert "l2.ai.formula: equation needs normalization" in issues[0]
+
+    def test_formatted_formula_and_remove_pass(self, tmp_path):
+        path = self.write_library_file(
+            tmp_path,
+            "inherit: ../gfx90a/l2.yaml\n"
+            "l2.ai:\n  formula: SUM(a) / SUM(b)\n  peak: !remove\n"
+            "l2.old: !remove\n",
+        )
+        assert check_file(path) == (True, [])
+
+    def test_fix_rewrites_formula(self, tmp_path):
+        path = self.write_library_file(tmp_path, "l2.ai:\n  formula: (a+b)\n")
+        check_file(path, fix=True)
+        assert path.read_text(encoding="utf-8") == "l2.ai:\n  formula: a + b\n"
+
+    def test_unsorted_keys_fail(self, tmp_path):
+        path = self.write_library_file(
+            tmp_path, "l2.b:\n  formula: b\nl2.a:\n  formula: a\n"
+        )
+        assert check_file(path) == (False, ["  top-level keys are not sorted"])
+
+    def test_fix_sorts_blocks_with_their_comments(self, tmp_path):
+        """inherit stays first though compute.* sorts before it; a key keeps its
+        comments, blank lines, folded text and column-zero list; "---" stays on top."""
+        path = write_text_file(
+            tmp_path / "metric_library" / "gfx90a" / "compute.yaml",
+            "---\n"
+            "inherit: ../gfx908/compute.yaml\n"
+            "# B\n"
+            "compute.b:\n  description: >-\n    One.\n\n    Two.\n"
+            "\n# A\n"
+            "compute.a: !remove\n"
+            "compute.c:\n- two\n- three\n",
+        )
+        check_file(path, fix=True)
+        assert path.read_text(encoding="utf-8") == (
+            "---\n"
+            "inherit: ../gfx908/compute.yaml\n"
+            "\n# A\n"
+            "compute.a: !remove\n"
+            "# B\n"
+            "compute.b:\n  description: >-\n    One.\n\n    Two.\n"
+            "compute.c:\n- two\n- three\n"
+        )
+
+    @pytest.mark.parametrize(
+        "text, sorted_text",
+        [
+            pytest.param(
+                "l2.b:\n  formula: b\nl2.a:\n  formula: a",
+                "l2.a:\n  formula: a\nl2.b:\n  formula: b\n",
+                id="no_final_newline",
+            ),
+            pytest.param(
+                "l2.z:\n  unit: &unit GB/s\nl2.a:\n  unit: *unit\n",
+                None,
+                id="alias_before_anchor",
+            ),
+        ],
+    )
+    def test_fix_keeps_the_file_loading_the_same(self, tmp_path, text, sorted_text):
+        """--fix writes sorted text that loads to the same data; when sorting would
+        change the data, it fails and leaves the file as it was."""
+        path = self.write_library_file(tmp_path, text)
+        is_valid, issues = check_file(path, fix=True)
+        if sorted_text is None:
+            assert not is_valid
+            assert "sort them by hand" in issues[0]
+            assert path.read_text(encoding="utf-8") == text
+        else:
+            assert is_valid
+            assert path.read_text(encoding="utf-8") == sorted_text
+
+    def test_analysis_config_keys_are_not_sorted(self, tmp_path):
+        path = write_text_file(
+            tmp_path / "analysis_configs" / "gfx908" / "0100_x.yaml", "b: 1\na: 2\n"
+        )
+        assert check_file(path) == (True, [])
 
 
 if __name__ == "__main__":

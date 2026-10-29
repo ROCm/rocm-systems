@@ -9,8 +9,9 @@ child arch keeps only the files that differ from its parent; each names its pare
 an "inherit" key. variables.yaml holds the built-in variables.
 
 Only tests and tools use this module so far. At the cutover it becomes the source of
-metrics for analyze and profile, so its scope grows past loading. Loading only rejects
-an id that two files define.
+metrics for analyze and profile, so its scope grows past loading. The file contents are
+checked by tools/validate_metric_library.py; loading only rejects an id that two files
+define.
 """
 
 from pathlib import Path
