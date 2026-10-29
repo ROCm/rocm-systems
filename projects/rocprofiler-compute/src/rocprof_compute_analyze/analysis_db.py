@@ -46,7 +46,7 @@ from pc_sampling.source_snapshot_analysis import (
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
-from utils import file_io, schema, utils_analysis
+from utils import file_io, schema
 from utils.analysis_orm import Database
 from utils.file_io import (
     load_kernel_short_names,
@@ -82,7 +82,7 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
     to_noise_clamp,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
+from utils.mi_gpu_spec import mi_gpu_specs, roofline_column
 from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
     OpsSupport,
@@ -668,23 +668,15 @@ class db_analysis(OmniAnalyze_Base):
             )
             keys: list[str] = []
 
-            matrix_ops_type = utils_analysis.get_matrix_ops_type(sys_row["gpu_series"])
+            matrix_ops_type = mi_gpu_specs.get_roofline_matrix_type(gpu_arch)
 
-            for mem_level in mi_gpu_specs.get_memory_levels(sys_row["gpu_model"]):
-                keys.append(f"{mem_level}Bw")
-            for dtype in SUPPORTED_DATATYPES[gpu_arch].keys():
-                if OpsSupport.VALU in SUPPORTED_DATATYPES[gpu_arch][dtype]:
-                    if dtype.startswith("F") or dtype.startswith("B"):
-                        keys.append(f"{dtype}Flops")
-                    elif dtype.startswith("I"):
-                        keys.append(f"{dtype}Ops")
-                if OpsSupport.MATRIX in SUPPORTED_DATATYPES[gpu_arch][dtype]:
-                    if dtype.startswith(("F", "B", "MX")):
-                        # FP16 -> F16, MXFP8 -> MXF8
-                        matrix_dtype = dtype.replace("FP", "F")
-                        keys.append(f"{matrix_ops_type}{matrix_dtype}Flops")
-                    elif dtype.startswith("I"):
-                        keys.append(f"{matrix_ops_type}{dtype}Ops")
+            for mem_level in mi_gpu_specs.get_roofline_bandwidth(gpu_arch):
+                keys.append(roofline_column(mem_level, "bandwidth"))
+            for dtype, support in SUPPORTED_DATATYPES[gpu_arch].items():
+                if OpsSupport.VALU in support:
+                    keys.append(roofline_column(dtype, "valu"))
+                if OpsSupport.MATRIX in support:
+                    keys.append(roofline_column(dtype, matrix_ops_type))
             roofline_ceilings_per_workload[workload_path] = {
                 key: roofline_dict[key] for key in keys if key in roofline_dict
             }
