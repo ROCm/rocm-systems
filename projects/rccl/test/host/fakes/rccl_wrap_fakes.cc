@@ -429,6 +429,27 @@ void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rc
 void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
 }
+bool rcclCeAllReduceEnabled(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAllReduceEnabled");
+}
+bool rcclForceCeAllReduceEnabled(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeAllReduceEnabled");
+}
+bool rcclForceCeScratchEnabled(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
+}
+size_t rcclCeAr2ShotMax(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMax");
+}
+size_t rcclCeAr2ShotMin(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
+}
+bool rcclNcclAlgoEnvIsSet() {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
+}
+bool rcclAllGatherCeRegisteredWindow(const ncclComm*, size_t, ncclSymRegType_t, bool) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclAllGatherCeRegisteredWindow");
+}
 int64_t g_rcclParamDirectReduceScatterThreshold = 8388608;     // rccl_wrap.cc:51 default
 int64_t rcclParamDirectReduceScatterThreshold() {              // rccl_wrap.cc:51
   return g_rcclParamDirectReduceScatterThreshold;
