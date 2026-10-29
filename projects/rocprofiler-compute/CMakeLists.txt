@@ -764,6 +764,13 @@ add_test(
 )
 
 add_test(
+    NAME test_metric_library
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library.xml
+        ${COV_OPTION} tests/unit/utils/test_metric_library.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_parser
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_parser.xml ${COV_OPTION}
@@ -1113,6 +1120,7 @@ if(${ENABLE_COVERAGE})
         test_metric_evaluator
         test_utils_counter_defs
         test_yaml_inherit_loader
+        test_metric_library
         test_parser
         test_argparser
         test_L1_cache_counters
