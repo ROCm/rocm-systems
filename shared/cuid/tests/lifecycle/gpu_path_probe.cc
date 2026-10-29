@@ -318,6 +318,7 @@ int main(int argc, char** argv) {
           root ? AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND : AMDCUID_STATUS_PERMISSION_DENIED;
       if (vf.get_hardware_fingerprint(fingerprint) != want || (root && fingerprint != 0)) return 1;
       amdcuid_primary_id primary{};
+      if (vf.driver_primary_cuid(primary) != AMDCUID_STATUS_UNSUPPORTED) return 1;
       const auto primary_status = vf.get_primary_cuid(primary);
       amdcuid_derived_id derived{};
       const auto derived_status = vf.get_derived_cuid(derived);

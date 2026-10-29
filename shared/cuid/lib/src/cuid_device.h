@@ -79,6 +79,35 @@ class CuidDevice {
   // AMDCUID_SOURCE_UNKNOWN before one and after a failed one.
   amdcuid_source_t derived_source() const { return last_source_; }
 
+  // The driver step of the lookup: read `attribute`
+  // (CuidUtilities::kDriverPrimaryAttribute) for this device's BDF, where it
+  // has one.
+  //
+  // On the base class rather than on CuidGpu because the interface is a
+  // property of the PCI device, not of amdgpu: a NIC or NPU whose driver grows
+  // the same attributes is then answered by the kernel with no change here.
+  //
+  // AMDCUID_STATUS_UNSUPPORTED when the driver publishes nothing, or the device
+  // has no BDF, and the caller should move on to the later stages. A
+  // present-but-unreadable attribute is PERMISSION_DENIED rather than an
+  // absence: the kernel holds the authoritative value, so computing a local one
+  // manufactures the divergence this ordering exists to prevent.
+  amdcuid_status_t read_driver_published(const std::string& attribute, amdcuid_id_t& out,
+                                         uint8_t raw_bits[16]) const;
+
+  // Where this component's driver-published attributes live. The default is
+  // /sys/bus/pci/devices/<bdf>/<attribute>; a spatial partition overrides it,
+  // since its BDF is its parent's. UNSUPPORTED when there is nothing to read.
+  virtual amdcuid_status_t driver_attribute_path(const std::string& attribute,
+                                                 std::string& path) const;
+
+  // The driver step for the primary. Returns AMDCUID_STATUS_UNSUPPORTED
+  // when the caller should carry on to the later stages, including when the
+  // driver publishes no cuid_unit_id beside cuid_primary, and any other failure
+  // verbatim, notably PERMISSION_DENIED on cuid_primary, which is
+  // CAP_SYS_ADMIN-gated because its payload embeds the raw serial.
+  amdcuid_status_t driver_primary_cuid(amdcuid_primary_id& id) const;
+
   // Virtual accessors for common device properties with default wrong device
   // type implementations
   virtual amdcuid_status_t get_vendor_id(uint16_t& vendor_id) const {

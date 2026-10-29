@@ -28,7 +28,7 @@ Component Type uses these values: `0x0` Platform, `0x1` CPU, `0x2` GPU, `0x3` NI
 if (!amdcuid_device_type_is_valid(type)) { /* reserved, or not a Component Type at all */ }
 ```
 
-`amdcuid_device_type_is_valid()` is true for `0x0`–`0xA` and `0xF`, and false for the reserved `0xB`–`0xE`, for `AMDCUID_DEVICE_TYPE_NONE` (`0xFF`, deliberately outside what a 4-bit field can hold), and for anything else. The library version is 2.2.0 (`AMDCUID_LIB_VERSION_MAJOR`, `_MINOR`, `_PATCH`); code that loops over Component Types uses the helper.
+`amdcuid_device_type_is_valid()` is true for `0x0`–`0xA` and `0xF`, and false for the reserved `0xB`–`0xE`, for `AMDCUID_DEVICE_TYPE_NONE` (`0xFF`, deliberately outside what a 4-bit field can hold), and for anything else. The library version is 2.3.0 (`AMDCUID_LIB_VERSION_MAJOR`, `_MINOR`, `_PATCH`); code that loops over Component Types uses the helper.
 
 The payload is framed as an RFC 9562 UUIDv8. `U` is the UUID in printed octet order:
 
@@ -51,9 +51,10 @@ When an input cannot be read, for example because the host has no machine-id, th
 
 ### Temporary CUIDs
 
-This library holds no node key and reads no CUID from a driver, so every CUID
-it returns is a temporary CUID, for root and every other caller alike. It
-covers:
+This library holds no node key, so every CUID it returns is a temporary CUID,
+for root and every other caller alike. Where amdgpu publishes `cuid_unit_id`
+and `cuid_primary`, root reads the GPU's primary from the driver, but a
+temporary CUID reports no primary until there is a node key. It covers:
 
 - AMD GPUs (vendor `0x1002`, class `0x03xx` or `0x12xx`, bound to amdgpu or
   gim) and their partitions
@@ -90,10 +91,10 @@ target_link_libraries(my_tool PRIVATE amdcuid::amdcuid)
 ```
 
 A program that links it carries no runtime dependency on CUID. It discovers
-hardware, constructs each component's CUID, and answers queries by handle;
-[`example/main.cc`](example/main.cc) walks through the API. amd-smi links the
-same library and is the administrator's interface to CUID:
-`amd-smi node --cuid` lists every component's CUID.
+hardware, reads what the driver publishes, constructs each component's CUID,
+and answers queries by handle; [`example/main.cc`](example/main.cc) walks
+through the API. amd-smi links the same library and is the administrator's
+interface to CUID: `amd-smi node --cuid` lists every component's CUID.
 
 ### Build and Install Instructions
 
