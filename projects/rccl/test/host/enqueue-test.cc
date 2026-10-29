@@ -5195,7 +5195,7 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegMultiRpn_PicksTheSendBufferPerCo
   }
 }
 
-TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegRingOneRpnAllGather_UsesWholeNetSizedChunks) {
+TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegRingOneRpnAllGather_MatchesTheKernelSchedule) {
   ChunkComm cc;
   cc.comm.isOneRPN = true;
   auto t = NetRegTask(ncclFuncAllGather, NCCL_ALGO_RING);
@@ -5203,12 +5203,32 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegRingOneRpnAllGather_UsesWholeNet
   const size_t nBytes = size_t(3) * NCCL_MAX_NET_SIZE;
   auto r = RunChunking(cc, t, nChannels, nBytes);
   ASSERT_EQ(ncclSuccess, r.rc);
+  EXPECT_EQ(1, r.proxyOp.reg);
+#if NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
   EXPECT_EQ(uint32_t(NCCL_MAX_NET_SIZE), r.proxyOp.chunkSize);
   EXPECT_EQ(uint32_t(NCCL_MAX_NET_SIZE), r.proxyOp.sliceSize);
   EXPECT_EQ(1, r.proxyOp.chunkSteps);
   const size_t loopSize = size_t(nChannels) * cc.comm.nRanks * NCCL_MAX_NET_SIZE;
   EXPECT_EQ(loopSize, r.proxyOp.loopSize);
   EXPECT_EQ(int(DIVUP(nBytes, loopSize) * (cc.comm.nRanks - 1)), r.proxyOp.nsteps);
+#else
+  // Without the net-offload kernel the proxy keeps the unregistered ring schedule the device runs.
+  auto unregistered = t;
+  unregistered.regBufType = NCCL_REGULAR_BUFFER;
+  auto base = RunChunking(cc, unregistered, nChannels, nBytes);
+  ASSERT_EQ(ncclSuccess, base.rc);
+  ASSERT_EQ(0, base.proxyOp.reg);
+  EXPECT_EQ(base.proxyOp.chunkSize, r.proxyOp.chunkSize);
+  EXPECT_EQ(base.proxyOp.sliceSize, r.proxyOp.sliceSize);
+  EXPECT_EQ(base.proxyOp.chunkSteps, r.proxyOp.chunkSteps);
+  EXPECT_EQ(base.proxyOp.sliceSteps, r.proxyOp.sliceSteps);
+  EXPECT_EQ(base.proxyOp.loopSize, r.proxyOp.loopSize);
+  EXPECT_EQ(base.proxyOp.nsteps, r.proxyOp.nsteps);
+  EXPECT_GT(uint32_t(NCCL_MAX_NET_SIZE), r.proxyOp.chunkSize);
+  const size_t loopSize = size_t(nChannels) * cc.comm.nRanks * r.proxyOp.chunkSize;
+  EXPECT_EQ(loopSize, r.proxyOp.loopSize);
+  EXPECT_EQ(int(DIVUP(nBytes, loopSize) * (cc.comm.nRanks - 1) * r.proxyOp.chunkSteps), r.proxyOp.nsteps);
+#endif
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegWithTree_IsAnInternalError) {
