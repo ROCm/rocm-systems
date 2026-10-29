@@ -14,6 +14,22 @@ Both use only the public API in `src/nccl_m2n.h`.
 
 ## Building
 
+`pipe_commb_resources_test` is a host-only test of stable PIPE parent namespace
+IDs, exhaustion without wrapping, control-slot ranges, resource sizing and
+overflow. It does not require CUDA, NCCL or GTest at runtime. Build directly:
+
+```sh
+c++ -std=c++17 -Wall -Wextra -Isrc tests/pipe_commb_resources_test.cc -o /tmp/pipe_commb_resources_test
+/tmp/pipe_commb_resources_test
+```
+
+From a configured CUDA/NCCL build, `make -C tests pipe_commb_resources_test`
+builds and runs it. CMake includes it when tests are enabled, even without GTest.
+`NCCL_RESHARD_GEN_COMM_PARENT_CAPACITY` reserves PIPE's persistent namespaces
+before first use; it is independent of `NCCL_RESHARD_GEN_COMM_CONCURRENCY`.
+The latter selects PIPE lanes and optionally caps PACK's effective physical
+slots per bucket. An unset value leaves PACK's configured slot counts unchanged.
+
 ```sh
 make tests
 ```
@@ -22,11 +38,14 @@ make tests
 tree is available. `tests/gtest.mk` looks for one in this order:
 
 1. `$(GTEST_DIR)` — caller-supplied (highest priority).
-2. `tests/googletest/` — vendored alongside the tests.
+2. `third_party/googletest/googletest/` — the repository-root googletest
+   submodule, shared with the other extensions in this repo. Fetch it with
+   `git submodule update --init third_party/googletest`.
+3. `tests/googletest/` — vendored alongside the tests.
 
-If neither resolves, `make tests` prints a friendly skip message and
+If none resolves, `make tests` prints a friendly skip message and
 returns success — the library and benchmarks build either way. To build
-the tests against a googletest checkout
+the tests against any googletest checkout
 (<https://github.com/google/googletest>):
 
 ```sh
@@ -43,11 +62,24 @@ make tests GTEST_DIR=/path/to/googletest
 | `uneven_ratio`             | `world ≥ 4`, `world % 4 == 0` | (240, 240) | bf16 | ratio ∈ {(3,1),(1,3)}, n_shards (2,2) |
 | `tensor_size_sensitivity`  | `world ≥ 4`, even           | 576², 3072², 3072×6144 | bf16 | n_shards (4,4) |
 | `nd_tensors`               | `world ≥ 4`, even           | (64,128,128), (128,64,64) | bf16 | 3D only; the `(64,128,128), sd=(0,1)` historical case lives in `cross_dim_regression` |
+| `staging_slot_pressure`    | `world = 4`                 | (64,128,128) | bf16 | 3D Shard(0) → Shard(2) default-API reproducer for CI when run with a 4 MiB staging channel |
+| `stream_churn`             | `world ≥ 4`, even           | (64,64) | fp32 | Reuses the case with fresh destination streams in the MPI driver |
+| `stream_ordering`          | `world ≥ 4`, even           | (64,64) | fp32 | Asynchronous producer, reshard, and consumer ordering |
+| `graph_capture`            | `world ≥ 4`, even           | (64,64) | fp32 | MPI-only first-use and prewarmed variants verify capture rejection |
 | `1d_full_sharding`            | `world ≥ 4`, even           | (8192,)            | fp32 / bf16 / uint8 | 1D mesh, sd=(0,0) (only one tensor axis) |
 | `1d_2d_placement`             | `world ≥ 4`, even           | (8192,)            | bf16 | n_shards ∈ {(2,4),(4,2),(2,2)}, placement ∈ {sr/sr, rs/rs, sr/rs, rs/sr} |
 | `1d_uneven_ratio`             | `world ≥ 4`, `world % 4 == 0` | (16384,)         | bf16 | ratio ∈ {(3,1),(1,3)}, n_shards (2,2) |
 | `1d_tensor_size_sensitivity`  | `world ≥ 4`, even           | (16384,), (1048576,), (4194304,) | bf16 | n_shards (4,4) |
-| `cross_dim_regression`        | `world ≥ 8`, even           | (200, 200), (64,128,128) | bf16 | Targeted historical cross-dim regressions for transpose and non-transpose paths |
+| `cross_dim_regression`        | `world ≥ 8`, even           | (200, 200), (64,128,128) | bf16 | Targeted historical cross-dimension data-layout regressions |
+| `split_tiny_contribution`  | `world ≥ 4`, even           | (4,) | uint8 | Every CTA signals when a contribution is smaller than the CTA count |
+| `split_reverse_mesh`       | `world ≥ 4`, even           | (4096,) | uint8 | Source communicator ranks precede destination ranks when the destination mesh starts at rank 0 |
+
+`basic_api_test_local` omits `graph_capture`. Its pthread ranks share one
+process, while CUDA graph-capture coverage runs through `basic_api_test_mpi`.
+The MPI driver runs `stream_churn`, `stream_ordering`, and `graph_capture`
+with both caller streams and internal stream-pool mode. Its
+`group_mixed_context` filter also checks ordering across overlapping
+communicator contexts.
 
 Each case carries additional **runtime feasibility checks** (n_shards
 must divide `src_total` / `dst_total`, the chosen tensor dim must divide
@@ -74,7 +106,11 @@ the C kernel has no inherent 8-rank requirement.
 # Run only one group.
 ./build/bin/basic_api_test_local --filter full_replication
 
-# Switch to the direct-put kernel.
+# Sweep CTA counts in separate processes, including counts that do not divide
+# evenly by the GIN context count.
+bash tests/run_cta_count_regression.sh -N 4
+
+# Select the DIRECT reshard algorithm.
 ./build/bin/basic_api_test_local --algorithm direct
 ```
 
@@ -87,6 +123,19 @@ tests/run_basic_api_tests.sh -N 32 --filter nd_tensors
 
 # Or directly:
 mpirun -np 8 ./build/bin/basic_api_test_mpi --filter 2d_placement
+
+# Focused PACK host-RMA lease regression: two warmed communicators
+# share one destination GPU and one physical staging slot. Require INFO logs
+# to contain "pack-lsa-hput" so a kernel fallback cannot certify it.
+NCCL_NUM_RMA_CTX=4 \
+NCCL_RESHARD_PACK_BUFFSIZES=8192:1 \
+NCCL_RESHARD_SPLIT_COMM=0 \
+NCCL_RESHARD_LOG_LEVEL=INFO \
+mpirun -np 3 ./build/bin/basic_api_test_mpi \
+  --filter pack_reduced_bucket \
+  --gtest_filter='PackMpiTest.*' \
+  --algorithm ring --api default --copy-algorithm pack \
+  --lb-mode uniform
 ```
 
 ## CLI flags (both binaries)
@@ -98,7 +147,8 @@ mpirun -np 8 ./build/bin/basic_api_test_mpi --filter 2d_placement
 | `--gtest_filter=<pattern>`            | Native gtest filtering over sanitized parameter names, after the custom matrix filters above. |
 | `--max-world <N>`                     | Skip cases whose minimum required world size is `> N`. |
 | `--min-world <N>`                     | Skip cases whose minimum required world size is `< N`. |
-| `--algorithm ring\|direct`            | Algorithm selection (default ring). `basic_api_test_mpi` also accepts `all`, registering one parameter per algorithm. |
+| `--algorithm ring\|direct`            | Legacy test-scenario label (default ring). If no copy algorithm is supplied, `ring` selects PACK and `direct` selects DIRECT. `basic_api_test_mpi` also accepts `all`, registering one parameter per label. |
+| `--copy-algorithm direct\|pack` | Copy transport exercised through every selected API surface. |
 | `--lb-mode uniform\|node`             | Load-balance mode (default uniform). |
 | `--verbose`                           | Library verbose + per-rank diagnostics. |
 | `-N <ranks>` *(local only)*           | Number of ranks/threads (clamped to device count). |
@@ -192,3 +242,45 @@ the run.
 Cluster-specific launch wrappers and perf-regression workflows are not
 shipped with this contrib; copy `run_basic_api_tests.sh` and adapt its
 environment for your system.
+
+## Multi-dimensional placement coverage
+
+With `NCCL_M2N_BUILD_TESTS=ON`, build `multi_dim_geometry_test` and
+`multi_dim_test_mpi` (neither requires GTest). Make provides the same target
+names under `nccl_m2n/tests`. `make -C nccl_m2n tests`, or the default
+`make` inside `nccl_m2n/tests`, builds both placement tests even without
+GTest; GTest-dependent binaries are included when GTest is available.
+
+The local CI runner requires `MULTI_DIM_GEOMETRY_PASS pairs=109872`.
+The MPI runner requires each sweep to report `MULTI_DIM_GPU_PASS cases=356`
+with the expected API, grouping, nonblocking mode, and mesh shapes. Its
+four-rank profile runs two sweeps on `2 x 1` meshes. The eight-rank profile
+runs ten sweeps on `2 x 2` meshes: DIRECT/PACK with RING/DIRECT, default and
+grouped-window APIs, plus PACK nonblocking default/window calls. Blocking
+default sweeps use UNIFORM balancing; window and nonblocking sweeps use
+NODE_AWARE.
+
+`multi_dim_geometry_test` checks every placement pair for tensor ranks 1–3
+on non-square and unit-axis meshes. Its independent global-box oracle checks
+rank mapping, overlap volume, local bounds, element correspondence, complete
+coverage, and rejection of invalid dimensions, global shapes, and overflow.
+It requires no GPU operations.
+
+`multi_dim_test_mpi` checks all 353 source/destination placement pairs across
+1D, 2D, and 3D tensors, plus three larger transfers. Each destination and
+source is checked against a global-coordinate data oracle and guard bytes.
+Use 8 ranks (4 GPUs per side) by default:
+
+```bash
+NCCL_RESHARD_COPY_ALGORITHM=PACK mpirun -np 8 build/bin/multi_dim_test_mpi
+NCCL_RESHARD_COPY_ALGORITHM=PACK mpirun -np 8 build/bin/multi_dim_test_mpi --window --grouped
+```
+
+Repeat with `DIRECT`, and `NCCL_RESHARD_ALGORITHM=RING` or `DIRECT`.
+`--nonblocking` tests a nonblocking caller communicator. Optional
+`--src-ranks`, `--src-rows`, and `--dst-rows` select asymmetric or non-square
+meshes; their shard products must divide the test shapes (24 and 48/96/192).
+Incompatible products fail the whole launch before CUDA/NCCL setup; cases
+are not silently skipped.
+For example, 12 ranks with `--src-ranks 6 --src-rows 2 --dst-rows 3` exercises
+`2 x 3` to `3 x 2` meshes.

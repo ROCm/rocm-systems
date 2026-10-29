@@ -22,9 +22,12 @@
 
 #include <cstdio>
 #include <cstdlib>
-
+#include <cstring>
+#include <vector>
 #include <cuda_runtime.h>
 #include <nccl.h>
+
+#include "m2n_checks.h"
 
 /* ======================================================================
  * Env-mutation chokepoints.
@@ -45,6 +48,11 @@ static inline void testUnsetEnv(const char* name) {
   unsetenv(name);
 }
 
+static inline bool testUsesNonBlockingComm() {
+  const char* value = getenv("NCCL_COMM_BLOCKING");
+  return value != nullptr && strcmp(value, "0") == 0;
+}
+
 /* ======================================================================
  * Error-checking macros (no MPI dependency).
  * ====================================================================*/
@@ -61,11 +69,84 @@ static inline void testUnsetEnv(const char* name) {
 #define TEST_NCCLCHECK(cmd)                                                                 \
   do {                                                                                      \
     ncclResult_t r = (cmd);                                                                 \
-    if (r != ncclSuccess) {                                                                 \
+    if (r != ncclSuccess && r != ncclInProgress) {                                          \
       fprintf(stderr, "NCCL error %s:%d: %s\n", __FILE__, __LINE__, ncclGetErrorString(r)); \
       abort();                                                                              \
     }                                                                                       \
   } while (0)
+
+/* Query the communicator after every NCCL call. A successful return can still
+ * leave the operation pending on a non-blocking communicator. */
+static inline ncclResult_t testWaitCommReady(ncclComm_t comm) {
+  return m2nWaitCommReady(comm);
+}
+
+static inline void testWaitComms(const std::vector<ncclComm_t>& comms) {
+  for (ncclComm_t comm : comms) {
+    TEST_NCCLCHECK(testWaitCommReady(comm));
+  }
+}
+
+#define TEST_NCCL_COMM_CHECK(comm, cmd)                                                        \
+  do {                                                                                         \
+    ncclResult_t r = (cmd);                                                                    \
+    if (r != ncclSuccess && r != ncclInProgress) {                                              \
+      fprintf(stderr, "NCCL error %s:%d: %s\n", __FILE__, __LINE__, ncclGetErrorString(r));   \
+      abort();                                                                                  \
+    }                                                                                           \
+    r = testWaitCommReady((comm));                                                              \
+    if (r != ncclSuccess) {                                                                    \
+      fprintf(stderr, "NCCL error %s:%d: %s\n", __FILE__, __LINE__, ncclGetErrorString(r)); \
+      abort();                                                                                 \
+    }                                                                                          \
+  } while (0)
+
+/* Supply comm to wait after the call. Omit it for calls such as destroy,
+ * which invalidate the communicator and cannot be polled afterward. */
+#define ASSERT_NCCL(cmd, ...) \
+  do { \
+    ncclResult_t ncclAssertResult = (cmd); \
+    auto checkComm = [ncclAssertResult](ncclComm_t comm = nullptr) { \
+      if (comm != nullptr) { \
+        return testWaitCommReady(comm); \
+      } \
+      return ncclAssertResult; \
+    }; \
+    if (ncclAssertResult == ncclSuccess || ncclAssertResult == ncclInProgress) { \
+      ncclAssertResult = checkComm(__VA_ARGS__); \
+    } \
+    ASSERT_EQ(ncclSuccess, ncclAssertResult) << #cmd; \
+  } while (0)
+
+static inline ncclResult_t testFinalizeComm(ncclComm_t comm) {
+  const ncclResult_t result = ncclCommFinalize(comm);
+  if (result != ncclSuccess && result != ncclInProgress) return result;
+  return testWaitCommReady(comm);
+}
+
+static inline ncclResult_t testDestroyComm(ncclComm_t comm) {
+  ncclResult_t result = testFinalizeComm(comm);
+  if (result != ncclSuccess) return result;
+  return ncclCommDestroy(comm);
+}
+
+static inline ncclResult_t testCheckCommStreamResult(ncclComm_t comm, cudaStream_t stream) {
+  ncclResult_t result = testWaitCommReady(comm);
+  if (result != ncclSuccess) return result;
+  const cudaError_t cudaResult = cudaStreamSynchronize(stream);
+  if (cudaResult != cudaSuccess) return ncclSystemError;
+  return testWaitCommReady(comm);
+}
+
+static inline void testCheckCommStream(ncclComm_t comm, cudaStream_t stream, const char* file, int line) {
+  const ncclResult_t result = testCheckCommStreamResult(comm, stream);
+  if (result != ncclSuccess) {
+    fprintf(stderr, "NCCL error %s:%d: %s\n", file, line, ncclGetErrorString(result));
+    abort();
+  }
+}
+
+#define TEST_NCCL_ASYNC_CHECK(comm, stream) testCheckCommStream((comm), (stream), __FILE__, __LINE__)
 
 /* ======================================================================
  * Byte-pattern initializer / validator.

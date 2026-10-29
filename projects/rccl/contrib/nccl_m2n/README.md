@@ -1,24 +1,16 @@
-> **This project has moved.**
-> `nccl_m2n` is now developed in the [NVIDIA/nccl-extensions](https://github.com/NVIDIA/nccl-extensions) repository.
-> Please open all new issues and pull requests there.
-
 # NCCL M2N
 
-NCCL M2N is an experimental, standalone NCCL-based library for cross-group
-GPU data movement. This preview contains the **reshard** functionality: redistribute a
-global tensor between two disjoint groups of GPU processes (the source group
-holds one sharding / replication layout, the destination group holds
-another), with a single call that moves the data with no host involvement.
+NCCL M2N is a standalone NCCL-based library for cross-group GPU data
+movement. It provides the **reshard** functionality: redistribute a global
+tensor between two disjoint groups of GPU processes (the source group holds
+one sharding / replication layout, the destination group holds another),
+with a single API call from the application side.
 
-The library is built on NCCL's user-window API (`ncclWindow_t` +
-`ncclMemAlloc`), so transfers are zero-copy and one-sided. The single public
-entry point for this release is `ncclReshardWithWindow`. The shared library is
-installed as `libnccl_m2n.so`; the public header is `nccl_m2n.h`.
-
-> **Status.** Experimental — see [RELEASE.md](RELEASE.md) for the full list of
-> known limitations and the supported tensor-rank / mesh-size envelope. Depends
-> on NCCL window APIs in `nccl_device.h`, which are still evolving; pin a
-> known-good NCCL build for production use.
+The library uses copy/staging-backed reshard transports, with two entry
+points: `ncclReshard`, and `ncclReshardWithWindow` for callers that supply a
+user-registered NCCL window. Both use the transport selected by
+`NCCL_RESHARD_COPY_ALGORITHM`, whose default is `PACK`. The shared library
+is installed as `libnccl_m2n.so`; the public header is `nccl_m2n.h`.
 
 ## Maintainers
 
@@ -31,281 +23,255 @@ installed as `libnccl_m2n.so`; the public header is `nccl_m2n.h`.
 
 ---
 
-## Concepts
+## Table of Contents
 
-A typical caller has two disjoint sets of ranks (e.g. trainer ranks and
-inference / generator ranks) inside one NCCL communicator. Each side owns a
-local tile of the same logical tensor under a different layout. One call to
-`ncclReshardWithWindow` reshapes the tile on every destination rank to match
-the destination layout.
+- [Overview](#overview)
+- [Quick Start](#quick-start)
+  - [Build](#build)
+  - [Install](#install)
+  - [Usage](#usage)
+- [Public API Reference](#public-api-reference)
+- [Build Reference](#build-reference)
+- [Benchmarks](#benchmarks)
+- [Runtime environment variables](#runtime-environment-variables)
+- [Contributing](#contributing)
+- [Third-party software](#third-party-software)
+- [License](#license)
 
-**Mesh** (`ncclMesh_t`) — describes one side's rank topology. It is
-always 2-axis:
+---
 
-```c
-typedef struct {
-    int dims[2];        // axis-0 size × axis-1 size = number of ranks on this side
-    int startRank;     // first global rank that belongs to this mesh
-    int placement[2];   // per-axis role: REPLICATE or SHARD(tensor_dim)
-} ncclMesh_t;
-```
+## Overview
 
-`placement[i]` is one of:
+A typical caller has two disjoint sets of ranks inside one NCCL
+communicator: a source group and a destination group (e.g. trainer ranks
+and inference / generator ranks). Both sides hold the same logical tensor —
+each rank owns a local tile of it — but distributed under a different
+layout. `ncclReshard` transfers the tensor from the source group to the
+destination group with a single call, reshaping the tile on every
+destination rank to match the destination layout.
 
-- `NCCL_RESHARD_REPLICATE` — the mesh axis replicates the tensor.
-- `NCCL_RESHARD_SHARD(d)`  — the mesh axis shards along tensor dim `d`.
+A layout is described with two abstractions:
 
-Exactly **one** axis per mesh should be a SHARD (the other a REPLICATE) for a
-sharded layout. For full replication, encode it as a 1-shard layout (mesh axis
-of size 1) — both `REPLICATE` is a degenerate case not exercised by the test
-suite.
+- **Mesh** (`ncclMesh_t`) — one side's rank topology only (no per-tensor
+  placement), matching PyTorch DTensor's `DeviceMesh` / JAX's `Mesh`.
+- **Distributed tensor** (`ncclDistTensor_t`) — the tensor descriptor for
+  that side: shape, dtype, a pointer to its mesh, and **placement**
+  (`NCCL_RESHARD_REPLICATE` / `NCCL_RESHARD_SHARD(d)`) per mesh axis,
+  describing how each axis maps onto the tensor.
 
-**Roles** — by convention, ranks `[0 .. src_total)` belong to the source mesh
-(`startRank = 0`) and ranks `[src_total .. world_size)` belong to the
-destination mesh (`startRank = src_total`). The two halves are disjoint and
-their union is the world.
+Every rank in the communicator — including ranks outside both the source
+and destination meshes — must pass **both** the source and destination mesh
+and tensor descriptors to the call. A rank that doesn't participate on a
+given side still provides that side's descriptor with `dataPtr = NULL`,
+since the library reads both meshes everywhere to derive the transfer
+geometry.
 
-**Same-dim vs cross-dim** — when `src_shard_dim == dst_shard_dim` the source
-and destination shard the tensor along the same axis (a partial-overlap copy
-between rank groups). Otherwise it is **cross-dim sharding** — effectively an
-all-to-all between groups along different axes.
+See [Public API Reference](#public-api-reference) for the full mesh,
+placement, and tensor-descriptor semantics, including rank roles and
+same-dim vs. cross-dim sharding.
 
-**Single-offset window contract** — each participating pointer must live at a
-non-negative offset inside the registered window. Both `src->dataPtr` and
-`dst->dataPtr` must have the same offset within that window. A zero-offset
-buffer is the common case, but a matching non-zero offset is accepted.
+Both mesh axes may independently use `REPLICATE` or `SHARD(d)`, where
+`0 <= d < tensor.ndims`. This includes `(SHARD(0), SHARD(1))`, swapped
+placements, and repeated sharding such as `(SHARD(0), SHARD(0))`.
+Mesh axes are applied in placement order: axis 0 partitions the global
+tensor, then axis 1 partitions each resulting piece. For a length-16 tensor
+on a `2 x 2` mesh with `(SHARD(0), SHARD(0))`, mesh coordinates `(0,0)`,
+`(0,1)`, `(1,0)`, `(1,1)` own `[0,4)`, `[4,8)`, `[8,12)`, `[12,16)`.
+
+Each rank holds a contiguous, equally sized local tile. For each tensor
+dimension `d`, its global extent is `localShape[d]` times the product of
+mesh-axis sizes placed at `SHARD(d)`. Source and destination global shapes
+must match. Fully replicated layouts `(REPLICATE, REPLICATE)` are supported.
+Public meshes have one or two axes, and tensors may have 1–3 dimensions.
+These placement semantics apply to both `ncclReshard` and
+`ncclReshardWithWindow`, including grouped calls and Python bindings.
+
+**Reshard geometry** — each source tile sends its intersection with each
+destination tile, including when either side shards multiple dimensions.
+Replicas reuse the existing replication load balancing and forwarding paths.
 
 ---
 
 ## Quick Start
 
-Prerequisites: an NCCL build from source (with `nccl_device.h` exported), CUDA,
-and an MPI runtime for the benchmarks.
-
-Two build paths are shipped side-by-side — pick either; both produce the
-same artifacts under `build/lib/` and `build/bin/`.
+Prerequisites: CUDA and an MPI runtime for the benchmarks. NCCL is vendored
+as a git submodule (`third_party/nccl`); `NCCL_HOME` defaults to its build
+output automatically. To use a different NCCL build instead, set
+`NCCL_HOME` explicitly (see below).
 
 ```bash
 git clone <repo-url> nccl-m2n
 cd nccl-m2n
 
-# 1. Point at your NCCL build
-export NCCL_HOME=/path/to/nccl/build
+# One-time: initialize and build the vendored NCCL submodule (skip if you
+# set NCCL_HOME below to point at your own build)
+make nccl-submodule
+
+# Point at the NCCL build. Make defaults to the submodule's build output
+# above, so this is optional for Make and required for CMake.
+export NCCL_HOME=$PWD/third_party/nccl/build
 ```
 
-### Option A — Make
+### Build
+
+Two build paths are shipped side-by-side — pick either. Make defaults to
+`build/`; CMake writes to the directory passed with `-B`.
+
+**Make**
 
 ```bash
-# 2a. Build the shared library
-make                                       # → build/lib/libnccl_m2n.so
-
-# 3a. Build the canonical single-layer benchmark (also a worked example)
-make reshard                               # → build/bin/reshard_bench
+make -C nccl_m2n                           # → build/lib/libnccl_m2n.so
+make -C nccl_m2n reshard                   # → build/bin/reshard_bench (also a worked example)
 ```
 
 `make help` lists all targets. `make` (no target) builds only the library.
 
-### Option B — CMake
+**CMake**
 
 ```bash
-# 2b. Configure + build everything (library + bench + tests)
-cmake -B build -DNCCL_HOME="$NCCL_HOME" \
-      -DNCCL_M2N_BUILD_BENCH=ON \
-      -DNCCL_M2N_BUILD_TESTS=ON
+cmake -S nccl_m2n -B build -DNCCL_HOME="$NCCL_HOME" \
+      -DNCCL_M2N_BUILD_BENCH=ON
 cmake --build build -j
 
 # Library only (faster):
-# cmake -B build -DNCCL_HOME="$NCCL_HOME" && cmake --build build -j
+# cmake -S nccl_m2n -B build -DNCCL_HOME="$NCCL_HOME" && cmake --build build -j
 ```
 
-Use `ctest --test-dir build` to run the host-only test subset.
+See [Build Reference](#build-reference) for the full target list and
+required/optional environment variables.
 
----
+### Install
 
-## Usage
+```bash
+# Make — copies lib + nccl_m2n.h to $PREFIX (default /usr/local)
+make -C nccl_m2n install
 
-A complete walk-through lives in `benchmarks/reshard_bench.cc`; a minimal
-sketch:
+# CMake — copies lib + headers to CMAKE_INSTALL_PREFIX (default /usr/local)
+cmake --build build --target install
+```
+
+### Usage
+
+Initialize the runtime. The config struct lets you cap CTA count; other
+tuning knobs are env-driven (see [Runtime environment variables](#runtime-environment-variables)):
 
 ```cpp
 #include "nccl_m2n.h"
 
-// Caller-allocated, communicator-wide symmetric buffer (sized to the worst
-// case across all reshard calls that will use this comm).
-void* buffer;
-ncclMemAlloc(&buffer, max_local_bytes);
-
-// Register one window on the comm; reuse for many reshards.
-ncclWindow_t window;
-ncclCommWindowRegister(comm, buffer, max_local_bytes, &window,
-                       NCCL_WIN_COLL_SYMMETRIC);
-
-// Initialize the reshard library. Optional config struct lets you set
-// maxCta; everything else is env-driven (see "Tuning" below).
+ncclM2nHandle_t m2nHandle = nullptr;
 ncclM2nConfig_t cfg = NCCL_M2N_CONFIG_INITIALIZER;
 cfg.maxCta = 8;
-ncclResult_t r = ncclM2nInit(&cfg);  // or ncclM2nInit(NULL) for defaults
-if (r != ncclSuccess) { /* handle */ }
-
-// Describe the two layouts. Example: 8 ranks split 4 src / 4 dst, both
-// 1×4 1-D meshes that shard the outer tensor dim.
-ncclMesh_t src_mesh = {
-    .dims = {1, 4}, .startRank = 0,
-    .placement = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(0)},
-};
-ncclMesh_t dst_mesh = {
-    .dims = {1, 4}, .startRank = 4,
-    .placement = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(0)},
-};
-
-// Pack the per-side tensor descriptors. localShape entries are in
-// **elements** and only the first ndims slots are read.  dataPtr is
-// NULL on the side this rank doesn't participate in (mirroring PyTorch
-// DTensor's size-0 local tensor for non-participating ranks).  mesh is
-// always required.
-ncclDistTensor_t src = {
-    .dataPtr    = is_source ? buffer : NULL,
-    .localShape = {256, 1024, 0},
-    .ndims       = 2,
-    .dtype       = ncclFloat32,
-    .mesh        = &src_mesh,
-};
-ncclDistTensor_t dst = {
-    .dataPtr    = is_dest ? buffer : NULL,
-    .localShape = {256, 1024, 0},
-    .ndims       = 2,
-    .dtype       = ncclFloat32,
-    .mesh        = &dst_mesh,
-};
-
-ncclReshardWithWindow(comm, window, &src, &dst, stream);
-
-// Tear down.
-ncclCommWindowDeregister(comm, window);
-ncclMemFree(buffer);
-ncclM2nFinalize();    // releases internal caches + transpose buffer
+ncclM2nInit(&m2nHandle, &cfg);
 ```
 
-The window must be registered on the **full** communicator regardless
-of whether this rank's `dataPtr` is NULL on either side.
+Describe each side's mesh and tensor descriptor. Example: 8 ranks split 4
+source / 4 destination, both native 1-D meshes sharding the outer tensor
+dim. `dataPtr` is `NULL` on the side a rank doesn't participate in:
+
+```cpp
+int srcMeshDims[] = {4};
+ncclMesh_t srcMesh = NCCL_M2N_MESH_INITIALIZER;
+srcMesh.ndims = 1;
+srcMesh.dims = srcMeshDims;
+srcMesh.startRank = 0;
+
+int dstMeshDims[] = {4};
+ncclMesh_t dstMesh = NCCL_M2N_MESH_INITIALIZER;
+dstMesh.ndims = 1;
+dstMesh.dims = dstMeshDims;
+dstMesh.startRank = 4;
+
+int srcPlacements[] = {NCCL_RESHARD_SHARD(0)};
+size_t srcLocalShape[] = {256, 1024};
+ncclDistTensor_t src = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+src.dataPtr = is_source ? buffer : nullptr;
+src.localShape = srcLocalShape;
+src.ndims = 2;
+src.dtype = ncclFloat32;
+src.mesh = &srcMesh;
+src.placements = srcPlacements;
+
+int dstPlacements[] = {NCCL_RESHARD_SHARD(0)};
+size_t dstLocalShape[] = {256, 1024};
+ncclDistTensor_t dst = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+dst.dataPtr = is_dest ? buffer : nullptr;
+dst.localShape = dstLocalShape;
+dst.ndims = 2;
+dst.dtype = ncclFloat32;
+dst.mesh = &dstMesh;
+dst.placements = dstPlacements;
+```
+
+Issue the reshard, then complete and finalize. Reshard is asynchronous, so
+synchronize the stream before releasing its resources:
+
+```cpp
+ncclReshard(m2nHandle, comm, &src, &dst, stream);
+
+cudaStreamSynchronize(stream);
+ncclM2nFinalize(m2nHandle);
+```
+
+Callers that have an NCCL window registered can use `ncclReshardWithWindow`
+instead, passing the window alongside the same `src`/`dst` descriptors.
 
 ---
 
 ## Public API Reference
 
+### C API
+
 ```c
 #include "nccl_m2n.h"
 ```
 
-### DistTensor
-
-`ncclDistTensor_t` ("Distributed Tensor") names the same abstraction
-training frameworks use: a logical tensor that is split across many
-GPUs under a per-rank layout (sharded along one or more dimensions,
-replicated on others), where each rank only ever holds and operates on
-its local tile.  The closest public analogues are **PyTorch DTensor**
-([torch.distributed.tensor]) and **JAX** sharded `jax.Array` (via
-`NamedSharding(mesh, PartitionSpec)`); the placement vocabulary used
-here (`REPLICATE`, `SHARD(d)`) maps 1-to-1 onto PyTorch's `Replicate()`
-and `Shard(d)`.  Both PyTorch and JAX bundle the topology with the
-per-rank tile (DTensor's `_spec.mesh`, JAX's `Array.sharding.mesh`),
-and `ncclDistTensor_t` follows that convention: data + shape + dtype +
-mesh in one descriptor.
-
-```c
-typedef struct {
-    void*                     dataPtr;        // local buffer; NULL if this rank
-                                               //   doesn't participate on this side
-    size_t                    localShape[NCCL_RESHARD_MAX_TENSOR_DIMS];  // elements
-    int                       ndims;           // 1..3
-    ncclDataType_t            dtype;           // element type
-    const ncclMesh_t*  mesh;            // topology + placement (caller-owned)
-} ncclDistTensor_t;
-```
-
-`dtype` selects the element size. Supported: `ncclInt8`, `ncclUint8`,
-`ncclFloat8e4m3`, `ncclFloat8e5m2`, `ncclFloat16`, `ncclBfloat16`,
-`ncclInt32`, `ncclUint32`, `ncclFloat32`, `ncclInt64`, `ncclUint64`,
-`ncclFloat64`.
-
-A rank that doesn't participate on a given side passes a fully-formed
-descriptor with `dataPtr = NULL` (mirroring DTensor's size-0 local
-tensor for non-participating ranks).  `mesh` is required on every
-rank — the library reads both meshes everywhere to compute who-holds-
-which-shard.
-
-[torch.distributed.tensor]: https://pytorch.org/docs/stable/distributed.tensor.html
-
-### Reshard
-
-```c
-ncclResult_t ncclReshardWithWindow(
-    ncclComm_t                comm,    // contains all ranks (src + dst)
-    ncclWindow_t              window,  // registered on comm
-    const ncclDistTensor_t*   src,     // source-side descriptor
-    const ncclDistTensor_t*   dst,     // destination-side descriptor
-    cudaStream_t              stream   // explicit stream, or default-stream sentinel
-);
-```
-
-CTA count defaults to `DEFAULT_NUM_CTAS = 8` and can be capped with
-`config.maxCta` / `NCCL_RESHARD_MAX_CTA`. Chunking defaults to
-`DEFAULT_ELEMENTS_PER_CHUNK = 32`; the RING path also honors
-`NCCL_RESHARD_CHUNK_SIZE` as a byte-level chunk override.
-
-**Preconditions** (return `ncclInvalidArgument` if violated, except where
-noted otherwise):
-
-- `comm`, `window`, `src`, `dst`, `src->mesh`, `dst->mesh` are non-NULL.
-- `src->ndims == dst->ndims`, both in `1..NCCL_RESHARD_MAX_TENSOR_DIMS`
-  (currently 3; 4-D is not supported).
-- `src->dtype == dst->dtype` and is a supported dtype (see list above).
-- `window` is registered on `comm` itself with `NCCL_WIN_COLL_SYMMETRIC`.
-- `stream` is either an explicit CUDA stream or a default-stream sentinel
-  (`NULL`, `cudaStreamLegacy`, or `cudaStreamPerThread`). Default-stream callers
-  run on an internal non-blocking stream pool when enabled.
-- Per-rank `src->dataPtr` / `dst->dataPtr` is either `NULL` for an inactive
-  side or lies inside the registered window. If both pointers are present on
-  one rank, their window offsets must match. Window-offset checks require
-  NCCL ≥ 2.29.2 (`ncclWinGetUserPtr`); on older NCCL the offset symmetry is
-  trusted. Violations of the single-offset contract abort the process via
-  `RESHARD_FATAL` rather than returning `ncclInvalidArgument`.
-- Each `localShape[shard_dim]` × shard count divides cleanly into the
-  global tensor dim.
-
-**Returns** `ncclSuccess` on success, otherwise an `ncclResult_t` from NCCL or
-`ncclInvalidArgument` from the preconditions above.
-
-**Threading** — the call is collective and follows CUDA stream semantics.
-Issue a single reshard at a time per `(comm, effective stream)`. Use separate
-communicators for concurrent transfers; the batched benchmark does this with
-`--num-comms`.
-
-### Lifecycle
-
-```c
-ncclResult_t ncclM2nInit(ncclM2nConfig_t* config); // idempotent; NULL = defaults
-ncclResult_t ncclM2nFinalize(void); // releases caches + transpose buffer
-```
-
-`Finalize` should be called before the process exits to release the device
-caches; running without `Finalize` is not a correctness bug but may show up as
-leaked device memory at process teardown.
-
-### Library configuration
-
-Modeled after `ncclConfig_t`. Fill an `ncclM2nConfig_t` with
-`NCCL_M2N_CONFIG_INITIALIZER`, override the fields you care about,
-and pass a pointer to `ncclM2nInit()`. `NULL` means "all defaults".
-Fields left at `NCCL_M2N_CONFIG_UNDEF_INT` keep the library default.
-
-| Field    | Purpose |
+| Function | Purpose |
 |---|---|
-| `maxCta` | Max number of CTAs used by reshard kernel. |
+| `ncclM2nInit(handle, config)` | Initialize an explicit handle from an optional `ncclM2nConfig_t` (`NULL` config = all defaults). |
+| `ncclM2nFinalize(handle)` | Release a handle — or `NULL` for the internal default handle — once its M2N work has completed. |
+| `ncclM2nGetLastError()` | Return detail for the most recent M2N error on the calling thread. |
+| `ncclReshard(handle, comm, src, dst, stream)` | Primary reshard entry point; copy/staging transport selected by `NCCL_RESHARD_COPY_ALGORITHM`. |
+| `ncclReshardWithWindow(handle, comm, window, src, dst, stream)` | Reshard entry point for callers that supply a user-registered NCCL window. |
+| `ncclM2nGroupStart()` | Begin recording `ncclReshard`/`ncclReshardWithWindow` calls on the calling thread instead of issuing them immediately. |
+| `ncclM2nGroupEnd()` | Close the outermost group and issue its recorded calls. |
+| `ncclM2nGroupAbort()` | Discard an active group's recorded calls without issuing them. |
+
+Layouts are described with two descriptors (both in
+[`src/nccl_m2n.h`](src/nccl_m2n.h), with static initializers
+`NCCL_M2N_MESH_INITIALIZER` / `NCCL_M2N_DIST_TENSOR_INITIALIZER` /
+`NCCL_M2N_CONFIG_INITIALIZER`):
+
+| Descriptor | Fields |
+|---|---|
+| `ncclMesh_t` | `ndims`, `dims[]`, `startRank` — one side's rank topology only. |
+| `ncclDistTensor_t` | `dataPtr`, `localShape[]`, `ndims`, `dtype`, `mesh`, `placements[]` — the per-rank tile plus its shape/dtype, a pointer to its mesh, and per-axis placement (`NCCL_RESHARD_REPLICATE` / `NCCL_RESHARD_SHARD(d)`). |
+
+See [`src/nccl_m2n.h`](src/nccl_m2n.h) for the full contract on every
+function and field, including preconditions, error codes, and
+group-submission semantics.
+
+### Python API
+
+```python
+import nccl.m2n as m2n
+```
+
+| Call | Purpose |
+|---|---|
+| `m2n.reshard(src, dst, comm, stream=..., src_mesh=..., src_placements=..., dst_mesh=..., dst_placements=...)` | Primary reshard entry point (staging-backed). |
+| `m2n.reshard_with_window(...)` | Reshard entry point for callers that supply a user-registered NCCL window. |
+| `m2n.Mesh(dims, start_rank=...)` | Rank-topology descriptor — flat list (1-D) or nested list (2-D). |
+| `m2n.Shard(dim)` | Placement helper for a sharded mesh axis. |
+| `m2n.init()` | Context manager yielding a handle exposing `handle.reshard(comm, src, dst, stream=...)`. |
+| `m2n.group()` | Defines a grouped submission boundary for reshard calls. |
+| `m2n.group_start()` / `m2n.group_end()` / `m2n.group_abort()` | Explicit group control for non-context-manager code. |
+
+See the [M2N Python guide](../python/nccl/m2n/README.md) for install steps
+and full usage examples.
 
 ---
 
-## Building
+## Build Reference
 
 Both Make and CMake are supported; pick the one that fits your toolchain.
 
@@ -319,15 +285,14 @@ Both Make and CMake are supported; pick the one that fits your toolchain.
 | `make reshard_model`            | `build/bin/reshard_model_bench`           | Config-driven model transfer bench (links MPI). |
 | `make bench`                    | All bench binaries above                    | |
 | `make bench reshard`            | Equivalent to `make reshard`                | Sub-name picker, see `make help`. |
-| `make tests`                    | `basic_api_test_{mpi,local}`                | C-level functional matrix. |
 | `make install`                  | Copies `lib` + `nccl_m2n.h` to `$PREFIX`  | Defaults `PREFIX=/usr/local`. |
-| `make clean`                    | `rm -rf build/`                             | |
+| `make clean`                    | Removes M2N artifacts from `build/`         | Preserves other libraries' artifacts. |
 
 ### CMake targets
 
 ```bash
-cmake -B build -DNCCL_HOME="$NCCL_HOME" \
-      [-DNCCL_M2N_BUILD_BENCH=ON] [-DNCCL_M2N_BUILD_TESTS=ON]
+cmake -S nccl_m2n -B build -DNCCL_HOME="$NCCL_HOME" \
+      [-DNCCL_M2N_BUILD_BENCH=ON]
 cmake --build build -j [--target <name>]
 ```
 
@@ -337,29 +302,24 @@ cmake --build build -j [--target <name>]
 | `nccl_m2n_shared`    | `build/lib/libnccl_m2n.so`                | Library only. |
 | `nccl_m2n_static`    | `build/lib/libnccl_m2n.a`                 | Static archive. |
 | `reshard_bench` *etc.* | `build/bin/<name>`                        | Requires `-DNCCL_M2N_BUILD_BENCH=ON`. |
-| `basic_api_test_*`    | `build/bin/<name>`                         | Requires `-DNCCL_M2N_BUILD_TESTS=ON`. |
-| `unit_tests`          | `build/bin/unit_tests`                     | Private CI gtest suite; links library SRCs directly. |
 | `install`             | Copies `lib` + headers to `CMAKE_INSTALL_PREFIX` | Defaults `/usr/local`. |
-
-`ctest --test-dir build` runs the host-only subset of `unit_tests` +
-`basic_api_test_local`.
 
 ### Required environment
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `NCCL_HOME` | *(unset; required)* | Path to a from-source NCCL build (`$NCCL_HOME/include/nccl_device.h` must exist). Make reads the env var directly; pass `-DNCCL_HOME=...` to `cmake`. |
+| `NCCL_HOME` | Make: `third_party/nccl/build` (vendored submodule); CMake: required at configure time (no default) | Path to a from-source NCCL build (`$NCCL_HOME/include/nccl_device.h` must exist). Make reads the env var directly; CMake configure fails when `NCCL_HOME` is unset. Pass `-DNCCL_HOME=...` or set the environment variable. Override to point at your own build. |
 
 ### Optional environment / cache vars
 
 | Make var | CMake equivalent | Default | Purpose |
 |---|---|---|---|
-| `CUDA_HOME` | auto-detected by `find_package(CUDAToolkit)` | `/usr/local/cuda` | CUDA install. CUDA ≥ 12.4 is needed for the default `sm_100` arch. |
+| `CUDA_HOME` | auto-detected by `find_package(CUDAToolkit)` | `/usr/local/cuda` | CUDA install. CUDA ≥ 12.8 is needed for the default `sm_100` arch. |
 | `MPI_HOME` | auto-detected by `find_package(MPI)` | system MPI | Used by benchmarks only (the library does not link MPI). |
 | `PREFIX` | `CMAKE_INSTALL_PREFIX` | `/usr/local` | `install` destination. |
 | `NVCC_GENCODE` | `CMAKE_CUDA_ARCHITECTURES` | `sm_80, sm_90, sm_100` (Make) / `80;90;100` (CMake) | Target GPU arch. |
 | `DEBUG=1` / `DEBUG=full` | `-DCMAKE_BUILD_TYPE=Debug` (+ `-DCMAKE_CUDA_FLAGS_DEBUG=...`) | unset / Release | Line info / device debug. |
-| `BUILDDIR` | `cmake -B <dir>` | `build/` | Output directory. |
+| `BUILDDIR` | `cmake -B <dir>` | `build/` | Make output directory. |
 
 ---
 
@@ -391,20 +351,6 @@ mpirun -np 8 ./build/bin/reshard_bench \
 `--help` lists all flags (`--lb-mode`, `--print-all-ranks`,
 `--verbose`, ...).
 
-### Batched — `reshard_batch_bench_user_window`
-
-Sweeps tensor sizes × shard-dim pairs and compares **sequential** vs
-**concurrent** issue across `--num-comms` independent NCCL communicators.
-
-```bash
-mpirun -np 16 ./build/bin/reshard_batch_bench_user_window \
-    --src-mesh-dims 1,8 --dst-mesh-dims 1,8 \
-    --tensor-dims '256,256:1024,1024:4096,4096' \
-    --src-shard-dims 0,0 --dst-shard-dims 0,1 \
-    --num-comms 2 --num-tensors 4 \
-    --validate
-```
-
 ### Model transfer — `reshard_model_bench`
 
 A config-driven benchmark that measures disaggregated model resharding using
@@ -415,61 +361,18 @@ grouping, PP stage mapping, and deduplication.
 
 #### How It Works
 
-```
-                                  ┌──────────────────────────────┐
-                                  │  model config JSON           │
-                                  │  (per-param shape + dtype)   │
-                                  └──────────┬───────────────────┘
-                                             │
-                         ┌───────────────────▼────────────────────┐
-                         │  1. Group expert params into 3D tensors│
-                         │  2. Deduplicate across layers (opt.)   │
-                         │  3. Compute placement rules per param  │
-                         │  4. Build transfer descriptors          │
-                         └───────────────────┬────────────────────┘
-                                             │
-                  ┌──────────────────────────▼──────────────────────────┐
-                  │  system config JSON                                  │
-                  │  (train/gen: num_gpus, TP, CP, EP, DP, PP)          │
-                  └──────────────────────────┬──────────────────────────┘
-                                             │
-            ┌────────────────────────────────▼────────────────────────────────┐
-            │  Per (train_stage, gen_stage) PP pair:                           │
-            │    - Create NCCL communicator (ncclCommInitRank)                 │
-            │    - Create dedicated CUDA stream                               │
-            │                                                                 │
-            │  Per transfer descriptor (param):                               │
-            │    - Allocate symmetric buffer (ncclMemAlloc)                   │
-            │    - Register ncclWindow_t (ncclCommWindowRegister)              │
-            └────────────────────────────────┬────────────────────────────────┘
-                                             │
-                    ┌────────────────────────▼─────────────────────────┐
-                    │  Warmup → Per-pattern: [Validation] → Timed runs │
-                    │  → Aggregate summary                             │
-                    └──────────────────────────────────────────────────┘
-```
-
-**Pipeline steps in detail:**
-
-1. **Parse configs** -- model config gives per-parameter global shapes and dtypes; system config gives train/gen parallelism (TP, CP, EP, DP, PP, num_gpus).
-
-2. **Expert grouping** -- individual per-expert 2D weight matrices (e.g. `layers.0.experts.0.gate_proj.weight`) are combined into a single 3D tensor (e.g. `layers.0.experts.gate_proj.weight` with shape `[num_experts, ...]`).
-
-3. **Deduplication** -- with PP, many layers share the same (shape, placement, PP-stage-pair) pattern. By default, only one representative per pattern is benchmarked, reducing runtime without affecting accuracy. Disable with `--no-dedup`.
-
-4. **Placement rules** --
-   - **Column-parallel (Shard dim 0)**: q/k/v/gate/up projections, embed_tokens, lm_head
-   - **Row-parallel (Shard dim 1)**: o/down projections
-   - **Expert-parallel (Shard dim 0)**: `.experts.` params sharded across EP
-   - **Replicated**: layernorms, biases, MoE router gate, 1D params
-
-5. **Transfer descriptors** -- for each param: local shapes (after sharding), mesh specs (rep count, shard count, shard tensor dim), PP stage assignment, byte sizes.
-
-6. **NCCL communicators** -- one `ncclComm_t` and one `cudaStream_t` per (train_stage, gen_stage) pair. Trainer ranks occupy `[0, trainStageSize)` and generator ranks occupy `[trainStageSize, trainStageSize + genStageSize)` within each sub-communicator.
-
-7. **Buffer allocation** -- one symmetric buffer per transfer descriptor (i.e. per parameter). Each buffer is registered as an `ncclWindow_t` on the corresponding PP communicator. This per-param allocation ensures that multiple parameters within the same pattern group can be in flight simultaneously without data corruption, which is critical for validation correctness.
-
-8. **Execution** -- all transfers in a pattern group are launched asynchronously on per-PP-comm CUDA streams (NCCL serializes ops on the same communicator), then synchronized once. Per-pattern and aggregate bandwidth/latency are reported.
+- Parses the model config (per-parameter shapes/dtypes) and system config
+  (train/gen parallelism: TP, CP, EP, DP, PP) into a transfer descriptor
+  per parameter.
+- Groups per-expert weights into 3D tensors and deduplicates repeated
+  PP-stage patterns by default (disable with `--no-dedup`).
+- Infers each parameter's placement (column-/row-/expert-parallel, or
+  replicated) from its name.
+- Creates one NCCL communicator and CUDA stream per (train_stage,
+  gen_stage) pair, and allocates a device buffer per transfer descriptor.
+- Runs a warmup pass followed by timed iterations (with optional
+  `--validate` correctness checks), reporting per-pattern and aggregate
+  bandwidth/latency.
 
 #### Input File Formats
 
@@ -528,68 +431,7 @@ mpirun -np <total_gpus> ./build/bin/reshard_model_bench \
     --validate
 ```
 
-#### CLI Arguments
-
-| Argument | Default | Description |
-|---|---|---|
-| `--model-config <file>` | required | Model config JSON with HuggingFace-style per-parameter shapes and dtypes. |
-| `--system-config <file>` | required | System config JSON with train/generation parallelism. |
-| `--iterations <N>` | 10 | Timed iterations per pattern. |
-| `--warmup <N>` | 2 | Warmup iterations. |
-| `--gpus-per-node <N>` | 8 | GPUs per node for load balancing. |
-| `--algorithm <auto\|ring\|direct>` | auto | Reshard algorithm selection. |
-| `--lb-mode <uniform\|node>` | uniform | Load-balance mode. |
-| `--no-dedup` | off | Benchmark all layers instead of one representative per repeated pattern. |
-| `--validate` | off | Run correctness validation before timing. |
-| `--validate-iterations <N>` | 3 | Validation iterations per pattern. |
-
-#### Validation Mode
-
-With `--validate`, the benchmark runs a per-pattern correctness check before
-the timed iterations for each pattern group:
-
-1. Trainer ranks initialize each parameter's dedicated buffer with a
-   deterministic byte pattern based on global coordinates; generator ranks zero
-   their buffers.
-2. All transfers in the pattern group execute in byte mode (`element_size=1`,
-   last tensor dimension scaled by the actual element size).
-3. Streams synchronize and an MPI barrier ensures all transfers complete.
-4. Generator ranks verify each parameter's received data matches the expected
-   pattern.
-5. Per-pattern pass/fail is reported, and a global `VALIDATION PASSED` or
-   `VALIDATION FAILED` summary is printed after all patterns.
-
-Since each parameter has its own buffer, multiple parameters within a pattern
-group are validated without data conflicts. Validation operates in byte space
-to work with multi-byte dtypes like BF16 and FP8.
-
-#### Reference Performance
-
-Measured end-to-end model transfer latency from `reshard_model_bench` on a
-GB200 NVL72 cluster (4 GPUs/node, NVLink intra-rack). Both runs use
-`--validate --no-dedup`, so every layer's transfers are timed (not just one
-representative per pattern). "Max latency" is the final-aggregate
-`Latency Max` line from the benchmark summary: the slowest rank's wall-clock
-summed across all per-pattern timings.
-
-The two columns compare the hierarchical algorithm (intra-NVL fan-out plus
-cross-NVL ring) against the direct point-to-point algorithm (every source rank
-issues GIN puts to every destination rank), holding everything else fixed:
-
-- **Hierarchical**: `--algorithm ring --lb-mode node`
-- **Direct P2P**: `--algorithm direct --lb-mode uniform`
-
-| Model | Cluster | GPUs (train + gen) | Trainer parallelism | Generator parallelism | Hierarchical max latency (ms) | Direct P2P max latency (ms) | Speedup |
-|---|---|---|---|---|---:|---:|---:|
-| DeepSeek-V3 (`dsv3.model.json`) | GB200 NVL72 | 256 (128T / 2 NVL + 128G / 2 NVL) | `TP=1, CP=1, EP=16, DP=2, PP=4` | `TP=8, CP=1, EP=1, DP=16, PP=1` | 1447.44 | 3837.74 | 2.65x |
-| Qwen3-235B (`qwen3-235b.model.json`) | GB200 NVL72 | 128 (64T / 1 NVL + 64G / 1 NVL) | `TP=2, CP=2, EP=16, DP=1, PP=4` | `TP=8, CP=1, EP=1, DP=8, PP=1` | 988.75 | 2175.16 | 2.20x |
-
-The `dsv3.model.json` and `qwen3-235b.model.json` files are derived from the
-public HuggingFace model cards
-([deepseek-ai/DeepSeek-V3](https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json),
-[Qwen/Qwen3-235B-A22B](https://huggingface.co/Qwen/Qwen3-235B-A22B/blob/main/config.json))
-and are not bundled here; the tree ships only
-`dsv3-toy.model.json` (see the "Shipped configs" subsection below).
+`--help` lists all flags and defaults.
 
 #### Shipped configs
 
@@ -604,152 +446,30 @@ examples under `benchmarks/configs/system_configs/`:
 
 ---
 
-## Tests
-
-A C-level functional matrix lives in [`tests/`](tests/README.md), exposed as
-two gtest binaries that share a single descriptor table:
-
-| Binary | Bootstrap | Use when |
-|---|---|---|
-| `basic_api_test_mpi`   | MPI (`mpirun`) | Cluster runs, large rank counts. |
-| `basic_api_test_local` | Single-process pthreads via `ncclCommInitAll` | Dev workstation, no MPI install. |
-
-Build:
-
-```bash
-make tests
-```
-
-Run:
-
-```bash
-# Single-host, no MPI
-./build/bin/basic_api_test_local --filter full_sharding
-
-# Multi-host
-mpirun -np 8 ./build/bin/basic_api_test_mpi --filter 2d_placement
-```
-
-Case groups: `full_replication`, `full_sharding`, `2d_placement`,
-`uneven_ratio`, `tensor_size_sensitivity`, `nd_tensors`, `cross_dim_regression`,
-plus 1-D analogues. See [`tests/README.md`](tests/README.md) for the full
-matrix and the `--list` / `--min-world` / `--max-world` flags used to bin a CI
-run into rank tiers. The C-level matrix covers RING and DIRECT; the MPI binary
-also accepts `--algorithm all`.
-
-Exit code is `1` if any case reports `FAIL`, `0` otherwise. `SKIP` does
-not fail the run.
-
----
-
-## Tuning
-
-**Algorithm**
-
-- `NCCL_RESHARD_ALGORITHM=AUTO` (default) — currently falls through to `RING`; no
-  NVL-domain auto-detection in this build.
-- `NCCL_RESHARD_ALGORITHM=RING` — hierarchical ring + intra-NVL fan-out via the input
-  comm's window. Best for cross-NVL transfers and scales linearly with
-  bandwidth.
-- `NCCL_RESHARD_ALGORITHM=DIRECT` — every src rank issues GIN puts directly to every
-  dst rank. Lower latency for small transfers; higher pressure on the NIC
-  and on the prepare-time fan-out.
-
-**Load balance**
-
-- `NCCL_RESHARD_LB_MODE=UNIFORM` (default) — splits work evenly by rank count.
-- `NCCL_RESHARD_LB_MODE=NODE_AWARE` — bias the assignment so each NVL domain serves
-  its local peers first; benefits cross-NVL fan-in.
-
-**CTA count and chunk granularity** — CTA count resolves once during
-`ncclM2nInit`: built-in default 8, then optional `config.maxCta`, then
-`NCCL_RESHARD_MAX_CTA` if set. `pickElementsPerChunk` currently returns the
-compile-time default (`DEFAULT_ELEMENTS_PER_CHUNK = 32`). The RING prepare path
-also uses `CHUNK_SIZE_BYTES` (256 KB) as a byte-level chunk size, overridable
-per-process via `NCCL_RESHARD_CHUNK_SIZE` (bytes).
-
-**Cross-dim transpose** — when cross-dim sharding would produce per-rank
-inner strides below `CROSS_DIM_TRANSPOSE_THRESHOLD` (256 KB), the library
-transparently transposes dimensions into a private buffer to keep GIN puts
-large. Applies to both 2-D and 3-D tensors; transparent to callers.
-
----
-
 ## Runtime environment variables
 
-Most env vars are read once in `ncclM2nInit`. Env vars always override
-matching fields of `ncclM2nConfig_t` (matches upstream NCCL's
-`envConfigOverride` precedence). `NCCL_RESHARD_CHUNK_SIZE` is read by the RING
-prepare path for each call.
+### Generic
+
+Apply regardless of the selected copy algorithm.
 
 | Variable | Effect |
 |---|---|
-| `NCCL_RESHARD_LOG_LEVEL`        | One of `NONE`, `WARN` (default), `INFO`, `DEBUG`, `TRACE`. |
-| `NCCL_RESHARD_ALGORITHM`        | `AUTO` (default), `RING`, or `DIRECT`. |
-| `NCCL_RESHARD_LB_MODE`          | `UNIFORM` (default) or `NODE_AWARE`. |
-| `NCCL_RESHARD_MAX_CTA`          | Overrides `config.maxCta`. |
-| `NCCL_RESHARD_STREAM_POOL_SIZE` | Max distinct `(comm, dev)` entries in the internal stream pool (default 4). |
-| `NCCL_RESHARD_CHUNK_SIZE`       | Override the library's default chunk size in **bytes**. |
+| `NCCL_RESHARD_LOG_LEVEL`      | One of `NONE`, `WARN` (default), `INFO`, `DEBUG`, `TRACE`. |
+| `NCCL_RESHARD_COPY_ALGORITHM` | Copy transport for both entry points: `PACK` (default), `DIRECT`, or `PIPE` (beta). |
+| `NCCL_RESHARD_NUM_CTAS`       | Directly overrides the resolved CTA count; invalid values are ignored. |
+| `NCCL_RESHARD_DEVCOMM_CACHE_CAPACITY` | Maximum cached DevComms per process (default 64). A positive integer, captured at runtime initialization; host storage is allocated on first use and DevComms are created lazily. No runtime eviction or automatic growth. Exhaustion fails locally before new DevComm creation; abort the distributed job on error, increase the limit, and restart. No cross-rank admission collective is performed, so peers may otherwise remain waiting in setup. Does not change split-communicator or persistent-control limits. |
 
----
+### Algorithm-specific
 
-## Repository layout
-
-```
-.
-├── src/                                  # Library
-│   ├── nccl_m2n.h                    # Unified public C API (the only header callers need)
-│   ├── reshard_internal.h                # Cross-TU function declarations (internal)
-│   ├── reshard_types.h                   # Internal struct definitions
-│   ├── reshard_limits.h                  # Compile-time constants (MAX_*, defaults)
-│   ├── m2n_log.h                         # RESHARD_LOG / RESHARD_DEBUG tier macros
-│   ├── m2n_checks.h                      # Error-checking macros
-│   ├── reshard_kernels.cuh               # Header-only device helpers
-│   ├── m2n_config.cc                     # Config/env parsing                  (host)
-│   ├── m2n_init.cc                       # Init / Finalize                     (host)
-│   ├── reshard_cache.cc                  # DevComm + Window caches             (host)
-│   ├── reshard_mesh.cc                   # Mesh analysis helpers               (host)
-│   ├── reshard_loadbalance.cc            # Replication load balancer           (host)
-│   ├── reshard_prepare.cc                # Kernel-parameter builders           (host)
-│   ├── reshard_transpose.cc              # Cross-dim transpose buffer mgmt     (host)
-│   └── reshard_user_window.cu            # ncclReshardWithWindow + CUDA kernels
-├── benchmarks/
-│   ├── Makefile                          # Bench build rules (delegated to from root)
-│   ├── bench_common.h                    # Host-only macros + arg parsing
-│   ├── bench_common_kernels.{h,cu}       # Shared validation kernels + launchers
-│   ├── reshard_bench.cc                  # Single-layer bench (host-only driver)
-│   ├── reshard_batch_bench_user_window.cu  # Batched / concurrent-comms bench
-│   ├── reshard_model_bench.cu            # Config-driven model transfer bench
-│   └── configs/                          # Bench config JSONs
-│       ├── model_configs/                # Per-model config JSONs
-│       ├── system_configs/               # Per-system topology JSONs
-│       ├── sample_layer_config.json      # Single-stage example config
-│       ├── sample_layer_config_multi.json  # Multi-stage example config
-│       └── moe.json                      # MoE-shaped tensor config
-├── tests/                                # C-level API tests + helpers
-│   ├── Makefile                          # Test build rules (delegated to from root)
-│   ├── README.md                         # Case matrix + CLI flags
-│   ├── basic_api_test_core.h             # Shared test descriptor table
-│   ├── basic_api_test_mpi.cc             # MPI-bootstrapped test binary
-│   └── basic_api_test_local.cc           # Single-process pthreads test binary
-├── third_party/                          # Vendored deps (nlohmann/json for benchmark JSON parsers)
-├── Makefile
-├── README.md
-├── RELEASE.md
-├── ThirdPartyNotices.txt
-└── Makefile.common
-```
-
----
-
-## Troubleshooting
-
-| Symptom | Likely cause |
-|---|---|
-| `ncclInvalidArgument` from `ncclReshardWithWindow` | One of the preconditions failed: NULL comm/window/descriptor/mesh, mismatched `ndims`/dtype, `ndims` outside 1..3, or an unsupported dtype. |
-| Validation fails with destination still containing the pre-call bytes | The kernel did not write to dest. Re-run with `NCCL_RESHARD_LOG_LEVEL=DEBUG` to see the prepared plan, then file an issue with the `reshard_bench` command line that reproduces the failure. |
-| `nccl_device.h: No such file or directory` at compile time | `NCCL_HOME` points at a binary install rather than a from-source build. Build NCCL from source or point at one. |
-| Fast-but-wrong: `make` succeeds yet runtime crashes with "illegal instruction" | Often a downstream symptom of a kernel that completed with corrupt state on the previous reshard call. Re-run with `NCCL_RESHARD_LOG_LEVEL=DEBUG` to see the prepared plan. |
+| Variable | Algorithm | Effect |
+|---|---|---|
+| `NCCL_RESHARD_PACK_BUFFSIZES` | PACK | Bounded staging pool as comma-separated `size[:slots]` buckets (default `2147483648:4`). Sizes accept bytes or binary `k`/`m` suffixes; omitted slots default to one. Invalid profiles retain the built-in default. Multiple size buckets disable split comm and use the parent DevComm path; one bucket with multiple slots retains split support. |
+| `NCCL_RESHARD_STAGING_NUM_CHANNELS` | DIRECT, PIPE | Channel count for the channelized staging pool (separate from PACK's pool above); default 4, or 8 for PIPE host-RMA. |
+| `NCCL_RESHARD_STAGING_CHANNEL_SIZE` | DIRECT, PIPE | Per-channel data capacity for that pool; default 8 MiB, or 128 MiB for PIPE host-RMA. |
+| `NCCL_RESHARD_STAGING_CHUNK_SIZE` | DIRECT, PIPE | Chunk size within a staging channel; default 1 MiB, or 32 MiB for PIPE host-RMA. |
+| `NCCL_RESHARD_PIPE_NET_MODE` | PIPE (beta) | `DEVICE` (default, persistent CUDA kernel) or `HOST_RMA` (host-initiated NCCL one-sided put/signal). `HOST_RMA` requires NCCL 2.31.2 or newer (public tag `v2.31.2-1`); older NCCL can hang when a rank has no PIPE edges, so `ncclReshard` returns `ncclInvalidUsage` instead. |
+| `NCCL_RESHARD_GEN_COMM_CONCURRENCY` | PACK, PIPE split-comm | Positive execution-concurrency limit, maximum 64, set before runtime initialization. PACK: an explicit value caps active physical slots in each bucket to `min(configured slots, limit)`; commB uses the same effective slot count. If unset, PACK preserves its configured profile, including profiles with more than four slots. PIPE: lane count, default 4; lane = agreed persistent namespace ID modulo concurrency. Parents sharing a lane are event-ordered but retain separate persistent signals/counters, and must be submitted in consistent relative order across generator ranks. No additional collective. |
+| `NCCL_RESHARD_GEN_COMM_PARENT_CAPACITY` | PIPE split-comm | Reserved persistent parent namespaces per shared generator commB (default 8, maximum 64), independent of concurrency. Set before runtime initialization. A parent reuses its namespace across calls; IDs never wrap or recycle during the runtime epoch. Exceeding capacity fails collectively during parent setup. Signals/counters are reserved for all namespaces up front; execution contexts are sized by concurrency. Does not affect PACK. |
 
 ---
 
@@ -767,8 +487,23 @@ See `RELEASE.md` for release history.
 
 ---
 
+## Third-party software
+
+This product includes `nlohmann/json` (JSON for Modern C++), which is used
+for JSON parsing and serialization.
+
+| Component | Version | Source | License and copyright | Used by |
+|---|---|---|---|---|
+| [JSON for Modern C++](https://github.com/nlohmann/json) (`nlohmann/json`) | 3.12.0 | `json.hpp` from `nlohmann/json`, for example upstream `single_include/nlohmann/json.hpp`; bundled here as `third_party/nlohmann/json.hpp` | MIT License; Copyright (c) 2013-2025 Niels Lohmann | `benchmarks/reshard_model_bench.cu` parses model and system configuration JSON files. |
+
+The applicable third-party copyright and license notice is included in this
+product's [nlohmann/json MIT license file](third_party/nlohmann/LICENSE.MIT).
+
+---
+
 ## License
 
 Apache-2.0 in the NCCL contrib drop, inherited from the parent `nccl/nccl`
-`LICENSE.txt`. Third-party notices for vendored dependencies are in
-[`ThirdPartyNotices.txt`](ThirdPartyNotices.txt). © NVIDIA Corporation.
+`LICENSE.txt`. The third-party license for the vendored `nlohmann/json`
+dependency is in [`third_party/nlohmann/LICENSE.MIT`](third_party/nlohmann/LICENSE.MIT).
+© NVIDIA Corporation.
