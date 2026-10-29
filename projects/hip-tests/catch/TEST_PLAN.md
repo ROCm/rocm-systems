@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 629 | 629 | 0 |
-| **total** | **629** | **629** | **0** |
+| `contract` | 631 | 631 | 0 |
+| **total** | **631** | **631** | **0** |
 
 ## Tier: `contract`
 
@@ -151,15 +151,16 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Device_HipGetDeviceProperties_WarpSize_IsPositive` | hipGetDeviceProperties | reported warp size is positive |
 | `Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount` | hipGetDevice | the current device ordinal is in range [0, device_count) |
 
-### `device_config` (6 cases)
+### `device_config` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_DeviceConfig_HipDeviceGetCacheConfig_Default_ReturnsEnumValue` | hipDeviceGetCacheConfig | the queried cache preference is one of the documented hipFuncCache_t enumerators |
-| `Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid` | hipDeviceGetLimit | stack and heap limits resolve or report unsupported, and an out-of-range limit is not accepted |
+| `Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid` | hipDeviceGetLimit | stack, heap, and persisting L2 limits resolve or report unsupported, and an out-of-range limit is not accepted |
 | `Contract_DeviceConfig_HipDeviceGetSharedMemConfig_Default_ReturnsEnumValue` | hipDeviceGetSharedMemConfig | when supported, reports one of the documented hipSharedMemConfig enumerators |
 | `Contract_DeviceConfig_HipDeviceSetCacheConfig_Default_IsAcceptedOrUnsupported` | hipDeviceSetCacheConfig | setting the cache preference either succeeds or reports NotSupported |
 | `Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsupported` | hipDeviceSetLimit | setting the heap limit back to its current value succeeds or reports unsupported |
+| `Contract_DeviceConfig_HipDeviceSetLimit_PersistingL2_RoundTripsAndRejectsOverMax` | hipDeviceSetLimit | persisting L2 cache set/get round-trips, and exceeding the max is rejected |
 | `Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_AreConsistent` | hipGetDeviceFlags | the schedule subfield is a documented mode and greatest stream priority <= least |
 
 ### `device_identity` (9 cases)
@@ -788,10 +789,11 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemAdviseV2_HipMemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported` | hipMemAdvise_v2 | the location-based set-read-mostly hint on managed memory is accepted or reported unsupported |
 | `Contract_MemAdviseV2_HipMemPrefetchAsyncV2_PrefetchAsync_IsAcceptedOrUnsupported` | hipMemPrefetchAsync_v2 | a location-based prefetch either completes after stream sync or is reported unsupported |
 
-### `mem_batch_copy` (3 cases)
+### `mem_batch_copy` (4 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes` | hipExtMemcpyBatchAsync | a two-op batch with all extended parameters null (no asymmetric swap or wait/signal) and default attributes delivers each source to its destination after synchronize (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsRejected` | hipMemcpyBatchAsync | a batch with a null destination never returns hipSuccess (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_TwoOps_RoundTripBytes` | hipMemcpyBatchAsync | a two-op batch delivers each source to its matching destination after synchronize (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_WithAttributes_RoundTripBytes` | hipMemcpyBatchAsync | a per-copy attribute (access order, location hints) does not change the copied bytes (or reports unsupported) |

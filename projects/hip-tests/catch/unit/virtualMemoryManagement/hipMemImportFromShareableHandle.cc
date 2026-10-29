@@ -17,6 +17,9 @@
 #include <hip_test_common.hh>
 #include "hip_vmm_common.hh"
 
+#include <chrono>
+#include <thread>
+
 #define DATA_SIZE (1 << 13)
 #define THREADS_PER_BLOCK 512
 typedef int ShareableHandle;
@@ -327,6 +330,293 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_SelfImportReleaseAcrossRecycl
   HIP_CHECK(hipMemUnmap(prev_ptr, size_mem));
   HIP_CHECK(hipMemRelease(prev_allocation_handle));
   HIP_CHECK(hipMemAddressFree(prev_ptr, size_mem));
+
+  CTX_DESTROY();
+}
+
+struct ImportedAllocation {
+  void* ptr = nullptr;
+  hipMemGenericAllocationHandle_t allocation_handle{};
+  hipMemGenericAllocationHandle_t imported_handle{};
+};
+
+/**
+ * Helper function to skip the test if the device does not support hipStreamWaitValue32
+ */
+static void CheckStreamWaitValueSupported(hipDevice_t device) {
+  int wait_value_supported = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&wait_value_supported, hipDeviceAttributeCanUseStreamWaitValue,
+                                  device));
+  if (wait_value_supported == 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+  }
+}
+
+/**
+ * Helper function to get a copy size that is a multiple of the granularity of devices
+ * [0, num_devices) and above ROC_P2P_SDMA_SIZE (1 MiB), below which AMD copies imported memory
+ * with a kernel
+ */
+static size_t GetOverlapCopySize(int num_devices) {
+  size_t granularity = 0;
+  for (int dev = 0; dev < num_devices; ++dev) {
+    hipMemAllocationProp prop{};
+    prop.type = hipMemAllocationTypePinned;
+    prop.location.type = hipMemLocationTypeDevice;
+    prop.location.id = dev;
+    size_t device_granularity = 0;
+    HIP_CHECK(hipMemGetAllocationGranularity(&device_granularity, &prop,
+                                             hipMemAllocationGranularityMinimum));
+    granularity = std::max(granularity, device_granularity);
+  }
+  REQUIRE(granularity > 0);
+  return ((size_t(4) << 20) + granularity - 1) / granularity * granularity;
+}
+
+/**
+ * Helper function to create an allocation on owner_device, export it as a POSIX fd, import it on
+ * import_device and map it there with read-write access for device 0. Leaves device 0 current.
+ */
+static ImportedAllocation CreateImportedAllocation(int owner_device, int import_device,
+                                                   size_t size) {
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = owner_device;
+
+  ImportedAllocation allocation;
+  HIP_CHECK(hipSetDevice(owner_device));
+  HIP_CHECK(hipMemCreate(&allocation.allocation_handle, size, &prop, 0));
+  ShareableHandle shareable_handle;
+  HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, allocation.allocation_handle,
+                                          hipMemHandleTypePosixFileDescriptor, 0));
+  HIP_CHECK(hipSetDevice(import_device));
+  HIP_CHECK(hipMemImportFromShareableHandle(
+      &allocation.imported_handle,
+      reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
+      hipMemHandleTypePosixFileDescriptor));
+  REQUIRE(close(shareable_handle) == 0);
+  HIP_CHECK(hipMemAddressReserve(&allocation.ptr, size, 0, nullptr, 0));
+  HIP_CHECK(hipMemMap(allocation.ptr, size, 0, allocation.imported_handle, 0));
+  hipMemAccessDesc access_desc{};
+  access_desc.location.type = hipMemLocationTypeDevice;
+  access_desc.location.id = 0;
+  access_desc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(allocation.ptr, size, &access_desc, 1));
+  HIP_CHECK(hipSetDevice(0));
+  return allocation;
+}
+
+/**
+ * Helper function to unmap and release an allocation from CreateImportedAllocation
+ */
+static void ReleaseImportedAllocation(const ImportedAllocation& allocation, size_t size) {
+  HIP_CHECK(hipMemUnmap(allocation.ptr, size));
+  HIP_CHECK(hipMemRelease(allocation.imported_handle));
+  HIP_CHECK(hipMemRelease(allocation.allocation_handle));
+  HIP_CHECK(hipMemAddressFree(allocation.ptr, size));
+}
+
+/**
+ * Helper function to check that device-0 copies from the given sources, each into its own buffer
+ * on its own stream, do not serialize. Each copy is held back in turn by hipStreamWaitValue32 and
+ * every other copy must complete before it is released. Checks forward progress rather than
+ * timing, so it is not sensitive to machine load.
+ */
+static void CheckImportedCopiesOverlap(const std::vector<ImportedAllocation>& sources,
+                                       size_t copy_size) {
+  const int copy_count = static_cast<int>(sources.size());
+  std::vector<void*> dsts(copy_count);
+  std::vector<hipStream_t> streams(copy_count);
+  for (int i = 0; i < copy_count; ++i) {
+    HIP_CHECK(hipMemset(sources[i].ptr, 0x10 + i, copy_size));
+    HIP_CHECK(hipMalloc(&dsts[i], copy_size));
+    HIP_CHECK(hipStreamCreateWithFlags(&streams[i], hipStreamNonBlocking));
+  }
+
+  uint32_t* release_flag = nullptr;
+  HIP_CHECK(hipHostMalloc(&release_flag, sizeof(*release_flag), hipHostMallocCoherent));
+  volatile uint32_t* host_release_flag = release_flag;
+  std::vector<unsigned char> result(copy_size);
+
+  for (int held_back = 0; held_back < copy_count; ++held_back) {
+    INFO("held back copy " << held_back);
+    *host_release_flag = 0;
+    for (void* dst : dsts) {
+      HIP_CHECK(hipMemset(dst, 0, copy_size));
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    HIP_CHECK(hipStreamWaitValue32(streams[held_back], release_flag, 1, hipStreamWaitValueEq,
+                                   0xFFFFFFFF));
+    for (int i = 0; i < copy_count; ++i) {
+      HIP_CHECK(hipMemcpyAsync(dsts[i], sources[i].ptr, copy_size, hipMemcpyDeviceToDevice,
+                               streams[i]));
+    }
+
+    const auto progress_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    bool other_copies_done = false;
+    while (!other_copies_done && std::chrono::steady_clock::now() < progress_deadline) {
+      other_copies_done = true;
+      for (int i = 0; i < copy_count; ++i) {
+        if (i != held_back && hipStreamQuery(streams[i]) != hipSuccess) {
+          other_copies_done = false;
+        }
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const hipError_t held_back_status = hipStreamQuery(streams[held_back]);
+    // Release before asserting so a failure cannot leave the held-back stream waiting forever.
+    *host_release_flag = 1;
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // The held-back copy must not have run yet, otherwise the check proves nothing.
+    REQUIRE(held_back_status == hipErrorNotReady);
+    REQUIRE(other_copies_done);
+    for (int i = 0; i < copy_count; ++i) {
+      const unsigned char expected = 0x10 + i;
+      HIP_CHECK(hipMemcpy(result.data(), dsts[i], copy_size, hipMemcpyDeviceToHost));
+      REQUIRE(std::all_of(result.begin(), result.end(),
+                          [&](unsigned char value) { return value == expected; }));
+    }
+  }
+
+  HIP_CHECK(hipHostFree(release_flag));
+  for (int i = 0; i < copy_count; ++i) {
+    HIP_CHECK(hipStreamDestroy(streams[i]));
+    HIP_CHECK(hipFree(dsts[i]));
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Allocations created on device 0 and imported back on device 0. Device-0 copies from them,
+ *      each into its own buffer on its own stream, must not serialize.
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
+ * Test requirements
+ * ------------------------
+ *    - Host specific (LINUX)
+ *    - Stream wait-value support (hipDeviceAttributeCanUseStreamWaitValue)
+ *    - HIP_VERSION >= 6.1
+ */
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_SelfImportCopiesOverlapAcrossStreams) {
+  CTX_CREATE();
+
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+  CheckStreamWaitValueSupported(device);
+
+  constexpr int kMaxStreams = 4;
+  const size_t copy_size = GetOverlapCopySize(1);
+  std::vector<ImportedAllocation> sources;
+  for (int i = 0; i < kMaxStreams; ++i) {
+    sources.push_back(CreateImportedAllocation(0, 0, copy_size));
+  }
+  CheckImportedCopiesOverlap(sources, copy_size);
+  for (const auto& source : sources) {
+    ReleaseImportedAllocation(source, copy_size);
+  }
+
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - One allocation created on each of devices 0 to 3 (those present), all imported on device 0,
+ *      the pattern torch symmetric memory uses to map peer buffers. Device-0 copies from them,
+ *      each into its own buffer on its own stream, must not serialize.
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
+ * Test requirements
+ * ------------------------
+ *    - Host specific (LINUX)
+ *    - At least 2 devices, with peer access from device 0 to the other devices used
+ *    - Stream wait-value support (hipDeviceAttributeCanUseStreamWaitValue)
+ *    - HIP_VERSION >= 6.1
+ */
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_ImportFromPeersCopiesOverlapAcrossStreams) {
+  CTX_CREATE();
+
+  int device_count = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_count));
+  if (device_count < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  constexpr int kMaxStreams = 4;
+  const int num_devices = std::min(device_count, kMaxStreams);
+  for (int dev = 0; dev < num_devices; ++dev) {
+    hipDevice_t device;
+    HIP_CHECK(hipDeviceGet(&device, dev));
+    checkVMMSupported(device);
+    int can_access_peer = 1;
+    if (dev != 0) {
+      HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, dev));
+    }
+    if (can_access_peer == 0) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    }
+  }
+  CheckStreamWaitValueSupported(0);
+
+  const size_t copy_size = GetOverlapCopySize(num_devices);
+  std::vector<ImportedAllocation> sources;
+  for (int dev = 0; dev < num_devices; ++dev) {
+    sources.push_back(CreateImportedAllocation(dev, 0, copy_size));
+  }
+  CheckImportedCopiesOverlap(sources, copy_size);
+  for (const auto& source : sources) {
+    ReleaseImportedAllocation(source, copy_size);
+  }
+
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Allocations created on device 0, each imported on a different one of devices 0 to 3
+ *      (those present) and mapped with access for device 0. Device-0 copies from them, each into
+ *      its own buffer on its own stream, must not serialize.
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
+ * Test requirements
+ * ------------------------
+ *    - Host specific (LINUX)
+ *    - At least 2 devices
+ *    - Stream wait-value support (hipDeviceAttributeCanUseStreamWaitValue)
+ *    - HIP_VERSION >= 6.1
+ */
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_ImportOnPeersCopiesOverlapAcrossStreams) {
+  CTX_CREATE();
+
+  int device_count = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_count));
+  if (device_count < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  constexpr int kMaxStreams = 4;
+  const int num_devices = std::min(device_count, kMaxStreams);
+  for (int dev = 0; dev < num_devices; ++dev) {
+    hipDevice_t device;
+    HIP_CHECK(hipDeviceGet(&device, dev));
+    checkVMMSupported(device);
+  }
+  CheckStreamWaitValueSupported(0);
+
+  const size_t copy_size = GetOverlapCopySize(1);
+  std::vector<ImportedAllocation> sources;
+  for (int dev = 0; dev < num_devices; ++dev) {
+    sources.push_back(CreateImportedAllocation(0, dev, copy_size));
+  }
+  CheckImportedCopiesOverlap(sources, copy_size);
+  for (const auto& source : sources) {
+    ReleaseImportedAllocation(source, copy_size);
+  }
 
   CTX_DESTROY();
 }

@@ -7,6 +7,7 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "util/log.h"
 #include "util/unique_handle.h"
@@ -238,6 +239,9 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
   gpu.num_xcc = src.num_xcc;
   gpu.max_slots_scratch_cu = src.max_slots_scratch_cu;
   gpu.local_mem_size = src.local_mem_size;
+  gpu.visible_vram_size = src.visible_vram_size;
+  gpu.control_stack_size = src.control_stack_size;
+  gpu.context_save_size = src.context_save_size;
   gpu.vram_type = src.vram_type;
   gpu.lds_size_kb = src.lds_size_kb;
   gpu.mem_width = src.mem_width;
@@ -765,6 +769,18 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   size_t arg_size = 0;
   if (!validate_ioctl_arg_size(request, arg, arg_size))
     return -EINVAL;
+
+  // The daemon rewrites mmap_offset to the allocation handle in its reply.
+  // Preserve the caller's USERPTR CPU address for the client-side promotion.
+  uint64_t userptr_cpu_address = 0;
+  if (request == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU) {
+    const auto *alloc = static_cast<const kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
+    if (alloc->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+      userptr_cpu_address = alloc->mmap_offset;
+      if (userptr_cpu_address == 0)
+        return -EINVAL;
+    }
+  }
 
   // Save original embedded pointers before serialization. The daemon rewrites
   // these to point at its own buffer; we must restore the client-side originals
@@ -1365,7 +1381,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
                           received_fds[0]);
 
       if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
-        promote_userptr(alloc_args->va_addr, alloc_args->size, received_fds[0]);
+        promote_userptr(userptr_cpu_address, alloc_args->size, received_fds[0]);
     }
   }
 
@@ -1484,6 +1500,8 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     auto *mapped = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, mapping_memfd, 0);
     if (mapped != MAP_FAILED)
       syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
+    if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(mapping_memfd))
+      syscall(SYS_madvise, mapped, length, MADV_DONTDUMP);
 
     if (memfd >= 0 && memfd != mapping_memfd)
       syscall(SYS_close, memfd);
