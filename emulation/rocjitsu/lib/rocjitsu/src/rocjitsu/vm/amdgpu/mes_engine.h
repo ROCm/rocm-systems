@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -174,7 +175,8 @@ private:
 /// retry journals, and firmware-free MES control execution. A PCI or legacy
 /// frontend supplies only physical-memory access, register callbacks, and
 /// interrupt/SDMA adapters. No MMIO register layout or PCI transport type is
-/// visible here.
+/// visible here. Frontends serialize control operations; CU trap lookups may
+/// run concurrently with them.
 class MesEngine {
 public:
   /// @brief Construct the semantic engine over shared VM and queue services.
@@ -337,6 +339,12 @@ private:
   GpuVm &gpu_vm_;
   GpuQueueRegistry &queue_registry_;
   ComputeQueueBindingProvider &compute_bindings_;
+  // Synchronize CU trap readers with owner-side mutations of mapped queues,
+  // and process debug state. Never hold this lock across
+  // queue/provider operations or frontend callbacks: they can wait for a CU
+  // whose trap lookup needs the shared lock. Owner-only reads need no lock,
+  // since CU callbacks return copies and never mutate the MES containers.
+  mutable std::shared_mutex trap_state_mutex_;
   std::vector<Queue> mapped_queues_;
   std::unordered_map<uint32_t, AddressSpace> address_spaces_;
   // SET_SHADER_DEBUGGER may enable a context before its first queue is created.

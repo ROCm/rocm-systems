@@ -19,7 +19,9 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <exception>
 #include <format>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -186,6 +188,7 @@ std::optional<uint32_t> status_dword(uint32_t opcode) {
 
 std::optional<TrapHandlerConfig>
 MesEngine::resolve_trap_config(const QueueIdentity &identity) const {
+  const std::shared_lock lock(trap_state_mutex_);
   for (const Queue &queue : mapped_queues_) {
     if (queue.kind != QueueKind::Compute || queue.process_id != identity.process_id ||
         queue.queue_id != identity.queue_id || queue.address_space != identity.address_space ||
@@ -230,7 +233,10 @@ bool MesEngine::detach_frontend() {
     orphaned_address_spaces_.push_back(address_space.handle);
   }
   address_spaces_.clear();
-  debug_enabled_contexts_.clear();
+  {
+    const std::unique_lock lock(trap_state_mutex_);
+    debug_enabled_contexts_.clear();
+  }
   sdma_queue_binding_factory_ = nullptr;
   interrupt_sink_ = {};
   trap_interrupt_sink_ = {};
@@ -251,6 +257,7 @@ bool MesEngine::reset() {
   if (!teardown_queues())
     return false;
   next_queue_ordinal_ = 0;
+  const std::unique_lock lock(trap_state_mutex_);
   debug_enabled_contexts_.clear();
   return true;
 }
@@ -274,7 +281,10 @@ bool MesEngine::teardown_queues() {
       ++queue;
       continue;
     }
-    queue = mapped_queues_.erase(queue);
+    {
+      const std::unique_lock lock(trap_state_mutex_);
+      queue = mapped_queues_.erase(queue);
+    }
   }
 
   for (std::unordered_map<uint32_t, AddressSpace>::iterator address_space = address_spaces_.begin();
@@ -470,6 +480,7 @@ bool MesEngine::update_process_address_space(uint64_t process_context_address,
     return false;
 
   matching->second.page_table_base = page_table_base;
+  const std::unique_lock lock(trap_state_mutex_);
   for (Queue &queue : mapped_queues_) {
     if (queue.address_space == matching->second.handle)
       queue.page_table_base = page_table_base;
@@ -645,6 +656,7 @@ VmAccessOutcome MesEngine::commit_queue(Queue queue, bool created_address_space)
       std::ranges::find(mapped_queues_, queue.doorbell_offset, &Queue::doorbell_offset);
   if (existing == mapped_queues_.end()) {
     try {
+      const std::unique_lock lock(trap_state_mutex_);
       mapped_queues_.push_back(queue);
     } catch (...) {
       rollback();
@@ -672,7 +684,10 @@ VmAccessOutcome MesEngine::commit_queue(Queue queue, bool created_address_space)
                                                      : VmAccessOutcome::Faulted;
   }
 
-  *existing = queue;
+  {
+    const std::unique_lock lock(trap_state_mutex_);
+    *existing = queue;
+  }
   if (queue.queue_handle)
     ++next_queue_ordinal_;
   if (queue.address_space && queue.process_context_address != 0) {
@@ -741,7 +756,10 @@ VmAccessOutcome MesEngine::remove_queue(uint64_t doorbell_offset, const GpuVmAcc
   if (!queue->queue_handle && queue->kind == QueueKind::Sdma) {
     return VmAccessOutcome::Faulted;
   }
-  mapped_queues_.erase(queue);
+  {
+    const std::unique_lock lock(trap_state_mutex_);
+    mapped_queues_.erase(queue);
+  }
 
   release_unused_address_space(process_id);
   return VmAccessOutcome::Complete;
@@ -880,6 +898,7 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
         (dword(frame, kShaderDebuggerFlagsDword) & kShaderDebuggerProcessContextFlush) != 0;
     const bool debug_enabled =
         (dword(frame, kShaderDebuggerControlDword) & kShaderDebuggerTrapEnable) != 0;
+    const std::unique_lock lock(trap_state_mutex_);
     if (debug_enabled && !flush)
       debug_enabled_contexts_.insert(process_context);
     else

@@ -16,11 +16,13 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <array>
+#include <barrier>
 #include <bit>
 #include <cstddef>
 #include <cstring>
 #include <optional>
 #include <span>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -505,6 +507,83 @@ TEST_F(MesEngineStateTest, TrapConfigurationFollowsTheQueueAndAddressSpaceGenera
   ASSERT_TRUE(engine_.resolve_trap_config(replacement).has_value());
   EXPECT_EQ(engine_.resolve_trap_config(replacement)->tba, 0x60000u);
   EXPECT_FALSE(engine_.resolve_trap_config(replacement)->debug_enabled);
+}
+
+TEST_F(MesEngineStateTest, TrapConfigurationLookupCanOverlapQueueChangesAndReset) {
+  constexpr uint64_t kTrapHandler = 0x20000;
+  constexpr uint64_t kTrapMemory = 0x30000;
+  constexpr uint32_t kRounds = 32;
+  constexpr uint32_t kLookupsPerRound = 64;
+
+  write_compute_add_frame(kRing, true, 1);
+  ASSERT_EQ(notify(kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+
+  const uint64_t second_frame = kRing + kFrameDwords * sizeof(uint32_t);
+  write_compute_add_frame(second_frame, true, 2);
+  store<uint64_t>(second_frame + 34 * sizeof(uint32_t), kTrapHandler);
+  store<uint64_t>(second_frame + 42 * sizeof(uint32_t), kTrapMemory);
+  store<uint32_t>(second_frame + 37 * sizeof(uint32_t), 1u << 10); // ADD_QUEUE.trap_en
+  store<uint32_t>(kMqd + 143 * sizeof(uint32_t), kComputeDoorbell + 4);
+  ASSERT_EQ(notify(2 * kFrameDwords), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+  ASSERT_EQ(bindings_.aql->requests.size(), 2u);
+  const rocjitsu::amdgpu::QueueIdentity identity = bindings_.aql->requests.back().identity;
+
+  // Only the MES owner mutates queues. The other thread models a CU trap
+  // lookup, which must remain valid while an unrelated queue is removed.
+  // Barriers bound each round without ordering the reads against its writes,
+  // so TSan can detect races without relying on sleeps or a crash.
+  std::barrier round_boundary(2);
+  std::jthread reader([&] {
+    for (uint32_t round = 0; round <= kRounds; ++round) {
+      round_boundary.arrive_and_wait();
+      for (uint32_t lookup = 0; lookup < kLookupsPerRound; ++lookup) {
+        const std::optional<rocjitsu::amdgpu::TrapHandlerConfig> config =
+            engine_.resolve_trap_config(identity);
+        // The final round races reset: the old config or its absence is valid.
+        if (round < kRounds)
+          EXPECT_TRUE(config.has_value());
+        if (config) {
+          EXPECT_EQ(config->tba, kTrapHandler);
+          EXPECT_EQ(config->tma, kTrapMemory);
+        }
+      }
+      round_boundary.arrive_and_wait();
+    }
+  });
+
+  uint64_t producer = 2 * kFrameDwords;
+  const auto next_frame = [&] {
+    const uint64_t frame = kRing + (producer % 256) * sizeof(uint32_t);
+    producer += kFrameDwords;
+    return frame;
+  };
+  for (uint32_t round = 0; round < kRounds; ++round) {
+    round_boundary.arrive_and_wait();
+    const uint64_t debug_frame = next_frame();
+    write_shader_debugger_frame(debug_frame, kProcessContext, (round % 2) ? 0 : 1u << 3, producer);
+    EXPECT_EQ(notify(producer), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+
+    const uint64_t remove_frame = next_frame();
+    write_remove_frame(remove_frame, producer);
+    store<uint32_t>(remove_frame + sizeof(uint32_t), kComputeDoorbell / sizeof(uint32_t));
+    EXPECT_EQ(notify(producer), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+
+    const uint64_t add_frame = next_frame();
+    write_compute_add_frame(add_frame, true, producer);
+    EXPECT_EQ(notify(producer), rocjitsu::amdgpu::MesDoorbellDisposition::Complete);
+    round_boundary.arrive_and_wait();
+    const std::optional<rocjitsu::amdgpu::TrapHandlerConfig> config =
+        engine_.resolve_trap_config(identity);
+    EXPECT_TRUE(config.has_value());
+    if (config)
+      EXPECT_EQ(config->debug_enabled, round % 2 == 0);
+  }
+
+  round_boundary.arrive_and_wait();
+  EXPECT_TRUE(engine_.reset());
+  round_boundary.arrive_and_wait();
+  reader.join();
+  EXPECT_FALSE(engine_.resolve_trap_config(identity).has_value());
 }
 
 TEST_F(MesEngineStateTest, RemovePublicationRetryDoesNotReplayTheSemantic) {
