@@ -644,7 +644,7 @@ TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
     EXPECT_EQ(state.lane_mask, 1u);
     EXPECT_EQ(state.per_lane_addr[0], kBase);
     EXPECT_EQ(state.elem_size, 4u);
-    EXPECT_EQ(state.buffer_format, 20u);
+    EXPECT_EQ(state.buffer_format, kR32Uint);
     wf->halt();
   }
 }
