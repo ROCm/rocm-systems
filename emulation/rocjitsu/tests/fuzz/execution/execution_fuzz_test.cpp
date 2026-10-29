@@ -78,7 +78,7 @@ TEST(ExecutionFuzzInputTest, GeneratedInputsRespectEverySizeAndTarget) {
       for (uint64_t seed :
            {uint64_t{0}, uint64_t{1}, uint64_t{17}, std::numeric_limits<uint64_t>::max()}) {
         SCOPED_TRACE(seed);
-        const auto input = random_input(seed, size, target);
+        const std::vector<uint8_t> input = random_input(seed, size, target);
         ASSERT_EQ(input.size(), size);
         EXPECT_EQ(input.front(), static_cast<uint8_t>(target));
         EXPECT_EQ(input, random_input(seed, size, target));
@@ -93,6 +93,55 @@ TEST(ExecutionFuzzInputTest, GeneratedInputsRespectEverySizeAndTarget) {
 TEST(ExecutionFuzzInputTest, GeneratedInputsRejectInvalidSizes) {
   for (size_t size : {size_t{0}, kMaxInputSize + 1, std::numeric_limits<size_t>::max()})
     EXPECT_THROW(random_input(0, size), std::invalid_argument);
+}
+
+TEST(ExecutionFuzzInputTest, ArbitraryInputsPreserveByteStreamAcrossSizes) {
+  const std::vector<uint8_t> expected = {0x02, 0x00, 0xaf, 0xf4, 0x4f, 0xec, 0x9b, 0xea};
+  EXPECT_EQ(random_input(0, expected.size(), FuzzTarget::Gfx942), expected);
+
+  const std::vector<uint8_t> full_input = random_input(0, kMaxInputSize, FuzzTarget::Gfx942);
+  ASSERT_EQ(full_input.size(), kMaxInputSize);
+  for (size_t size = 1; size < kMaxInputSize; ++size) {
+    SCOPED_TRACE(size);
+    const std::vector<uint8_t> input = random_input(0, size, FuzzTarget::Gfx942);
+    EXPECT_EQ(input, (std::vector<uint8_t>{full_input.begin(), full_input.begin() + size}));
+  }
+}
+
+TEST(ExecutionFuzzInputTest, WmmaPrefixStartsAtExactCapacity) {
+  constexpr std::array first_wmma =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  constexpr std::array second_wmma =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+                         {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
+  constexpr std::array<uint32_t, 4> expected_words = {first_wmma[0], first_wmma[1], second_wmma[0],
+                                                      second_wmma[1]};
+  struct Case {
+    uint64_t seed;
+    uint8_t short_mode;
+    uint8_t prefix_mode;
+  };
+  constexpr std::array cases = {Case{1, 0x00, 0x08}, Case{17, 0x01, 0x09}};
+  for (FuzzTarget target : {FuzzTarget::Gfx1250, FuzzTarget::Gfx1251}) {
+    SCOPED_TRACE(target_name(target));
+    for (const Case &test_case : cases) {
+      SCOPED_TRACE(test_case.seed);
+      const std::vector<uint8_t> short_input = random_input(test_case.seed, 17, target);
+      ASSERT_EQ(short_input.size(), 17u);
+      EXPECT_EQ(short_input[1], test_case.short_mode);
+
+      const std::vector<uint8_t> input = random_input(test_case.seed, 18, target);
+      ASSERT_EQ(input.size(), 18u);
+      EXPECT_EQ(input[1], test_case.prefix_mode);
+      for (size_t byte = 0; byte < expected_words.size() * sizeof(uint32_t); ++byte) {
+        SCOPED_TRACE(byte);
+        const uint32_t word = expected_words[byte / sizeof(uint32_t)];
+        EXPECT_EQ(input[kHeaderSize + byte],
+                  static_cast<uint8_t>(word >> (8 * (byte % sizeof(uint32_t)))));
+      }
+    }
+  }
 }
 
 TEST(ExecutionFuzzInputTest, InitialAddressPairsReachMappedMemory) {
