@@ -559,13 +559,42 @@ TEST_F(DiagnosticsMicrotest, Run_NonZeroRankPrintsNothingEvenOnFailures) {
   BuildComm(2, 1, 1);
   p2pResult_ = ncclSystemError;
   ncclResult_t ret;
+  // A non-zero rank is silent, but the p2p failure still propagates so init can abort.
   EXPECT_EQ(Run(&ret), "");
-  EXPECT_EQ(ret, ncclSuccess);
+  EXPECT_EQ(ret, ncclSystemError);
   EXPECT_EQ(checks_, (std::vector<std::string>{"p2p"}));
   BuildComm(2, 1, 2);
+  p2pResult_ = ncclSuccess;
   peerMasks_[0] = Bit(PATH_NET);
   EXPECT_EQ(Run(&ret), "");
+  EXPECT_EQ(ret, ncclSuccess);
   EXPECT_EQ(checks_, (std::vector<std::string>{"ib", "p2p"}));
+}
+
+// A detect failure on a rank other than 0 is silent but must still propagate, so the surviving ranks
+// do not sail past a collective their peer skipped.
+TEST_F(DiagnosticsMicrotest, Run_DetectFailureOnNonZeroRankStillAborts) {
+  BuildComm(2, 1, 2);
+  gatherResult_ = ncclRemoteError;
+  ncclResult_t ret;
+  EXPECT_EQ(Run(&ret), "");
+  EXPECT_EQ(ret, ncclRemoteError);
+  EXPECT_TRUE(checks_.empty());
+}
+
+// The p2p check is collective, so like detection a failure aborts diagnostics and runs nothing after it;
+// ncclRunDiagnostics propagates the error so init fails instead of returning success on a desynced rank.
+TEST_F(DiagnosticsMicrotest, Run_P2pFailureAbortsAndPropagates) {
+  BuildComm(2, 0, 1);
+  p2pResult_ = ncclSystemError;
+  ncclResult_t ret;
+  const std::string out = Run(&ret);
+  EXPECT_EQ(ret, ncclSystemError);
+  EXPECT_EQ(checks_, (std::vector<std::string>{"p2p"}));
+  const std::string expected = kBanner + kNetSkipped +
+                               DiagLine("NCCL DIAG [INFO] p2p: check returned " +
+                                        std::to_string(ncclSystemError) + "; aborting diagnostics");
+  EXPECT_EQ(out, expected);
 }
 
 // A failed transport-mask all-gather desyncs the ranks, so diagnostics must abort and run no checks;
