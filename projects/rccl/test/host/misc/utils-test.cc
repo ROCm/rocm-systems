@@ -522,7 +522,7 @@ TEST_F(UtilsMicrotest, MemoryStack_ReusesTheEmptyHunkLeftAboveByPop) {
   EXPECT_EQ(Addr(above) + above->size, stack_.topFrame.end);
 }
 
-// Every ncclMemoryStackAlloc overload zeroes its whole n*sizeof(T) bytes even when handed back memory a popped frame dirtied.
+// Every ncclMemoryStackAlloc overload zeroes all its bytes, even when it reuses memory a popped frame dirtied.
 TEST_F(UtilsMicrotest, MemoryStackAlloc_ZeroesReusedMemoryOfEveryOverload) {
   struct alignas(16) Wide {
     char c[48];
@@ -530,8 +530,8 @@ TEST_F(UtilsMicrotest, MemoryStackAlloc_ZeroesReusedMemoryOfEveryOverload) {
   struct Header {
     uint32_t n;
   };
-  Alloc(100);  // creates the hunk in the nil frame
-  // Dirties `size` bytes in a pushed frame, pops, pushes again and checks `alloc` reuses those bytes and zeroes all of them.
+  Alloc(92);  // creates the hunk in the nil frame, leaving the frame body off 16-byte alignment
+  // Dirties `size` bytes in a pushed frame, pops, pushes again and checks `alloc` reuses and zeroes them.
   auto check = [&](size_t size, size_t align, auto alloc) {
     ncclMemoryStackPush(&stack_);
     unsigned char* dirty = static_cast<unsigned char*>(Alloc(size, align));
