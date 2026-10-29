@@ -1218,8 +1218,8 @@ template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
     y_src1.emplace(registers.read_operand(*y.src1, exec));
   const auto x_dst = registers.write_operand(*x.dst, exec);
   const auto y_dst = registers.write_operand(*y.dst, exec);
-  const auto evaluate = [&wf](const Slot &slot, const auto &src0_view, const auto &src1_view,
-                              uint32_t lane_base) {
+  const auto evaluate = [](const Slot &slot, const auto &src0_view, const auto &src1_view,
+                           uint32_t lane_base) {
     const auto src0 = src0_view.template load_native<uint32_t>(lane_base);
     switch (slot.op) {
     case kMovOp:
@@ -1229,7 +1229,7 @@ template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
     case kLshlOp:
       return simd_lshl_u32(src1_view->template load_native<uint32_t>(lane_base), src0);
     default:
-      wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+      assert(false && "integer slot was validated before SIMD execution");
       return decltype(src0)(0);
     }
   };
@@ -1239,11 +1239,7 @@ template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
     if (lane_mask == 0)
       continue;
     const auto x_result = evaluate(x, x_src0, x_src1, lane_base);
-    if (wf.instruction_execution_failed())
-      return true; // Handled failure: do not retry through another executor.
     const auto y_result = evaluate(y, y_src0, y_src1, lane_base);
-    if (wf.instruction_execution_failed())
-      return true; // Handled failure: do not retry through another executor.
     x_dst.template store_native<uint32_t>(lane_base, x_result, lane_mask);
     y_dst.template store_native<uint32_t>(lane_base, y_result, lane_mask);
   }

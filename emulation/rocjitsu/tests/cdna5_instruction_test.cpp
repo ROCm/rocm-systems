@@ -2166,6 +2166,7 @@ TEST(Gfx1250SimulationTest, VopdFmacUsesDestinationAccumulator) {
 }
 
 TEST(Gfx1250ExecutionTest, UnsupportedVopd3SlotDoesNotCommitMixedWidthPair) {
+  constexpr VopdOp kInvalidVopd3Op = static_cast<VopdOp>(63);
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *wf = sim.dispatch_scratch_wf();
@@ -2173,12 +2174,12 @@ TEST(Gfx1250ExecutionTest, UnsupportedVopd3SlotDoesNotCommitMixedWidthPair) {
   const uint32_t base = wf->vgpr_alloc().base;
   for (bool invalid_x : {false, true}) {
     SCOPED_TRACE(::testing::Message() << "invalid_x=" << invalid_x);
-    const auto words = make_vopd3_pair({.op = static_cast<VopdOp>(invalid_x ? 63 : 33),
+    const auto words = make_vopd3_pair({.op = invalid_x ? kInvalidVopd3Op : VopdOp::AddF64,
                                         .src0 = vopd_src0_vgpr(2),
                                         .src1 = 4,
                                         .src2 = 0,
                                         .dst = 8},
-                                       {.op = static_cast<VopdOp>(invalid_x ? 33 : 63),
+                                       {.op = invalid_x ? VopdOp::AddF64 : kInvalidVopd3Op,
                                         .src0 = vopd_src0_vgpr(6),
                                         .src1 = 10,
                                         .src2 = 0,

@@ -1958,94 +1958,6 @@ TEST_P(RdnaVopdExecutionSmokeTest, HandlesWave64ExecutionAccordingToArchitecture
   }
 }
 
-class VopdExecutionFailureTest : public ::testing::TestWithParam<RdnaVopdExecutionCase> {};
-
-TEST_P(VopdExecutionFailureTest, UnsupportedSlotCommitsNeitherDestination) {
-  const auto &tc = GetParam();
-  amdgpu::GpuMemory gpu_mem("vopd_failure_mem");
-  amdgpu::L2Cache l2("vopd_failure_l2");
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = tc.arch;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 106;
-  cfg.vgprs_per_wf = 256;
-  cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("vopd_failure", cfg, &gpu_mem, &l2);
-  ASSERT_NE(cu, nullptr);
-  auto *wf = cu->dispatch_wf(0, 0x1000, cfg.sgprs_per_wf, cfg.vgprs_per_wf, 32);
-  ASSERT_NE(wf, nullptr);
-  auto decoder = Decoder::create(tc.arch);
-  ASSERT_NE(decoder, nullptr);
-  const uint32_t base = wf->vgpr_alloc().base;
-  for (bool invalid_x : {false, true}) {
-    SCOPED_TRACE(::testing::Message() << tc.arch_name << " invalid_x=" << invalid_x);
-    const auto words = make_vopdxy_pair(invalid_x ? 14 : 8, invalid_x ? 8 : 14);
-    EXPECT_TRUE(decode_fails(*decoder, words.data()));
-    // Bypass decoder validation deliberately to exercise the execution fallback.
-    const auto *backend = tc.arch == ROCJITSU_CODE_ARCH_RDNA3     ? &rdna3::execution_backend()
-                          : tc.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? &rdna3_5::execution_backend()
-                          : tc.arch == ROCJITSU_CODE_ARCH_RDNA4   ? &rdna4::execution_backend()
-                                                                  : &cdna5::execution_backend();
-    ScopedIsaExecutionBackend execution_backend_scope{backend};
-    const auto construct =
-        [&]<typename Vopd, typename MachineInst>() -> std::unique_ptr<Instruction> {
-      return std::make_unique<Vopd>(reinterpret_cast<const MachineInst *>(words.data()));
-    };
-    std::unique_ptr<Instruction> inst;
-    switch (tc.arch) {
-    case ROCJITSU_CODE_ARCH_RDNA3:
-      inst = construct.operator()<rdna3::Vopd, rdna3::MachineInst>();
-      break;
-    case ROCJITSU_CODE_ARCH_RDNA3_5:
-      inst = construct.operator()<rdna3_5::Vopd, rdna3_5::MachineInst>();
-      break;
-    case ROCJITSU_CODE_ARCH_RDNA4:
-      inst = construct.operator()<rdna4::Vopd, rdna4::MachineInst>();
-      break;
-    case ROCJITSU_CODE_ARCH_CDNA5:
-      inst = construct.operator()<cdna5::Vopd, cdna5::MachineInst>();
-      break;
-    default:
-      FAIL() << "unexpected VOPD architecture";
-    }
-    ASSERT_NE(inst, nullptr);
-    ASSERT_NE(inst->execute, nullptr);
-    for (uint64_t exec : {uint64_t{0}, uint64_t{0xAAAA'AAAA}}) {
-      wf->set_exec(exec);
-      wf->set_vcc(0x87654321);
-      wf->write_scc(1);
-      for (uint32_t lane = 0; lane < 32; ++lane) {
-        for (uint32_t reg = 0; reg < 5; ++reg)
-          cu->write_vgpr(base + reg, lane, 100u * reg + lane);
-      }
-      wf->clear_instruction_execution_error();
-      ASSERT_NO_THROW(inst->execute(*inst, wf));
-      EXPECT_EQ(wf->instruction_execution_error(),
-                exec ? amdgpu::InstructionExecutionError::UnimplementedInstruction
-                     : amdgpu::InstructionExecutionError::None);
-      EXPECT_EQ(wf->exec(), exec);
-      EXPECT_EQ(wf->vcc(), 0x87654321u);
-      EXPECT_EQ(wf->read_scc(), 1u);
-      EXPECT_EQ(wf->pc, 0x1000u);
-      EXPECT_FALSE(wf->is_halted());
-      for (uint32_t lane = 0; lane < 32; ++lane) {
-        EXPECT_EQ(cu->read_vgpr(base, lane), lane);
-        EXPECT_EQ(cu->read_vgpr(base + 1, lane), 100u + lane);
-      }
-    }
-  }
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    AllArchitectures, VopdExecutionFailureTest,
-    ::testing::Values(RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3"},
-                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5"},
-                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"},
-                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_CDNA5, "cdna5"}),
-    [](const ::testing::TestParamInfo<RdnaVopdExecutionCase> &info) {
-      return info.param.arch_name;
-    });
-
 TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
   const auto &tc = GetParam();
   constexpr uint32_t kSrc0 = 0x3F800001u;
@@ -2363,6 +2275,94 @@ INSTANTIATE_TEST_SUITE_P(
                       RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"}),
     [](const ::testing::TestParamInfo<RdnaVopdExecutionCase> &info) {
       return std::string(info.param.arch_name);
+    });
+
+class VopdExecutionFailureTest : public ::testing::TestWithParam<RdnaVopdExecutionCase> {};
+
+TEST_P(VopdExecutionFailureTest, UnsupportedSlotCommitsNeitherDestination) {
+  const auto &tc = GetParam();
+  amdgpu::GpuMemory gpu_mem("vopd_failure_mem");
+  amdgpu::L2Cache l2("vopd_failure_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = tc.arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("vopd_failure", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0x1000, cfg.sgprs_per_wf, cfg.vgprs_per_wf, 32);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (bool invalid_x : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << tc.arch_name << " invalid_x=" << invalid_x);
+    const auto words = make_vopdxy_pair(invalid_x ? 14 : 8, invalid_x ? 8 : 14);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
+    // Bypass decoder validation deliberately to exercise the execution fallback.
+    const auto *backend = tc.arch == ROCJITSU_CODE_ARCH_RDNA3     ? &rdna3::execution_backend()
+                          : tc.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? &rdna3_5::execution_backend()
+                          : tc.arch == ROCJITSU_CODE_ARCH_RDNA4   ? &rdna4::execution_backend()
+                                                                  : &cdna5::execution_backend();
+    ScopedIsaExecutionBackend execution_backend_scope{backend};
+    const auto construct =
+        [&]<typename Vopd, typename MachineInst>() -> std::unique_ptr<Instruction> {
+      return std::make_unique<Vopd>(reinterpret_cast<const MachineInst *>(words.data()));
+    };
+    std::unique_ptr<Instruction> inst;
+    switch (tc.arch) {
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      inst = construct.operator()<rdna3::Vopd, rdna3::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA3_5:
+      inst = construct.operator()<rdna3_5::Vopd, rdna3_5::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      inst = construct.operator()<rdna4::Vopd, rdna4::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      inst = construct.operator()<cdna5::Vopd, cdna5::MachineInst>();
+      break;
+    default:
+      FAIL() << "unexpected VOPD architecture";
+    }
+    ASSERT_NE(inst, nullptr);
+    ASSERT_NE(inst->execute, nullptr);
+    for (uint64_t exec : {uint64_t{0}, uint64_t{0xAAAA'AAAA}}) {
+      wf->set_exec(exec);
+      wf->set_vcc(0x87654321);
+      wf->write_scc(1);
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < 5; ++reg)
+          cu->write_vgpr(base + reg, lane, 100u * reg + lane);
+      }
+      wf->clear_instruction_execution_error();
+      ASSERT_NO_THROW(inst->execute(*inst, wf));
+      EXPECT_EQ(wf->instruction_execution_error(),
+                exec ? amdgpu::InstructionExecutionError::UnimplementedInstruction
+                     : amdgpu::InstructionExecutionError::None);
+      EXPECT_EQ(wf->exec(), exec);
+      EXPECT_EQ(wf->vcc(), 0x87654321u);
+      EXPECT_EQ(wf->read_scc(), 1u);
+      EXPECT_EQ(wf->pc, 0x1000u);
+      EXPECT_FALSE(wf->is_halted());
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(cu->read_vgpr(base, lane), lane);
+        EXPECT_EQ(cu->read_vgpr(base + 1, lane), 100u + lane);
+      }
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AllArchitectures, VopdExecutionFailureTest,
+    ::testing::Values(RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_CDNA5, "cdna5"}),
+    [](const ::testing::TestParamInfo<RdnaVopdExecutionCase> &info) {
+      return info.param.arch_name;
     });
 
 void expect_sleep_yields_before_quantum_expires(rj_code_arch_t arch, uint32_t sleep_encoding) {
