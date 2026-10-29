@@ -30,6 +30,7 @@ def resolve(
     event='workflow_dispatch',
     workflow_ref=None,
     ref_type='branch',
+    event_payload=None,
 ):
     workflow = yaml.safe_load(WORKFLOW.read_text())
     step = next(
@@ -52,6 +53,8 @@ def resolve(
         'print(data)\n'
     )
     gh.chmod(0o755)
+    event_file = tmp_path / 'event.json'
+    event_file.write_text(json.dumps(event_payload or {}))
     output = tmp_path / 'output'
     calls = tmp_path / 'calls'
     api = {
@@ -70,6 +73,7 @@ def resolve(
             'PATH': str(tmp_path) + os.pathsep + os.environ['PATH'],
             'GITHUB_REPOSITORY': REPO,
             'GITHUB_EVENT_NAME': event,
+            'GITHUB_EVENT_PATH': str(event_file),
             'GITHUB_REF': (
                 workflow_ref if workflow_ref is not None else f'refs/heads/{branch}'
             ),
@@ -91,6 +95,30 @@ def resolve(
         else {}
     )
     return result, values, calls.read_text().splitlines() if calls.exists() else []
+
+
+def test_pr_event_measures_frozen_head_not_synthetic_merge_or_later_tip(tmp_path):
+    result, values, calls = resolve(
+        tmp_path,
+        event='pull_request',
+        workflow_ref='refs/pull/42/merge',
+        commit='',
+        event_payload={
+            'number': 42,
+            'pull_request': {'head': {'ref': 'feature/source', 'sha': SOURCE}},
+        },
+        responses=side_responses(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert values == {
+        'source_branch': 'feature/source',
+        'source_sha': SOURCE,
+        'base_branch': 'develop',
+        'base_sha': 'f' * 40,
+        'pull_request_number': '42',
+        'pull_request_url': f'https://github.com/{REPO}/pull/42',
+    }
+    assert not any('/git/ref/heads/feature' in call for call in calls)
 
 
 def test_manual_source_is_independent_of_workflow_revision(tmp_path):
