@@ -5,6 +5,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ## RCCL 2.32.3 for ROCm 10.3.0 (Unreleased)
 
 ### Added
+* Documentation for the unified cost model (`docs/how-to/rccl-cost-model.rst`), covering the candidate ID space, the `NCCL_DEBUG_SUBSYS=TUNING` log records, which selections it drives today, and the tuner plugin boundary.
 
 ### Changed
 
