@@ -615,7 +615,12 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
       if (!set->qp_allocator) set->qp_allocator = new GinFinegrainedAllocator();
 
       int cqe = 1;  // CQE compression: only need length 1
-      int dmabuf_enabled = gin_ibv_is_dmabuf_supported(set->nic.pd_orig);
+      // Gate on BOTH the NIC capability and rccl's resolved DMA-BUF gate
+      // (pfn_... is NULL when NCCL_DMABUF_ENABLE=0 or ROCr lacks the export).
+      // Otherwise GetDmabufHandle below returns hipErrorNotSupported and connect
+      // hard-fails instead of falling back to VA registration (dmabuf_fd = 0).
+      int dmabuf_enabled = gin_ibv_is_dmabuf_supported(set->nic.pd_orig) &&
+                           pfn_hsa_amd_portable_export_dmabuf != nullptr;
 
       for (int i = 0; i < n; i++) {
         auto* ctx = set->nic.context;
@@ -762,7 +767,9 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
         memset(&set->bnxt_qps[i].mem_info, 0, sizeof(struct bnxt_re_dv_qp_mem_info));
         if (set->bnxt_re_dv.qp_mem_alloc(pd, &ib_qp_attr, &set->bnxt_qps[i].mem_info) != 0) return -1;
 
-        int dmabuf_enabled = gin_ibv_is_dmabuf_supported(pd);
+        // Gate on NIC capability AND rccl's resolved DMA-BUF gate (see CQ path above).
+        int dmabuf_enabled = gin_ibv_is_dmabuf_supported(pd) &&
+                             pfn_hsa_amd_portable_export_dmabuf != nullptr;
 
         void* sq_ptr = nullptr;
         set->qp_allocator->allocate(&sq_ptr, set->bnxt_qps[i].mem_info.sq_len);
