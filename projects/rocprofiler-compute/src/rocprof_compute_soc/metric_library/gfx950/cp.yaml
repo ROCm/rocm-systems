@@ -1,0 +1,22 @@
+inherit: ../gfx908/cp.yaml
+cp.cpc_adc_util:
+  name: CPC ADC Utilization
+  formula: 100 * SUM(CPC_TG_SEND) / SUM(CPC_GD_BUSY)
+  unit: Percent
+  description: >-
+    Percent of ADC busy cycles spent dispatching thread groups. The ADC is responsible
+    for sending workgroups from the command processor to the workgroup manager.
+cp.cpc_cane_stall_rate:
+  name: CPC CANE Stall Rate
+  formula: 100 * SUM(CPC_CANE_STALL) / SUM(CPC_CANE_BUSY)
+  unit: Percent
+  description: >-
+    Percent of CPC CANE bus busy cycles where sync counter requests were stalled.
+    High values indicate contention on the CANE bus for synchronization counter operations.
+cp.cpc_sync_fifo_full_rate:
+  name: CPC SYNC FIFO Full Rate
+  formula: 100 * SUM(CPC_SYNC_FIFO_FULL) / SUM(CPC_SYNC_WRREQ_FIFO_BUSY)
+  unit: Percent
+  description: >-
+    Percent of CPC sync counter request FIFO busy cycles where the FIFO was full.
+    High values indicate backpressure in synchronization counter processing.
