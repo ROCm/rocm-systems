@@ -28,8 +28,19 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
-/// Check requesting LDS lanes before memory access or debugger translation probes.
-/// address_bias normalizes pre-routing FLAT addresses to workgroup LDS addresses.
+/// @brief Whether an LDS atomic must be rejected because a requesting lane's
+/// address is not aligned to the atomic's access width.
+/// @details Called before any LDS side effect, both by the local pipeline and
+/// by the debugger preflight, which sees FLAT addresses before routing.
+/// Non-atomics, byte atomics and architectures other than RDNA3/3.5/4 and
+/// CDNA5 never reject.
+/// @param d Decoded vector memory instruction.
+/// @param wf Issuing wavefront; selects the architecture.
+/// @param lds_lanes Lanes that request LDS; other lanes are ignored.
+/// @param address_bias Added to each lane address before checking alignment.
+///        Pre-routing callers pass `lds_base - shared_aperture_base` so FLAT
+///        addresses are checked as the workgroup LDS addresses routing forms.
+/// @return True if any requesting lane is misaligned.
 bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf, uint64_t lds_lanes,
                                    uint64_t address_bias = 0);
 

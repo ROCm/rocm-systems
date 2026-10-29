@@ -478,8 +478,9 @@ TEST_P(ScalarAtomicTest, UnavailableAtomicRetainsCounterAndUpdatesExactlyOnce) {
 }
 
 TEST_P(ScalarAtomicTest, MisalignedTwoDwordAtomicFaultsWithoutUpdate) {
-  // On gfx90a, S_ATOMIC_*_X2 at an address that is 4 mod 8 raises a memory
-  // violation and leaves both neighboring qwords unchanged.
+  // On gfx90a, S_ATOMIC_*_X2 at an address that is 4 mod 8 faults and leaves
+  // both neighboring qwords unchanged. That establishes rejection without
+  // writes; the two paths below intentionally classify it differently.
   memory.write64(kAddress, 0x5'0000'0005);
   memory.write64(kAddress + 8, 0x5'0000'0005);
   write_sgprs(4, 2, 9);

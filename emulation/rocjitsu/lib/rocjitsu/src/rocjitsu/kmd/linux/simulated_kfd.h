@@ -715,6 +715,8 @@ private:
   /// matching ROCr's trap handler. Returns true when an owner claims the wave;
   /// otherwise CU cancellation applies.
   /// @param issue_pc Address of the memory instruction that caused the fault.
+  /// @param outcome Faulted or ApertureViolation; any other value is a caller
+  ///        bug. Only Faulted permits XNACK replay.
   bool on_wave_memory_violation(amdgpu::Wavefront &wf, uint64_t addr, bool is_write,
                                 uint64_t issue_pc, amdgpu::VmAccessOutcome outcome);
 

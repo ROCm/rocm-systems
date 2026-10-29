@@ -436,8 +436,10 @@ public:
   /// Deferred data and tensor-DMA faults supply zero/false when lane metadata is
   /// unavailable. The issue PC identifies the faulting instruction in all cases;
   /// data-fault callbacks see the advanced resume PC and may rewind it for XNACK.
-  /// outcome distinguishes translation faults (Faulted) from instruction
-  /// MEMVIOL (ApertureViolation); only translation faults can replay under XNACK.
+  /// The handler's outcome parameter is always Faulted or ApertureViolation:
+  /// Faulted is a translation fault and is the only outcome that permits XNACK
+  /// replay; ApertureViolation is an instruction MEMVIOL raised before
+  /// translation. Other outcomes take the terminal path and never reach it.
   /// @returns True if the frontend owns the fault and retains the wave.
   using MemoryViolationHandler = std::function<bool(Wavefront &wf, uint64_t address, bool is_write,
                                                     uint64_t issue_pc, VmAccessOutcome outcome)>;

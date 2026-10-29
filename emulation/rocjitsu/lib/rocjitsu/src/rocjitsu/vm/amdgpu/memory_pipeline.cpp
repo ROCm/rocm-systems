@@ -690,9 +690,14 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
-    // GpuVmAccess rejects and reports scalar atomics not aligned to their access
-    // width. VMID 0 reaches physical memory without it, so reject here to match; a
-    // misaligned X2 atomic was observed to fault without updating memory on gfx90a.
+    // Both paths reject a scalar atomic not aligned to its access width before
+    // any write, but they classify it differently. A translated VM's
+    // GpuVmAccess reports a VM fault and returns Malformed, which the runtime
+    // owner consumes as a page fault. VMID 0 has no VM fault reporter, so it
+    // returns ApertureViolation and the issuer publishes the queue error itself.
+    // gfx90a was observed to fault on a misaligned X2 atomic without updating
+    // either qword; that establishes rejection without writes, not which
+    // exception class hardware reports.
     if (wf.process_id() == 0 && d.addr % d.elem_size != 0)
       return VmAccessOutcome::ApertureViolation;
     L2Cache &l2 = *wf.raw_cu().l2();
@@ -1315,13 +1320,13 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   auto &d = *inst.data_as<VectorMemState>();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  // DDS requires a separate backing implementation. Reject the complete
-  // instruction before global or LDS side effects rather than narrowing a
-  // DDS address into another workgroup's LDS allocation.
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   // Address-formation violations must precede all transport and LDS side effects.
   if (d.memviol_lane_mask & request_lanes)
     return VmAccessOutcome::ApertureViolation;
+  // DDS requires a separate backing implementation. Reject the complete
+  // instruction before global or LDS side effects rather than narrowing a
+  // DDS address into another workgroup's LDS allocation.
   if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Unsupported;
   const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
@@ -1448,10 +1453,10 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
-  // Uniform shared-aperture FLAT must reject unsupported DDS too.
   // Address-formation violations must precede all transport and LDS side effects.
   if (d.memviol_lane_mask & request_lanes)
     return VmAccessOutcome::ApertureViolation;
+  // Uniform shared-aperture FLAT must reject unsupported DDS too.
   if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Unsupported;
   if (rejects_misaligned_lds_atomic(d, wf, request_lanes))

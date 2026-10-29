@@ -6704,9 +6704,13 @@ TEST(CommandProcessorAqlTest, MisalignedLdsAtomicPublishesApertureViolation) {
   }
 }
 
-// gfx90a raises MEMVIOL for an S_ATOMIC_*_X2 that is 4 mod 8. VMID 0 has no VM
-// fault reporter and no runtime owner, so the compute unit must publish the
-// aperture violation itself; otherwise the dispatch never completes or fails.
+// gfx90a faults on an S_ATOMIC_*_X2 that is 4 mod 8 without updating memory.
+// That observation establishes rejection without writes; the exact exception
+// class hardware reports is not qualified. VMID 0 has no VM fault reporter and
+// no runtime owner, so the compute unit must publish the aperture violation
+// itself; otherwise the dispatch never completes or fails. Translated VMs
+// classify the same access differently (Malformed plus a VM fault report); see
+// ScalarAtomicTest.MisalignedTwoDwordAtomicFaultsWithoutUpdate.
 TEST(CommandProcessorAqlTest, MisalignedScalarAtomicPublishesApertureViolation) {
   constexpr uint64_t kData = 0x9000;
   struct Case {
