@@ -228,6 +228,20 @@ KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
   };
 }
 
+// The wave size every kernel in @p kernels runs at, or nullopt when there are
+// none or they disagree.
+std::optional<uint8_t> common_wavefront_size(rj_code_arch_t arch,
+                                             std::span<const KernelDescriptorInfo> kernels) {
+  std::optional<uint8_t> common;
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    const uint8_t wave_size = kernel_wavefront_size(arch, kernel.descriptor);
+    if (common && *common != wave_size)
+      return std::nullopt;
+    common = wave_size;
+  }
+  return common;
+}
+
 // Special machine state preserved across a probe call: SCC (via the trampoline
 // envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
 // plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
@@ -913,6 +927,13 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
+  // A probe call is analyzed and planned at the wave size the object's kernels
+  // share, with temps bounded by their SGPR allocation. The point loop refuses a
+  // probe call before any of that when either is missing.
+  const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                       obj_.image_size());
+  out.kernels = scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+  out.wave_size = common_wavefront_size(arch_, out.kernels);
 
   const auto &registry = default_isa_target_registry();
   const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
@@ -1007,7 +1028,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // which a trampoline at an arbitrary site cannot reproduce, so the probe
     // would read whatever the instrumented kernel left behind. An ordinary
     // uninitialized read lands here too, and is equally unusable.
-    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->abi, &perr);
+    auto live_ins =
+        analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->abi, *out.wave_size, &perr);
     if (!live_ins)
       return std::nullopt;
     if (!live_ins->none()) {
@@ -1057,6 +1079,22 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // Resolve the probe request. An unresolvable or non-relocatable probe is
     // a fatal, all-or-nothing validation error.
     if (pt.probe_obj != nullptr) {
+      // A temp past the kernel's .sgpr_count would be unallocated, so the call
+      // needs a descriptor to bound SGPR selection (growing the allocation is
+      // deferred).
+      if (out.kernels.empty()) {
+        out.errors.push_back("probe call at anchor_offset " + std::to_string(pt.anchor_offset) +
+                             " requires a discovered kernel descriptor to bound SGPR "
+                             "selection, but none was found");
+        continue;
+      }
+      if (!out.wave_size) {
+        out.errors.push_back("probe call at anchor_offset " + std::to_string(pt.anchor_offset) +
+                             " is in a code object whose kernels mix Wave32 and Wave64; "
+                             "DBI currently analyzes kernels and probes at one wave size "
+                             "per code object");
+        continue;
+      }
       auto index = resolve_probe_index(pt, perr);
       if (!index) {
         out.errors.push_back(std::move(perr));
@@ -1144,17 +1182,24 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   CodeObjectPatcher patcher(obj_);
   const uint64_t cave_start = patcher.text_size();
 
-  // Liveness over the decoded blocks, built once and reused by every probe-call
-  // site. validate_points() already built blocks_, and obj_ owns the
-  // Instructions live_before() is keyed on.
+  const std::vector<KernelDescriptorInfo> &kernels = resolved.kernels;
+
+  // Liveness over the decoded blocks, built only when a probe resolved (probe-call
+  // sites are the only ones that query it) and shared by all of them.
+  // resolve_points() built blocks_ and resolved those probes only because the
+  // kernels share a wave size. obj_ owns the Instructions live_before() is keyed
+  // on.
   // TODO: scope this to the kernel containing each anchor, like the DBT path,
   // rather than treating every decoded block as one CFG. Safe here: kernels end
   // in s_endpgm, so there are no false cross-kernel fallthrough edges.
   std::vector<BasicBlock *> liveness_scope;
-  liveness_scope.reserve(blocks_.size());
-  for (const auto &block : blocks_)
-    liveness_scope.push_back(block.get());
-  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope)};
+  std::optional<LivenessAnalysis> liveness;
+  if (!resolved.probes.empty()) {
+    liveness_scope.reserve(blocks_.size());
+    for (const auto &block : blocks_)
+      liveness_scope.push_back(block.get());
+    liveness.emplace(KernelBlockScope(liveness_scope), *resolved.wave_size);
+  }
 
   // Lay out the appended region as [probe bodies][s_nop padding][entry stub]
   // [trampolines], the padding and stub only when the kernel has an entry
@@ -1170,13 +1215,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     probe.output_text_offset = cave_cursor;
     cave_cursor += probe.body_words.size() * sizeof(uint32_t);
   }
-
-  // Register spilling targets a single-kernel code object for now: any site that
-  // must spill grows that one kernel's per-lane scratch. The SpillManager is
-  // created lazily on the first spilling site and shared by the rest; its final
-  // size is written back to the descriptor after all sites succeed.
-  const std::vector<KernelDescriptorInfo> kernels =
-      scan_kernel_descriptors(patcher.image_bytes(), patcher.text_offset(), patcher.text_size());
 
   // Temporary SGPR-allocation bound. The probe-call return-link pair is fixed
   // by the calling convention, so the kernel must allocate up to it. Derived from
@@ -1200,7 +1238,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   probe_summaries.reserve(resolved.probes.size());
   for (const ProbeCallable &probe : resolved.probes) {
     std::string probe_err;
-    auto summary = build_probe_clobber_summary(probe, &probe_err);
+    auto summary = build_probe_clobber_summary(probe, *resolved.wave_size, &probe_err);
     if (!summary) {
       result.errors.push_back(std::move(probe_err));
       continue;
@@ -1230,6 +1268,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     cave_cursor = entry_patch->stub_offset + entry_patch->words.size() * sizeof(uint32_t);
   }
 
+  // Register spilling targets a single-kernel code object for now: any site that
+  // must spill grows that one kernel's per-lane scratch. The SpillManager is
+  // created lazily on the first spilling site and shared by the rest; its final
+  // size is written back to the descriptor after all sites succeed.
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
 
@@ -1248,19 +1290,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     // clobber
     if (site.is_probe_call()) {
       const ProbeCallable &probe = resolved.probes[*site.probe_index];
-
-      // A probe call selects temp SGPRs (link/target/SCC/special-state) bounded by
-      // the kernel's own allocation. Without a discovered descriptor that bound is
-      // unknown, so a temp could land past the kernel's .sgpr_count; fail closed
-      // rather than fall back to the device-wide default (growing the allocation is
-      // deferred).
-      if (!kernel_sgpr_count) {
-        result.errors.push_back("probe call at anchor_offset " +
-                                std::to_string(site.anchor_offset) +
-                                " requires a discovered kernel descriptor to bound SGPR "
-                                "selection, but none was found");
-        continue;
-      }
 
       // The kernel must own the fixed return-link pair.
       if (const uint16_t link_base = probe.abi.link_pair_base;
@@ -1340,7 +1369,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("internal: anchor instruction vanished after validation");
         continue;
       }
-      auto maybe_live = liveness.live_before(*anchor);
+      auto maybe_live = liveness->live_before(*anchor);
       if (maybe_live.failed()) {
         result.errors.emplace_back("internal: anchor liveness is unavailable");
         continue;

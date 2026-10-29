@@ -37,6 +37,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
@@ -2714,6 +2715,41 @@ TEST(BinaryTranslatorE2E, Gfx1250KernargFactSurvivesWriteToTheRegisterAboveThePa
       maybe_s_endpgm_7.value(),
   };
   EXPECT_TRUE(translate_kernarg_fixture(words, /*enable_kernarg=*/true).ok());
+}
+
+// v_cmp_eq_u32_e64 s79 names s[79:80], but a Wave32 kernel's compare writes only s79, so the pair
+// in s[80:81] survives. Analyzed at Wave64, the compare would kill it and refuse the transfer.
+TEST(BinaryTranslatorE2E, Rdna4KernargFactSurvivesWave32CompareBelowThePair) {
+  const auto load = rdna4::build_smem(
+      rdna4::kSLoadB64Smem,
+      {.sbase = 0, .sdata = static_cast<uint8_t>(kKernargTargetSreg), .soffset = 124});
+  const auto compare = rdna4::build_vop3(
+      rdna4::kVCmpEqU32Vop3,
+      {.vdst = static_cast<uint8_t>(kKernargTargetSreg - 1), .src0 = 256, .src1 = 257});
+  const std::vector<uint32_t> words = {
+      load[0],
+      load[1],
+      compare[0],
+      compare[1],
+      rocjitsu::build_s_swappc_b64(kKernargReturnSreg, kKernargTargetSreg,
+                                   ROCJITSU_CODE_ARCH_RDNA4),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  rocjitsu::test_support::TestKernelDescriptor kd{};
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.kernel_code_properties,
+                     rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kd.kernel_code_properties,
+                     rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+  kd.kernarg_size = 16;
+  const auto image = rocjitsu::test_support::make_minimal_amdgpu_kernel_elf(
+      words, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1200, kd);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto result = translator.translate(source);
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
 }
 
 // Clobbered on ONE of the two paths into the consumer. A meet that is not an intersection would
