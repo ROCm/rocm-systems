@@ -948,10 +948,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#compatibility-mode-planned" class="md-nav__link">
+  <a href="#compatibility-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Compatibility mode (planned)
+        Compatibility mode
       
     </span>
   </a>
@@ -1853,10 +1853,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#compatibility-mode-planned" class="md-nav__link">
+  <a href="#compatibility-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Compatibility mode (planned)
+        Compatibility mode
       
     </span>
   </a>
@@ -2162,8 +2162,8 @@ and guest FP controls.</p>
 </tr>
 <tr>
 <td>7</td>
-<td>Reserved for compatibility</td>
-<td>Currently rejected</td>
+<td><code>RJ_ARITH_SEMANTICS_COMPATIBILITY</code></td>
+<td>Instruction-specific policy, outside the ordering</td>
 </tr>
 </tbody>
 </table>
@@ -2174,8 +2174,8 @@ including returning infinity where the GPU returns a finite value. Loose paths
 need not reorder terms or check operand ranges to prevent these discrepancies.
 Modes 2 and 3 reject unsupported behavior rather than silently falling back to
 loose arithmetic.</p>
-<h3 id="compatibility-mode-planned">Compatibility mode (planned)<a class="headerlink" href="#compatibility-mode-planned" title="Permanent link">&para;</a></h3>
-<p>Once implemented, mode 7 will be a temporary, instruction-specific policy outside the ordered modes.
+<h3 id="compatibility-mode">Compatibility mode<a class="headerlink" href="#compatibility-mode" title="Permanent link">&para;</a></h3>
+<p>Mode 7 is a temporary, instruction-specific policy outside the ordered modes.
 Each entry point resolves it before validation or calling another entry point;
 the resolved mode determines both numerical behavior and FP status reporting.
 Rocjitsu's JSON policy setting is planned for the later integration step.</p>
