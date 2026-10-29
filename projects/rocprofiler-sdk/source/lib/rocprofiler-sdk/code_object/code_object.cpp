@@ -387,7 +387,9 @@ get_host_function_id()
     return _v;
 }
 
-using kernel_object_map_t        = std::unordered_map<uint64_t, uint64_t>;
+// Kernel descriptors the application has loaded, keyed by the handle a dispatch packet carries, so
+// that a launch can be resolved to its registration in one lookup.
+using kernel_object_map_t        = std::unordered_map<uint64_t, kernel_locator_t>;
 using executable_array_t         = std::vector<hsa_executable_t>;
 using code_object_unload_array_t = std::vector<hsa::code_object_unload>;
 
@@ -498,8 +500,7 @@ read_code_object_file(int fd)
 }
 
 hip::code_object_metadata_t
-get_loaded_code_object_metadata(
-    const rocprofiler_callback_tracing_code_object_load_data_t& data)
+get_loaded_code_object_metadata(const rocprofiler_callback_tracing_code_object_load_data_t& data)
 {
     if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
     {
@@ -522,8 +523,7 @@ get_loaded_code_object_metadata(
         // application's own buffer, which the application may free once the executable is frozen.
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         const auto* executable = reinterpret_cast<const void*>(data.memory_base);
-        return hip::get_metadata_from_executable(executable,
-                                                 static_cast<size_t>(data.memory_size));
+        return hip::get_metadata_from_executable(executable, static_cast<size_t>(data.memory_size));
     }
 
     if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
@@ -537,23 +537,36 @@ get_loaded_code_object_metadata(
 }
 
 void
-populate_hip_register_data_from_loaded_code_object(
-    const rocprofiler_callback_tracing_code_object_load_data_t& data)
+populate_hip_symbol_map_from_loaded_code_object(
+    const hip::kernel_symbol_hip_device_map_t& symbol_map)
 {
-    auto metadata = get_loaded_code_object_metadata(data);
-    if(metadata.kernel_symbol_device_map.empty() && metadata.kernarg_layout_map.empty()) return;
+    if(symbol_map.empty()) return;
 
-    const auto code_object_id = data.code_object_id;
     CHECK_NOTNULL(get_hip_register_data())
-        ->wlock([&metadata, code_object_id](hip::hip_register_data& register_data) {
-            register_data.kernel_symbol_device_map.insert(
-                metadata.kernel_symbol_device_map.begin(),
-                metadata.kernel_symbol_device_map.end());
-            auto& layouts = register_data.kernel_kernarg_layout_map[code_object_id];
-            // Assigned rather than inserted: should the loader ever reuse an id, the layouts of the
-            // load now taking it replace the ones the previous load left behind.
-            for(const auto& [symbol, layout] : metadata.kernarg_layout_map) layouts[symbol] = layout;
+        ->wlock([&symbol_map](hip::hip_register_data& register_data) {
+            register_data.kernel_symbol_device_map.insert(symbol_map.begin(), symbol_map.end());
         });
+}
+
+// Hands each kernel this load registered the pointer ranges its metadata describes, so that a
+// dispatch finds them with the kernel in one lookup.
+void
+populate_kernarg_pointer_regions(const hsa::code_object&                 code_obj,
+                                 const hip::kernel_symbol_kernarg_map_t& pointer_regions)
+{
+    if(pointer_regions.empty()) return;
+
+    CHECK_NOTNULL(get_kernel_object_map())->wlock([&](kernel_object_map_t& object_map) {
+        for(const auto& symbol : code_obj.symbols)
+        {
+            if(!symbol || !symbol->name) continue;
+            const auto regions = pointer_regions.find(*symbol->name);
+            const auto kernel  = object_map.find(symbol->rocp_data.kernel_object);
+            if(regions == pointer_regions.end() || kernel == object_map.end()) continue;
+            kernel->second.pointer_regions =
+                std::make_shared<const std::vector<kernarg_region_t>>(regions->second);
+        }
+    });
 }
 
 hsa_status_t
@@ -650,11 +663,12 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
 
     CHECK_NOTNULL(get_kernel_object_map())
         ->wlock(
-            [](kernel_object_map_t& object_map, uint64_t _kern_obj, uint64_t _kern_id) {
-                object_map[_kern_obj] = _kern_id;
+            [](kernel_object_map_t& object_map, uint64_t _kern_obj, kernel_locator_t locator) {
+                object_map[_kern_obj] = locator;
             },
             data.kernel_object,
-            data.kernel_id);
+            kernel_locator_t{
+                data.kernel_id, static_cast<size_t>(data.kernarg_segment_size), symbol_v.name});
 
     code_obj_v->symbols.emplace_back(std::make_unique<hsa::kernel_symbol>(std::move(symbol_v)));
 
@@ -828,13 +842,15 @@ code_object_load_callback(hsa_executable_t         executable,
     // generate a unique code object id
     data.code_object_id = ++get_code_object_id();
 
-    populate_hip_register_data_from_loaded_code_object(data);
+    const auto metadata = get_loaded_code_object_metadata(data);
+    populate_hip_symbol_map_from_loaded_code_object(metadata.kernel_symbol_device_map);
 
     auto _status = ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
         executable, data.hsa_agent, executable_iterate_agent_symbols_load_callback, &code_obj_v);
 
     if(_status == HSA_STATUS_SUCCESS)
     {
+        populate_kernarg_pointer_regions(code_obj_v, metadata.kernarg_pointer_regions);
         code_obj_vec->emplace_back(std::make_unique<hsa::code_object>(std::move(code_obj_v)));
     }
     else
@@ -1172,24 +1188,9 @@ executable_destroy_internal(hsa_executable_t executable)
             {
                 for(const auto& sitr : uitr.symbols)
                 {
-                    data.erase(sitr->rocp_data.kernel_id);
+                    if(sitr == nullptr) continue;
+                    data.erase(sitr->rocp_data.kernel_object);
                 }
-            }
-        });
-    }
-
-    // Kernarg layouts are kept per load, keyed by the id the load reported, so that two loads
-    // defining kernels of the same name cannot supply each other's boundary. They are dropped with
-    // the load: an application that repeatedly loads and unloads modules would otherwise retain the
-    // layouts of every load it ever made. A dispatch of an already unloaded kernel cannot reach the
-    // map, because the kernel object it would be queried under is gone with the executable.
-    if(get_hip_register_data())
-    {
-        CHECK_NOTNULL(get_hip_register_data())->wlock([_unloaded](hip::hip_register_data& data) {
-            for(const auto& uitr : _unloaded)
-            {
-                if(uitr.object == nullptr) continue;
-                data.kernel_kernarg_layout_map.erase(uitr.object->rocp_data.code_object_id);
             }
         });
     }
@@ -1498,26 +1499,23 @@ get_kernel_id(uint64_t kernel_object)
         ->rlock(
             [](const kernel_object_map_t& object_map, uint64_t _kern_obj) -> uint64_t {
                 auto itr = object_map.find(_kern_obj);
-                return (itr == object_map.end()) ? 0 : itr->second;
+                return (itr == object_map.end()) ? 0 : itr->second.kernel_id;
             },
             kernel_object);
 }
 
-std::optional<size_t>
-get_kernarg_explicit_arg_size(uint64_t           code_object_id,
-                              const std::string& symbol,
-                              size_t             segment_size)
+std::optional<kernel_locator_t>
+locate_kernel(uint64_t kernel_object)
 {
-    auto explicit_size = std::optional<size_t>{};
-    if(auto* register_data = get_hip_register_data())
-        register_data->rlock([&](const hip::hip_register_data& data) {
-            const auto load_itr = data.kernel_kernarg_layout_map.find(code_object_id);
-            if(load_itr == data.kernel_kernarg_layout_map.end()) return;
-            const auto symbol_itr = load_itr->second.find(symbol);
-            if(symbol_itr == load_itr->second.end()) return;
-            explicit_size = symbol_itr->second.explicit_size_for(segment_size);
-        });
-    return explicit_size;
+    return CHECK_NOTNULL(get_kernel_object_map())
+        ->rlock(
+            [](const kernel_object_map_t& object_map,
+               uint64_t                   _kern_obj) -> std::optional<kernel_locator_t> {
+                auto itr = object_map.find(_kern_obj);
+                if(itr == object_map.end()) return std::nullopt;
+                return itr->second;
+            },
+            kernel_object);
 }
 
 void

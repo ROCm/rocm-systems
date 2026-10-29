@@ -35,6 +35,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -103,7 +104,8 @@ convert_type(hsa_amd_pointer_type_t type)
     {
         case HSA_EXT_POINTER_TYPE_UNKNOWN: return pointer_facts_t::type_t::unknown;
         case HSA_EXT_POINTER_TYPE_HSA: return pointer_facts_t::type_t::hsa;
-        case HSA_EXT_POINTER_TYPE_LOCKED: return pointer_facts_t::type_t::locked;
+        case HSA_EXT_POINTER_TYPE_LOCKED:
+            return pointer_facts_t::type_t::locked;
 // hsa_amd_pointer_info gained these two types at HSA AMD interface 1.12. Older
 // installed headers (e.g. the 6.2 release-compatibility builds) do not declare them
 // at all, so they are compiled out there; an unnamed type already classifies as
@@ -133,31 +135,16 @@ as_pointer(uint64_t address)
     return reinterpret_cast<void*>(address);  // NOLINT(performance-no-int-to-ptr)
 }
 
-// What the code object registry knows about a dispatched kernel: which load it came from, and how
-// large its argument segment is.
-struct loaded_kernel_t
+// Bytes of `offset`, `size` rounded out to whole aligned words inside the segment, so that a word
+// overlapping the range is read. Returns false when the range holds no whole word.
+bool
+word_range(size_t segment_size, uint64_t offset, uint64_t size, size_t& begin, size_t& end)
 {
-    const std::string* name           = nullptr;  // interned by the registry; null if unnamed
-    uint64_t           code_object_id = 0;        // the load its metadata was read from
-    size_t             segment_size   = 0;        // explicit plus hidden arguments
-};
-
-std::optional<loaded_kernel_t>
-find_loaded_kernel(uint64_t kernel_object)
-{
-    auto found = std::optional<loaded_kernel_t>{};
-    code_object::iterate_loaded_code_objects([&found, kernel_object](const auto& co) {
-        if(found) return;
-        for(const auto& symbol : co.symbols)
-        {
-            if(!symbol || symbol->rocp_data.kernel_object != kernel_object) continue;
-            found = loaded_kernel_t{symbol->name,
-                                    symbol->rocp_data.code_object_id,
-                                    static_cast<size_t>(symbol->rocp_data.kernarg_segment_size)};
-            return;
-        }
-    });
-    return found;
+    constexpr auto word = sizeof(uint64_t);
+    if(offset >= segment_size) return false;
+    begin = static_cast<size_t>(offset) & ~(word - 1);
+    end   = std::min(static_cast<size_t>(offset) + size + (word - 1), segment_size) & ~(word - 1);
+    return begin + word <= end;
 }
 }  // namespace
 
@@ -169,8 +156,7 @@ to_string(kind_t kind)
         case kind_t::host_pinned: return "host-pinned memory (hipHostMalloc)";
         case kind_t::managed: return "managed memory (hipMallocManaged)";
         case kind_t::virtual_mem: return "a virtual-memory allocation (hipMallocAsync, hipMemMap)";
-        case kind_t::device_other:
-            return "device memory the snapshot does not track (fine-grained, uncached, peer)";
+        case kind_t::device_other: return "device memory the snapshot does not track";
         case kind_t::locked_host: return "locked host memory (hipHostRegister)";
         case kind_t::host_pageable: return "pageable host memory";
     }
@@ -307,34 +293,40 @@ region_of(kind_t kind, const pointer_facts_t& facts)
     return out;
 }
 
-size_t
-explicit_arg_size(size_t segment_size, std::optional<size_t> metadata_size)
-{
-    if(!metadata_size || *metadata_size > segment_size) return segment_size;
-    return *metadata_size;
-}
-
 std::vector<hit_t>
-scan_kernarg(const uint8_t*                     kernarg,
-             size_t                             explicit_size,
-             const std::vector<address_span_t>& covered,
-             const pointer_facts_fn_t&          facts,
-             std::unordered_set<uint64_t>&      seen)
+scan_kernarg(const uint8_t*                                    kernarg,
+             size_t                                            segment_size,
+             const std::vector<code_object::kernarg_region_t>* pointer_regions,
+             const std::vector<address_span_t>&                covered,
+             const pointer_facts_fn_t&                         facts,
+             std::unordered_set<uint64_t>&                     seen)
 {
     auto hits = std::vector<hit_t>{};
     if(kernarg == nullptr) return hits;
 
-    for(size_t off = 0; off + sizeof(uint64_t) <= explicit_size; off += sizeof(uint64_t))
-    {
-        auto value = uint64_t{0};
-        std::memcpy(&value, kernarg + off, sizeof(value));
-        if(value < min_candidate || value > max_candidate) continue;
-        if(in_spans(covered, value)) continue;
-        if(!seen.insert(value).second) continue;
+    const auto whole = std::vector<code_object::kernarg_region_t>{
+        code_object::kernarg_region_t{0u,
+                                      static_cast<uint32_t>(std::min<size_t>(
+                                          segment_size, std::numeric_limits<uint32_t>::max()))}};
+    const auto& regions = pointer_regions != nullptr ? *pointer_regions : whole;
 
-        const auto f = facts(value);
-        if(const auto kind = classify_pointer(f); kind)
-            hits.push_back(hit_t{off, value, region_of(*kind, f)});
+    for(const auto& region : regions)
+    {
+        auto begin = size_t{};
+        auto end   = size_t{};
+        if(!word_range(segment_size, region.offset, region.size, begin, end)) continue;
+        for(size_t off = begin; off < end; off += sizeof(uint64_t))
+        {
+            auto value = uint64_t{0};
+            std::memcpy(&value, kernarg + off, sizeof(value));
+            if(value < min_candidate || value > max_candidate) continue;
+            if(in_spans(covered, value)) continue;
+            if(!seen.insert(value).second) continue;
+
+            const auto f = facts(value);
+            if(const auto kind = classify_pointer(f); kind)
+                hits.push_back(hit_t{off, value, region_of(*kind, f)});
+        }
     }
     return hits;
 }
@@ -394,16 +386,17 @@ region_set_t::restore() const
 }
 
 bool
-save_dispatch_memory(region_set_t&                             saved,
-                     const uint8_t*                            kernarg,
-                     size_t                                    explicit_size,
-                     const memory_snapshot::device_snapshot_t& snapshot,
-                     hsa_agent_t                               agent,
-                     const pointer_facts_fn_t&                 facts)
+save_dispatch_memory(region_set_t&                                     saved,
+                     const uint8_t*                                    kernarg,
+                     size_t                                            segment_size,
+                     const std::vector<code_object::kernarg_region_t>* pointer_regions,
+                     const memory_snapshot::device_snapshot_t&         snapshot,
+                     hsa_agent_t                                       agent,
+                     const pointer_facts_fn_t&                         facts)
 {
     auto seen = std::unordered_set<uint64_t>{};
     for(const auto& hit :
-        scan_kernarg(kernarg, explicit_size, covered_spans(snapshot), facts, seen))
+        scan_kernarg(kernarg, segment_size, pointer_regions, covered_spans(snapshot), facts, seen))
     {
         const auto  where   = fmt::format("kernel replay: kernarg offset {} points at 0x{:x}, {}",
                                        hit.kernarg_offset,
@@ -448,7 +441,7 @@ save_dispatch_memory(region_set_t&                             saved,
                      const memory_snapshot::device_snapshot_t& snapshot,
                      hsa_agent_t                               agent)
 {
-    const auto kernel = find_loaded_kernel(packet.kernel_object);
+    const auto kernel = code_object::locate_kernel(packet.kernel_object);
     if(!kernel)
     {
         LOG_FIRST_N(WARNING, 1) << "kernel replay: the dispatched kernel is not in the code "
@@ -459,18 +452,22 @@ save_dispatch_memory(region_set_t&                             saved,
 
     if(kernel->name != nullptr && is_idempotent_runtime_kernel(*kernel->name)) return true;
 
-    // The hidden arguments the compiler appends are not the application's to point into, and where
-    // the kernel's own arguments end is a property of each kernel, read from this load's metadata
-    // while it was being registered. Assuming a fixed block at the end of the segment would hide
-    // pointers the passes write through, because a kernel's own arguments can run past it.
-    auto metadata_size = std::optional<size_t>{};
-    if(kernel->name != nullptr)
-        metadata_size = code_object::get_kernarg_explicit_arg_size(
-            kernel->code_object_id, *kernel->name, kernel->segment_size);
+    // Without metadata every word of the segment is a candidate, including the runtime's hidden
+    // arguments -- its hostcall and printf buffers, its heap -- which point at memory the snapshot
+    // does not restore, so such a dispatch may run once for that alone.
+    const auto* regions = kernel->pointer_regions.get();
+    if(regions == nullptr)
+        LOG_FIRST_N(WARNING, 1) << fmt::format(
+            "kernel replay: no argument metadata for {} (kernarg segment {} bytes), so every word "
+            "of it is checked for pointers including the runtime's hidden arguments; a dispatch of "
+            "this kernel may run once without replay",
+            kernel->name != nullptr ? kernel->name->c_str() : "<unnamed kernel>",
+            kernel->segment_size);
 
     return save_dispatch_memory(saved,
                                 static_cast<const uint8_t*>(packet.kernarg_address),
-                                explicit_arg_size(kernel->segment_size, metadata_size),
+                                kernel->segment_size,
+                                regions,
                                 snapshot,
                                 agent,
                                 make_hsa_pointer_facts());

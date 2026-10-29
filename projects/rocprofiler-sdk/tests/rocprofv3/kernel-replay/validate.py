@@ -37,6 +37,9 @@
 #   5. dispatch_id identity: a replayed dispatch keeps ONE dispatch_id across its passes (only the
 #      replay_pass index advances), and dispatch_id increments sequentially across dispatches -- one
 #      id minted per logical dispatch, reused by every pass (never one id per pass).
+#   6. With --expected-pass-counts, each dispatch carries the passes its memory allowed: a dispatch
+#      replay cannot save runs once, so a run mixing such memory with replayable memory yields
+#      dispatches of different lengths, in the order the dispatches were issued.
 # (The app verifies its own results in the generate step, guarding the restored data itself.)
 
 import collections
@@ -340,6 +343,24 @@ def test_expected_logical_dispatch_count(json_data, expected_dispatch_count):
     assert len(table) == expected_dispatch_count, (
         f"expected {expected_dispatch_count} selected logical dispatches, found {len(table)}: "
         f"dispatch_ids={sorted(table)}"
+    )
+
+
+def test_pass_counts_per_dispatch(json_data, expected_pass_counts):
+    # Each dispatch carries the passes its memory allowed, in the order the dispatches were issued.
+    # A dispatch whose kernel arguments point at memory the snapshot cannot save runs once instead
+    # of once per counter group, so a run mixing such memory with replayable memory yields dispatches
+    # of different lengths. The sequence says which ones were replayed, which the application's own
+    # result cannot: running once and running twice-then-restoring both leave y correct.
+    if expected_pass_counts is None:
+        pytest.skip("--expected-pass-counts was not specified")
+
+    table = _dispatch_passes(_sdk(json_data))
+    got = [sorted(table[did]["passes"]) for did in sorted(table)]
+    want = [list(range(count)) for count in expected_pass_counts]
+    assert got == want, (
+        f"per-dispatch replay_pass sequences {got} != {want}: "
+        f"dispatch_ids={sorted(table)} kernel_ids={[table[d]['kernel_id'] for d in sorted(table)]}"
     )
 
 

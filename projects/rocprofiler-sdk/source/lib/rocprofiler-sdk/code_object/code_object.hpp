@@ -31,6 +31,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -57,17 +58,33 @@ get_ids();
 uint64_t
 get_kernel_id(uint64_t kernel_object);
 
-// Where the arguments of the kernel named `symbol` (an HSA kernel symbol name) of the code object
-// load `code_object_id` end in its kernarg segment, i.e. the size of the arguments the kernel
-// itself declares, read from the amdhsa metadata while that code object was being registered. The
-// compiler appends its hidden argument block only to kernels that use it, so this boundary cannot
-// be derived from the segment size, and it belongs to a particular load: two loads may define
-// kernels of the same name with different argument lists. nullopt when the metadata was not
-// readable, does not know the kernel, or reports a segment other than `segment_size`.
-std::optional<size_t>
-get_kernarg_explicit_arg_size(uint64_t           code_object_id,
-                              const std::string& symbol,
-                              size_t             segment_size);
+// A range of a kernarg segment, in bytes from its start.
+struct kernarg_region_t
+{
+    uint32_t offset{0};
+    uint32_t size{0};
+
+    friend bool operator==(const kernarg_region_t& lhs, const kernarg_region_t& rhs) noexcept
+    {
+        return lhs.offset == rhs.offset && lhs.size == rhs.size;
+    }
+};
+
+// A loaded kernel, found by the kernel_object of a dispatch packet.
+struct kernel_locator_t
+{
+    uint64_t           kernel_id{0};
+    size_t             segment_size{0};  // kernarg segment size the load reported
+    const std::string* name{nullptr};  // held by the string table, valid while the kernel is loaded
+    // The ranges of the kernarg segment that can hold a pointer, read from the kernel's amdhsa
+    // metadata when its code object was loaded; null when that metadata was not readable.
+    std::shared_ptr<const std::vector<kernarg_region_t>> pointer_regions{};
+};
+
+// The kernel whose descriptor handle is `kernel_object`, or nullopt when no loaded kernel carries
+// it.
+std::optional<kernel_locator_t>
+locate_kernel(uint64_t kernel_object);
 
 void
 iterate_loaded_code_objects(code_object_iterator_t&& func);

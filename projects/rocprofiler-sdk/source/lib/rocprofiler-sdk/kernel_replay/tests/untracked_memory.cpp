@@ -36,6 +36,7 @@
 
 namespace msnp = ::rocprofiler::kernel_replay::memory_snapshot;
 namespace um   = ::rocprofiler::kernel_replay::untracked_memory;
+namespace co   = ::rocprofiler::code_object;
 
 namespace
 {
@@ -128,7 +129,7 @@ save(um::region_set_t& saved, const std::vector<uint64_t>& words, const um::poin
 {
     const auto kernarg = kernarg_with(words);
     return um::save_dispatch_memory(
-        saved, kernarg.data(), kernarg.size(), msnp::device_snapshot_t{}, this_agent, f);
+        saved, kernarg.data(), kernarg.size(), nullptr, msnp::device_snapshot_t{}, this_agent, f);
 }
 }  // namespace
 
@@ -150,51 +151,48 @@ TEST(kernel_replay_untracked_memory, ignores_scalars_and_covered_memory)
     const auto covered = std::vector<um::address_span_t>{{tracked_addr, tracked_addr + 4096}};
     const auto facts   = [](uint64_t) { return facts_of(type_t::hsa, true); };
 
-    // A small scalar, then a pointer into the snapshot, then the hidden arguments holding a
-    // pointer of their own past the end of what the kernel was written with.
+    // A small scalar, a pointer into the snapshot, then a pointer the passes would write through.
     auto kernarg = kernarg_with({42, tracked_addr + 8, vmem_addr});
 
     auto seen = std::unordered_set<uint64_t>{};
-    // The kernel's own arguments are a scalar and memory the snapshot restores.
-    EXPECT_TRUE(um::scan_kernarg(kernarg.data(), 2 * sizeof(uint64_t), covered, facts, seen)
-                    .empty());
-    // The word after them is a pointer the passes would write through, and stopping early is what
-    // hides it: where the kernel's arguments end has to come from the kernel, not from a guess.
-    const auto hits = um::scan_kernarg(kernarg.data(), kernarg.size(), covered, facts, seen);
+    // Read only as far as the first two words, it holds nothing the snapshot does not restore.
+    const auto first_two = std::vector<co::kernarg_region_t>{{0u, 16u}};
+    EXPECT_TRUE(
+        um::scan_kernarg(kernarg.data(), kernarg.size(), &first_two, covered, facts, seen).empty());
+    // Read whole, the third word is found.
+    const auto hits =
+        um::scan_kernarg(kernarg.data(), kernarg.size(), nullptr, covered, facts, seen);
     ASSERT_EQ(hits.size(), 1u);
     EXPECT_EQ(hits[0].kernarg_offset, 2 * sizeof(uint64_t));
     EXPECT_EQ(hits[0].address, vmem_addr);
 }
 
-TEST(kernel_replay_untracked_memory, scans_whatever_the_metadata_does_not_mark_hidden)
+TEST(kernel_replay_untracked_memory, only_what_metadata_calls_a_pointer_is_queried)
 {
-    // The hidden arguments are only appended to kernels that use them, and where they begin is a
-    // property of each kernel, so the boundary has to come from the kernel's own metadata. Guessing
-    // a fixed block at the end of the segment would hide pointers in the kernels whose arguments
-    // run that long, which is the failure this module exists to catch.
-    EXPECT_EQ(um::explicit_arg_size(288, std::nullopt), 288u) << "no metadata to read";
-    EXPECT_EQ(um::explicit_arg_size(288, 288), 288u) << "a kernel with no hidden arguments";
-    EXPECT_EQ(um::explicit_arg_size(264, 8), 8u) << "hidden arguments after one pointer";
-    EXPECT_EQ(um::explicit_arg_size(64, 128), 64u) << "the segment bounds the scan";
+    // A by-value scalar whose bits land in the range a kernel could dereference must not be taken
+    // for a pointer: nothing writes through it, and a value that happens to sit over memory the
+    // snapshot does not restore would run the dispatch once for nothing.
+    constexpr auto scalar_value = uint64_t{0x40000000};
+    const auto     facts        = [](uint64_t address) {
+        if(address == scalar_value) return facts_of(type_t::unknown, false, true);
+        if(address == vmem_addr) return facts_of(type_t::vmem);
+        return facts_of(type_t::unknown);
+    };
 
-    // A pointer in the last word of a 288-byte segment, the shape of a kernel that takes many
-    // arguments and has no hidden ones.
-    auto kernarg = std::vector<uint8_t>(288, 0);
-    std::memcpy(kernarg.data() + 280, &vmem_addr, sizeof(vmem_addr));
+    const auto kernarg = kernarg_with({scalar_value, vmem_addr});
+    const auto regions = std::vector<co::kernarg_region_t>{co::kernarg_region_t{8u, 8u}};
 
-    const auto facts = [](uint64_t address)
-    { return address == vmem_addr ? facts_of(type_t::vmem) : facts_of(type_t::unknown); };
-
-    auto seen = std::unordered_set<uint64_t>{};
-    auto hits = um::scan_kernarg(
-        kernarg.data(), um::explicit_arg_size(288, 288), {}, facts, seen);
+    auto       seen = std::unordered_set<uint64_t>{};
+    const auto hits = um::scan_kernarg(kernarg.data(), kernarg.size(), &regions, {}, facts, seen);
     ASSERT_EQ(hits.size(), 1u);
-    EXPECT_EQ(hits[0].kernarg_offset, 280u);
+    EXPECT_EQ(hits[0].kernarg_offset, 8u);
     EXPECT_EQ(hits[0].region.kind, um::kind_t::virtual_mem);
+    EXPECT_EQ(seen.count(scalar_value), 0u) << "the scalar was never classified";
 
-    // The same segment with metadata placing the kernel's arguments in its first word.
-    EXPECT_TRUE(
-        um::scan_kernarg(kernarg.data(), um::explicit_arg_size(288, 8), {}, facts, seen).empty());
+    // Without metadata the whole segment is the candidate set, scalar included.
+    auto blind = std::unordered_set<uint64_t>{};
+    EXPECT_EQ(um::scan_kernarg(kernarg.data(), kernarg.size(), nullptr, {}, facts, blind).size(),
+              2u);
 }
 
 TEST(kernel_replay_untracked_memory, only_the_runtime_copy_and_fill_kernels_are_exempt)
@@ -222,9 +220,9 @@ TEST(kernel_replay_untracked_memory, host_mappings_hold_the_memory_a_kernel_coul
 {
     const auto mappings = um::read_writable_host_mappings();
     ASSERT_FALSE(mappings.empty());
-    const auto by_address =
-        [](const um::address_span_t& lhs, const um::address_span_t& rhs)
-    { return lhs.begin < rhs.begin; };
+    const auto by_address = [](const um::address_span_t& lhs, const um::address_span_t& rhs) {
+        return lhs.begin < rhs.begin;
+    };
     EXPECT_TRUE(std::is_sorted(mappings.begin(), mappings.end(), by_address));
 
     // A kernel argument may point at a host variable, and the snapshot holds no host memory, so

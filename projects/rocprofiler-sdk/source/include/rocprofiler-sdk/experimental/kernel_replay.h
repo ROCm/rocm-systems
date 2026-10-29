@@ -98,13 +98,16 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  * single dispatch. HIP graph launches are not replayed, and a multi-packet submission runs once
  * without replay; each case warns once. Repeatability rests on a snapshot covering coarse-grained
  * device allocations owned by the agent plus module-scope @c __device__ / @c __constant__
- * variables. Fine-grained device memory of that agent named by an explicit kernel argument is also
- * saved and restored between passes; a host thread must not write it while the dispatch is being
- * replayed. A dispatch whose explicit kernel arguments point at other memory outside the snapshot
- * (unified or managed memory, host memory, another agent's memory, @c hipMallocAsync and other
- * virtual-memory-mapped allocations) runs once without replay and warns once. A pointer stored
- * inside other memory is not seen, so a kernel writing through one observes values accumulated
- * across passes rather than identical inputs. Allocations carrying
+ * variables. Fine-grained device memory of that agent named by a kernel argument is also saved and
+ * restored between passes, up to 512 MiB per dispatch; a host thread must not write that memory
+ * while the dispatch is being replayed. Which arguments hold a pointer comes from the kernel's own
+ * metadata, so a scalar the width of a pointer is not read as one; without that metadata every
+ * argument word is checked. A dispatch whose kernel
+ * arguments point at other memory outside the snapshot (unified or managed memory, host memory,
+ * another agent's memory, @c hipMallocAsync and other virtual-memory-mapped allocations) runs once
+ * without replay and warns once. A pointer the kernel finds inside memory it was handed is not
+ * seen, so a kernel writing through one observes values accumulated across passes rather than
+ * identical inputs. Allocations carrying
  * @c HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are excluded from the snapshot (HIP kernarg pools /
  * profiler buffers share that flag). A direct-HSA application that puts ordinary writable device
  * data behind the same flag sees the same omission -- an unsupported allocation class for beta.
