@@ -294,7 +294,9 @@ IsaRegistry::GetSupportedGenericVersions() {
     {prepend_isa_prefix("gfx11-generic"), 1},
     {prepend_isa_prefix("gfx11-7-generic"), 1},
     {prepend_isa_prefix("gfx12-generic"), 1},
-    {prepend_isa_prefix("gfx12-5-generic"), 1}
+    {prepend_isa_prefix("gfx12-5-generic"), 1},
+    {prepend_isa_prefix("gfx12-5-generic:xnack-"), 1},
+    {prepend_isa_prefix("gfx12-5-generic:xnack+"), 1}
   };
   return *min_gen_versions;
 }
