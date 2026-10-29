@@ -7,6 +7,7 @@
 #include "rocjitsu/code/rj_code.h"
 
 #include <optional>
+#include <string>
 
 namespace rocjitsu::tools {
 namespace cli = ::rocjitsu::cli;
@@ -39,9 +40,11 @@ private:
   size_t minimum_;
 };
 
+std::string decode_target_description();
+
 struct DecodeBenchmarkFlags {
-  std::shared_ptr<DecodeTargetFlag> target = std::make_shared<DecodeTargetFlag>(cli::FlagInfo{
-      "--target", {"-t"}, "Target: auto, gfx942, gfx950, gfx1200, gfx1201, gfx1250, gfx1251"});
+  std::shared_ptr<DecodeTargetFlag> target = std::make_shared<DecodeTargetFlag>(
+      cli::FlagInfo{"--target", {"-t"}, decode_target_description()});
   std::shared_ptr<DecodeCountFlag> iterations = std::make_shared<DecodeCountFlag>(
       cli::FlagInfo{"--iterations", {"-n"}, "Positive iteration count (default: 1)"}, 1, 1);
   std::shared_ptr<DecodeCountFlag> invalid_limit = std::make_shared<DecodeCountFlag>(

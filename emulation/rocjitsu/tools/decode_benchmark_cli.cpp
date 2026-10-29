@@ -6,6 +6,7 @@
 
 #include <array>
 #include <limits>
+#include <string>
 
 namespace rocjitsu::tools {
 namespace {
@@ -20,6 +21,15 @@ constexpr std::array<NamedChoice<rj_code_target_id_t>, 6> kTargets{{
 }};
 
 } // namespace
+
+std::string decode_target_description() {
+  std::string description = "Target: auto";
+  for (const NamedChoice<rj_code_target_id_t> &target : kTargets) {
+    description += ", ";
+    description += target.first;
+  }
+  return description;
+}
 
 util::Result DecodeTargetFlag::set_value(std::optional<rj_code_target_id_t> value,
                                          util::DiagnosticEmitter diagnostic) {

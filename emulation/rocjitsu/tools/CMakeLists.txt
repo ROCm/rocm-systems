@@ -85,7 +85,6 @@ if(BUILD_TESTING)
                 ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_shared_cli_tools.py
             DESTINATION ${RJ_INSTALL_TEST_DIR}/tools
         )
-        rj_install_test_target(rj_decode_benchmark)
     endif()
     rj_add_test(
         NAME cli.decode_benchmark_process
@@ -134,13 +133,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rj_pretranslate
         PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
     )
-    install(TARGETS rj_pretranslate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    if(RJ_INSTALL_TESTS)
-        rj_install_test_target(rj_dbt_translate)
-    endif()
     rj_add_test(
         NAME cli.tools_process
         COMMAND
