@@ -15,6 +15,7 @@
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "rocjitsu/vm/soc.h"
 #include "simdojo/sim/exec_mode.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -242,8 +243,9 @@ TEST(L2CacheTest, LinkedHierarchyCachesOnlyAccessibleBytesOfIncompleteLines) {
       << "repeated valid accesses should hit the partial line at every cache level";
 
   {
-    auto maintenance = hierarchy.coherence->acquire_cache_maintenance(
-        rocjitsu::amdgpu::DeviceCacheOperation::Invalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        hierarchy.coherence->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::Invalidate);
     ASSERT_TRUE(maintenance.succeeded());
   }
   ASSERT_EQ(hierarchy.l2.read(kValidAddress, reinterpret_cast<uint8_t *>(&observed),
@@ -583,16 +585,18 @@ TEST(DeviceCacheCoherenceTest, MaintenancePreservesWritebackVersusInvalidateSema
 
   l2.writeback_line(kDiscardedAddress, dirty_line.data(), Mtype::RW);
   {
-    auto maintenance = l2.coherence_domain()->acquire_cache_maintenance(
-        rocjitsu::amdgpu::DeviceCacheOperation::Invalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        l2.coherence_domain()->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::Invalidate);
     ASSERT_TRUE(maintenance.succeeded());
   }
   EXPECT_EQ(memory.read8(kDiscardedAddress), 0u);
 
   l2.writeback_line(kPublishedAddress, dirty_line.data(), Mtype::RW);
   {
-    auto maintenance = l2.coherence_domain()->acquire_cache_maintenance(
-        rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        l2.coherence_domain()->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
     ASSERT_TRUE(maintenance.succeeded());
   }
   EXPECT_EQ(memory.read8(kPublishedAddress), 0x5au);
@@ -619,8 +623,9 @@ TEST(DeviceCacheCoherenceTest, MaintenanceRefreshesMemorySideCacheAfterDirectWri
   ASSERT_EQ(cached, kInitial);
 
   {
-    auto maintenance = memory_side_cache.coherence_domain()->acquire_cache_maintenance(
-        rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        memory_side_cache.coherence_domain()->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
     ASSERT_TRUE(maintenance.succeeded());
     memory.write32(kAddress, kReplacement);
   }
@@ -649,8 +654,9 @@ TEST(DeviceCacheCoherenceTest, DomainsAreIsolated) {
   const uint64_t first_epoch = first_domain->current_epoch();
   const uint64_t second_epoch = second_domain->current_epoch();
   {
-    auto maintenance = first_domain->acquire_cache_maintenance(
-        rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        first_domain->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
     ASSERT_TRUE(maintenance.succeeded());
   }
 
@@ -682,8 +688,9 @@ TEST(DeviceCacheCoherenceTest, LegacyMaintenanceDoesNotUseL2RequesterPort) {
   // Maintenance must still publish through its explicit legacy-only backing.
   l2.set_backing_memory(nullptr);
   {
-    auto maintenance = coherence->acquire_cache_maintenance(
-        rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        coherence->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
     ASSERT_TRUE(maintenance.succeeded());
   }
   EXPECT_EQ(memory.read8(kAddress), 0x6bu);
@@ -753,8 +760,19 @@ TEST(DeviceCacheCoherenceTest, WritebackMaintenanceRejectsMissingLegacyBacking) 
   auto coherence = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
   L2Cache l2("l2", coherence);
   util::StringDiagnostic diagnostics;
-  auto maintenance = coherence->acquire_cache_maintenance(
-      rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate, diagnostics.emitter());
+  auto report = [&](std::string_view message) {
+    EXPECT_FALSE(coherence->has_legacy_maintenance_backing());
+    // Reenter maintenance to verify both domain locks have been released.
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> nested =
+        coherence->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    EXPECT_TRUE(nested.failed());
+    diagnostics(message);
+  };
+  util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+      coherence->acquire_cache_maintenance(
+          rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate,
+          util::DiagnosticEmitter(report));
   EXPECT_TRUE(maintenance.failed());
   EXPECT_EQ(diagnostics.message(), "cache hierarchy lacks legacy maintenance backing");
 }
@@ -1043,8 +1061,18 @@ TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes
   ASSERT_EQ(mprotect(second_mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ), 0);
   const uint64_t epoch_before_failure = coherence->current_epoch();
   util::StringDiagnostic diagnostics;
-  auto failed_maintenance = coherence->acquire_cache_maintenance(
-      rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate, diagnostics.emitter());
+  auto report = [&](std::string_view message) {
+    EXPECT_TRUE(coherence->has_legacy_maintenance_backing());
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> nested =
+        coherence->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    EXPECT_TRUE(nested.failed());
+    diagnostics(message);
+  };
+  util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> failed_maintenance =
+      coherence->acquire_cache_maintenance(
+          rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate,
+          util::DiagnosticEmitter(report));
   EXPECT_TRUE(failed_maintenance.failed());
   EXPECT_FALSE(diagnostics.message().empty());
   EXPECT_EQ(coherence->current_epoch(), epoch_before_failure);
@@ -1059,8 +1087,9 @@ TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes
   std::memcpy(first_mapping.data(), &kReplacementFirstValue, sizeof(kReplacementFirstValue));
   ASSERT_EQ(mprotect(second_mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ | PROT_WRITE), 0);
   {
-    auto maintenance = coherence->acquire_cache_maintenance(
-        rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        coherence->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
     ASSERT_TRUE(maintenance.succeeded());
   }
 
@@ -1107,8 +1136,18 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
   ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ), 0);
 
   util::StringDiagnostic diagnostics;
-  auto failed_maintenance = coherence->acquire_cache_maintenance(
-      rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate, diagnostics.emitter());
+  auto report = [&](std::string_view message) {
+    EXPECT_TRUE(coherence->has_legacy_maintenance_backing());
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> nested =
+        coherence->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    EXPECT_TRUE(nested.failed());
+    diagnostics(message);
+  };
+  util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> failed_maintenance =
+      coherence->acquire_cache_maintenance(
+          rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate,
+          util::DiagnosticEmitter(report));
   EXPECT_TRUE(failed_maintenance.failed());
   EXPECT_FALSE(diagnostics.message().empty());
   EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(memory_side_cache,
@@ -1116,8 +1155,9 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
 
   ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ | PROT_WRITE), 0);
   {
-    auto maintenance = coherence->acquire_cache_maintenance(
-        rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        coherence->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
     ASSERT_TRUE(maintenance.succeeded());
   }
   EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(memory_side_cache,
@@ -2203,8 +2243,9 @@ TEST_F(LegacySubPageCacheTest, VectorAccessCachesOnlyAccessibleBytesOfIncomplete
       << "the valid suffix should remain cached after the write-through store";
 
   {
-    auto maintenance = l2_.coherence_domain()->acquire_cache_maintenance(
-        rocjitsu::amdgpu::DeviceCacheOperation::Invalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        l2_.coherence_domain()->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::Invalidate);
     ASSERT_TRUE(maintenance.succeeded());
   }
   ASSERT_EQ(l1.load(addresses, /*lane_mask=*/1, sizeof(uint32_t), kAccessSize / sizeof(uint32_t),
@@ -2255,8 +2296,9 @@ TEST_F(LegacySubPageCacheTest, ScalarAccessCachesOnlyAccessibleBytesOfIncomplete
       << "the valid suffix should remain cached after the write-through store";
 
   {
-    auto maintenance = l2_.coherence_domain()->acquire_cache_maintenance(
-        rocjitsu::amdgpu::DeviceCacheOperation::Invalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        l2_.coherence_domain()->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::Invalidate);
     ASSERT_TRUE(maintenance.succeeded());
   }
   ASSERT_EQ(l1.load(kValidAddress, /*num_dwords=*/1, &observed, kVmid),

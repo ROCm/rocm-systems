@@ -32,7 +32,9 @@ public:
   Iod(std::string name, const Config &config, GpuMemory *memory,
       std::shared_ptr<DeviceCacheCoherence> coherence = std::make_shared<DeviceCacheCoherence>());
 
-  /// @brief Replace the coherence domain; a null domain fails without changing registration.
+  /// @brief Rebind to a device-local coherence domain before use.
+  /// @details A null domain fails without changing registration.
+  /// @param emit_error Destination for failure diagnostics.
   util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
                                     util::DiagnosticEmitter emit_error = {});
   void set_gpu_vm(GpuVm *gpu_vm) {

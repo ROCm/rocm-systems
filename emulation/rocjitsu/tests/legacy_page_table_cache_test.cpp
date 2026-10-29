@@ -5,6 +5,7 @@
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/legacy_address_space.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 

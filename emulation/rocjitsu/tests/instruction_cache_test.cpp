@@ -262,8 +262,9 @@ TEST(InstructionCacheTest, DeviceMaintenanceInvalidatesLazilyOnOwningThread) {
   const uint64_t epoch_before = instruction_cache.coherence_domain()->current_instruction_epoch();
   std::vector<uint8_t> second(InstructionCache::kLineSize, 0x72);
   {
-    auto maintenance = instruction_cache.coherence_domain()->acquire_cache_maintenance(
-        amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        instruction_cache.coherence_domain()->acquire_cache_maintenance(
+            amdgpu::DeviceCacheOperation::WritebackInvalidate);
     ASSERT_TRUE(maintenance.succeeded());
     EXPECT_EQ(instruction_cache.coherence_domain()->current_instruction_epoch(), epoch_before);
     memory.write_block(kCodeBase, std::span<const uint8_t>(second));
@@ -1026,7 +1027,7 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadPreservesCodeCoherence) {
     if (debugger_write) {
       fixture.cu()->set_debug_active(true);
     } else {
-      auto maintenance =
+      util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
           fixture.cu()->instruction_cache().coherence_domain()->acquire_cache_maintenance(
               amdgpu::DeviceCacheOperation::Invalidate);
       ASSERT_TRUE(maintenance.succeeded());
@@ -1133,7 +1134,7 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadSelectsInlineOrAsyncMfma) {
         fixture.cu()->write_vgpr(wf->vgpr_alloc().base + 32 + reg, lane, 0x3c003c00u);
       }
     {
-      auto maintenance =
+      util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
           fixture.cu()->instruction_cache().coherence_domain()->acquire_cache_maintenance(
               amdgpu::DeviceCacheOperation::Invalidate);
       ASSERT_TRUE(maintenance.succeeded());

@@ -117,8 +117,11 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
         std::ranges::any_of(memory_side_caches_, [](const MemorySideCache *cache) {
           return !cache->has_legacy_maintenance_backing();
         });
-    if (missing_l2_backing || missing_memory_side_backing)
+    if (missing_l2_backing || missing_memory_side_backing) {
+      coherence_lock.unlock();
+      atomic_lock.unlock();
       return emit_error.emit() << "cache hierarchy lacks legacy maintenance backing";
+    }
   }
 
   size_t locked_l2_count = 0;
@@ -137,6 +140,8 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
         if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
           release_cache_locks(std::exchange(locked_l2_count, 0),
                               std::exchange(locked_memory_side_count, 0));
+          coherence_lock.unlock();
+          atomic_lock.unlock();
           return emit_error.emit() << "L2 cache maintenance backing write failed";
         }
       }
@@ -152,6 +157,8 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
         if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
           release_cache_locks(std::exchange(locked_l2_count, 0),
                               std::exchange(locked_memory_side_count, 0));
+          coherence_lock.unlock();
+          atomic_lock.unlock();
           return emit_error.emit() << "memory-side cache maintenance backing write failed";
         }
       }

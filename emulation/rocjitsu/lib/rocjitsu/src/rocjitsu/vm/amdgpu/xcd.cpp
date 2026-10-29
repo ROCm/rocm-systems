@@ -98,7 +98,7 @@ void Xcd::adopt_gws_store(std::shared_ptr<GwsDevice> store) {
 
 void Xcd::set_l2_cache(L2Cache *l2) {
   l2_cache_ = l2;
-  if (l2_cache_)
+  if (l2_cache_ && coherence_)
     (void)l2_cache_->set_coherence_domain(coherence_);
 }
 

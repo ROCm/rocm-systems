@@ -9,6 +9,7 @@
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/packet_processor.h"
+#include "util/result.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -91,7 +92,9 @@ public:
   std::function<VmAccessOutcome(uint32_t data)> deliver_interrupt;
   /// The returned lease spans every direct memory effect. It is released when
   /// execution yields and reacquired before the effect resumes.
-  /// Failure stops the packet before its protected effect and holds retirement.
+  /// Failure is terminal and stops before the protected effect. A packet with
+  /// an already committed prefix retires; otherwise retirement is held.
+  /// Either terminal disposition clears the continuation.
   std::function<util::FailureOr<SdmaCacheLease>(SdmaCacheOperation operation)>
       acquire_cache_maintenance;
   std::function<uint64_t()> timestamp;

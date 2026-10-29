@@ -288,6 +288,10 @@ private:
     if (outcome == SdmaPacketExecutionOutcome::Complete) {
       state_->completion_published = true;
       state_->retire_packet = true;
+    } else if (outcome == SdmaPacketExecutionOutcome::CacheMaintenanceFailed &&
+               state_->operation_committed) {
+      // Maintenance failures are terminal too: never replay a committed prefix.
+      state_->retire_packet = true;
     } else if ((outcome == SdmaPacketExecutionOutcome::Faulted ||
                 outcome == SdmaPacketExecutionOutcome::Malformed) &&
                (state_->operation_committed ||
@@ -1086,8 +1090,7 @@ private:
       const std::size_t dwords = operation->dwords;
       const Kind kind = operation->kind;
       const SdmaPacketExecutionOutcome outcome = execute(*operation, frame);
-      if (outcome == SdmaPacketExecutionOutcome::Unavailable ||
-          outcome == SdmaPacketExecutionOutcome::CacheMaintenanceFailed) {
+      if (outcome == SdmaPacketExecutionOutcome::Unavailable) {
         operation->cache_lease.reset();
         return result(outcome);
       }

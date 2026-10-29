@@ -381,11 +381,11 @@ TEST(SdmaPacketProcessorTest, FailedCacheMaintenanceStopsEffectsAndRetirement) {
     EXPECT_FALSE(result.operation_committed);
     EXPECT_FALSE(result.completion_published);
     EXPECT_EQ(fixture.memory->write_calls(kDestination), 0u);
-    EXPECT_TRUE(fixture.continuation.pending());
+    EXPECT_FALSE(fixture.continuation.pending());
   }
 }
 
-TEST(SdmaPacketProcessorTest, FailedCacheReacquisitionPreservesCommittedCopyProgress) {
+TEST(SdmaPacketProcessorTest, FailedCacheReacquisitionRetiresCommittedCopyPrefix) {
   PacketProcessorFixture fixture;
   ASSERT_TRUE(fixture.access);
   constexpr uint64_t kSource = 0x100;
@@ -402,24 +402,22 @@ TEST(SdmaPacketProcessorTest, FailedCacheReacquisitionPreservesCommittedCopyProg
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
   const auto packet = copy_packet(kSource, kDestination, 32);
-  const auto first = processor.process({.available_dwords = packet,
-                                        .access = *fixture.access,
-                                        .continuation = fixture.continuation});
+  const SdmaPacketProcessResult first = processor.process({.available_dwords = packet,
+                                                           .access = *fixture.access,
+                                                           .continuation = fixture.continuation});
   ASSERT_EQ(first.packet.status, PacketProcessStatus::Blocked);
   ASSERT_TRUE(first.operation_committed);
-  const auto failed = processor.process(
+  const SdmaPacketProcessResult failed = processor.process(
       {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
   EXPECT_EQ(failed.packet.status, PacketProcessStatus::Faulted);
-  EXPECT_EQ(failed.packet.retirement, PacketRetirement::Hold);
+  EXPECT_EQ(failed.packet.retirement, PacketRetirement::Retire);
   EXPECT_TRUE(failed.operation_committed);
   EXPECT_FALSE(failed.completion_published);
-  EXPECT_TRUE(fixture.continuation.pending());
-  const auto resumed = processor.process(
-      {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
-  EXPECT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
+  EXPECT_FALSE(fixture.continuation.pending());
   EXPECT_EQ(fixture.memory->write_calls(kDestination), 1u);
   for (uint32_t index = 0; index < 32; ++index)
-    EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + index), static_cast<uint8_t>(index + 1));
+    EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + index),
+              index < 16 ? static_cast<uint8_t>(index + 1) : 0);
 }
 
 TEST(SdmaPacketProcessorTest, CacheLeaseIsReleasedOnUnavailableAndReacquiredOnResume) {

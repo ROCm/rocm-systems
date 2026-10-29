@@ -122,7 +122,8 @@ public:
   void set_gpu_vm(GpuVm *gpu_vm) { gpu_vm_ = gpu_vm; }
 
   /// @brief Rebind this cache to a device-local coherence domain before use.
-  /// @brief Replace the coherence domain; a null domain fails without changing registration.
+  /// @details A null domain fails without changing registration.
+  /// @param emit_error Destination for failure diagnostics.
   util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
                                     util::DiagnosticEmitter emit_error = {});
   const std::shared_ptr<DeviceCacheCoherence> &coherence_domain() const { return coherence_; }

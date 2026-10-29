@@ -55,7 +55,9 @@ public:
   /// @brief Set typed child pointers after the builder populates children.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
   void set_l2_cache(L2Cache *l2);
-  /// @brief Replace the coherence domain; a null domain fails without changing registration.
+  /// @brief Rebind to a device-local coherence domain before use.
+  /// @details A null domain fails without changing registration.
+  /// @param emit_error Destination for failure diagnostics.
   util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
                                     util::DiagnosticEmitter emit_error = {});
   void add_shader_engine(ShaderEngine *se) { shader_engines_.push_back(se); }

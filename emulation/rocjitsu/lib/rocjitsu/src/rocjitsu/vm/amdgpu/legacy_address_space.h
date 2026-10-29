@@ -263,6 +263,7 @@ public:
   /// @param request_mutex Optional lease that stabilizes batched page-table
   ///        lookups. Omitting it disables cross-chunk MTYPE reuse.
   /// @param page_table_cache_state Copied-policy admissions; requires request_mutex.
+  /// @param emit_error Destination for failure diagnostics.
   /// @returns Failure with a diagnostic if a policy cache has no shared request mutex.
   /// A failed registration leaves any existing VMID registration unchanged.
   util::Result
