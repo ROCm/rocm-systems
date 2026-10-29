@@ -50,7 +50,7 @@ for (const range of ['1W', '1M', '3M', 'ALL']) {
     const tooltip = await chart.getByText(/^Commit [a-f0-9]{8}$/).evaluate((heading) => heading.parentElement.innerText);
     expect(tooltip).not.toContain('Attempt:');
     expect(tooltip).not.toContain('Reference:');
-    expect(tooltip).toMatch(/gfx1250 single · [\d.]+× · [\d.]+s · ref [\d.]+s/);
+    expect(tooltip).toMatch(/gfx1250 single · [\d.]+× · (?:\d+m )?\d+\.\d{1,2}s · ref (?:\d+m )?\d+\.\d{1,2}s/);
   });
 }
 
