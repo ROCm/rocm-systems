@@ -772,6 +772,73 @@ TEST(GpuVmPipeline, PrivateAtomicMemviolPrecedesDebuggerTranslationProbe) {
     EXPECT_EQ(context.cu->read_vgpr(vb + 8, lane), 0xdeadbeefu);
 }
 
+TEST(GpuVmPipeline, LdsAlignmentMemviolPrecedesDebuggerTranslationProbe) {
+  for (bool debug : {false, true}) {
+    for (uint32_t width : {4u, 8u}) {
+      for (bool misaligned : {false, true}) {
+        for (bool lds_active : {false, true}) {
+          SCOPED_TRACE(testing::Message()
+                       << "debug=" << debug << " width=" << width << " misaligned=" << misaligned
+                       << " lds_active=" << lds_active);
+          TranslatedPipelineContext context;
+          ASSERT_NO_FATAL_FAILURE(
+              context.initialize(/*legacy_cache_compatible=*/false, /*xcnt_checks=*/true));
+          ASSERT_NE(context.wf, nullptr);
+          constexpr uint64_t code = 0x1000;
+          constexpr uint64_t shared_base = uint64_t{1} << 48;
+          const auto words = cdna5::build_vflat(width == 4 ? cdna5::kFlatAtomicAddU32Vflat
+                                                           : cdna5::kFlatAtomicAddU64Vflat,
+                                                {.saddr = 124, .vdst = 8, .th = 1, .vsrc = 4});
+          context.external->store(code, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+          context.cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+          context.wf->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+          ASSERT_EQ(context.cu->allocate_lds(256), 0u);
+          context.wf->set_lds_base(context.cu->allocate_lds(256));
+          context.wf->set_lds_size(256);
+          for (uint32_t byte = 0; byte < 32; ++byte)
+            context.wf->lds().write8(context.wf->lds_base() + byte, 0x5a);
+          context.wf->set_exec(lds_active ? 3 : 1);
+          context.wf->pc = code;
+          const uint32_t vb = context.wf->vgpr_alloc().base;
+          for (uint32_t lane = 0; lane < 2; ++lane) {
+            const uint64_t address = lane == 0 ? 0x20000 : shared_base + (misaligned ? 6 : 16);
+            context.cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
+            context.cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+            context.cu->write_vgpr(vb + 4, lane, 1);
+            context.cu->write_vgpr(vb + 5, lane, 0);
+            context.cu->write_vgpr(vb + 8, lane, 0xdeadbeef);
+          }
+          context.cu->set_debug_active(debug);
+          const bool aperture = misaligned && lds_active;
+          uint32_t faults = 0;
+          context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &wave, uint64_t, bool,
+                                                       uint64_t issue_pc,
+                                                       amdgpu::VmAccessOutcome outcome) {
+            ++faults;
+            EXPECT_EQ(outcome, aperture ? amdgpu::VmAccessOutcome::ApertureViolation
+                                        : amdgpu::VmAccessOutcome::Faulted);
+            EXPECT_EQ(issue_pc, code);
+            EXPECT_EQ(wave.pc, code + sizeof(words));
+            wave.set_fatal_exception_pending(true);
+            wave.set_debug_suspended(true);
+            return true;
+          });
+          context.cu->step();
+          EXPECT_EQ(faults, 1u);
+          EXPECT_EQ(context.reported_faults.size(), aperture || debug ? 0u : 1u);
+          for (uint32_t byte = 0; byte < 32; ++byte)
+            EXPECT_EQ(context.wf->lds().read8(context.wf->lds_base() + byte), 0x5a);
+          EXPECT_TRUE(context.wf->wait_counters().empty());
+          EXPECT_EQ(context.external->write_calls, 0u);
+          EXPECT_EQ(context.external->atomic_load_calls, 0u);
+          for (uint32_t lane = 0; lane < 2; ++lane)
+            EXPECT_EQ(context.cu->read_vgpr(vb + 8, lane), 0xdeadbeefu);
+        }
+      }
+    }
+  }
+}
+
 TEST(GpuVmPipeline, ScratchWithoutBackingIsATerminalFault) {
   for (const auto kind :
        {amdgpu::VmAccessKind::Read, amdgpu::VmAccessKind::Write, amdgpu::VmAccessKind::Atomic}) {
@@ -783,8 +850,9 @@ TEST(GpuVmPipeline, ScratchWithoutBackingIsATerminalFault) {
       ASSERT_TRUE(context.address_space);
       ASSERT_NE(context.wf, nullptr);
       ASSERT_EQ(context.wf->scratch_base(), 0u);
-      if (retired)
+      if (retired) {
         ASSERT_TRUE(context.sim.soc->gpu_vm().unregister_address_space(context.address_space));
+      }
       auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
       state->elem_size = sizeof(uint32_t);
       state->num_elems = 1;

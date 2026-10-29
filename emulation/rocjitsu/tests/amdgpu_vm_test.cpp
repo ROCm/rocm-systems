@@ -6749,9 +6749,10 @@ TEST(CommandProcessorAqlTest, MisalignedScalarAtomicPublishesApertureViolation) 
 
     ASSERT_NO_THROW(f.engine->run());
     EXPECT_EQ(f.engine->last_exit().code, test.deliver ? 0 : 1);
-    if (!test.deliver)
+    if (!test.deliver) {
       EXPECT_NE(f.engine->last_exit().message.find("Failed to deliver queue exception"),
                 std::string::npos);
+    }
     EXPECT_FALSE(f.cu()->has_active_wfs());
     EXPECT_EQ(completion_signal_value(f.mem(), kSignal), misaligned ? 1 : 0);
     EXPECT_EQ(f.cp()->queue_faulted_for_test(1, 0), misaligned);

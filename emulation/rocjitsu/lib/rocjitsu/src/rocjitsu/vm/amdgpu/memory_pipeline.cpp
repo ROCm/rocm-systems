@@ -1276,11 +1276,21 @@ void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 
   }
 }
 
+bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t request_lanes) {
+  if (!(inst.data_as<VectorMemState>()->flat_dds_lane_mask & request_lanes))
+    return false;
+  util::Logger::warn("unsupported FLAT DDS execution: ", inst.mnemonic(),
+                     " pc=", std::format("{:#x}", wf.pc), ": CDNA5 DDS backing is not implemented");
+  return true;
+}
+
+} // namespace
+
 // RDNA3/3.5 section 12.7, RDNA4 section 3.3.5.1 and CDNA5 section 3.3.4.1
 // require payload-aligned LDS atomics. Validate every requesting LDS lane
 // before a mixed FLAT instruction can commit global or LDS side effects.
-bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf,
-                                   uint64_t lds_lanes) {
+bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf, uint64_t lds_lanes,
+                                   uint64_t address_bias) {
   if (d.atomic_op == AtomicOp::NONE || d.elem_size <= 1)
     return false;
   switch (wf.cu().arch()) {
@@ -1294,22 +1304,12 @@ bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf,
   }
   const auto misaligned = [&](const std::array<uint64_t, 64> &addresses) {
     for (uint64_t lanes = lds_lanes; lanes; lanes &= lanes - 1)
-      if (addresses[std::countr_zero(lanes)] % d.elem_size != 0)
+      if ((addresses[std::countr_zero(lanes)] + address_bias) % d.elem_size != 0)
         return true;
     return false;
   };
   return misaligned(d.per_lane_addr) || (d.ds2_active && misaligned(d.ds2_per_lane_addr));
 }
-
-bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t request_lanes) {
-  if (!(inst.data_as<VectorMemState>()->flat_dds_lane_mask & request_lanes))
-    return false;
-  util::Logger::warn("unsupported FLAT DDS execution: ", inst.mnemonic(),
-                     " pc=", std::format("{:#x}", wf.pc), ": CDNA5 DDS backing is not implemented");
-  return true;
-}
-
-} // namespace
 
 VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();

@@ -990,6 +990,36 @@ void ComputeUnitCore::tick_pipelines() {
     tensor_dma_pipeline_.tick();
 }
 
+namespace {
+struct FlatSharedLanes {
+  uint64_t local = 0;
+  uint64_t dds = 0;
+};
+
+FlatSharedLanes classify_flat_shared_lanes(const VectorMemState &d, const Wavefront &wf,
+                                           uint64_t shared_base, uint64_t shared_limit) {
+  FlatSharedLanes result;
+  if (shared_base == 0)
+    return result;
+  const uint32_t wf_size = wf.wf_size();
+  const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask : 0;
+  for (uint32_t lane = 0; lane < wf_size; ++lane) {
+    const uint64_t lane_bit = uint64_t{1} << lane;
+    if ((d.lane_mask & ~scratch_lanes & lane_bit) != 0) {
+      const uint64_t address = d.per_lane_addr[lane];
+      if (address >= shared_base && address <= shared_limit) {
+        if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
+            ((address - shared_base) & (uint64_t{1} << 31)) != 0)
+          result.dds |= lane_bit;
+        else
+          result.local |= lane_bit;
+      }
+    }
+  }
+  return result;
+}
+} // namespace
+
 VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   if (observes_memory_instruction_routing_)
     plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
@@ -1008,20 +1038,10 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     // is set by whoever built the state, and the DS paths leave it at its
     // default until the local pipeline backfills it -- which is after this.
     const uint32_t wf_size = wf.wf_size();
-    const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask : 0;
-    for (uint32_t lane = 0; lane < wf_size; ++lane) {
-      const uint64_t lane_bit = uint64_t{1} << lane;
-      if ((d.lane_mask & ~scratch_lanes & lane_bit) != 0) {
-        const uint64_t address = d.per_lane_addr[lane];
-        if (address >= shared_aperture_base_ && address <= shared_aperture_limit_) {
-          if (arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
-              ((address - shared_aperture_base_) & (uint64_t{1} << 31)) != 0)
-            flat_dds_lane_mask |= lane_bit;
-          else
-            flat_local_lane_mask |= lane_bit;
-        }
-      }
-    }
+    const auto shared_lanes =
+        classify_flat_shared_lanes(d, wf, shared_aperture_base_, shared_aperture_limit_);
+    flat_local_lane_mask = shared_lanes.local;
+    flat_dds_lane_mask = shared_lanes.dds;
     // Normalize shared addresses once for both routes. The global operation
     // excludes those lanes, and retries reuse this state without rerouting.
     const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
@@ -2308,7 +2328,17 @@ template <bool EnableAsync>
       // atomic whose decoder left elem_size unset would fault on every lane of
       // a perfectly mapped buffer.
       dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_elems * d.elem_size);
-      if ((d.memviol_lane_mask & transpose_request_lane_mask(d, active->wf_size())) == 0) {
+      const uint64_t request_lanes = transpose_request_lane_mask(d, active->wf_size());
+      const auto shared_lanes = inst->mnemonic().starts_with("flat_")
+                                    ? classify_flat_shared_lanes(d, *active, shared_aperture_base_,
+                                                                 shared_aperture_limit_)
+                                    : FlatSharedLanes{};
+      const uint64_t lds_lanes = shared_lanes.local & request_lanes;
+      // Routing subtracts the aperture base and adds the workgroup base.
+      // RDNA4's 17-bit wrapping preserves payload alignment for LDS atomics.
+      const uint64_t lds_bias = active->lds_base() - shared_aperture_base_;
+      if ((d.memviol_lane_mask & request_lanes) == 0 &&
+          !rejects_misaligned_lds_atomic(d, *active, lds_lanes, lds_bias)) {
         dbg_addrs.reserve(d.wf_size);
         for (uint32_t lane = 0; lane < d.wf_size; ++lane)
           if (d.lane_mask & (1ULL << lane))

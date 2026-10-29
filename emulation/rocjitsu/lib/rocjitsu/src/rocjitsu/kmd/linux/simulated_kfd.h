@@ -39,7 +39,7 @@ namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
 enum class VmAccessOutcome : uint8_t;
-}
+} // namespace amdgpu
 
 namespace kmd {
 struct CwsrWaveState;

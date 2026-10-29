@@ -28,6 +28,11 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
+/// Check requesting LDS lanes before memory access or debugger translation probes.
+/// address_bias normalizes pre-routing FLAT addresses to workgroup LDS addresses.
+bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf, uint64_t lds_lanes,
+                                   uint64_t address_bias = 0);
+
 enum class [[nodiscard]] MemoryAccessCompletion {
   Complete,
   Deferred,
