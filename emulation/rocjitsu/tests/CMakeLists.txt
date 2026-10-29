@@ -4475,11 +4475,23 @@ else()
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    rj_add_test(
-        NAME KfdIoctlTest.token
-        COMMAND $<TARGET_FILE:rocjitsu_tests> --gtest_filter=KfdIoctlTest.*
-        ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
-        INSTALL_COMMAND bin/rocjitsu_tests --gtest_filter=KfdIoctlTest.*
-        INSTALL_ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
+    gtest_discover_tests(
+        rocjitsu_tests
+        TEST_FILTER "KfdIoctlTest.*"
+        TEST_SUFFIX .token
+        TEST_LIST rocjitsu_token_tests
+        PROPERTIES ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
     )
+    if(RJ_INSTALL_TESTS)
+        rj_install_gtest_cases(
+            rocjitsu_tests
+            TEST_FILTER "KfdIoctlTest.*"
+            TEST_SUFFIX .token
+            ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
+        )
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"rocjitsu_tests.token.cmake\")\n"
+        )
+    endif()
 endif()
