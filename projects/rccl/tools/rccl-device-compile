@@ -20,6 +20,11 @@ Link mode (--link):
     5. Optionally compiles --rocshmem-bitcode=<path>.bc to a device object
     6. Links all objects + dispatcher (+ optional rocSHMEM object) into device.elf via ld.lld
 
+Device address sanitizer:
+    --dasan-tu-rt=<bc> compiles through bitcode (see ir_codegen_cmd).
+    --derive-dasan-tu-rt=<archive> -o <bc> writes that bitcode.
+    --ir-codegen runs only the codegen step.
+
 Target selection (--arch / --target-id):
     --arch is the bare processor name (gfx942); --target-id is the full target
     ID (gfx942:xnack+) and defaults to --arch.
@@ -536,9 +541,9 @@ def do_compile(args, forwarded_flags):
 
     try:
         # Step 1: Compile to assembly
-        compile_cmd = device_compile_cmd(clang, target_id, forwarded_flags,
-                                             asm_file, source)
-        run(compile_cmd, f"compile {os.path.basename(source)}")
+        compile_device_asm(clang, target_id, forwarded_flags, asm_file, source,
+                           getattr(args, 'dasan_tu_rt', None),
+                           f"compile {os.path.basename(source)}")
 
         # Step 2: Extract device function (inline)
         with open(asm_file) as f:
@@ -571,13 +576,16 @@ def do_compile(args, forwarded_flags):
 # Link mode: objects -> device.elf
 # ---------------------------------------------------------------------------
 
-def device_compile_cmd(clang, target_id, forwarded_flags, asm_out, source):
+def device_compile_cmd(clang, target_id, forwarded_flags, asm_out, source,
+                       emit_llvm=False):
     """Device-only compile to assembly, for the dispatcher and each kernel.
 
     -gline-tables-only is placed before forwarded_flags. Clang takes the last
     debug-info option, so coverage's -g0 in DL_OPT_FLAGS still wins (see the
     ENABLE_FULL_COVERAGE branch of DL_OPT_FLAGS in cmake/DeviceLinker.cmake)
     while Release (bare -O3) keeps line tables.
+
+    emit_llvm writes optimized bitcode instead, for ir_codegen_cmd.
     """
     return [
         clang,
@@ -586,12 +594,103 @@ def device_compile_cmd(clang, target_id, forwarded_flags, asm_out, source):
         f'--offload-arch={target_id}',
         '-gline-tables-only',
         '-w',
-    ] + list(forwarded_flags) + [
-        '-S', '-o', asm_out, source,
+    ] + list(forwarded_flags) + (
+        ['-c', '-emit-llvm'] if emit_llvm else ['-S']
+    ) + [
+        '-o', asm_out, source,
     ]
 
 
-def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
+def _codegen_flags(forwarded_flags):
+    """The forwarded flags codegen of optimized bitcode still reads."""
+    out = []
+    it = iter(forwarded_flags)
+    for flag in it:
+        if flag.startswith('-O'):
+            out.append(flag)
+        elif flag == '-mllvm':
+            out.extend([flag, next(it, '')])
+    return out
+
+
+def ir_codegen_cmd(clang, target_id, forwarded_flags, out, bitcode, dasan_tu_rt,
+                   emit='-S'):
+    """Codegen of optimized device bitcode with the DASAN runtime linked in.
+
+    Register and scratch usage are only known for callees in the module, and
+    the report calls only exist after optimization.
+    """
+    return [
+        clang,
+        '-target', 'amdgcn-amd-amdhsa',
+        f'-mcpu={target_id}',
+        '-x', 'ir',
+        '-w',
+    ] + _codegen_flags(forwarded_flags) + [
+        '-Xclang', '-disable-llvm-passes',
+        '-Xclang', '-mlink-builtin-bitcode', '-Xclang', dasan_tu_rt,
+        emit, '-o', out, bitcode,
+    ]
+
+
+def compile_device_asm(clang, target_id, forwarded_flags, asm_out, source,
+                       dasan_tu_rt, description):
+    """device_compile_cmd, through bitcode and ir_codegen_cmd under DASAN."""
+    if not dasan_tu_rt:
+        run(device_compile_cmd(clang, target_id, forwarded_flags, asm_out,
+                               source), description)
+        return
+    bitcode = os.path.splitext(asm_out)[0] + '.bc'
+    run(device_compile_cmd(clang, target_id, forwarded_flags, bitcode, source,
+                           emit_llvm=True), description)
+    run(ir_codegen_cmd(clang, target_id, forwarded_flags, asm_out, bitcode,
+                       dasan_tu_rt), f"{description} (codegen)")
+
+
+# __llvm_rpc_client is the device half of the report channel. The host finds it
+# by name in the loaded image, so exactly one exported definition may exist.
+_RPC_CLIENT_DEF_RE = re.compile(
+    r'^(@__llvm_rpc_client = )weak (protected addrspace\(\d+\) global \S+) '
+    r'zeroinitializer(, align \d+)', re.M)
+_GLOBAL_DEF_RE = re.compile(
+    r'^@(\S+) = (?!internal |private |external )[^\n]*?\b(global|constant)\b', re.M)
+
+
+def derive_dasan_tu_rt(clang, archive, output):
+    """Write the device DASAN runtime as bitcode to link into every TU, with
+    __llvm_rpc_client declared; --dasan-rt defines it at the device link."""
+    compiler_dir = os.path.dirname(os.path.realpath(clang))
+    llvm_bins = [compiler_dir, os.path.join(compiler_dir, '..', 'lib', 'llvm', 'bin')]
+    tools = {}
+    for name in ('llvm-ar', 'llvm-dis', 'llvm-as'):
+        found = [os.path.join(d, name) for d in llvm_bins
+                 if os.access(os.path.join(d, name), os.X_OK)]
+        if not found:
+            raise SystemExit(f"ERROR: {name} not found next to {clang}")
+        tools[name] = found[0]
+
+    members = subprocess.check_output(
+        [tools['llvm-ar'], 't', archive], text=True).split()
+    if len(members) != 1:
+        raise SystemExit(f"ERROR: expected one member in {archive}, found {members}")
+    bitcode = subprocess.check_output([tools['llvm-ar'], 'p', archive, members[0]])
+    ir = subprocess.run([tools['llvm-dis'], '-', '-o', '-'], input=bitcode,
+                        stdout=subprocess.PIPE, check=True).stdout.decode()
+
+    ir, n = _RPC_CLIENT_DEF_RE.subn(r'\1external \2\3', ir)
+    if n != 1:
+        raise SystemExit(f"ERROR: no __llvm_rpc_client definition in {archive}")
+    others = [m.group(1) for m in _GLOBAL_DEF_RE.finditer(ir)]
+    if others:
+        raise SystemExit(
+            f"ERROR: {archive} defines non-internal globals {others}; a copy in "
+            f"every TU would not be shared")
+
+    subprocess.run([tools['llvm-as'], '-', '-o', output], input=ir.encode(),
+                   check=True)
+
+
+def build_link_cmd(lld, output, rsp_path, arch, profile_rt, dasan_rt=None):
     """Assemble the ld.lld argv for the per-arch device.elf link.
 
     When a device profile-runtime archive is given (ENABLE_FULL_COVERAGE), it
@@ -608,14 +707,21 @@ def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
     hand-invoked; fail loudly instead of falling through to a link that leaves
     __llvm_profile_runtime / __start___llvm_prf_* unresolved as an opaque lld
     dump.
+
+    The DASAN runtime (--dasan-rt) is linked as clang links it: whole-archive,
+    with symbols exported for the host runtime.
     """
     link_cmd = [lld, '-shared', '-o', output, f'@{rsp_path}']
+    for flag, rt in (('--profile-rt', profile_rt), ('--dasan-rt', dasan_rt)):
+        if rt and not os.path.exists(rt):
+            raise SystemExit(f"ERROR: {flag}={rt} not found for {arch}")
+    if profile_rt or dasan_rt:
+        link_cmd.append(f'--plugin-opt=mcpu={arch}')
     if profile_rt:
-        if not os.path.exists(profile_rt):
-            raise SystemExit(
-                f"ERROR: --profile-rt={profile_rt} not found; cannot resolve "
-                f"the device profile runtime for {arch}")
-        link_cmd.extend([f'--plugin-opt=mcpu={arch}', profile_rt])
+        link_cmd.append(profile_rt)
+    if dasan_rt:
+        link_cmd.extend(['--whole-archive', dasan_rt, '--no-whole-archive',
+                         '--export-dynamic'])
     return link_cmd
 
 
@@ -629,6 +735,7 @@ def do_link(args, forwarded_flags):
     keep_temps = args.keep_temps
     rocshmem_bitcode = getattr(args, 'rocshmem_bitcode', None)
     profile_rt = getattr(args, 'profile_rt', None)
+    dasan_rt = getattr(args, 'dasan_rt', None)
 
     if not dispatcher:
         raise SystemExit("ERROR: --link requires --dispatcher=<source>")
@@ -667,9 +774,9 @@ def do_link(args, forwarded_flags):
 
     try:
         # Step 2: Compile dispatcher to assembly.
-        disp_compile_cmd = device_compile_cmd(
-            clang, target_id, forwarded_flags, disp_asm, dispatcher)
-        run(disp_compile_cmd, f"compile dispatcher for {arch}")
+        compile_device_asm(clang, target_id, forwarded_flags, disp_asm,
+                           dispatcher, getattr(args, 'dasan_tu_rt', None),
+                           f"compile dispatcher for {arch}")
 
         # Step 3: Patch dispatcher with aggregated resources
         with open(disp_asm) as f:
@@ -718,7 +825,8 @@ def do_link(args, forwarded_flags):
         # from the per-arch libclang_rt.profile.a (see build_link_cmd for the
         # --plugin-opt=mcpu rationale). lld pulls in only the members referenced
         # by the instrumented TUs; host-only members stay unreferenced.
-        link_cmd = build_link_cmd(lld, output, rsp_path, arch, profile_rt)
+        link_cmd = build_link_cmd(lld, output, rsp_path, arch, profile_rt,
+                                  dasan_rt)
         run(link_cmd, f"link device.elf for {arch}")
 
     finally:
@@ -771,6 +879,14 @@ def parse_compiler_flags(argv):
         elif arg == '--profile-rt' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
+        elif arg.startswith(('--dasan-rt=', '--dasan-tu-rt=', '--derive-dasan-tu-rt=')):
+            our_args.append(arg)
+        elif (arg in ('--dasan-rt', '--dasan-tu-rt', '--derive-dasan-tu-rt')
+              and i + 1 < len(argv)):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
+        elif arg == '--ir-codegen':
+            our_args.append(arg)
         elif arg == '-o' and i + 1 < len(argv):
             our_args.extend(['-o', argv[i + 1]])
             i += 1
@@ -829,6 +945,10 @@ def main():
     parser.add_argument('--dispatcher', default=None)
     parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
     parser.add_argument('--profile-rt', default=None, dest='profile_rt')
+    parser.add_argument('--dasan-rt', default=None, dest='dasan_rt')
+    parser.add_argument('--dasan-tu-rt', default=None, dest='dasan_tu_rt')
+    parser.add_argument('--derive-dasan-tu-rt', default=None, dest='derive_dasan_tu_rt')
+    parser.add_argument('--ir-codegen', action='store_true', dest='ir_codegen')
     parser.add_argument('-o', '--output', required=False)
     parser.add_argument('--keep-temps', action='store_true')
     parser.add_argument('--version', action='store_true')
@@ -867,6 +987,24 @@ def main():
             raise SystemExit("ERROR: --link requires -o <output>")
         args.objects = positional
         do_link(args, forwarded_flags)
+
+    elif args.derive_dasan_tu_rt:
+        if not args.output:
+            raise SystemExit("ERROR: --derive-dasan-tu-rt requires -o <output>")
+        clang, _ = discover_tools(args.clang)
+        derive_dasan_tu_rt(clang, args.derive_dasan_tu_rt, args.output)
+
+    elif args.ir_codegen:
+        if len(positional) != 1 or not args.output or not args.target_id:
+            raise SystemExit(
+                "ERROR: --ir-codegen requires --arch=<target>, -o <output> and "
+                "one bitcode input")
+        if not args.dasan_tu_rt:
+            raise SystemExit("ERROR: --ir-codegen requires --dasan-tu-rt=<bitcode>")
+        clang, _ = discover_tools(args.clang)
+        run(ir_codegen_cmd(clang, args.target_id, forwarded_flags, args.output,
+                           positional[0], args.dasan_tu_rt, emit='-c'),
+            f"codegen {os.path.basename(positional[0])}")
 
     else:
         raise SystemExit("ERROR: specify --compile or --link mode")
