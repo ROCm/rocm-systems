@@ -1036,4 +1036,31 @@ TEST_F(PluginNetGdrMicrotestIsolated, AGetPropertiesFailureIsRetried) {
   });
 }
 
+// ROCM-27737. The verdict is read off the communicator's own net, and the Socket plugin reports
+// NCCL_PTR_CUDA on no device. Keyed on the GPU alone, a Socket communicator's "no" answered for
+// every later IB communicator in the process, and the IB net was never probed at all: the GDR
+// path went quiet with nothing in the log to say why. Both GDR tests above use one plugin index,
+// so they pass either way -- this is the case the per-plugin key exists for.
+TEST_F(PluginNetGdrMicrotestIsolated, ASocketVerdictDoesNotAnswerForIb) {
+  RUN_ISOLATED_TEST("PluginNetGdr_ASocketVerdictDoesNotAnswerForIb", [this]() {
+    ncclNet_t socketNet = FakeNet<kSocket>::Make("Socket");
+    g_net[kSocket].ndev = 2;  // cudaDevMask stays 0: Socket offers NCCL_PTR_CUDA nowhere
+    g_net[kIb].ndev = 2;
+    g_net[kIb].cudaDevMask = 0b1;
+
+    int gdr = -1;
+    comm_->ncclNet = &socketNet;
+    comm_->netPluginIndex = 1;
+    ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
+    EXPECT_EQ(gdr, 0);
+
+    // Same process, same GPU, different plugin -- what ncclCommSplit on a Socket parent produces.
+    comm_->ncclNet = &net_;
+    comm_->netPluginIndex = 0;
+    ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
+    EXPECT_EQ(gdr, 1);
+    EXPECT_EQ(g_net[kIb].devicesCalls, 1) << "IB was answered from Socket's slot, not probed";
+  });
+}
+
 }  // namespace
