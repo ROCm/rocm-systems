@@ -725,6 +725,10 @@ public:
   /// @details A retired snapshot returns Revoked without notifying its former owner.
   [[nodiscard]] VmAccessOutcome report_translation_fault(uint64_t address,
                                                          VmAccessKind access) const;
+  /// @brief Whether this binding has a VM fault reporter.
+  /// @details Without one, a terminal fault reaches no runtime event, so its
+  /// issuer must notify the queue owner directly.
+  [[nodiscard]] bool reports_faults() const;
 
 private:
   friend class GpuVm;

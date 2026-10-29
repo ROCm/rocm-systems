@@ -1289,9 +1289,10 @@ void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 
 
 // Admission rejects DDS without logging so the debugger preflight stays silent;
 // the pipeline that raises the outcome reports it once.
-VmAccessOutcome warn_unsupported_flat_dds(const Instruction &inst, const Wavefront &wf) {
+VmAccessOutcome warn_unsupported_flat_dds(const Instruction &inst, Wavefront &wf) {
   util::Logger::warn("unsupported FLAT DDS execution: ", inst.mnemonic(),
                      " pc=", std::format("{:#x}", wf.pc), ": CDNA5 DDS backing is not implemented");
+  wf.set_memory_failure_cause("CDNA5 FLAT DDS backing is not implemented");
   return VmAccessOutcome::Unsupported;
 }
 
@@ -1436,7 +1437,11 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
     }
   }
   if (d.requires_scratch_backing && swizzled_lanes != 0 && wf.scratch_base() == 0) {
-    // ROCr needs the VM fault event as well as the queue's memory-violation status.
+    // CDNA5 SCRATCH performs no aperture check (section 10.1.3), so this is a
+    // fault on the unbacked address, not an aperture violation. ROCr needs the
+    // VM fault event as well as the queue's memory-violation status; without a
+    // reporter (physical memory) the compute unit aborts the queue instead.
+    wf.set_memory_failure_cause("private access without scratch backing");
     if (d.translated.access) {
       const VmAccessKind kind = d.atomic_op != AtomicOp::NONE ? VmAccessKind::Atomic
                                 : d.is_load                   ? VmAccessKind::Read
@@ -1450,8 +1455,12 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
       d.translated.access && !d.translated.access->info().legacy_cache_compatible;
 
   if (d.atomic_op != AtomicOp::NONE) {
-    if (translated_address_space)
-      return execute_translated_atomic_rmw(d, request_lanes);
+    if (translated_address_space) {
+      const VmAccessOutcome outcome = execute_translated_atomic_rmw(d, request_lanes);
+      if (outcome == VmAccessOutcome::Unsupported)
+        wf.set_memory_failure_cause("translated append, consume or barrier-arrive atomic");
+      return outcome;
+    }
     return execute_atomic_rmw(d, l2_, wf.process_id(), request_lanes);
   }
 

@@ -520,6 +520,10 @@ VmAccessOutcome GpuVmAccess::report_translation_fault(uint64_t address, VmAccess
   return VmAccessOutcome::Faulted;
 }
 
+bool GpuVmAccess::reports_faults() const {
+  return access_state_ && access_state_->fault_reporter && *access_state_->fault_reporter;
+}
+
 void GpuVmAccess::report_terminal_fault(uint64_t address, VmAccessKind access,
                                         VmAccessOutcome outcome) const {
   if (access_state_ && access_state_->fault_reporter && *access_state_->fault_reporter &&

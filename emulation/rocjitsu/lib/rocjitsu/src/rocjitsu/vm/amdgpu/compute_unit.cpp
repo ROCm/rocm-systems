@@ -496,6 +496,8 @@ void ComputeUnitCore::flush_cp_notifications() {
 void ComputeUnitCore::handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome,
                                                    uint64_t issue_pc) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  // Consume the pipeline's cause now so a claimed fault cannot leave it behind.
+  const char *cause = wf.take_memory_failure_cause();
   if (wf.fail_pm4_submission()) {
     abort_dispatch(wf.dispatch_id());
     return;
@@ -507,16 +509,26 @@ void ComputeUnitCore::handle_memory_access_failure(Wavefront &wf, VmAccessOutcom
   if (architectural && memory_violation_handler_ &&
       memory_violation_handler_(wf, 0, false, issue_pc, outcome))
     return;
-  handle_terminal_vm_fault(wf, outcome);
+  handle_terminal_vm_fault(wf, outcome, issue_pc, cause);
 }
 
-void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome) {
+void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome,
+                                               uint64_t issue_pc, const char *cause) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  if (cause == nullptr)
+    cause = wf.take_memory_failure_cause();
+  // A data instruction's wf.pc has already advanced to the resume PC; report
+  // the instruction that failed.
+  const auto warn = [&](std::string_view what) {
+    util::Logger::warn(what, ": process=", wf.process_id(), " queue=", wf.queue_id(),
+                       " dispatch=", wf.dispatch_id(), " cu=", name(), " wave=", wf.wf_id(),
+                       " pc=", std::format("{:#x}", issue_pc));
+  };
   if (outcome == VmAccessOutcome::Unsupported) {
-    util::Logger::warn("unsupported memory access: process=", wf.process_id(),
-                       " queue=", wf.queue_id(), " dispatch=", wf.dispatch_id(), " cu=", name(),
-                       " wave=", wf.wf_id(), " pc=", std::format("{:#x}", wf.pc));
-    fail_wave_execution(wf, "unsupported memory access");
+    const std::string reason = cause ? std::format("unsupported memory access: {}", cause)
+                                     : std::string("unsupported memory access");
+    warn(reason);
+    fail_wave_execution(wf, reason);
     return;
   }
   if (wf.fail_pm4_submission()) {
@@ -527,20 +539,32 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
                                 .process_id = wf.process_id(),
                                 .dispatch_id = wf.dispatch_id(),
                                 .outcome = outcome});
-  if (outcome == VmAccessOutcome::Revoked) {
-    // Fetch revocation is recovered before reaching this terminal path. An
-    // in-flight data access cannot be replayed safely. Notify the live queue
-    // owner after dropping the wave-state lock, rather than invoking a fault
-    // reporter retained by the revoked snapshot. The dispatch still aborts
-    // without publishing a successful completion.
-    defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueMemoryViolation,
-                          /*clear_debug_stop_on_success=*/false,
-                          /*retain_failure_for_debugger=*/false);
-  } else if (outcome == VmAccessOutcome::ApertureViolation) {
+  // The address space's VM fault reporter publishes Faulted and Malformed
+  // accesses to the runtime. Physical memory and bindings registered without
+  // a reporter (internal VMID 0 queues) never told anyone.
+  bool vm_reported = false;
+  if (outcome == VmAccessOutcome::Faulted || outcome == VmAccessOutcome::Malformed) {
+    const std::optional<GpuVmAccess> access = wf.snapshot_vm_access();
+    vm_reported = access && access->reports_faults();
+  }
+  if (outcome == VmAccessOutcome::ApertureViolation) {
     // No runtime owner claimed the wave and no VM fault reporter saw the
     // access. ROCr waits for a VM fault event before acting on a memory
     // violation, so only the aperture status terminates the queue.
     defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueApertureViolation,
+                          /*clear_debug_stop_on_success=*/false,
+                          /*retain_failure_for_debugger=*/false,
+                          QueueExceptionDeliveryPolicy::PublishOrFail);
+  } else if (!vm_reported) {
+    // A revoked snapshot's reporter must not run, and physical memory has
+    // none. A memory-violation status would make ROCr wait for a VM fault
+    // event that never arrives, so abort the queue directly. An in-flight
+    // data access cannot be replayed safely after revocation. Failing to
+    // publish to a live owner fails the engine rather than stranding it.
+    warn(cause                                 ? cause
+         : outcome == VmAccessOutcome::Revoked ? "VM access revoked during execution"
+                                               : "memory fault without a VM fault reporter");
+    defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueWaveAbort,
                           /*clear_debug_stop_on_success=*/false,
                           /*retain_failure_for_debugger=*/false,
                           QueueExceptionDeliveryPolicy::PublishOrFail);
@@ -1888,7 +1912,8 @@ template <bool EnableAsync>
       drain_async_window();
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(MissingGpuVm) pc=0x",
                        std::hex, active->pc, std::dec, " vmid=", vmid);
-      handle_terminal_vm_fault(*active, VmAccessOutcome::Unsupported);
+      handle_terminal_vm_fault(*active, VmAccessOutcome::Unsupported, active->pc,
+                               "translated wave has no GPU VM");
       return;
     }
     if (vm_access == nullptr) {
@@ -1917,7 +1942,8 @@ template <bool EnableAsync>
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
                        " HALT(StaleAddressSpace) pc=0x", std::hex, active->pc, std::dec,
                        " vmid=", vmid);
-      handle_terminal_vm_fault(*active, VmAccessOutcome::Revoked);
+      handle_terminal_vm_fault(*active, VmAccessOutcome::Revoked, active->pc,
+                               "address space was revoked before fetch");
       return;
     }
   }
@@ -1972,7 +1998,7 @@ template <bool EnableAsync>
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
                      " HALT(InstructionVmAccess) pc=0x", std::hex, active->pc, std::dec,
                      " vmid=", vmid, " outcome=", static_cast<unsigned>(fetch_outcome));
-    handle_terminal_vm_fault(*active, fetch_outcome);
+    handle_terminal_vm_fault(*active, fetch_outcome, active->pc);
     return;
   }
 

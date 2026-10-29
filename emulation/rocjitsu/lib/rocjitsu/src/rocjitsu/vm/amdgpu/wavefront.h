@@ -24,6 +24,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -892,6 +893,15 @@ public:
   bool fatal_exception_cwsr_valid() const { return fatal_exception_cwsr_valid_; }
   void set_fatal_exception_cwsr_valid(bool valid) { fatal_exception_cwsr_valid_ = valid; }
 
+  /// @brief Record why a memory pipeline failed this wave's access.
+  /// @details A pipeline names the missing capability behind Unsupported, or a
+  /// fault no VM reporter covers. The compute unit's terminal handler consumes
+  /// it so the warning and any engine failure reason state the real cause.
+  /// @param cause Static string; null clears it.
+  void set_memory_failure_cause(const char *cause) { memory_failure_cause_ = cause; }
+  /// @brief Consume the cause recorded by set_memory_failure_cause(), or null.
+  const char *take_memory_failure_cause() { return std::exchange(memory_failure_cause_, nullptr); }
+
   /// @brief Whether a future debugger resume should request single-step mode.
   bool debug_single_step() const { return single_step_; }
   void set_debug_single_step(bool v) { single_step_ = v; }
@@ -1087,6 +1097,7 @@ public:
     runtime_suspended_ = false;
     fatal_exception_pending_ = false;
     fatal_exception_cwsr_valid_ = false;
+    memory_failure_cause_ = nullptr;
     single_step_ = false;
     trap_id_ = 0;
     debug_wave_id_ = 0;
@@ -1216,8 +1227,9 @@ private:
   bool runtime_suspended_ = false; ///< Queue-suspended by the runtime (queue_percentage 0).
   bool fatal_exception_pending_ = false;
   bool fatal_exception_cwsr_valid_ = false;
-  bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
-  uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).
+  const char *memory_failure_cause_ = nullptr; ///< See set_memory_failure_cause().
+  bool single_step_ = false;                   ///< Execute one instruction on resume, then re-stop.
+  uint32_t trap_id_ = 0;                       ///< Trap id from the last s_trap (breakpoint = 1).
   uint64_t debug_wave_id_ = 0; ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
 
 public:

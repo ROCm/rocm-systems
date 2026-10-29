@@ -1296,12 +1296,57 @@ TEST(GpuVmPipeline, InfrastructureFailuresDoNotReachTheArchitecturalFaultOwner) 
       for (unsigned i = 0; i < 32 && context.sim.engine->last_exit().code == 0; ++i)
         if (!context.sim.engine->step())
           break;
+    // Neither failure has a VM fault reporter, so neither may publish a
+    // memory-violation status: ROCr would wait for a VM fault event that never
+    // arrives. Both abort the queue. Missing infrastructure also fails the
+    // engine; a revoked address space does so only if delivery fails.
     EXPECT_EQ(context.sim.engine->last_exit().code, missing_vm ? 1 : 0);
-    EXPECT_EQ(exceptions, std::vector<uint64_t>{missing_vm ? amdgpu::kAqlQueueWaveAbort
-                                                           : amdgpu::kAqlQueueMemoryViolation});
+    EXPECT_EQ(exceptions, std::vector<uint64_t>{amdgpu::kAqlQueueWaveAbort});
     EXPECT_EQ(faults, 0u);
     EXPECT_TRUE(context.wf->is_halted());
     EXPECT_FALSE(context.wf->fatal_exception_pending());
+  }
+}
+
+// One rejected instruction yields one consistent diagnosis: every warning and
+// the engine failure reason name the failing instruction's PC and the real
+// cause, not the advanced resume PC or a generic "unsupported" label.
+TEST(GpuVmPipeline, TerminalDiagnosticsNameTheIssuePcAndCause) {
+  for (const bool missing_vm : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "missing_vm=" << missing_vm);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    constexpr uint64_t pc = 0x1000, shared_base = uint64_t{1} << 48;
+    context.wf->pc = pc;
+    context.wf->set_exec(1);
+    if (missing_vm) {
+      context.cu->set_gpu_vm(nullptr);
+    } else {
+      context.cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+      context.wf->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+      const auto words =
+          cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 8, .vsrc = 4});
+      context.external->store(pc, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+      const uint32_t vb = context.wf->vgpr_alloc().base;
+      const uint64_t dds_address = shared_base + 0xffffffc0;
+      context.cu->write_vgpr(vb, 0, static_cast<uint32_t>(dds_address));
+      context.cu->write_vgpr(vb + 1, 0, static_cast<uint32_t>(dds_address >> 32));
+    }
+    context.cu->set_execution_failure_handler([](amdgpu::Wavefront &, bool) { return true; });
+    testing::internal::CaptureStderr();
+    context.cu->step();
+    for (unsigned i = 0; i < 32 && context.sim.engine->last_exit().code == 0; ++i)
+      if (!context.sim.engine->step())
+        break;
+    const std::string warnings = testing::internal::GetCapturedStderr();
+    const std::string cause =
+        missing_vm ? "translated wave has no GPU VM" : "CDNA5 FLAT DDS backing is not implemented";
+    EXPECT_EQ(context.sim.engine->last_exit().code, 1);
+    EXPECT_EQ(context.sim.engine->last_exit().message, "unsupported memory access: " + cause);
+    EXPECT_NE(warnings.find("unsupported memory access: " + cause), std::string::npos) << warnings;
+    EXPECT_NE(warnings.find("pc=0x1000"), std::string::npos) << warnings;
+    EXPECT_EQ(warnings.find("pc=0x100c"), std::string::npos) << warnings;
   }
 }
 

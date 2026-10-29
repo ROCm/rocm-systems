@@ -1474,8 +1474,18 @@ protected:
   /// @brief Offer an architectural data fault to its owner, otherwise cancel it.
   /// @param issue_pc Original instruction PC, before advancing to the resume PC.
   void handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc);
-  /// @brief Cancel a terminal VM failure and notify the CP without offering it again.
-  void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
+  /// @brief Cancel a terminal VM failure and notify its owner without offering it again.
+  /// @details Every terminal outcome reaches an owner that can stop the
+  /// dispatch's waiter. Faulted and Malformed from a translated address space
+  /// rely on the VM fault event its reporter already raised. Revoked accesses
+  /// and VMID 0 physical accesses have no reporter, so they publish a wave
+  /// abort instead of a memory-violation status that ROCr would pair with a VM
+  /// event that never arrives. Unsupported fails the dispatch and the engine.
+  /// @param issue_pc PC of the failing instruction; also used in diagnostics.
+  /// @param cause Static description of the failure, or null to use the cause
+  ///        a memory pipeline recorded on the wave.
+  void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc,
+                                const char *cause = nullptr);
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
   void fail_gws_wait(Wavefront &wf, std::string_view reason);
   /// @brief Fail a dispatch and notify its owner of a non-architectural failure.
