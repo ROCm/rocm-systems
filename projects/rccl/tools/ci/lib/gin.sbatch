@@ -293,14 +293,20 @@ if [[ ! -x "${rccl_tests_build}/all_gather_perf" ]]; then
   exit 1
 fi
 
-# Diag: a GIN librccl.so must be self-contained — no unresolved rocshmem host
-# symbols (the old -rdynamic/--allow-shlib-undefined model is gone) and no linked
-# rocshmem library. A hit here would mean the de-link regressed.
-librccl="$(ls "${rccl_prefix}"/lib/librccl.so* 2>/dev/null | head -n1)"
-echo "== rocshmem self-containment diag =="
-nm -uC "${librccl}" 2>/dev/null | grep -iE "rocshmem|envvar|IBVWrapper" \
-  && echo "  ERROR: librccl.so has undefined rocshmem symbols (de-link regressed)" >&2 \
-  || echo "  OK: librccl.so leaves no rocshmem host symbol unresolved"
+# Fail if librccl.so has any undefined rocshmem/envvar host symbol: GIN must be
+# self-contained. nm -u lists only undefined (U) symbols, so the exported GDA
+# API (rocshmem_gin_*, type T) is not matched. resolve_librccl_elf skips the
+# namelink ld script, which nm cannot read.
+echo "== rocshmem self-containment gate =="
+librccl="$(resolve_librccl_elf "${rccl_prefix}")" || {
+  echo "  ERROR: no readable librccl.so ELF under ${rccl_prefix}/lib" >&2
+  exit 1
+}
+if nm -DuC "${librccl}" | grep -iE "rocshmem|envvar|IBVWrapper"; then
+  echo "  ERROR: librccl.so has undefined rocshmem symbols" >&2
+  exit 1
+fi
+echo "  OK: librccl.so leaves no rocshmem host symbol unresolved"
 
 # Hand the install/build locations to the run stage.
 {
