@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import pandas as pd
 
 from utils.logger import console_warning
+from utils.metrics.pass_provenance import raw_pmc_column_names
 
 if TYPE_CHECKING:
     from utils.metrics.metric_evaluator import MetricEvaluator
@@ -84,10 +85,7 @@ def _collect_debug_column_data(
     raw_pmc_df: pd.DataFrame,
 ) -> tuple[list[tuple[str, Optional[list[Any]]]], int]:
     """Collect column data and compute alignment width for debug output."""
-    matched_cols = re.findall(
-        r"raw_pmc_df\[[\"'](\w+)[\"']\]",
-        row_expr,
-    )
+    matched_cols = raw_pmc_column_names(row_expr)
     seen: set[str] = set()
     rows_to_print: list[tuple[str, Optional[list[Any]]]] = []
     global_width = 0

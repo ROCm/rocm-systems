@@ -5,12 +5,13 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-from utils.logger import console_error, console_warning, demarcate
+from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
@@ -20,6 +21,11 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
+)
+from utils.metrics.pass_provenance import (
+    PassLayout,
+    bind_metric_tables_to_passes,
+    evaluate_pass_scoped_builtins,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
@@ -187,6 +193,63 @@ def calc_builtin_vars(
     return builtin_vars_collection
 
 
+def _gui_active_zero_detected(raw_pmc_df: pd.DataFrame) -> Optional[str]:
+    """Return the preferred GUI-active column when it contains a zero.
+
+    Shadow columns are ignored. A zero in one replay must not abort analyze
+    when the summed column, or otherwise the base column, is non-zero.
+    """
+    if "GRBM_GUI_ACTIVE_sum" in raw_pmc_df.columns:
+        column = "GRBM_GUI_ACTIVE_sum"
+    elif "GRBM_GUI_ACTIVE" in raw_pmc_df.columns:
+        column = "GRBM_GUI_ACTIVE"
+    else:
+        return None
+    if (raw_pmc_df[column] == 0).any():
+        return column
+    return None
+
+
+def _calc_pass_scoped_builtins(
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: dict[str, int | float],
+    gpu_arch: str,
+    pass_layout: PassLayout,
+    used_passes: set[str],
+    expressions: list[str],
+) -> dict[str, Optional[str | float | int]]:
+    """Compute built-ins with duplicated counters bound to each used pass."""
+    return evaluate_pass_scoped_builtins(
+        pass_layout,
+        used_passes,
+        mi_gpu_specs.get_gpu_series(gpu_arch),
+        expressions,
+        partial(_eval_pass_scoped_builtin, raw_pmc_df, sys_vars),
+        key_prefix="ammolite__",
+    )
+
+
+def _eval_pass_scoped_builtin(
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: dict[str, int | float],
+    variable_key: str,
+    eval_string: str,
+    pass_locals: dict[str, object],
+) -> object:
+    try:
+        evaluator = MetricEvaluator(raw_pmc_df, {**sys_vars, **pass_locals}, {})
+        calculation_result = evaluator.eval_expression(eval_string)
+    except (TypeError, NameError, KeyError):
+        console_debug(
+            "pass_provenance",
+            f"builtin {variable_key!r}: pass-bound eval failed, using nan",
+        )
+        return np.nan
+    if np.isscalar(calculation_result) and calculation_result == "N/A":
+        return np.nan
+    return calculation_result
+
+
 @demarcate
 def eval_metric(
     dfs: dict,
@@ -196,24 +259,14 @@ def eval_metric(
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
     debug: bool,
+    pass_layout: Optional[PassLayout] = None,
 ) -> None:
     """Execute the expr string for each metric in the df."""
     # confirm no illogical counter values (only consider non-roofline runs)
     roof_only_run = sys_info.ip_blocks == "roofline"
-    gui_active_counter = next(
-        (
-            counter
-            for counter in ("GRBM_GUI_ACTIVE_sum", "GRBM_GUI_ACTIVE")
-            if counter in raw_pmc_df.columns
-        ),
-        None,
-    )
-    if (
-        (not roof_only_run)
-        and gui_active_counter is not None
-        and (raw_pmc_df[gui_active_counter] == 0).any()
-    ):
-        console_warning(f"Detected {gui_active_counter} == 0")
+    zero_gui = None if roof_only_run else _gui_active_zero_detected(raw_pmc_df)
+    if zero_gui is not None:
+        console_warning(f"Detected {zero_gui} == 0")
         console_error("Halting execution for warning above.")
 
     sys_vars = create_sys_vars(sys_info)
@@ -224,10 +277,33 @@ def eval_metric(
         if dfs_type.get(df_id) == "metric_table"
         for expr in dfs_expressions.get(df_id, [])
     ]
+
+    used_passes: set[str] = set()
+    if pass_layout is not None and pass_layout.has_duplicates:
+        gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
+        used_passes = bind_metric_tables_to_passes(
+            dfs,
+            dfs_type,
+            pass_layout,
+            gpu_series,
+            frozenset(SUPPORTED_FIELD),
+        )
+
     builtin_vars = calc_builtin_vars(
         raw_pmc_df, sys_vars, sys_info["gpu_arch"], expressions
     )
     sys_vars.update(builtin_vars)
+    if pass_layout is not None and used_passes:
+        sys_vars.update(
+            _calc_pass_scoped_builtins(
+                raw_pmc_df,
+                sys_vars,
+                sys_info["gpu_arch"],
+                pass_layout,
+                used_passes,
+                expressions,
+            )
+        )
 
     # Clear any previous noise clamp warnings before this analysis
     clear_noise_clamp_warnings()

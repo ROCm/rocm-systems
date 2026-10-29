@@ -122,8 +122,8 @@ The following sample command profiles the ``vcopy`` workload.
       INFO
       INFO Using native counter collection tool: /tmp/rocprofiler-compute-tool-xxxxx/librocprofiler-compute-tool.so
       INFO [profiling] Iteration multiplexing: Disabled
-      INFO [Run 1/13][Approximate profiling time left: pending first measurement...]
-      INFO [profiling] Current input file: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/perfmon/pmc_perf_SQC_DCACHE_INFLIGHT_LEVEL.yaml
+      INFO [Run 1/14][Approximate profiling time left: pending first measurement...]
+      INFO [profiling] Current input file: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/perfmon/pmc_perf_0.yaml
       INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
       INFO    |-> [rocprofiler-sdk] W20260323 16:43:44.337323 139842239868672 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.250706 sec
       INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
@@ -142,8 +142,8 @@ The following sample command profiles the ``vcopy`` workload.
       INFO    |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
       INFO    |-> [rocprofiler-sdk] Releasing GPU memory
       INFO    |-> [rocprofiler-sdk] Releasing CPU memory
-      INFO [Run 13/13][Approximate profiling time left: 0 seconds]...
-      INFO [profiling] Current input file: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/perfmon/pmc_perf_5.yaml
+      INFO [Run 14/14][Approximate profiling time left: 0 seconds]...
+      INFO [profiling] Current input file: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/perfmon/pmc_perf_9.yaml
       INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
       INFO    |-> [rocprofiler-sdk] W20260323 16:44:43.871622 140315166887680 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.224905 sec
       INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
@@ -299,33 +299,24 @@ Examples:
     │   ├── counter_def_1.yaml
     │   ├── counter_def_2.yaml
     │   ├── counter_def_3.yaml
-    │   ├── counter_def_4.yaml
-    │   ├── counter_def_5.yaml
-    │   ├── counter_def_SQC_DCACHE_INFLIGHT_LEVEL.yaml
-    │   ├── counter_def_SQC_ICACHE_INFLIGHT_LEVEL.yaml
-    │   ├── counter_def_SQ_IFETCH_LEVEL.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_LDS.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_SMEM.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_VMEM.yaml
-    │   ├── counter_def_SQ_LEVEL_WAVES.yaml
     │   ├── pmc_perf_0.yaml
     │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_10.yaml
+    │   ├── pmc_perf_11.yaml
+    │   ├── pmc_perf_12.yaml
+    │   ├── pmc_perf_13.yaml
     │   ├── pmc_perf_2.yaml
     │   ├── pmc_perf_3.yaml
     │   ├── pmc_perf_4.yaml
     │   ├── pmc_perf_5.yaml
-    │   ├── pmc_perf_SQC_DCACHE_INFLIGHT_LEVEL.yaml
-    │   ├── pmc_perf_SQC_ICACHE_INFLIGHT_LEVEL.yaml
-    │   ├── pmc_perf_SQ_IFETCH_LEVEL.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_LDS.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_SMEM.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
-    │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
+    │   ├── pmc_perf_6.yaml
+    │   ├── pmc_perf_7.yaml
+    │   ├── pmc_perf_8.yaml
+    │   └── pmc_perf_9.yaml
     ├── profiling_config.yaml
     ├── results_pmc_perf_0.csv.gz
     ├── results_pmc_perf_1.csv.gz
     ├── results_pmc_perf_2.csv.gz
-    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv.gz
     ├── roofline.csv
     └── sysinfo.csv
 
@@ -347,33 +338,24 @@ details on when the final ``pmc_perf.csv.gz`` is created.
     │   ├── counter_def_1.yaml
     │   ├── counter_def_2.yaml
     │   ├── counter_def_3.yaml
-    │   ├── counter_def_4.yaml
-    │   ├── counter_def_5.yaml
-    │   ├── counter_def_SQC_DCACHE_INFLIGHT_LEVEL.yaml
-    │   ├── counter_def_SQC_ICACHE_INFLIGHT_LEVEL.yaml
-    │   ├── counter_def_SQ_IFETCH_LEVEL.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_LDS.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_SMEM.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_VMEM.yaml
-    │   ├── counter_def_SQ_LEVEL_WAVES.yaml
     │   ├── pmc_perf_0.yaml
     │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_10.yaml
+    │   ├── pmc_perf_11.yaml
+    │   ├── pmc_perf_12.yaml
+    │   ├── pmc_perf_13.yaml
     │   ├── pmc_perf_2.yaml
     │   ├── pmc_perf_3.yaml
     │   ├── pmc_perf_4.yaml
     │   ├── pmc_perf_5.yaml
-    │   ├── pmc_perf_SQC_DCACHE_INFLIGHT_LEVEL.yaml
-    │   ├── pmc_perf_SQC_ICACHE_INFLIGHT_LEVEL.yaml
-    │   ├── pmc_perf_SQ_IFETCH_LEVEL.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_LDS.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_SMEM.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
-    │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
+    │   ├── pmc_perf_6.yaml
+    │   ├── pmc_perf_7.yaml
+    │   ├── pmc_perf_8.yaml
+    │   └── pmc_perf_9.yaml
     ├── profiling_config.yaml
     ├── results_pmc_perf_0.csv.gz
     ├── results_pmc_perf_1.csv.gz
     ├── results_pmc_perf_2.csv.gz
-    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv.gz
     ├── roofline.csv
     └── sysinfo.csv
 
@@ -386,7 +368,7 @@ Raw performance counter data produced by the underlying
 :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend is written in ``rocpd``
 (SQLite) format:
 
-* The rocpd database files are converted to gzip-compressed CSV files (``results_pmc_perf_0.csv.gz``, ``results_pmc_perf_SQ_*.csv.gz``, etc.) for each profiling run, after which the database files are removed.
+* The rocpd database files are converted to gzip-compressed CSV files (``results_pmc_perf_0.csv.gz``, ``results_pmc_perf_1.csv.gz``, etc.) for each profiling run, after which the database files are removed.
 * These files are merged into a single gzip-compressed ``pmc_perf.csv.gz`` file when running ``rocprof-compute analyze``.
 * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 
@@ -1303,7 +1285,7 @@ The following example demonstrates how to use iteration multiplexing with the
    INFO
    INFO Using native counter collection tool: /tmp/rocprofiler-compute-tool-xxxxx/librocprofiler-compute-tool.so
    INFO [profiling] Iteration multiplexing: kernel
-   INFO [profiling] Current input files: .../perfmon/pmc_perf_SQC_DCACHE_INFLIGHT_LEVEL.yaml, .../perfmon/pmc_perf_0.yaml, ...
+   INFO [profiling] Current input files: .../perfmon/pmc_perf_0.yaml, .../perfmon/pmc_perf_1.yaml, ...
    INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
    INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
    INFO    |-> [rocprofiler-sdk] vcopy testing on GCD 0
@@ -1369,28 +1351,20 @@ The example above produces:
     │   ├── counter_def_1.yaml
     │   ├── counter_def_2.yaml
     │   ├── counter_def_3.yaml
-    │   ├── counter_def_4.yaml
-    │   ├── counter_def_5.yaml
-    │   ├── counter_def_SQC_DCACHE_INFLIGHT_LEVEL.yaml
-    │   ├── counter_def_SQC_ICACHE_INFLIGHT_LEVEL.yaml
-    │   ├── counter_def_SQ_IFETCH_LEVEL.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_LDS.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_SMEM.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_VMEM.yaml
-    │   ├── counter_def_SQ_LEVEL_WAVES.yaml
     │   ├── pmc_perf_0.yaml
     │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_10.yaml
+    │   ├── pmc_perf_11.yaml
+    │   ├── pmc_perf_12.yaml
+    │   ├── pmc_perf_13.yaml
     │   ├── pmc_perf_2.yaml
     │   ├── pmc_perf_3.yaml
     │   ├── pmc_perf_4.yaml
     │   ├── pmc_perf_5.yaml
-    │   ├── pmc_perf_SQC_DCACHE_INFLIGHT_LEVEL.yaml
-    │   ├── pmc_perf_SQC_ICACHE_INFLIGHT_LEVEL.yaml
-    │   ├── pmc_perf_SQ_IFETCH_LEVEL.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_LDS.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_SMEM.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
-    │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
+    │   ├── pmc_perf_6.yaml
+    │   ├── pmc_perf_7.yaml
+    │   ├── pmc_perf_8.yaml
+    │   └── pmc_perf_9.yaml
     ├── pmc_perf_0.csv
     ├── pmc_perf_1.csv
     ├── pmc_perf_2.csv
@@ -1420,28 +1394,20 @@ The example above produces:
     │   ├── counter_def_1.yaml
     │   ├── counter_def_2.yaml
     │   ├── counter_def_3.yaml
-    │   ├── counter_def_4.yaml
-    │   ├── counter_def_5.yaml
-    │   ├── counter_def_SQC_DCACHE_INFLIGHT_LEVEL.yaml
-    │   ├── counter_def_SQC_ICACHE_INFLIGHT_LEVEL.yaml
-    │   ├── counter_def_SQ_IFETCH_LEVEL.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_LDS.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_SMEM.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_VMEM.yaml
-    │   ├── counter_def_SQ_LEVEL_WAVES.yaml
     │   ├── pmc_perf_0.yaml
     │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_10.yaml
+    │   ├── pmc_perf_11.yaml
+    │   ├── pmc_perf_12.yaml
+    │   ├── pmc_perf_13.yaml
     │   ├── pmc_perf_2.yaml
     │   ├── pmc_perf_3.yaml
     │   ├── pmc_perf_4.yaml
     │   ├── pmc_perf_5.yaml
-    │   ├── pmc_perf_SQC_DCACHE_INFLIGHT_LEVEL.yaml
-    │   ├── pmc_perf_SQC_ICACHE_INFLIGHT_LEVEL.yaml
-    │   ├── pmc_perf_SQ_IFETCH_LEVEL.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_LDS.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_SMEM.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
-    │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
+    │   ├── pmc_perf_6.yaml
+    │   ├── pmc_perf_7.yaml
+    │   ├── pmc_perf_8.yaml
+    │   └── pmc_perf_9.yaml
     ├── pmc_perf_0.csv
     ├── pmc_perf_1.csv
     ├── pmc_perf_2.csv
@@ -1469,28 +1435,20 @@ to your output directory. The following example is run on the host ``amd-ryzen``
     │   ├── counter_def_1.yaml
     │   ├── counter_def_2.yaml
     │   ├── counter_def_3.yaml
-    │   ├── counter_def_4.yaml
-    │   ├── counter_def_5.yaml
-    │   ├── counter_def_SQC_DCACHE_INFLIGHT_LEVEL.yaml
-    │   ├── counter_def_SQC_ICACHE_INFLIGHT_LEVEL.yaml
-    │   ├── counter_def_SQ_IFETCH_LEVEL.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_LDS.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_SMEM.yaml
-    │   ├── counter_def_SQ_INST_LEVEL_VMEM.yaml
-    │   ├── counter_def_SQ_LEVEL_WAVES.yaml
     │   ├── pmc_perf_0.yaml
     │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_10.yaml
+    │   ├── pmc_perf_11.yaml
+    │   ├── pmc_perf_12.yaml
+    │   ├── pmc_perf_13.yaml
     │   ├── pmc_perf_2.yaml
     │   ├── pmc_perf_3.yaml
     │   ├── pmc_perf_4.yaml
     │   ├── pmc_perf_5.yaml
-    │   ├── pmc_perf_SQC_DCACHE_INFLIGHT_LEVEL.yaml
-    │   ├── pmc_perf_SQC_ICACHE_INFLIGHT_LEVEL.yaml
-    │   ├── pmc_perf_SQ_IFETCH_LEVEL.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_LDS.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_SMEM.yaml
-    │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
-    │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
+    │   ├── pmc_perf_6.yaml
+    │   ├── pmc_perf_7.yaml
+    │   ├── pmc_perf_8.yaml
+    │   └── pmc_perf_9.yaml
     ├── pmc_perf_0.csv
     ├── pmc_perf_1.csv
     ├── pmc_perf_2.csv

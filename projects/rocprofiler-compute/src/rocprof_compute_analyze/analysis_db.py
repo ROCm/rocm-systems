@@ -6,6 +6,7 @@ import json
 import re
 import warnings
 from collections import defaultdict
+from functools import partial
 from pathlib import Path
 from typing import Any, DefaultDict, Dict, List, NamedTuple, Optional, Tuple, Union
 
@@ -76,11 +77,18 @@ from utils.metrics.aggregation import (
 )
 from utils.metrics.common import EVAL_BUILTINS, ValuDualIssueDetector
 from utils.metrics.expression import transform_expression
+from utils.metrics.metric_evaluator import rows_for_expression
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
     to_noise_clamp,
+)
+from utils.metrics.pass_provenance import (
+    PassLayout,
+    bind_expression_dataframe,
+    evaluate_pass_scoped_builtins,
+    strip_bound_builtin_suffixes,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
@@ -171,6 +179,70 @@ def filter_dispatch_frame(
             ])
         ]
     return dispatch_frame
+
+
+def _is_composite_roofline_expression(expression: object) -> bool:
+    """Return whether expression must be filled by composite evaluation."""
+    if not isinstance(expression, str):
+        return False
+    return expression.lstrip().startswith((
+        "COLLECT_SUM(",
+        "COLLECT_RATIO(",
+        "WEIGHTED_AVG(",
+    ))
+
+
+def _roofline_point_values(
+    expressions: Dict[str, str],
+    pmc_df: pd.DataFrame,
+    sys_info: Dict[str, Any],
+    pass_layout: Optional[PassLayout],
+) -> Dict[str, Any]:
+    """Evaluate ordinary roofline points with one-pass expression binding."""
+    expression_rows = [
+        (metric_name, expression)
+        for metric_name, expression in expressions.items()
+        if expression and not _is_composite_roofline_expression(expression)
+    ]
+    if not expression_rows:
+        return {}
+
+    expression_df = pd.DataFrame({
+        "metric_id": [metric_name for metric_name, _expression in expression_rows],
+        "value_name": ["Value"] * len(expression_rows),
+        "value": [expression for _metric_name, expression in expression_rows],
+    })
+    used_passes = set()
+    if pass_layout is not None and pass_layout.has_duplicates:
+        used_passes = bind_expression_dataframe(
+            expression_df,
+            pass_layout,
+            mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"]),
+        )
+    values = db_analysis.calc_dataframe_expressions(
+        pmc_df,
+        sys_info.copy(),
+        expression_df,
+        pass_layout=pass_layout,
+        used_passes=used_passes,
+    )
+    return dict(zip(expression_df["metric_id"], values))
+
+
+def _evaluate_pass_scoped_builtin(
+    pmc_df: pd.DataFrame,
+    sys_info: Dict[str, Any],
+    variable_key: str,
+    bound_expression: str,
+    pass_locals: Dict[str, object],
+) -> object:
+    return db_analysis.evaluate(
+        variable_key,
+        bound_expression,
+        pmc_df,
+        {**sys_info, **pass_locals},
+        parse=False,
+    )
 
 
 class MetricInfoRow(NamedTuple):
@@ -626,23 +698,28 @@ class db_analysis(OmniAnalyze_Base):
 
     def calc_pmc_df_data(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
+        # Shadow columns + PassLayout; expressions are bound in calc_expressions.
+        self._pass_layout_per_workload: dict[str, Optional[PassLayout]] = {}
+        iteration_multiplexing = self._profiling_config.get("iteration_multiplexing")
 
         for workload_path in self._runs.keys():
-            pmc_df = file_io.create_df_pmc(
+            pmc_df, pass_layout = file_io.load_df_pmc(
                 workload_path,
                 self.get_args().verbose,
+                preserve_pass_provenance=iteration_multiplexing is None,
             )
             if pmc_df.empty:
                 continue
 
-            if self._profiling_config.get("iteration_multiplexing") is not None:
+            if iteration_multiplexing is not None:
                 pmc_df = self.iteration_multiplex_impute_counters(
                     pmc_df,
-                    policy=self._profiling_config["iteration_multiplexing"],
+                    policy=iteration_multiplexing,
                     workload_dir=Path(workload_path),
                 )
 
             pmc_df_per_workload[workload_path] = pmc_df
+            self._pass_layout_per_workload[workload_path] = pass_layout
 
         if pmc_df_per_workload:
             console_debug("Collected dispatch data")
@@ -1037,6 +1114,7 @@ class db_analysis(OmniAnalyze_Base):
                 value,
             )
         try:
+            pmc_df = rows_for_expression(pmc_df, value)
             prev_noise_clamp_count = get_noise_clamp_warnings()["count"]
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", RuntimeWarning)
@@ -1140,21 +1218,62 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
     @staticmethod
+    def calc_pass_scoped_builtin_sys_info(
+        pmc_df: pd.DataFrame,
+        sys_info: dict,
+        pass_layout: PassLayout,
+        used_passes: set[str],
+        expressions: list[str],
+    ) -> dict[str, Any]:
+        """Compute pass-scoped built-ins for DB ``sys_info`` lookups.
+
+        Keys are ``{var}__pass{ordinal}`` so that bound ``ammolite__var__passN``
+        expressions resolve via ``sys_info["var__passN"]``.
+        """
+        return evaluate_pass_scoped_builtins(
+            pass_layout,
+            used_passes,
+            mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"]),
+            expressions,
+            partial(_evaluate_pass_scoped_builtin, pmc_df, sys_info),
+            key_prefix="",
+        )
+
+    @staticmethod
     def calc_dataframe_expressions(
         pmc_df: pd.DataFrame,
         sys_info: dict,
         expression_df: pd.DataFrame,
         emit_variance_warnings: bool = False,
+        pass_layout: Optional[PassLayout] = None,
+        used_passes: Optional[set[str]] = None,
     ) -> pd.Series:
+        """Evaluate each expression row against ``pmc_df``.
+
+        When ``pass_layout`` / ``used_passes`` are set, pass-scoped built-ins are
+        merged into ``sys_info`` in place (caller should pass ``sys_info.copy()``).
+        """
+        expressions = [
+            value
+            for value in expression_df["value"].tolist()
+            if isinstance(value, str) and value and value != "None"
+        ]
+        # Bound expressions use ammolite__var__passN; strip for base builtin discovery.
         db_analysis.calc_builtin_vars(
             pmc_df,
             sys_info,
-            [
-                v
-                for v in expression_df["value"].tolist()
-                if isinstance(v, str) and v and v != "None"
-            ],
+            strip_bound_builtin_suffixes(expressions),
         )
+        if pass_layout is not None and used_passes and pass_layout.has_duplicates:
+            sys_info.update(
+                db_analysis.calc_pass_scoped_builtin_sys_info(
+                    pmc_df,
+                    sys_info,
+                    pass_layout,
+                    used_passes,
+                    expressions,
+                )
+            )
         return pd.Series(
             [
                 db_analysis.evaluate(
@@ -1229,12 +1348,22 @@ class db_analysis(OmniAnalyze_Base):
             pmc_df = self._pmc_df_per_workload[workload_path]
             expression_template = self._metric_expression_data_per_workload[
                 workload_path
-            ]
+            ].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             for key, value in self._roofline_ceilings_per_workload.get(
                 workload_path, {}
             ).items():
                 sys_info[f"{key}_empirical_peak"] = value
+
+            pass_layout = self._pass_layout_per_workload.get(workload_path)
+            used_passes: set[str] = set()
+            if pass_layout is not None and pass_layout.has_duplicates:
+                gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
+                used_passes = bind_expression_dataframe(
+                    expression_template,
+                    pass_layout,
+                    gpu_series,
+                )
 
             metrics_info = self._metrics_info_data_per_workload.get(
                 workload_path, pd.DataFrame(columns=["pct_of_peak", "metric_id"])
@@ -1255,6 +1384,8 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_pmc_df,
                     sys_info.copy(),
                     kernel_expression_df,
+                    pass_layout=pass_layout,
+                    used_passes=used_passes,
                 )
                 new_kernel_rows.extend(
                     db_analysis._derive_pct_of_peak_values(
@@ -1284,6 +1415,8 @@ class db_analysis(OmniAnalyze_Base):
                 sys_info.copy(),
                 workload_expression_df,
                 emit_variance_warnings=True,
+                pass_layout=pass_layout,
+                used_passes=used_passes,
             )
             print_noise_clamp_summary()
             db_analysis.validate_dual_issue_metrics(
@@ -1562,6 +1695,9 @@ class db_analysis(OmniAnalyze_Base):
                 "hbm_cache_data": roofline_data_expressions.get("AI HBM", ""),
                 "lds_cache_data": roofline_data_expressions.get("AI LDS", ""),
             }
+            pass_layout = getattr(self, "_pass_layout_per_workload", {}).get(
+                workload_path
+            )
 
             # Calculate kernel-level roofline data
             top_kernels = (
@@ -1575,16 +1711,12 @@ class db_analysis(OmniAnalyze_Base):
             roofline_df = pd.DataFrame([
                 {
                     "kernel_name": kernel_name,
-                    **{
-                        metric_name: db_analysis.evaluate(
-                            metric_name,
-                            roofline_data_expressions[metric_name],
-                            pmc_df[pmc_df["Kernel_Name"] == kernel_name],
-                            sys_info,
-                        )
-                        for metric_name in roofline_data_expressions
-                        if roofline_data_expressions[metric_name]
-                    },
+                    **_roofline_point_values(
+                        roofline_data_expressions,
+                        pmc_df[pmc_df["Kernel_Name"] == kernel_name],
+                        sys_info,
+                        pass_layout,
+                    ),
                 }
                 for kernel_name in top_kernels
             ])
