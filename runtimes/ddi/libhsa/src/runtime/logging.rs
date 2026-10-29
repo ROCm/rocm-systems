@@ -185,3 +185,25 @@ pub(super) fn logging_flag_enabled(flags: [u8; 8], flag: u32) -> bool {
         .and_then(|index| flags.get(index))
         .is_some_and(|byte| byte & (1 << (flag % 8)) != 0)
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_write_init_does_not_wait_for_preparing_shutdown() {
+        let lifecycle = Mutex::new(HsaLifecycle::new());
+        let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+        lifecycle
+            .lock()
+            .unwrap()
+            .prepare_without_runtime_for_test(generation);
+        let scope = LogWriteScope::enter();
+        assert!(scope.is_some());
+        assert_eq!(
+            begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+            Some(INVALID_RUNTIME_STATE)
+        );
+    }
+}
