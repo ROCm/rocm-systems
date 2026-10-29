@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
@@ -118,6 +119,15 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
   }
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
+  // Section 10.10: LOAD_MONITOR (same opcodes in VFLAT and VGLOBAL) follows
+  // the atomic alignment rule -- MEMVIOL for a payload that is not aligned,
+  // in the unaligned mode KFD programs -- and FLAT_LOAD_MONITOR_B64/_B128
+  // raise MEMVIOL in the scratch aperture.
+  const bool load_monitor =
+      inst.op >= kFlatLoadMonitorB32Vflat && inst.op <= kFlatLoadMonitorB128Vflat;
+  static_assert(kFlatLoadMonitorB32Vflat == kGlobalLoadMonitorB32Vglobal &&
+                kFlatLoadMonitorB128Vflat == kGlobalLoadMonitorB128Vglobal);
+  const uint32_t monitor_bytes = d.elem_size * d.num_elems;
   bool saddr_present = has_saddr(inst.saddr);
   auto saddr = saddr_present ? read_sreg64_operand(wf, inst.saddr) : std::optional<uint64_t>{0};
   if (!saddr) {
@@ -151,6 +161,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
       vaddr = vaddr_region.lane64(0, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
+    if (load_monitor && monitor_bytes != 0 && addr % monitor_bytes != 0)
+      d.memviol_lane_mask |= uint64_t{1} << lane;
     if (decode_flat_private) {
       // CDNA5 section 10.1.1 checks the final address, including IOFFSET.
       if (amdgpu::flat_address_in_hole(wf, addr, amdgpu::kCdna5FlatVaBits,
@@ -159,7 +171,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
       const auto translated =
           amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane);
       if (amdgpu::rejects_private_flat_atomic(translated.private_address,
-                                              d.atomic_op != amdgpu::AtomicOp::NONE, d.elem_size))
+                                              d.atomic_op != amdgpu::AtomicOp::NONE, d.elem_size) ||
+          (load_monitor && translated.private_address && monitor_bytes > sizeof(uint32_t)))
         d.memviol_lane_mask |= uint64_t{1} << lane;
       if (translated.private_address) {
         // The pointer names its owner's backing (section 10.2.1), so this

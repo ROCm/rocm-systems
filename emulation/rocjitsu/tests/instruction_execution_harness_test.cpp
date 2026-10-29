@@ -1274,6 +1274,67 @@ TEST(Gfx1250MemoryExecutionHarness, MisalignedGlobalAtomicLanesRaiseMemviol) {
   });
 }
 
+// CDNA5 section 10.10: LOAD_MONITOR follows the atomic alignment rule and
+// FLAT_LOAD_MONITOR_B64/_B128 raise MEMVIOL in the scratch aperture; B32 is
+// legal there. These used to be ordinary loads with neither check. Lane 0 is
+// an aligned global lane that still completes; lane 1 is the case under test.
+TEST(Gfx1250MemoryExecutionHarness, LoadMonitorAlignmentAndPrivateWidth) {
+  enum class Lane1 { PrivateAligned, GlobalMisaligned };
+  for (const bool flat : {true, false}) {
+    for (const uint32_t dwords : {1u, 2u, 4u}) {
+      for (const Lane1 lane1 : {Lane1::PrivateAligned, Lane1::GlobalMisaligned}) {
+        if (!flat && lane1 == Lane1::PrivateAligned)
+          continue; // GLOBAL does not decode apertures.
+        SCOPED_TRACE(testing::Message() << "flat=" << flat << " dwords=" << dwords
+                                        << " lane1=" << static_cast<int>(lane1));
+        amdgpu::GpuMemory memory("load_monitor");
+        amdgpu::L2Cache cache("load_monitor_cache");
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 256;
+        config.lds_size_kb = 64;
+        MemoryTestCu<cdna5::Isa> cu("load_monitor", config, &memory, &cache);
+        constexpr uint64_t scratch_base = 0x8000;
+        cu.set_apertures(uint64_t{1} << 48, (uint64_t{1} << 48) + UINT32_MAX, kCdna5PrivateBase,
+                         kCdna5PrivateBase + UINT32_MAX);
+        auto *wave = cu.dispatch_wf(0, 0, 128, 256, 32);
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(3);
+        wave->set_scratch_base(scratch_base);
+        wave->set_scratch_lane_size(128);
+        const uint32_t vb = wave->vgpr_alloc().base;
+        for (uint32_t lane = 0; lane < 2; ++lane) {
+          const uint64_t address = lane == 0 ? 0x2000
+                                   : lane1 == Lane1::PrivateAligned
+                                       ? cdna5_private_pointer(scratch_base, 1, 32)
+                                       : 0x3000 + 4 * dwords - 2;
+          cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
+          cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+        }
+        const uint16_t op = dwords == 1   ? cdna5::kFlatLoadMonitorB32Vflat
+                            : dwords == 2 ? cdna5::kFlatLoadMonitorB64Vflat
+                                          : cdna5::kFlatLoadMonitorB128Vflat;
+        const auto words = flat ? cdna5::build_vflat(op, {.saddr = 124, .vdst = 8, .vaddr = 0})
+                                : cdna5::build_vglobal(op, {.saddr = 124, .vdst = 8, .vaddr = 0});
+        auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        ASSERT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
+        const bool memviol = lane1 == Lane1::GlobalMisaligned || dwords > 1;
+        EXPECT_EQ(inst->data_as<amdgpu::VectorMemState>()->memviol_lane_mask, memviol ? 2u : 0u);
+        EXPECT_EQ(cu.route_memory_inst(inst.release(), *wave),
+                  memviol ? amdgpu::VmAccessOutcome::ApertureViolation
+                          : amdgpu::VmAccessOutcome::Complete);
+        cu.flush_all();
+        EXPECT_TRUE(wave->wait_counters().empty());
+        wave->halt();
+      }
+    }
+  }
+}
+
 // RDNA3/3.5/4 and CDNA5 forbid private FLAT atomic64 independently of
 // the backing layout. Only the private lane is suppressed: gfx1201 and gfx1100
 // commit an ordinary global lane of the same instruction.
