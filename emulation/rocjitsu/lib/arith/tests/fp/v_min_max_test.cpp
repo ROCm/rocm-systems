@@ -10,6 +10,7 @@
 #include "rj_arith/rj_arith.h"
 
 #include <gtest/gtest.h>
+#include <iterator>
 
 // Check FP selection results with NaNs, modifiers, EXEC masks, and aliases.
 TEST(FpMinF16W32, Arithmetic) {
@@ -191,4 +192,80 @@ TEST(FpSelection, CompatibilityOmodNan) {
   check_selection_omod_nan<16, 3>(rj_arith_v_min3_f16_w32);
   check_selection_omod_nan<32, 3>(rj_arith_v_min3_f32_w32);
   check_selection_omod_nan<64, 2>(rj_arith_v_min_f64_w32);
+}
+
+// Check native SIMD comparisons/min/max with bitwise NaN selection and quieting
+// against the scalar model. NaN encoding checks enforce the Compatibility
+// contract and exceed the Loose guarantees.
+TEST(FpSelection, NativeNanSelection) {
+  using namespace rocjitsu::arith::test;
+  using Call = decltype(&rj_arith_v_min_num_f32_w32);
+  struct Family {
+    int width;
+    uint64_t infinity, quiet, sign;
+    Call calls[4];
+  };
+  const Family families[] = {
+      {16,
+       0x7c00,
+       0x0200,
+       0x8000,
+       {rj_arith_v_min_num_f16_w32, rj_arith_v_max_num_f16_w32, rj_arith_v_minimum_f16_w32,
+        rj_arith_v_maximum_f16_w32}},
+      {32,
+       0x7f800000,
+       0x00400000,
+       0x80000000,
+       {rj_arith_v_min_num_f32_w32, rj_arith_v_max_num_f32_w32, rj_arith_v_minimum_f32_w32,
+        rj_arith_v_maximum_f32_w32}},
+      {64,
+       0x7ff0000000000000ULL,
+       0x0008000000000000ULL,
+       0x8000000000000000ULL,
+       {rj_arith_v_min_num_f64_w32, rj_arith_v_max_num_f64_w32, rj_arith_v_minimum_f64_w32,
+        rj_arith_v_maximum_f64_w32}},
+  };
+  const auto levels = supported_cpu_levels();
+  for (const auto &family : families) {
+    // Pairs: signed zeros, smallest subnormals, largest finite values,
+    // infinities, signaling NaNs, and quiet NaNs.
+    const uint64_t values[] = {0,
+                               family.sign,
+                               1,
+                               family.sign | 1,
+                               family.infinity - 1,
+                               family.sign | (family.infinity - 1),
+                               family.infinity,
+                               family.sign | family.infinity,
+                               family.infinity | 1,
+                               family.sign | family.infinity | 2,
+                               family.infinity | family.quiet | 3,
+                               family.sign | family.infinity | family.quiet | 4};
+    constexpr int value_count = std::size(values);
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+      SCOPED_TRACE(semantics);
+      for (Call call : family.calls) {
+        for (uint64_t a : values) {
+          Registers<8, 32> r;
+          for (int lane = 0; lane < 32; ++lane) {
+            write_fp(r.v, lane, family.width, a);
+            write_fp(r.v + 2, lane, family.width, values[lane % value_count]);
+          }
+          ASSERT_EQ(call(semantics, 0xffffffffU, 0, r.v + 4, r.v, r.v + 2, nullptr),
+                    RJ_ARITH_SUCCESS);
+          for (uint64_t cpu : levels) {
+            if (cpu == RJ_ARITH_CPU_BASELINE) {
+              continue;
+            }
+            ASSERT_EQ(call(cpu | semantics, 0xffffffffU, 0, r.v + 6, r.v, r.v + 2, nullptr),
+                      RJ_ARITH_SUCCESS);
+            for (int lane = 0; lane < 32; ++lane) {
+              EXPECT_EQ(read_fp(r.v + 6, lane, family.width), read_fp(r.v + 4, lane, family.width))
+                  << family.width << '/' << cpu << '/' << a << '/' << values[lane % value_count];
+            }
+          }
+        }
+      }
+    }
+  }
 }
