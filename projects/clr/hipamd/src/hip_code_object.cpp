@@ -725,18 +725,6 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
 }
 
 // ================================================================================================
-Var* StatCO::FindDeferredManagedVar(const void* ptr) {
-  std::scoped_lock lock(sclock_);
-  for (const auto& [_, vars] : managedVars_) {
-    for (auto* var : vars) {
-      void* base = *static_cast<void**>(var->GetManagedVarPtr());
-      if (base != nullptr && base == ptr) return var;
-    }
-  }
-  return nullptr;
-}
-
-// ================================================================================================
 void StatCO::ForEachFatBinaryBlob(void (*cb)(const void*)) const {
   std::scoped_lock lock(sclock_);
   for (const auto& [data, _] : modules_) {

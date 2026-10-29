@@ -1023,13 +1023,14 @@ hipError_t PlatformState::Init() {
   if (initialized_ || g_devices.empty()) {
     return hipSuccess;
   }
-  initialized_ = true;
   statCO_.ResizeForDevices(g_devices.size());
 
-  IHIP_RETURN_ONFAIL(statCO_.EnsureAllManagedVarsAreMapped());
   amd::RuntimeTearDown::RegisterTearDownCallback("PlatformState static fatbin cleanup", [this]() {
     statCO_.RemoveAllFatBinaries();
   });
+
+  IHIP_RETURN_ONFAIL(statCO_.EnsureAllManagedVarsAreMapped());
+  initialized_ = true;
   return hipSuccess;
 }
 

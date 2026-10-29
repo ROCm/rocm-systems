@@ -7,8 +7,6 @@
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
 
-#include <dlfcn.h>
-
 namespace {
 
 constexpr int kInitialManagedValue = 41;
@@ -21,17 +19,9 @@ using ReadLateManagedVariable = hipError_t (*)(int*, hipStream_t);
 __global__ void IncrementInitialManagedValue() { ++initialManagedValue; }
 
 void LoadVerifyAndUnloadLateManagedVariable() {
-  void* handle = dlopen("./libLateManagedVariable.so", RTLD_NOW);
-  const char* loadError = dlerror();
-  INFO("dlopen failed: " << (loadError == nullptr ? "" : loadError));
-  REQUIRE(handle != nullptr);
-
+  DlopenGuard library("./libLateManagedVariable.so");
   auto launch = reinterpret_cast<LaunchLateManagedVariable>(
-      dlsym(handle, "launchLateManagedVariable"));
-  const char* symbolError = dlerror();
-  INFO("dlsym failed: " << (symbolError == nullptr ? "" : symbolError));
-  REQUIRE(symbolError == nullptr);
-  REQUIRE(launch != nullptr);
+      library.symbol("launchLateManagedVariable"));
 
   // The library writes its managed variable on the host and reads it from a
   // kernel, proving that late registration initialized its device pointer.
@@ -42,7 +32,6 @@ void LoadVerifyAndUnloadLateManagedVariable() {
   int result = 0;
   HIP_CHECK(hipMemcpy(&result, deviceResult.ptr(), sizeof(result), hipMemcpyDeviceToHost));
   REQUIRE(result == kExpectedValue);
-  REQUIRE(dlclose(handle) == 0);
 }
 
 void VerifyLateManagedVariableOnDevice(LaunchLateManagedVariable launch, int device,
@@ -101,21 +90,12 @@ HIP_TEST_CASE(Unit_StatCO_Positive_ManagedVariableFromRepeatedLateDlopenAcrossDe
     HIP_CHECK(hipDeviceSynchronize());
   }
 
-  void* handle = dlopen("./libLateManagedVariable.so", RTLD_NOW);
-  const char* loadError = dlerror();
-  INFO("dlopen failed: " << (loadError == nullptr ? "" : loadError));
-  REQUIRE(handle != nullptr);
-
+  DlopenGuard library("./libLateManagedVariable.so");
   auto launch = reinterpret_cast<LaunchLateManagedVariable>(
-      dlsym(handle, "launchLateManagedVariable"));
-  const char* symbolError = dlerror();
-  INFO("dlsym failed: " << (symbolError == nullptr ? "" : symbolError));
-  REQUIRE(symbolError == nullptr);
-  REQUIRE(launch != nullptr);
+      library.symbol("launchLateManagedVariable"));
 
   VerifyLateManagedVariableOnDevice(launch, /*device=*/0, /*expectedValue=*/41);
   VerifyLateManagedVariableOnDevice(launch, /*device=*/1, /*expectedValue=*/42);
-  REQUIRE(dlclose(handle) == 0);
 }
 
 // A library's late-registered managed variable must be backed by a
@@ -125,20 +105,11 @@ HIP_TEST_CASE(Unit_StatCO_Positive_ManagedVariableFromRepeatedLateDlopenAcrossDe
 HIP_TEST_CASE(Unit_StatCO_Positive_ManagedVariableFromLateDlopenBeforeFirstUse) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
-  void* handle = dlopen("./libLateManagedVariable.so", RTLD_NOW);
-  const char* loadError = dlerror();
-  INFO("dlopen failed: " << (loadError == nullptr ? "" : loadError));
-  REQUIRE(handle != nullptr);
-
-  auto variableAddress =
-      reinterpret_cast<LateManagedVariableAddress>(dlsym(handle, "lateManagedVariableAddress"));
+  DlopenGuard library("./libLateManagedVariable.so");
+  auto variableAddress = reinterpret_cast<LateManagedVariableAddress>(
+      library.symbol("lateManagedVariableAddress"));
   auto readVariable =
-      reinterpret_cast<ReadLateManagedVariable>(dlsym(handle, "readLateManagedVariable"));
-  const char* symbolError = dlerror();
-  INFO("dlsym failed: " << (symbolError == nullptr ? "" : symbolError));
-  REQUIRE(symbolError == nullptr);
-  REQUIRE(variableAddress != nullptr);
-  REQUIRE(readVariable != nullptr);
+      reinterpret_cast<ReadLateManagedVariable>(library.symbol("readLateManagedVariable"));
 
   constexpr unsigned char kFillByte = 0x5A;
   // Touches the managed memory to make sure it has been initialized. 
@@ -152,6 +123,4 @@ HIP_TEST_CASE(Unit_StatCO_Positive_ManagedVariableFromLateDlopenBeforeFirstUse) 
   HIP_CHECK(hipMemcpy(&result, deviceResult.ptr(), sizeof(result), hipMemcpyDeviceToHost));
   constexpr int kExpectedValue = 0x5A5A5A5A;
   REQUIRE(result == kExpectedValue);
-
-  REQUIRE(dlclose(handle) == 0);
 }

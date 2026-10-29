@@ -483,6 +483,12 @@ inline bool isManagedMemorySupportedOnDevice(int device) {
   return managed != 0;
 }
 
+inline bool isStreamWaitValueSupportedOnDevice(int device) {
+  int waitValue = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&waitValue, hipDeviceAttributeCanUseStreamWaitValue, device));
+  return waitValue != 0;
+}
+
 inline bool isPcieAtomicSupported() {
   int pcieAtomic = 1;
   int device;
@@ -898,6 +904,15 @@ class StreamGate {
 #define CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(device)                         \
   if (!HipTest::isManagedMemorySupportedOnDevice(device)) {                    \
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);             \
+  }
+
+// Call at the start of tests that require hipStreamWaitValue32 or hipStreamWaitValue64
+// support on the current device.
+#define CHECK_STREAM_WAIT_VALUE_SUPPORT                                        \
+  int wait_value_device_ = 0;                                                  \
+  HIP_CHECK(hipGetDevice(&wait_value_device_));                                \
+  if (!HipTest::isStreamWaitValueSupportedOnDevice(wait_value_device_)) {      \
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);           \
   }
 
 #define CHECK_PCIE_ATOMIC_SUPPORT                                                                 \

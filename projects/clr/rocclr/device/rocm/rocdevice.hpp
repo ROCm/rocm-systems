@@ -274,6 +274,12 @@ class NullDevice : public amd::Device {
     return true;
   }
 
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override {
+    ShouldNotReachHere();
+    return false;
+  }
+
   //! Determine if we can use device memory for SVM
   const bool forceFineGrain(amd::Memory* memory) const {
     return (memory->getContext().devices().size() > 1);
@@ -578,8 +584,8 @@ class Device : public NullDevice {
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
 
-  bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
-                         const void* src) const override;
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override;
 
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }

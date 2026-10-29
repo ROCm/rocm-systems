@@ -2214,10 +2214,8 @@ class Device : public RuntimeObject {
    * @param src Host source buffer
    * @return False if the write failed.
    */
-  virtual bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
-                                 const void* src) const {
-    return false;
-  }
+  [[nodiscard]] virtual bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                               const void* src) const = 0;
 
   /**
    * Recovers the location and size of a VMM allocation.

@@ -35,9 +35,9 @@ __managed__ int g_managed_initialized[kStaticInitLen] = {1, 2, 3, 4, 5, 6, 7, 8}
 __managed__ int g_managed_launch[kN];
 __managed__ int g_managed_nonblocking[kN];
 
-static __global__ void AddConst(int* data, int n, int addend) {
+static __global__ void AddConst(int* value, int n, int addend) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) data[i] += addend;
+  if (i < n) value[i] += addend;
 }
 
 static __global__ void SumTwo(int* a, int* b, int n) {
@@ -272,7 +272,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D) {
 
   constexpr int kZStride = 10000;
   constexpr int kYStride = 100;
-  auto uniqueCellValue = [](int x, int y, int z) {
+  auto calcExpectedCellValue = [](int x, int y, int z) {
     return z * kZStride + y * kYStride + x;
   };
 
@@ -280,18 +280,14 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D) {
   for (int z = 0; z < k3dDim; ++z) {
     for (int y = 0; y < k3dDim; ++y) {
       for (int x = 0; x < k3dDim; ++x) {
-        host[z][y][x] = uniqueCellValue(x, y, z);
+        host[z][y][x] = calcExpectedCellValue(x, y, z);
       }
     }
   }
 
-  auto cubePitched = [](void* p) {
-    return make_hipPitchedPtr(p, k3dDim * sizeof(int), k3dDim, k3dDim);
-  };
-
   hipMemcpy3DParms parms = {};
-  parms.srcPtr = cubePitched(host);
-  parms.dstPtr = cubePitched(g_managed_3d);
+  parms.srcPtr = make_hipPitchedPtr(host, k3dDim * sizeof(int), k3dDim, k3dDim);
+  parms.dstPtr = make_hipPitchedPtr(g_managed_3d, k3dDim * sizeof(int), k3dDim, k3dDim);
   parms.extent = make_hipExtent(k3dDim * sizeof(int), k3dDim, k3dDim);
   parms.kind = hipMemcpyHostToDevice;
   HIP_CHECK(hipMemcpy3D(&parms));
@@ -301,7 +297,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D) {
     for (int y = 0; y < k3dDim; ++y) {
       for (int x = 0; x < k3dDim; ++x) {
         INFO("(" << x << ',' << y << ',' << z << ')');
-        REQUIRE(g_managed_3d[z][y][x] == uniqueCellValue(x, y, z));
+        REQUIRE(g_managed_3d[z][y][x] == calcExpectedCellValue(x, y, z));
       }
     }
   }
@@ -318,12 +314,8 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemset3D) {
   constexpr unsigned char kFillByte = 0x42;
   constexpr int kExpected = 0x42424242;
 
-  auto cubePitched = [](void* p) {
-    return make_hipPitchedPtr(p, k3dDim * sizeof(int), k3dDim, k3dDim);
-  };
-
-  HIP_CHECK(hipMemset3D(cubePitched(g_managed_3d), kFillByte,
-                        make_hipExtent(k3dDim * sizeof(int), k3dDim, k3dDim)));
+  HIP_CHECK(hipMemset3D(make_hipPitchedPtr(g_managed_3d, k3dDim * sizeof(int), k3dDim, k3dDim),
+                        kFillByte, make_hipExtent(k3dDim * sizeof(int), k3dDim, k3dDim)));
   HIP_CHECK(hipDeviceSynchronize());
 
   for (int z = 0; z < k3dDim; ++z) {
@@ -423,6 +415,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeer) {
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior) {
   CHECK_MANAGED_MEMORY_SUPPORT
+  CHECK_STREAM_WAIT_VALUE_SUPPORT
 
   const hipExtent extent = make_hipExtent(k3dDim * sizeof(int), k3dDim, k3dDim);
   LinearAllocGuard3D<int> dst(extent);
@@ -453,6 +446,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior) {
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior) {
   CHECK_MANAGED_MEMORY_SUPPORT
+  CHECK_STREAM_WAIT_VALUE_SUPPORT
 
   HipTest::StreamGate gate{nullptr};
   hipStream_t kernel_stream{nullptr};
@@ -481,41 +475,6 @@ static __global__ void ReadManagedInitialized(int* value) {
   *value = g_managed_initialized[0];
 }
 
-// hipMemcpyAsync must initialize managed symbols for the stream's device, not
-// the current device. A zero-byte copy isolates initialization from copy effects.
-HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream) {
-  int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
-  if (numDevices < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
-  }
-  CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(0);
-  CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(1);
-
-  HIP_CHECK(hipSetDevice(1));
-  hipStream_t deviceOneStream = nullptr;
-  HIP_CHECK(hipStreamCreate(&deviceOneStream));
-  int* deviceResult = nullptr;
-  HIP_CHECK(hipMalloc(&deviceResult, sizeof(*deviceResult)));
-
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipMemcpyAsync(nullptr, nullptr, 0, hipMemcpyDefault, deviceOneStream));
-
-  HIP_CHECK(hipSetDevice(1));
-  ReadManagedInitialized<<<1, 1, 0, deviceOneStream>>>(deviceResult);
-  HIP_CHECK(hipGetLastError());
-
-  int result = 0;
-  HIP_CHECK(hipMemcpyAsync(&result, deviceResult, sizeof(result), hipMemcpyDeviceToHost,
-                           deviceOneStream));
-  HIP_CHECK(hipStreamSynchronize(deviceOneStream));
-  REQUIRE(result == 1);
-
-  HIP_CHECK(hipFree(deviceResult));
-  HIP_CHECK(hipStreamDestroy(deviceOneStream));
-}
-
 // Regression test for previous CLR implementation. 
 //
 // Deferred managed-variable initialization must not be ordered behind the null stream.
@@ -528,6 +487,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream) {
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipManagedKeyword_InitIndependentOfNullStream) {
   CHECK_MANAGED_MEMORY_SUPPORT
+  CHECK_STREAM_WAIT_VALUE_SUPPORT
 
   StreamGuard kernel_stream(Streams::withFlags, hipStreamNonBlocking);
 

@@ -7,7 +7,6 @@
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
 #include "hip_conversions.hpp"
-#include "hip_platform.hpp"
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
@@ -633,17 +632,6 @@ hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t coun
       size_t size = sizes[op_idx];
       amd::Memory* mem_obj = mem_objs[op_idx];
       size_t offset = offsets[op_idx];
-
-      if (mem_obj == nullptr) {
-        hip::Var* deferred_var = PlatformState::Instance().StatCO().FindDeferredManagedVar(dev_ptr);
-        if (deferred_var != nullptr) {
-          hipError_t status = deferred_var->EnsureManagedVarIsMapped();
-          if (status != hipSuccess) {
-            return status;
-          }
-          mem_obj = getMemoryObject(hip::getCurrentDevice(), dev_ptr, offset);
-        }
-      }
 
       if (mem_obj != nullptr) {
         if (size > (mem_obj->getSize() - offset)) {

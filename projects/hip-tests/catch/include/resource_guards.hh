@@ -10,6 +10,10 @@
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif  // !defined(_WIN32)
+
 enum class LinearAllocs {
   malloc,
   mallocAndRegister,
@@ -439,3 +443,36 @@ class MemPoolGuard {
   hipMemAllocationHandleType handle_type_;
   hipMemPool_t mempool_;
 };
+
+#if !defined(_WIN32)
+class DlopenGuard {
+ public:
+  explicit DlopenGuard(const char* path) : handle_{dlopen(path, RTLD_NOW)} {
+    const char* load_error = dlerror();
+    INFO("dlopen " << path << " failed: " << (load_error == nullptr ? "" : load_error));
+    REQUIRE(handle_ != nullptr);
+  }
+
+  DlopenGuard(const DlopenGuard&) = delete;
+  DlopenGuard(DlopenGuard&&) = delete;
+  DlopenGuard& operator=(const DlopenGuard&) = delete;
+
+  ~DlopenGuard() {
+    if (handle_ != nullptr) {
+      static_cast<void>(dlclose(handle_));
+    }
+  }
+
+  void* symbol(const char* name) const {
+    void* resolved = dlsym(handle_, name);
+    const char* symbol_error = dlerror();
+    INFO("dlsym " << name << " failed: " << (symbol_error == nullptr ? "" : symbol_error));
+    REQUIRE(symbol_error == nullptr);
+    REQUIRE(resolved != nullptr);
+    return resolved;
+  }
+
+ private:
+  void* handle_;
+};
+#endif  // !defined(_WIN32)

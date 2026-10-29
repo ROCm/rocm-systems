@@ -274,7 +274,11 @@ hipError_t Var::EnsureManagedVarIsMapped() {
     // reserved and initialized as a fine-grain SVM buffer, leaving migration to HMM.
     // Passing false would allocate fresh storage and drop the initial value.
     const bool use_host_ptr = true;
-    IHIP_RETURN_ONFAIL(ihipMallocManaged(pointer, size_, align_, use_host_ptr));
+    const hipError_t status = ihipMallocManaged(pointer, size_, align_, use_host_ptr);
+    if (status != hipSuccess) {
+      LogPrintfError("Failed to map managed var %s, error: %d", name_.c_str(), status);
+      return status;
+    }
     managedVarMapped_ = true;
   }
   if (dMem_.empty()) {

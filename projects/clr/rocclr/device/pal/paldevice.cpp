@@ -1464,8 +1464,8 @@ Memory* Device::getGpuMemory(amd::Memory* mem) const {
 const device::BlitManager& Device::xferMgr() const { return xferQueue_->blitMgr(); }
 
 // ================================================================================================
-bool Device::writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
-                               const void* src) const {
+[[nodiscard]] bool Device::writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                             const void* src) const {
   if (src == nullptr) {
     return false;
   }

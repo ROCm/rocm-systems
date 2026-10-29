@@ -35,6 +35,8 @@ HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Basic) {
 // AMD only because StreamGate uses HIP exclusive APIs
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Synchronization_Behavior) {
+  CHECK_STREAM_WAIT_VALUE_SUPPORT
+
   HipTest::StreamGate gate{nullptr};
   hipStream_t kernel_stream{nullptr};
 

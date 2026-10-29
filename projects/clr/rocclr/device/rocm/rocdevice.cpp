@@ -2672,8 +2672,8 @@ void Device::updateFreeMemory(size_t size, bool free) {
 }
 
 // ================================================================================================
-bool Device::writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
-                               const void* src) const {
+[[nodiscard]] bool Device::writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                             const void* src) const {
   address target = reinterpret_cast<address>(dst.getSvmPtr());
   if (target == nullptr || src == nullptr) {
     return false;

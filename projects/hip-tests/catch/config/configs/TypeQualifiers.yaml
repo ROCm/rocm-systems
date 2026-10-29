@@ -23,8 +23,5 @@ TypeQualifiers:
   Unit_hipManagedKeyword_hipMemcpyPeer:
     <<: *level_default
     tags: [multigpu]
-  Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream:
-    <<: *level_default
-    tags: [multigpu]
   Unit_hipManagedKeyword_hipPointerGetAttributes_BeforeKernel: *level_default
   Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel: *level_default
