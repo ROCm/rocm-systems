@@ -49,7 +49,9 @@ def load_bench(device_id: int, cache_sizes: dict) -> object:
         from utils.hip_interface import hipGetDeviceProperties
 
         # Get exact LLVM target name of the device
-        gfx_device = (hipGetDeviceProperties(device_id).gcnArchName).split(":", 1)[0]
+        gfx_device = (
+            hipGetDeviceProperties(device_id).gcnArchName.split(":")[0].split("-")[0]
+        )
 
         # Force gfx940 MI300A_A0 and gfx941 MI300X_A0 products
         # to use same class as gfx942 MI300_A1
