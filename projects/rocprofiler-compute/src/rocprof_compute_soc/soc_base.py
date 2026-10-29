@@ -10,7 +10,7 @@ import shutil
 from abc import abstractmethod
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 import config
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
@@ -397,6 +397,7 @@ class OmniSoC_Base:
             metric_idx,
             metric_name,
             expressions,
+            *_,
         ) in self._iter_arch_analysis_yaml_metrics():
             formula_hw, _ = extract_counters_and_variables(
                 "\n".join(expressions),
@@ -479,8 +480,8 @@ class OmniSoC_Base:
         expressions: list[str] = []
         if not filter_blocks:
             # Select all sections by default; block 30 only with --membw-analysis
-            for *_, metric_exprs in self._iter_arch_analysis_yaml_metrics():
-                expressions.extend(metric_exprs)
+            for metric in self._iter_arch_analysis_yaml_metrics():
+                expressions.extend(metric.expressions)
 
         for block_id in filter_blocks:
             self._append_expressions_for_filter_token(
@@ -585,9 +586,7 @@ class OmniSoC_Base:
 
         return output_files, file_count, accu_file_count
 
-    def _iter_arch_analysis_yaml_metrics(
-        self,
-    ) -> Iterator[tuple[str, int, int, str, list[str]]]:
+    def _iter_arch_analysis_yaml_metrics(self) -> Iterator[AnalysisConfigMetric]:
         """Iterate the metrics of this arch's analysis configs.
 
         Block 30 is skipped unless --membw-analysis is set. See
@@ -881,19 +880,23 @@ def _table_expressions(table: dict[str, Any]) -> list[str]:
     ]
 
 
+class AnalysisConfigMetric(NamedTuple):
+    """One metric of an analysis config metric_table."""
+
+    stem_id: str  # file id, e.g. "0200" from "0200_system_speed_of_light.yaml"
+    table_id: int
+    metric_idx: int  # zero-based position of the metric in its table
+    metric_name: str
+    expressions: list[str]  # metric_expressions of the metric
+    table: dict[str, Any]
+    metric: dict[str, Any]
+
+
 def iter_analysis_config_metrics(
     config_root: Path, exclude_file_ids: set[str]
-) -> Iterator[tuple[str, int, int, str, list[str]]]:
-    """Iterate the metrics of the analysis config files in config_root,
-    skipping files whose id is in exclude_file_ids.
-
-    Yields:
-        stem_id     file id, e.g. "0200" from "0200_system_speed_of_light.yaml"
-        table_id    metric_table id
-        metric_idx  zero-based index of the metric within its table
-        metric_name metric key string
-        expressions metric_expressions of the metric
-    """
+) -> Iterator[AnalysisConfigMetric]:
+    """Iterate the metrics of the analysis config files in config_root, skipping files
+    whose id is in exclude_file_ids."""
     for config_path in sorted(config_root.glob("*.yaml")):
         stem_id = config_path.name.split("_")[0]
         if stem_id in exclude_file_ids:
@@ -906,10 +909,12 @@ def iter_analysis_config_metrics(
                 continue
             metrics = table["metric"] or {}
             for idx, (metric_name, metric) in enumerate(metrics.items()):
-                yield (
+                yield AnalysisConfigMetric(
                     stem_id,
                     table["id"],
                     idx,
                     metric_name,
                     metric_expressions(table, metric),
+                    table,
+                    metric,
                 )
