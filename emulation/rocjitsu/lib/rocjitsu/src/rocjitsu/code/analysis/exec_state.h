@@ -62,6 +62,9 @@ public:
   /// @returns `ExecState::Unknown` if @p inst was not part of this analysis.
   [[nodiscard]] ExecState before(const Instruction &inst) const;
 
+  /// @brief Lanes per wavefront this analysis was computed for.
+  [[nodiscard]] uint8_t wave_size() const { return wave_size_; }
+
 private:
   void analyze(KernelBlockScope blocks, std::span<const ScopedCfgEdge> extra_edges,
                std::span<const BasicBlock *const> entry_blocks);

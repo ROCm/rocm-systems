@@ -881,7 +881,7 @@ TEST_P(AtomicPolicyExecutionTest, LdsStackUpdatesPointerAndResultWithoutAnInters
     }
     std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
     ASSERT_NE(inst, nullptr);
-    const InstDefUse def_use(*inst);
+    const InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 16, 1}));
     EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::VGPR, 16, 1}));
     ASSERT_TRUE(compute_unit_->execute_instruction(inst.get(), *wave_).succeeded());
@@ -1048,7 +1048,7 @@ TEST_P(AtomicPolicyExecutionTest, BufferFloatCompareSwapDefinesOnlyReturnedEleme
     ASSERT_NE(instruction, nullptr);
     ASSERT_EQ(instruction->num_dst_operands(), 2);
     EXPECT_EQ(instruction->dst_operand(1)->size_bits(), width * 32);
-    const InstDefUse def_use(*instruction);
+    const InstDefUse def_use(*instruction, 64);
     EXPECT_TRUE(
         def_use.uses.contains(RegisterRef{RegClass::VGPR, 0, static_cast<uint8_t>(width * 2)}));
     EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::VGPR, 0, static_cast<uint8_t>(width)}));

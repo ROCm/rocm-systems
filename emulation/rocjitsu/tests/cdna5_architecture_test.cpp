@@ -334,11 +334,11 @@ TEST(Gfx1250CodeObjectTest, ProbeClobberPreservesConcreteTargetIdentity) {
   callable.body_words = {0xCC3B4004u, 0x1C421908u};
 
   std::string error;
-  EXPECT_TRUE(build_probe_clobber_summary(callable, &error).has_value()) << error;
+  EXPECT_TRUE(build_probe_clobber_summary(callable, /*wave_size=*/32, &error).has_value()) << error;
 
   callable.target = ROCJITSU_CODE_TARGET_GFX1250;
   error.clear();
-  EXPECT_FALSE(build_probe_clobber_summary(callable, &error).has_value());
+  EXPECT_FALSE(build_probe_clobber_summary(callable, /*wave_size=*/32, &error).has_value());
   EXPECT_FALSE(error.empty());
 }
 
