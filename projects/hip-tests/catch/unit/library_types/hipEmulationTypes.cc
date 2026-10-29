@@ -18,8 +18,9 @@
  * `hipEmulationSpecialValuesSupport`. Math libraries pass these values straight
  * through to their backends, so the enumerator values must match CUDA.
  *
- * Most checks are static_asserts, so a mismatch fails the build. The test cases
- * additionally exercise the types at runtime so the coverage shows up in CTest.
+ * All checks are static_asserts, so a mismatch fails the build. The single test
+ * case only registers the check in CTest and reports a skip on NVIDIA when the
+ * CUDA version is too old to provide the types.
  */
 
 /*
@@ -48,6 +49,11 @@ static_assert(std::is_same<hipEmulationStrategy, hipEmulationStrategy_t>::value 
                   std::is_same<hipEmulationStrategy, enum hipEmulationStrategy_t>::value,
               "hipEmulationStrategy and hipEmulationStrategy_t name the same type");
 
+// Both names must be usable as variable types.
+constexpr hipEmulationStrategy_t kStrategy = HIP_EMULATION_STRATEGY_EAGER;
+constexpr hipEmulationStrategy kStrategyAlias = HIP_EMULATION_STRATEGY_PERFORMANT;
+static_assert(kStrategy == 2 && kStrategyAlias == 1, "hipEmulationStrategy variables");
+
 #if defined(__HIP_PLATFORM_NVIDIA__)
 static_assert(std::is_same<hipEmulationStrategy, cudaEmulationStrategy>::value,
               "hipEmulationStrategy is cudaEmulationStrategy");
@@ -65,6 +71,10 @@ static_assert(HIP_EMULATION_MANTISSA_CONTROL_DYNAMIC == 0,
               "HIP_EMULATION_MANTISSA_CONTROL_DYNAMIC");
 static_assert(HIP_EMULATION_MANTISSA_CONTROL_FIXED == 1, "HIP_EMULATION_MANTISSA_CONTROL_FIXED");
 
+constexpr hipEmulationMantissaControl_t kMantissa = HIP_EMULATION_MANTISSA_CONTROL_FIXED;
+constexpr hipEmulationMantissaControl kMantissaAlias = HIP_EMULATION_MANTISSA_CONTROL_DYNAMIC;
+static_assert(kMantissa == 1 && kMantissaAlias == 0, "hipEmulationMantissaControl variables");
+
 // Documented values; these match CUDA's cudaEmulationSpecialValuesSupport.
 static_assert(HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE == 0,
               "HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE");
@@ -74,6 +84,15 @@ static_assert(HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN == 2,
               "HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN");
 static_assert(HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT == 0xFFFF,
               "HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT");
+
+// The INFINITY and NAN flags form a bitmask and combine with bitwise OR.
+constexpr hipEmulationSpecialValuesSupport_t kSpecial =
+    static_cast<hipEmulationSpecialValuesSupport_t>(HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY |
+                                                    HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN);
+constexpr hipEmulationSpecialValuesSupport kSpecialAlias =
+    HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT;
+static_assert(kSpecial == 3 && kSpecialAlias == 0xFFFF,
+              "hipEmulationSpecialValuesSupport variables");
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
 static_assert(std::is_same<hipEmulationMantissaControl, cudaEmulationMantissaControl>::value,
@@ -107,86 +126,26 @@ static_assert(HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT ==
 /**
  * Test Description
  * ------------------------
- *    - Assigns each hipEmulationStrategy enumerator to a variable of type
- *      hipEmulationStrategy_t and checks the documented value. On NVIDIA the
- *      values are also checked at compile time against CUDA_EMULATION_STRATEGY_*.
+ *    - The checks in this file are static_asserts on the documented enumerator
+ *      values (and, on NVIDIA, against the CUDA_EMULATION_* values and types).
+ *      Reaching this test case means they all passed at compile time. On NVIDIA
+ *      the test is skipped if the CUDA version does not provide all three types.
  * Test source
  * ------------------------
  *    - catch/unit/library_types/hipEmulationTypes.cc
  * Test requirements
  * ------------------------
- *    - AMD, or NVIDIA with CUDA 13.0 or later
+ *    - AMD, or NVIDIA with CUDA 13.1 or later (CUDA 13.0 checks hipEmulationStrategy only)
  */
-// @asserts: hipEmulationStrategy - enumerator values are 0/1/2 and match CUDA
-HIP_TEST_CASE(Unit_hipEmulationStrategy_Values) {
-#if HIP_TEST_HAS_EMULATION_STRATEGY
-  hipEmulationStrategy_t strategy = HIP_EMULATION_STRATEGY_DEFAULT;
-  REQUIRE(static_cast<int>(strategy) == 0);
-  strategy = HIP_EMULATION_STRATEGY_PERFORMANT;
-  REQUIRE(static_cast<int>(strategy) == 1);
-  hipEmulationStrategy alias = HIP_EMULATION_STRATEGY_EAGER;
-  REQUIRE(static_cast<int>(alias) == 2);
+HIP_TEST_CASE(Unit_hipEmulationTypes_CompileChecks) {
+#if HIP_TEST_HAS_EMULATION_STRATEGY && HIP_TEST_HAS_EMULATION_MANTISSA_SPECIAL
+  SUCCEED("hipEmulation* type and value checks passed at compile time");
+#elif HIP_TEST_HAS_EMULATION_STRATEGY
+  HIP_SKIP_TEST(
+      "hipEmulationMantissaControl and hipEmulationSpecialValuesSupport require CUDA 13.1 or "
+      "later on NVIDIA; only hipEmulationStrategy was checked");
 #else
-  HIP_SKIP_TEST("hipEmulationStrategy requires CUDA 13.0 or later on NVIDIA");
-#endif
-}
-
-/**
- * Test Description
- * ------------------------
- *    - Assigns each hipEmulationMantissaControl enumerator to a variable of type
- *      hipEmulationMantissaControl_t and checks the documented value. On NVIDIA
- *      the values are also checked at compile time against
- *      CUDA_EMULATION_MANTISSA_CONTROL_*.
- * Test source
- * ------------------------
- *    - catch/unit/library_types/hipEmulationTypes.cc
- * Test requirements
- * ------------------------
- *    - AMD, or NVIDIA with CUDA 13.1 or later
- */
-// @asserts: hipEmulationMantissaControl - enumerator values are 0/1 and match CUDA
-HIP_TEST_CASE(Unit_hipEmulationMantissaControl_Values) {
-#if HIP_TEST_HAS_EMULATION_MANTISSA_SPECIAL
-  hipEmulationMantissaControl_t control = HIP_EMULATION_MANTISSA_CONTROL_DYNAMIC;
-  REQUIRE(static_cast<int>(control) == 0);
-  hipEmulationMantissaControl alias = HIP_EMULATION_MANTISSA_CONTROL_FIXED;
-  REQUIRE(static_cast<int>(alias) == 1);
-#else
-  HIP_SKIP_TEST("hipEmulationMantissaControl requires CUDA 13.1 or later on NVIDIA");
-#endif
-}
-
-/**
- * Test Description
- * ------------------------
- *    - Checks the documented hipEmulationSpecialValuesSupport values and that the
- *      INFINITY and NAN flags combine with bitwise OR into a valid
- *      hipEmulationSpecialValuesSupport_t. On NVIDIA the values are also checked
- *      at compile time against CUDA_EMULATION_SPECIAL_VALUES_SUPPORT_*.
- * Test source
- * ------------------------
- *    - catch/unit/library_types/hipEmulationTypes.cc
- * Test requirements
- * ------------------------
- *    - AMD, or NVIDIA with CUDA 13.1 or later
- */
-// @asserts: hipEmulationSpecialValuesSupport - values are 0/1/2/0xFFFF, OR-combine, match CUDA
-HIP_TEST_CASE(Unit_hipEmulationSpecialValuesSupport_Values) {
-#if HIP_TEST_HAS_EMULATION_MANTISSA_SPECIAL
-  hipEmulationSpecialValuesSupport_t support = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
-  REQUIRE(static_cast<int>(support) == 0);
-
-  support = static_cast<hipEmulationSpecialValuesSupport_t>(
-      HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY | HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN);
-  REQUIRE(static_cast<int>(support) == 3);
-  REQUIRE((static_cast<int>(support) & HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY) != 0);
-  REQUIRE((static_cast<int>(support) & HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN) != 0);
-
-  hipEmulationSpecialValuesSupport alias = HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT;
-  REQUIRE(static_cast<int>(alias) == 0xFFFF);
-#else
-  HIP_SKIP_TEST("hipEmulationSpecialValuesSupport requires CUDA 13.1 or later on NVIDIA");
+  HIP_SKIP_TEST("hipEmulation* types require CUDA 13.0 or later on NVIDIA");
 #endif
 }
 
