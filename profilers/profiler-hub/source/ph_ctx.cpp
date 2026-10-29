@@ -1027,21 +1027,21 @@ ph_ctx::initialize_track_list()
             .id          = static_cast<std::uint32_t>(track->id),
             .track_name  = track->name.c_str(),
             .nid         = track->node_info
-                               ? static_cast<std::uint32_t>(track->node_info->node_id)
+                               ? static_cast<std::uint64_t>(track->node_info->node_id)
                                : 0,
             .pid         = track->process_info
-                               ? static_cast<std::uint32_t>(track->process_info->pid)
+                               ? static_cast<std::uint64_t>(track->process_info->pid)
                                : 0,
             .tid         = track->thread_info  // Some tracks have no thread (e.g. per
                                        // agent+queue category tracks)
-                               ? static_cast<std::uint32_t>(track->thread_info->thread_id)
+                               ? static_cast<std::uint64_t>(track->thread_info->thread_id)
                                : 0,
             .event_count = static_cast<std::uint32_t>(std::min<size_t>(
                 track->event_count, std::numeric_limits<std::uint32_t>::max())),
-            .agent_id    = static_cast<std::uint32_t>(track->agent_id),
+            .agent_id    = static_cast<std::uint64_t>(track->agent_id),
             .category    = to_c_track_category(track->category),
-            .queue_id    = static_cast<std::uint32_t>(track->queue_id),
-            .stream_id   = static_cast<std::uint32_t>(track->stream_id),
+            .queue_id    = static_cast<std::uint64_t>(track->queue_id),
+            .stream_id   = static_cast<std::uint64_t>(track->stream_id),
             .start_ts    = static_cast<std::uint64_t>(track->start_ts),
             .end_ts      = static_cast<std::uint64_t>(track->end_ts),
             .value_range = track->value_range ? ph_value_range_t{ track->value_range->min,
@@ -1123,7 +1123,7 @@ ph_ctx::initialize_node_info()
     {
         const auto& node = m_nodes[0];
         m_c_node->info   = {
-              .id            = static_cast<uint32_t>(node->node_id),
+              .id            = static_cast<uint64_t>(node->node_id),
               .machine_id    = node->machine_id.c_str(),
               .system_name   = node->system_name.c_str(),
               .hostname      = node->hostname.c_str(),
@@ -1172,7 +1172,7 @@ ph_ctx::initialize_node_agents()
     for(const auto& agent : m_agents)
     {
         m_c_agents.push_back(ph_agent_t{
-            .id             = static_cast<std::uint32_t>(agent->type_index),
+            .id             = static_cast<std::uint64_t>(agent->type_index),
             .agent_type     = agent->agent_type.c_str(),
             .name           = agent->name.c_str(),
             .model_name     = agent->model_name.c_str(),
@@ -1197,7 +1197,7 @@ ph_ctx::initialize_node_processes()
     for(const auto& process : m_processes)
     {
         m_c_processes.push_back(ph_process_t{
-            .id          = static_cast<std::uint32_t>(process->pid),
+            .id          = static_cast<std::uint64_t>(process->pid),
             .command     = process->command.c_str(),
             .environment = process->environment.c_str(),
             .extdata     = process->extdata.c_str(),
@@ -1243,8 +1243,8 @@ ph_ctx::initialize_node_streams()
             .stream_id = static_cast<uint64_t>(stream->stream_id),
             .name      = stream->name.c_str(),
             .extdata   = stream->extdata.c_str(),
-            .nid       = static_cast<uint32_t>(stream->nid),
-            .pid       = static_cast<uint32_t>(stream->pid),
+            .nid       = static_cast<uint64_t>(stream->nid),
+            .pid       = static_cast<uint64_t>(stream->pid),
         });
     }
 }
@@ -1261,8 +1261,8 @@ ph_ctx::initialize_node_queues()
             .queue_id = static_cast<uint64_t>(queue->queue_id),
             .name     = queue->name.c_str(),
             .extdata  = queue->extdata.c_str(),
-            .nid      = static_cast<uint32_t>(queue->nid),
-            .pid      = static_cast<uint32_t>(queue->pid),
+            .nid      = static_cast<uint64_t>(queue->nid),
+            .pid      = static_cast<uint64_t>(queue->pid),
         });
     }
 }
@@ -1306,8 +1306,8 @@ ph_ctx::initialize_stream_hardware_links()
     {
         m_c_stream_hardware_links.push_back(ph_stream_hardware_link_t{
             .category          = to_c_track_category(link.category),
-            .nid               = static_cast<std::uint32_t>(link.nid),
-            .pid               = static_cast<std::uint32_t>(link.pid),
+            .nid               = static_cast<std::uint64_t>(link.nid),
+            .pid               = static_cast<std::uint64_t>(link.pid),
             .stream_id         = static_cast<std::uint64_t>(link.stream_id),
             .agent_id          = optional_uint64(link.agent_id),
             .queue_id          = optional_uint64(link.queue_id),

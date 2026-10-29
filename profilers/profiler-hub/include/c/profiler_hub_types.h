@@ -128,18 +128,18 @@ extern "C"
     {
         uint32_t    id;
         const char* track_name;
-        uint32_t    nid;         /**< Node id this track belongs to. */
-        uint32_t    pid;         /**< OS process id. Not rocpd_info_process.id. */
-        uint32_t    tid;         /**< OS thread id, or 0 if this track has no thread.
+        uint64_t    nid;         /**< Node id this track belongs to. */
+        uint64_t    pid;         /**< OS process id. Not rocpd_info_process.id. */
+        uint64_t    tid;         /**< OS thread id, or 0 if this track has no thread.
                                        Not rocpd_info_thread.id. */
         uint32_t    event_count; /**< Total events recorded on this track. */
-        uint32_t    agent_id;    /**< Owning device (agent) id, or 0 if not
+        uint64_t    agent_id;    /**< Owning device (agent) id, or 0 if not
                                        device-specific. */
         ph_track_category_t category; /**< What identity columns this track was
                                             derived from. */
-        uint32_t queue_id;            /**< Owning queue id. Only meaningful for
+        uint64_t queue_id;            /**< Owning queue id. Only meaningful for
                                        *_AGENT_QUEUE categories, else 0. */
-        uint32_t stream_id;           /**< Owning stream id. Only meaningful for
+        uint64_t stream_id;           /**< Owning stream id. Only meaningful for
                                             PH_TRACK_CATEGORY_STREAM, else 0. */
         uint64_t start_ts;            /**< Nanosecond timestamp of the track's
                                             earliest event. */
@@ -175,7 +175,7 @@ extern "C"
      */
     typedef struct
     {
-        uint32_t    id;
+        uint64_t    id;
         const char* machine_id;
         const char* system_name;
         const char* hostname;
@@ -192,7 +192,7 @@ extern "C"
      */
     typedef struct
     {
-        uint32_t             id; /**< type_index. Not rocpd_info_agent.id. */
+        uint64_t             id; /**< type_index. Not rocpd_info_agent.id. */
         const char*          agent_type;
         const char*          name;
         const char*          model_name;
@@ -220,7 +220,7 @@ extern "C"
      */
     typedef struct
     {
-        uint32_t             id; /**< OS process id. Not rocpd_info_process.id. */
+        uint64_t             id; /**< OS process id. Not rocpd_info_process.id. */
         const char*          command;
         const char*          environment;
         const char*          extdata;
@@ -270,8 +270,8 @@ extern "C"
         uint64_t    stream_id;
         const char* name;
         const char* extdata;
-        uint32_t    nid; /**< rocpd_info_node.id. */
-        uint32_t    pid; /**< rocpd_info_process.id. Not the OS pid. */
+        uint64_t    nid; /**< rocpd_info_node.id. */
+        uint64_t    pid; /**< rocpd_info_process.id. Not the OS pid. */
     } ph_stream_t;
 
     /** @brief A list of streams; same lifetime rule as ph_track_list_t. */
@@ -290,8 +290,8 @@ extern "C"
         uint64_t    queue_id;
         const char* name;
         const char* extdata;
-        uint32_t    nid; /**< rocpd_info_node.id. */
-        uint32_t    pid; /**< rocpd_info_process.id. Not the OS pid. */
+        uint64_t    nid; /**< rocpd_info_node.id. */
+        uint64_t    pid; /**< rocpd_info_process.id. Not the OS pid. */
     } ph_queue_t;
 
     /** @brief A list of queues; same lifetime rule as ph_track_list_t. */
@@ -346,8 +346,8 @@ extern "C"
     typedef struct
     {
         ph_track_category_t  category;
-        uint32_t             nid;
-        uint32_t             pid;
+        uint64_t             nid;
+        uint64_t             pid;
         uint64_t             stream_id;
         ph_optional_uint64_t agent_id;
         ph_optional_uint64_t queue_id;
