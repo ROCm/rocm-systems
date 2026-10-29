@@ -102,12 +102,16 @@ ARCH_CEILINGS_WITHOUT_METRIC = {
     "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
     # The roofline shows the F32 and F64 VALU rates only.
     "gfx115x": ("FP16Flops", "BF16Flops"),
+    # The VALU rows show theoretical peaks.
+    "gfx1250": ("FP16Flops", "FP32Flops", "FP64Flops"),
 }
 VARIABLE_FIELDS = ("formula",)
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
-# by a different measured ceiling. gfx950 counts MXF8 matrix work in the F8 counter.
+# by a different measured ceiling. gfx950 and gfx1250 count MXF8 matrix work in the F8
+# counter.
 SHARED_FORMULA_IDS = {
     "compute.mfma_flops_mxf8": "compute.mfma_flops_f8",
+    "compute.wmma_flops_mxfp8": "compute.wmma_flops_fp8",
 }
 # Ids that hold another id's formula on a different arch (id -> that id): one label
 # shows two equations on gfx940 and gfx941 (D8 Kind 3), and the parent arch's equation
@@ -278,6 +282,13 @@ DISPLAY_VARIANTS["gfx115x"] = {
         "SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)",
     ),
 }
+DISPLAY_VARIANTS["gfx1250"] = {
+    "3.3.4": (
+        "GL0 Hit Rate",
+        "gl0.hit_rate",
+        "SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum) * 100",
+    ),
+}
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
 UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942")}
@@ -303,6 +314,19 @@ UNIT_VARIANTS["gfx115x"] = {
     "11.4.0": ("GL2 Read Requests", "(Count + $normUnit)"),
     "11.4.1": ("GL2 Read 128B Requests", "(Count + $normUnit)"),
     "11.4.2": ("GL2 Write Requests", "(Count + $normUnit)"),
+}
+UNIT_VARIANTS["gfx1250"] = {
+    "2.1.17": ("Active WGPs", "WGPs per Cycle"),
+    "3.4.0": ("LDS Load Requests", "(Requests + $normUnit)"),
+    "3.4.1": ("LDS Store Requests", "(Requests + $normUnit)"),
+    "3.4.2": ("LDS Atomic Requests", "(Requests + $normUnit)"),
+    "3.4.3": ("Async Load Requests", "(Requests + $normUnit)"),
+    "3.4.4": ("Async Store Requests", "(Requests + $normUnit)"),
+    "3.4.14": ("TDM Load Requests", "(Requests + $normUnit)"),
+    "3.4.15": ("TDM Store Requests", "(Requests + $normUnit)"),
+    "6.2.0": ("Dispatched Workgroups", "Count"),
+    "6.2.1": ("Dispatched Wavefronts", "Count"),
+    "7.2.5": ("LDS Allocation", "Bytes"),
 }
 UNIT_VARIANTS["gfx950"] = {
     **_CDNA_UNIT_VARIANTS,

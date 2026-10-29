@@ -1,0 +1,108 @@
+glarb.gl2_atomic_bw:
+  name: GLARB-GL2 Atomic Bandwidth
+  formula: 64 * SUM(GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total Graphic Level Arbiter to GL2 atomic bandwidth.
+glarb.glarba_req:
+  name: GLARBA Requests
+  formula: SUM(GLARBA_ARB_REQUESTS_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Total requests arbitrated by Graphics Level Arbiter.
+glarb.glarba_req_bus_util:
+  name: GLARBA Request Bus Utilization
+  formula: 100 * SUM(GLARBA_REQ_PATH_BUSY_sum) / SUM(GLARBA_CYCLE_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the GL1 to Graphics Level Arbiter request bus is active.
+glarb.glarba_req_lat:
+  name: GLARBA Request Latency
+  formula: SUM(GLARBA_REQ_INFLIGHT_LEVEL_sum) / SUM(GLARBA_ARB_REQUESTS_sum)
+  unit: Cycles
+  description: ''
+glarb.glarba_return_bus_util:
+  name: GLARBA Return Bus Utilization
+  formula: 100 * SUM(GLARBA_RET_PATH_BUSY_sum) / SUM(GLARBA_CYCLE_sum)
+  unit: Percent
+  description: Percentage of cycles the GL2-to-GL1 return bus is active.
+glarb.glarba_util:
+  name: GLARBA Utilization
+  formula: 100 * SUM(GLARBA_BUSY_sum) / SUM(GLARBA_CYCLE_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the Graphic Level Arbiter is processing requests.
+glarb.glarbc_buffer_full_stall:
+  name: GLARBC Buffer Full Stall
+  formula: 100 * SUM(GLARBC_STALL_BUFFER_FULL_sum) / SUM(GLARBC_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of Graphics Level Arbiter busy cycles when it's stalled due to a full
+    buffer.
+glarb.glarbc_client_wr_acks:
+  name: GLARBC-Client Write ACKs
+  formula: SUM(GLARBC_GLARB_RET_ACK_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of write acknowledgments returned from Graphics Level Arbiter to GL1 clients.
+glarb.glarbc_gl2_rd_lat:
+  name: GLARBC-GL2 Read Latency
+  formula: SUM(GLARBC_GL2_REQ_READ_LEVEL_sum) / SUM(GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum)
+  unit: Cycles
+  description: Average Graphics Level Arbiter to GL2 read latency.
+glarb.glarbc_gl2_wr_acks:
+  name: GLARBC-GL2 Write ACKs
+  formula: SUM(GLARBC_GL2_RET_ACK_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of write acknowledgments received from GL2 by Graphics Level Arbiter.
+glarb.glarbc_gl2_wr_lat:
+  name: GLARBC-GL2 Write Latency
+  formula: SUM(GLARBC_GL2_REQ_WRITE_LEVEL_sum) / SUM(GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum)
+  unit: Cycles
+  description: ''
+glarb.glarbc_req:
+  name: GLARBC Requests
+  formula: SUM(GLARBC_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Total requests forwarded by Graphics Level Arbiter to GL2.
+glarb.glarbc_req_atomic_with_return:
+  name: GLARBC Requests - Atomic with Return
+  formula: SUM(GLARBC_REQ_ATOMIC_WITH_RET_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of returning Graphics Level Arbiter atomic requests.
+glarb.glarbc_req_atomic_without_return:
+  name: GLARBC Requests - Atomic Without Return
+  formula: SUM(GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Number of non-returning Graphics Level Arbiter atomic requests.
+glarb.glarbc_req_bw_rd:
+  name: GLARBC Request Bandwidth - Read
+  formula: SUM(GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total Graphic Level Arbiter to GL2 read bandwidth.
+glarb.glarbc_req_bw_wr:
+  name: GLARBC Request Bandwidth - Write
+  formula: SUM(GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total Graphic Level Arbiter to GL2 write bandwidth.
+glarb.glarbc_req_rd:
+  name: GLARBC Requests - Read
+  formula: SUM(GLARBC_REQ_READ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of Graphics Level Arbiter read requests.
+glarb.glarbc_req_wr:
+  name: GLARBC Requests - Write
+  formula: SUM(GLARBC_REQ_WRITE_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of Graphics Level Arbiter write requests.
+glarb.glarbc_return_arbitration_lat:
+  name: GLARBC Return Arbitration Latency
+  formula: SUM(GLARBC_ARB_RET_LEVEL_sum) / SUM(GLARBC_REQ_sum)
+  unit: Cycles
+  description: ''
+glarb.glarbc_util:
+  name: GLARBC Utilization
+  formula: 100 * SUM(GLARBC_BUSY_sum) / SUM(GLARBC_CYCLE_sum)
+  unit: Percent
+  description: >-
+    Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding requests.
