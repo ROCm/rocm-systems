@@ -218,7 +218,7 @@ inline uint32_t input_local_element(const InputLoc &loc) {
 }
 
 /// Compute 32-bit output element location for the GFX9 MFMA register layout.
-inline OutputLoc output_loc_32(uint32_t M, uint32_t N, uint32_t i, uint32_t j, uint32_t b) {
+constexpr OutputLoc output_loc_32(uint32_t M, uint32_t N, uint32_t i, uint32_t j, uint32_t b) {
   uint32_t multirows = 64 / N;
   uint32_t mn_div_4 = (M * N) / 4;
   uint32_t blocks_per_reg = (64 + mn_div_4 - 1) / mn_div_4;
@@ -226,6 +226,28 @@ inline OutputLoc output_loc_32(uint32_t M, uint32_t N, uint32_t i, uint32_t j, u
   uint32_t reg = b * ((M * N) / 64) + (i / (4 * multirows)) * 4 + (i % 4);
   uint32_t lane = (b % blocks_per_reg) * N + ((i / 4) % multirows) * blocks_per_reg * N + j;
   return {reg, lane};
+}
+
+/// Whether output_loc_32 maps the M x N x B outputs of a wave64 MFMA one-to-one
+/// onto every word of the first M*N*B/64 VGPRs.
+template <uint32_t M, uint32_t N, uint32_t B>
+consteval bool output_loc_32_fills_wave64_registers() {
+  constexpr uint32_t words = M * N * B;
+  if constexpr (words % 64 != 0) {
+    return false;
+  } else {
+    std::array<bool, words> written{};
+    for (uint32_t b = 0; b < B; ++b)
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          const OutputLoc out = output_loc_32(M, N, row, col, b);
+          const uint32_t word = out.reg * 64 + out.lane;
+          if (out.lane >= 64 || word >= words || written[word])
+            return false;
+          written[word] = true;
+        }
+    return true;
+  }
 }
 
 /// Compute 64-bit output element location for the GFX9 MFMA register layout.
@@ -5967,7 +5989,12 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
           if (std::isnan(fv) || std::isinf(fv))
             has_nan_or_inf = true;
         }
-    static_assert(M * N * B % 64 == 0, "MFMA output must cover whole VGPRs");
+    // This path runs only for wave64, so the write region holds M*N*B/64 whole
+    // VGPRs and each published span lies inside C_words. Every word of those
+    // spans must also have been staged above; a gap would publish a stale
+    // accumulator word or uninitialized stack memory.
+    static_assert(output_loc_32_fills_wave64_registers<M, N, B>(),
+                  "f16 MFMA outputs must fill whole wave64 VGPRs exactly once");
     for (uint32_t reg = 0; reg < writes.reg_count(); ++reg)
       writes.set_lanes(reg, std::span<const uint32_t>(C_words + reg * wf, wf));
     if (has_nan_or_inf) {
