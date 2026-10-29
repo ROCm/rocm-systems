@@ -45,20 +45,6 @@ NCCL_DEVICE_INLINE GdaSignalTarget gdaSignalTarget(ncclGinRocshmemGdaGPUContext*
 
 template <>
 struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
-  // ThreadSafe selects whether the QueuePair post path locks the SQ (agent-scope
-  // CAS + acquire/release fence) to guard against other coops/CTAs posting to the
-  // same QP concurrently. It is the rocSHMEM analogue of DOCA's
-  // doca_gpu_dev_verbs_resource_sharing_mode: GPU/CTA sharing -> ThreadSafe (lock),
-  // THREAD (exclusive QP ownership) -> !ThreadSafe (drop the lock). Like GDAKI, a
-  // single elected lane posts for the whole coop; the mode only changes the
-  // internal SQ synchronization, not who posts.
-  //
-  // PRECONDITION for THREAD (stronger than GDAKI): all contexts alias the same
-  // per-peer QP array (gin_plugin_rocshmem_gda.cc; only signals/counters stripe by
-  // contextId), so there is one SQ per peer for the WHOLE grid -- GDAKI instead has
-  // a distinct QP per context. So THREAD is safe only with a single poster per peer
-  // across the grid (e.g. GIN confined to one CTA); a multi-CTA barrier posting to
-  // qps[peer] must use GPU mode. Opt-in only (library default is GPU).
   template <bool threadSafe, typename Coop>
   NCCL_DEVICE_INLINE static void callImpl(ncclGinCtx ctx, Coop coop, int peer, bool hasWins, ncclGinWindow_t dstWin,
                                           size_t dstOff, ncclGinWindow_t srcWin, size_t srcOff, size_t bytes,
@@ -141,7 +127,6 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
 template <>
 struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
-  // See ncclGinApi_Put::callImpl for the ThreadSafe/resource-sharing rationale.
   template <bool threadSafe, typename Coop, typename T>
   NCCL_DEVICE_INLINE static void callImpl(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin, size_t dstOff,
                                           T srcVal, ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
