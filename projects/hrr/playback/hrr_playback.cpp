@@ -1263,9 +1263,9 @@ static bool check_repair_signature(const std::string& dir, hrr::VerifiedFiles* f
 // After --repair rewrote events.bin and manifest.json the old signature, if any,
 // is stale. Sign the result with --signing-key, or drop the stale pair and say so.
 //
-// `dir_fd` is the descriptor check_existing_signature verified through and `held`
-// what it saw, so a file other than the ones repair rewrote that changed between
-// the check and now is refused, not signed.
+// `held` is the digest of every file as verified, updated for the files repair
+// rewrote, and signing is held to it: any file that differs at signing is refused,
+// not signed. `dir_fd` is the directory descriptor the tree is hashed through.
 static bool resign_repaired(const fs::path& dir, int dir_fd,
                             const std::optional<hrr_sign::ExpectedTree>& held) {
   std::string err;
@@ -1358,6 +1358,32 @@ static int repair_archive(const hrr::Archive& archive) {
     return 1;
   }
 
+  // pid and parent_pid are carried into the manifest that gets signed, so they are
+  // read before anything is rewritten. For a checked archive they come from the old
+  // manifest.json held to the verified digest, so a change made after the check is
+  // refused instead of signed; a manifest the signature did not list is not read.
+  const std::string manifest_path = (archive_dir / "manifest.json").string();
+  ProcessInfo info{};
+  bool have_info = false;
+#ifdef HRR_HAVE_ARCHIVE_SIGN
+  if (archive.checked) {
+    hrr::ManifestIds ids;
+    std::string read_err;
+    bool refused = false;
+    have_info = hrr::read_manifest_ids(archive.path, &archive.verified, ids, &read_err, &refused);
+    if (refused) {
+      fprintf(stderr, "[HRR] repair: %s\n", read_err.c_str());
+      return 1;
+    }
+    info.pid = ids.pid;
+    info.parent_pid = ids.parent_pid;
+  } else
+#endif
+  {
+    have_info = read_process_manifest(manifest_path, info);
+  }
+  if (!have_info) info.pid = pid_from_archive_dir(archive_dir);
+
   // The digest of what is written to each rewritten file, taken as it is written
   // (a signed archive only): signing is held to these, so a file swapped in after
   // the write is refused rather than signed.
@@ -1404,11 +1430,6 @@ static int repair_archive(const hrr::Archive& archive) {
     fprintf(stderr, "[HRR] repair: %s; leaving original untouched\n", err.c_str());
     return 1;
   }
-
-  const std::string manifest_path = (archive_dir / "manifest.json").string();
-  ProcessInfo info{};
-  if (!read_process_manifest(manifest_path, info))
-    info.pid = pid_from_archive_dir(archive_dir);
 
   char manifest_text[256];
   const int manifest_len = snprintf(manifest_text, sizeof(manifest_text),

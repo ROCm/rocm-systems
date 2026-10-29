@@ -340,6 +340,20 @@ bool read_archive_file(const std::string& dir, const std::string& rel,
                        const VerifiedFiles* verified, std::vector<uint8_t>& data,
                        std::string* error = nullptr, bool* refused = nullptr);
 
+// The pid and parent_pid recorded in an archive's manifest.json.
+struct ManifestIds {
+  uint64_t pid = 0;
+  uint64_t parent_pid = 0;
+};
+
+// Read the ids from `dir`/manifest.json as read_archive_file reads it, so with
+// `verified` they come from bytes that hash to the verified digest. False when
+// there is no usable pid: the file is absent, has none, or (with `verified`) is not
+// listed in it, which is not read at all. *refused is set, with *error, when the
+// file is listed but was changed or removed since the check.
+bool read_manifest_ids(const std::string& dir, const VerifiedFiles* verified, ManifestIds& out,
+                       std::string* error = nullptr, bool* refused = nullptr);
+
 // Read a blob's bytes given its hash. Returns false if not found.
 bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
                std::vector<uint8_t>& data);

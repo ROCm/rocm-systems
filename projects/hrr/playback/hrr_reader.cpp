@@ -895,6 +895,33 @@ bool read_archive_file(const std::string& dir, const std::string& rel,
   return true;
 }
 
+bool read_manifest_ids(const std::string& dir, const VerifiedFiles* verified, ManifestIds& out,
+                       std::string* error, bool* refused) {
+  if (verified && !verified->count("manifest.json")) return false;
+  std::vector<uint8_t> data;
+  if (!read_archive_file(dir, "manifest.json", verified, data, error, refused)) return false;
+  ManifestIds ids;
+  bool saw_pid = false;
+  const std::string text(data.begin(), data.end());
+  size_t pos = 0;
+  while (pos < text.size()) {
+    size_t end = text.find('\n', pos);
+    if (end == std::string::npos) end = text.size();
+    const std::string line = text.substr(pos, end - pos);
+    pos = end + 1;
+    unsigned long long u = 0;
+    if (sscanf(line.c_str(), " \"pid\": %llu", &u) == 1) {
+      ids.pid = static_cast<uint64_t>(u);
+      saw_pid = true;
+    } else if (sscanf(line.c_str(), " \"parent_pid\": %llu", &u) == 1) {
+      ids.parent_pid = static_cast<uint64_t>(u);
+    }
+  }
+  if (!saw_pid) return false;
+  out = ids;
+  return true;
+}
+
 static bool read_file(const Archive& archive, const std::string& file_path,
                       std::vector<uint8_t>& data) {
   std::string err;

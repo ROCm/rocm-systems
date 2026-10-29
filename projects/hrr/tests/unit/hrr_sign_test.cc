@@ -834,6 +834,65 @@ HRR_TEST_CASE(Unit_HRR_Sign_SigningHoldsFilesToTheVerifiedTree) {
 #endif
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   --repair copies pid and parent_pid from the old manifest.json into the manifest
+ *   it signs, so with a checked archive they are read through the verified digests
+ *   (hrr::read_manifest_ids), not by path:
+ *   - negative control: read by path (no digests), a manifest.json swapped in after
+ *     the check yields the attacker's pid and parent_pid, so the swap is real;
+ *   - read against archive.verified, the same swap is refused (*refused set, the
+ *     file named) and no ids are returned;
+ *   - an untouched manifest.json gives its own pid and parent_pid;
+ *   - a manifest.json the signature did not list is not read: false, not refused.
+ */
+HRR_TEST_CASE(Unit_HRR_Sign_RepairReadsTheOldManifestThroughTheVerifiedDigests) {
+  const std::string evil = "{\n  \"pid\": 777,\n  \"parent_pid\": 888,\n  \"complete\": true\n}\n";
+  {
+    Archive a("manifest_ids_ok");
+    CheckGuard guard(a);
+    hrr::Archive loaded;
+    REQUIRE(hrr::load_archive(a.dir.string(), loaded));
+    REQUIRE(loaded.checked);
+    hrr::ManifestIds ids;
+    bool refused = false;
+    CHECK(hrr::read_manifest_ids(a.dir.string(), &loaded.verified, ids, nullptr, &refused));
+    CHECK_FALSE(refused);
+    CHECK(ids.pid == 4242);
+    CHECK(ids.parent_pid == 1);
+  }
+  {
+    Archive a("manifest_ids_swapped");
+    CheckGuard guard(a);
+    hrr::Archive loaded;
+    REQUIRE(hrr::load_archive(a.dir.string(), loaded));
+    write_bytes(a.dir / "manifest.json", evil);  // after the check
+    hrr::ManifestIds ids;
+    // Negative control: by path the chosen integers are read.
+    CHECK(hrr::read_manifest_ids(a.dir.string(), nullptr, ids));
+    CHECK(ids.pid == 777);
+    CHECK(ids.parent_pid == 888);
+    hrr::ManifestIds held;
+    std::string err;
+    bool refused = false;
+    CHECK_FALSE(hrr::read_manifest_ids(a.dir.string(), &loaded.verified, held, &err, &refused));
+    CHECK(refused);
+    CHECK(err.find("manifest.json") != std::string::npos);
+    CHECK(held.pid == 0);
+    CHECK(held.parent_pid == 0);
+  }
+  {
+    Archive a("manifest_ids_unlisted");
+    hrr::VerifiedFiles none;
+    hrr::ManifestIds ids;
+    bool refused = false;
+    CHECK_FALSE(hrr::read_manifest_ids(a.dir.string(), &none, ids, nullptr, &refused));
+    CHECK_FALSE(refused);
+    CHECK(ids.pid == 0);
+  }
+}
+
 #else
 // projects/hrr was checked out without CLR's hrr_archive_sign.cpp or shared/sha256
 // (playback/CMakeLists.txt).
@@ -854,6 +913,7 @@ HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_TrustedKeyVariableDoesNotBlockRepair)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_ManifestLimitAppliesToSigningToo)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_FilesAreHeldToTheVerifiedDigestsWhenRead)
 HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_SigningHoldsFilesToTheVerifiedTree)
+HRR_SIGN_NOT_BUILT(Unit_HRR_Sign_RepairReadsTheOldManifestThroughTheVerifiedDigests)
 #endif
 
 /**
