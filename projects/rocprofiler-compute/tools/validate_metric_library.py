@@ -94,8 +94,9 @@ METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical")
 # A roofline benchmark ceiling, the measured peak in "peak_empirical".
 EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
 # Ceilings the roofline benchmark measures that no row shows as a peak: on every arch,
-# the VALU integer rates; per arch, the rates the roofline combines or does not show.
-CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops")
+# the VALU integer rates and MALL bandwidth (analyze skips MALL, roofline_calc.py); per
+# arch, the rates the roofline combines or does not show.
+CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
 ARCH_CEILINGS_WITHOUT_METRIC = {}
 VARIABLE_FIELDS = ("formula",)
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
@@ -155,10 +156,24 @@ DISPLAY_VARIANTS = {
         "4.1.11": _ROOFLINE_LDS_BW,
         "11.2.7": _PIPELINE_MFMA_UTIL,
     },
+    "gfx940": {
+        "4.1.10": _ROOFLINE_L2_BW,
+        "4.1.12": _ROOFLINE_LDS_BW,
+        "11.2.7": _PIPELINE_MFMA_UTIL,
+    },
 }
+DISPLAY_VARIANTS["gfx941"] = DISPLAY_VARIANTS["gfx940"]
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
 UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a")}
+# gfx940 and gfx941 label integer ops in FLOPs.
+_GFX940_UNIT_VARIANTS = {
+    **_CDNA_UNIT_VARIANTS,
+    "11.3.1": ("IOPs (Total)", "(FLOPs + $normUnit)"),
+    "11.3.7": ("INT8 OPs", "(FLOPs + $normUnit)"),
+}
+UNIT_VARIANTS["gfx940"] = _GFX940_UNIT_VARIANTS
+UNIT_VARIANTS["gfx941"] = _GFX940_UNIT_VARIANTS
 
 
 def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> List[str]:
