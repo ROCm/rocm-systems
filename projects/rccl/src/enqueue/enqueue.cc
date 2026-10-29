@@ -2168,6 +2168,11 @@ static ncclResult_t hostStreamPlanTask(struct ncclComm* comm, struct ncclKernelP
 static void HIPRT_CB hostStreamPlanCallback(void* plan_) {
   NCCL_NVTX3_FUNC_RANGE;
   struct ncclKernelPlan* plan = (struct ncclKernelPlan*)plan_;
+  if (plan->persistent &&
+      (COMPILER_ATOMIC_LOAD(&plan->comm->revokedFlag, std::memory_order_acquire) != 0 ||
+       COMPILER_ATOMIC_LOAD(plan->comm->abortFlag, std::memory_order_acquire) != 0)) {
+    return;
+  }
   ncclResult_t result = hostStreamPlanTask(plan->comm, plan);
   if (result != ncclSuccess) {
     WARN("hostStreamPlanCallback() failed : %s", ncclGetErrorString(result));
@@ -2241,14 +2246,79 @@ static ncclResult_t reclaimPlan(struct ncclComm* comm, struct ncclCommCallback* 
   return ncclSuccess;
 }
 
-static void persistentDestructor(void* plans_) {
-  struct ncclKernelPlan* plan = (struct ncclKernelPlan*)plans_;
-  struct ncclComm* comm = plan->comm;
+static bool claimPersistentPlanRef(struct ncclPersistentPlanRef* ref) {
+  int expected;
+  bool won;
+  do {
+    expected = ncclPersistentPlanRefLive;
+    won = COMPILER_ATOMIC_COMPARE_EXCHANGE(&ref->state, &expected, (int)ncclPersistentPlanRefReleased,
+                                           std::memory_order_acq_rel, std::memory_order_acquire);
+  } while (!won && expected == ncclPersistentPlanRefLive);
+  return won || expected == ncclPersistentPlanRefOrphaned;
+}
+
+static void enqueuePlanChain(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   while (plan != nullptr) {
     struct ncclKernelPlan* next = plan->next;
     ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &plan->reclaimer);
     plan = next;
   }
+}
+
+static void persistentDestructor(void* ref_) {
+  struct ncclPersistentPlanRef* ref = (struct ncclPersistentPlanRef*)ref_;
+  struct ncclComm* comm = ref->comm;
+  struct ncclKernelPlan* plan = ref->planHead;
+
+  ncclPersistentPlanRefsLock(comm);
+  struct ncclDeferredCleanup* deferred = comm->deferredCleanup;
+  if (deferred == nullptr) {
+    bool reclaim = claimPersistentPlanRef(ref);
+    ncclPersistentPlanRefDrop(ref);
+    ncclPersistentPlanRefsUnlock(comm);
+    if (reclaim) enqueuePlanChain(comm, plan);
+    return;
+  }
+  bool waitCleanup = ncclDeferredCleanupArrive(deferred);
+  ncclPersistentPlanRefsUnlock(comm);
+
+  bool reclaim = claimPersistentPlanRef(ref);
+  ncclPersistentPlanRefDrop(ref);
+  if (reclaim) enqueuePlanChain(comm, plan);
+  if (waitCleanup) ncclDeferredCleanupWait(deferred);
+}
+
+static ncclResult_t addPersistentPlanRef(struct ncclComm* comm, struct ncclCudaGraph graph,
+                                         struct ncclKernelPlan* planHead) {
+  ncclPersistentPlanRefsLock(comm);
+  struct ncclPersistentPlanRef** pref = &comm->persistentPlanRefs;
+  while (*pref != nullptr) {
+    struct ncclPersistentPlanRef* ref = *pref;
+    if (COMPILER_ATOMIC_LOAD(&ref->state, std::memory_order_acquire) == ncclPersistentPlanRefLive) {
+      pref = &ref->next;
+    } else {
+      *pref = ref->next;
+      ncclPersistentPlanRefDrop(ref);
+    }
+  }
+  ncclPersistentPlanRefsUnlock(comm);
+
+  struct ncclPersistentPlanRef* ref;
+  NCCLCHECK(ncclCalloc(&ref, 1));
+  ref->comm = comm;
+  ref->planHead = planHead;
+  COMPILER_ATOMIC_STORE(&ref->state, (int)ncclPersistentPlanRefLive, std::memory_order_relaxed);
+  COMPILER_ATOMIC_STORE(&ref->refCount, 2, std::memory_order_relaxed);
+  ncclResult_t result = ncclCudaGraphAddDestructor(graph, persistentDestructor, ref);
+  if (result != ncclSuccess) {
+    free(ref);
+    return result;
+  }
+  ncclPersistentPlanRefsLock(comm);
+  ref->next = comm->persistentPlanRefs;
+  comm->persistentPlanRefs = ref;
+  ncclPersistentPlanRefsUnlock(comm);
+  return ncclSuccess;
 }
 
 NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
@@ -2610,10 +2680,9 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
     }
 
     if (persistent) {
+      NCCLCHECKGOTO(addPersistentPlanRef(comm, planner->capturingGraph, planHead), result, failure);
       comm->sharedRes->persistentRefs += nPlans;
       comm->localPersistentRefs += nPlans;
-      NCCLCHECKGOTO(ncclCudaGraphAddDestructor(planner->capturingGraph, persistentDestructor, (void*)planHead), result,
-                    failure);
     }
   }
 failure:

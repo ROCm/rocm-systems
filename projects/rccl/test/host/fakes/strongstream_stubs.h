@@ -24,6 +24,7 @@ extern std::function<ncclResult_t(hipStream_t, hipStream_t)> g_ncclStreamAdvance
 extern std::function<ncclResult_t(struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*)>
     g_ncclStrongStreamAcquiredWorkStream;
 extern std::function<ncclResult_t(struct ncclCudaGraph, hipEvent_t, hipStream_t)> g_ncclCudaGraphRecordEvent;
+extern std::function<ncclResult_t(struct ncclCudaGraph, cudaHostFn_t, void*)> g_cudaGraphAddDestructor;
 
 extern ncclResult_t g_ncclStrongStreamResult;
 
