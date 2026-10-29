@@ -31,6 +31,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Resolved a segmentation fault in `hipStreamEndCapture` during multi-stream capture caused by a bookkeeping cycle among capture participants. The fix tracks capture participants in a single origin-stream-owned set, eliminating recursive traversal of forked streams during capture finalization and improving stream capture stability.
 * Resolved a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
 * Fixed incorrect calculations when using the type `bool` for `cooperative_groups::exclusive_scan`. The implementation now correctly handles the identity value for the first active lane and prevents unintended type conversions from `bool` to `int`.
+* Resolved an issue where legacy-stream sync operations (`hipMemset`, `hipMemcpy`) incorrectly invalidated `ThreadLocal` and `Relaxed` graph captures on `hipStreamNonBlocking` streams. These captures now remain active, matching CUDA semantics. `Global`-mode captures and captures involving blocking participants are still invalidated as expected.
 
 ### Optimized
 
