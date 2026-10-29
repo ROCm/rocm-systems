@@ -202,21 +202,6 @@ ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob* job, ncclResult_t (*func)(stru
                              void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*), struct ncclComm* comm) {
   return g_ncclAsyncLaunch(job, func, undo, destructor, comm);
 }
-// Omitted when RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue is defined: the unit under test
-// (enqueue/mgmt_task_enq.cc) defines it.
-#ifndef RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue
-static ncclResult_t DefaultNcclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
-                                               void (*)(void*), struct ncclComm*) {
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
-                           struct ncclComm*)>
-    g_ncclMgmtTaskEnqueue = DefaultNcclMgmtTaskEnqueue;
-ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob* task, ncclResult_t (*func)(struct ncclAsyncJob*),
-                                 void (*destructor)(void*), struct ncclComm* comm) {
-  return g_ncclMgmtTaskEnqueue(task, func, destructor, comm);
-}
-#endif
 ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport) {
   if (gpuCftSupport) *gpuCftSupport = 0;
   return ncclSuccess;
@@ -290,9 +275,6 @@ void ResetNcclStubs() {
   g_ncclInitKernelsForDevice = DefaultNcclInitKernelsForDevice;
 #endif
   g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
-#ifndef RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue
-  g_ncclMgmtTaskEnqueue = DefaultNcclMgmtTaskEnqueue;
-#endif
   g_ncclMemAlloc = DefaultNcclMemAlloc;
   g_ncclMemFree = DefaultNcclMemFree;
   g_ncclCommDestroy = DefaultNcclCommDestroy;

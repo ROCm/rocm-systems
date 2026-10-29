@@ -26,6 +26,7 @@ void ResetEnqueueTestDeps() {
   ResetCommFakes();
   ResetDevRuntimeFakes();
   ResetGroupFakes();
+  ResetMgmtTaskEnqFakes();
   ResetProxyFakes();
   ResetRcclWrapFakes();
   ResetRecorderFakes();

@@ -26,13 +26,6 @@ extern std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct 
                                   void (*)(struct ncclAsyncJob*), void (*)(void*), struct ncclComm*)>
     g_ncclAsyncLaunch;
 
-// src/enqueue/mgmt_task_enq.cc. The default accepts the job without running or freeing it.
-#ifndef RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue
-extern std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
-                                  struct ncclComm*)>
-    g_ncclMgmtTaskEnqueue;
-#endif
-
 // src/init.cc's device bringup reaches src/enqueue.cc through this. Fail-loud by default; script it to reach past it.
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
 extern std::function<ncclResult_t(int /*cudaArch*/, int /*maxSharedMem*/, size_t* /*maxStackSize*/)>
