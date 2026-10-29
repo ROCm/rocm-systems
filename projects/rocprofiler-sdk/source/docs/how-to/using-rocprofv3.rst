@@ -1114,18 +1114,26 @@ The preceding command creates two profiling passes:
 
 **Combining CLI and input file:**
 
-You can combine ``--pmc`` flag with an input file. The counters specified in CLI and input file are combined, creating separate passes for each counter:
+You can combine ``--pmc`` flags with an input file. The counter groups specified in the CLI and input file are combined, creating a separate pass for each group:
 
 .. code-block:: shell
 
-   rocprofv3 -i input.txt --pmc GRBM_COUNT --pmc SQ_WAVES -- <application_path>
+   rocprofv3 -i input.json --pmc GRBM_COUNT --pmc SQ_WAVES -- <application_path>
 
-If ``input.txt`` contains:
+If ``input.json`` contains:
 
-.. code-block:: text
+.. code-block:: json
 
-   pmc: FETCH_SIZE SQ_WAVES
-   pmc: GRBM_GUI_ACTIVE
+   {
+     "jobs": [
+       {
+         "pmc": ["FETCH_SIZE", "SQ_WAVES"]
+       },
+       {
+         "pmc": ["GRBM_GUI_ACTIVE"]
+       }
+     ]
+   }
 
 The preceding command creates four profiling passes:
 
@@ -1133,13 +1141,15 @@ The preceding command creates four profiling passes:
 
 - Pass 2: ``SQ_WAVES`` (from CLI).
 
-- Pass 3: ``FETCH_SIZE SQ_WAVE_CYCLES`` (from input file).
+- Pass 3: ``FETCH_SIZE SQ_WAVES`` (from input file).
 
 - Pass 4: ``GRBM_GUI_ACTIVE`` (from input file).
 
+Output file names and directories are scoped to their source in combined mode. The ``--output-file`` and ``--output-directory`` options configure only the passes created by CLI ``--pmc`` flags. Each input-file job uses its own ``output_file`` and ``output_directory`` values, or the default output location when they are omitted. CLI passes never inherit these values from an input-file job.
+
 **Output organization:**
 
-In multi-pass counter collection, each pass generates its output in a separate ``pass_n`` subdirectory:
+In multi-pass counter collection, each pass generates its output in a separate ``pass_n`` subdirectory under that pass's effective output directory. When all passes use the same output directory, the layout is:
 
 .. code-block:: text
 
@@ -1152,6 +1162,17 @@ In multi-pass counter collection, each pass generates its output in a separate `
    │   └── counter_collection.csv
    └── pass_4/
        └── counter_collection.csv
+
+When combined CLI and input-file passes use different output settings, their ``pass_n`` subdirectories are placed under their respective output directories. For example, a CLI pass configured with ``-d cli_out -o cli`` and an input-file job configured with ``"output_directory": "job_out"`` and ``"output_file": "job"`` produce:
+
+.. code-block:: text
+
+   cli_out/
+   └── pass_1/
+       └── cli_counter_collection.csv
+   job_out/
+   └── pass_2/
+       └── job_counter_collection.csv
 
 .. note::
 
