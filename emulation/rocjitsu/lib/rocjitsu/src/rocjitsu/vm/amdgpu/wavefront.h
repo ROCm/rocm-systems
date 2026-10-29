@@ -906,10 +906,15 @@ public:
   uint64_t debug_wave_id() const { return debug_wave_id_; }
   void set_debug_wave_id(uint64_t id) { debug_wave_id_ = id; }
 
-  /// @brief Read one allocated SGPR for debugger state capture.
+  /// @brief Read an SGPR relative to this wave's physical register base.
+  /// @details Reads storage without notifying execution plugins. Returns zero
+  /// when the resulting index is outside the physical register file.
   uint32_t debug_read_sgpr(uint32_t reg) const;
 
-  /// @brief Read one allocated VGPR lane for debugger state capture.
+  /// @brief Read a VGPR lane relative to this wave's physical register base.
+  /// @details Reads storage without notifying execution plugins. Returns zero
+  /// for an index outside the physical register file or a lane outside the
+  /// stored lane range.
   uint32_t debug_read_vgpr(uint32_t reg, uint32_t lane) const;
 
   /// @brief Write one allocated SGPR from debugger state restore.
