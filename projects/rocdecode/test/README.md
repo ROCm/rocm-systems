@@ -133,8 +133,11 @@ in order:
 Detection prefers market names because multiple GPUs can share a gfx target (MI300X/MI300A
 share `gfx942`, MI350/MI355 share `gfx950`, 780M/760M/740M share `gfx1103`). On Windows,
 `amd-smi` and `rocm-smi` are skipped; the `hipInfo` fallback (step 4) handles detection.
-Use `--gpu <name>` to override when auto-detection produces the wrong label or when no
-baseline column exists for the detected GPU.
+
+The detected label is matched against the baseline HTML columns (`MI250X`, `MI300X`,
+`MI300A`, `MI350`, `MI355`, `Navi31`, `Navi48`). If the detected GPU has no matching
+column (e.g. `780M`), the script runs in measure-only mode rather than erroring — see
+above. Use `--gpu <name>` to override when auto-detection produces the wrong label.
 
 ### Perf stream + baseline location
 

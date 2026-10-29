@@ -7,7 +7,7 @@ allowed-tools:
   - Bash(python3 test/perf_regression.py *)
   - Bash(python test/perf_regression.py *)
   - Bash(nproc)
-  - Bash(cmd *)
+  - Bash(cmd //c "rmdir *)
 ---
 
 Run the rocDecode performance regression check: measure decode FPS and compare it against
