@@ -122,6 +122,12 @@ if(NOT WIN32)
     link_libraries(amd_comgr)
     link_libraries(hiprtc-builtins)
   endif() # end BUILD_SHARED_LIBS
+  # hipTestMain calls hsa_system_get_info; link HSA for shared builds too.
+  if(HIP_PLATFORM STREQUAL "amd")
+    list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/llvm)
+    find_package(hsa-runtime64)
+    link_libraries(hsa-runtime64::hsa-runtime64)
+  endif()
 endif() # end win32
 
 # Resolves ENABLE_SANITIZER, applies the sanitizer flags to this scope, and defines
