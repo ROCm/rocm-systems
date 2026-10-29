@@ -145,12 +145,16 @@ endif()
 add_rccl_test(all_gather)
 add_rccl_test(all_reduce)
 add_rccl_test(alltoall)
-# ENABLE_ROCSHMEM_GIN is defined project-wide (add_definitions in the top-level
-# CMakeLists), so GIN perf targets need no per-target define — only the extra
-# ENABLE_DEVICE_API gate for the all_gather hybrid kernel.
-if (ENABLE_ROCSHMEM_GIN AND ENABLE_DEVICE_API)
-    target_compile_definitions(all_gather_perf PRIVATE ENABLE_DEVICE_API)
-endif()
+add_rccl_test(alltoallv)
+add_rccl_test(broadcast)
+add_rccl_test(gather)
+add_rccl_test(hypercube)
+add_rccl_test(reduce_scatter)
+add_rccl_test(reduce)
+add_rccl_test(scatter)
+add_rccl_test(sendrecv)
+add_rccl_test(all_reduce_bias)
+
 if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
     add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu PROPERTIES LANGUAGE CXX)
@@ -163,39 +167,4 @@ if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
         roc::rccl
         $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
     set_target_properties(gin_rocshmem_gda_factory_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-endif()
-add_rccl_test(alltoallv)
-add_rccl_test(broadcast)
-add_rccl_test(gather)
-add_rccl_test(hypercube)
-add_rccl_test(reduce_scatter)
-add_rccl_test(reduce)
-add_rccl_test(scatter)
-add_rccl_test(sendrecv)
-add_rccl_test(all_reduce_bias)
-if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
-    function(_rccl_tests_link_rocshmem_gin_rdc target)
-        target_compile_definitions(${target} PRIVATE ENABLE_ROCSHMEM_GIN NCCL_GIN_ANVIL_SDMA_ENABLE=1)
-        target_compile_options(${target} PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-        # --whole-archive: librccl.so (ENABLE_ROCSHMEM_GIN) leaves rocshmem host
-        # symbols unresolved (--allow-shlib-undefined).  The executable must pull
-        # in ALL rocshmem symbols (not just those it references directly) so that
-        # -rdynamic exports them for librccl.so to resolve at runtime.
-        target_link_libraries(${target} PRIVATE
-            -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
-        target_link_options(${target} PRIVATE -fgpu-rdc --hip-link -rdynamic)
-    endfunction()
-
-    # Binaries launched against a --rocshmem-gin librccl.so must RDC-link
-    # rocSHMEM so GIN host symbols resolve from the executable. These are the
-    # binaries with GIN device paths: alltoall_perf (-D 3/-D 4), and
-    # all_gather_perf / broadcast_perf (Anvil SDMA, -D 3).
-    # all_reduce_perf is omitted: it still does not build under
-    # ENABLE_ROCSHMEM_GIN.
-    foreach(_gin_rdc_bin IN ITEMS
-        all_gather_perf
-        alltoall_perf
-        broadcast_perf)
-      _rccl_tests_link_rocshmem_gin_rdc(${_gin_rdc_bin})
-    endforeach()
 endif()

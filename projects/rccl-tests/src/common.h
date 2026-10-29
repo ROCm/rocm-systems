@@ -123,8 +123,7 @@ static inline testResult_t testCheckGinBackendCompiled(ncclGinType_t ginType) {
   fprintf(stderr, "The communicator uses GIN type %d (NCCL_GIN_TYPE), but this binary's device code "
                   "was built without that backend (compiled-in backend mask 0x%x). "
                   "NCCL_GIN_TYPE_ROCSHMEM_GDA (%d) and NCCL_GIN_TYPE_ANVIL_SDMA (%d) need an rccl "
-                  "built with the CMake option ENABLE_ROCSHMEM_GIN=ON; the Makefile build "
-                  "(install.sh) does not ship them.\n",
+                  "built with the CMake option ENABLE_ROCSHMEM_GIN=ON (install.sh --rocshmem-gin).\n",
           (int)ginType, (unsigned)(NCCL_GIN_BACKEND_MASK_ALL),
           (int)NCCL_GIN_TYPE_ROCSHMEM_GDA, (int)NCCL_GIN_TYPE_ANVIL_SDMA);
   return testInvalidUsage;
