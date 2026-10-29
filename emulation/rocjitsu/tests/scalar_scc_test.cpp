@@ -303,7 +303,7 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
       EXPECT_FALSE(inst->dst_operand(i)->to_register_ref()) << profile.name << " " << mnemonic;
     }
 
-    const InstDefUse def_use(*inst);
+    const InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains(source)) << profile.name << " " << mnemonic;
     EXPECT_FALSE(def_use.uses.contains(destination)) << profile.name << " " << mnemonic;
     EXPECT_TRUE(def_use.defs.contains(destination)) << profile.name << " " << mnemonic;
@@ -721,7 +721,7 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
       EXPECT_EQ(inst->dst_operand(0)->to_register_ref(), (RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
 
-      const InstDefUse def_use(*inst);
+      const InstDefUse def_use(*inst, 64);
       EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
       EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SGPR, 4, 1}))

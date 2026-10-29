@@ -19,7 +19,7 @@
 ///
 /// Not established here: store ordering and the probe's waits (the simulator
 /// completes every memory operation inside the instruction that issues it), and
-/// Wave32 execution. DbiSim dispatches RDNA4 as Wave64; the RDNA4 cases are
+/// Wave32 execution. This suite dispatches RDNA4 as Wave64; the RDNA4 cases are
 /// Wave32 at patch time only, which is what makes the probe's high mask dword
 /// the immediate zero.
 

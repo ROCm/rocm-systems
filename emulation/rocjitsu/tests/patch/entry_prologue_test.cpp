@@ -9,6 +9,8 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/register_set.h"
 
@@ -64,13 +66,13 @@ public:
 /// expression that built it.
 class Kernel {
 public:
-  explicit Kernel(const std::vector<uint32_t> &words) : co_(words) {
-    decoder_ = Decoder::create(kArch);
+  explicit Kernel(const std::vector<uint32_t> &words, rj_code_arch_t arch = kArch) : co_(words) {
+    decoder_ = Decoder::create(arch);
     if (decoder_ == nullptr) {
       ADD_FAILURE() << "no decoder for the test arch";
       return;
     }
-    blocks_ = build_valid_blocks(co_, *decoder_, kArch);
+    blocks_ = build_valid_blocks(co_, *decoder_, arch);
     for (const auto &block : blocks_)
       scope_.push_back(block.get());
   }
@@ -161,6 +163,22 @@ TEST(DbiEntryStorageFloor, DisabledWorkgroupDimensionsConsumeNoSgpr) {
                             /*workgroup_id_y=*/true, /*workgroup_id_z=*/true);
   EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), none, kArch), 6u);
   EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), all, kArch), 9u);
+}
+
+// RDNA decoders name v_cmp_eq_u32_e64 s1's mask as s[1:2]. A Wave32 kernel
+// writes s1 alone, so the floor is s2.
+TEST(DbiEntryStorageFloor, CountsAWave32CompareMaskAsOneSgpr) {
+  constexpr rj_code_arch_t kRdna4 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr auto compare = rdna4::build_vop3(rdna4::kVCmpEqU32Vop3,
+                                             {.vdst = 1, .src0 = kInlineZero, .src1 = kInlineZero});
+  const Kernel kernel({compare[0], compare[1], build_s_endpgm(kRdna4)}, kRdna4);
+
+  const KD wave64{};
+  KD wave32{};
+  RJ_AMDHSA_BITS_SET(wave32.kernel_code_properties,
+                     kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+  EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), wave32, kRdna4), 2u);
+  EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), wave64, kRdna4), 3u);
 }
 
 TEST(PlanDbiEntryStorage, PlacesTheRunAtTheFirstAlignedIndexAboveTheFloor) {
