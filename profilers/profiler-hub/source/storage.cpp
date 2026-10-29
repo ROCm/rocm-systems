@@ -12,6 +12,10 @@
 namespace profiler_hub
 {
 
+storage_t::storage_t(const std::string& database_path, const std::string& uuid)
+: storage_t(database_path, uuid, profiler_hub::version_t{ 3, 0, 1 })
+{}
+
 storage_t::storage_t(const std::string&      database_path,
                      const std::string&      uuid,
                      profiler_hub::version_t schema_version)
