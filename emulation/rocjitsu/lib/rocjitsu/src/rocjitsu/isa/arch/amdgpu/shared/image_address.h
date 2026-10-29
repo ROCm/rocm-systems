@@ -15,6 +15,10 @@
 
 namespace rocjitsu::amdgpu {
 
+/// @brief Candidate wave-relative VGPR selectors for image coordinates.
+/// @details Callers consume only the required prefix. On RDNA, DIM and A16
+/// determine that count, so entries outside the prefix need not name valid
+/// registers.
 using ImageAddressRegisters = std::array<uint32_t, 4>;
 
 /// MIMG/VIMAGE DIM encodings. These are instruction fields (0-7), distinct
@@ -44,8 +48,9 @@ inline uint32_t image_coordinate_register_count(uint32_t dim, bool a16) {
   return a16 ? (count + 1) / 2 : count;
 }
 
-/// @brief Return the four consecutive address-register selectors beginning at @p first.
-/// @details Callers consume the prefix required by the instruction DIM.
+/// @brief Return four consecutive selector values beginning at @p first.
+/// @details This performs no VGPR-range validation; for example, a high
+/// @p first can make unused trailing entries exceed the architectural range.
 inline ImageAddressRegisters contiguous_image_address_registers(uint32_t first) {
   return {first, first + 1, first + 2, first + 3};
 }
@@ -64,7 +69,9 @@ inline ImageAddressRegisters gfx11_image_address_registers(bool nsa, uint32_t fi
           (raw_encoding[2] >> 16) & 0xffu};
 }
 
-/// @brief Return the four explicit GFX12 VIMAGE address-register selectors.
+/// @brief Return the explicit GFX12 VIMAGE VADDR0-3 register selectors.
+/// @details This does not include VADDR4; the current linear image operations
+/// require at most four coordinate sources.
 /// @tparam VimageMachineInst Machine encoding type exposing vaddr0 through vaddr3.
 template <typename VimageMachineInst>
 inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineInst &inst) {
