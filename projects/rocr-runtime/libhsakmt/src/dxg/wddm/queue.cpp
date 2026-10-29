@@ -1173,11 +1173,11 @@ hsa_status_t ComputeQueue::Process(void) {
     if (!platform_atomic_support_ && signal_addr_) {
       constexpr int kFaultTimeoutMs = 30000;
       auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
-      while (*sync_addr < cmdbuf_aql_frame_write_index) {
+      while (*sync_addr < sync_point) {
         if (!dxg_runtime->disable_wait_timeout_ &&
             std::chrono::steady_clock::now() >= deadline) {
           pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
-                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, cmdbuf_aql_frame_write_index);
+                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, sync_point);
           return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
