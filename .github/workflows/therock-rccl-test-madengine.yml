@@ -196,6 +196,33 @@ jobs:
             --work-dir "${WORK_DIR}" \
             $NOTIFY_ARGS
 
+      # Cancelling a run does not signal the driver: the runner kills this
+      # job's process tree outright and then reports "Terminate orphan
+      # process" for madengine and srun. No Python handler gets to run, and
+      # salloc holds the allocation in a session of its own, so the nodes stay
+      # taken until its --time expires -- four of them, for five hours, in the
+      # 405B case. Measured on run 40879865705: the job reached `cancelled`
+      # while SLURM job 104884 kept running with 4:48 left.
+      #
+      # The runner starts this step itself, which is what makes it the one
+      # piece of cleanup a cancellation cannot skip.
+      - name: Release the SLURM allocation
+        if: cancelled()
+        run: |
+          recorded="${WORK_DIR}/allocation.txt"
+          if [ ! -s "${recorded}" ]; then
+            echo "No allocation was granted; nothing to release."
+            exit 0
+          fi
+          job="$(head -n1 "${recorded}" | tr -d '[:space:]')"
+          case "${job}" in
+            ''|*[!0-9]*)
+              echo "::warning::no usable job id in ${recorded}, got '${job}'"
+              exit 0 ;;
+          esac
+          echo "Releasing SLURM job ${job}"
+          scancel "${job}" || echo "::warning::scancel ${job} failed"
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
