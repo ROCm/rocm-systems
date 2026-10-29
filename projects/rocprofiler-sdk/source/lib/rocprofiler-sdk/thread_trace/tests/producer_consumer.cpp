@@ -87,9 +87,9 @@ copy_data_mock(att_queue_t&, void* dst, const void* src, size_t size)
 }
 
 att_queue_ptr_t
-make_mock_queue(rocprofiler_agent_id_t agent_id)
+make_mock_queue(rocprofiler_agent_id_t agent_id, size_t num_buffers = MOCK_NUM_BUFFERS)
 {
-    auto q       = make_att_queue(agent_id, MOCK_BUFFER_SIZE, MOCK_NUM_BUFFERS);
+    auto q       = make_att_queue(agent_id, MOCK_BUFFER_SIZE, num_buffers);
     q->submit_fn = mock_submit;
     return q;
 }
@@ -109,8 +109,13 @@ public:
     , query_fn(std::move(_query))
     , clock_fn(std::move(_clock)){};
 
-    std::optional<hsa::sqtt_buffer_status_t> query_buffer_status() override { return query_fn(); };
-    aqlprofile_att_gpu_clock_t               get_gpu_clock() const override
+    std::optional<hsa::sqtt_buffer_status_t> query_buffer_status() override
+    {
+        auto status = query_fn();
+        if(status) status->shader_engine_id = shader_engine_id;
+        return status;
+    };
+    aqlprofile_att_gpu_clock_t get_gpu_clock() const override
     {
         return clock_fn ? clock_fn() : aqlprofile_att_gpu_clock_t{};
     }
@@ -146,7 +151,8 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
               decltype(att_queue_t::submit_fn)                submit_fn           = mock_submit,
               drain_t                                         drain_fn            = {},
               query_clock_t                                   clock               = {},
-              size_t                                          shader_engine_count = 1)
+              size_t                                          shader_engine_count = 1,
+              size_t                                          num_buffers = MOCK_NUM_BUFFERS)
 {
     // Build a synthetic queue + packet stack that mimics the runtime so we can
     // exercise the producer/consumer pairing without a real GPU.
@@ -172,7 +178,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     auto running_flag = std::make_shared<std::atomic<int>>(WORKER_FLAG_RUNNING);
 
     auto params               = thread_trace_parameter_pack{};
-    params.num_buffers        = MOCK_NUM_BUFFERS;
+    params.num_buffers        = num_buffers;
     params.buffer_size        = MOCK_BUFFER_SIZE;
     params.shader_cb_fn       = cb_fn;
     params.callback_userdata  = userdata;
@@ -196,25 +202,25 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
         mock_buffer.emplace_back(std::move(buffer_packet));
     }
 
-    auto mock_queue          = make_mock_queue(agent_id);
+    auto mock_queue          = make_mock_queue(agent_id, num_buffers);
     mock_queue->submit_fn    = submit_fn;
     auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
     worker_data->queue       = mock_queue.get();
-    worker_data->num_buffers = MOCK_NUM_BUFFERS;
+    worker_data->num_buffers = num_buffers;
 
     // Initialize buffer memory pointers from the queue's CPU staging buffers.
     // Slots default to FREE.
     for(size_t i = 0; i < worker_data->num_buffers; i++)
         worker_data->buffers[i].memory = mock_queue->cpu_buffers.at(i);
 
-    auto producer_data               = triple_buffer_producer_data_t{};
-    producer_data.producer_running   = running_flag;
-    producer_data.submit_signal      = make_signal(*mock_queue);
-    producer_data.control_packet     = std::move(control_packet);
-    producer_data.copy_data_fn       = copy_data_mock;
-    producer_data.shared             = worker_data;
-    producer_data.buffer_packets     = std::move(mock_buffer);
-    producer_data.restart_trace      = [queue = mock_queue.get()](auto& packet) {
+    auto producer_data             = triple_buffer_producer_data_t{};
+    producer_data.producer_running = running_flag;
+    producer_data.submit_signal    = make_signal(*mock_queue);
+    producer_data.control_packet   = std::move(control_packet);
+    producer_data.copy_data_fn     = copy_data_mock;
+    producer_data.shared           = worker_data;
+    producer_data.buffer_packets   = std::move(mock_buffer);
+    producer_data.restart_trace    = [queue = mock_queue.get()](auto& packet) {
         return att_queue_submit_packets(*queue, packet->before_krn_pkt);
     };
 
@@ -222,8 +228,8 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     ret.mock_queue = std::move(mock_queue);
     ret.producer   = std::thread{producer_loop, std::move(producer_data)};
     // One consumer thread per slot.
-    ret.consumers.reserve(MOCK_NUM_BUFFERS);
-    for(size_t i = 0; i < MOCK_NUM_BUFFERS; i++)
+    ret.consumers.reserve(num_buffers);
+    for(size_t i = 0; i < num_buffers; i++)
     {
         auto consumer_data        = triple_buffer_consumer_data_t{};
         consumer_data.callback_fn = params.shader_cb_fn;
@@ -797,6 +803,87 @@ TEST(thread_trace, stop_during_cpu_backpressure)
     EXPECT_EQ(drains, 2);
     EXPECT_EQ(state.headers, drains);
     EXPECT_EQ(state.ends, drains);
+}
+
+// An engine whose previous retired buffer is still uncopied must not be swapped while no CPU slot
+// is free: the producer would wait on consumers while the GPU keeps filling. It must stop instead.
+TEST(thread_trace, uncopied_retired_buffer_stops_without_waiting)
+{
+    using namespace rocprofiler::thread_trace;
+    test_init();
+    // More engines than COPIES_PER_POLL, so a retired buffer outlives its poll.
+    constexpr size_t engines     = 5;
+    constexpr size_t num_buffers = 4;
+    const auto&      agents      = rocprofiler::hsa::get_queue_controller()->get_supported_agents();
+    if(agents.empty() || agents.begin()->second.get_rocp_agent()->num_shader_banks < engines)
+        GTEST_SKIP() << "Requires at least " << engines << " shader engines";
+
+    static std::atomic<size_t> submissions{0};
+    submissions = 0;
+    auto submit = [](const att_queue_t&, hsa_ext_amd_aql_pm4_packet_t*, att_signal_t*) {
+        ++submissions;
+        return true;
+    };
+    struct callback_state
+    {
+        std::mutex              mutex;
+        std::condition_variable cv;
+        bool                    release{false};
+        std::atomic<size_t>     headers{0};
+        std::atomic<bool>       cpu_full{false};
+    } state;
+    auto callback = [](rocprofiler_thread_trace_shader_data_t data,
+                       rocprofiler_user_data_t                userdata) {
+        auto& cb_state = *static_cast<callback_state*>(userdata.ptr);
+        if(data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL)
+            cb_state.cpu_full.store(true);
+        // Headers pass so every slot starts free; trace data blocks until released.
+        if(data.data_size == 4 * sizeof(uint64_t))
+        {
+            ++cb_state.headers;
+            return;
+        }
+        auto lock = std::unique_lock{cb_state.mutex};
+        cb_state.cv.wait(lock, [&] { return cb_state.release; });
+    };
+    std::vector<char>   input(MOCK_BUFFER_SIZE, 0);
+    std::atomic<size_t> queries{0};
+    auto                query = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
+        if(queries++ == 0)
+        {
+            while(state.headers.load() < engines)
+                std::this_thread::yield();
+            // Let consumers mark their header slots free.
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        auto result = rocprofiler::hsa::sqtt_buffer_status_t{};
+        result.data = input.data();
+        result.size = input.size();
+        return result;
+    };
+    auto drain = [&](aqlprofile_att_data_callback_t cb, void* data) {
+        return cb(0, input.data(), 256, data);
+    };
+    auto threads =
+        start_threads(callback, query, {.ptr = &state}, submit, drain, {}, engines, num_buffers);
+
+    // Poll 1: query + 5 swaps; 4 copies fill every slot and SE 4's buffer stays retired.
+    // Poll 2: query + swaps for SEs 0-3; SE 4 is left unqueried and the trace stops.
+    constexpr size_t expected_submissions = (1 + engines) + (1 + engines - 1) + 1;
+    for(int i = 0; i < 5000 && submissions.load() < expected_submissions; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    EXPECT_EQ(submissions.load(), expected_submissions);
+    EXPECT_EQ(queries.load(), 2 * engines - 1);
+
+    threads.flag->store(WORKER_FLAG_STOP);
+    {
+        auto lock     = std::unique_lock{state.mutex};
+        state.release = true;
+    }
+    state.cv.notify_all();
+    threads.join_all();
+
+    EXPECT_TRUE(state.cpu_full.load());
 }
 
 TEST(thread_trace, gpu_full_disables_queue)

@@ -67,19 +67,26 @@ namespace aql_profile_v2
 {
 namespace
 {
-// Buffers the hardware filled and moved past since the last swap. gfx9 SQ_THREAD_TRACE_CNTR counts
-// every 32-byte block written across buffer rollovers; modular arithmetic handles CNTR wrapping.
+// Buffers the hardware filled and moved past since the last swap, in multi-buffer mode. One is a
+// buffer awaiting its swap; more means the pending buffer overflowed and data was lost.
 uint64_t
-unswapped_buffers(const TraceMemoryManager&       manager,
-                  const pm4_builder::SqttBuilder& sqtt_builder,
-                  int                             shader_engine_id,
-                  uint32_t                        cntr,
-                  uint32_t                        wptr)
+pending_buffers(const TraceMemoryManager& manager,
+                aql_profile::Pm4Factory&  pm4_factory,
+                int                       shader_engine_id,
+                uint32_t                  status,
+                uint32_t                  cntr,
+                uint32_t                  wptr)
 {
+    const auto& sqtt_builder = *pm4_factory.GetSqttBuilder();
+    if((status & sqtt_builder.GetLockDownFailMask()) != 0) return 2;
+    if(pm4_factory.GetGpuId() >= aql_profile::GFX10_GPU_ID)
+        return (status & sqtt_builder.GetBufferFullMask()) != 0 ? 1 : 0;
+
+    // gfx9 has no lockdown bit. SQ_THREAD_TRACE_CNTR counts every 32-byte block written across
+    // buffer rollovers; modular arithmetic handles CNTR wrapping.
     const uint64_t blocks = manager.config.capacity_per_se / sqtt_builder.GetWritePtrBlk();
-    const auto     swapped =
-        static_cast<uint32_t>(manager.buffer_swaps.at(shader_engine_id) * blocks +
-                              (wptr & sqtt_builder.GetWritePtrMask()));
+    const auto swapped = static_cast<uint32_t>(manager.buffer_swaps.at(shader_engine_id) * blocks +
+                                               (wptr & sqtt_builder.GetWritePtrMask()));
     return static_cast<uint32_t>(cntr - swapped) / blocks;
 }
 }  // namespace
@@ -124,20 +131,18 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
                                  ? control_ptr[se_index].status2
                                  : control_ptr[se_index].status;
         // With multiple buffers, FULL means the hardware moved on to the next buffer and the
-        // filled one still awaits a swap; only a lockdown failure means data was lost.
-        const bool buffer_full = (status2_value & sqttbuilder->GetBufferFullMask()) != 0;
-        const bool lockdown    = (status2_value & sqttbuilder->GetLockDownFailMask()) != 0;
-        uint64_t   unswapped   = 0;
-        if(memorymgr->isDoubleBuffer() && pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
-            unswapped = unswapped_buffers(*memorymgr,
-                                          *sqttbuilder,
-                                          se_index,
-                                          control_ptr[se_index].cntr,
-                                          control_ptr[se_index].wptr);
-        else if(memorymgr->isDoubleBuffer())
-            unswapped = (buffer_full && !lockdown) ? 1 : 0;
-        const bool retired_pending = unswapped == 1;
-        if(memorymgr->isDoubleBuffer() ? (lockdown || unswapped > 1) : buffer_full)
+        // filled one still awaits a swap; data is only lost if that buffer overflowed too.
+        uint64_t pending = 0;
+        if(memorymgr->isDoubleBuffer())
+            pending = pending_buffers(*memorymgr,
+                                      *pm4_factory,
+                                      se_index,
+                                      status2_value,
+                                      control_ptr[se_index].cntr,
+                                      control_ptr[se_index].wptr);
+        const bool retired_pending = pending == 1;
+        if(memorymgr->isDoubleBuffer() ? pending > 1
+                                       : (status2_value & sqttbuilder->GetBufferFullMask()) != 0)
         {
             AQL_WARNING << "SQTT data buffer full, SE(" << se_index << ")";
             if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -182,11 +187,10 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
             {
                 // Deliver the filled buffer as a status query + swap would have. Like the
                 // active buffer below, it starts at byte 0 so concatenated data stays intact.
-                auto callback_status =
-                    callback(se_index,
-                             buffer_data[(buffer_swap + buf_num - 1) % buf_num],
-                             sample_capacity,
-                             userdata);
+                auto callback_status = callback(se_index,
+                                                buffer_data[(buffer_swap + buf_num - 1) % buf_num],
+                                                sample_capacity,
+                                                userdata);
                 if(callback_status != HSA_STATUS_SUCCESS) return callback_status;
                 ++buffer_swap;
             }
@@ -531,17 +535,14 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
 
     if(out->needs_swap)
     {
-        // Lockdown error signals we have overflown the buffer and the trace has already stopped
-        auto* pm4_factory  = aql_profile::Pm4Factory::Create(manager->AgentHandle());
-        auto* sqtt_builder = pm4_factory->GetSqttBuilder();
-        out->is_too_late   = (status & sqtt_builder->GetLockDownFailMask()) != 0;
-        // gfx9 has no lockdown bit: a second unswapped rollover means the pending buffer overflowed.
-        if(pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
-            out->is_too_late |= aql_profile_v2::unswapped_buffers(*manager,
-                                                                  *sqtt_builder,
-                                                                  shader_engine_id,
-                                                                  control.cntr_doublebuffer,
-                                                                  control.wptr_doublebuffer) > 1;
+        // An overflowed pending buffer means the trace lost data (and stopped, on gfx10+)
+        auto* pm4_factory = aql_profile::Pm4Factory::Create(manager->AgentHandle());
+        out->is_too_late  = aql_profile_v2::pending_buffers(*manager,
+                                                           *pm4_factory,
+                                                           shader_engine_id,
+                                                           status,
+                                                           control.cntr_doublebuffer,
+                                                           control.wptr_doublebuffer) > 1;
 
         ROCP_WARNING_IF(out->is_too_late) << "GPU buffer full!";
 
