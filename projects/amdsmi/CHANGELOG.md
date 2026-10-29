@@ -33,24 +33,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
 
-- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
-  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
-  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
-  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
-  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
-
 - **Added NPM (Node Power Management) power limit setting**.  
   - New `amd-smi set --node-power-limit`/`-n` to set the node-level power limit in watts (node-wide, not per-GPU).
   - New API: `amdsmi_set_npm_limit()`.
   - New `current_node_power` field in `amdsmi_npm_info_t` (returned by `amdsmi_get_npm_info()`), the current (instantaneous) node power in watts, queried once per node rather than once per GPU; `amd-smi node -p` now displays it when available.
   - New `max_node_power_limit` field in `amdsmi_npm_info_t` (returned by `amdsmi_get_npm_info()`), the platform max bound for `amdsmi_set_npm_limit()` requests.
   - `amdsmi_set_npm_limit()` rejects the request with `AMDSMI_STATUS_INVAL` when NPM is disabled on the node (`amdsmi_npm_info_t::status == AMDSMI_NPM_STATUS_DISABLED`), instead of writing a limit that would have no defined effect. `amd-smi set --node-power-limit` performs the same check up front to fail fast with a friendlier message.
-
-- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
-  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
-  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
-  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
-  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
 
 - **Added NPM (Node Power Management) balancing mode get/set**.  
   - New `amdsmi_npm_balancing_mode_t` enum: `AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING` (PB, the default) or `AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING` (FB).
@@ -182,9 +170,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **NPM sysfs numeric reads (e.g. `cur_node_power_limit`, `max_node_power_limit`) now reject negative or malformed content**.  
   - Previously a leading `-` (e.g. `"-1"`) parsed successfully as `UINT64_MAX`; such content now fails with `RSMI_STATUS_UNEXPECTED_DATA`.
 
-- **`amd-smi`, `amd-smi version`, and `amd-smi static --driver` include the DKMS build in the amdgpu version**.  
-  - For example `6.19.14.31400000-2370381`. Labels and JSON/CSV keys are unchanged.
-
 - **`amd-smi metric` no longer prints fields the GPU's `gpu_metrics` table version cannot carry** (human-readable output only).  
   - These fields previously printed as `N/A` and are now omitted from human-readable output. On a metrics v1.3 GPU this removes 88 of the 110 `N/A` values in `amd-smi metric -g 0` (80%), taking the command from 140 lines to 95.
   - **Fields that stop appearing on current accelerators.** On the metrics v1.6 and later tables, which cover MI300X, MI325X and MI355X, the `POWER` section loses `THROTTLE_STATUS` and the `USAGE` section loses `MM_ACTIVITY`, `VCN_ACTIVITY` and `JPEG_ACTIVITY`. Naming the section does not bring them back, so `amd-smi metric --power` no longer prints `THROTTLE_STATUS` and `amd-smi metric --usage` no longer prints the three activity rows. On a metrics v1.3 GPU plain `amd-smi metric` instead drops the whole `THROTTLE` section, and `THROTTLE_STATUS` is still printed. **`--show-unsupported` restores all of them**, and `--json` and `--csv` never stopped emitting them.
@@ -246,6 +231,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed APU video engine (VCN) utilization reading 100 times too high**.  
   - On APUs such as Ryzen AI Max (Strix Halo), `amdsmi_get_gpu_metrics_info()` returned `apu_metrics.average_vcn_activity` in hundredths of a percent (6067 for 61 %), so Python reported it as N/A and `amd-smi metric --usage` left it out. It is now whole percent.
 
+- **Fixed `amd-smi list`/`amd-smi static` reporting a placeholder UUID instead of `N/A` on WSL APUs without an ASIC serial**.  
+  - On WSL2/DXG with APUs such as Ryzen AI Max (Strix Halo / gfx1151), HSA-KMT reports its "unavailable" sentinel for `UniqueID`, which was packed into a UUID-shaped string instead of surfacing `N/A`. `amdsmi_get_gpu_device_uuid()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` for that case.
+
 - **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
   - On MI450 the GPU connects to the CPU over xGMI, and the driver reports that link's traffic as a single counter. It was dropped instead of being stored as the first link, so `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`).
 
@@ -254,6 +242,20 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amdsmi_get_gpu_cper_entries()` failing the page after a large CPER record**.  
   - A record an earlier call had already returned still had to fit the caller's buffers on the next call, so that call failed with `AMDSMI_STATUS_OUT_OF_RESOURCES`. Records already returned are now skipped before the space check.
+
+- **Fixed `amdsmi_get_gpu_total_ecc_count()` reading RAS state up to 39 times per call, and reporting `0` instead of an error when that read failed**.  
+  - RAS state is now read once per call instead of once per block, avoiding the repeated `.../ras/features` reads that could trip host-side RAS request throttling on SR-IOV guests with RAS enabled.
+  - A failed RAS state read is now reported as an error (`N/A` in the CLI) instead of a misleading `0`. `amdsmi_get_gpu_total_ecc_count()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` when `ras/features` cannot be opened and `AMDSMI_STATUS_API_FAILED` when it cannot be parsed. It previously returned `AMDSMI_STATUS_SUCCESS` with a zero total in both cases.
+  - `amdsmi_get_gpu_ras_block_features_enabled()` shares that read, so an unparsable `ras/features` now returns `AMDSMI_STATUS_API_FAILED` instead of `AMDSMI_STATUS_SUCCESS` with every block reported as disabled.
+  - A GPU with RAS present but genuinely disabled (a cleanly-read, all-zero RAS state) still correctly reports `0`, not `N/A` -- only an actual read/parse failure reports `N/A`.
+  - Affects the default `amd-smi` output (`UEC` column), `amd-smi monitor --ecc`, and `amd-smi metric --ecc`.
+  - Example default output, one GPU where the read succeeds (`UEC: 0`) next to one where it fails (`UEC: N/A`), instead of both previously reading `0`:
+    ```
+    | 0000:0c:00.0            AMD Instinct MI...  | 12 %     45 °C   0       300/750 W    |
+    | 1     0       0       NA                    | 34 %     30 %    2048/196608 MB       |
+    | 0000:2f:00.0           AMD Radeon RX ...    | 8 %      41 °C   N/A     280/300 W    |
+    | 2     1       1       NA                    | 22 %     28 %    1024/32768 MB        |
+    ```
 
 - **Fixed `amd-smi static --clock` printing a Python traceback for an unknown clock name**.  
   - It now reports the invalid parameter and exits `195` (`INVALID_PARAMETER`).
