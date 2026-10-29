@@ -14,6 +14,7 @@ from amdisa.sema_ast import (
     SemaNodeKind,
     SemaType,
 )
+from amdisa.sema_enrich import enrich_block
 from amdisa.codegen.execute.sema_lower import (
     _INLINE_BINARY_OPS,
     _INLINE_TERNARY_OPS,
@@ -186,7 +187,110 @@ class TestLowerScalarAdd:
         assert 'exec()' not in result
 
 
+class TestLowerScalarF16Sources:
+    @pytest.mark.parametrize('high', [False, True])
+    def test_numeric_f16_carrier_keeps_explicit_source_half_selection(self, high):
+        source = _src(0)
+        if high:
+            source = SemaNode(
+                SemaNodeKind.SHR,
+                ty=SemaType.B32,
+                children=(source, SemaNode(SemaNodeKind.LIT, lit_value='16')),
+            )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), SemaType.F32),
+                _cast(source, SemaType.F16),
+            ),
+        )
+        name = 'S_CVT_HI_F32_F16' if high else 'S_CVT_F32_F16'
+        block = SemaBlock(name, ExecModel.SCALAR, body)
+        ctx = LoweringContext(
+            exec_model=ExecModel.SCALAR,
+            operand_map=OperandMap(
+                src_bindings={0: OperandBinding('ssrc0', RegClass.SGPR, 16)},
+                dst_bindings={0: OperandBinding('sdst', RegClass.SGPR, 32)},
+            ),
+            scalar_f16_source_reads_high_half={0: high},
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        suffix = ', true' if high else ''
+        assert f'amdgpu::read_scalar_f16_carrier(ssrc0, wf{suffix})' in result
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' not in result
+        assert ('>> 16' in result) == high
+        assert 'amdgpu::RegisterAccess(wf).write_scalar(sdst,' in result
+        assert 'wf.exec()' not in result
+
+    def test_f16_source_policy_is_per_operand_and_excludes_destination_reads(self):
+        source = SemaNode(
+            SemaNodeKind.OR,
+            ty=SemaType.B32,
+            children=(
+                _src(0),
+                SemaNode(
+                    SemaNodeKind.OR,
+                    ty=SemaType.B32,
+                    children=(_src(1), _dst(0)),
+                ),
+            ),
+        )
+        block = SemaBlock(
+            'SCALAR_SOURCE_POLICY',
+            ExecModel.SCALAR,
+            SemaNode(
+                SemaNodeKind.ASSIGN,
+                children=(_cast(_dst(0), SemaType.B32), source),
+            ),
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.SCALAR,
+            operand_map=OperandMap(
+                src_bindings={
+                    0: OperandBinding('ssrc0', RegClass.SGPR, 16),
+                    1: OperandBinding('ssrc1', RegClass.SGPR, 16),
+                },
+                dst_bindings={0: OperandBinding('sdst', RegClass.SGPR, 16)},
+            ),
+            scalar_f16_source_reads_high_half={0: False},
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        assert 'amdgpu::read_scalar_f16_carrier(ssrc0, wf)' in result
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' in result
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(sdst)' in result
+        assert 'read_scalar_f16_carrier(sdst,' not in result
+
+
 class TestLowerVectorAdd:
+    def test_explicit_u32_result_keeps_full_width_with_a_16bit_binding(self):
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), SemaType.U32),
+                _cast(_src(0), SemaType.U32),
+            ),
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR,
+            operand_map=OperandMap(
+                src_bindings={0: OperandBinding('src0', RegClass.VGPR, 32)},
+                dst_bindings={0: OperandBinding('vdst', RegClass.VGPR, 16)},
+            ),
+        )
+
+        result = lower_sema_block(
+            SemaBlock('PACKED_U32_RESULT', ExecModel.VECTOR, body), ctx
+        )
+
+        assert 'amdgpu::RegisterAccess(wf).write_lane(vdst, lane,' in result
+        assert 'amdgpu::RegisterAccess(wf).read_lane(src0, lane)' in result
+        assert 'static_cast<uint16_t>' not in result
+        assert 'write_vop3_true16_dst' not in result
+
     @pytest.mark.parametrize('operation', ['cubeid', 'cubesc', 'cubetc', 'cubema'])
     def test_cube_output_scaling_uses_instruction_policy(self, operation: str):
         cube = SemaNode(
@@ -651,6 +755,49 @@ class TestLowerVectorAdd:
             'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, src_half, true);'
             in result
         )
+
+    @pytest.mark.parametrize('modifier_format', [None, 'F16'])
+    def test_cndmask_b16_source_modifiers_flip_half_sign_bits(self, modifier_format):
+        u16 = SemaType('U', 16)
+        cond = SemaNode(
+            SemaNodeKind.ARRAYDEREF,
+            ty=SemaType.U1,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='VCC', ty=SemaType.U64),
+                SemaNode(SemaNodeKind.ID, id_name='laneId', ty=SemaType.U32),
+            ),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), u16),
+                SemaNode(
+                    SemaNodeKind.TERNARY,
+                    ty=u16,
+                    children=(cond, _cast(_src(1), u16), _cast(_src(0), u16)),
+                ),
+            ),
+        )
+        block = enrich_block(
+            SemaBlock('V_CNDMASK_B16', ExecModel.VECTOR, body),
+            enc_field_names=frozenset({'neg', 'abs'}),
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR, source_modifier_format=modifier_format
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        # Integer selects ignore ABS/NEG unless the generator names the format
+        # whose sign bit they modify. No float conversion is involved.
+        helper = 'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+        assert 'apply_to_float' not in result
+        if modifier_format is None:
+            assert helper not in result
+        else:
+            assert result.count(helper) == 2
+            assert ', 0, inst_.abs, inst_.neg)' in result
+            assert ', 1, inst_.abs, inst_.neg)' in result
 
     def test_true16_bf16_destination_converts_float_result(self):
         body = SemaNode(

@@ -326,6 +326,14 @@ class Backend {
   int hip_dev_id{0};
 
   /**
+   * @brief Host-side copy of the auto-resolved TDM tile size (bytes).
+   *
+   * Mirrors constmem_t::tdm_tile_bytes (GPU constant memory) so host code
+   * can query the resolved tile size without a device->host memcpy.
+   */
+  uint32_t tdm_resolved_tile_bytes{0};
+
+  /**
    * @brief Add ctx from the list of user-created ctxs
    */
   void track_ctx(Context* ctx);

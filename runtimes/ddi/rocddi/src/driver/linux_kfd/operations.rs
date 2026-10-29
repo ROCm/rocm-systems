@@ -49,6 +49,16 @@ pub(super) fn populate_endpoint(endpoint: &mut Endpoint) {
 }
 
 impl GpuDriver for LinuxKfdDriver {
+    fn xnack_enabled(&self, device: &DeviceState) -> Result<bool, Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        device
+            .vm
+            .kfd()
+            .xnack_enabled()
+            .map_err(|source| native_error("KFD XNACK mode query", source))
+    }
+
     fn available_memory(&self, device: &DeviceState) -> Result<u64, Error> {
         self.ensure_open()?;
         device
@@ -155,8 +165,19 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
 
     fn available_sdma_engines(&self, device: &DeviceState) -> Result<u32, Error> {
         self.ensure_open()?;
+        if cfg!(target_arch = "x86_64")
+            && device.native.queues.target_profile == crate::topology::GpuTargetProfile::Gfx9
+            && device.native.queues.sdma_qualified
+        {
+            let count = device.native.queues.sdma_engines.min(u32::BITS);
+            return Ok(u32::MAX >> (u32::BITS - count));
+        }
         if !cfg!(target_arch = "x86_64")
-            || !matches!(device.native.queues.gfx_target, 120_000 | 120_001 | 120_500)
+            || !device
+                .native
+                .queues
+                .target_profile
+                .supports_kernel_submission()
             || !device.native.queues.sdma_qualified
         {
             return Err(error(
@@ -177,7 +198,11 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
     ) -> Result<Owned<KfdKernelQueue>, Error> {
         self.ensure_open()?;
         if !cfg!(target_arch = "x86_64")
-            || !matches!(device.native.queues.gfx_target, 120_000 | 120_001 | 120_500)
+            || !device
+                .native
+                .queues
+                .target_profile
+                .supports_kernel_submission()
         {
             return Err(error(
                 ErrorKind::Unsupported,
@@ -406,25 +431,33 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
         &self,
         device: &DeviceState,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error> {
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure> {
         let mut args = uapi::Spm {
             destination: destination.map_or(0, |address| address as u64),
             size,
             operation: uapi::SPM_OP_SET_DESTINATION,
-            timeout: *timeout,
+            timeout,
             gpu_id: device.native.gpu_id,
             bytes_copied: 0,
             has_data_loss: 0,
         };
         let result = device.vm.kfd().spm(&mut args);
-        *timeout = args.timeout;
-        *bytes_copied = args.bytes_copied;
-        *data_loss = args.has_data_loss != 0;
-        result.map_err(|source| native_error("KFD SPM destination update", source))
+        let report = SpmDestinationReport {
+            timeout: args.timeout,
+            bytes_copied: args.bytes_copied,
+            data_loss: args.has_data_loss != 0,
+        };
+        result.map_or_else(
+            |source| {
+                Err(SpmDestinationFailure {
+                    error: native_error("KFD SPM destination update", source),
+                    report,
+                })
+            },
+            |()| Ok(report),
+        )
     }
 }
 pub(super) fn marketing_name(contents: &str, device_id: u32, revision: u32) -> Option<String> {
@@ -491,12 +524,26 @@ impl AllocationOperations for LinuxKfdDriver {
                 "secondary KFD contexts cannot bind host-owned pages",
             ));
         }
+        if let MemoryKind::DeviceLocal {
+            coherent,
+            extended_coherent: true,
+            uncached,
+            ..
+        } = kind
+            && (!coherent || uncached)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "extended local coherence requires a cached coherent mapping",
+            ));
+        }
         let native_kind = match kind {
             MemoryKind::System => memory::BufferKind::Gtt,
             MemoryKind::OwnedHost { policy } => memory::BufferKind::OwnedUserptr { cache: policy },
             MemoryKind::DeviceLocal {
                 host_visible,
                 coherent,
+                extended_coherent,
                 uncached,
                 contiguous,
             } => {
@@ -520,6 +567,7 @@ impl AllocationOperations for LinuxKfdDriver {
                 memory::BufferKind::Vram {
                     public: host_visible,
                     coherent,
+                    extended_coherent,
                     uncached,
                     contiguous,
                 }
@@ -550,12 +598,16 @@ impl AllocationOperations for LinuxKfdDriver {
             permissions,
             backing,
         } = request;
-        let desc = checked_allocation_desc(size, alignment)?;
+        let desc = checked_host_registration_desc(size, alignment)?;
+        let mut backing = backing;
         if self.lifetime == DriverContextLifetime::Session {
             if policy == HostMappingPolicy::Extended
                 && std::iter::once(device)
                     .chain(peers.iter().copied())
-                    .any(|peer| peer.native.queues.gfx_target != 120_001)
+                    .any(|peer| {
+                        peer.native.queues.target_profile
+                            != crate::topology::GpuTargetProfile::Gfx1201
+                    })
             {
                 return Err(error(
                     ErrorKind::Unsupported,
@@ -578,6 +630,17 @@ impl AllocationOperations for LinuxKfdDriver {
                 )
             }
         } else {
+            if let Some(alias) = memory::KfdHostAlias::try_create(
+                &device.vm,
+                peers,
+                address,
+                size,
+                policy,
+                permissions,
+                &mut backing,
+            )? {
+                return LinuxAllocation::from_host_alias(alias);
+            }
             // SAFETY: Raw callers retain these pages through cleanup; owned
             // registrations transfer a lease into the native allocation.
             let pages = unsafe { memory::BorrowedHostPages::new(address, policy) };
@@ -611,6 +674,19 @@ fn checked_allocation_desc(size: u64, alignment: u64) -> Result<AllocationDesc, 
     Ok(desc)
 }
 
+fn checked_host_registration_desc(size: u64, alignment: u64) -> Result<AllocationDesc, Error> {
+    let desc = AllocationDesc { size, alignment };
+    let page =
+        os_memory::page_size().map_err(|source| native_error("native page size", source))? as u64;
+    if size == 0 || size > isize::MAX as u64 || !alignment.is_power_of_two() || alignment < page {
+        return Err(error(
+            ErrorKind::InvalidArgument,
+            "invalid host registration extent or alignment",
+        ));
+    }
+    Ok(desc)
+}
+
 impl VirtualMemoryOperations for LinuxKfdDriver {
     type VirtualAddress = KfdVirtualAddress;
     type VirtualDeviceMapping = KfdVirtualDeviceMapping;
@@ -635,11 +711,10 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
         device: &DeviceState,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        KfdVirtualMemory::create(device.vm.clone(), kind, size, pinned, uncached)
+        KfdVirtualMemory::create(device.vm.clone(), kind, size, options)
     }
     fn free_virtual_memory(memory: &mut KfdVirtualMemory) -> Result<(), Error> {
         memory.free()
@@ -675,6 +750,12 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
         permissions: DeviceAccess,
     ) -> Result<Owned<KfdVirtualHostMapping>, Error> {
         KfdVirtualHostMapping::create(memory, reservation, address, offset, size, permissions)
+    }
+    fn set_virtual_host_mapping_permissions(
+        mapping: &mut KfdVirtualHostMapping,
+        permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        mapping.set_permissions(permissions)
     }
     fn free_virtual_host_mapping(mapping: &mut KfdVirtualHostMapping) -> Result<(), Error> {
         mapping.free()
@@ -757,5 +838,19 @@ impl KernelQueueResource for KfdKernelQueue {
 
     fn destroy(&mut self) -> Result<(), Error> {
         KfdKernelQueue::destroy(self)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod registration_extent_tests {
+    use super::{checked_allocation_desc, checked_host_registration_desc, os_memory};
+
+    #[test]
+    fn host_registration_accepts_an_exact_subpage_length() {
+        let page = os_memory::page_size().unwrap() as u64;
+        assert!(checked_host_registration_desc(1, page).is_ok());
+        assert!(checked_allocation_desc(1, page).is_err());
+        assert!(checked_host_registration_desc(0, page).is_err());
     }
 }

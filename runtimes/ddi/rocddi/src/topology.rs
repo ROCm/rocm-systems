@@ -1,25 +1,31 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Passive hardware discovery records and topology relationships.
+//! Passive hardware facts and source-qualified topology relationships.
 //!
-//! An endpoint describes hardware discovered in one generation-consistent
-//! topology snapshot. Optional information from other sources may be populated
-//! later on the same record. Inspecting or cloning an endpoint does not
-//! activate hardware, acquire an address space, or grant access to memory. An
-//! activated endpoint is represented separately by `crate::device::Device`.
+//! The records defined here describe hardware independently of a topology
+//! graph: an endpoint can be opened directly, and cache, link, PCI, and GPU
+//! information can be used without a node ID. `model` defines the sources,
+//! nodes, and relationships that bind those facts into one snapshot. Its public
+//! types are re-exported here so callers have one topology interface.
 //!
-//! Endpoint-kind variants carry only the capabilities meaningful to that kind.
-//! A backend publishes a variant only when it can populate and activate that
-//! endpoint faithfully; an activated device remains a separate session-owned
-//! state object.
+//! An endpoint is a passive discovery record. Optional facts from other
+//! sources may be populated later. Inspecting or cloning one does not activate
+//! hardware, acquire an address space, or grant memory access; an activated
+//! endpoint is a separate session-owned `crate::device::Device`. Endpoint-kind
+//! variants contain only capabilities meaningful to that kind.
 
 use crate::driver;
-use crate::memory::storage::Shared;
 use crate::memory::{DeviceAccess, HostCacheability};
 
 pub mod host;
+mod model;
 pub mod platform;
+pub use model::{
+    AttachmentKind, CpuNodeInfo, EndpointAttachment, MemoryBank, MemoryBankKind, MemoryLocation,
+    MemoryLocationKind, NativeNodeId, NodeId, NodeKind, ReportedRoute, SourceId, SourceKind,
+    TopologyCache, TopologyNode, TopologySnapshot, TopologySource,
+};
 
 /// Exact PCI function and configuration identity reported by the OS.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -68,6 +74,8 @@ pub struct CacheInfo {
     pub line_size_bytes: Option<u32>,
     /// Data and instruction classification of this cache.
     pub kind: CacheKind,
+    /// Whether the source classifies this as a CPU cache.
+    pub cpu_cache: bool,
     /// Whether the source marks this cache as associated with compute units.
     pub(crate) compute_unit_cache: bool,
 }
@@ -86,13 +94,13 @@ impl CacheInfo {
             size_bytes,
             line_size_bytes,
             kind,
+            cpu_cache: false,
             compute_unit_cache: false,
         }
     }
 }
 
 /// Physical or logical interconnect kind reported by topology discovery.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MemoryLinkType {
     /// `HyperTransport` link.
@@ -110,7 +118,6 @@ pub enum MemoryLinkType {
 }
 
 /// Passive properties of one directed native topology link.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MemoryLinkInfo {
     /// Native minimum latency value for this direction.
@@ -134,36 +141,11 @@ pub struct MemoryLinkInfo {
 }
 
 impl MemoryLinkInfo {
-    #[doc(hidden)]
+    /// Number of native hops implied by the reported distance weight.
     #[must_use]
     pub const fn hop_count(self) -> u32 {
         if self.numa_distance == 0 { 0 } else { 1 }
     }
-}
-
-/// Driver-local node identity used to relate discovered topology records.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TopologyKey {
-    /// Native topology node or group number.
-    pub(crate) group: u32,
-    /// Native member identity within that group.
-    pub(crate) member: u32,
-}
-
-/// Driver-local directed link. Host classification is explicit rather than
-/// inferred from an operating-system node or GPU identifier.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct MemoryLink {
-    /// Topology key at the directed link's origin.
-    pub(crate) source: TopologyKey,
-    /// Topology key at the directed link's destination.
-    pub(crate) target: TopologyKey,
-    /// The origin represents host memory rather than a device.
-    pub(crate) source_is_host: bool,
-    /// The destination represents host memory rather than a device.
-    pub(crate) target_is_host: bool,
-    /// Native latency, bandwidth, and coherency facts for this direction.
-    pub(crate) info: MemoryLinkInfo,
 }
 
 /// Queue transports qualified for one AMD GPU endpoint.
@@ -201,20 +183,210 @@ pub struct GpuQueueCapabilities {
     pub sdma_engine_count: u32,
 }
 
+/// Qualified packet and scratch dialect selected from the discovered target.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GpuTargetProfile {
+    /// No packet dialect has been qualified for this target.
+    #[default]
+    Other,
+    /// Qualified wave64 GFX9 targets.
+    Gfx9,
+    /// GFX10 targets with AQL transport support.
+    Gfx10,
+    /// GFX11 targets with AQL transport support.
+    Gfx11,
+    /// GFX12.0.0 packet dialect.
+    Gfx1200,
+    /// GFX12.0.1 packet dialect.
+    Gfx1201,
+    /// GFX12.5.0 packet dialect.
+    Gfx1250,
+}
+
+/// Native scratch descriptor encoding for a qualified target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GpuScratchEncoding {
+    /// Wave64 scratch descriptor with GFX9 alignment.
+    Gfx9,
+    /// Wave32 scratch descriptor with GFX12 alignment.
+    Gfx12,
+}
+
+/// SDMA packet layout qualified for a target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GpuSdmaDialect {
+    /// GFX9 SDMA packets.
+    Gfx9,
+    /// GFX12.0 SDMA packets.
+    Gfx1200,
+    /// GFX12.5 SDMA packets.
+    Gfx1250,
+}
+
+impl GpuTargetProfile {
+    /// Resolves a KFD target code once when the endpoint is discovered.
+    #[must_use]
+    pub const fn from_kfd_target(target: u32) -> Self {
+        match target {
+            90008 | 90010 | 90402 | 90500 => Self::Gfx9,
+            100_100..=109_999 => Self::Gfx10,
+            110_000..=119_999 => Self::Gfx11,
+            120_000 => Self::Gfx1200,
+            120_001 => Self::Gfx1201,
+            120_500 => Self::Gfx1250,
+            _ => Self::Other,
+        }
+    }
+
+    /// Whether the current backend qualifies an AQL queue transport.
+    #[must_use]
+    pub const fn supports_aql(self) -> bool {
+        match self {
+            Self::Other => false,
+            Self::Gfx9
+            | Self::Gfx10
+            | Self::Gfx11
+            | Self::Gfx1200
+            | Self::Gfx1201
+            | Self::Gfx1250 => true,
+        }
+    }
+
+    /// Whether the qualified DRM kernel command transport is available.
+    #[must_use]
+    pub const fn supports_kernel_submission(self) -> bool {
+        match self {
+            Self::Gfx1200 | Self::Gfx1201 | Self::Gfx1250 => true,
+            Self::Other | Self::Gfx9 | Self::Gfx10 | Self::Gfx11 => false,
+        }
+    }
+
+    /// Returns the fixed scratch descriptor supported by this wavefront.
+    #[must_use]
+    pub const fn scratch_encoding(self, wavefront_size: u32) -> Option<GpuScratchEncoding> {
+        match self {
+            Self::Gfx9 if wavefront_size == 64 => Some(GpuScratchEncoding::Gfx9),
+            Self::Gfx1200 | Self::Gfx1201 | Self::Gfx1250 if wavefront_size == 32 => {
+                Some(GpuScratchEncoding::Gfx12)
+            }
+            Self::Other
+            | Self::Gfx9
+            | Self::Gfx10
+            | Self::Gfx11
+            | Self::Gfx1200
+            | Self::Gfx1201
+            | Self::Gfx1250 => None,
+        }
+    }
+
+    /// Returns an SDMA dialect only when its packet format is implemented.
+    #[must_use]
+    pub const fn sdma_dialect(self) -> Option<GpuSdmaDialect> {
+        match self {
+            Self::Gfx9 => Some(GpuSdmaDialect::Gfx9),
+            Self::Gfx1200 | Self::Gfx1201 => Some(GpuSdmaDialect::Gfx1200),
+            Self::Gfx1250 => Some(GpuSdmaDialect::Gfx1250),
+            Self::Other | Self::Gfx10 | Self::Gfx11 => None,
+        }
+    }
+
+    /// Whether SDMA FENCE packets expose the explicit system bit.
+    #[must_use]
+    pub const fn sdma_fence_system(self) -> bool {
+        match self {
+            Self::Gfx1200 | Self::Gfx1201 | Self::Gfx1250 => true,
+            Self::Other | Self::Gfx9 | Self::Gfx10 | Self::Gfx11 => false,
+        }
+    }
+
+    /// Whether SDMA COPY and FENCE packets expose memory scope fields.
+    #[must_use]
+    pub const fn sdma_memory_scope(self) -> bool {
+        match self {
+            Self::Gfx1250 => true,
+            Self::Other
+            | Self::Gfx9
+            | Self::Gfx10
+            | Self::Gfx11
+            | Self::Gfx1200
+            | Self::Gfx1201 => false,
+        }
+    }
+
+    /// Whether this target has the implemented image sampler descriptor.
+    #[must_use]
+    pub const fn supports_image_sampler(self) -> bool {
+        match self {
+            Self::Gfx1200 | Self::Gfx1201 => true,
+            Self::Other | Self::Gfx9 | Self::Gfx10 | Self::Gfx11 | Self::Gfx1250 => false,
+        }
+    }
+
+    /// Whether AMDF can advertise PM4 dispatch scratch on this target.
+    #[must_use]
+    pub const fn supports_pm4_dispatch_scratch(self) -> bool {
+        match self {
+            Self::Gfx11 | Self::Gfx1200 | Self::Gfx1201 | Self::Gfx1250 => true,
+            Self::Other | Self::Gfx9 | Self::Gfx10 => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod target_profile_tests {
+    use super::{GpuScratchEncoding, GpuSdmaDialect, GpuTargetProfile as Profile};
+
+    #[test]
+    fn qualified_targets_keep_packet_and_scratch_dialects_together() {
+        for target in [90008, 90010, 90402, 90500] {
+            let profile = Profile::from_kfd_target(target);
+            assert_eq!(profile, Profile::Gfx9);
+            assert_eq!(profile.sdma_dialect(), Some(GpuSdmaDialect::Gfx9));
+            assert_eq!(profile.scratch_encoding(64), Some(GpuScratchEncoding::Gfx9));
+            assert_eq!(profile.scratch_encoding(32), None);
+        }
+        for (target, profile, dialect) in [
+            (120_000, Profile::Gfx1200, GpuSdmaDialect::Gfx1200),
+            (120_001, Profile::Gfx1201, GpuSdmaDialect::Gfx1200),
+            (120_500, Profile::Gfx1250, GpuSdmaDialect::Gfx1250),
+        ] {
+            assert_eq!(Profile::from_kfd_target(target), profile);
+            assert_eq!(profile.sdma_dialect(), Some(dialect));
+            assert_eq!(
+                profile.scratch_encoding(32),
+                Some(GpuScratchEncoding::Gfx12)
+            );
+            assert_eq!(profile.scratch_encoding(64), None);
+            assert!(profile.supports_kernel_submission());
+        }
+        for target in [90009, 120_002, 120_501] {
+            let profile = Profile::from_kfd_target(target);
+            assert_eq!(profile, Profile::Other);
+            assert!(!profile.supports_aql());
+            assert_eq!(profile.sdma_dialect(), None);
+            assert_eq!(profile.scratch_encoding(32), None);
+        }
+    }
+}
+
 /// GPU target and enabled compute geometry captured without activation.
 /// Required geometry fields must be complete and consistent before this record
 /// is published; opening an endpoint never substitutes guessed dimensions.
 /// Optional DRM facts may be populated later.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "GPU topology reports independent native capabilities as flags"
+)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GpuInfo {
-    /// Native KFD GPU identity used to resolve imported allocation placement.
-    pub native_gpu_id: u32,
     /// Exact GFX major version.
     pub gfx_major: u32,
     /// Exact GFX minor version.
     pub gfx_minor: u32,
     /// Exact GFX stepping.
     pub gfx_stepping: u32,
+    /// Packet and scratch dialect resolved from the KFD target at discovery.
+    pub target_profile: GpuTargetProfile,
     /// Globally unique immutable GPU identifier when reported by the backend.
     pub unique_id: Option<u64>,
     /// AMD GPU hive identifier, or zero when the endpoint has no hive.
@@ -261,6 +433,8 @@ pub struct GpuInfo {
     pub iommu_v2_supported: bool,
     /// Device-local memory can be coherently accessed by the host.
     pub coherent_host_access: bool,
+    /// SRAM ECC mode reported by the native GPU topology.
+    pub sram_ecc_enabled: bool,
     /// Packet processor firmware revision reported by the backend.
     pub packet_processor_firmware_version: u32,
     /// SDMA firmware revision reported by the backend.
@@ -349,9 +523,6 @@ pub struct Endpoint {
     /// Supported device permission bits. Every allocation requires READ and may
     /// independently request the supported WRITE and EXECUTE bits.
     pub supported_permissions: DeviceAccess,
-    pub(crate) caches: Option<Shared<Vec<CacheInfo>>>,
-    pub(crate) memory_links: Option<Shared<Vec<MemoryLink>>>,
-    pub(crate) topology_key: TopologyKey,
     pub(crate) driver_instance: driver::DriverInstanceId,
     pub(crate) selector: driver::EndpointSelector,
 }
@@ -378,66 +549,5 @@ impl Endpoint {
             EndpointKind::Gpu { info } => Some(info),
             EndpointKind::Cpu | EndpointKind::Npu | EndpointKind::Other => None,
         }
-    }
-
-    /// Returns the native cache records associated with this endpoint.
-    #[must_use]
-    pub fn caches(&self) -> &[CacheInfo] {
-        self.caches.as_ref().map_or(&[], |caches| caches.as_slice())
-    }
-
-    /// Returns the directed native link from this endpoint to another endpoint.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn memory_link_to(&self, owner: &Self) -> Option<MemoryLinkInfo> {
-        if self.driver_instance != owner.driver_instance {
-            return None;
-        }
-        self.memory_links.as_ref().and_then(|links| {
-            links.iter().rev().find_map(|link| {
-                (link.source == self.topology_key
-                    && link.target == owner.topology_key
-                    && !link.source_is_host
-                    && !link.target_is_host)
-                    .then_some(link.info)
-            })
-        })
-    }
-
-    /// Returns the directed native link from this endpoint to host memory.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn memory_link_to_host(&self) -> Option<MemoryLinkInfo> {
-        self.memory_links.as_ref().and_then(|links| {
-            links.iter().rev().find_map(|link| {
-                (link.source == self.topology_key && !link.source_is_host && link.target_is_host)
-                    .then_some(link.info)
-            })
-        })
-    }
-
-    /// Returns the directed native link from the host to this endpoint's memory.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn memory_link_from_host(&self) -> Option<MemoryLinkInfo> {
-        self.memory_links.as_ref().and_then(|links| {
-            links.iter().rev().find_map(|link| {
-                (link.source_is_host && !link.target_is_host && link.target == self.topology_key)
-                    .then_some(link.info)
-            })
-        })
-    }
-
-    /// Returns whether this consumer has a cached direct route to the owner's
-    /// LOCAL memory. The owner itself is always reachable. Peer routes are
-    /// accepted only from the generation-consistent topology snapshot used to
-    /// construct this endpoint record.
-    #[must_use]
-    pub fn can_access_local_memory(&self, owner: &Self) -> bool {
-        self.driver_instance == owner.driver_instance
-            && ((self.topology_key == owner.topology_key)
-                || self
-                    .memory_link_to(owner)
-                    .is_some_and(|link| link.hop_count() != 0))
     }
 }

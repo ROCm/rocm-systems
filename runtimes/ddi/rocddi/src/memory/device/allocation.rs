@@ -3,9 +3,13 @@
 
 //! Device-accessible allocation ownership and registration.
 
-use super::{AllocationInfo, DeviceAccess, HostMappingPolicy, HostRegistration, MemoryKind};
+use super::{
+    AllocationInfo, DeviceAccess, HostMappingPolicy, HostRegistration, MemoryKind,
+    registered_host_page_cover,
+};
 use crate::device::Device;
 use crate::driver::{self, AddressSpaceInfo, AllocationOperations, CachedInfo};
+use crate::memory::host::host_page_size;
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
@@ -180,9 +184,7 @@ where
                 detail: "access device belongs to another allocation session",
             });
         }
-        if allocation.is_device_local()
-            && !device.endpoint.can_access_local_memory(&origin.endpoint)
-        {
+        if allocation.is_device_local() && !device.can_access_local_memory(origin) {
             return Err(Error::Operation {
                 kind: ErrorKind::Unsupported,
                 detail: "access device has no qualified route to local memory",
@@ -217,6 +219,25 @@ impl Allocation {
     #[must_use]
     pub fn info(&self) -> AllocationInfo {
         self.inner.info()
+    }
+
+    /// Returns the registered page base's offset within an existing physical
+    /// backing when this allocation reuses another mapped BO. Add the byte
+    /// offset returned by `register_host_range` for the exact caller pointer.
+    #[must_use]
+    pub fn host_alias_source_offset(&self) -> Option<u64> {
+        self.inner.host_alias_source_offset()
+    }
+
+    /// Publishes an opaque frontend identity for later registrations of this
+    /// owned host-visible BO. This identity is used only when no native
+    /// DMA-BUF identity is available; callers must keep it unique among their
+    /// live physical backings in this process.
+    ///
+    /// # Errors
+    /// Rejects an allocation without a mapped BO or a conflicting identity.
+    pub fn set_host_alias_identity(&self, identity: [u64; 2]) -> Result<(), Error> {
+        self.inner.set_host_alias_identity(identity)
     }
 
     /// Reports allocation-owned payload still tied to a native backing handle
@@ -303,6 +324,81 @@ impl Allocation {
 }
 
 impl Device {
+    /// Registers an arbitrary host byte range, including an unaligned first
+    /// byte. Returns the allocation for the complete page cover and the byte
+    /// offset of `address` from its base. Add that offset to a device address
+    /// obtained from the returned allocation.
+    ///
+    /// # Errors
+    /// Rejects an invalid page cover and propagates native registration errors.
+    ///
+    /// # Safety
+    /// The complete page cover must remain mapped and synchronized until
+    /// successful release. An ambiguous native failure extends that obligation
+    /// through process teardown.
+    #[allow(unsafe_code)]
+    pub unsafe fn register_host_range(
+        &self,
+        address: usize,
+        policy: HostMappingPolicy,
+        size: u64,
+        alignment: u64,
+        permissions: DeviceAccess,
+    ) -> Result<(Allocation, u64), Error> {
+        // SAFETY: The caller retains the complete page cover.
+        unsafe {
+            self.register_host_range_with_peers(&[], address, policy, size, alignment, permissions)
+        }
+    }
+
+    /// Registers a host byte range in this device and every listed peer.
+    /// The returned offset applies to each mapped device address.
+    ///
+    /// # Errors
+    /// Rejects an invalid page cover or peer set and propagates native errors.
+    ///
+    /// # Safety
+    /// The complete page cover must remain mapped and synchronized until
+    /// successful release. An ambiguous native failure extends that obligation
+    /// through process teardown.
+    #[allow(unsafe_code)]
+    pub unsafe fn register_host_range_with_peers(
+        &self,
+        peers: &[&Self],
+        address: usize,
+        policy: HostMappingPolicy,
+        size: u64,
+        alignment: u64,
+        permissions: DeviceAccess,
+    ) -> Result<(Allocation, u64), Error> {
+        let page = usize::try_from(host_page_size()?).map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "host page size exceeds address width",
+        })?;
+        let size = usize::try_from(size).map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "host registration size exceeds address width",
+        })?;
+        let (base, cover) =
+            registered_host_page_cover(address, size, page).ok_or(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "invalid registered host page cover",
+            })?;
+        // SAFETY: The caller retains the cover, which is exactly the extent
+        // passed to the native registration.
+        let allocation = unsafe {
+            self.register_host_with_peers(
+                peers,
+                base,
+                policy,
+                cover as u64,
+                alignment,
+                permissions,
+            )?
+        };
+        Ok((allocation, (address - base) as u64))
+    }
+
     /// Creates owned backing and establishes this device's mapping before
     /// returning. `kind` selects owned system or local placement; borrowed
     /// caller pages must use [`Self::register_host`]. Permissions are never
@@ -455,7 +551,7 @@ impl Device {
                     detail: "peer devices must belong to one session",
                 });
             }
-            if requires_local_route && !peer.endpoint.can_access_local_memory(&self.endpoint) {
+            if requires_local_route && !peer.can_access_local_memory(self) {
                 return Err(Error::Operation {
                     kind: ErrorKind::Unsupported,
                     detail: "peer device has no qualified route to local memory",
