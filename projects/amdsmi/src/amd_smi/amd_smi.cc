@@ -8238,10 +8238,19 @@ amdsmi_status_t amdsmi_get_cpu_xgmi_width(amdsmi_processor_handle processor_hand
   amdsmi_status_t status;
   uint8_t sock_ind;
   char proc_id[SIZE];
+  uint32_t hsmp_proto_ver;
 
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr || min == nullptr || max == nullptr) return AMDSMI_STATUS_INVAL;
+
+  // esmi_xgmi_width_get is only defined for HSMP protocol version >= 7. Older
+  // versions would issue an unsupported mailbox command and can leave the
+  // out-params untouched while still reporting success.
+  status = static_cast<amdsmi_status_t>(esmi_hsmp_proto_ver_get(&hsmp_proto_ver));
+  if (status != AMDSMI_STATUS_SUCCESS)
+    return amd::smi::esmi_to_amdsmi_status(static_cast<esmi_status_t>(status));
+  if (hsmp_proto_ver < 7) return AMDSMI_STATUS_NOT_SUPPORTED;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;

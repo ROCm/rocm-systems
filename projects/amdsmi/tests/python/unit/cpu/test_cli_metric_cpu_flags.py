@@ -189,15 +189,26 @@ class TestCliMetricCpuFlags(unittest.TestCase):
         self.assertIsNotNone(captured, "metric_cpu did not store a values payload")
         return captured
 
+    def test_no_cpu_flags_emits_all_three_sections(self):
+        # With no cpu_* flag set, metric_cpu defaults to "show everything", so the
+        # three new sections must all render (getters unstubbed here -> N/A).
+        captured = self._run_metric_cpu()
+        self.assertIn("apb_status", captured)
+        self.assertIn("xgmi_link_width", captured)
+        self.assertIn("df_pstate_range", captured)
+
     def test_apb_status_disabled_reports_pstate(self):
-        self.interface.amdsmi_get_cpu_apb_status = lambda _cpu: {"apb_disabled": 1, "pstate": 3}
+        # pstate == 0 is a real value: assert it survives and is not coerced to "N/A".
+        self.interface.amdsmi_get_cpu_apb_status = lambda _cpu: {"apb_disabled": 1, "pstate": 0}
         captured = self._run_metric_cpu(cpu_apb_status=True)
-        self.assertEqual(captured["apb_status"], {"status": "DISABLED", "pstate": 3})
+        self.assertEqual(set(captured), {"apb_status"})
+        self.assertEqual(captured["apb_status"], {"status": "DISABLED", "pstate": 0})
 
     def test_apb_status_enabled_hides_pstate(self):
         # apb_disabled == 0 means APB is enabled; the fixed P-state is then N/A.
         self.interface.amdsmi_get_cpu_apb_status = lambda _cpu: {"apb_disabled": 0, "pstate": 5}
         captured = self._run_metric_cpu(cpu_apb_status=True)
+        self.assertEqual(set(captured), {"apb_status"})
         self.assertEqual(captured["apb_status"], {"status": "ENABLED", "pstate": "N/A"})
 
     def test_apb_status_failure_reports_na(self):
@@ -206,11 +217,13 @@ class TestCliMetricCpuFlags(unittest.TestCase):
 
         self.interface.amdsmi_get_cpu_apb_status = _raise
         captured = self._run_metric_cpu(cpu_apb_status=True)
+        self.assertEqual(set(captured), {"apb_status"})
         self.assertEqual(captured["apb_status"], {"status": "N/A", "pstate": "N/A"})
 
     def test_xgmi_link_width_reports_min_max(self):
         self.interface.amdsmi_get_cpu_xgmi_width = lambda _cpu: {"min_width": 2, "max_width": 16}
         captured = self._run_metric_cpu(cpu_xgmi_link_width=True)
+        self.assertEqual(set(captured), {"xgmi_link_width"})
         self.assertEqual(captured["xgmi_link_width"], {"min_width": 2, "max_width": 16})
 
     def test_xgmi_link_width_failure_reports_na(self):
@@ -219,6 +232,7 @@ class TestCliMetricCpuFlags(unittest.TestCase):
 
         self.interface.amdsmi_get_cpu_xgmi_width = _raise
         captured = self._run_metric_cpu(cpu_xgmi_link_width=True)
+        self.assertEqual(set(captured), {"xgmi_link_width"})
         self.assertEqual(captured["xgmi_link_width"], {"min_width": "N/A", "max_width": "N/A"})
 
     def test_df_pstate_range_reports_min_max(self):
@@ -227,6 +241,7 @@ class TestCliMetricCpuFlags(unittest.TestCase):
             "max_pstate": 2,
         }
         captured = self._run_metric_cpu(cpu_df_pstate_range=True)
+        self.assertEqual(set(captured), {"df_pstate_range"})
         self.assertEqual(captured["df_pstate_range"], {"min_pstate": 0, "max_pstate": 2})
 
     def test_df_pstate_range_failure_reports_na(self):
@@ -235,4 +250,5 @@ class TestCliMetricCpuFlags(unittest.TestCase):
 
         self.interface.amdsmi_get_cpu_df_pstate_range = _raise
         captured = self._run_metric_cpu(cpu_df_pstate_range=True)
+        self.assertEqual(set(captured), {"df_pstate_range"})
         self.assertEqual(captured["df_pstate_range"], {"min_pstate": "N/A", "max_pstate": "N/A"})

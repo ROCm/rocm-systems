@@ -168,13 +168,21 @@ class TestCpuXgmi(unittest.TestCase):
             failures.append(e)
 
         # A SUCCESS must also carry sane data -- status alone would let
-        # swapped min/max out-params pass.
+        # swapped or out-of-range min/max out-params pass. Per ESMI
+        # (esmi_xgmi_width_get), the width is an encoded level in [0, 2]
+        # with min <= max.
         for i, val in values:
             try:
                 if isinstance(val, dict):
-                    assert val["min_width"] <= val["max_width"], (
-                        f"cpu={i}: xgmi width min ({val['min_width']}) must be <= "
-                        f"max ({val['max_width']})"
+                    min_width, max_width = val["min_width"], val["max_width"]
+                    self.assertLessEqual(
+                        0, min_width, f"cpu={i}: xgmi min_width out of range [0, 2]: {val}"
+                    )
+                    self.assertLessEqual(
+                        min_width, max_width, f"cpu={i}: xgmi min_width must be <= max_width: {val}"
+                    )
+                    self.assertLessEqual(
+                        max_width, 2, f"cpu={i}: xgmi max_width out of range [0, 2]: {val}"
                     )
             except Exception as e:
                 failures.append(e)

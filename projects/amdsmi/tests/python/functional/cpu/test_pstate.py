@@ -259,15 +259,24 @@ class TestCpuPstate(unittest.TestCase):
             failures.append(e)
 
         # A SUCCESS must also carry sane data -- status alone would let
-        # out-of-range P-states pass. Note DF P-states are numbered
-        # with P0 as the highest-performance state, so min/max are not
-        # numerically ordered (eg. a valid result is min_pstate=2,
-        # max_pstate=0); only the [0, 7] range is asserted.
+        # out-of-range P-states pass. Per ESMI (esmi_df_pstate_range), DF
+        # P-states are in [0, 2] with P0 as the highest-performance state,
+        # so the range is numerically inverted: max_pstate <= min_pstate
+        # (eg. a valid result is min_pstate=2, max_pstate=0).
         for i, val in values:
             try:
                 if isinstance(val, dict):
-                    assert 0 <= val["min_pstate"] <= 7 and 0 <= val["max_pstate"] <= 7, (
-                        f"cpu={i}: df pstate values out of range [0, 7]: {val}"
+                    min_pstate, max_pstate = val["min_pstate"], val["max_pstate"]
+                    self.assertLessEqual(
+                        0, max_pstate, f"cpu={i}: df max_pstate out of range [0, 2]: {val}"
+                    )
+                    self.assertLessEqual(
+                        max_pstate,
+                        min_pstate,
+                        f"cpu={i}: df max_pstate must be <= min_pstate: {val}",
+                    )
+                    self.assertLessEqual(
+                        min_pstate, 2, f"cpu={i}: df min_pstate out of range [0, 2]: {val}"
                     )
             except Exception as e:
                 failures.append(e)

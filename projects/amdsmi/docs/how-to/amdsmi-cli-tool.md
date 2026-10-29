@@ -424,7 +424,7 @@ Watch Arguments:
 CPU Arguments:
   --cpu-power-metrics                       CPU power metrics
   --cpu-prochot                             Displays prochot status
-  --cpu-xgmi-link-width                     Displays XGMI link width range, min and max values for the selected CPU
+  --cpu-xgmi-link-width                     Displays XGMI link width range, min and max values for the selected CPU. Values are encoded width levels (0-2), not lane counts: 0 = 4 lanes (family 19h model 10h) or 2 lanes (other models), 1 = 8 lanes, 2 = 16 lanes
   --cpu-apb-status                          Displays APB status
   --cpu-freq-metrics                        Displays currentFclkMemclk frequencies and cclk frequency limit
   --cpu-c0-res                              Displays C0 residency
