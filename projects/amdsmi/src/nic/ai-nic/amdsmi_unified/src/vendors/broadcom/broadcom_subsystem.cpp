@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -21,6 +22,14 @@ namespace {
 // and hwmon layout.
 constexpr std::array<const char*, 2> kBroadcomMainDrivers = {"bnxt_en", "bng_en"};
 constexpr std::array<const char*, 2> kBroadcomRdmaAuxDrivers = {"bnxt_re.rdma", "bng_re.rdma"};
+
+// A netdev bound to a Broadcom function, held until every netdev is known so they group by
+// function.
+struct Netdev_t {
+  std::string iface;
+  std::string bdf;
+  std::string class_path;
+};
 }  // namespace
 
 NicVendor SmiNicSubsystemBroadcom::vendor() const { return NicVendor::Broadcom; }
@@ -65,6 +74,7 @@ void SmiNicSubsystemBroadcom::discover(
     std::shared_ptr<amd::smi::nic::transport::NicTransport> transport) {
   nics_.clear();
   std::error_code ec;
+  auto netdevs = std::vector<Netdev_t>{};
 
   // Manual increment(ec): operator++ on directory_iterator throws on a
   // mid-scan read error; the non-throwing form only guards construction.
@@ -88,13 +98,31 @@ void SmiNicSubsystemBroadcom::discover(
       continue;
     }
 
-    auto nic = std::make_unique<SmiNic>(iface, bdf, NicType::Ethernet, it->path().string(),
-                                        sysfs_bus_path, NicVendor::Broadcom, NicProduct::Unknown);
-    SmiNicPort port(iface, bdf, it->path().string(), sysfs_bus_path, transport,
-                    &kBroadcomStatTable);
+    netdevs.push_back({iface, bdf, it->path().string()});
+  }
+
+  // Directory order is unspecified; sorting by name makes the netdev that names the NIC stable.
+  std::sort(netdevs.begin(), netdevs.end(),
+            [](const Netdev_t& lhs, const Netdev_t& rhs) { return (lhs.iface < rhs.iface); });
+
+  // A function can expose several netdevs (a PF with switchdev representors); they are ports of
+  // one NIC, not NICs that share a BDF.
+  auto nic_by_bdf = std::map<std::string, SmiNic*>{};
+  for (const auto& netdev : netdevs) {
+    const auto sysfs_bus_path = pci_path + "/" + netdev.bdf;
+    auto port = SmiNicPort{netdev.iface,   netdev.bdf, netdev.class_path,
+                           sysfs_bus_path, transport,  &kBroadcomStatTable};
     port.discover_infiniband();
-    nic->add_nic_port(port);
-    nics_.push_back(std::move(nic));
+
+    auto found = nic_by_bdf.find(netdev.bdf);
+    if (found == nic_by_bdf.end()) {
+      auto nic =
+          std::make_unique<SmiNic>(netdev.iface, netdev.bdf, NicType::Ethernet, netdev.class_path,
+                                   sysfs_bus_path, NicVendor::Broadcom, NicProduct::Unknown);
+      found = nic_by_bdf.emplace(netdev.bdf, nic.get()).first;
+      nics_.push_back(std::move(nic));
+    }
+    found->second->add_nic_port(port);
   }
 }
 
