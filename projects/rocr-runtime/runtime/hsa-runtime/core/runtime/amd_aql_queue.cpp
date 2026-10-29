@@ -293,8 +293,16 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
         eop_buf_ = agent_->coarsegrain_allocator()(info.compute.eop_size, core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
         if (!eop_buf_) break;
 
-        if (static_cast<DrmDriver &>(agent_->driver()).QueryCwsrInfo(*agent_, &cwsr_info) != HSA_STATUS_SUCCESS)
-          break;
+        // Query CWSR size from kernel; if it fails, compute fallback once
+        hsa_status_t cwsr_status = static_cast<DrmDriver &>(agent_->driver()).QueryCwsrInfo(*agent_, &cwsr_info);
+        if (cwsr_status != HSA_STATUS_SUCCESS || cwsr_info.min_save_area_size == 0) {
+          // Kernel query failed, compute fallback
+          memset(&cwsr_info, 0, sizeof(cwsr_info));
+          if (static_cast<DrmDriver&>(agent_->driver()).ComputeCwsrSizeFallback(*agent_, &cwsr_info) != HSA_STATUS_SUCCESS ||
+              cwsr_info.min_save_area_size == 0) {
+            break;
+          }
+        }
 
         cwsr_buf_ = agent_->coarsegrain_allocator()(cwsr_info.min_save_area_size, core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
         if (!cwsr_buf_) break;
