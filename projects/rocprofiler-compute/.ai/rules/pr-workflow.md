@@ -76,6 +76,7 @@ approval. Do NOT create the PR without confirmation.
 - Ensure the branch is pushed to the remote before creating the PR.
 - Create the PR with `gh pr create`, passing the body with `--body-file` so its
   newlines and markdown arrive unchanged.
+- For stacked PRs, use the `gh stack` extension to create, rebase, and sync them.
 
 ### 6. Verify and fix formatting
 

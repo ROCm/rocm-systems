@@ -107,8 +107,7 @@ while hooks are skipped because pre-commit is missing.
 
 ## What NOT to do
 
-- Do not use `--no-gpg-sign` to disable commit signing to remote unless explicitly asked.
-- Do not use `--no-verify` or `--no-gpg-sign` to bypass hooks.
+- Do not use `--no-verify` to bypass hooks or `--no-gpg-sign` to skip signing.
 - Do not commit when pre-commit is unavailable. Install it first.
 - Do not create empty commits.
 - Do not batch multiple unrelated changes into one commit.
