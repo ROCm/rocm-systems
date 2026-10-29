@@ -8048,39 +8048,29 @@ class CodeGenerator:
                     '.tfe = bool(inst_.tfe), .lwe = false, .da = true, '
                     '.unorm = true}'
                 )
-            else:
+            elif self.isa_spec.profile.has_gfx11_image_address_extension:
                 resource = 'inst_.srsrc * 4'
                 address_registers = (
                     'amdgpu::gfx11_image_address_registers('
                     'inst_.nsa, inst_.vaddr, raw_encoding())'
-                    if self.isa_spec.arch_name.startswith('rdna')
-                    else 'amdgpu::contiguous_image_address_registers(inst_.vaddr)'
-                )
-                da = (
-                    'true'
-                    if self.isa_spec.arch_name.startswith('rdna')
-                    else 'bool(inst_.da)'
-                )
-                r128 = (
-                    'bool(inst_.r128)'
-                    if self.isa_spec.arch_name.startswith('rdna')
-                    else 'false'
-                )
-                tfe = (
-                    '.tfe = bool(inst_.tfe), '
-                    if self.isa_spec.arch_name.startswith('rdna')
-                    else ''
-                )
-                dim = (
-                    '.dim = inst_.dim, '
-                    if self.isa_spec.arch_name.startswith('rdna')
-                    else ''
                 )
                 image_fields = (
-                    f'{{.dmask = inst_.dmask, {dim}.a16 = bool(inst_.a16), '
-                    f'.d16 = bool(inst_.d16), .r128 = {r128}, '
-                    f'{tfe}.lwe = bool(inst_.lwe), '
-                    f'.da = {da}, .unorm = bool(inst_.unorm)}}'
+                    '{.dmask = inst_.dmask, .dim = inst_.dim, '
+                    '.a16 = bool(inst_.a16), '
+                    '.d16 = bool(inst_.d16), .r128 = bool(inst_.r128), '
+                    '.tfe = bool(inst_.tfe), .lwe = bool(inst_.lwe), '
+                    '.da = true, .unorm = bool(inst_.unorm)}'
+                )
+            else:
+                resource = 'inst_.srsrc * 4'
+                address_registers = (
+                    'amdgpu::contiguous_image_address_registers(inst_.vaddr)'
+                )
+                image_fields = (
+                    '{.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
+                    '.d16 = bool(inst_.d16), .r128 = false, '
+                    '.lwe = bool(inst_.lwe), .da = bool(inst_.da), '
+                    '.unorm = bool(inst_.unorm)}'
                 )
             L.append(
                 '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
