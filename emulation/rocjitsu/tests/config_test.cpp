@@ -3225,6 +3225,44 @@ void expect_config_target_failure(const std::string &json, const char *message) 
   EXPECT_EQ(validation_diagnostic.message(), message);
 }
 
+TEST(ConfigLoaderTest, PropagatesRootComputeUnitFailure) {
+  const std::string json = R"({"vm":{"arch":"cdna3"},"topology":{
+    "root":{"name":"rejected","type":"compute_unit","config":[
+      {"key":"num_wf_slots","value":"33"}]}}})";
+  EXPECT_NO_THROW(expect_config_target_failure(json, "num_wf_slots exceeds the ISA maximum of 32"));
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidCuAfterConstructingSibling) {
+  const struct {
+    const char *key;
+    const char *value;
+    const char *message;
+  } cases[] = {
+      {"num_wf_slots", "33", "num_wf_slots exceeds the ISA maximum of 32"},
+      {"vgprs_per_wf", "513", "effective VGPRs per wavefront exceeds the ISA maximum of 512"},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.key);
+    const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3"},
+      "topology":{"root":{"name":"soc","type":"soc","children":[
+        {"name":"vram","type":"gpu_memory"},
+        {"name":"accepted","type":"compute_unit"},
+        {"name":"rejected","type":"compute_unit","config":[{"key":")") +
+                             test_case.key + R"(","value":")" + test_case.value + R"("}]}]}}})";
+    EXPECT_NO_THROW(expect_config_target_failure(json, test_case.message));
+
+    rj_vm_t sentinel;
+    rj_vm_t *output = &sentinel;
+    EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &output),
+              ROCJITSU_STATUS_INVALID_ARGUMENT);
+    EXPECT_EQ(output, &sentinel);
+    const auto file = write_temp_config(json);
+    EXPECT_EQ(rj_vm_create(file.path().c_str(), RJ_VM_MODE_DEFAULT, &output),
+              ROCJITSU_STATUS_INVALID_FILE);
+    EXPECT_EQ(output, &sentinel);
+  }
+}
+
 TEST(ConfigLoaderTest, RejectsMissingOrInvalidArchitecture) {
   const std::array<const char *, 3> configs{R"({})", R"({"vm":{}})",
                                             R"({"vm":{"arch":"invalid"}})"};

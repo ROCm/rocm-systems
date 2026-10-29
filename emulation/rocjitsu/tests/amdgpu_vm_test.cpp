@@ -377,14 +377,67 @@ TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFai
   }
 }
 
-TEST(ComputeUnitConfigTest, RejectsWavefrontSlotsAboveIsaMaximum) {
-  VmFixture fixture;
-  EXPECT_THROW(fixture.initialize("cdna3", 1, 33), util::ConfigError);
+TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesRejectedConfiguration) {
+  using Config = amdgpu::ComputeUnitCore::Config;
+  const Config valid{
+      .arch = ROCJITSU_CODE_ARCH_CDNA3,
+      .num_wf_slots = 8,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+  struct InvalidConfig {
+    Config config;
+    const char *message;
+  };
+  std::vector<InvalidConfig> cases;
+  Config invalid = valid;
+  invalid.num_wf_slots = 33;
+  cases.push_back({invalid, "num_wf_slots exceeds the ISA maximum of 32"});
+  invalid = valid;
+  invalid.vgprs_per_wf = 513;
+  cases.push_back({invalid, "effective VGPRs per wavefront exceeds the ISA maximum of 512"});
+  invalid = valid;
+  invalid.arch = ROCJITSU_CODE_ARCH_INVALID;
+  cases.push_back({invalid, "Unsupported architecture for ComputeUnit"});
+  invalid.arch = ROCJITSU_CODE_ARCH_RV64I;
+  cases.push_back({invalid, "Unsupported architecture for ComputeUnit"});
+  invalid = valid;
+  invalid.target = static_cast<rj_code_target_id_t>(UINT32_MAX);
+  cases.push_back({invalid, "unsupported concrete GPU target"});
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.message);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(amdgpu::ComputeUnitCore::validate(test_case.config, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(), test_case.message);
+    for (auto mode : {simdojo::ExecMode::FUNCTIONAL, simdojo::ExecMode::CLOCKED}) {
+      diagnostic("");
+      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+      EXPECT_NO_THROW(compute_unit =
+                          amdgpu::ComputeUnitCore::create("rejected", test_case.config, nullptr,
+                                                          nullptr, mode, diagnostic.emitter()));
+      EXPECT_EQ(compute_unit, nullptr);
+      EXPECT_EQ(diagnostic.message(), test_case.message);
+    }
+  }
 }
 
-TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
-  VmFixture fixture;
-  EXPECT_THROW(fixture.initialize("cdna3", 1, 32, 64, 104, 513), util::ConfigError);
+TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
+  const amdgpu::ComputeUnitCore::Config config{
+      .arch = ROCJITSU_CODE_ARCH_CDNA3,
+      .num_wf_slots = 8,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+  util::StringDiagnostic diagnostic;
+  std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+  EXPECT_NO_THROW(compute_unit = amdgpu::ComputeUnitCore::create(
+                      "rejected", config, nullptr, nullptr, static_cast<simdojo::ExecMode>(255),
+                      diagnostic.emitter()));
+  EXPECT_EQ(compute_unit, nullptr);
+  EXPECT_EQ(diagnostic.message(), "Unsupported execution mode for ComputeUnit");
 }
 
 TEST(ComputeUnitConfigTest, DirectFactoryAcceptsExecutionEnabledConcreteTarget) {
@@ -435,8 +488,14 @@ TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {
       .lds_size_kb = 64,
   };
 
-  EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2),
-               util::ConfigError);
+  util::StringDiagnostic diagnostic;
+  std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+  EXPECT_NO_THROW(compute_unit = amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2,
+                                                                 simdojo::ExecMode::FUNCTIONAL,
+                                                                 diagnostic.emitter()));
+  EXPECT_EQ(compute_unit, nullptr);
+  EXPECT_EQ(diagnostic.message(),
+            "concrete GPU target does not belong to the configured architecture");
 }
 
 enum class SubmitTrigger { DispatchBegin, AfterInstruction };

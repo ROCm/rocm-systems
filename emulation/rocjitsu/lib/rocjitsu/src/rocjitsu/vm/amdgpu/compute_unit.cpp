@@ -30,7 +30,6 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
-#include "util/except.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -131,25 +130,27 @@ uint32_t pack_barrier_state(uint32_t member_count, uint32_t signal_count,
 }
 } // namespace
 
-template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::Config &config) {
+template <GpuIsa Isa>
+util::Result validate_compute_unit_config(const ComputeUnitCore::Config &config,
+                                          util::DiagnosticEmitter emit_error) {
   using Limits = IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
 
   if (config.num_wf_slots > Isa::MAX_WF_SLOTS) {
-    throw util::ConfigError("num_wf_slots exceeds the ISA maximum of " +
-                            std::to_string(Isa::MAX_WF_SLOTS));
+    return emit_error.emit() << "num_wf_slots exceeds the ISA maximum of " << Isa::MAX_WF_SLOTS;
   }
 
   const uint32_t vgprs_per_block = Limits::effective_vgpr_allocation_block_size(config);
   if (vgprs_per_block > Limits::MAX_VGPRS_PER_BLOCK) {
-    throw util::ConfigError("effective VGPRs per wavefront exceeds the ISA maximum of " +
-                            std::to_string(Limits::MAX_VGPRS_PER_BLOCK));
+    return emit_error.emit() << "effective VGPRs per wavefront exceeds the ISA maximum of "
+                             << Limits::MAX_VGPRS_PER_BLOCK;
   }
 
   const uint64_t vgpr_file_registers = static_cast<uint64_t>(config.num_wf_slots) * vgprs_per_block;
   if (vgpr_file_registers > std::numeric_limits<uint32_t>::max() ||
       vgpr_file_registers > Limits::MAX_VGPR_FILE_REGISTERS) {
-    throw util::ConfigError("configured VGPR file exceeds the ISA maximum capacity");
+    return emit_error.emit() << "configured VGPR file exceeds the ISA maximum capacity";
   }
+  return util::Result::success();
 }
 
 std::unique_ptr<Decoder> ComputeUnitCore::create_decoder(const Config &config) {
@@ -170,8 +171,8 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
       l1_vector_(l2, memory ? memory->transaction_policy() : MemoryTransactionPolicy{}),
       lds_(config.lds_size_kb), scalar_mem_pipeline_(&l1_scalar_),
       global_mem_pipeline_(&l1_vector_, l2), local_mem_pipeline_() {
-  if (!decoder_)
-    throw std::runtime_error("Unsupported architecture for ComputeUnit decoder");
+  // Admitted built-in architectures always provide a decoder.
+  assert(decoder_ && "validated ComputeUnit architecture must provide a decoder");
 
   inst_cache_.set_l2(l2_);
 
@@ -233,7 +234,9 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
 }
 
 namespace {
-template <typename F> decltype(auto) with_compute_unit_isa(rj_code_arch_t arch, F &&fn) {
+template <typename F>
+util::Result with_compute_unit_isa(rj_code_arch_t arch, F &&fn,
+                                   util::DiagnosticEmitter emit_error) {
   switch (arch) {
     // \NPI new ISA family: add its architecture-to-ISA mapping here.
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -257,44 +260,62 @@ template <typename F> decltype(auto) with_compute_unit_isa(rj_code_arch_t arch, 
   case ROCJITSU_CODE_ARCH_CDNA5:
     return fn.template operator()<cdna5::Isa>();
   default:
-    throw std::runtime_error("Unsupported architecture for ComputeUnit");
+    return emit_error.emit() << "Unsupported architecture for ComputeUnit";
   }
 }
 } // namespace
 
-void ComputeUnitCore::validate(const Config &config) {
+util::Result ComputeUnitCore::validate(const Config &config, util::DiagnosticEmitter emit_error) {
   if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetRegistry &registry = default_isa_target_registry();
     const IsaTargetDescriptor *target_descriptor = registry.find(config.target);
     const IsaGpuTargetDescription *target_binding = registry.find_gpu_target(config.target);
     if (target_descriptor == nullptr || target_binding == nullptr)
-      throw util::ConfigError("unsupported concrete GPU target");
+      return emit_error.emit() << "unsupported concrete GPU target";
     if (target_descriptor->architecture_id != config.arch)
-      throw util::ConfigError("concrete GPU target does not belong to the configured architecture");
+      return emit_error.emit()
+             << "concrete GPU target does not belong to the configured architecture";
     if (!target_descriptor->supports_execution ||
         !target_binding->capabilities.execution_implemented)
-      throw util::ConfigError("execution is not implemented for the concrete GPU target");
+      return emit_error.emit() << "execution is not implemented for the concrete GPU target";
   }
 
-  with_compute_unit_isa(config.arch,
-                        [&]<GpuIsa Isa>() { validate_compute_unit_config<Isa>(config); });
+  return with_compute_unit_isa(
+      config.arch,
+      [&]<GpuIsa Isa>() { return validate_compute_unit_config<Isa>(config, emit_error); },
+      emit_error);
 }
 
 std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
                                                          GpuMemory *memory, L2Cache *l2,
-                                                         simdojo::ExecMode exec_mode) {
-  validate(config);
+                                                         simdojo::ExecMode exec_mode,
+                                                         util::DiagnosticEmitter emit_error) {
+  if (validate(config, emit_error).failed())
+    return nullptr;
+  if (exec_mode != simdojo::ExecMode::FUNCTIONAL && exec_mode != simdojo::ExecMode::CLOCKED) {
+    emit_error.emit() << "Unsupported execution mode for ComputeUnit";
+    return nullptr;
+  }
 
-  return with_compute_unit_isa(config.arch, [&]<GpuIsa Isa>() -> std::unique_ptr<ComputeUnitCore> {
-    switch (exec_mode) {
-    case simdojo::ExecMode::FUNCTIONAL:
-      return create_functional_cu<Isa>(std::move(name), config, memory, l2);
-    case simdojo::ExecMode::CLOCKED:
-      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, Isa>>(
-          std::move(name), config, memory, l2);
-    }
-    throw std::runtime_error("Unsupported architecture for ComputeUnit");
-  });
+  std::unique_ptr<ComputeUnitCore> compute_unit;
+  if (with_compute_unit_isa(
+          config.arch,
+          [&]<GpuIsa Isa>() {
+            switch (exec_mode) {
+            case simdojo::ExecMode::FUNCTIONAL:
+              compute_unit = create_functional_cu<Isa>(std::move(name), config, memory, l2);
+              break;
+            case simdojo::ExecMode::CLOCKED:
+              compute_unit = std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, Isa>>(
+                  std::move(name), config, memory, l2);
+              break;
+            }
+            return util::Result::success();
+          },
+          emit_error)
+          .failed())
+    return nullptr;
+  return compute_unit;
 }
 
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,

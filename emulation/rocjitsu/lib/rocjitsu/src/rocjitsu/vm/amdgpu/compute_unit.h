@@ -30,6 +30,7 @@
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
+#include "util/diagnostic.h"
 #include "util/except.h"
 #include "util/log.h"
 #include "util/result.h"
@@ -195,8 +196,9 @@ public:
   /// @brief Validate ISA support and CU resource limits without allocating execution state.
   /// @details Shared with create() so validation-only callers apply the same checks.
   /// @param config CU configuration parameters.
-  /// @throws std::runtime_error if the target or resource limits are unsupported.
-  static void validate(const Config &config);
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
+  /// @returns Success, or diagnosed failure for unsupported targets or resource limits.
+  static util::Result validate(const Config &config, util::DiagnosticEmitter emit_error = {});
 
   /// @brief Create a compute unit for the given architecture and execution mode.
   /// @param name Human-readable name (e.g., "cu0").
@@ -204,10 +206,14 @@ public:
   /// @param memory Shared GPU memory (not owned).
   /// @param l2 Shared L2 cache (owned by the XCD).
   /// @param exec_mode Execution mode for the CU.
-  /// @returns Owning pointer to the created compute unit.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
+  /// @returns Owning pointer, or nullptr after diagnosing invalid configuration or execution mode.
+  /// Validation finishes before allocating execution state. Allocation failures may still throw;
+  /// already constructed resources are owned by RAII members and are cleaned during unwinding.
   static std::unique_ptr<ComputeUnitCore>
   create(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
-         simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL);
+         simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL,
+         util::DiagnosticEmitter emit_error = {});
 
   /// @brief Activate an idle wavefront slot with the given dispatch parameters.
   ///
@@ -1995,6 +2001,8 @@ public:
                                          MAX_VGPR_FILE_REGISTERS>;
 
   /// @brief Construct an ISA-parameterized compute unit.
+  /// @details Internal ISA-specific extensions supply validated configuration;
+  /// use ComputeUnitCore::create() for input validation.
   /// @param name Human-readable name (e.g., "cu0").
   /// @param config CU configuration parameters.
   /// @param memory Shared GPU memory (not owned).

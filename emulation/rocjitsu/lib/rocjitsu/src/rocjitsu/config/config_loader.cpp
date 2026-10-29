@@ -625,7 +625,8 @@ amdgpu::ComputeUnitCore::Config parse_compute_unit_config(const CfgMap &cfg, rj_
 
 using FactoryFn = std::function<std::unique_ptr<simdojo::Component>(
     const std::string &name, const CfgMap &cfg, simdojo::ExecMode mode, rj_code_arch_t arch,
-    rj_code_target_id_t target, amdgpu::GpuMemory *mem, const AsyncResources &resources)>;
+    rj_code_target_id_t target, amdgpu::GpuMemory *mem, const AsyncResources &resources,
+    util::DiagnosticEmitter emit_error)>;
 
 using FactoryMap = std::unordered_map<std::string, FactoryFn>;
 
@@ -644,39 +645,40 @@ const FactoryMap &factories(BuildMode build_mode) {
   static const FactoryMap full_factories = [] {
     std::unordered_map<std::string, FactoryFn> f;
     f["composite"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                        rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &) {
+                        rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &,
+                        util::DiagnosticEmitter) {
       auto c = std::make_unique<simdojo::CompositeComponent>(n);
       c->set_weight(0);
       return c;
     };
     f["soc"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode, rj_code_arch_t arch,
-                  rj_code_target_id_t, amdgpu::GpuMemory *mem,
-                  const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                  rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &,
+                  util::DiagnosticEmitter) -> std::unique_ptr<simdojo::Component> {
       auto soc = std::make_unique<SoC>(n, mem);
       soc->set_arch(arch);
       soc->set_exec_mode(mode);
       return soc;
     };
     f["xcd"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                  rj_code_target_id_t, amdgpu::GpuMemory *,
-                  const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                  rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &,
+                  util::DiagnosticEmitter) -> std::unique_ptr<simdojo::Component> {
       return std::make_unique<amdgpu::Xcd>(n);
     };
     f["shader_engine"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                            rj_code_target_id_t, amdgpu::GpuMemory *,
-                            const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                            rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &,
+                            util::DiagnosticEmitter) -> std::unique_ptr<simdojo::Component> {
       return std::make_unique<amdgpu::ShaderEngine>(n);
     };
 
     f["gpu_memory"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                         rj_code_target_id_t, amdgpu::GpuMemory *,
-                         const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                         rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &,
+                         util::DiagnosticEmitter) -> std::unique_ptr<simdojo::Component> {
       return std::make_unique<amdgpu::GpuMemory>(n);
     };
 
     f["iod"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode, rj_code_arch_t,
-                  rj_code_target_id_t, amdgpu::GpuMemory *mem,
-                  const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                  rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &,
+                  util::DiagnosticEmitter) -> std::unique_ptr<simdojo::Component> {
       if (!mem)
         throw std::runtime_error("IOD requires gpu_memory");
       amdgpu::Iod::Config ic{};
@@ -685,8 +687,8 @@ const FactoryMap &factories(BuildMode build_mode) {
     };
 
     f["l2_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                       rj_code_target_id_t, amdgpu::GpuMemory *mem,
-                       const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                       rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &,
+                       util::DiagnosticEmitter) -> std::unique_ptr<simdojo::Component> {
       auto l2 = std::make_unique<amdgpu::L2Cache>(n);
       l2->set_backing_memory(mem);
       l2->set_legacy_maintenance_memory(mem);
@@ -695,24 +697,28 @@ const FactoryMap &factories(BuildMode build_mode) {
 
     f["memory_side_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
                                 rj_code_arch_t, rj_code_target_id_t, amdgpu::GpuMemory *mem,
-                                const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                                const AsyncResources &,
+                                util::DiagnosticEmitter) -> std::unique_ptr<simdojo::Component> {
       return std::make_unique<amdgpu::MemorySideCache>(
           n, std::make_shared<amdgpu::DeviceCacheCoherence>(), mem);
     };
 
     f["command_processor"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode,
                                 rj_code_arch_t arch, rj_code_target_id_t, amdgpu::GpuMemory *,
-                                const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
+                                const AsyncResources &,
+                                util::DiagnosticEmitter) -> std::unique_ptr<simdojo::Component> {
       auto cp = std::make_unique<amdgpu::CommandProcessor>(n, mode);
       cp->configure_for_arch(arch);
       return cp;
     };
 
-    f["compute_unit"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode mode,
-                           rj_code_arch_t arch, rj_code_target_id_t target, amdgpu::GpuMemory *mem,
-                           const AsyncResources &resources) -> std::unique_ptr<simdojo::Component> {
+    f["compute_unit"] =
+        [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode mode, rj_code_arch_t arch,
+           rj_code_target_id_t target, amdgpu::GpuMemory *mem, const AsyncResources &resources,
+           util::DiagnosticEmitter emit_error) -> std::unique_ptr<simdojo::Component> {
       return amdgpu::ComputeUnitCore::create(
-          n, parse_compute_unit_config(cfg, arch, target, resources), mem, nullptr, mode);
+          n, parse_compute_unit_config(cfg, arch, target, resources), mem, nullptr, mode,
+          emit_error);
     };
     return f;
   }();
@@ -722,10 +728,11 @@ const FactoryMap &factories(BuildMode build_mode) {
     FactoryMap result = full_factories;
     result["compute_unit"] =
         [](const std::string &name, const CfgMap &cfg, simdojo::ExecMode, rj_code_arch_t arch,
-           rj_code_target_id_t target, amdgpu::GpuMemory *,
-           const AsyncResources &resources) -> std::unique_ptr<simdojo::Component> {
+           rj_code_target_id_t target, amdgpu::GpuMemory *, const AsyncResources &resources,
+           util::DiagnosticEmitter emit_error) -> std::unique_ptr<simdojo::Component> {
       const auto cu_config = parse_compute_unit_config(cfg, arch, target, resources);
-      amdgpu::ComputeUnitCore::validate(cu_config);
+      if (amdgpu::ComputeUnitCore::validate(cu_config, emit_error).failed())
+        return nullptr;
       // Preserve the parsed CU config and declarative children without execution state.
       return std::make_unique<ValidatedComputeUnit>(name, cu_config);
     };
@@ -770,7 +777,9 @@ build_children(simdojo::CompositeComponent *parent,
       auto it = fmap.find(tp);
       if (it == fmap.end())
         throw std::runtime_error("Unknown type: " + tp);
-      auto comp = it->second(n, cfg, mode, arch, target, mem, resources);
+      auto comp = it->second(n, cfg, mode, arch, target, mem, resources, emit_error);
+      if (!comp)
+        return util::Result::failure();
       auto *raw = comp.get();
       if (auto *gm = dynamic_cast<amdgpu::GpuMemory *>(raw))
         mem = gm;
@@ -936,7 +945,9 @@ build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_c
   auto it = f.find(rt);
   if (it == f.end())
     throw std::runtime_error("Unknown component type for root: " + rt);
-  auto root_comp = it->second(rn, root_cfg, mode, arch, target, nullptr, resources);
+  auto root_comp = it->second(rn, root_cfg, mode, arch, target, nullptr, resources, emit_error);
+  if (!root_comp)
+    return util::Result::failure();
   auto *root = dynamic_cast<simdojo::CompositeComponent *>(root_comp.get());
   if (!root)
     throw std::runtime_error("Root component must be a CompositeComponent");

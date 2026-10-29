@@ -312,15 +312,16 @@ simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 /// @param schema_text FlatBuffers schema text.
 /// @param emit_error Destination for failure diagnostics.
 /// @returns Success, or failure with a diagnostic for file-reading, parsing,
-/// KFD/DBT device conversion, architecture/target validation, component-range, or
-/// link-expression errors. Other validation and allocation exceptions propagate.
+/// KFD/DBT device conversion, architecture/target validation, CU resource limits,
+/// component-range, or link-expression errors. Other validation and allocation exceptions
+/// propagate.
 util::Result validate_config(const std::string &json_path, const std::string &schema_text,
                              util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON file.
 /// @details File-reading, parsing, KFD/DBT device conversion, architecture/target
-/// validation, component-range, and link-expression failures emit a diagnostic and
-/// return failure. Other validation and allocation exceptions propagate.
+/// validation, CU resource limits, component-range, and link-expression failures emit a diagnostic
+/// and return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -347,7 +348,7 @@ util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
 
 /// @brief Load simulation config from a JSON string.
 /// @details Parsing, KFD/DBT device conversion, architecture/target validation,
-/// component-range, and link-expression failures emit a diagnostic and return
+/// CU resource limits, component-range, and link-expression failures emit a diagnostic and return
 /// failure. Other validation and allocation exceptions propagate.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).

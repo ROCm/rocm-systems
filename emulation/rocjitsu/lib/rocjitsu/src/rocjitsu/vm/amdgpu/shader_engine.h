@@ -42,6 +42,7 @@ public:
   /// @param memory Shared GPU memory (not owned).
   /// @param l2 Shared L2 cache (owned by the XCD).
   /// @param exec_mode Execution mode for CU creation.
+  /// @throws util::ConfigError if CU configuration or execution mode is rejected.
   ShaderEngine(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
                L2Cache *l2, simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL);
 
