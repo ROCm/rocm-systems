@@ -645,6 +645,11 @@ private:
                                       uint64_t exception_mask, bool wait_for_ack = true);
 
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
+  /// @brief Report the VM faults the debugger preflight withheld for a queue.
+  /// @details Called when a debugger forwards a memory violation to the
+  /// runtime. Each stopped wave's withheld fault is reported once.
+  void report_unreported_vm_faults(GpuDevice &gpu, const std::shared_ptr<KfdProcess> &proc,
+                                   uint32_t queue_id);
   void apply_debug_event_publication_hook_for_testing(const std::shared_ptr<KfdProcess> &proc);
   [[nodiscard]] bool notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),

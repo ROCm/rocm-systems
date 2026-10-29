@@ -829,7 +829,12 @@ TEST(GpuVmPipeline, LdsAlignmentMemviolPrecedesDebuggerTranslationProbe) {
           });
           context.cu->step();
           EXPECT_EQ(faults, 1u);
+          // The handler keeps the stop as a debugger would, so the probed
+          // translation fault is withheld here and recorded on the wave; KFD
+          // reports it if it hands the fault to the runtime instead (see
+          // KfdMemoryFaultPcTest.RuntimeOwnedMemoryViolationsRaiseTheirVmEvent).
           EXPECT_EQ(context.reported_faults.size(), aperture || debug ? 0u : 1u);
+          EXPECT_EQ(context.wf->has_unreported_vm_fault(), debug && !aperture);
           for (uint32_t byte = 0; byte < 32; ++byte)
             EXPECT_EQ(context.wf->lds().read8(context.wf->lds_base() + byte), 0x5a);
           EXPECT_TRUE(context.wf->wait_counters().empty());
@@ -1074,6 +1079,115 @@ TEST(GpuVmPipeline, DebuggerPreflightSkipsBufferOutOfRangeDwords) {
     EXPECT_EQ(context.cu->read_vgpr(vb + 10, 0), 0u);
     EXPECT_EQ(context.cu->read_vgpr(vb + 11, 0), 0u);
   }
+}
+
+// Lane 1's atomic translation is unavailable twice, then faults until the
+// test repairs it. Lane 0's address always translates.
+class SecondLaneTranslator final : public amdgpu::AddressSpaceTranslator {
+public:
+  static constexpr uint64_t kFirstLane = 0x2000, kSecondLane = 0x3000;
+  explicit SecondLaneTranslator(std::shared_ptr<TestExternalAddressSpace> external)
+      : external_(std::move(external)) {}
+  amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                        amdgpu::VmAccessKind access) const override {
+    if (address == kSecondLane && access == amdgpu::VmAccessKind::Atomic && !repaired)
+      return {.outcome = ++second_lane_translations <= 2 ? amdgpu::VmAccessOutcome::Unavailable
+                                                         : amdgpu::VmAccessOutcome::Faulted,
+              .translation = {}};
+    return external_->translate(address, size, access);
+  }
+  bool repaired = false;
+  mutable unsigned second_lane_translations = 0;
+
+private:
+  std::shared_ptr<TestExternalAddressSpace> external_;
+};
+
+// Issues a two-lane FLAT_ATOMIC_ADD_U32 through SecondLaneTranslator. The
+// handler models KFD under XNACK: it rewinds to the issue PC and holds the wave.
+struct PartialAtomicContext {
+  TranslatedPipelineContext context;
+  std::shared_ptr<SecondLaneTranslator> translator;
+  unsigned faults = 0;
+
+  void initialize() {
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    translator = std::make_shared<SecondLaneTranslator>(context.external);
+    const auto address_space = context.sim.soc->gpu_vm().register_address_space(
+        78, translator, context.external, [this](uint64_t address, amdgpu::VmAccessKind kind) {
+          context.reported_faults.emplace_back(address, kind);
+        });
+    ASSERT_TRUE(address_space);
+    context.wf->set_address_space(address_space);
+    context.wf->set_process_id(78);
+    context.wf->set_exec(3);
+    context.wf->pc = 0x1000;
+    const auto words = cdna5::build_vflat(cdna5::kFlatAtomicAddU32Vflat,
+                                          {.saddr = 124, .vdst = 8, .th = 1, .vsrc = 4});
+    context.external->store(0x1000, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+    context.external->store<uint32_t>(SecondLaneTranslator::kFirstLane, 10);
+    context.external->store<uint32_t>(SecondLaneTranslator::kSecondLane, 20);
+    const uint32_t vb = context.wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < 2; ++lane) {
+      context.cu->write_vgpr(
+          vb, lane, lane ? SecondLaneTranslator::kSecondLane : SecondLaneTranslator::kFirstLane);
+      context.cu->write_vgpr(vb + 1, lane, 0);
+      context.cu->write_vgpr(vb + 4, lane, 1);
+    }
+    context.cu->set_debug_active(true);
+    context.cu->set_memory_violation_handler([this](amdgpu::Wavefront &wave, uint64_t, bool,
+                                                    uint64_t issue_pc,
+                                                    amdgpu::VmAccessOutcome outcome) {
+      ++faults;
+      EXPECT_EQ(outcome, amdgpu::VmAccessOutcome::Faulted);
+      wave.pc = issue_pc;
+      wave.set_debug_suspended(true);
+      return true;
+    });
+  }
+  uint32_t first_lane() const {
+    return context.external->load<uint32_t>(SecondLaneTranslator::kFirstLane);
+  }
+  uint32_t second_lane() const {
+    return context.external->load<uint32_t>(SecondLaneTranslator::kSecondLane);
+  }
+};
+
+// A retained Unavailable retry continues from the lane that stalled, so lane 0
+// commits exactly once.
+TEST(GpuVmPipeline, UnavailableRetryPreservesCommittedAtomicLanes) {
+  PartialAtomicContext partial;
+  ASSERT_NO_FATAL_FAILURE(partial.initialize());
+  partial.context.cu->step();
+  ASSERT_EQ(partial.context.wf->state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_EQ(partial.first_lane(), 11u);
+  partial.translator->repaired = true;
+  partial.context.cu->step();
+  EXPECT_EQ(partial.faults, 0u);
+  EXPECT_TRUE(partial.context.reported_faults.empty());
+  EXPECT_EQ(partial.first_lane(), 11u);
+  EXPECT_EQ(partial.second_lane(), 21u);
+}
+
+// KNOWN LIMITATION, disabled until per-lane continuation exists: when the
+// retained retry above Faults instead, XNACK replay restarts the whole
+// instruction after the repair and repeats lane 0's committed atomic (11 -> 12).
+// Recovery after partial progress is documented as unsupported rather than
+// fixed; see the replay comment in SimulatedKfd::on_wave_memory_violation.
+TEST(GpuVmPipeline, DISABLED_XnackReplayAfterPartialProgressRepeatsCommittedLanes) {
+  PartialAtomicContext partial;
+  ASSERT_NO_FATAL_FAILURE(partial.initialize());
+  partial.context.cu->step();
+  ASSERT_EQ(partial.context.wf->state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_EQ(partial.first_lane(), 11u);
+  partial.context.cu->step();
+  ASSERT_EQ(partial.faults, 1u);
+  EXPECT_EQ(partial.context.reported_faults.size(), 1u);
+  partial.translator->repaired = true;
+  partial.context.wf->set_debug_suspended(false);
+  partial.context.cu->step();
+  EXPECT_EQ(partial.first_lane(), 11u) << "lane 0's committed atomic was applied twice";
+  EXPECT_EQ(partial.second_lane(), 21u);
 }
 
 TEST(GpuVmPipeline, ScratchWithoutBackingIsATerminalFault) {

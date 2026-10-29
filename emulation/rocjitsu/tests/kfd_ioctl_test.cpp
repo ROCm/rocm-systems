@@ -10972,6 +10972,225 @@ TEST_P(KfdMemoryFaultPcTest, InstructionMemoryViolationReachesItsOwnerAsAperture
   }
 }
 
+// Faults one translated page and reports through a caller-supplied reporter,
+// so a test can watch the VM fault event independently of the queue status.
+class OnePageFaultMemory final : public rocjitsu::amdgpu::AddressSpaceTranslator,
+                                 public rocjitsu::amdgpu::PhysicalMemoryAccess {
+public:
+  OnePageFaultMemory(rocjitsu::amdgpu::GpuVmAccess native, uint64_t faulting_page)
+      : native_(std::move(native)), faulting_page_(faulting_page) {}
+
+  rocjitsu::amdgpu::VmTranslationResult translate(uint64_t address, std::size_t,
+                                                  rocjitsu::amdgpu::VmAccessKind) const override {
+    using rocjitsu::amdgpu::VmAccessOutcome;
+    if (address / 4096 == faulting_page_ / 4096)
+      return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    return {
+        .outcome = VmAccessOutcome::Complete,
+        .translation = {.domain = rocjitsu::amdgpu::VmMemoryDomain::System,
+                        .address = address,
+                        .contiguous_bytes = 4096 - address % 4096,
+                        .permissions = {.readable = true, .writable = true, .executable = true}}};
+  }
+  rocjitsu::amdgpu::VmAccessOutcome read(rocjitsu::amdgpu::VmMemoryDomain, uint64_t address,
+                                         std::span<std::byte> bytes) override {
+    return native_.read(address, bytes);
+  }
+  rocjitsu::amdgpu::VmAccessOutcome write(rocjitsu::amdgpu::VmMemoryDomain, uint64_t address,
+                                          std::span<const std::byte> bytes) override {
+    return native_.write(address, bytes);
+  }
+
+private:
+  rocjitsu::amdgpu::GpuVmAccess native_;
+  uint64_t faulting_page_;
+};
+
+// ROCr acts on EC_QUEUE_WAVE_MEMORY_VIOLATION only after the matching VM fault
+// event. The debugger preflight probes without reporting, so whenever its
+// fault ends up with the runtime -- no debugger on this process although the
+// CU-wide probe is on, a debugger stop that fails, or a stop the debugger
+// later forwards with SEND_RUNTIME_EVENT -- KFD must raise that event. A stop
+// the debugger keeps must not raise it, or ROCr would treat the recoverable
+// stop as fatal. The pipeline's own reporter covers the debug-off control.
+TEST_P(KfdMemoryFaultPcTest, RuntimeOwnedMemoryViolationsRaiseTheirVmEvent) {
+  constexpr uint64_t kKernel = 0x600000000ULL;
+  constexpr uint64_t kContext = 0x600100000ULL;
+  constexpr uint64_t kFaultingData = 0x600200000ULL;
+  constexpr uint64_t kStatus = 0x600900000ULL;
+  constexpr uint32_t kAreaSize = 0x40000, kEvent = 83;
+  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  enum class Owner {
+    PipelineReported,  // Debugging off: the pipeline's reporter raises the event.
+    NoProcessDebugger, // The CU probe runs for a process sharing a debugged CU.
+    DebuggerForwards,  // The debugger keeps the stop, then forwards it.
+    DebuggerClaimLost, // The debugger no longer subscribes when the stop publishes.
+    ContextSaveFails,  // The stop cannot be saved for the debugger.
+  };
+  for (const Owner owner :
+       {Owner::PipelineReported, Owner::NoProcessDebugger, Owner::DebuggerForwards,
+        Owner::DebuggerClaimLost, Owner::ContextSaveFails}) {
+    SCOPED_TRACE(testing::Message() << "owner=" << static_cast<int>(owner));
+    const bool debugger = owner >= Owner::DebuggerForwards;
+    int notifier = -1;
+    if (debugger) {
+      kfd_ioctl_runtime_enable_args runtime{};
+      runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+      ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+      notifier = make_debug_fd();
+      ASSERT_GE(notifier, 0);
+      kfd_ioctl_dbg_trap_args enable{};
+      enable.pid = static_cast<uint32_t>(getpid());
+      enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+      enable.enable.dbg_fd = notifier;
+      enable.enable.exception_mask = kException;
+      ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+    }
+    kfd_ioctl_set_xnack_mode_args mode{};
+    mode.xnack_enabled = GetParam();
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_XNACK_MODE, &mode), 0);
+    auto process = driver_->find_process(driver_->local_process_id());
+    ASSERT_NE(process, nullptr);
+    std::vector<uint8_t> code(4096), context(kAreaSize * soc_->num_xcds()), status(4096);
+    process->map_pages(kKernel, code.data(), code.size());
+    process->map_pages(kContext, context.data(), context.size());
+    process->map_pages(kStatus, status.data(), status.size());
+    std::memcpy(context.data() + 24, &kStatus, sizeof(kStatus));
+    std::memcpy(context.data() + 32, &kEvent, sizeof(kEvent));
+    alignas(64) std::array<uint8_t, 4096> ring{};
+    uint64_t read_pointer = 0, write_pointer = 0;
+    kfd_ioctl_create_queue_args create{};
+    create.gpu_id = kGpuId;
+    create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    create.queue_percentage = 100;
+    create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+    create.ring_size = ring.size();
+    create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+    create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+    create.ctx_save_restore_address = kContext;
+    create.ctx_save_restore_size = owner == Owner::ContextSaveFails ? 64 : kAreaSize;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+    rocjitsu::amdgpu::AddressSpaceHandle address_space;
+    struct Guard {
+      rocjitsu::SimulatedKfd *driver;
+      rocjitsu::SoC *soc;
+      uint32_t queue;
+      bool debugger;
+      rocjitsu::amdgpu::AddressSpaceHandle *address_space;
+      ~Guard() {
+        driver->set_interrupt_callback_for_testing(nullptr);
+        kfd_ioctl_destroy_queue_args destroy{};
+        destroy.queue_id = queue;
+        driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
+        if (debugger) {
+          kfd_ioctl_dbg_trap_args disable{};
+          disable.pid = static_cast<uint32_t>(getpid());
+          disable.op = KFD_IOC_DBG_TRAP_DISABLE;
+          driver->ioctl(AMDKFD_IOC_DBG_TRAP, &disable);
+        }
+        if (*address_space)
+          (void)soc->gpu_vm().unregister_address_space(*address_space);
+      }
+    } guard{driver_, soc_, create.queue_id, debugger, &address_space};
+    if (debugger) {
+      kfd_queue_snapshot_entry entry{};
+      kfd_ioctl_dbg_trap_args snapshot{};
+      snapshot.pid = static_cast<uint32_t>(getpid());
+      snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+      snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+      snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&entry);
+      snapshot.queue_snapshot.num_queues = 1;
+      snapshot.queue_snapshot.entry_size = sizeof(entry);
+      ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+    }
+    std::atomic<uint32_t> publications{0};
+    std::atomic<uint64_t> published{0};
+    driver_->set_interrupt_callback_for_testing([&](uint32_t pid, uint32_t event) {
+      if (event != kEvent)
+        return;
+      published = vm_read64(kStatus, pid);
+      ++publications;
+      (void)vm_write64(kStatus, 0, pid);
+    });
+    soc_->for_each_cp([](rocjitsu::amdgpu::CommandProcessor *cp) {
+      cp->set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds(0));
+    });
+    kfd_ioctl_create_event_args memory_event{};
+    memory_event.event_type = KFD_IOC_EVENT_MEMORY;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_EVENT, &memory_event), 0);
+    const auto native = soc_->gpu_vm().snapshot_vmid(driver_->local_process_id());
+    ASSERT_TRUE(native);
+    auto backing = std::make_shared<OnePageFaultMemory>(*native, kFaultingData);
+    address_space = soc_->gpu_vm().register_unrouted_address_space(
+        driver_->local_process_id(), backing, backing,
+        [&](uint64_t address, rocjitsu::amdgpu::VmAccessKind) {
+          rocjitsu::MemoryFault fault{};
+          fault.va = address;
+          fault.gpu_id = kGpuId;
+          fault.not_present = true;
+          EXPECT_TRUE(process->event_state_.signal_memory_fault(fault));
+        });
+    ASSERT_TRUE(address_space);
+    auto *cu = soc_->xcd(0)->command_processor()->compute_units().front();
+    cu->set_debug_active(owner != Owner::PipelineReported);
+    if (owner == Owner::DebuggerClaimLost)
+      driver_->set_debug_event_claim_mask_for_testing(0);
+
+    const std::optional<rocjitsu::amdgpu::GpuVmAccess> memory =
+        soc_->gpu_vm().snapshot_vmid(driver_->local_process_id());
+    ASSERT_TRUE(memory);
+    (void)memory->atomic_store(kKernel, sizeof(uint32_t), 0xC0020000u); // s_load_dword s0, s[0:1]
+    (void)memory->atomic_store(kKernel + 4, sizeof(uint32_t), 0u);
+    (void)memory->atomic_store(kKernel + 8, sizeof(uint32_t), 0xBF800000u); // s_nop 0
+    auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernel, /*sgprs=*/16, /*vgprs=*/4);
+    ASSERT_NE(wave, nullptr);
+    wave->set_process_id(driver_->local_process_id());
+    wave->set_address_space(address_space);
+    wave->set_queue_id(create.queue_id);
+    wave->set_dispatch_id(7);
+    cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(kFaultingData));
+    cu->write_sgpr(wave->sgpr_alloc().base + 1, static_cast<uint32_t>(kFaultingData >> 32));
+    cu->step();
+
+    kfd_event_data event_data{};
+    event_data.event_id = memory_event.event_id;
+    kfd_ioctl_wait_events_args wait{};
+    wait.events_ptr = reinterpret_cast<uint64_t>(&event_data);
+    wait.num_events = 1;
+    wait.wait_for_all = 1;
+    wait.timeout = 0;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+    const bool debugger_keeps_stop = owner == Owner::DebuggerForwards;
+    EXPECT_EQ(wait.wait_result,
+              debugger_keeps_stop ? KFD_IOC_WAIT_RESULT_TIMEOUT : KFD_IOC_WAIT_RESULT_COMPLETE);
+    EXPECT_EQ(publications.load(), debugger_keeps_stop ? 0u : 1u);
+    EXPECT_EQ(published.load(), debugger_keeps_stop ? 0u : kException);
+    if (debugger_keeps_stop) {
+      EXPECT_TRUE(wave->debug_halted());
+      kfd_ioctl_dbg_trap_args forward{};
+      forward.pid = static_cast<uint32_t>(getpid());
+      forward.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
+      forward.send_runtime_event.exception_mask = kException;
+      forward.send_runtime_event.gpu_id = kGpuId;
+      forward.send_runtime_event.queue_id = create.queue_id;
+      ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+      ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+      EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+      EXPECT_EQ(publications.load(), 1u);
+    } else {
+      EXPECT_TRUE(wave->fatal_exception_pending());
+      EXPECT_TRUE(wave->debug_suspended());
+    }
+    // Reported at most once: whoever handed the fault to the runtime consumed it.
+    EXPECT_FALSE(wave->has_unreported_vm_fault());
+    // Only a translation fault replays under XNACK.
+    EXPECT_EQ(wave->pc, GetParam() ? kKernel : kKernel + 8);
+    kfd_ioctl_destroy_event_args destroy_event{};
+    destroy_event.event_id = memory_event.event_id;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_EVENT, &destroy_event), 0);
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(XnackModes, KfdMemoryFaultPcTest, ::testing::Bool());
 
 TEST_F(KfdIoctlTest, DbgTrapRejectedMemoryViolationFallsBackToRuntime) {

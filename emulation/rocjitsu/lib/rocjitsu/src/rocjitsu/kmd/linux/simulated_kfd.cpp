@@ -1620,6 +1620,29 @@ int SimulatedKfd::open() {
   return fd_.load(std::memory_order_acquire);
 }
 
+void SimulatedKfd::report_unreported_vm_faults(GpuDevice &gpu,
+                                               const std::shared_ptr<KfdProcess> &proc,
+                                               uint32_t queue_id) {
+  std::vector<amdgpu::Wavefront::UnreportedVmFault> faults;
+  gpu.soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    for (auto *cu : cp->compute_units()) {
+      cu->with_wave_state_locked([&] {
+        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+          auto *wave = cu->wf(slot);
+          if (wave && wave->process_id() == proc->process_id() && wave->queue_id() == queue_id)
+            if (const auto fault = wave->take_unreported_vm_fault())
+              faults.push_back(*fault);
+        }
+      });
+    }
+  });
+  // Report outside the wave-state locks; event delivery takes its own.
+  for (const auto &fault : faults)
+    report_memory_fault(proc, fault.address, gpu.gpu_id,
+                        fault.read_only ? amdgpu::MemoryFaultCause::ReadOnly
+                                        : amdgpu::MemoryFaultCause::NotPresent);
+}
+
 void SimulatedKfd::report_memory_fault(const std::shared_ptr<KfdProcess> &proc, uint64_t addr,
                                        uint32_t gpu_id, amdgpu::MemoryFaultCause cause) {
   if (proc == nullptr)
@@ -5576,10 +5599,26 @@ bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t /*
   // translation fault wakes; an aperture violation terminates the queue itself.
   const uint64_t exception = translation_fault ? KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION)
                                                : KFD_EC_MASK(EC_QUEUE_WAVE_APERTURE_VIOLATION);
+  // KNOWN LIMITATION: XNACK replay restarts the whole instruction. A vector
+  // memory instruction whose earlier lanes already committed (for example, a
+  // retained Unavailable retry that later Faults) repeats those lanes'
+  // effects, so an atomic can apply twice. Retained per-lane continuation is
+  // not modeled; see
+  // GpuVmPipeline.DISABLED_XnackReplayAfterPartialProgressRepeatsCommittedLanes.
   const bool replay = translation_fault && proc->xnack_enabled_.load(std::memory_order_relaxed);
+  // A fault the debugger preflight found was never reported. Handing it to
+  // the runtime must raise the VM fault event that ROCr pairs with the
+  // memory-violation status; a debugger-owned stop must not.
+  const auto report_to_runtime = [&] {
+    if (const auto fault = wave.take_unreported_vm_fault())
+      report_memory_fault(proc, fault->address, gpu_id,
+                          fault->read_only ? amdgpu::MemoryFaultCause::ReadOnly
+                                           : amdgpu::MemoryFaultCause::NotPresent);
+  };
   if (!debugger_attached || ctx_base == 0 || !debug_stop_publishable(gpu_id)) {
     if (!has_runtime_signal)
       return false;
+    report_to_runtime();
     if (replay)
       wave.pc = issue_pc;
     wave.set_trapsts(wave.trapsts() | cause);
@@ -5605,6 +5644,7 @@ bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t /*
     // Roll back the debugger stop without losing the runtime-owned fault's reason.
     if (has_runtime_signal)
       wave.set_trapsts(wave.trapsts() | cause);
+    report_to_runtime();
     return defer_wave_exception_to_runtime(wave, exception,
                                            /*suspend_while_pending=*/true,
                                            /*clear_debug_stop_on_success=*/false,
@@ -6953,6 +6993,12 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
       // trap callbacks acquire these in the opposite order. Nothing below
       // this point reads debug_sessions_ or session_it.
       lk.unlock();
+      // A forwarded memory violation hands the debugger's stop to ROCr, which
+      // pairs it with a VM fault event. Raise the events the debugger
+      // preflight withheld for this queue's stopped waves.
+      if (event.exception_mask & KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION))
+        if (const auto proc = find_process(target_proc->process_id()))
+          report_unreported_vm_faults(*gpu, proc, event.queue_id);
       // KFD's SEND_RUNTIME_EVENT publishes the status and event without
       // waiting for ROCr to acknowledge them. ROCr removes its async exception
       // handler after a fatal error, so later waves forwarding their aborts

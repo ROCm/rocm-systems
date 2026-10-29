@@ -902,6 +902,27 @@ public:
   /// @brief Consume the cause recorded by set_memory_failure_cause(), or null.
   const char *take_memory_failure_cause() { return std::exchange(memory_failure_cause_, nullptr); }
 
+  /// @brief A translation fault the debugger preflight found without reporting it.
+  /// @details The preflight probes without the VM fault reporter so a debugger
+  /// can own the stop without waking ROCr's fatal VM fault handler. Whoever
+  /// routes the fault to the runtime instead -- at once, after a failed
+  /// debugger stop, or later through SEND_RUNTIME_EVENT -- must report it,
+  /// because ROCr pairs EC_QUEUE_WAVE_MEMORY_VIOLATION with a VM fault event.
+  /// The compute unit clears it when the wave next issues, so it never
+  /// outlives the stop it describes.
+  struct UnreportedVmFault {
+    uint64_t address = 0;
+    bool read_only = false; ///< The page is readable; the write or atomic was rejected.
+  };
+  void set_unreported_vm_fault(std::optional<UnreportedVmFault> fault) {
+    unreported_vm_fault_ = fault;
+  }
+  bool has_unreported_vm_fault() const { return unreported_vm_fault_.has_value(); }
+  /// @brief Consume the unreported fault so it is reported at most once.
+  std::optional<UnreportedVmFault> take_unreported_vm_fault() {
+    return std::exchange(unreported_vm_fault_, std::nullopt);
+  }
+
   /// @brief Whether a future debugger resume should request single-step mode.
   bool debug_single_step() const { return single_step_; }
   void set_debug_single_step(bool v) { single_step_ = v; }
@@ -1098,6 +1119,7 @@ public:
     fatal_exception_pending_ = false;
     fatal_exception_cwsr_valid_ = false;
     memory_failure_cause_ = nullptr;
+    unreported_vm_fault_.reset();
     single_step_ = false;
     trap_id_ = 0;
     debug_wave_id_ = 0;
@@ -1227,9 +1249,10 @@ private:
   bool runtime_suspended_ = false; ///< Queue-suspended by the runtime (queue_percentage 0).
   bool fatal_exception_pending_ = false;
   bool fatal_exception_cwsr_valid_ = false;
-  const char *memory_failure_cause_ = nullptr; ///< See set_memory_failure_cause().
-  bool single_step_ = false;                   ///< Execute one instruction on resume, then re-stop.
-  uint32_t trap_id_ = 0;                       ///< Trap id from the last s_trap (breakpoint = 1).
+  const char *memory_failure_cause_ = nullptr;           ///< See set_memory_failure_cause().
+  std::optional<UnreportedVmFault> unreported_vm_fault_; ///< See set_unreported_vm_fault().
+  bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
+  uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).
   uint64_t debug_wave_id_ = 0; ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
 
 public:

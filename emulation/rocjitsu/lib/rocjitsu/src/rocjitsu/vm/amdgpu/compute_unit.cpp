@@ -1893,6 +1893,10 @@ template <bool EnableAsync>
     std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window,
     std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage) {
   uint32_t vmid = active->process_id();
+  // The stop that recorded an unreported fault has ended without routing it
+  // to the runtime; the wave resumed or replays the access.
+  if (active->has_unreported_vm_fault()) [[unlikely]]
+    active->set_unreported_vm_fault(std::nullopt);
   const auto drain_async_window = [&]() {
     if constexpr (EnableAsync) {
       if (window)
@@ -2425,13 +2429,26 @@ template <bool EnableAsync>
     // first_fault is already known to fault, so it is reported without a second
     // range walk; only the lanes after it still have to be tested.
     for (auto it = first_fault; it != dbg_ranges.end(); ++it) {
-      if ((it == first_fault || access_faults(*it)) &&
-          memory_violation_handler_(*active, it->address, dbg_is_write, issue_pc,
+      if (it != first_fault && !access_faults(*it))
+        continue;
+      // query_access() reports nothing. Record the fault so an owner that
+      // hands it to the runtime can raise the VM fault event ROCr waits for.
+      const bool read_only =
+          dbg_is_write && vm_address_space &&
+          vm_access->query_access(it->address, std::max(1u, it->size), VmAccessKind::Read) ==
+              VmAccessOutcome::Complete;
+      active->set_unreported_vm_fault(
+          Wavefront::UnreportedVmFault{.address = it->address, .read_only = read_only});
+      if (memory_violation_handler_(*active, it->address, dbg_is_write, issue_pc,
                                     VmAccessOutcome::Faulted)) {
         fault_claimed = true;
         break;
       }
     }
+    // A declining owner leaves the access to the pipeline, whose reporter
+    // raises the event itself.
+    if (!fault_claimed)
+      active->set_unreported_vm_fault(std::nullopt);
     // Only undo our own advance. A declining handler is still free to have
     // moved the wave (entering a trap handler, for instance); clobbering that
     // would resume the application with the handler's state half-installed.
