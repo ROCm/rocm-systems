@@ -197,9 +197,12 @@ bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> cur
   }
   // LDS instructions stay in order with other LDS instructions from the same
   // wave. GDS and SMEM are separate event kinds that are not ordered with LDS.
-  if (event.kind == WaitEventKind::Ds)
-    return std::ranges::any_of(current,
-                               [](const auto &other) { return other.kind == WaitEventKind::Ds; });
+  // Only DS-counter results qualify: expert scheduling also tracks DS sources
+  // on VmVsrc, and result ordering does not end those source lifetimes.
+  if (event.counter == WaitCounterKind::Ds && event.kind == WaitEventKind::Ds)
+    return std::ranges::any_of(current, [](const auto &other) {
+      return other.counter == WaitCounterKind::Ds && other.kind == WaitEventKind::Ds;
+    });
   if (!amdgpu::has_ordered_vmem_writeback(arch))
     return false;
   if (event.kind == WaitEventKind::FlatLoad) {

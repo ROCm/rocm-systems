@@ -46,36 +46,47 @@ void load(Program &program, uint8_t dst = 0) {
   append(program, inst); // global_load_b32 vdst, v8, s[0:1].
 }
 
-// ds_load_b32 (ds_read_b32 on CDNA3/4) v<dst>, v8.
-void ds_load(Program &program, rj_code_arch_t arch, uint8_t dst = 0, bool gds = false) {
+// ds_load_b32 (ds_read_b32 on CDNA3/4) v<dst>, v<addr>.
+void ds_load(Program &program, rj_code_arch_t arch, uint8_t dst = 0, bool gds = false,
+             uint8_t addr = 8) {
   const uint8_t gds_bit = gds ? 1 : 0;
   std::array<uint32_t, 2> words{};
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
-    words = cdna3::build_ds(cdna3::kDsReadB32Ds, {.gds = gds_bit, .addr = 8, .vdst = dst});
+    words = cdna3::build_ds(cdna3::kDsReadB32Ds, {.gds = gds_bit, .addr = addr, .vdst = dst});
     break;
   case ROCJITSU_CODE_ARCH_CDNA4:
-    words = cdna4::build_ds(cdna4::kDsReadB32Ds, {.gds = gds_bit, .addr = 8, .vdst = dst});
+    words = cdna4::build_ds(cdna4::kDsReadB32Ds, {.gds = gds_bit, .addr = addr, .vdst = dst});
     break;
   case ROCJITSU_CODE_ARCH_RDNA3:
-    words = rdna3::build_ds(rdna3::kDsLoadB32Ds, {.gds = gds_bit, .addr = 8, .vdst = dst});
+    words = rdna3::build_ds(rdna3::kDsLoadB32Ds, {.gds = gds_bit, .addr = addr, .vdst = dst});
     break;
   case ROCJITSU_CODE_ARCH_RDNA3_5:
-    words = rdna3_5::build_ds(rdna3_5::kDsLoadB32Ds, {.gds = gds_bit, .addr = 8, .vdst = dst});
+    words = rdna3_5::build_ds(rdna3_5::kDsLoadB32Ds, {.gds = gds_bit, .addr = addr, .vdst = dst});
     break;
   case ROCJITSU_CODE_ARCH_RDNA4:
     EXPECT_FALSE(gds) << "GFX12 has no GDS";
-    words = rdna4::build_vds(rdna4::kDsLoadB32Vds, {.addr = 8, .vdst = dst});
+    words = rdna4::build_vds(rdna4::kDsLoadB32Vds, {.addr = addr, .vdst = dst});
     break;
   case ROCJITSU_CODE_ARCH_CDNA5:
     EXPECT_FALSE(gds) << "GFX12 has no GDS";
-    words = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 8, .vdst = dst});
+    words = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = addr, .vdst = dst});
     break;
   default:
     ADD_FAILURE() << "no DS encoding for arch " << arch;
     return;
   }
   program.insert(program.end(), words.begin(), words.end());
+}
+
+// flat_load_dword (flat_load_b32 on RDNA4) v0, v[8:9].
+void flat_load(Program &program, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    append(program, cdna3::build_flat(cdna3::kFlatLoadDwordFlat, {.addr = 8, .saddr = 127}));
+  else if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    append(program, rdna4::build_vflat(rdna4::kFlatLoadB32Vflat, {.saddr = 124, .vaddr = 8}));
+  else
+    ADD_FAILURE() << "no FLAT encoding for arch " << arch;
 }
 
 void direct_load(Program &program, rj_code_arch_t arch, bool parameter) {
@@ -334,6 +345,39 @@ TEST(WaitcheckStream, GdsAndLdsOverwritesRequireAWait) {
       EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
       EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
     }
+}
+
+TEST(WaitcheckStream, FlatAndLdsOverwritesRequireAWait) {
+  // The analyzer cannot tell which FLAT lanes LDS services, so these overwrites
+  // need a wait even where the runtime checker exempts LDS-serviced lanes.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA4})
+    for (bool flat_first : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(flat_first);
+      Program program;
+      for (bool flat : {flat_first, !flat_first})
+        flat ? flat_load(program, arch) : ds_load(program, arch);
+      auto report = analyze(program, arch);
+      ASSERT_FALSE(report.incomplete);
+      ASSERT_FALSE(report.diagnostics.empty());
+      for (const auto &diagnostic : report.diagnostics)
+        EXPECT_EQ(diagnostic.access, WaitcheckAccess::Write);
+    }
+}
+
+TEST(WaitcheckStream, LdsOrderDoesNotEndExpertModeDsSourceLifetimes) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    Program program;
+    ds_load(program, arch, /*dst=*/0);
+    ds_load(program, arch, /*dst=*/8, /*gds=*/false, /*addr=*/9); // Overwrites the first address.
+    EXPECT_TRUE(analyze(program, arch).diagnostics.empty());
+    auto report = analyze(program, arch, /*expert_scheduling=*/true);
+    ASSERT_FALSE(report.incomplete);
+    ASSERT_EQ(report.diagnostics.size(), 1u);
+    EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::VmVsrc);
+    EXPECT_EQ(report.diagnostics[0].reg.index, 8u);
+  }
 }
 
 TEST(WaitcheckStream, UnorderedVmemWritebackRequiresAWait) {

@@ -1487,20 +1487,28 @@ struct MemoryWaitOrderingTest : ::testing::Test {
     ASSERT_TRUE(decoded.succeeded()) << error.message();
     track(*decoded.value());
   }
-  void lds_load() {
+  void lds_load(uint8_t vdst = 2) {
     switch (cu->arch()) {
+    case ROCJITSU_CODE_ARCH_CDNA1:
+      return track(cdna1::build_ds(cdna1::kDsReadB32Ds, {.addr = 0, .vdst = vdst}));
+    case ROCJITSU_CODE_ARCH_CDNA2:
+      return track(cdna2::build_ds(cdna2::kDsReadB32Ds, {.addr = 0, .vdst = vdst}));
+    case ROCJITSU_CODE_ARCH_CDNA3:
+      return track(cdna3::build_ds(cdna3::kDsReadB32Ds, {.addr = 0, .vdst = vdst}));
+    case ROCJITSU_CODE_ARCH_CDNA4:
+      return track(cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA1:
-      return track(rdna1::build_ds(rdna1::kDsReadB32Ds, {.addr = 0, .vdst = 2}));
+      return track(rdna1::build_ds(rdna1::kDsReadB32Ds, {.addr = 0, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA2:
-      return track(rdna2::build_ds(rdna2::kDsReadB32Ds, {.addr = 0, .vdst = 2}));
+      return track(rdna2::build_ds(rdna2::kDsReadB32Ds, {.addr = 0, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA3:
-      return track(rdna3::build_ds(rdna3::kDsLoadB32Ds, {.addr = 0, .vdst = 2}));
+      return track(rdna3::build_ds(rdna3::kDsLoadB32Ds, {.addr = 0, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA3_5:
-      return track(rdna3_5::build_ds(rdna3_5::kDsLoadB32Ds, {.addr = 0, .vdst = 2}));
+      return track(rdna3_5::build_ds(rdna3_5::kDsLoadB32Ds, {.addr = 0, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA4:
-      return track(rdna4::build_vds(rdna4::kDsLoadB32Vds, {.addr = 0, .vdst = 2}));
+      return track(rdna4::build_vds(rdna4::kDsLoadB32Vds, {.addr = 0, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_CDNA5:
-      return track(cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 0, .vdst = 2}));
+      return track(cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 0, .vdst = vdst}));
     default:
       FAIL() << "unsupported test architecture";
     }
@@ -1571,26 +1579,38 @@ struct MemoryWaitOrderingTest : ::testing::Test {
       FAIL() << "unsupported FLAT alias architecture";
     }
   }
-  void flat_load() {
+  void flat_load(uint8_t vdst = 2) {
     switch (cu->arch()) {
+    case ROCJITSU_CODE_ARCH_CDNA1:
+      return track(
+          cdna1::build_flat(cdna1::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = vdst}));
+    case ROCJITSU_CODE_ARCH_CDNA2:
+      return track(
+          cdna2::build_flat(cdna2::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = vdst}));
+    case ROCJITSU_CODE_ARCH_CDNA3:
+      return track(
+          cdna3::build_flat(cdna3::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = vdst}));
+    case ROCJITSU_CODE_ARCH_CDNA4:
+      return track(
+          cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA1:
       return track(
-          rdna1::build_flat(rdna1::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2}));
+          rdna1::build_flat(rdna1::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA2:
       return track(
-          rdna2::build_flat(rdna2::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2}));
+          rdna2::build_flat(rdna2::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA3:
       return track(
-          rdna3::build_flat(rdna3::kFlatLoadB32Flat, {.addr = 0, .saddr = 124, .vdst = 2}));
+          rdna3::build_flat(rdna3::kFlatLoadB32Flat, {.addr = 0, .saddr = 124, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA3_5:
       return track(
-          rdna3_5::build_flat(rdna3_5::kFlatLoadB32Flat, {.addr = 0, .saddr = 124, .vdst = 2}));
+          rdna3_5::build_flat(rdna3_5::kFlatLoadB32Flat, {.addr = 0, .saddr = 124, .vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA4:
       return track(
-          rdna4::build_vflat(rdna4::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0}));
+          rdna4::build_vflat(rdna4::kFlatLoadB32Vflat, {.saddr = 124, .vdst = vdst, .vaddr = 0}));
     case ROCJITSU_CODE_ARCH_CDNA5:
       return track(
-          cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0}));
+          cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = vdst, .vaddr = 0}));
     default:
       FAIL() << "unsupported test architecture";
     }
@@ -1638,6 +1658,77 @@ TEST_F(MemoryWaitOrderingTest, NativeLdsDoesNotExemptUnqualifiedFlatWriteback) {
     lds_load();
     EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
   }
+}
+
+TEST_F(MemoryWaitOrderingTest, NativeLdsOverwritesOnlyOrderedFlatLdsLanes) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
+                    ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_RDNA4})
+    for (uint64_t shared_lanes : {0u, 0b0101u, 0b1111u})
+      for (bool wait : {false, true}) {
+        SCOPED_TRACE(std::format("arch={} shared={} wait={}", static_cast<unsigned>(arch),
+                                 shared_lanes, wait));
+        setup(arch);
+        set_test_flat_domains(*cu, *wf, shared_lanes);
+        constexpr uint8_t dst = 2;
+        flat_load(dst);
+        if (wait) {
+          wf->memory_wait_scoreboard()->wait(WaitCounterKind::Load, 0);
+          wf->memory_wait_scoreboard()->wait(WaitCounterKind::Ds, 0);
+        }
+        lds_load(dst);
+        // The global-memory and LDS lanes of a FLAT result are separate
+        // pending results. Only the RDNA3+ and CDNA5 guides say the LDS lanes
+        // are written to registers in order with native LDS results.
+        const bool ordered_flat =
+            arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+            arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+        const unsigned global_hazard = shared_lanes != 0b1111;
+        const unsigned lds_hazard = !ordered_flat && shared_lanes != 0;
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait ? 0u : global_hazard + lds_hazard);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, PartialWaitRetiresFlatResultFromGfx10) {
+  // A FLAT load, a younger load on the counter its lanes use, a wait that leaves
+  // only the younger load outstanding, then a read of the FLAT result. LLVM
+  // emits such waits from GFX10 on (hasFlatLgkmVMemCountInOrder), e.g. for
+  // gfx1030:
+  //   flat_load_dword v0, v[0:1]
+  //   global_load_dword v1, v2, s[4:5]
+  //   s_waitcnt vmcnt(1) lgkmcnt(0)
+  //   v_add_nc_u32_e32 v0, 7, v0
+  // CDNA1-4 are GFX9, where LLVM waits for zero after FLAT.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
+                    ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_RDNA4})
+    for (bool lds_route : {false, true}) {
+      SCOPED_TRACE(std::format("arch={} lds_route={}", static_cast<unsigned>(arch), lds_route));
+      setup(arch);
+      set_test_flat_domains(*cu, *wf, lds_route ? 0b1111 : 0);
+      constexpr uint8_t flat_dst = 2;
+      constexpr uint8_t younger_dst = 3;
+      flat_load(flat_dst);
+      if (lds_route) {
+        lds_load(younger_dst);
+      } else {
+        TestMemoryLoad global("global_load_dword", younger_dst);
+        track(global);
+      }
+      auto &state = *wf->memory_wait_scoreboard();
+      state.wait(lds_route ? WaitCounterKind::Ds : WaitCounterKind::Load, 1);
+      state.wait(lds_route ? WaitCounterKind::Load : WaitCounterKind::Ds, 0);
+      std::vector<MemoryWaitScoreboard::Hazard> hazards;
+      state.bind(wf->pc, &hazards, [](void *p, const auto &hazard) {
+        static_cast<decltype(hazards) *>(p)->push_back(hazard);
+      });
+      state.access({RegClass::VGPR, flat_dst, 1}, 0b1111, 0xf, false);
+      const bool gfx9 = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+                        arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+      EXPECT_EQ(hazards.size(), gfx9 ? 1u : 0u);
+    }
 }
 
 TEST_F(MemoryWaitOrderingTest, LdsDirectAndParameterResultsUseQualifiedWritebackOrder) {
