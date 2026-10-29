@@ -99,6 +99,7 @@ void ResetInitFakes() {
   ResetMemManagerFakes();
   ResetNcclFakes();
   ResetNcclStubs();
+  ResetChannelFakes();
   ResetOsFakes();
   ResetRcclArchThresholdsFakes();
   ResetRcclWrapFakes();
@@ -110,6 +111,7 @@ void ResetInitFakes() {
   ResetStrongStreamStubs();
   ResetTopoStubs();
   ResetTransportStubs();
+  ResetTransportNetIbFakes();
   ResetTuningFakes();
   g_ncclNetInitResult = ncclSuccess;
 }

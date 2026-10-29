@@ -114,6 +114,7 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
 option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy and reduce paths" OFF)
+option(ENABLE_TDM_PRIM_LL128                   "Build the experimental gfx1250 TDM LL128 user-buffer path" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
@@ -127,6 +128,10 @@ option(RCCL_POISON_HIP_ATOMICS                 "Reject __hip_atomic_* builtins i
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 if(ENABLE_TDM_SIMPLE)
   add_compile_definitions(ENABLE_TDM_SIMPLE=1)
+endif()
+
+if(ENABLE_TDM_PRIM_LL128)
+  add_compile_definitions(ENABLE_TDM_PRIM_LL128=1)
 endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
@@ -283,13 +288,8 @@ elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*clang\\+\\+")
   set(COMPILER_EXE_NAME clang++)
   set(COMPILER_GREP_STRING "AMD clang version")
   set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
-elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*hipcc$")
-  message(STATUS "Compiling with hipcc")
-  set(COMPILER_EXE_NAME hipcc)
-  set(COMPILER_GREP_STRING "HIP version")
-  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $3}' | awk -F\"-\" '{ printf $1}'")
 else()
-  message(FATAL_ERROR "RCCL can be built only with hipcc or amdclang++")
+  message(FATAL_ERROR "RCCL can be built only with amdclang++")
 endif()
 
 # Set CMAKE flags
@@ -335,11 +335,8 @@ execute_process(
 message(STATUS "${COMPILER_EXE_NAME} version:    ${compiler_version_string}")
 
 ## Check for HIP version
-find_program(hipconfig_executable hipconfig)
-message(STATUS "hipconfig executable: ${hipconfig_executable}")
-execute_process(
-  COMMAND         bash "-c" "${hipconfig_executable} -v | awk -F\"-\" '{ printf $1 }'"
-  OUTPUT_VARIABLE hip_version_string)
+# Use hip_VERSION from find_package(hip) above
+string(REGEX MATCH "^([0-9]+\\.[0-9]+\\.[0-9]+)" hip_version_string "${hip_VERSION}")
 message(STATUS "${COMPILER_EXE_NAME} HIP version:    ${hip_version_string}")
 
 ## Check for ROCm version
