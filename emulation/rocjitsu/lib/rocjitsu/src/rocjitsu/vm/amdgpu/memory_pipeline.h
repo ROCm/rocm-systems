@@ -19,6 +19,7 @@
 #include <functional>
 #include <queue>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -43,6 +44,45 @@ class Lds;
 /// @return True if any requesting lane is misaligned.
 bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf, uint64_t lds_lanes,
                                    uint64_t address_bias = 0);
+
+/// @brief A byte range a memory instruction requests from memory.
+struct MemoryRequestRange {
+  uint64_t address = 0;
+  uint32_t size = 0;
+};
+
+/// @brief Instruction-level rejection checked before any vector memory side effect.
+/// @details Shared by the global and local pipelines and by the debugger
+/// preflight, so enabling a debugger cannot replace an instruction rejection
+/// with a translation fault. Performs no memory access and no logging. Checks,
+/// in order: address-formation MEMVIOL, CDNA5 FLAT DDS, misaligned LDS atomics.
+/// @param request_lanes Lanes that issue; see transpose_request_lane_mask.
+/// @param lds_lanes Requesting lanes that address LDS.
+/// @param dds_lanes Lanes that address CDNA5 DDS. Routing records these in
+///        flat_dds_lane_mask; the preflight runs before routing and classifies them.
+/// @param lds_bias See rejects_misaligned_lds_atomic's address_bias.
+/// @return ApertureViolation, Unsupported, or Complete when admitted.
+VmAccessOutcome vector_memory_admission(const VectorMemState &d, const Wavefront &wf,
+                                        uint64_t request_lanes, uint64_t lds_lanes,
+                                        uint64_t dds_lanes, uint64_t lds_bias = 0);
+
+/// @brief Instruction-level rejection checked before any scalar memory side effect.
+/// @return Malformed for an invalid atomic shape, ApertureViolation for
+///         address-formation MEMVIOL, otherwise Complete.
+VmAccessOutcome scalar_memory_admission(const ScalarMemState &d);
+
+/// @brief Append the global-memory byte ranges an admitted vector instruction
+/// requests for @p lanes.
+/// @details Matches what the global pipeline accesses: one element per lane for
+/// atomics, per-element lane masks (buffer bounds, M0 block masks) and
+/// swizzled scratch layouts. Callers exclude LDS lanes.
+void append_vector_request_ranges(const VectorMemState &d, uint64_t lanes,
+                                  std::vector<MemoryRequestRange> &ranges);
+
+/// @brief Append the byte ranges an admitted scalar instruction requests.
+/// @details Descriptor-masked dwords request nothing, so a fully masked buffer
+/// access appends no range. Atomics and sub-dword loads request their element.
+void append_scalar_request_ranges(const ScalarMemState &d, std::vector<MemoryRequestRange> &ranges);
 
 enum class [[nodiscard]] MemoryAccessCompletion {
   Complete,

@@ -602,13 +602,9 @@ VmAccessOutcome execute_cached_scalar_atomic_rmw(ScalarMemState &d, L2Cache &l2,
 
 VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
-  // A scalar atomic accesses one 4- or 8-byte element and returns it as dwords.
-  if (d.atomic_op != AtomicOp::NONE &&
-      ((d.elem_size != sizeof(uint32_t) && d.elem_size != sizeof(uint64_t)) ||
-       d.num_dwords * sizeof(uint32_t) != d.elem_size))
-    return VmAccessOutcome::Malformed;
-  if (d.memviol)
-    return VmAccessOutcome::ApertureViolation;
+  if (const VmAccessOutcome admission = scalar_memory_admission(d);
+      admission != VmAccessOutcome::Complete)
+    return admission;
   // Masked loads still write the zero response, without taking a VM snapshot or
   // touching backing memory, including byte and halfword requests.
   // Fully masked stores likewise perform no VM or backing-memory access.
@@ -841,6 +837,27 @@ uint64_t fully_valid_lane_mask(std::span<const uint64_t> element_lane_masks, uin
   return full_lane_mask;
 }
 
+// Visit the byte runs of one element of a swizzled lane. Each run stays within
+// one swizzle unit; visit(address, lane_byte_offset, size).
+template <typename Visit>
+void for_each_swizzled_element_run(const VectorMemState &d, uint32_t lane, uint32_t elem,
+                                   uint32_t addr_stride, uint32_t addr_base_offset, Visit &&visit) {
+  const uint64_t base = d.per_lane_addr[lane];
+  const uint32_t first_byte_in_unit =
+      static_cast<uint32_t>((base - addr_base_offset) % d.scratch_swizzle_unit);
+  uint32_t copied = elem * d.elem_size;
+  const uint32_t elem_end = copied + d.elem_size;
+  while (copied < elem_end) {
+    const uint32_t logical_byte = first_byte_in_unit + copied;
+    const uint32_t byte_in_unit = logical_byte % d.scratch_swizzle_unit;
+    const uint32_t chunk = std::min(elem_end - copied, d.scratch_swizzle_unit - byte_in_unit);
+    visit(base - first_byte_in_unit + logical_byte / d.scratch_swizzle_unit * addr_stride +
+              byte_in_unit,
+          copied, chunk);
+    copied += chunk;
+  }
+}
+
 void append_translated_requests(VectorMemState &d, uint64_t lane_mask, uint32_t addr_stride,
                                 uint32_t addr_base_offset, MemoryTransactionPolicy transactions) {
   const uint32_t stride = d.num_elems * d.elem_size;
@@ -889,21 +906,10 @@ void append_translated_requests(VectorMemState &d, uint64_t lane_mask, uint32_t 
       while (mask) {
         const uint32_t lane = std::countr_zero(mask);
         mask &= mask - 1;
-        const uint64_t base = d.per_lane_addr[lane];
-        const uint32_t first_byte_in_unit =
-            static_cast<uint32_t>((base - addr_base_offset) % d.scratch_swizzle_unit);
-        uint32_t copied = elem * d.elem_size;
-        const uint32_t elem_end = copied + d.elem_size;
-        while (copied < elem_end) {
-          const uint32_t logical_byte = first_byte_in_unit + copied;
-          const uint32_t byte_in_unit = logical_byte % d.scratch_swizzle_unit;
-          const uint32_t chunk = std::min(elem_end - copied, d.scratch_swizzle_unit - byte_in_unit);
-          const uint64_t address = base - first_byte_in_unit +
-                                   logical_byte / d.scratch_swizzle_unit * addr_stride +
-                                   byte_in_unit;
-          append(address, lane * stride + copied, chunk);
-          copied += chunk;
-        }
+        for_each_swizzled_element_run(d, lane, elem, addr_stride, addr_base_offset,
+                                      [&](uint64_t address, uint32_t offset, uint32_t size) {
+                                        append(address, lane * stride + offset, size);
+                                      });
       }
     }
     return;
@@ -1281,12 +1287,12 @@ void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 
   }
 }
 
-bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t request_lanes) {
-  if (!(inst.data_as<VectorMemState>()->flat_dds_lane_mask & request_lanes))
-    return false;
+// Admission rejects DDS without logging so the debugger preflight stays silent;
+// the pipeline that raises the outcome reports it once.
+VmAccessOutcome warn_unsupported_flat_dds(const Instruction &inst, const Wavefront &wf) {
   util::Logger::warn("unsupported FLAT DDS execution: ", inst.mnemonic(),
                      " pc=", std::format("{:#x}", wf.pc), ": CDNA5 DDS backing is not implemented");
-  return true;
+  return VmAccessOutcome::Unsupported;
 }
 
 } // namespace
@@ -1316,22 +1322,93 @@ bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf,
   return misaligned(d.per_lane_addr) || (d.ds2_active && misaligned(d.ds2_per_lane_addr));
 }
 
-VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
-  auto &d = *inst.data_as<VectorMemState>();
-  d.wg_id = wf.wg_id();
-  d.wf_id = wf.wf_id();
-  const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
+VmAccessOutcome vector_memory_admission(const VectorMemState &d, const Wavefront &wf,
+                                        uint64_t request_lanes, uint64_t lds_lanes,
+                                        uint64_t dds_lanes, uint64_t lds_bias) {
   // Address-formation violations must precede all transport and LDS side effects.
   if (d.memviol_lane_mask & request_lanes)
     return VmAccessOutcome::ApertureViolation;
   // DDS requires a separate backing implementation. Reject the complete
   // instruction before global or LDS side effects rather than narrowing a
-  // DDS address into another workgroup's LDS allocation.
-  if (rejects_flat_dds(inst, wf, request_lanes))
+  // DDS address into another workgroup's LDS allocation. Uniform
+  // shared-aperture FLAT must reject it too.
+  if (dds_lanes & request_lanes)
     return VmAccessOutcome::Unsupported;
-  const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
-  if (rejects_misaligned_lds_atomic(d, wf, shared_lanes))
+  if (rejects_misaligned_lds_atomic(d, wf, lds_lanes, lds_bias))
     return VmAccessOutcome::ApertureViolation;
+  return VmAccessOutcome::Complete;
+}
+
+VmAccessOutcome scalar_memory_admission(const ScalarMemState &d) {
+  // A scalar atomic accesses one 4- or 8-byte element and returns it as dwords.
+  if (d.atomic_op != AtomicOp::NONE &&
+      ((d.elem_size != sizeof(uint32_t) && d.elem_size != sizeof(uint64_t)) ||
+       d.num_dwords * sizeof(uint32_t) != d.elem_size))
+    return VmAccessOutcome::Malformed;
+  if (d.memviol)
+    return VmAccessOutcome::ApertureViolation;
+  return VmAccessOutcome::Complete;
+}
+
+void append_vector_request_ranges(const VectorMemState &d, uint64_t lanes,
+                                  std::vector<MemoryRequestRange> &ranges) {
+  if (d.atomic_op != AtomicOp::NONE) {
+    for (uint64_t mask = lanes; mask; mask &= mask - 1)
+      ranges.push_back({d.per_lane_addr[std::countr_zero(mask)], d.elem_size});
+    return;
+  }
+  const uint64_t swizzled_lanes = d.scratch_swizzle ? d.scratch_lane_mask & lanes : 0;
+  const bool per_element = !d.element_lane_masks.empty();
+  for (uint64_t mask = lanes; mask; mask &= mask - 1) {
+    const uint32_t lane = std::countr_zero(mask);
+    const uint64_t lane_bit = uint64_t{1} << lane;
+    if (!per_element && !(swizzled_lanes & lane_bit)) {
+      ranges.push_back({d.per_lane_addr[lane], d.num_elems * d.elem_size});
+      continue;
+    }
+    for (uint32_t elem = 0; elem < d.num_elems; ++elem) {
+      if (per_element && !(d.element_lane_masks[elem] & lane_bit))
+        continue;
+      if (swizzled_lanes & lane_bit)
+        for_each_swizzled_element_run(
+            d, lane, elem, d.scratch_addr_stride, d.scratch_addr_base_offset,
+            [&](uint64_t address, uint32_t, uint32_t size) { ranges.push_back({address, size}); });
+      else
+        ranges.push_back({d.per_lane_addr[lane] + uint64_t{elem} * d.elem_size, d.elem_size});
+    }
+  }
+}
+
+void append_scalar_request_ranges(const ScalarMemState &d,
+                                  std::vector<MemoryRequestRange> &ranges) {
+  // Descriptor bounds mask whole dwords. A fully masked access of any kind,
+  // including an atomic or a byte load, requests no memory.
+  if (d.load_dword_mask == 0)
+    return;
+  if (d.atomic_op != AtomicOp::NONE || d.elem_size < sizeof(uint32_t)) {
+    ranges.push_back({d.addr, d.elem_size});
+    return;
+  }
+  if (d.load_dword_mask == 0xffff) {
+    ranges.push_back({d.addr, d.num_dwords * d.elem_size});
+    return;
+  }
+  for (uint32_t index = 0; index < d.num_dwords; ++index)
+    if (d.load_dword_mask & (1u << index))
+      ranges.push_back({d.addr + index * sizeof(uint32_t), sizeof(uint32_t)});
+}
+
+VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
+  auto &d = *inst.data_as<VectorMemState>();
+  d.wg_id = wf.wg_id();
+  d.wf_id = wf.wf_id();
+  const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
+  const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
+  if (const VmAccessOutcome admission =
+          vector_memory_admission(d, wf, request_lanes, shared_lanes, d.flat_dds_lane_mask);
+      admission != VmAccessOutcome::Complete)
+    return admission == VmAccessOutcome::Unsupported ? warn_unsupported_flat_dds(inst, wf)
+                                                     : admission;
   const VmAccessOutcome outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
   if (outcome != VmAccessOutcome::Complete || shared_lanes == 0)
     return outcome;
@@ -1453,14 +1530,11 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
-  // Address-formation violations must precede all transport and LDS side effects.
-  if (d.memviol_lane_mask & request_lanes)
-    return VmAccessOutcome::ApertureViolation;
-  // Uniform shared-aperture FLAT must reject unsupported DDS too.
-  if (rejects_flat_dds(inst, wf, request_lanes))
-    return VmAccessOutcome::Unsupported;
-  if (rejects_misaligned_lds_atomic(d, wf, request_lanes))
-    return VmAccessOutcome::ApertureViolation;
+  if (const VmAccessOutcome admission =
+          vector_memory_admission(d, wf, request_lanes, request_lanes, d.flat_dds_lane_mask);
+      admission != VmAccessOutcome::Complete)
+    return admission == VmAccessOutcome::Unsupported ? warn_unsupported_flat_dds(inst, wf)
+                                                     : admission;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   if (d.lds_stack_inputs) {

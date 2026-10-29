@@ -2306,8 +2306,11 @@ template <bool EnableAsync>
   // it. Gated on debug_active_ so non-debugged runs pay no per-access cost.
   const bool debug_probe = debugger_active && inst->is_memory_op() && inst->data() &&
                            (inst->data()->tag() == GLOBAL_MEM || inst->data()->tag() == SCALAR_MEM);
-  std::vector<uint64_t> dbg_addrs;
-  uint32_t dbg_bytes = 0;
+  // Probe exactly what the pipeline will request. Instruction-level rejections
+  // (MEMVIOL, DDS, LDS alignment, malformed atomics) use the pipeline's own
+  // admission and are left for it to raise; masked lanes, buffer-OOB elements
+  // and descriptor-masked dwords request nothing and must not fault.
+  std::vector<MemoryRequestRange> dbg_ranges;
   bool dbg_is_write = false;
   bool dbg_is_atomic = false;
   if (debug_probe) {
@@ -2315,20 +2318,15 @@ template <bool EnableAsync>
       auto &d = *inst->data_as<ScalarMemState>();
       dbg_is_atomic = d.atomic_op != AtomicOp::NONE;
       dbg_is_write = !d.is_load || dbg_is_atomic;
-      dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_dwords * d.elem_size);
-      // Address-formation MEMVIOL must reach the pipeline before any VM probe.
-      if (!d.memviol)
-        dbg_addrs.push_back(d.addr);
+      if (scalar_memory_admission(d) == VmAccessOutcome::Complete)
+        append_scalar_request_ranges(d, dbg_ranges);
     } else {
       auto &d = *inst->data_as<VectorMemState>();
       dbg_is_atomic = (d.atomic_op != AtomicOp::NONE);
       dbg_is_write = !d.is_load || dbg_is_atomic;
-      // std::max on both arms: VectorMemState::elem_size defaults to 0 and the
-      // range check below reports a zero-sized range as *unmapped*, so an
-      // atomic whose decoder left elem_size unset would fault on every lane of
-      // a perfectly mapped buffer.
-      dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_elems * d.elem_size);
       const uint64_t request_lanes = transpose_request_lane_mask(d, active->wf_size());
+      // Routing has not run yet, so classify FLAT shared lanes here exactly
+      // as it will.
       const auto shared_lanes = inst->mnemonic().starts_with("flat_")
                                     ? classify_flat_shared_lanes(d, *active, shared_aperture_base_,
                                                                  shared_aperture_limit_)
@@ -2337,13 +2335,9 @@ template <bool EnableAsync>
       // Routing subtracts the aperture base and adds the workgroup base.
       // RDNA4's 17-bit wrapping preserves payload alignment for LDS atomics.
       const uint64_t lds_bias = active->lds_base() - shared_aperture_base_;
-      if ((d.memviol_lane_mask & request_lanes) == 0 &&
-          !rejects_misaligned_lds_atomic(d, *active, lds_lanes, lds_bias)) {
-        dbg_addrs.reserve(d.wf_size);
-        for (uint32_t lane = 0; lane < d.wf_size; ++lane)
-          if (d.lane_mask & (1ULL << lane))
-            dbg_addrs.push_back(d.per_lane_addr[lane]);
-      }
+      if (vector_memory_admission(d, *active, request_lanes, lds_lanes, shared_lanes.dds,
+                                  lds_bias) == VmAccessOutcome::Complete)
+        append_vector_request_ranges(d, request_lanes & ~lds_lanes, dbg_ranges);
     }
   }
   // One predicate for the whole access, used both to decide that this
@@ -2352,9 +2346,10 @@ template <bool EnableAsync>
   // found no faulting address, the access would be dropped with nothing
   // delivered. Checking only the first byte let a multi-byte load, store or
   // atomic that starts near the end of a mapped page run off it unnoticed, so
-  // the whole [addr, addr + dbg_bytes) range is validated.
+  // each whole requested range is validated.
   const uint32_t dbg_vmid = active->process_id();
-  auto access_faults = [&](uint64_t addr) {
+  auto access_faults = [&](const MemoryRequestRange &range) {
+    const uint64_t addr = range.address;
     const bool shared_address = active->shared_aperture_base() != 0 &&
                                 addr >= active->shared_aperture_base() &&
                                 addr <= active->shared_aperture_limit();
@@ -2364,17 +2359,21 @@ template <bool EnableAsync>
       const VmAccessKind access = dbg_is_atomic  ? VmAccessKind::Atomic
                                   : dbg_is_write ? VmAccessKind::Write
                                                  : VmAccessKind::Read;
-      return vm_access->query_access(addr, dbg_bytes, access) == VmAccessOutcome::Faulted;
+      // VectorMemState::elem_size defaults to 0 and a zero-sized range reports
+      // as unmapped, so an atomic whose decoder left elem_size unset would
+      // fault on every lane of a mapped buffer. Probe at least one byte.
+      return vm_access->query_access(addr, std::max(1u, range.size), access) ==
+             VmAccessOutcome::Faulted;
     }
     return dbg_vmid != 0;
   };
   // Locate the faulting address once. The report loop below resumes from this
   // iterator rather than rescanning: each access_faults() call is a page-table
-  // walk per touched page, and dbg_addrs holds one entry per active lane.
-  auto first_fault = dbg_addrs.end();
+  // walk per touched page, and dbg_ranges holds at least one entry per lane.
+  auto first_fault = dbg_ranges.end();
   if (debug_probe && memory_violation_handler_)
-    first_fault = std::ranges::find_if(dbg_addrs, access_faults);
-  const bool debug_memory_fault = first_fault != dbg_addrs.end();
+    first_fault = std::ranges::find_if(dbg_ranges, access_faults);
+  const bool debug_memory_fault = first_fault != dbg_ranges.end();
 
   // The trap return is whatever instruction just left the handler. Asking the
   // wave rather than matching mnemonics keeps this ISA-agnostic: the spelling
@@ -2399,9 +2398,9 @@ template <bool EnableAsync>
     active->pc += inst_size;
     // first_fault is already known to fault, so it is reported without a second
     // range walk; only the lanes after it still have to be tested.
-    for (auto it = first_fault; it != dbg_addrs.end(); ++it) {
+    for (auto it = first_fault; it != dbg_ranges.end(); ++it) {
       if ((it == first_fault || access_faults(*it)) &&
-          memory_violation_handler_(*active, *it, dbg_is_write, issue_pc,
+          memory_violation_handler_(*active, it->address, dbg_is_write, issue_pc,
                                     VmAccessOutcome::Faulted)) {
         fault_claimed = true;
         break;
@@ -2489,8 +2488,8 @@ template <bool EnableAsync>
   // severe than a watchpoint and wins if both would fire on the same
   // instruction, which it does by returning above before reaching here.
   if (debug_probe && !active->debug_halted() && watchpoint_handler_) {
-    for (uint64_t addr : dbg_addrs)
-      if (watchpoint_handler_(*active, addr, dbg_bytes, dbg_is_write, dbg_is_atomic))
+    for (const MemoryRequestRange &range : dbg_ranges)
+      if (watchpoint_handler_(*active, range.address, range.size, dbg_is_write, dbg_is_atomic))
         break;
   }
 }

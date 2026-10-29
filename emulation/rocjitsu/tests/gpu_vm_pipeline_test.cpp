@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
@@ -836,6 +840,239 @@ TEST(GpuVmPipeline, LdsAlignmentMemviolPrecedesDebuggerTranslationProbe) {
         }
       }
     }
+  }
+}
+
+// S_BUFFER descriptor bounds mask whole dwords. Masked dwords request no
+// memory, so the debugger preflight must not probe them: a fully masked load
+// is a legal zeroing load, and a partially masked one may end at the last
+// mapped byte. Debugging must not change either result.
+TEST(GpuVmPipeline, DebuggerPreflightSkipsDescriptorMaskedScalarDwords) {
+  constexpr uint64_t kMappedEnd = 64 * 1024; // TestExternalAddressSpace default size.
+  for (const bool debug : {false, true}) {
+    for (const uint32_t records : {0u, 8u}) {
+      SCOPED_TRACE(testing::Message() << "debug=" << debug << " records=" << records);
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize());
+      ASSERT_NE(context.wf, nullptr);
+      constexpr uint64_t kCode = 0x1000;
+      const auto words = cdna5::build_smem(cdna5::kSBufferLoadB128Smem,
+                                           {.sbase = 0, .sdata = 8, .ioffset = 0, .soffset = 124});
+      context.external->store(kCode, std::array{words[0], words[1], S_ENDPGM_GFX12});
+      // Fully masked: an unmapped base. Partially masked: the two in-range
+      // dwords are the last mapped bytes and the masked dwords lie beyond them.
+      const uint64_t base = records == 0 ? 0x20000 : kMappedEnd - 8;
+      if (records != 0) {
+        context.external->store(base, uint32_t{0x11});
+        context.external->store(base + 4, uint32_t{0x22});
+      }
+      const uint32_t sb = context.wf->sgpr_alloc().base;
+      // CDNA5 V#: NUM_RECORDS[6:0] live in word1[31:25], the rest in word2.
+      context.cu->write_sgpr(sb, static_cast<uint32_t>(base));
+      context.cu->write_sgpr(sb + 1, static_cast<uint32_t>(base >> 32) | (records << 25));
+      context.cu->write_sgpr(sb + 2, 0);
+      context.cu->write_sgpr(sb + 3, 0);
+      for (uint32_t i = 0; i < 4; ++i)
+        context.cu->write_sgpr(sb + 8 + i, 0xdeadbeef);
+      context.wf->pc = kCode;
+      context.cu->set_debug_active(debug);
+      uint32_t faults = 0;
+      context.cu->set_memory_violation_handler(
+          [&](amdgpu::Wavefront &wave, uint64_t, bool, uint64_t, amdgpu::VmAccessOutcome) {
+            ++faults;
+            wave.set_fatal_exception_pending(true);
+            wave.set_debug_suspended(true);
+            return true;
+          });
+      context.cu->step();
+      for (unsigned i = 0; i < 8 && !context.wf->wait_counters().empty(); ++i)
+        context.cu->step();
+      EXPECT_EQ(faults, 0u);
+      EXPECT_FALSE(context.wf->fatal_exception_pending());
+      EXPECT_TRUE(context.wf->wait_counters().empty());
+      EXPECT_TRUE(context.reported_faults.empty());
+      EXPECT_EQ(context.cu->read_sgpr(sb + 8), records ? 0x11u : 0u);
+      EXPECT_EQ(context.cu->read_sgpr(sb + 9), records ? 0x22u : 0u);
+      EXPECT_EQ(context.cu->read_sgpr(sb + 10), 0u);
+      EXPECT_EQ(context.cu->read_sgpr(sb + 11), 0u);
+    }
+  }
+}
+
+// A CDNA5 FLAT access with any DDS lane is Unsupported before any memory
+// access. With debugging enabled, an unmapped global lane in the same
+// instruction must not let the preflight claim it as a translation fault.
+TEST(GpuVmPipeline, DdsUnderDebuggerRemainsUnsupported) {
+  for (const bool debug : {false, true}) {
+    for (const bool mixed : {false, true}) {
+      for (const bool load : {false, true}) {
+        for (const uint32_t dds_lane : {0u, 1u}) {
+          SCOPED_TRACE(testing::Message() << "debug=" << debug << " mixed=" << mixed
+                                          << " load=" << load << " dds_lane=" << dds_lane);
+          TranslatedPipelineContext context;
+          ASSERT_NO_FATAL_FAILURE(context.initialize(/*legacy_cache_compatible=*/false,
+                                                     /*xcnt_checks=*/true));
+          ASSERT_NE(context.wf, nullptr);
+          constexpr uint64_t shared_base = uint64_t{1} << 48;
+          constexpr uint64_t pc = 0x1000;
+          context.cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+          context.wf->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+          context.wf->pc = pc;
+          context.wf->set_exec(mixed ? 3 : uint64_t{1} << dds_lane);
+          const auto words = cdna5::build_vflat(
+              load ? cdna5::kFlatLoadB32Vflat : cdna5::kFlatStoreB32Vflat,
+              {.saddr = 124, .vdst = uint8_t(load ? 16 : 0), .vsrc = 8, .vaddr = 0});
+          context.external->store(pc, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+          const uint32_t vb = context.wf->vgpr_alloc().base;
+          for (uint32_t lane = 0; lane < 2; ++lane) {
+            const uint64_t address = lane == dds_lane ? shared_base + 0xffffffc0 : 0x20000;
+            context.cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
+            context.cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+            context.cu->write_vgpr(vb + 8, lane, 42);
+          }
+          uint32_t execution_failures = 0, memory_faults = 0;
+          context.cu->set_execution_failure_handler([&](amdgpu::Wavefront &wave, bool) {
+            EXPECT_EQ(&wave, context.wf);
+            ++execution_failures;
+            return true;
+          });
+          context.cu->set_memory_violation_handler(
+              [&](amdgpu::Wavefront &, uint64_t, bool, uint64_t, amdgpu::VmAccessOutcome) {
+                context.wf->set_debug_suspended(true);
+                ++memory_faults;
+                return true;
+              });
+          context.cu->set_debug_active(debug);
+          testing::internal::CaptureStderr();
+          static_cast<void>(context.cu->step());
+          const std::string diagnostic = testing::internal::GetCapturedStderr();
+          const std::string prefix = "unsupported FLAT DDS execution: ";
+          const auto warning = diagnostic.find(prefix);
+          EXPECT_NE(warning, std::string::npos) << diagnostic;
+          EXPECT_EQ(diagnostic.find(prefix, warning == std::string::npos ? 0 : warning + 1),
+                    std::string::npos)
+              << diagnostic;
+          EXPECT_EQ(execution_failures, 1u);
+          EXPECT_EQ(memory_faults, 0u);
+          EXPECT_TRUE(context.reported_faults.empty());
+          EXPECT_TRUE(context.wf->wait_counters().empty());
+          EXPECT_EQ(context.external->write_calls, 0u);
+          for (const auto &read : context.external->read_history)
+            EXPECT_NE(read.address, 0x20000u);
+        }
+      }
+    }
+  }
+}
+
+// RDNA4 CU on a translated address space whose mapping ends at 64 KiB, for
+// preflight cases that need wave64 or RDNA buffer bounds.
+class Rdna4TranslatedContext {
+public:
+  static constexpr uint64_t kCode = 0x1000;
+  static constexpr uint64_t kMappedEnd = 64 * 1024; // TestExternalAddressSpace default size.
+  amdgpu::GpuMemory memory{"rdna4_translated"};
+  amdgpu::L2Cache l2{"rdna4_translated_l2"};
+  amdgpu::GpuVm vm;
+  std::shared_ptr<TestExternalAddressSpace> external = std::make_shared<TestExternalAddressSpace>();
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  amdgpu::Wavefront *wf = nullptr;
+  std::vector<std::pair<uint64_t, amdgpu::VmAccessKind>> reported_faults;
+  uint32_t faults = 0;
+
+  void initialize(std::span<const uint32_t> code, uint32_t wf_size, bool debug) {
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 64;
+    config.lds_size_kb = 64;
+    cu = amdgpu::ComputeUnitCore::create("rdna4_translated", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    cu->set_gpu_vm(&vm);
+    const auto address_space = vm.register_address_space(
+        77, external, external, [this](uint64_t address, amdgpu::VmAccessKind kind) {
+          reported_faults.emplace_back(address, kind);
+        });
+    ASSERT_TRUE(address_space);
+    for (uint32_t i = 0; i < code.size(); ++i)
+      external->store(kCode + 4 * i, code[i]);
+    wf = cu->dispatch_wf(0, kCode, 106, 64, wf_size);
+    ASSERT_NE(wf, nullptr);
+    wf->set_process_id(77);
+    wf->set_address_space(address_space);
+    cu->set_debug_active(debug);
+    cu->set_memory_violation_handler(
+        [this](amdgpu::Wavefront &wave, uint64_t, bool, uint64_t, amdgpu::VmAccessOutcome) {
+          ++faults;
+          wave.set_fatal_exception_pending(true);
+          wave.set_debug_suspended(true);
+          return true;
+        });
+  }
+};
+
+// Wave64 GLOBAL_LOAD_TR_B128 issues through lanes 0-31 only. The upper lanes'
+// addresses are never requested, so the debugger preflight must not probe them.
+TEST(GpuVmPipeline, DebuggerPreflightProbesOnlyIssuingTransposeLanes) {
+  for (const bool debug : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "debug=" << debug);
+    const auto load = rdna4::build_vglobal(
+        rdna4::kGlobalLoadTrB128Vglobal, {.saddr = rdna4::OPR_SREG_M0_NULL, .vdst = 4, .vaddr = 0});
+    const uint32_t code[] = {load[0], load[1], load[2], 0xBF800000u}; // s_nop 0
+    Rdna4TranslatedContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize(code, 64, debug));
+    constexpr uint64_t kData = 0x2000;
+    const uint32_t vb = context.wf->vgpr_alloc().base;
+    context.wf->set_exec(~uint64_t{0});
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      const uint64_t address =
+          lane < 32 ? kData + lane * 16 : Rdna4TranslatedContext::kMappedEnd + lane * 16;
+      context.cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
+      context.cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+    }
+    context.cu->step();
+    EXPECT_EQ(context.faults, 0u);
+    EXPECT_TRUE(context.reported_faults.empty());
+    EXPECT_FALSE(context.wf->fatal_exception_pending());
+    EXPECT_EQ(context.wf->pc, Rdna4TranslatedContext::kCode + 12);
+  }
+}
+
+// RDNA4 bounds-checks each dword of an untyped B128 buffer load. Dwords past
+// NUM_RECORDS request nothing and return zero, so the preflight must not probe
+// them even when they would cross the end of the mapping.
+TEST(GpuVmPipeline, DebuggerPreflightSkipsBufferOutOfRangeDwords) {
+  for (const bool debug : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "debug=" << debug);
+    const auto load = rdna4::build_vbuffer(
+        rdna4::kBufferLoadB128Vbuffer, {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4});
+    const uint32_t code[] = {load[0], load[1], load[2], 0xBF800000u}; // s_nop 0
+    Rdna4TranslatedContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize(code, 32, debug));
+    constexpr uint64_t kBase = Rdna4TranslatedContext::kMappedEnd - 8;
+    constexpr uint32_t kIdentity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
+    context.external->store(kBase, uint32_t{0x11});
+    context.external->store(kBase + 4, uint32_t{0x22});
+    const uint32_t sb = context.wf->sgpr_alloc().base;
+    context.cu->write_sgpr(sb + 4, static_cast<uint32_t>(kBase));
+    context.cu->write_sgpr(sb + 5, 0);
+    context.cu->write_sgpr(sb + 6, 8);                      // Two in-range dwords.
+    context.cu->write_sgpr(sb + 7, kIdentity | (3u << 28)); // OOB_SELECT 3: offset + size.
+    const uint32_t vb = context.wf->vgpr_alloc().base;
+    context.wf->set_exec(1);
+    for (uint32_t i = 0; i < 4; ++i)
+      context.cu->write_vgpr(vb + 8 + i, 0, 0xdeadbeef);
+    context.cu->step();
+    for (unsigned i = 0; i < 8 && !context.wf->wait_counters().empty(); ++i)
+      context.cu->step();
+    EXPECT_EQ(context.faults, 0u);
+    EXPECT_TRUE(context.reported_faults.empty());
+    EXPECT_FALSE(context.wf->fatal_exception_pending());
+    EXPECT_EQ(context.cu->read_vgpr(vb + 8, 0), 0x11u);
+    EXPECT_EQ(context.cu->read_vgpr(vb + 9, 0), 0x22u);
+    EXPECT_EQ(context.cu->read_vgpr(vb + 10, 0), 0u);
+    EXPECT_EQ(context.cu->read_vgpr(vb + 11, 0), 0u);
   }
 }
 
