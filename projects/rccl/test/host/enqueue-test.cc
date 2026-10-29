@@ -5196,6 +5196,11 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegMultiRpn_PicksTheSendBufferPerCo
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegRingOneRpnAllGather_UsesWholeNetSizedChunks) {
+#if NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
+  // The 1 GiB step is compiled into calcCollChunking only when the device
+  // net-offload kernel exists. The HIP host build leaves that schedule out;
+  // CalcCollChunking_NetOffloadUnsupportedOneRpnRegisteredAllGatherUsesKernelSchedule
+  // covers that arm.
   ChunkComm cc;
   cc.comm.isOneRPN = true;
   auto t = NetRegTask(ncclFuncAllGather, NCCL_ALGO_RING);
@@ -5209,6 +5214,9 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegRingOneRpnAllGather_UsesWholeNet
   const size_t loopSize = size_t(nChannels) * cc.comm.nRanks * NCCL_MAX_NET_SIZE;
   EXPECT_EQ(loopSize, r.proxyOp.loopSize);
   EXPECT_EQ(int(DIVUP(nBytes, loopSize) * (cc.comm.nRanks - 1)), r.proxyOp.nsteps);
+#else
+  GTEST_SKIP() << "Host/device net offload is not compiled into this build";
+#endif
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegWithTree_IsAnInternalError) {
