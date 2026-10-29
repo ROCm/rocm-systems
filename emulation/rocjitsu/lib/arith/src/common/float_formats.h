@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Scalar FP16/BF16 encoding conversions.
+// Scalar FP16 and BF16 encoding conversions.
 // Kept independent of util conversions: GPU rounding and special-value policies
 // can differ by architecture, and CPU SIMD implementations share these contracts.
 // Internal helpers; not part of the public C API.

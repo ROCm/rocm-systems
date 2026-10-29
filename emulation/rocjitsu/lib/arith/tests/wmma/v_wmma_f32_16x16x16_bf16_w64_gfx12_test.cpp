@@ -28,6 +28,11 @@ using Registers = rocjitsu::arith::test::Registers<64, 64>;
 // Check matrix results, operand aliases, and instruction-flag contracts across supported CPUs
 // and semantics.
 TEST(WmmaF32BF16W64Gfx12, Arithmetic) {
+  rocjitsu::arith::test::expect_bf16_tiny_accumulator<64>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12);
+  rocjitsu::arith::test::expect_matrix_modifiers<true, 64, false>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12);
+
   std::minstd_rand random;
   uint32_t a[16][16], b[16][16], c[16][16];
   for (int row = 0; row < 16; ++row) {
@@ -99,39 +104,14 @@ TEST(WmmaF32BF16W64Gfx12, Arithmetic) {
   // clang-format on
 
   rocjitsu::arith::test::expect_matrix_invalid_flags(rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12,
-                                                     input, 9, 0, 2, 4, 0);
+                                                     input, 9, 0, 2, 4,
+                                                     rocjitsu::arith::test::kFloatingWmmaModifiers);
 
   // A occupies 2 registers, B 2, C/D 4. Reuse the same arithmetic
   // data for overlapping and disjoint destination ranges.
-  const auto cpu_levels = rocjitsu::arith::test::supported_cpu_levels();
-  for (uint64_t cpu : cpu_levels) {
-    for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
-
-      for (uint64_t fp_flags : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
-        for (int aliasing_offset : {0, 1, 2, 3, 4, 9}) {
-          SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << aliasing_offset);
-          Registers r = input;
-          ASSERT_EQ(rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12(cpu | semantics | fp_flags, 0,
-                                                                r.v + aliasing_offset, r.v, r.v + 2,
-                                                                r.v + 4),
-                    RJ_ARITH_SUCCESS);
-          for (int row = 0; row < 16; ++row) {
-            for (int col = 0; col < 16; ++col) {
-              uint32_t actual =
-                  rocjitsu::arith::test::wmma_gfx12_acc<64>(r.v + aliasing_offset, row, col);
-              if (semantics == RJ_ARITH_SEMANTICS_LOOSE) {
-                rocjitsu::arith::test::expect_f32(actual, golden[row][col], semantics,
-                                                  /*atol=*/1e-5, /*rtol=*/1e-5);
-              } else {
-                EXPECT_EQ(actual, std::bit_cast<uint32_t>(golden[row][col]));
-              }
-            }
-          }
-          r.expect_preserved(input, aliasing_offset, 4);
-        }
-      }
-    }
-  }
+  rocjitsu::arith::test::expect_wmma_f32_arithmetic</*Gfx11=*/false>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12, input, golden, {0, 1, 2, 3, 4, 9},
+      {0, RJ_ARITH_FP16_OVFL});
 }
 
 // Check selected finite overflow cancellation and exponent-gap boundaries.
@@ -145,8 +125,3 @@ TEST(WmmaF32BF16W64Gfx12, ExactExponentGaps) {
 }
 
 // Reject unsupported guest controls before operand access.
-TEST(WmmaF32BF16W64Gfx12, UnsupportedGuestControls) {
-  rocjitsu::arith::test::expect_unsupported_guest_controls([&](uint64_t flag) {
-    return rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12(flag, 0, nullptr, nullptr, nullptr, nullptr);
-  });
-}
