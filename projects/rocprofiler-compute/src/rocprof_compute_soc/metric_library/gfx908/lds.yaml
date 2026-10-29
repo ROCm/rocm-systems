@@ -1,0 +1,123 @@
+lds.access_rate:
+  name: LDS Access Rate
+  formula: 200 * SUM(SQ_ACTIVE_INST_LDS) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Indicates the percentage of SIMDs in the VALU actively issuing LDS instructions,
+    averaged over the lifetime of the kernel. Calculated as the ratio of the total
+    number of cycles spent by the scheduler issuing LDS instructions over the total
+    CU cycles.
+lds.addr_conflict:
+  name: LDS Address Conflicts
+  formula: SUM(SQ_LDS_ADDR_CONFLICT) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The total number of cycles spent in the LDS scheduler due to address conflicts
+    (as determined by the conflict resolution hardware) per normalization unit.
+lds.ai:
+  name: LDS Arithmetic Intensity
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu)
+  unit: FLOPs/Byte
+  description: >-
+    Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate
+    more compute per byte of LDS traffic, suggesting effective reuse of shared data
+    within a workgroup. Lower values suggest memory-bound behavior limited by LDS
+    bandwidth or bank-conflict pressure.
+lds.atomic_return_cycles:
+  name: LDS Atomic Return Cycles
+  formula: SUM(SQ_LDS_ATOMIC_RETURN) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The total number of cycles spent on LDS atomics with return per normalization
+    unit.
+lds.bank_conflict:
+  name: LDS Bank Conflict Cycles
+  formula: SUM(SQ_LDS_BANK_CONFLICT) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The total number of cycles spent in the LDS scheduler due to bank conflicts (as
+    determined by the conflict resolution hardware) per normalization unit.
+lds.bank_conflict_rate:
+  name: LDS Bank Conflict Rate
+  formula: 3.125 * SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
+  unit: Percent
+  description: >-
+    Indicates the percentage of active LDS cycles that were spent servicing bank conflicts.
+    Calculated as the ratio of LDS cycles spent servicing bank conflicts over the
+    number of LDS cycles that would have been required to move the same amount of
+    data in an uncontended access.
+lds.bank_conflicts_access:
+  name: LDS Bank Conflicts per Access
+  formula: SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
+  unit: Conflicts per Access
+  description: >-
+    The ratio of the number of cycles spent in the LDS scheduler due to bank conflicts
+    (as determined by the conflict resolution hardware) to the base number of cycles
+    that would be spent in the LDS scheduler in a completely uncontended case. This
+    is the unnormalized form of the Bank Conflict Rate.
+  peak: 32
+lds.index_accesses:
+  name: LDS Index Accesses
+  formula: SUM(SQ_LDS_IDX_ACTIVE) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The total number of cycles spent in the LDS scheduler over all operations per
+    normalization unit.
+lds.insts:
+  name: LDS Instructions
+  formula: SUM(SQ_INSTS_LDS) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of LDS (also known as shared memory) instructions (including,
+    but not limited to, read/write/atomics and HIP's __shfl instructions) executed
+    per normalization unit.
+lds.lat:
+  name: LDS Latency
+  formula: SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS)
+  unit: Cycles
+  description: >-
+    The average number of round-trip cycles (i.e., from issue to data-return acknowledgment)
+    required for an LDS instruction to complete.
+lds.mem_violations:
+  name: LDS Memory Violations
+  formula: SUM(SQ_LDS_MEM_VIOLATIONS) / SUM($denom)
+  unit: (Accesses + $normUnit)
+  description: >-
+    The total number of out-of-bounds accesses made to the LDS, per normalization
+    unit. This is unused and expected to be zero in most configurations for modern
+    CDNA accelerators.
+lds.theoretical_bw:
+  name: Theoretical LDS Bandwidth
+  formula: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Indicates the maximum amount of bytes that could have been loaded from, stored
+    to, or atomically updated in the LDS per unit time (see LDS Bandwidth example
+    for more detail). Does not take into account the execution mask of the wavefront
+    when the instruction was executed.
+  peak: $max_sclk * $cu_per_gpu * 0.128
+lds.theoretical_bw_util:
+  name: Theoretical LDS Bandwidth Utilization
+  formula: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / (0.00128 * SUM((End_Timestamp - Start_Timestamp) * $max_sclk * $cu_per_gpu))
+  unit: Percent
+  description: >-
+    Indicates the maximum amount of bytes that could have been loaded from, stored
+    to, or atomically updated in the LDS divided as percentage of theoretical peak.
+    Does not take into account the execution mask of the wavefront when the instruction
+    was executed.
+lds.unaligned_stall:
+  name: LDS Unaligned Stall
+  formula: SUM(SQ_LDS_UNALIGNED_STALL) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The total number of cycles spent in the LDS scheduler due to stalls from non-dword
+    aligned addresses per normalization unit.
+lds.util:
+  name: LDS Utilization
+  formula: 100 * SUM(SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Indicates what percent of the total CU cycles the LDS was actively executing instructions
+    (including, but not limited to, load, store, atomic and HIP's __shfl operations).
+    Calculated as the ratio of the total number of cycles LDS was active over the
+    total CU cycles.
