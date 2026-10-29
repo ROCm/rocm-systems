@@ -60,10 +60,12 @@ pub unsafe extern "C" fn hsa_ext_image_get_capability_with_layout(
     image_data_layout: u32,
     capability_mask: *mut u32,
 ) -> Status {
-    if image_data_layout != IMAGE_LAYOUT_LINEAR {
-        return INVALID_ARGUMENT;
-    }
-    unsafe { hsa_ext_image_get_capability(agent, geometry, image_format, capability_mask) }
+    boundary(|| {
+        if image_data_layout != IMAGE_LAYOUT_LINEAR {
+            return INVALID_ARGUMENT;
+        }
+        unsafe { hsa_ext_image_get_capability(agent, geometry, image_format, capability_mask) }
+    })
 }
 
 #[cfg_attr(
@@ -190,12 +192,14 @@ pub unsafe extern "C" fn hsa_amd_image_get_info_max_dim(
     attribute: u32,
     value: *mut c_void,
 ) -> Status {
-    if !(EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS..=EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS)
-        .contains(&attribute)
-    {
-        return INVALID_ARGUMENT;
-    }
-    // SAFETY: The HSA caller provides storage of the type associated with
-    // this image limit; hsa_agent_get_info validates the agent and output.
-    unsafe { crate::hsa_agent_get_info(agent, attribute, value) }
+    boundary(|| {
+        if !(EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS..=EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS)
+            .contains(&attribute)
+        {
+            return INVALID_ARGUMENT;
+        }
+        // SAFETY: The HSA caller provides storage of the type associated with
+        // this image limit; hsa_agent_get_info validates the agent and output.
+        unsafe { crate::hsa_agent_get_info(agent, attribute, value) }
+    })
 }

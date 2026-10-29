@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 use rocddi::device::gpu::profiling::{PcSamplingIntervalUnit, PcSamplingMethod, PcSamplingRequest};
 
@@ -25,18 +25,18 @@ pub(crate) struct PcSamplingState {
     /// Sessions undergoing a native transition.
     busy: HashSet<u64>,
     /// Prevents reuse after uncertain native cleanup.
-    quarantine: Arc<AtomicBool>,
+    quarantine: Arc<crate::runtime::GenerationHealth>,
     /// Trap assets retained until native users have stopped.
     retired: Vec<RetiredAssets>,
 }
 
 impl PcSamplingState {
     /// Initializes an empty PC sampling session registry.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(quarantine: Arc<crate::runtime::GenerationHealth>) -> Self {
         Self {
             sessions: HashMap::new(),
             busy: HashSet::new(),
-            quarantine: Arc::new(AtomicBool::new(false)),
+            quarantine,
             retired: Vec::new(),
         }
     }
@@ -62,7 +62,7 @@ impl PcSamplingState {
     /// Releases every native sampling session before device teardown.
     /// Failure retains the remaining state with the whole HSA generation.
     pub(crate) fn shutdown(&mut self) -> bool {
-        if self.quarantine.load(Ordering::Acquire) {
+        if self.quarantine.is_quarantined() {
             self.quarantine_all();
             return false;
         }
@@ -241,7 +241,7 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
                 if let Ok(retired) = owner.destroy() {
                     std::mem::forget(retired);
                 } else {
-                    quarantine.store(true, Ordering::Release);
+                    quarantine.quarantine();
                     owner.quarantine();
                     std::mem::forget(owner);
                 }
@@ -255,7 +255,7 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
             if let Ok(retired) = owner.destroy() {
                 std::mem::forget(retired);
             } else {
-                quarantine.store(true, Ordering::Release);
+                quarantine.quarantine();
                 owner.quarantine();
                 std::mem::forget(owner);
             }
@@ -310,7 +310,7 @@ pub(crate) fn destroy_session(session: HsaPcSampling) -> Status {
     let mut guard = match lock() {
         Ok(guard) => guard,
         Err(status) => {
-            quarantine.store(true, Ordering::Release);
+            quarantine.quarantine();
             owner.quarantine();
             if let Ok(retired) = outcome {
                 std::mem::forget(retired);
@@ -323,7 +323,7 @@ pub(crate) fn destroy_session(session: HsaPcSampling) -> Status {
             std::mem::forget(retired);
             return SUCCESS;
         }
-        quarantine.store(true, Ordering::Release);
+        quarantine.quarantine();
         owner.quarantine();
         return INVALID_RUNTIME_STATE;
     };

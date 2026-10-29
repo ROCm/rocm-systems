@@ -84,7 +84,7 @@ pub unsafe extern "C" fn hsa_memory_copy(
             }
         }
         let stop = runtime.stop_workers.clone();
-        let quarantine = runtime.memory_state.async_copy_quarantine.clone();
+        let health = runtime.health.clone();
         drop(guard);
 
         let (status, may_be_live) = match execute_sync_gpu_copy(resolved.route, &stop) {
@@ -95,7 +95,7 @@ pub unsafe extern "C" fn hsa_memory_copy(
             Err(failure) => (failure.status, failure.operands_may_be_live),
         };
         if may_be_live {
-            quarantine.store(true, Ordering::Release);
+            health.quarantine();
         }
         release_async_resources(&[], &retained, may_be_live);
         status
@@ -190,7 +190,7 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
         }
         let device = runtime.gpus[index].device.clone();
         let stop = runtime.stop_workers.clone();
-        let quarantine = runtime.memory_state.async_copy_quarantine.clone();
+        let health = runtime.health.clone();
         drop(guard);
 
         let (status, may_be_live) = match device.gpu() {
@@ -206,7 +206,7 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
             Err(error) => (map_error(error), false),
         };
         if may_be_live {
-            quarantine.store(true, Ordering::Release);
+            health.quarantine();
         }
         release_async_resources(&[], &[Some(base)], may_be_live);
         status
