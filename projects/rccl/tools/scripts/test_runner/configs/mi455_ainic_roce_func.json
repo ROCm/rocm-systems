@@ -163,8 +163,8 @@
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
       "num_ranks": 2,
-      "num_nodes": 1,
-      "num_gpus": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
       "env_variables": {
         "NCCL_DMABUF_ENABLE": "1",
         "RCCL_CTS_OFFLOAD_ENABLED": "0",
@@ -265,6 +265,8 @@
     },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
+      "num_nodes": 1,
+      "num_gpus": 2,
       "timeout": 120,
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "1"
@@ -692,17 +694,6 @@
           "name": "NetIB_Flush_AfterRecv",
           "description": "iflush completes after a GPU-memory receive",
           "test_filter": "NetIbMPITest.FlushAfterRecv"
-        }
-      ]
-    },
-    "net_ib_stress_gpu_memory": {
-      "extends": "net_ib_base",
-      "timeout": 600,
-      "tests": [
-        {
-          "name": "NetIB_Stress_GpuMemoryTransfer",
-          "description": "5 GPU alloc/transfer/flush/verify/free cycles",
-          "test_filter": "NetIbMPITest.GpuMemoryTransferStress"
         }
       ]
     },
@@ -1164,6 +1155,7 @@
     "cast_gin_error_path_unit": {
       "extends": "net_ib_base",
       "num_ranks": 1,
+      "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 60,
       "description": "White-box net_ib_cast error paths ported from net_ib (AICOMRCCL-2750); no NIC traffic.",
@@ -1441,6 +1433,11 @@
           "test_filter": "NetIbMPITest.LongRunningEndurance"
         },
         {
+          "name": "NetIB_Stress_GpuMemoryTransfer",
+          "description": "5 GPU alloc/transfer/flush/verify/free cycles",
+          "test_filter": "NetIbMPITest.GpuMemoryTransferStress"
+        },
+        {
           "name": "NetIB_Stress_RapidRecvPostDrain",
           "description": "100 cycles of post-32-recv/drain (6400 ops)",
           "test_filter": "NetIbMPITest.RapidRecvPostDrain"
@@ -1450,6 +1447,7 @@
     "net_ib_stress_4rank": {
       "extends": "net_ib_base",
       "num_ranks": 4,
+      "num_gpus": 2,
       "timeout": 600,
       "tests": [
         {
@@ -1518,6 +1516,7 @@
     "net_ib_stress_multi_qp_fanin": {
       "extends": "net_ib_base",
       "num_ranks": 4,
+      "num_gpus": 2,
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_MERGE_NICS": "1",
@@ -1726,12 +1725,6 @@
     },
     "net_ib_flush_cast": {
       "extends": "net_ib_flush",
-      "env_variables": {
-        "NCCL_NET": "IB-CAST"
-      }
-    },
-    "net_ib_stress_gpu_memory_cast": {
-      "extends": "net_ib_stress_gpu_memory",
       "env_variables": {
         "NCCL_NET": "IB-CAST"
       }
@@ -5880,9 +5873,8 @@
     },
     {
       "name": "NET IB - Flush",
-      "description": "InfiniBand GPU flush (iflush) with GDR. Disabled on MI450 AINIC: the receive into GPU memory fails with ncclInternalError before the flush is posted.",
-      "config": "net_ib_flush",
-      "enabled": false
+      "description": "InfiniBand GPU flush (iflush) with GDR",
+      "config": "net_ib_flush"
     },
     {
       "name": "NET IB - vNIC Host Buffers",
@@ -6038,15 +6030,8 @@
     },
     {
       "name": "NET IB - Stress Inline CTS",
-      "description": "CTS inline send boundary tests. Disabled on MI450 AINIC: with NCCL_IB_USE_INLINE=1 net_ib delivers corrupted data (the ib-cast twin passes).",
-      "config": "net_ib_stress_inline",
-      "enabled": false
-    },
-    {
-      "name": "NET IB - Stress GPU Memory",
-      "description": "GPU alloc/transfer/verify stress. Disabled on MI450 AINIC: receives into GPU memory time out and the data does not match.",
-      "config": "net_ib_stress_gpu_memory",
-      "enabled": false
+      "description": "CTS inline send boundary tests",
+      "config": "net_ib_stress_inline"
     },
     {
       "name": "NET IB - Initialization Tests (ib-cast)",
@@ -6150,12 +6135,6 @@
       "config": "net_ib_stress_inline_cast"
     },
     {
-      "name": "NET IB - Stress GPU Memory (ib-cast)",
-      "description": "GPU alloc/transfer/verify stress via ib-cast plugin (NCCL_NET=IB-CAST). Disabled on MI450 AINIC: receives into GPU memory time out and the data does not match.",
-      "config": "net_ib_stress_gpu_memory_cast",
-      "enabled": false
-    },
-    {
       "name": "NET IB - Multithread Independent Connections (4) (ib-cast)",
       "description": "4 worker threads/rank, each on an independent context and connection, via ib-cast plugin (NCCL_NET=IB-CAST)",
       "config": "net_ib_multithread_independent_cast"
@@ -6177,9 +6156,8 @@
     },
     {
       "name": "NET IB - Flush (ib-cast)",
-      "description": "GPU flush (iflush) via ib-cast plugin (NCCL_NET=IB-CAST). Disabled on MI450 AINIC: the receive into GPU memory fails with ncclInternalError before the flush is posted.",
-      "config": "net_ib_flush_cast",
-      "enabled": false
+      "description": "GPU flush (iflush) via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_flush_cast"
     },
     {
       "name": "Unit Tests - Fixtures (Release)",
