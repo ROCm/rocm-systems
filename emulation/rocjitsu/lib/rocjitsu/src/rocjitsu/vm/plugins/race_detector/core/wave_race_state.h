@@ -43,11 +43,11 @@ public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
 
   /// Apply the issue backpressure required before an instruction adds one
-  /// token to a finite hardware counter. This must run before checking that
-  /// instruction's operands.
+  /// token to a finite hardware counter. Call before operand checks when the
+  /// counter is known statically, or after routing for address-dependent FLAT.
   void prepareForCounterIncrement(amdgpu::WaitCounterType, uint8_t increment = 1);
 
-  /// Apply pre-operand backpressure to every counter incremented by an issue.
+  /// Apply backpressure to every counter incremented by a resolved issue.
   void prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
 
   /// Register an in-flight memory event that does not involve LDS.
@@ -94,19 +94,31 @@ public:
                    int bytesPerLane, uint8_t byteMask, amdgpu::WaitCounterType waitCounterType,
                    MemoryOrderClass memoryOrder,
                    std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
+  /// ldsLaneMask restricts LDS intervals to a subset of execMask (for mixed
+  /// FLAT). Register dependencies still use all execMask lanes, and the whole
+  /// instruction occupies one event with one set of counter obligations.
+  /// Bits outside execMask are ignored; zero records no LDS intervals.
+  /// elementBytes selects the execution granularity at the backing boundary;
+  /// zero treats the whole per-lane access as one element.
+  /// allocationEnd additionally clips complete elements to a captured workgroup
+  /// allocation without reducing register or counter participation.
   void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                        MemoryOrderClass memoryOrder);
+                        MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0},
+                        int elementBytes = 0, std::optional<uint64_t> allocationEnd = std::nullopt);
+  /// Register two LDS address sets per lane. elementBytes selects the granularity
+  /// of complete elements retained at the backing boundary; zero treats the
+  /// whole per-lane access in each address set as one element.
   void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> firstLaneBaseAddresses,
                         std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                        MemoryOrderClass memoryOrder);
+                        MemoryOrderClass memoryOrder, int elementBytes = 0);
 
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8

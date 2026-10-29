@@ -3,15 +3,38 @@
 
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
 #include <bit>
+#include <limits>
 #include <span>
 #include <stdexcept>
 
 namespace rocjitsu::plugins::race_detector {
 namespace {
+void appendLdsInterval(IntervalSet &intervals, uint32_t address, int bytes,
+                       const RaceDetector &detector, int elementBytes = 0,
+                       std::optional<uint64_t> allocationEnd = std::nullopt) {
+  if (bytes <= 0 || elementBytes < 0)
+    return;
+  bytes = static_cast<int>(
+      detector.ldsBytesInRange(address, bytes, elementBytes ? elementBytes : bytes));
+  if (allocationEnd) {
+    const uint32_t element = elementBytes ? elementBytes : bytes;
+    bytes = static_cast<int>(
+        amdgpu::whole_element_bytes_in_range(address, bytes, element, *allocationEnd));
+  }
+  // Intervals must fit the CU's logical LDS backing and the signed index type.
+  // Rejected addresses retain their event's register/counter dependencies.
+  if (bytes <= 0 || !detector.validLdsRange(address, bytes) ||
+      address > static_cast<uint32_t>(std::numeric_limits<int>::max() - bytes))
+    return;
+  const int start = static_cast<int>(address);
+  intervals.append(start, start + bytes);
+}
+
 /// RAII guard for ProfilerInterface::beginScope/endScope.
 struct ProfileScope {
   ProfilerInterface &p;
@@ -184,8 +207,8 @@ void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type, uin
     return;
 
   // An instruction cannot issue if adding its counter token would overflow the
-  // finite counter. Immediately before it reads its operands, hardware has
-  // therefore established the same upper bound as an implicit partial wait.
+  // finite counter. Once participation is known, admission establishes the
+  // same upper bound as an implicit partial wait.
   applyCounterConstraint(type, capacity - increment, /*includeUnordered=*/false);
 }
 
@@ -224,11 +247,12 @@ void WaveRaceState::registerLdsEvent(
     uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
     int waveSize, std::span<const uint32_t> laneBaseAddresses, int bytesPerLane, uint8_t byteMask,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder) {
+    MemoryOrderClass memoryOrder, uint64_t ldsLaneMask, int elementBytes,
+    std::optional<uint64_t> allocationEnd) {
   IntervalSet intervals;
-  forEachActiveLane(execMask, waveSize, [&](int lane) {
-    int addr = static_cast<int>(laneBaseAddresses[lane]);
-    intervals.append(addr, addr + bytesPerLane);
+  forEachActiveLane(execMask & ldsLaneMask, waveSize, [&](int lane) {
+    appendLdsInterval(intervals, laneBaseAddresses[lane], bytesPerLane, *detector, elementBytes,
+                      allocationEnd);
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
@@ -240,13 +264,11 @@ void WaveRaceState::registerLdsEvent(
     int waveSize, std::span<const uint32_t> firstLaneBaseAddresses,
     std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane, uint8_t byteMask,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder) {
+    MemoryOrderClass memoryOrder, int elementBytes) {
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
-    for (const auto addresses : {firstLaneBaseAddresses, secondLaneBaseAddresses}) {
-      const int addr = static_cast<int>(addresses[lane]);
-      intervals.append(addr, addr + bytesPerLane);
-    }
+    for (const auto addresses : {firstLaneBaseAddresses, secondLaneBaseAddresses})
+      appendLdsInterval(intervals, addresses[lane], bytesPerLane, *detector, elementBytes);
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
@@ -285,10 +307,8 @@ void WaveRaceState::registerDualOffsetLdsEvent(
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
     uint32_t vAddr = laneBaseAddresses[lane];
-    int intAddr0 = static_cast<int>(vAddr + static_cast<uint32_t>(offset0) * 8);
-    intervals.append(intAddr0, intAddr0 + 8);
-    int intAddr1 = static_cast<int>(vAddr + static_cast<uint32_t>(offset1) * 8);
-    intervals.append(intAddr1, intAddr1 + 8);
+    appendLdsInterval(intervals, vAddr + static_cast<uint32_t>(offset0) * 8, 8, *detector);
+    appendLdsInterval(intervals, vAddr + static_cast<uint32_t>(offset1) * 8, 8, *detector);
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, 0xF, std::move(intervals),

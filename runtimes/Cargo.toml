@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 [package]
@@ -18,7 +19,7 @@ doctest = false
 
 [dependencies]
 libamdf = { path = "ddi/libamdf" }
-libhsa = { path = "hsa/libhsa" }
+libhsa = { path = "ddi/libhsa" }
 
 [lints.rust]
 missing_docs = "deny"
@@ -33,7 +34,14 @@ unreachable = "deny"
 unwrap_used = "deny"
 
 [workspace]
-members = ["ddi/rocddi", "ddi/libamdf", "hsa/libhsa"]
+members = [
+    "ddi/rocddi",
+    "ddi/libamdf",
+    "ddi/libhsa",
+    "loader/rocelf",
+    "image/rocaddr3",
+    "loader/rocloader",
+]
 resolver = "3"
 
 [workspace.package]

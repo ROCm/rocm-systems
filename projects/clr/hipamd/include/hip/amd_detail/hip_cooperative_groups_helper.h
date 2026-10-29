@@ -302,16 +302,19 @@ __CG_STATIC_QUALIFIER__ void sync() {
 // have i-th bit of x set and come before the current thread.
 __CG_STATIC_QUALIFIER__ unsigned int masked_bit_count(lane_mask x, unsigned int add = 0) {
   unsigned int counter = 0;
-  if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_lo)) __builtin_trap();
-  if (static_cast<int>(warpSize) == 32) {
-    counter = __builtin_amdgcn_mbcnt_lo(static_cast<unsigned int>(x), add);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_lo)) {
+    if (static_cast<int>(warpSize) == 32) {
+      counter = __builtin_amdgcn_mbcnt_lo(static_cast<unsigned int>(x), add);
+    } else {
+      unsigned int lo = static_cast<unsigned int>(x & 0xFFFFFFFF);
+      unsigned int hi = static_cast<unsigned int>((x >> 32) & 0xFFFFFFFF);
+      counter = __builtin_amdgcn_mbcnt_lo(lo, add);
+      counter = __builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_hi)
+                    ? __builtin_amdgcn_mbcnt_hi(hi, counter)
+                    : counter;
+    }
   } else {
-    unsigned int lo = static_cast<unsigned int>(x & 0xFFFFFFFF);
-    unsigned int hi = static_cast<unsigned int>((x >> 32) & 0xFFFFFFFF);
-    counter = __builtin_amdgcn_mbcnt_lo(lo, add);
-    counter = __builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_hi)
-                  ? __builtin_amdgcn_mbcnt_hi(hi, counter)
-                  : counter;
+    __builtin_trap();
   }
 
   return counter;
@@ -437,10 +440,12 @@ template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank
 
 __CG_STATIC_QUALIFIER__ unsigned int query_shared_rank(const void* in) {
 #if __has_builtin(__builtin_amdgcn_query_shared_rank)
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_query_shared_rank))
-    return static_cast<unsigned int>(
-        __builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
-  __builtin_trap();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_query_shared_rank)) {
+    return static_cast<unsigned int>(__builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
+  } else {
+    __builtin_trap();
+    return 0;
+  }
 #else
   return 0;
 #endif

@@ -58,10 +58,17 @@
 namespace rocr {
 namespace AMD {
 
+/// @brief Creates a string_view of the agent's architecture name from the node properties.
+static std::string_view GetArchName(const HsaNodeProperties& node_props) {
+  const char* name = reinterpret_cast<const char*>(node_props.AMDName);
+  return std::string_view(name, ::strnlen(name, sizeof(node_props.AMDName)));
+}
+
 AieAgent::AieAgent(uint32_t node, const HsaNodeProperties& node_props)
     : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::XDNA), node,
                   core::Agent::DeviceType::kAmdAieDevice),
-      node_props_(node_props) {
+      node_props_(node_props),
+      arch_name_(GetArchName(node_props_)) {
   InitRegionList();
   InitAllocators();
 }
@@ -295,8 +302,7 @@ hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 
   if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  auto aql_queue(
-      new AieAqlQueue(shared_queue, this, size, node_id(), event_callback, data, flags));
+  auto aql_queue(new AieAqlQueue(shared_queue, this, size, node_id(), event_callback, data, flags));
   if (aql_queue == nullptr) {
     core::Runtime::runtime_singleton_->system_deallocator()(shared_queue);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -326,8 +332,8 @@ void AieAgent::InitRegionList() {
   // We use HSA_HEAPTYPE_DEVICE_SVM so that the recommended
   // HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE is 0. We can use that to determine if a pool
   // is regular pool or dev heap.
-  // The system will report the max allocatable size as MemoryRegion::max_sysmem_alloc_size_, but
-  // this is incorrect. The pool is exactly XdnaDriver::GetDevHeapByteSize() bytes.
+  // The pool reports its max allocatable size as MemoryRegion::max_single_alloc_size_, which is
+  // exactly XdnaDriver::GetDevHeapByteSize() bytes.
   HsaMemoryProperties dev_mem_props = {};
   dev_mem_props.HeapType = HSA_HEAPTYPE_DEVICE_SVM;
   dev_mem_props.SizeInBytes = XdnaDriver::GetDevHeapByteSize();

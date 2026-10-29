@@ -150,7 +150,7 @@ static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool
   return ncclSuccess;
 }
 
-static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv,
+static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv, ncclFunc_t collAPI,
                                                 bool* needPreconnect) {
   struct ncclKernelPlanner* planner = &comm->planner;
   uint8_t base;
@@ -162,9 +162,12 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
   // Mark channels that need pre-connect. planner->peers[peer].send/recvSeen is
-  // private to each comm, so we need to set it anyway.
-  (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
-  for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
+  // private to each comm, so we need to set it anyway. Leave it clear when only
+  // some parts are connected, so a later task to this peer still connects the rest.
+  int nParts = rcclP2pTaskParts(comm, collAPI);
+  if (nParts == comm->p2pnChannelsPerPeer)
+    (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
+  for (int c = 0; c < nParts; c++) {
     int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
                                           comm->p2pChannelShiftSize);
 
@@ -335,6 +338,7 @@ static ncclResult_t postTuneRmaTaskAppend(struct ncclComm* comm, const struct nc
     return ncclInvalidArgument;
   }
 
+#if !defined(__HIP_PLATFORM_AMD__)
   int driverVersion;
   NCCLCHECK(ncclCudaDriverVersion(&driverVersion));
   if (driverVersion < 12050) {
@@ -342,10 +346,19 @@ static ncclResult_t postTuneRmaTaskAppend(struct ncclComm* comm, const struct nc
          (driverVersion % 1000) / 10);
     return ncclInvalidUsage;
   }
+#endif
 
   // Check if signal index is valid
   if (sigIdx < 0 || sigIdx >= comm->config.numRmaSig) {
     WARN("Signal index %d is invalid (must be in [0, %d))", sigIdx, comm->config.numRmaSig);
+    return ncclInvalidArgument;
+  }
+
+  // Check if context is valid: 0 <= ctx < numRmaCtx.
+  // WaitSignal carries ctx per descriptor (info/raw ctx is unused); those are
+  // validated in the descriptor loop below.
+  if (func != ncclFuncWaitSignal && (ctx < 0 || ctx >= comm->config.numRmaCtx)) {
+    WARN("Context %d is invalid (must be in [0, %d))", ctx, comm->config.numRmaCtx);
     return ncclInvalidArgument;
   }
 
@@ -418,6 +431,18 @@ static ncclResult_t postTuneRmaTaskAppend(struct ncclComm* comm, const struct nc
       if (signalDescs[i].sigIdx < 0 || signalDescs[i].sigIdx >= comm->config.numRmaSig) {
         WARN("ncclWaitSignal: descriptor %d has invalid sigIdx %d (must be in [0, %d))", i, signalDescs[i].sigIdx,
              comm->config.numRmaSig);
+        return ncclInvalidArgument;
+      }
+      if (signalDescs[i].ctx < 0 || signalDescs[i].ctx >= comm->config.numRmaCtx) {
+        WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, signalDescs[i].ctx,
+             comm->config.numRmaCtx);
+        return ncclInvalidArgument;
+      }
+      // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
+      // sees these descriptors (ncclWaitSignal passes root = 0).
+      if (signalDescs[i].peer < 0 || signalDescs[i].peer >= comm->nRanks) {
+        WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, signalDescs[i].peer,
+             comm->nRanks);
         return ncclInvalidArgument;
       }
     }
@@ -901,7 +926,7 @@ static ncclResult_t postTuneP2pTasks(
     struct ncclRawTaskSendRecv* raw = &tInfo->raw->sendRecv;
     bool isSendNotRecv = raw->func == ncclFuncSend;
 
-    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, &needPreconnect));
+    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, raw->collAPI, &needPreconnect));
   }
 
   if (needPreconnect) {

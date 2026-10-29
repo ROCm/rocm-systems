@@ -46,9 +46,17 @@ void L2Cache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coheren
   coherence_->register_l2_cache(this);
 }
 
-std::shared_lock<util::DistributedSharedMutex> L2Cache::acquire_cache_access() {
+std::shared_lock<L2Cache::MaintenanceMutex> L2Cache::acquire_cache_access() {
+  std::shared_lock access_lock(maintenance_mutex_);
+  if (coherence_epoch_ == coherence_->current_epoch())
+    return access_lock;
+
+  access_lock.unlock();
+  // Only stale readers serialize here. Recheck under shared admission so peers
+  // reuse completed reconciliation instead of each closing the reader gate.
+  std::lock_guard reconcile_lock(epoch_reconcile_mutex_);
   for (;;) {
-    std::shared_lock access_lock(maintenance_mutex_);
+    access_lock.lock();
     if (coherence_epoch_ == coherence_->current_epoch())
       return access_lock;
 
@@ -58,7 +66,7 @@ std::shared_lock<util::DistributedSharedMutex> L2Cache::acquire_cache_access() {
   }
 }
 
-std::unique_lock<util::DistributedSharedMutex> L2Cache::acquire_cache_maintenance() {
+std::unique_lock<L2Cache::MaintenanceMutex> L2Cache::acquire_cache_maintenance() {
   std::unique_lock maintenance_lock(maintenance_mutex_);
   synchronize_epoch_locked();
   return maintenance_lock;

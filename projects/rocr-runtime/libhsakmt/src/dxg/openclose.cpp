@@ -546,6 +546,11 @@ ErrorCode hsakmtRuntime::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt
     if (size >= GPU_HUGE_PAGE_SIZE)
         align = GPU_HUGE_PAGE_SIZE;
 
+    if (!handle_aperture_mgr_) {
+        *out_gpu_virt_addr = 0;
+        return ErrorCode::OutOfHandleApeMemory;
+    }
+
     *out_gpu_virt_addr = handle_aperture_mgr_->Alloc(size, align);
     if (*out_gpu_virt_addr == 0)
         return ErrorCode::OutOfHandleApeMemory;
@@ -554,7 +559,9 @@ ErrorCode hsakmtRuntime::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt
 }
 
 void hsakmtRuntime::HandleApertureFree(gpusize gpu_addr) {
-    handle_aperture_mgr_->Free(gpu_addr);
+    if (handle_aperture_mgr_) {
+        handle_aperture_mgr_->Free(gpu_addr);
+    }
 }
 
 /* is_forked_child detects when the process has forked since the last
@@ -704,6 +711,13 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   // Check available system memory before allocation if WSL_CHECK_AVAIL_SYSRAM is "1".
   if ((envvar = getenv("WSL_CHECK_AVAIL_SYSRAM")) != nullptr) {
     dxg_runtime->check_avail_sysram = (envvar[0] == '1' && envvar[1] == '\0');
+  }
+
+  // Leave the dependency POLL_REGMEM packets in the ring for the SDMA engine to execute if
+  // HSA_ENABLE_SDMA_GPU_POLL is "1", instead of waiting them out and stripping them on a host
+  // thread. Only meaningful on a native SDMA user queue. Defaults off: gpu poll is stuck in KMD.
+  if ((envvar = getenv("HSA_ENABLE_SDMA_GPU_POLL")) != nullptr) {
+    dxg_runtime->sdma_gpu_poll_ = (envvar[0] == '1' && envvar[1] == '\0');
   }
 
   // Set default GPU node based on ROCR_VISIBLE_DEVICES. Extract the first numeric value

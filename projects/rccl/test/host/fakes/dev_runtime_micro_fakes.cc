@@ -33,6 +33,7 @@
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
+#include "fakes/signature-drift.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -97,14 +98,21 @@ ncclResult_t bootstrapIntraNodeAllGather(void* bs, int* ranks, int self, int siz
   return g_devrBootstrapIntraNodeAllGather(bs, ranks, self, size, buf, bytes);
 }
 
-// ---------------------------------------------------------------------------
-// Arg checks / comm readiness.
-// ---------------------------------------------------------------------------
-ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSuccess; }
-ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
-// Seam: NCCLCHECK'd on entry to ncclCommWindowRegister_impl, so the
-// not-ready rejection is only reachable by driving it.
+static ncclResult_t DefaultBootstrapSend(void*, int, int, void*, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapSend = DefaultBootstrapSend;
+ASSERT_HOOK_MATCHES_PROD(g_devrBootstrapSend, bootstrapSend);
 
+ncclResult_t bootstrapSend(void* bs, int peer, int tag, void* data, int size) {
+  return g_devrBootstrapSend(bs, peer, tag, data, size);
+}
+
+static ncclResult_t DefaultBootstrapRecv(void*, int, int, void*, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv = DefaultBootstrapRecv;
+ASSERT_HOOK_MATCHES_PROD(g_devrBootstrapRecv, bootstrapRecv);
+
+ncclResult_t bootstrapRecv(void* bs, int peer, int tag, void* data, int size) {
+  return g_devrBootstrapRecv(bs, peer, tag, data, size);
+}
 
 // ---------------------------------------------------------------------------
 // Public registration API.
@@ -140,20 +148,13 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // Group state machine.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Param loader.
-// ---------------------------------------------------------------------------
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) *cache = deftVal;
-  if (noCache) *noCache = 0;
-  return deftVal;
-}
-
 // Emitted by init.cc, which this binary does not link, so the redirected
 // NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
 // like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0
 // opt-out in ncclCommWindowRegister_impl.
 int64_t ncclParamWinEnable() { return g_loadParam("WIN_ENABLE", 1); }
+// Emitted by rocmwrap.cc; read by the host VMM GIN fail-closed check.
+int64_t ncclParamDmaBufEnable() { return g_loadParam("DMABUF_ENABLE", 1); }
 
 // ---------------------------------------------------------------------------
 // Proxy.
@@ -295,11 +296,16 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm*, ncclGinType_t* ginType) {
   if (ginType) *ginType = NCCL_GIN_TYPE_NONE;
   return ncclSuccess;
 }
-ncclResult_t ncclGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
+// Seam: ncclDevrCommCreateInternal latches GIN only after this succeeds.
+static ncclResult_t DefaultGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce = DefaultGinConnectOnce;
+
+ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnectOnce(comm); }
 ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*) {
   return ncclSuccess;
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+void ncclGinDevCommClearFields(struct ncclDevComm*) {}
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
 // which is itself behind ENABLE_ROCSHMEM_GIN. Copied from develop's
@@ -311,26 +317,34 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm*, void*, size
 // Seams: symMemoryRegisterGin NCCLCHECKs both, and its rollback path is only
 // observable through the deregister count.
 static ncclResult_t DefaultGinRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                                       ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int) {
+                                       ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
+                                       uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int) {
   return ncclSuccess;
 }
 std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                           ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>
+                           ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int,
+                           bool, int)>
     g_devrGinRegister = DefaultGinRegister;
 
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* addr, size_t size,
                              void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
-                             ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS], int winFlags, bool multiSegment,
-                             int memType) {
-  return g_devrGinRegister(comm, addr, size, hostWins, devWins, winFlags, multiSegment, memType);
+                             ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS],
+                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS], int winFlags,
+                             bool multiSegment, int memType) {
+  return g_devrGinRegister(comm, addr, size, hostWins, devWins, ginWinGenerations, winFlags, multiSegment, memType);
 }
 
-static ncclResult_t DefaultGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }
-std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_devrGinDeregister =
-    DefaultGinDeregister;
+static ncclResult_t DefaultGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
+                                         uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
+                           uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS])>
+    g_devrGinDeregister = DefaultGinDeregister;
 
-ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* hostWins[NCCL_GIN_MAX_CONNECTIONS]) {
-  return g_devrGinDeregister(comm, hostWins);
+ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
+                               uint32_t const ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+  return g_devrGinDeregister(comm, hostWins, ginWinGenerations);
 }
 
 // ---------------------------------------------------------------------------
@@ -403,6 +417,18 @@ std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos =
 
 ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) { return g_devrBuildGinSegmentInfos(mem); }
 
+// Real body lives in dev_runtime_segments.cc. dev-runtime-test.cc compiles that
+// file as RealDevrCheckRegistrationSupport so this seam stays injectable; the
+// fixture points the hook at the real body.
+static ncclResult_t DefaultCheckRegistrationSupport(void*, size_t, struct ncclComm*, bool, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, size_t, struct ncclComm*, bool, int)> g_devrCheckRegistrationSupport =
+    DefaultCheckRegistrationSupport;
+
+ncclResult_t ncclDevrCheckRegistrationSupport(void* userPtr, size_t userSize, struct ncclComm* comm,
+                                              bool hasSysmemSegment, int winFlags) {
+  return g_devrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment, winFlags);
+}
+
 // ---------------------------------------------------------------------------
 // Team accessors (host variants).
 // ---------------------------------------------------------------------------
@@ -418,7 +444,7 @@ static ncclTeam_t DefaultTeamWorld(ncclComm_t comm) {
 }
 std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld = DefaultTeamWorld;
 extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return g_devrTeamWorld(comm); }
-extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) { return ncclTeam_t{}; }
+// ncclTeamRail is in devcomm_fakes.cc.
 
 // The CFT teams, read by symMemoryObtain and ncclDevrCommCreateInternal. Same
 // shape as the real host accessors in nccl_device/core.cc, reading the sizes
@@ -475,15 +501,18 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct nc
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
 extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsaBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = {};
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = {};
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = {};
   return ncclSuccess;
 }
 
@@ -527,6 +556,9 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapIntraNodeBarrier               = DefaultIntraNodeBarrier;
   g_devrBootstrapIntraNodeAllGather             = DefaultIntraNodeAllGather;
   g_devrBootstrapAllGather                      = DefaultAllGather;
+  g_devrBootstrapSend                           = DefaultBootstrapSend;
+  g_devrBootstrapRecv                           = DefaultBootstrapRecv;
+  g_devrGinConnectOnce                          = DefaultGinConnectOnce;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
@@ -552,6 +584,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_devrVerifySegmentLayouts                = DefaultVerifySegmentLayouts;
   g_devrBuildGinSegmentInfos                = DefaultBuildGinSegmentInfos;
+  g_devrCheckRegistrationSupport            = DefaultCheckRegistrationSupport;
 
   // Not a hook either, but 12 tests assign it directly to steer the
   // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}

@@ -70,6 +70,9 @@ def test_pc_sampling_analyze_kernel_filter(
     assert "0.1 Top Kernels" in captured.out
     assert "0.2 Dispatch List" in captured.out
     assert "21. PC Sampling" in captured.out
+    pc_sampling_output = captured.out.split("21. PC Sampling", maxsplit=1)[1]
+    assert "issue_count" in pc_sampling_output
+    assert "stall_count" in pc_sampling_output
 
     common.clean_output_dir(True, workload_dir)
 
