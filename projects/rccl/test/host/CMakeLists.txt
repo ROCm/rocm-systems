@@ -971,9 +971,8 @@ function(rccl_define_micro_source_lists)
 
   # rccl-UnitTestsMicroTransport -- src/transport/. Tests mirror that tree
   # under test/host/transport; one binary owns the subsystem's shared socket,
-  # network and GDRCopy seams. No two TUs share a basename (llvm-cov keys
-  # static functions by it), so net_ib/net-ib-p2p-test.cc and the
-  # net_ib_cast/ tests carry a prefix.
+  # network and GDRCopy seams.
+  # No two TUs may share a basename (see MICROTEST_README.md).
   set(TEST_MICRO_TRANSPORT_SOURCE_FILES
     transport/coll-net-test.cc
     transport/net-socket-test.cc
@@ -2314,9 +2313,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     ${_MICRO_MODE_DEFS}
     ${_MICRO_DMABUF_EXPORT_DEF}  # standalone: the cuMem DMA-BUF arms in-build gets from rccl
     ${_MICRO_AMDSMI_DEF}         # graph/xml.cc
-    # Shipping builds set it. It gates the *gid_inspect.cc units and net_ib_ops_fault.cc whole, plus fault
-    # hooks in cast common.cc, p2p.cc and scheduler.cc and fields of net_ib_cast's ncclIbNetCommBase, so
-    # every TU must agree on it.
+    # Shipping builds set it; it gates whole TUs and net_ib_cast's ncclIbNetCommBase fields, so every TU must agree.
     ENABLE_FAULT_INJECTION
     COLL_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/coll_net.cc"
     NET_IB_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc"

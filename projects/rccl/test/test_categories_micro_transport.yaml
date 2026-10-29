@@ -15,9 +15,6 @@ test_categories:
       - "GuardOperands/P2pAllocateSkipMarkExport.*"
       - "MappingStages/P2pImportMapStageFails.*"
       - "Net*"  # net.cc; also matches the NetIb, NetSocket and NetTelemetry suites
-      - "NetIb*"
-      - "NetSocket*"
-      - "NetTelemetry*"
       - "Nvls*"
       - "P2p*"
       - "RmaSocket*"
