@@ -1,6 +1,8 @@
-# Phase 2 -- Display / View (Stages 5-8)
+# Phase B -- Display / View (Stages 5-8)
 
 Parent: [LLD index](lld-index.md)
+
+Stage dependencies: [Stage dependencies and parallelism](lld-index.md#stage-dependencies-and-parallelism).
 
 
 ## Stage 5 -- Layer 3 schema
@@ -34,6 +36,7 @@ New module `src/utils/layer3_schema.py`.
 | `archs` | list[str] | no | Metric-level arch filter |
 | `label` | str | no | Display name override for this view |
 | `unit` | str | no | Display unit for this view, e.g. `Bytes/s` for a metric defined in `GB/s` |
+| `description_note` | str | no | Sentence appended to the metric's description in this view, saying how the view shows it, e.g. "This is also presented as a percent of the peak theoretical bandwidth." |
 
 **Render type mapping to current table types:**
 
@@ -54,10 +57,6 @@ set.
 
 Valid view passes validation; missing metric id fails; invalid arch name fails;
 label override preserved in output.
-
-### Dependencies
-
-None. Can be developed in parallel with Phase 1 stages.
 
 
 ## Stage 6 -- Layer 3 reader
@@ -81,15 +80,17 @@ New module `src/utils/layer3_reader.py`.
    itself stays uniform; only the view's display changes.
 
 Display adjustments such as unit scaling, rounding and aggregation wrappers belong in code,
-not in static YAML. The views must reproduce every column of today's tables (`min`, `max`,
-`std dev`, ...) before Stage 8 deletes the panel files: the metric library keeps only each
-row's main column.
+not in static YAML. The metric library keeps only each row's main column
+([Phase A](lld-phase-a-metric-library.md#layer-2-metric-schema)). A view's `header`
+declares every column of the table (`min`, `max`, `std dev`, ...), and the code generates
+each column's wrapped form from a per-kernel expression, as the `simple_box` tables
+already do for `MIN/Q1/MEDIAN/Q3/MAX`.
 
 `views_to_panel_configs(views: list[ViewDefinition], library: MetricLibrary) -> OrderedDict[int, dict]`:
 
 Translates view objects into the same `OrderedDict[int, dict]` consumed by
-`build_dfs()`. This replaces Stage 3's `layer2_to_panel_configs()` as the permanent
-translation from the new format to the existing pipeline.
+`build_dfs()`. It is the translation from the new format to the existing pipeline; Phase
+A ships no adapter (see [Stage 3](lld-phase-a-metric-library.md#stage-3----equivalence-with-the-analysis-configs)).
 
 - Panel IDs: from `legacy_panel_id` during transition, or from view ordering when
   legacy IDs are removed.
@@ -105,10 +106,6 @@ translation from the new format to the existing pipeline.
 - Arch filtering: views and metric refs correctly included/excluded per arch.
 - Label override: display name comes from view label when present, metric name
   otherwise.
-
-### Dependencies
-
-Stages 2 and 5.
 
 
 ## Stage 7 -- View file authoring
@@ -228,6 +225,9 @@ One-time script `tools/generate_views_from_panels.py`:
 4. Preserve `label` overrides where the current display name differs from the
    canonical `name` -- the 234 cases of intentional name variation identified in the
    HLD's static analysis.
+5. Preserve, as `description_note`, each sentence a panel adds to a metric's description
+   about how the panel shows it (the library descriptions leave these out; Phase A
+   lists them in the PR #13522 description review).
 
 ### Validation
 
@@ -236,13 +236,8 @@ One-time script `tools/generate_views_from_panels.py`:
 - All metrics referenced by views exist in `MetricLibrary`.
 - Label overrides are correct (checked against the 234 known cases).
 
-### Dependencies
 
-Stage 4 (metrics must be migrated before views can reference them) and Stage 5
-(view schema).
-
-
-## Stage 8 -- Adapter retirement
+## Stage 8 -- Cutover
 
 ### Modifications
 
@@ -260,15 +255,13 @@ Every production reader of the old analysis config tree moves to the new path:
 `load_panel_configs()` in `utils/utils_common.py` then has no production caller. The
 unused copy in `utils/file_io.py` is deleted.
 
-**Fallback for one release:** the new path becomes the default, and the old path stays
-for one release behind a hidden option that routes every reader above back to it: the old
-panel config files, `load_panel_configs()`, the YAML counter scan in `detect_counters()`
-and the hardcoded built-in variables. If the new path misbehaves in the field, users and
-support can switch back without a new build. The next release removes the option and all
-of the old path, along with the tooling listed below.
+**No fallback release:** the cutover release makes the new path the only path and removes
+the old one: the old panel config files, `load_panel_configs()`, the YAML counter scan in
+`detect_counters()` and the hardcoded built-in variables, along with the tooling listed
+below ([cutover timeline](lld-index.md#cutover-timeline)).
 
 **`generate_configs()` in `analysis_base.py`** -- the new path replaces the
-`load_panel_configs()` call as the default path:
+`load_panel_configs()` call:
 
 ```python
 library = load_metric_library(METRIC_LIBRARY_DIR, arch)
@@ -276,14 +269,12 @@ views = load_views(view_dirs, arch, library)
 ac.panel_configs = views_to_panel_configs(views, library)
 ```
 
-The `load_panel_configs()` call moves behind the fallback option.
 
 **`detect_counters()` in `soc_base.py`** -- counter detection goes through
-`MetricLibrary.get_counters_for_metrics()` by default; the YAML-text scan moves behind the
-fallback option.
+`MetricLibrary.get_counters_for_metrics()`; the YAML-text scan is removed.
 
 **`get_build_in_vars()` in `utils_counter_defs.py`** -- loads from
-`MetricLibrary.variables` by default; the hardcoded dicts move behind the fallback option.
+`MetricLibrary.variables`; the hardcoded dicts are removed.
 
 **`-b` / `--filter-blocks`** -- string metric IDs are the primary format. Numeric
 IDs produce a deprecation warning with the equivalent string ID:
@@ -296,16 +287,7 @@ WARNING: Numeric metric ID '11.2.3' is deprecated.
 `convert_metric_id_to_panel_info()` remains during the deprecation window for
 backward compatibility.
 
-**Legacy mapping** -- the transition-only mapping that carries `legacy_id` per table row
-is removed.
-
 **`legacy_panel_id`** -- removed from all Layer 3 view files.
-
-**Old panel config YAML files** -- removed from per-arch directories one release after
-the cutover (see the fallback above). The base arch and `views/` directories are the
-canonical source.
-
-**`compat_adapter.py`** -- removed.
 
 ### Tooling cleanup
 
@@ -323,24 +305,17 @@ canonical source.
   the default. Zero failures.
 - Columns: the views reproduce every column of every analysis config table, not only the
   main one, before any panel file is deleted.
-- Output equivalence: for every architecture, compare analyze text output to a
-  golden file captured before migration.
-- Counter extraction: for every architecture, compare `detect_counters()` output to
-  golden file.
+- Golden files: for every architecture, analyze text output and `detect_counters()`
+  output match the pre-migration capture
+  ([Risk mitigation](lld-index.md#risk-mitigation-metric-value-validation)).
 - Pre-commit hooks: all pass with the new file structure.
-- Fallback: with the hidden option set, analyze, the list commands and profile counters
-  match the pre-cutover output.
 - Documentation pipeline: Sphinx-generated metric reference is identical to
   pre-migration version.
-
-### Dependencies
-
-Stages 3, 6, 7.
 
 
 ## Set display
 
-Sets are defined in Layer 2 (see Phase 1, "Sets migration"). What Layer 3 decides is how a
+Sets are defined in Layer 2 (see [Sets migration](lld-phase-a-metric-library.md#sets-migration)). What Layer 3 decides is how a
 set's results are shown:
 
 - **Which panels analyze shows after `profile --set`.** Today the set's numeric IDs are
