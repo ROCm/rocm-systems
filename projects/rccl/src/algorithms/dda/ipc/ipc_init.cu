@@ -210,7 +210,7 @@ ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  auto* barrierState = static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
+  auto* barrierState = comm->ddaIpcBarrierState;
   if (barrierState != nullptr && barrierState->resources != nullptr &&
       barrierState->resources->ipcMemHandler != nullptr) {
     ncclResult_t closeResult = barrierState->resources->ipcMemHandler->closePeerMappings();
@@ -237,11 +237,11 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   // commFree must remain non-collective. Normal destruction closes mappings
   // from commDestroySync before its existing intranode barrier; this idempotent
   // call handles abort, revoke, and partial-init cleanup locally.
-  (void)ncclDdaIpcCommClosePeerMappings(comm);
+  ncclResult_t closeResult = ncclSuccess;
+  NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(comm), closeResult);
 
-  auto* barrierState = static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
   if (comm->ddaIpcBarrierState != nullptr) {
-    delete barrierState;
+    delete comm->ddaIpcBarrierState;
     comm->ddaIpcBarrierState = nullptr;
   }
   CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
