@@ -637,5 +637,28 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutUsesWindowsOfItsBackendIndex) 
       /*strongSignals=*/true, /*lastHasCounter=*/true);
 }
 
+// Device-only put on backend 1 reads ginMultiSegmentWins[backendIndex * numSegments].ginWins[connection 0] for both
+// windows, not the default-backend token or backend 0's segment.
+TEST_F(GinBackendMaskDispatchTest, DevicePutUsesWindowOfItsBackendIndex) {
+  constexpr uintptr_t kS0 = 0x5C6100, kS1 = 0x5C6200, kB1S0 = 0x5C6300, kB1S1 = 0x5C6400;
+  constexpr uintptr_t kD0 = 0xD56100, kD1 = 0xD56200, kB1D0 = 0xD56300, kB1D1 = 0xD56400;
+  ASSERT_NO_FATAL_FAILURE(uploadMultiSegmentWindow(
+      d_srcWin_, d_srcSegs_, kSrcToken, kSrcOffset4K,
+      {{kS0, 64, kDev}, {kS1, 64, kDev}, {kB1S0, 64, kDev}, {kB1S1, 64, kDev}}, /*numBackends=*/2));
+  ASSERT_NO_FATAL_FAILURE(uploadMultiSegmentWindow(
+      d_dstWin_, d_dstSegs_, kDstToken, kDstOffset4K,
+      {{kD0, 100, kDev}, {kD1, 100, kDev}, {kB1D0, 100, kDev}, {kB1D1, 100, kDev}}, /*numBackends=*/2));
+  ncclDevComm comm = makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA);
+  comm.backendIndex = 1;
+  PutArgs args = defaultArgs();
+  const std::vector<ExpectedChunk> chunks = {
+      {kB1D0, ginOffset(kDstOffset4K, args.dstOff), kB1S0, ginOffset(kSrcOffset4K, args.srcOff), args.bytes,
+       args.required},
+  };
+  expectPutChunks<ncclGin_SegmentDevice>(comm, kEfaSlot, args, ncclGin_SignalInc{args.signalId},
+      ncclGin_CounterInc{args.counterId}, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
+      /*strongSignals=*/true, /*lastHasCounter=*/true);
+}
+
 }  // namespace
 }  // namespace RcclUnitTesting
