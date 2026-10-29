@@ -25,12 +25,7 @@ cases:
         kind: disabled
         reason: "rocJitsu does not execute image_store, which hipMemcpy3D to and from a hipArray needs on image-capable archs"
         issue: "https://github.com/ROCm/rocm-systems/issues/14612"
-  Unit_HRR_AllApis_Direct:
-    skip:
-      - when: {arch: ["gfx90a", "gfx11*", "gfx120*"], emulator: true}
-        kind: disabled
-        reason: "rocJitsu does not execute image_store, which hipMemcpy3D to and from a hipArray needs on image-capable archs"
-        issue: "https://github.com/ROCm/rocm-systems/issues/14612"
+  Unit_HRR_AllApis_Direct: {}
   Unit_HRR_ApiMatrix_Breadth2_Direct: {}
   Unit_HRR_ApiMatrix_Breadth_Direct: {}
   Unit_HRR_ApiMatrix_Deprioritised_Direct: {}
