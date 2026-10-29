@@ -105,8 +105,11 @@ ExpandResult lower_accvgpr_read(const Instruction &inst) {
                                 std::to_string(src_acc));
   const uint16_t src_unified = src_acc - 512;
 
-  if (dst_vgpr == src_unified)
-    return ExpandResult::success({build_s_nop()});
+  if (dst_vgpr == src_unified) {
+    constexpr util::FailureOr<uint32_t> nop = build_s_nop();
+    static_assert(nop.succeeded());
+    return ExpandResult::success({nop.value()});
+  }
 
   return ExpandResult::success(
       {build_v_mov_b32(static_cast<uint8_t>(dst_vgpr), static_cast<uint16_t>(256 + src_unified))});
@@ -283,7 +286,11 @@ ExpandResult expand_accvgpr_write(const Instruction &, uint32_t, uint64_t, std::
                                   const LaneLayout *, const LaneLayout *) {
   // AccVGPR writes are already represented by the unified VGPR mapping that
   // descriptor translation reserves for RDNA targets.
-  return ExpandResult::success({build_s_nop()});
+  {
+    constexpr util::FailureOr<uint32_t> nop = build_s_nop();
+    static_assert(nop.succeeded());
+    return ExpandResult::success({nop.value()});
+  }
 }
 
 ExpandResult expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uint64_t,

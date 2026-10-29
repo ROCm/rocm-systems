@@ -130,7 +130,7 @@ struct XcdDistributionFixture {
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kKdAddr);
     memory->write32(kKdAddr + sizeof(kernel_descriptor_t),
-                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value());
   }
 };
 
@@ -158,11 +158,11 @@ struct Cdna5ScratchTopologyFixture {
     kd.private_segment_fixed_size = 64;
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5ScratchKdAddr);
     memory->write32(kCdna5ScratchKdAddr + sizeof(kernel_descriptor_t),
-                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value());
     kd.private_segment_fixed_size = 0;
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kCdna5PlainKdAddr);
     memory->write32(kCdna5PlainKdAddr + sizeof(kernel_descriptor_t),
-                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+                    build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value());
   }
 };
 
@@ -180,7 +180,7 @@ void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes,
   RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   kd.private_segment_fixed_size = private_bytes;
   memory.load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
-  memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t), build_s_endpgm(arch));
+  memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t), build_s_endpgm(arch).value());
 }
 
 // Minimal CDNA3 (GFX9) DS GWS op issue for the cross-XCD rendezvous regressions.
@@ -1460,8 +1460,11 @@ TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAl
   using namespace rocjitsu::amdhsa;
   struct alignas(64) Kernel {
     kernel_descriptor_t kd{};
-    uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+    uint32_t endpgm = 0;
   } kernel;
+  util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm.succeeded());
+  kernel.endpgm = maybe_s_endpgm.value();
   constexpr uint64_t kKernelVa = 0x20000;
   constexpr uint64_t kRingVa = 0x30000;
   constexpr uint64_t kQueueVa = 0x40000;

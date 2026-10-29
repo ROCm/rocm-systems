@@ -190,11 +190,11 @@ protected:
     wrapper_ = make_wrapper_image();
     ASSERT_FALSE(wrapper_.empty()) << "could not build the kernarg wrapper";
 
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value();
     // Inline constant 0 is scalar-source code 128.
-    const uint32_t clobber_s0 = build_s_mov_b32(0, 128, a_.arch);
-    const uint32_t clobber_s1 = build_s_mov_b32(1, 128, a_.arch);
+    const uint32_t clobber_s0 = build_s_mov_b32(0, 128, a_.arch).value();
+    const uint32_t clobber_s1 = build_s_mov_b32(1, 128, a_.arch).value();
     const auto maybe_guest_anchor = build_v_mov_b32_src(1, kVgprSrcBase + 0, a_.arch);
     ASSERT_TRUE(maybe_guest_anchor.succeeded());
     const uint32_t guest_anchor = maybe_guest_anchor.value();
@@ -219,17 +219,18 @@ protected:
     ASSERT_NO_FATAL_FAILURE(patch({clobber_s0, clobber_s1, guest_anchor, endpgm},
                                   /*anchor_offset=*/8, probe_obj, delivery_));
     ASSERT_NO_FATAL_FAILURE(
-        patch({build_s_nop(0, a_.arch), guest_anchor, restore_lo, restore_hi, endpgm},
+        patch({build_s_nop(0, a_.arch).value(), guest_anchor, restore_lo, restore_hi, endpgm},
               /*anchor_offset=*/4, probe_obj, restore_));
 
     // s_call_b64's immediate is a signed dword offset from the next instruction.
-    const uint32_t ret = build_s_setpc_b64(/*s[4:5]=*/4, a_.arch);
+    const uint32_t ret = build_s_setpc_b64(/*s[4:5]=*/4, a_.arch).value();
+    ASSERT_NO_FATAL_FAILURE(patch({clobber_s0, clobber_s1, build_s_call_b64(4, 2, a_.arch).value(),
+                                   guest_anchor, endpgm, ret},
+                                  /*anchor_offset=*/12, probe_obj, call_delivery_));
     ASSERT_NO_FATAL_FAILURE(
-        patch({clobber_s0, clobber_s1, build_s_call_b64(4, 2, a_.arch), guest_anchor, endpgm, ret},
-              /*anchor_offset=*/12, probe_obj, call_delivery_));
-    ASSERT_NO_FATAL_FAILURE(patch({build_s_nop(0, a_.arch), build_s_call_b64(4, 4, a_.arch),
-                                   guest_anchor, restore_lo, restore_hi, endpgm, ret},
-                                  /*anchor_offset=*/8, probe_obj, call_restore_));
+        patch({build_s_nop(0, a_.arch).value(), build_s_call_b64(4, 4, a_.arch).value(),
+               guest_anchor, restore_lo, restore_hi, endpgm, ret},
+              /*anchor_offset=*/8, probe_obj, call_restore_));
 
     // A point on the entry itself: the stub runs the prologue, then branches to
     // the entry, which is spliced to the site's trampoline.
@@ -240,8 +241,8 @@ protected:
 
     // Re-entry kernels. s6 counts passes through the entry; the second pass
     // leaves the loop or skips the call or jump.
-    const uint32_t count_pass = build_s_add_u32(6, 6, kInline1, a_.arch);
-    const uint32_t second_pass = build_s_cmp_lg_u32(6, kInline2, a_.arch);
+    const uint32_t count_pass = build_s_add_u32(6, 6, kInline1, a_.arch).value();
+    const uint32_t second_pass = build_s_cmp_lg_u32(6, kInline2, a_.arch).value();
     const uint32_t read_s0 = restore_lo;
     const uint32_t read_s1 = restore_hi;
     const uint32_t loop_to_entry = test::build_s_cbranch_scc(/*scc1=*/true, -4, a_.arch);
@@ -254,13 +255,13 @@ protected:
     // The helper subtracts the call's return offset from the saved address, so
     // it returns to the entry instead of the continuation.
     const std::vector<uint32_t> rewrite_return{
-        build_s_add_u32(4, 4, test::kScalarSrcLiteral, a_.arch), static_cast<uint32_t>(-20),
-        build_s_addc_u32(5, 5, kInlineMinus1, a_.arch), ret};
+        build_s_add_u32(4, 4, test::kScalarSrcLiteral, a_.arch).value(), static_cast<uint32_t>(-20),
+        build_s_addc_u32(5, 5, kInlineMinus1, a_.arch).value(), ret};
     std::vector<uint32_t> words{count_pass,
                                 guest_anchor,
                                 second_pass,
                                 test::build_s_cbranch_scc(/*scc1=*/false, 1, a_.arch),
-                                build_s_call_b64(4, 1, a_.arch),
+                                build_s_call_b64(4, 1, a_.arch).value(),
                                 endpgm};
     words.insert(words.end(), rewrite_return.begin(), rewrite_return.end());
     ASSERT_NO_FATAL_FAILURE(patch(words, /*anchor_offset=*/4, probe_obj, return_delivery_));
@@ -268,7 +269,7 @@ protected:
              guest_anchor,
              second_pass,
              test::build_s_cbranch_scc(/*scc1=*/false, 1, a_.arch),
-             build_s_call_b64(4, 3, a_.arch),
+             build_s_call_b64(4, 3, a_.arch).value(),
              read_s0,
              read_s1,
              endpgm};
@@ -278,12 +279,12 @@ protected:
     // A plain indirect jump to the entry: the address comes from s_getpc_b64,
     // not from a call's saved return address.
     const std::vector<uint32_t> jump_to_entry{
-        build_s_cmp_lg_u32(6, kInline2, a_.arch),
+        build_s_cmp_lg_u32(6, kInline2, a_.arch).value(),
         test::build_s_cbranch_scc(/*scc1=*/false, 5, a_.arch),
-        build_s_getpc_b64(4, a_.arch),
-        build_s_add_u32(4, 4, test::kScalarSrcLiteral, a_.arch),
+        build_s_getpc_b64(4, a_.arch).value(),
+        build_s_add_u32(4, 4, test::kScalarSrcLiteral, a_.arch).value(),
         static_cast<uint32_t>(-20),
-        build_s_addc_u32(5, 5, kInlineMinus1, a_.arch),
+        build_s_addc_u32(5, 5, kInlineMinus1, a_.arch).value(),
         ret};
     words = {count_pass, guest_anchor};
     words.insert(words.end(), jump_to_entry.begin(), jump_to_entry.end());
@@ -417,13 +418,13 @@ protected:
   // the wrapper pointer. Confirms the restore is what put the guest's back.
   void expect_without_the_restore_the_wrapper_pointer_remains() {
     std::vector<uint32_t> sabotaged = restore_.text;
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    const uint32_t nop = build_s_nop(0, a_.arch).value();
     size_t replaced = 0;
     for (uint32_t &word : sabotaged) {
       // The restores are the only s_mov_b32 into s0/s1 in this kernel.
       for (uint16_t dst = 0; dst < 2; ++dst) {
         for (uint16_t src = 0; src < REGISTER_SET_ALLOCATABLE_SGPRS; ++src) {
-          if (word == build_s_mov_b32(dst, src, a_.arch)) {
+          if (word == build_s_mov_b32(dst, src, a_.arch).value()) {
             word = nop;
             ++replaced;
           }
@@ -509,7 +510,7 @@ protected:
     const std::array<KernargExtensionPayloadLayout, 1> payloads{kDbiEntryPayloadLayout};
     const auto layout = make_kernarg_extension_layout(kGuestKernargSize, payloads);
     ASSERT_TRUE(layout.has_value());
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    const uint32_t nop = build_s_nop(0, a_.arch).value();
 
     for (uint16_t sdst = 0; sdst < REGISTER_SET_ALLOCATABLE_SGPRS - 1; sdst += 2) {
       const auto load_result =

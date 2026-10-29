@@ -205,9 +205,10 @@ inline void build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_typ
       build_s_and_b32(kSlot, kWritePtr, scalar_positive_inline_u32(slot_count - 1), arch));
   detail::append_salu_sgpr_write_wait(words, arch);
   words.push_back(
-      build_s_lshl_b32(kSlot, kSlot, scalar_positive_inline_u32(detail::kRecordShift), arch));
+      build_s_lshl_b32(kSlot, kSlot, scalar_positive_inline_u32(detail::kRecordShift), arch)
+          .value());
   detail::append_salu_sgpr_write_wait(words, arch);
-  words.push_back(build_s_add_u32(kSlot, kSlot, kScalarSrcLiteral, arch));
+  words.push_back(build_s_add_u32(kSlot, kSlot, kScalarSrcLiteral, arch).value());
   words.push_back(static_cast<uint32_t>(sizeof(RjLogBufferHeader)));
   detail::append_salu_sgpr_write_wait(words, arch);
   ASSERT_NO_FATAL_FAILURE(detail::append(words, build_v_mov_b32_src(kSlotV, kSlot, arch)));
@@ -264,16 +265,17 @@ inline void build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_typ
                                                  offsetof(RjLogRecord, valid), arch));
 
   // write_ptr + 1, after valid.
-  words.push_back(build_s_add_u32(kWritePtr, kWritePtr, scalar_positive_inline_u32(1), arch));
   words.push_back(
-      build_s_addc_u32(kWritePtr + 1, kWritePtr + 1, scalar_positive_inline_u32(0), arch));
+      build_s_add_u32(kWritePtr, kWritePtr, scalar_positive_inline_u32(1), arch).value());
+  words.push_back(
+      build_s_addc_u32(kWritePtr + 1, kWritePtr + 1, scalar_positive_inline_u32(0), arch).value());
   detail::append_salu_sgpr_write_wait(words, arch);
   ASSERT_NO_FATAL_FAILURE(detail::append(words, build_v_mov_b32_src(kNextPtr, kWritePtr, arch)));
   ASSERT_NO_FATAL_FAILURE(
       detail::append(words, build_v_mov_b32_src(kNextPtr + 1, kWritePtr + 1, arch)));
   detail::append(words, build_global_store_dwordx2(kNextPtr, kZero, kBase, kWritePtrOffset, arch));
 
-  words.push_back(build_s_setpc_b64(kLink, arch));
+  words.push_back(build_s_setpc_b64(kLink, arch).value());
 }
 
 } // namespace test

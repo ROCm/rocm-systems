@@ -105,11 +105,12 @@ protected:
   [[nodiscard]] std::vector<uint8_t> make_target(const std::vector<uint32_t> &setup,
                                                  uint32_t anchor_word) {
     std::vector<uint32_t> text = setup;
-    text.push_back(build_s_mov_b64(scalar_operand_exec_lo(a_.arch),
-                                   scalar_positive_inline_u32(kAnchorMask), a_.arch));
+    text.push_back(build_s_mov_b64(scalar_operand_exec_lo(a_.arch).value(),
+                                   scalar_positive_inline_u32(kAnchorMask), a_.arch)
+                       .value());
     anchor_offset_ = static_cast<uint64_t>(text.size()) * sizeof(uint32_t);
     text.push_back(anchor_word);
-    text.push_back(build_s_endpgm(a_.arch));
+    text.push_back(build_s_endpgm(a_.arch).value());
     return test::make_amdgpu_kernel_elf(text, /*private_bytes=*/64, /*granulated_sgpr_count=*/3,
                                         a_.e_flags, /*granulated_vgpr_count=*/0,
                                         /*accum_offset=*/0, /*unterminated_kd_name=*/false,
@@ -175,12 +176,12 @@ protected:
   // Publishes an inline sentinel in v3; reads nothing, so it takes no arguments.
   [[nodiscard]] std::vector<uint32_t> sentinel_probe() const {
     return {test::make_mov_vgpr_inline(3, kProbeSentinel),
-            build_s_setpc_b64(/*s[30:31]=*/30, a_.arch)};
+            build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value()};
   }
 
   // Republishes its first argument in v3.
   [[nodiscard]] std::vector<uint32_t> echo_probe() const {
-    return {kMovV3V0, build_s_setpc_b64(/*s[30:31]=*/30, a_.arch)};
+    return {kMovV3V0, build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value()};
   }
 
   // Publishes the sentinel, then narrows EXEC and returns without putting it
@@ -188,9 +189,10 @@ protected:
   // and the envelope is what has to cope.
   [[nodiscard]] std::vector<uint32_t> narrowing_sentinel_probe() const {
     return {test::make_mov_vgpr_inline(3, kProbeSentinel),
-            build_s_mov_b64(scalar_operand_exec_lo(a_.arch),
-                            scalar_positive_inline_u32(kAnchorMask), a_.arch),
-            build_s_setpc_b64(/*s[30:31]=*/30, a_.arch)};
+            build_s_mov_b64(scalar_operand_exec_lo(a_.arch).value(),
+                            scalar_positive_inline_u32(kAnchorMask), a_.arch)
+                .value(),
+            build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value()};
   }
 
   // Widened before the shift: the wave64 fixtures run lanes up to 63, and
@@ -298,7 +300,7 @@ protected:
         test::make_mov_vgpr_inline(1, 5));
     // Publish v0 (exec_lo) in v3 and v1 (exec_hi) in v2.
     const std::vector<uint32_t> probe{kMovV3V0, kMovV2V1,
-                                      build_s_setpc_b64(/*s[30:31]=*/30, a_.arch)};
+                                      build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value()};
     auto regs_result = run_patched(
         target, probe, {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}},
         /*full_exec=*/true, {3, 2});
@@ -375,8 +377,9 @@ protected:
     ASSERT_TRUE(patched_result.succeeded());
     ASSERT_FALSE(patched_text_.empty());
 
-    const uint32_t widen =
-        build_s_mov_b64(scalar_operand_exec_lo(a_.arch), scalar_inline_neg_one(a_.arch), a_.arch);
+    const uint32_t widen = build_s_mov_b64(scalar_operand_exec_lo(a_.arch).value(),
+                                           scalar_inline_neg_one(a_.arch).value(), a_.arch)
+                               .value();
     std::vector<uint32_t> sabotaged = patched_text_;
     // A full-exec site widens exactly twice: once opening the window, once
     // reopening it for the spill loads. The anchor-mask restore that would sit
@@ -386,7 +389,7 @@ protected:
     auto it = std::ranges::find(sabotaged, widen);
     it = std::ranges::find(it + 1, sabotaged.end(), widen);
     ASSERT_NE(it, sabotaged.end());
-    *it = build_s_nop(0, a_.arch);
+    *it = build_s_nop(0, a_.arch).value();
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
@@ -407,12 +410,13 @@ protected:
     ASSERT_TRUE(patched_result.succeeded());
     ASSERT_FALSE(patched_text_.empty());
 
-    const uint32_t widen =
-        build_s_mov_b64(scalar_operand_exec_lo(a_.arch), scalar_inline_neg_one(a_.arch), a_.arch);
+    const uint32_t widen = build_s_mov_b64(scalar_operand_exec_lo(a_.arch).value(),
+                                           scalar_inline_neg_one(a_.arch).value(), a_.arch)
+                               .value();
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::find(sabotaged, widen);
     ASSERT_NE(it, sabotaged.end()) << "full-mask widen not found in the patched text";
-    *it = build_s_nop(0, a_.arch);
+    *it = build_s_nop(0, a_.arch).value();
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));

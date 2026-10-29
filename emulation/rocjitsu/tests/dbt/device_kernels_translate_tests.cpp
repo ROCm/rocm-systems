@@ -248,16 +248,31 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGri
 
   constexpr uint16_t ttmp_base = 108;
   const uint16_t shift16 = rocjitsu::scalar_positive_inline_u32(16);
+  util::FailureOr<uint32_t> maybe_s_lshl_b32 =
+      rocjitsu::build_s_lshl_b32(13, 13, shift16, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_s_lshl_b32.succeeded());
+  util::FailureOr<uint32_t> maybe_s_lshr_b32 =
+      rocjitsu::build_s_lshr_b32(13, 13, shift16, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_s_lshr_b32.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32 =
+      rocjitsu::build_s_mov_b32(12, ttmp_base + 9, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_s_mov_b32.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_2 =
+      rocjitsu::build_s_mov_b32(13, ttmp_base + 7, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_s_mov_b32_2.succeeded());
+  util::FailureOr<uint32_t> maybe_s_lshr_b32_2 =
+      rocjitsu::build_s_lshr_b32(14, ttmp_base + 7, shift16, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_s_lshr_b32_2.succeeded());
   const std::vector<uint32_t> expected = {
-      rocjitsu::build_s_mov_b32(12, ttmp_base + 9, ROCJITSU_CODE_ARCH_RDNA4),
+      maybe_s_mov_b32.value(),
       rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
-      rocjitsu::build_s_mov_b32(13, ttmp_base + 7, ROCJITSU_CODE_ARCH_RDNA4),
+      maybe_s_mov_b32_2.value(),
       rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
-      rocjitsu::build_s_lshl_b32(13, 13, shift16, ROCJITSU_CODE_ARCH_RDNA4),
+      maybe_s_lshl_b32.value(),
       rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
-      rocjitsu::build_s_lshr_b32(13, 13, shift16, ROCJITSU_CODE_ARCH_RDNA4),
+      maybe_s_lshr_b32.value(),
       rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
-      rocjitsu::build_s_lshr_b32(14, ttmp_base + 7, shift16, ROCJITSU_CODE_ARCH_RDNA4),
+      maybe_s_lshr_b32_2.value(),
       rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
   };
   EXPECT_EQ(translated->prologue_words, expected)
@@ -283,8 +298,11 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesXOnlyWorkgroupId) {
   ASSERT_NE(translated, translations.end());
 
   constexpr uint16_t ttmp_base = 108;
+  util::FailureOr<uint32_t> maybe_s_mov_b32_3 =
+      rocjitsu::build_s_mov_b32(12, ttmp_base + 9, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_s_mov_b32_3.succeeded());
   const std::vector<uint32_t> expected = {
-      rocjitsu::build_s_mov_b32(12, ttmp_base + 9, ROCJITSU_CODE_ARCH_RDNA4),
+      maybe_s_mov_b32_3.value(),
       rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
   };
   EXPECT_EQ(translated->prologue_words, expected);
@@ -689,8 +707,12 @@ TEST(BinaryTranslatorE2E, NoTextPaddingStillMaterializesLocalCaveInText) {
   const auto *text = co->text_sections()[0];
   uint8_t *text_bytes = image.data() + text->sectionOffset();
   const size_t word_count = text->size() / sizeof(uint32_t);
-  const uint32_t nop = rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
-  const uint32_t filler = rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_s_nop = rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_nop.succeeded());
+  const uint32_t nop = maybe_s_nop.value();
+  util::FailureOr<uint32_t> maybe_s_branch = rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_branch.succeeded());
+  const uint32_t filler = maybe_s_branch.value();
 
   // Force away the old trailing-NOP escape hatch so this test only passes if
   // expansion bodies are materialized in the relocated .text.

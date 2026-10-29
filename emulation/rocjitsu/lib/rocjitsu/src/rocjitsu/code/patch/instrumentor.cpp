@@ -366,8 +366,13 @@ bool validate_inline_nop_plan(const TrampolinePlan &plan, std::string *error_out
     report(error_out, "trampoline plan: after_items must be empty for the inline nop");
     return false;
   }
+  util::FailureOr<uint32_t> nop = build_s_nop(0, plan.arch);
+  if (nop.failed()) {
+    report(error_out, "Unimplemented instruction: s_nop for target architecture");
+    return false;
+  }
   if (plan.before_items.size() != 1 || plan.before_items[0].words.size() != 1 ||
-      plan.before_items[0].words[0] != build_s_nop(0, plan.arch)) {
+      plan.before_items[0].words[0] != nop.value()) {
     report(error_out, "trampoline plan: before_items must be exactly { { s_nop 0 } } "
                       "for the inlined nop");
     return false;
@@ -680,10 +685,16 @@ bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const AmdGpuCodeObjec
 
 } // namespace
 
-TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
-                                    uint64_t trampoline_offset) {
+std::optional<TrampolinePlan> make_trampoline_plan(const ResolvedInstrumentationSite &site,
+                                                   rj_code_arch_t arch, uint64_t trampoline_offset,
+                                                   std::string *error_out) {
+  util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  if (nop.failed()) {
+    report(error_out, "Unimplemented instruction: s_nop for target architecture");
+    return std::nullopt;
+  }
   TrampolinePlan plan = make_base_plan(site, arch, trampoline_offset);
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, arch)}}};
+  plan.before_items = {InlineAsmItem{{nop.value()}}};
   plan.after_items = {};
   plan.emit_original = true;
   return plan;
@@ -784,7 +795,12 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
                           .c_str());
     return std::nullopt;
   }
-  patch.words.push_back(build_s_branch(*simm16, arch_));
+  util::FailureOr<uint32_t> branch = build_s_branch(*simm16, arch_);
+  if (branch.failed()) {
+    report(error_out, "Unimplemented instruction: s_branch for target architecture");
+    return std::nullopt;
+  }
+  patch.words.push_back(branch.value());
   return patch;
 }
 
@@ -1431,7 +1447,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Currently, this means that the plan is to put a nop which means we do
       // not need to mess with spills
     } else {
-      TrampolinePlan plan = make_trampoline_plan(site, arch_, trampoline_offset);
+      std::optional<TrampolinePlan> maybe_plan =
+          make_trampoline_plan(site, arch_, trampoline_offset, &err);
+      if (!maybe_plan) {
+        result.errors.push_back(std::move(err));
+        continue;
+      }
+      const TrampolinePlan &plan = *maybe_plan;
       // The only assembly we currently allow is an inlined nop
       if (!validate_inline_nop_plan(plan, &err)) {
         result.errors.push_back(std::move(err));
@@ -1493,7 +1515,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   for (const ProbeCallable &probe : resolved.probes)
     append_words(new_text, probe.body_words);
   if (entry_patch) {
-    append_nop_padding(new_text, entry_patch->padding_bytes, arch_);
+    if (append_nop_padding(new_text, entry_patch->padding_bytes, arch_).failed()) {
+      result.errors.emplace_back("Unimplemented instruction: s_nop for target architecture");
+      return result;
+    }
     append_words(new_text, entry_patch->words);
   }
   for (const auto &a : applied)

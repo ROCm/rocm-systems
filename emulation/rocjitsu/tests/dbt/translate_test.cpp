@@ -3769,7 +3769,9 @@ TEST(BinaryTranslator, InlineExpansionIgnoresUnreachableTextTail) {
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   for (size_t i = 0; i < expected_waitcnt.size(); ++i)
     EXPECT_EQ(target_words[i], expected_waitcnt[i]);
-  EXPECT_EQ(target_words[expected_waitcnt.size()], build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_s_endpgm.succeeded());
+  EXPECT_EQ(target_words[expected_waitcnt.size()], maybe_s_endpgm.value());
 }
 
 TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
@@ -3787,7 +3789,9 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
 
   const auto *source_text = source_layout.text_sections()[0];
   auto *source_words = reinterpret_cast<uint32_t *>(image.data() + source_text->sectionOffset());
-  source_words[0] = build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_s_branch_17 = build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_branch_17.succeeded());
+  source_words[0] = maybe_s_branch_17.value();
   source_words[64] = 0xBF810000u; // CDNA4 s_endpgm at the post-preload body entry.
 
   AmdGpuCodeObject co(image.data(), image.size());
@@ -3805,17 +3809,26 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   const auto *text = translated.text_sections()[0];
   ASSERT_GT(text->size(), kKernargPreloadSkipBytes);
   const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
-  EXPECT_EQ(target_words[0], build_s_branch(64, ROCJITSU_CODE_ARCH_CDNA3))
+  util::FailureOr<uint32_t> maybe_s_branch = build_s_branch(64, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_branch.succeeded());
+  EXPECT_EQ(target_words[0], maybe_s_branch.value())
       << "old firmware enters the synthesized compatibility stub, which branches to the "
          "translated compatibility source entry";
-  for (size_t i = 1; i < 64; ++i)
-    EXPECT_EQ(target_words[i], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3))
+  for (size_t i = 1; i < 64; ++i) {
+    util::FailureOr<uint32_t> maybe_s_nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3);
+    ASSERT_TRUE(maybe_s_nop.succeeded());
+    EXPECT_EQ(target_words[i], maybe_s_nop.value())
         << "the synthesized launch window must keep the compatible firmware entry exactly 256 "
            "bytes after the descriptor entry";
-  EXPECT_EQ(target_words[64], build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3))
+  }
+  util::FailureOr<uint32_t> maybe_s_branch_2 = build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_branch_2.succeeded());
+  EXPECT_EQ(target_words[64], maybe_s_branch_2.value())
       << "compatible firmware enters at descriptor entry + 256 and branches to the translated "
          "preloaded-kernarg source entry";
-  EXPECT_EQ(target_words[65], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3))
+  util::FailureOr<uint32_t> maybe_s_branch_3 = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_branch_3.succeeded());
+  EXPECT_EQ(target_words[65], maybe_s_branch_3.value())
       << "the original compatibility source block is translated in the compact body";
   EXPECT_EQ(target_words[66], 0xBF810000u)
       << "the original compatible-firmware source entry is translated in the compact body";
@@ -3839,10 +3852,16 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
   constexpr uint16_t kTtmpRdna4GridX = 9;
 
   std::vector<uint32_t> words(kSourcePreloadEntryWord + 1,
-                              build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
-  words[0] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
-  words[kSourceEntryWord] = build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA4);
-  words[kSourcePreloadEntryWord] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+                              build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4).value());
+  util::FailureOr<uint32_t> maybe_s_endpgm_6 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm_6.succeeded());
+  words[0] = maybe_s_endpgm_6.value();
+  util::FailureOr<uint32_t> maybe_s_branch_18 = build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_branch_18.succeeded());
+  words[kSourceEntryWord] = maybe_s_branch_18.value();
+  util::FailureOr<uint32_t> maybe_s_endpgm_7 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm_7.succeeded());
+  words[kSourcePreloadEntryWord] = maybe_s_endpgm_7.value();
 
   auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   enable_workgroup_id_x_sgpr(image);
@@ -3878,8 +3897,10 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
   ASSERT_GT(text->size(), kKernargPreloadSkipBytes + 3 * sizeof(uint32_t));
   const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
 
-  const uint32_t workgroup_id_x_prologue =
+  util::FailureOr<uint32_t> maybe_s_mov_b32 =
       build_s_mov_b32(0, kScalarOperandTtmpBase + kTtmpRdna4GridX, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_s_mov_b32.succeeded());
+  const uint32_t workgroup_id_x_prologue = maybe_s_mov_b32.value();
   const uint32_t prologue_delay =
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value();
   const auto expect_launch_stub = [&](size_t word_index, int16_t branch_offset) {
@@ -3888,15 +3909,22 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
            "before branching into the relocated body";
     EXPECT_EQ(target_words[word_index + 1], prologue_delay)
         << "the synthesized launch stub must preserve scalar producer/consumer hazards";
-    EXPECT_EQ(target_words[word_index + 2], build_s_branch(branch_offset, ROCJITSU_CODE_ARCH_RDNA4))
+    util::FailureOr<uint32_t> maybe_s_branch_4 =
+        build_s_branch(branch_offset, ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(maybe_s_branch_4.succeeded());
+    EXPECT_EQ(target_words[word_index + 2], maybe_s_branch_4.value())
         << "the synthesized launch stub branches only after the descriptor ABI prologue";
   };
   expect_launch_stub(0, 64);
   expect_launch_stub(kKernargPreloadSkipBytes / sizeof(uint32_t), 1);
 
-  EXPECT_EQ(target_words[67], build_s_branch(0, ROCJITSU_CODE_ARCH_RDNA4))
+  util::FailureOr<uint32_t> maybe_s_branch_5 = build_s_branch(0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_s_branch_5.succeeded());
+  EXPECT_EQ(target_words[67], maybe_s_branch_5.value())
       << "the original compatibility source entry is translated in the compact body";
-  EXPECT_EQ(target_words[68], build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4))
+  util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+  EXPECT_EQ(target_words[68], maybe_s_endpgm_2.value())
       << "the original preloaded-kernarg source entry is translated in the compact body";
 
   const auto *target_rodata = find_section(translated, ".rodata");
@@ -3916,46 +3944,72 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
 }
 
 TEST(InstructionBuilder, PatchPcrelBranchOffsetInRange) {
-  const uint32_t source_word = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_s_branch_6 = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_branch_6.succeeded());
+  const uint32_t source_word = maybe_s_branch_6.value();
   auto inst = decode_one(source_word, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(inst, nullptr);
 
-  std::array<uint32_t, 1> words = {build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3)};
+  util::FailureOr<uint32_t> maybe_s_branch_7 = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_branch_7.succeeded());
+  std::array<uint32_t, 1> words = {maybe_s_branch_7.value()};
   EXPECT_TRUE(patch_pcrel_branch_offset(*inst, words, -8, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(words[0], build_s_branch(-2, ROCJITSU_CODE_ARCH_CDNA3));
+  util::FailureOr<uint32_t> maybe_s_branch_8 = build_s_branch(-2, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_branch_8.succeeded());
+  EXPECT_EQ(words[0], maybe_s_branch_8.value());
 }
 
 TEST(InstructionBuilder, PatchPcrelBranchOffsetRejectsOutOfRange) {
-  const uint32_t source_word = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_s_branch_9 = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_branch_9.succeeded());
+  const uint32_t source_word = maybe_s_branch_9.value();
   auto inst = decode_one(source_word, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(inst, nullptr);
 
-  std::array<uint32_t, 1> words = {build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3)};
+  util::FailureOr<uint32_t> maybe_s_branch_10 = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_branch_10.succeeded());
+  std::array<uint32_t, 1> words = {maybe_s_branch_10.value()};
   EXPECT_FALSE(patch_pcrel_branch_offset(*inst, words, 32768LL * 4, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(words[0], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  util::FailureOr<uint32_t> maybe_s_branch_11 = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_branch_11.succeeded());
+  EXPECT_EQ(words[0], maybe_s_branch_11.value());
 
   EXPECT_FALSE(patch_pcrel_branch_offset(*inst, words, -32769LL * 4, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(words[0], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  util::FailureOr<uint32_t> maybe_s_branch_12 = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_branch_12.succeeded());
+  EXPECT_EQ(words[0], maybe_s_branch_12.value());
 }
 
 TEST(InstructionBuilder, PatchPcrelBranchOffsetRejectsNonBranch) {
-  const uint32_t source_word = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_nop_2.succeeded());
+  const uint32_t source_word = maybe_s_nop_2.value();
   auto inst = decode_one(source_word, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(inst, nullptr);
 
-  std::array<uint32_t, 1> words = {build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3)};
+  util::FailureOr<uint32_t> maybe_s_nop_3 = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_nop_3.succeeded());
+  std::array<uint32_t, 1> words = {maybe_s_nop_3.value()};
   EXPECT_FALSE(patch_pcrel_branch_offset(*inst, words, 4, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(words[0], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+  util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_nop_4.succeeded());
+  EXPECT_EQ(words[0], maybe_s_nop_4.value());
 }
 
 TEST(InstructionBuilder, PatchPcrelBranchOffsetRejectsMisalignedDelta) {
-  const uint32_t source_word = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_s_branch_13 = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_branch_13.succeeded());
+  const uint32_t source_word = maybe_s_branch_13.value();
   auto inst = decode_one(source_word, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(inst, nullptr);
 
-  std::array<uint32_t, 1> words = {build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3)};
+  util::FailureOr<uint32_t> maybe_s_branch_14 = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_branch_14.succeeded());
+  std::array<uint32_t, 1> words = {maybe_s_branch_14.value()};
   EXPECT_FALSE(patch_pcrel_branch_offset(*inst, words, 2, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(words[0], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  util::FailureOr<uint32_t> maybe_s_branch_15 = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_s_branch_15.succeeded());
+  EXPECT_EQ(words[0], maybe_s_branch_15.value());
 }
 
 /// @brief One incomplete-consumer body with a second, independent PC builder.
@@ -3977,14 +4031,14 @@ std::vector<uint32_t> make_incomplete_indirect_consumer_body(uint32_t bypass_bui
       pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
       40,                                                  // 0x0c: target delta -> 0x30.
       pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
-      build_s_branch(5, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x2c.
+      build_s_branch(5, ROCJITSU_CODE_ARCH_CDNA4).value(), // 0x14 -> consumer at 0x2c.
       pack_sop1(0x1c, kBypassSreg, 0),                     // 0x18: bypass-path s_getpc_b64.
       pack_sop2(0, kBypassSreg, kBypassSreg, kLiteralOperand),     // 0x1c: s_add_u32.
       bypass_builder_delta,                                        // 0x20.
       pack_sop2(4, kBypassSreg + 1, kBypassSreg + 1, kInlineInt0), // 0x24: s_addc_u32.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                    // 0x28: closes the chain.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4).value(),            // 0x28: closes the chain.
       pack_sop1(0x1d, 0, kPcSreg),                                 // 0x2c: joined consumer setpc.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                    // 0x30: builder target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value(),            // 0x30: builder target.
   };
 }
 
@@ -4047,6 +4101,10 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnOpenPcBuilderCh
   // delta add lives in a successor, where an unmodeled write would leave the
   // original delta in place. The scope therefore cannot be proven free of stale
   // PC values and the incomplete consumer must keep failing closed.
+  util::FailureOr<uint32_t> maybe_s_nop_5 = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_nop_5.succeeded());
+  util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
   std::vector<uint32_t> words = {
       pack_sopp(5, 5),                                     // 0x00: cbranch scc0 -> bypass at 0x18.
       pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
@@ -4058,8 +4116,8 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnOpenPcBuilderCh
       12,                                                  // 0x1c.
       pack_sop2(4, kOpenSreg + 1, kOpenSreg + 1, kInlineInt0), // 0x20: s_addc_u32.
       pack_sop1(0x1d, 0, kPcSreg),                             // 0x24: joined consumer setpc.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                // 0x28: not a target.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                // 0x2c: builder target.
+      maybe_s_nop_5.value(),                                   // 0x28: not a target.
+      maybe_s_endpgm_3.value(),                                // 0x2c: builder target.
   };
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -4112,7 +4170,9 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
       const uint64_t target = (i + 1) * sizeof(uint32_t) + target_words[i + 2];
       ASSERT_EQ(target % sizeof(uint32_t), 0u);
       ASSERT_LT(target / sizeof(uint32_t), word_count);
-      EXPECT_EQ(target_words[target / sizeof(uint32_t)], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3))
+      util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3);
+      ASSERT_TRUE(maybe_s_endpgm_4.succeeded());
+      EXPECT_EQ(target_words[target / sizeof(uint32_t)], maybe_s_endpgm_4.value())
           << "builder for s[" << pc_sreg << ":" << pc_sreg + 1
           << "] was not rewritten to its relocated target";
     }
@@ -4142,22 +4202,30 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnNonContiguousBu
   // patch_recovered_builder_fixups NOPs the whole range, which would erase the
   // move. The proof must fail closed on the non-contiguous range, keeping the
   // incomplete consumer's original refusal and leaving the object unchanged.
+  util::FailureOr<uint32_t> maybe_s_nop_6 = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_nop_6.succeeded());
+  util::FailureOr<uint32_t> maybe_s_endpgm_5 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm_5.succeeded());
+  util::FailureOr<uint32_t> maybe_s_branch_16 = build_s_branch(6, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_branch_16.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_2 =
+      build_s_mov_b32(kUnrelatedSreg, 0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_mov_b32_2.succeeded());
   std::vector<uint32_t> words = {
       pack_sopp(5, 6),                                     // 0x00: cbranch scc0 -> bypass at 0x1c.
       pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
       pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
       44,                                                  // 0x0c: target delta -> 0x34.
       pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
-      build_s_branch(6, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x30.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: padding before bypass.
+      maybe_s_branch_16.value(),                           // 0x14 -> consumer at 0x30.
+      maybe_s_nop_6.value(),                               // 0x18: padding before bypass.
       pack_sop1(0x1c, kBypassSreg, 0),                     // 0x1c: bypass s_getpc_b64.
       pack_sop2(0, kBypassSreg, kBypassSreg, kLiteralOperand), // 0x20: s_add_u32.
       20,                                                      // 0x24: -> 0x20 + 20 = 0x34.
-      build_s_mov_b32(kUnrelatedSreg, 0,
-                      ROCJITSU_CODE_ARCH_CDNA4), // 0x28: unrelated write, in range.
+      maybe_s_mov_b32_2.value(),                               // 0x28: unrelated write, in range.
       pack_sop2(4, kBypassSreg + 1, kBypassSreg + 1, kInlineInt0), // 0x2c: s_addc_u32.
       pack_sop1(0x1d, 0, kPcSreg),                                 // 0x30: joined consumer setpc.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                    // 0x34: builder target.
+      maybe_s_endpgm_5.value(),                                    // 0x34: builder target.
   };
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -4188,8 +4256,10 @@ TEST(BinaryTranslatorE2E, IncompleteConsumerFailsClosedAtKernargPreloadFirmwareE
   // Descriptor entry (word 0) is a trivial ordinary path. The incomplete-consumer
   // body is placed at the +256 preload firmware entry, so it is reachable only
   // from that root.
-  std::vector<uint32_t> words(kPreloadEntryWord, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
-  words[0] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint32_t> words(kPreloadEntryWord, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4).value());
+  util::FailureOr<uint32_t> maybe_s_endpgm_8 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm_8.succeeded());
+  words[0] = maybe_s_endpgm_8.value();
   const auto body = make_incomplete_indirect_consumer_body(0x14);
   words.insert(words.end(), body.begin(), body.end());
 
@@ -4262,13 +4332,14 @@ constexpr uint32_t kOversizedGroupSegmentBytes = 105600u;
 make_shared_address_taken_helper_image(bool oversized_kernel0_lds) {
   const std::vector<uint32_t> words = {
       // word 0: kernel 0 entry, calls the helper at word 4.
-      build_s_call_b64(kSharedHelperReturnSreg, 3, ROCJITSU_CODE_ARCH_CDNA4),
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // word 1
+      build_s_call_b64(kSharedHelperReturnSreg, 3, ROCJITSU_CODE_ARCH_CDNA4).value(),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value(), // word 1
       // word 2: kernel 1 entry, calls the same helper.
-      build_s_call_b64(kSharedHelperReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA4),
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                             // word 3
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                             // word 4: helper entry
-      build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // word 5: helper return
+      build_s_call_b64(kSharedHelperReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA4).value(),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value(), // word 3
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4).value(), // word 4: helper entry
+      build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA4)
+          .value(), // word 5: helper return
   };
 
   auto image = test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
@@ -4312,7 +4383,7 @@ translated_helper_entry_offsets(const AmdGpuCodeObject &object) {
   const Section &text = *object.text_sections().front();
   const auto *words = reinterpret_cast<const uint32_t *>(text.data());
   const size_t word_count = text.size() / sizeof(uint32_t);
-  const uint32_t ret = build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA3);
+  const uint32_t ret = build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA3).value();
   for (size_t i = 1; i < word_count; ++i) {
     if (words[i] == ret)
       entries.push_back((i - 1) * sizeof(uint32_t));

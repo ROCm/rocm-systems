@@ -92,8 +92,8 @@ protected:
   explicit DbiArgSimBase(const ArgSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value();
     // v_mov v0, K0 ; v_mov v1, v0 (ANCHOR at offset 4, v0 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(0, kGuestValue), kMovV1V0, endpgm}, /*private_bytes=*/64,
@@ -156,7 +156,7 @@ protected:
     const auto maybe_arg_write = build_v_mov_b32_imm(0, kArgSentinel, a_.arch);
     ASSERT_TRUE(maybe_arg_write.succeeded());
     const auto arg_write = maybe_arg_write.value();
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    const uint32_t nop = build_s_nop(0, a_.arch).value();
 
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, arg_write).begin();

@@ -195,10 +195,17 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
     return std::nullopt;
   prologue.words.push_back(wait.value());
 
-  prologue.words.push_back(build_s_mov_b32(*kernarg_base, storage.entry_temp_base, arch));
-  prologue.words.push_back(build_s_mov_b32(static_cast<uint16_t>(*kernarg_base + 1),
-                                           static_cast<uint16_t>(storage.entry_temp_base + 1),
-                                           arch));
+  util::FailureOr<uint32_t> restore_lo =
+      build_s_mov_b32(*kernarg_base, storage.entry_temp_base, arch, &error);
+  if (restore_lo.failed())
+    return std::nullopt;
+  util::FailureOr<uint32_t> restore_hi =
+      build_s_mov_b32(static_cast<uint16_t>(*kernarg_base + 1),
+                      static_cast<uint16_t>(storage.entry_temp_base + 1), arch, &error);
+  if (restore_hi.failed())
+    return std::nullopt;
+  prologue.words.push_back(restore_lo.value());
+  prologue.words.push_back(restore_hi.value());
   return prologue;
 }
 

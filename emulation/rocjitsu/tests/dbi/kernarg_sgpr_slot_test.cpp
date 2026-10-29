@@ -105,7 +105,7 @@ TEST_P(KernargSgprSlot, CommandProcessorWritesThePointerWhereTheHelperNamesIt) {
   ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna3", /*wave_size=*/64));
   sim.set_kernarg(std::vector<uint8_t>(8, 0), properties, c.user_sgpr_count);
 
-  const std::vector<uint32_t> code{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3)};
+  const std::vector<uint32_t> code{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3).value()};
   const std::optional<uint64_t> pair =
       sim.run_and_read_sgpr64(code, /*private_bytes=*/0, c.expected_slot);
 
@@ -123,7 +123,7 @@ TEST(KernargSgprSlotNeighbours, ThePointerIsNotAlsoInTheAdjacentPairs) {
   desc.kernel_code_properties = properties;
   ASSERT_EQ(kernarg_segment_ptr_slot(desc), kSlot);
 
-  const std::vector<uint32_t> code{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3)};
+  const std::vector<uint32_t> code{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3).value()};
   for (uint32_t slot : {kSlot - 2, kSlot + 2}) {
     test::DbiSim sim;
     ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna3", /*wave_size=*/64));

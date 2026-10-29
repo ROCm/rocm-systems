@@ -85,10 +85,10 @@ TEST(LogRecordProbe, Rdna4WaitsAfterEachSaluWriteLlvmFlags) {
   };
   expect_wait_after(build_s_and_b32(12, 10, scalar_positive_inline_u32(kSlotCount - 1), kArch), 0,
                     "s_and_b32 s12");
-  expect_wait_after(build_s_lshl_b32(12, 12, scalar_positive_inline_u32(6), kArch), 0,
+  expect_wait_after(build_s_lshl_b32(12, 12, scalar_positive_inline_u32(6), kArch).value(), 0,
                     "s_lshl_b32 s12");
-  expect_wait_after(build_s_add_u32(12, 12, kScalarSrcLiteral, kArch), 1, "s_add_u32 s12");
-  expect_wait_after(build_s_addc_u32(11, 11, scalar_positive_inline_u32(0), kArch), 0,
+  expect_wait_after(build_s_add_u32(12, 12, kScalarSrcLiteral, kArch).value(), 1, "s_add_u32 s12");
+  expect_wait_after(build_s_addc_u32(11, 11, scalar_positive_inline_u32(0), kArch).value(), 0,
                     "s_addc_u32 s11");
 }
 

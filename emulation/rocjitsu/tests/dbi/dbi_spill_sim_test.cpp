@@ -116,8 +116,8 @@ protected:
   explicit DbiVgprSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value();
     // v_mov v2, K ; v_mov v3, v2 (ANCHOR at offset 4, v2 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(2, kSentinel), kMovV3V2, endpgm}, /*private_bytes=*/64,
@@ -169,7 +169,7 @@ protected:
   // the intact text restores it.
   void expect_missing_restore_clobbers_vgpr() {
     const std::vector<uint32_t> load = build_scratch_load_dword(2, 64, a_.arch);
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    const uint32_t nop = build_s_nop(0, a_.arch).value();
 
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, load).begin();
@@ -245,11 +245,11 @@ protected:
   explicit DbiSgprSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value();
     const uint32_t mov_s8_k =
-        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch);
-    const uint32_t mov_s8_0 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch);
+        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch).value();
+    const uint32_t mov_s8_0 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch).value();
     // s_mov s8, K ; v_mov v3, s8 (ANCHOR at offset 4, s8 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf({mov_s8_k, kMovV3S8, endpgm}, /*private_bytes=*/64,
                                                /*granulated_sgpr_count=*/3, a_.e_flags);
@@ -299,7 +299,7 @@ protected:
   void expect_missing_readlane_clobbers_sgpr() {
     const std::array<uint32_t, 2> readlane =
         build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    const uint32_t nop = build_s_nop(0, a_.arch).value();
 
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, readlane).begin();
@@ -374,12 +374,12 @@ protected:
   explicit DbiTwoSgprSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value();
     const uint32_t mov_s8_k =
-        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch);
+        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch).value();
     const uint32_t mov_s9_k =
-        build_s_mov_b32(kSpilledSgprHi, static_cast<uint16_t>(128 + kSentinel2), a_.arch);
+        build_s_mov_b32(kSpilledSgprHi, static_cast<uint16_t>(128 + kSentinel2), a_.arch).value();
     // s_mov s8,K1 ; s_mov s9,K2 ; v_mov v3,s8 (ANCHOR at offset 8: reads s8, s9 read
     // next -> both live) ; v_mov v4,s9 ; s_endpgm.
     auto target =
@@ -479,8 +479,8 @@ protected:
   explicit DbiAccVgprSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value();
     // v_accvgpr_write a0, K ; v_accvgpr_read v3, a0 (ANCHOR at offset 8, acc0
     // live) ; s_endpgm. The read copies restored acc0 into v3 for observability.
     auto target = test::make_amdgpu_kernel_elf(
@@ -536,7 +536,7 @@ protected:
   void expect_missing_restore_clobbers_accvgpr() {
     const std::vector<uint32_t> load =
         build_scratch_load_dword(/*acc0=*/0, 64, a_.arch, /*acc=*/true);
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    const uint32_t nop = build_s_nop(0, a_.arch).value();
 
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, load).begin();
@@ -607,11 +607,11 @@ protected:
   explicit DbiCombinedSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value();
     const uint32_t mov_s8_k =
-        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch);
-    const uint32_t mov_s8_0 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch);
+        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch).value();
+    const uint32_t mov_s8_0 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch).value();
     // v_mov v2,K ; s_mov s8,K ; v_accvgpr_write a0,K ; (ANCHOR at offset 16)
     // v_mov v5,v2 ; v_mov v6,s8 ; v_accvgpr_read v7,a0 ; s_endpgm.
     // 16 VGPRs with ACCUM_OFFSET=1 puts the accumulator window at v8-v15, so v2 and
@@ -680,7 +680,7 @@ protected:
         build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
     const std::vector<uint32_t> aload =
         build_scratch_load_dword(/*acc0=*/0, 72, a_.arch, /*acc=*/true);
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    const uint32_t nop = build_s_nop(0, a_.arch).value();
 
     std::vector<uint32_t> sabotaged = patched_text_;
     const auto nop_seq = [&](const auto &seq, const char *what) {
@@ -755,10 +755,10 @@ protected:
   explicit DbiReusedBridgeSpillSimBase(const SpillSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value();
     const uint32_t mov_s8_k =
-        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel2), a_.arch);
+        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel2), a_.arch).value();
     constexpr uint16_t kVgprSrc = 256; // VOP2 src field: VGPR = 256 + index.
     auto vadd = [&](uint16_t d, uint16_t s0, uint16_t s1) {
       return build_v_add_u32(d, s0, s1, a_.arch);
@@ -865,7 +865,7 @@ TEST_F(DbiRdna4ReusedBridgeSpillSimFixture, ReusedSpilledBridgeRestoredBeforeOwn
 // literal). Used for the RDNA4 wave32 partial EXEC mask (exec_lo=0x0000FFFF).
 [[nodiscard]] std::vector<uint32_t> s_mov_b32_literal(uint16_t sdst, uint32_t literal,
                                                       rj_code_arch_t arch) {
-  return {build_s_mov_b32(sdst, /*literal marker=*/255, arch), literal};
+  return {build_s_mov_b32(sdst, /*literal marker=*/255, arch).value(), literal};
 }
 
 // Per-arch EXEC-sim config. set_partial_mask narrows EXEC to [0, active_lanes);
@@ -882,8 +882,8 @@ struct ExecSimArch {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
   return {kCdna3SpillArch,
           /*active_lanes=*/32,
-          {build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch)},
-          {build_s_mov_b32(/*exec_hi=*/127, scalar_inline_neg_one(kArch), kArch)}};
+          {build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch).value()},
+          {build_s_mov_b32(/*exec_hi=*/127, scalar_inline_neg_one(kArch).value(), kArch).value()}};
 }
 
 // CDNA4 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
@@ -891,29 +891,32 @@ struct ExecSimArch {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   return {kCdna4SpillArch,
           /*active_lanes=*/32,
-          {build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch)},
-          {build_s_mov_b32(/*exec_hi=*/127, scalar_inline_neg_one(kArch), kArch)}};
+          {build_s_mov_b32(/*exec_hi=*/127, /*inline 0=*/128, kArch).value()},
+          {build_s_mov_b32(/*exec_hi=*/127, scalar_inline_neg_one(kArch).value(), kArch).value()}};
 }
 
 // RDNA4 wave32: narrow exec_lo to 0x0000FFFF (lanes 0..15); restore with exec_lo = -1.
 [[nodiscard]] inline ExecSimArch rdna4_exec_arch() {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
-  return {kRdna4SpillArch,
-          /*active_lanes=*/16,
-          s_mov_b32_literal(scalar_operand_exec_lo(kArch), /*lanes 0..15=*/0x0000FFFFu, kArch),
-          {build_s_mov_b32(scalar_operand_exec_lo(kArch), scalar_inline_neg_one(kArch), kArch)}};
+  return {
+      kRdna4SpillArch,
+      /*active_lanes=*/16,
+      s_mov_b32_literal(scalar_operand_exec_lo(kArch).value(), /*lanes 0..15=*/0x0000FFFFu, kArch),
+      {build_s_mov_b32(scalar_operand_exec_lo(kArch).value(), scalar_inline_neg_one(kArch).value(),
+                       kArch)
+           .value()}};
 }
 
 // Index of the trampoline's EXEC restore: an s_mov_b64 writing EXEC_LO from a
 // dead SGPR temp (< VCC_LO), not the probe's own `s_mov_b64 exec, 0` (reads
 // inline 0 = 128). text.size() if absent.
 [[nodiscard]] size_t find_exec_restore(const std::vector<uint32_t> &text, rj_code_arch_t arch) {
-  const uint32_t mov64 = sop1_op_mov_b64(arch);
+  const uint32_t mov64 = sop1_op_mov_b64(arch).value();
   for (size_t i = 0; i < text.size(); ++i) {
     const uint32_t w = text[i];
     if ((w >> 23) == kSop1EncodingPrefix && ((w >> 8) & 0xFFu) == mov64 &&
-        ((w >> 16) & 0x7Fu) == scalar_operand_exec_lo(arch) &&
-        (w & 0xFFu) < scalar_operand_vcc_lo(arch))
+        ((w >> 16) & 0x7Fu) == scalar_operand_exec_lo(arch).value() &&
+        (w & 0xFFu) < scalar_operand_vcc_lo(arch).value())
       return i;
   }
   return text.size();
@@ -927,13 +930,15 @@ protected:
   explicit DbiExecPreserveSimBase(ExecSimArch a) : a_(std::move(a)) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.base.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.base.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch).value();
     const uint32_t mov_v3_0 = 0x7E060280u;                      // v_mov_b32 v3, 0
     const uint32_t mov_v3_k = 0x7E060200u | (128u + kSentinel); // v_mov_b32 v3, K
     // Probe clobbers the whole EXEC pair: s_mov_b64 exec, 0.
     const uint32_t probe_clobber_exec =
-        build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch), /*inline 0=*/128, a_.base.arch);
+        build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch).value(), /*inline 0=*/128,
+                        a_.base.arch)
+            .value();
 
     // v_mov v3,0 (all lanes) ; <narrow EXEC> ; ANCHOR v_mov v3,K ; s_endpgm.
     std::vector<uint32_t> code = {mov_v3_0};
@@ -995,7 +1000,7 @@ protected:
     ASSERT_LT(restore, patched_text_.size()) << "EXEC restore (s_mov_b64 exec, tmp) not found";
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    sabotaged[restore] = build_s_nop(0, a_.base.arch);
+    sabotaged[restore] = build_s_nop(0, a_.base.arch).value();
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.base.sim_arch, a_.base.wave_size));
@@ -1064,15 +1069,17 @@ protected:
   explicit DbiExecWidenSpillSimBase(ExecSimArch a) : a_(std::move(a)) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.base.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.base.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch).value();
     const uint32_t mov_v2_k = test::make_mov_vgpr_inline(2, kSentinel); // v_mov v2, K (all lanes)
     const uint32_t mov_v3_0 = 0x7E060280u;                              // v_mov v3, 0
     const uint32_t mov_v4_v2 = 0x7E080302u;                             // v_mov v4, v2 (v2 live)
     const uint32_t mov_v3_v2 = kMovV3V2;                                // v_mov v3, v2
     // Probe widens EXEC to all lanes, then clobbers v2 on all of them.
-    const uint32_t probe_widen = build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch),
-                                                 scalar_inline_neg_one(a_.base.arch), a_.base.arch);
+    const uint32_t probe_widen =
+        build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch).value(),
+                        scalar_inline_neg_one(a_.base.arch).value(), a_.base.arch)
+            .value();
 
     // v2=K ; v3=0 ; <narrow EXEC> ; ANCHOR v_mov v4,v2 ; <widen EXEC> ; v3=v2 ; endpgm.
     std::vector<uint32_t> code = {mov_v2_k, mov_v3_0};
@@ -1132,8 +1139,10 @@ protected:
   // anchor mask and v2's inactive lanes are never saved -- they lose the sentinel.
   void expect_missing_store_full_mask_loses_high_lanes() {
     const std::vector<uint32_t> store = build_scratch_store_dword(2, 64, a_.base.arch);
-    const uint32_t toggle = build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch),
-                                            scalar_inline_neg_one(a_.base.arch), a_.base.arch);
+    const uint32_t toggle =
+        build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch).value(),
+                        scalar_inline_neg_one(a_.base.arch).value(), a_.base.arch)
+            .value();
     // The in-flight-load drain now sits at the envelope top, not in the spill
     // prologue, so the store's immediately preceding word is the EXEC=-1 toggle.
     auto it = std::ranges::search(patched_text_, store).begin();
@@ -1145,7 +1154,7 @@ protected:
         << "word before the store should be the prologue EXEC=-1 toggle";
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    sabotaged[toggle_idx] = build_s_nop(0, a_.base.arch);
+    sabotaged[toggle_idx] = build_s_nop(0, a_.base.arch).value();
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.base.sim_arch, a_.base.wave_size));
@@ -1210,8 +1219,8 @@ protected:
   explicit DbiExecMaskAtSpillSimBase(ExecSimArch a) : a_(std::move(a)) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.base.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch);
+    const uint32_t endpgm = build_s_endpgm(a_.base.arch).value();
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.base.arch).value();
     const uint32_t mov_v5_0 = 0x7E0A0280u;                      // v_mov v5, 0 (all lanes)
     const uint32_t mov_v5_k = 0x7E0A0200u | (128u + kSentinel); // v_mov v5, K (probe marker)
     const uint32_t mov_v2_k = test::make_mov_vgpr_inline(2, kSentinel); // v_mov v2, K (spilled reg)
@@ -1276,7 +1285,7 @@ protected:
     ASSERT_LT(restore, patched_text_.size()) << "pre-call EXEC anchor-restore not found";
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    sabotaged[restore] = build_s_nop(0, a_.base.arch);
+    sabotaged[restore] = build_s_nop(0, a_.base.arch).value();
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.base.sim_arch, a_.base.wave_size));

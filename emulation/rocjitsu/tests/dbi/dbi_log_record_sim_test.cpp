@@ -216,13 +216,13 @@ protected:
   // A kernel that sets EXEC to @p mask and reaches its anchor, the s_nop at
   // kMaskedAnchor, under it.
   std::vector<uint32_t> masked_kernel(uint64_t mask) const {
-    const uint16_t exec_lo = scalar_operand_exec_lo(t_.arch);
-    return {build_s_mov_b32(exec_lo, test::kScalarSrcLiteral, t_.arch),
+    const uint16_t exec_lo = scalar_operand_exec_lo(t_.arch).value();
+    return {build_s_mov_b32(exec_lo, test::kScalarSrcLiteral, t_.arch).value(),
             static_cast<uint32_t>(mask),
-            build_s_mov_b32(exec_lo + 1, test::kScalarSrcLiteral, t_.arch),
+            build_s_mov_b32(exec_lo + 1, test::kScalarSrcLiteral, t_.arch).value(),
             static_cast<uint32_t>(mask >> 32),
-            build_s_nop(0, t_.arch),
-            build_s_endpgm(t_.arch)};
+            build_s_nop(0, t_.arch).value(),
+            build_s_endpgm(t_.arch).value()};
   }
   static constexpr uint64_t kMaskedAnchor = 16;
 
@@ -255,9 +255,9 @@ protected:
 
   void expect_one_record_under_the_launch_mask() {
     PatchedKernel kernel;
-    ASSERT_NO_FATAL_FAILURE(
-        patch({build_s_nop(0, t_.arch), build_s_nop(0, t_.arch), build_s_endpgm(t_.arch)},
-              {/*anchor_offset=*/4}, /*force_full_exec=*/true, kernel));
+    ASSERT_NO_FATAL_FAILURE(patch({build_s_nop(0, t_.arch).value(), build_s_nop(0, t_.arch).value(),
+                                   build_s_endpgm(t_.arch).value()},
+                                  {/*anchor_offset=*/4}, /*force_full_exec=*/true, kernel));
     Drained drained;
     ASSERT_NO_FATAL_FAILURE(run(kernel, drained));
     EXPECT_EQ(drained.header.write_ptr, 1u);
@@ -318,12 +318,13 @@ protected:
     // s20 counts down from kTrips; s_cbranch_scc1 returns to the anchor, the
     // s_nop at 4, while it is nonzero.
     const std::vector<uint32_t> text{
-        build_s_mov_b32(kCounter, scalar_positive_inline_u32(kTrips), t_.arch),
-        build_s_nop(0, t_.arch),
-        build_s_add_u32(kCounter, kCounter, scalar_inline_neg_one(t_.arch), t_.arch),
-        build_s_cmp_lg_u32(kCounter, scalar_positive_inline_u32(0), t_.arch),
+        build_s_mov_b32(kCounter, scalar_positive_inline_u32(kTrips), t_.arch).value(),
+        build_s_nop(0, t_.arch).value(),
+        build_s_add_u32(kCounter, kCounter, scalar_inline_neg_one(t_.arch).value(), t_.arch)
+            .value(),
+        build_s_cmp_lg_u32(kCounter, scalar_positive_inline_u32(0), t_.arch).value(),
         test::build_s_cbranch_scc(/*scc1=*/true, /*back to the anchor=*/-4, t_.arch),
-        build_s_endpgm(t_.arch)};
+        build_s_endpgm(t_.arch).value()};
     PatchedKernel kernel;
     ASSERT_NO_FATAL_FAILURE(patch(text, {/*anchor_offset=*/4}, /*force_full_exec=*/true, kernel));
     Drained drained;
@@ -338,9 +339,10 @@ protected:
   // records land in execution order.
   void expect_each_site_records_its_own_offset() {
     PatchedKernel kernel;
-    ASSERT_NO_FATAL_FAILURE(patch({build_s_nop(0, t_.arch), build_s_nop(0, t_.arch),
-                                   build_s_nop(0, t_.arch), build_s_endpgm(t_.arch)},
-                                  {/*first=*/4, /*second=*/8}, /*force_full_exec=*/true, kernel));
+    ASSERT_NO_FATAL_FAILURE(
+        patch({build_s_nop(0, t_.arch).value(), build_s_nop(0, t_.arch).value(),
+               build_s_nop(0, t_.arch).value(), build_s_endpgm(t_.arch).value()},
+              {/*first=*/4, /*second=*/8}, /*force_full_exec=*/true, kernel));
     Drained drained;
     ASSERT_NO_FATAL_FAILURE(run(kernel, drained));
     EXPECT_EQ(drained.header.write_ptr, 2u);

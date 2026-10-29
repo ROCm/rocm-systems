@@ -171,8 +171,8 @@ constexpr uint16_t kInlineZero = scalar_positive_inline_u32(0);
 void make_copy_kernel(rj_code_arch_t arch, bool with_store, std::vector<uint32_t> &code) {
   const auto zero = build_v_mov_b32_src(0, kInlineZero, arch);
   ASSERT_TRUE(zero.succeeded());
-  code = {build_s_mov_b32(2, kScalarSrcLiteral, arch), static_cast<uint32_t>(kSource),
-          build_s_mov_b32(3, kInlineZero, arch), zero.value()};
+  code = {build_s_mov_b32(2, kScalarSrcLiteral, arch).value(), static_cast<uint32_t>(kSource),
+          build_s_mov_b32(3, kInlineZero, arch).value(), zero.value()};
   const std::vector<uint32_t> load = build_global_load_dword(1, 0, 2, 0, arch);
   code.insert(code.end(), load.begin(), load.end());
   code.push_back(build_wait_loads_complete(arch));
@@ -180,8 +180,8 @@ void make_copy_kernel(rj_code_arch_t arch, bool with_store, std::vector<uint32_t
   if (with_store)
     code.insert(code.end(), store.begin(), store.end());
   else
-    code.insert(code.end(), store.size(), build_s_nop(0, arch));
-  code.push_back(build_s_endpgm(arch));
+    code.insert(code.end(), store.size(), build_s_nop(0, arch).value());
+  code.push_back(build_s_endpgm(arch).value());
 }
 
 // Seeds kSource, runs the copy kernel, and returns the destination dword, or
@@ -226,7 +226,7 @@ void expect_destination_untouched_without_the_store(const SimArch &target) {
 void expect_reuse_is_rejected(const SimArch &target) {
   DbiSim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize(target.name, target.wave_size));
-  const std::vector<uint32_t> halt{build_s_endpgm(target.arch)};
+  const std::vector<uint32_t> halt{build_s_endpgm(target.arch).value()};
   ASSERT_TRUE(
       sim.run_and_read_memory(halt, /*private_bytes=*/0, kSource, sizeof(uint32_t)).has_value())
       << "the first dispatch did not halt";
@@ -240,8 +240,8 @@ void expect_no_read_back_without_a_halt(const SimArch &target) {
   DbiSim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize(target.name, target.wave_size));
   // s_branch to itself.
-  EXPECT_FALSE(sim.run_and_read_memory({build_s_branch(-1, target.arch)}, /*private_bytes=*/0,
-                                       kSource, sizeof(uint32_t))
+  EXPECT_FALSE(sim.run_and_read_memory({build_s_branch(-1, target.arch).value()},
+                                       /*private_bytes=*/0, kSource, sizeof(uint32_t))
                    .has_value());
 }
 

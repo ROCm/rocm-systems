@@ -135,7 +135,7 @@ constexpr uint16_t kInlineZero = 128;
 
 /// A kernel whose only explicitly named ordinary SGPR is `sgpr`.
 [[nodiscard]] std::vector<uint32_t> kernel_naming_sgpr(uint16_t sgpr) {
-  return {build_s_mov_b32(sgpr, kInlineZero, kArch), build_s_endpgm(kArch)};
+  return {build_s_mov_b32(sgpr, kInlineZero, kArch).value(), build_s_endpgm(kArch).value()};
 }
 
 // The floor is the higher of the two inputs. Here the kernel's own registers
@@ -148,14 +148,14 @@ TEST(DbiEntryStorageFloor, TakesTheOperandScanWhenItExceedsTheAbiBlock) {
 TEST(DbiEntryStorageFloor, FoldsInUserSgprsAndEnabledWorkgroupIds) {
   // Nothing named by the body, so the ABI block alone sets the floor: six user
   // SGPRs then two enabled workgroup dimensions, ending at s8.
-  const Kernel kernel({build_s_endpgm(kArch)});
+  const Kernel kernel({build_s_endpgm(kArch).value()});
   const KD desc = descriptor(/*user_sgpr_count=*/6, /*workgroup_id_x=*/true,
                              /*workgroup_id_y=*/true, /*workgroup_id_z=*/false);
   EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), desc, kArch), 8u);
 }
 
 TEST(DbiEntryStorageFloor, DisabledWorkgroupDimensionsConsumeNoSgpr) {
-  const Kernel kernel({build_s_endpgm(kArch)});
+  const Kernel kernel({build_s_endpgm(kArch).value()});
   const KD none = descriptor(/*user_sgpr_count=*/6);
   const KD all = descriptor(/*user_sgpr_count=*/6, /*workgroup_id_x=*/true,
                             /*workgroup_id_y=*/true, /*workgroup_id_z=*/true);
@@ -227,7 +227,7 @@ TEST(PlanDbiEntryStorage, LargeCdnaAllocationKeepsTheTailAboveTheAddressableMaxi
 
 // An allocation smaller than the tail leaves no ordinary SGPRs to search.
 TEST(PlanDbiEntryStorage, CdnaAllocationSmallerThanTheTailFailsClosed) {
-  const Kernel kernel({build_s_endpgm(kArch)});
+  const Kernel kernel({build_s_endpgm(kArch).value()});
   std::string error;
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
@@ -283,7 +283,7 @@ TEST(PlanDbiEntryStorage, FailsClosedWhenTheFloorIsAtOrPastTheAllocation) {
 // no run above the floor is provably unused.
 TEST(PlanDbiEntryStorage, FailsClosedOnRelativeSgprAccess) {
   constexpr uint32_t kSMovreldB32S4S2 = 0xBE842C02u; // s_movreld_b32 s4, s2
-  const Kernel kernel({kSMovreldB32S4S2, build_s_endpgm(kArch)});
+  const Kernel kernel({kSMovreldB32S4S2, build_s_endpgm(kArch).value()});
   std::string error;
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
@@ -333,8 +333,8 @@ TEST(BuildDbiEntryPrologue, EmitsLoadsThenWaitThenRestore) {
       original[0],
       original[1],
       wait.value(),
-      build_s_mov_b32(0, kStorage.entry_temp_base, kArch),
-      build_s_mov_b32(1, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
+      build_s_mov_b32(0, kStorage.entry_temp_base, kArch).value(),
+      build_s_mov_b32(1, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch).value(),
   };
   EXPECT_EQ(prologue->words, expected);
 }
@@ -368,8 +368,8 @@ TEST(BuildDbiEntryPrologue, AddressesThroughTheKernargPairWhereverTheAbiPutsIt) 
       original[0],
       original[1],
       wait.value(),
-      build_s_mov_b32(2, kStorage.entry_temp_base, kArch),
-      build_s_mov_b32(3, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
+      build_s_mov_b32(2, kStorage.entry_temp_base, kArch).value(),
+      build_s_mov_b32(3, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch).value(),
   };
   EXPECT_EQ(prologue->words, expected);
 }

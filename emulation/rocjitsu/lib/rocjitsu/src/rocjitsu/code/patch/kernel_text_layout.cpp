@@ -91,10 +91,16 @@ void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words) {
   std::memcpy(text.data() + old_size, words.data(), extra_bytes);
 }
 
-void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code_arch_t arch) {
+util::Result append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count,
+                                rj_code_arch_t arch) {
   assert(byte_count % sizeof(uint32_t) == 0 && "padding must be word-aligned");
   if (byte_count == 0)
-    return;
+    return util::Result::success();
+
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
+  if (maybe_nop.failed())
+    return util::Result::failure();
+  const uint32_t nop = maybe_nop.value();
 
   // Large translated code objects can compact reachable text substantially, but
   // CodeObjectPatcher still expects the final section to be padded back to the
@@ -105,7 +111,6 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
   const size_t extra = static_cast<size_t>(byte_count);
   text.resize(old_size + extra);
 
-  const uint32_t nop = build_s_nop(0, arch);
   std::memcpy(text.data() + old_size, &nop, sizeof(nop));
   size_t filled = sizeof(nop);
   while (filled < extra) {
@@ -113,6 +118,7 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
     std::memcpy(text.data() + old_size + filled, text.data() + old_size, copy_size);
     filled += copy_size;
   }
+  return util::Result::success();
 }
 
 [[nodiscard]] uint64_t padding_for_residue(uint64_t current_offset, uint64_t target_residue,
@@ -134,14 +140,16 @@ void write_words_at(std::vector<uint8_t> &dst, uint64_t offset, std::span<const 
 [[nodiscard]] bool write_launch_stub(std::vector<uint8_t> &text,
                                      const KernelEntryLayoutPlan &translation, uint64_t stub_offset,
                                      uint64_t target_offset, rj_code_arch_t arch) {
-  uint64_t cursor = stub_offset;
-  write_words_at(text, cursor, translation.prologue_words);
-  cursor += translation.prologue_words.size() * sizeof(uint32_t);
+  uint64_t cursor = stub_offset + translation.prologue_words.size() * sizeof(uint32_t);
 
   const auto branch_dwords = compute_sopp_branch_simm16(cursor, target_offset);
   if (!branch_dwords)
     return false;
-  const uint32_t branch = build_s_branch(*branch_dwords, arch);
+  util::FailureOr<uint32_t> maybe_branch = build_s_branch(*branch_dwords, arch);
+  if (maybe_branch.failed())
+    return false;
+  const uint32_t branch = maybe_branch.value();
+  write_words_at(text, stub_offset, translation.prologue_words);
   write_words_at(text, cursor, std::span<const uint32_t>(&branch, 1));
   return true;
 }
@@ -199,10 +207,16 @@ void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta) {
 KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
                                                   const SkippedKernelLayoutPlan &plan,
                                                   rj_code_arch_t arch) {
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(arch);
+  if (maybe_endpgm.failed())
+    return kernel_text_append_error(plan.source_entry,
+                                    "Unimplemented instruction: s_endpgm for target architecture");
   const uint64_t source_entry = plan.source_entry;
   const uint64_t padding =
       padding_for_residue(text.size(), source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
-  append_nop_padding(text, padding, arch);
+  if (append_nop_padding(text, padding, arch).failed())
+    return kernel_text_append_error(source_entry,
+                                    "Unimplemented instruction: s_nop for target architecture");
   const uint64_t target_entry = text.size();
 
   // Keep skipped symbols loadable without placing guest ISA bytes in the
@@ -211,10 +225,12 @@ KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
   // wave immediately if one is dispatched: a trap can abort or wedge its HSA
   // queue, while the mandatory load-time diagnostic loudly reports that this
   // no-op body cannot produce valid kernel outputs.
-  const uint32_t endpgm = build_s_endpgm(arch);
+  const uint32_t endpgm = maybe_endpgm.value();
   append_words(text, std::span<const uint32_t>(&endpgm, 1));
   if (plan.has_kernarg_preload_firmware_skip) {
-    append_nop_padding(text, kKernargPreloadSkipBytes - sizeof(uint32_t), arch);
+    if (append_nop_padding(text, kKernargPreloadSkipBytes - sizeof(uint32_t), arch).failed())
+      return kernel_text_append_error(source_entry,
+                                      "Unimplemented instruction: s_nop for target architecture");
     append_words(text, std::span<const uint32_t>(&endpgm, 1));
   }
 
@@ -225,6 +241,9 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
                                                     KernelTextLayout &layout,
                                                     std::span<const uint8_t> kernel_text,
                                                     rj_code_arch_t arch) {
+  if (build_s_nop(0, arch).failed())
+    return kernel_text_append_error(layout.source_entry,
+                                    "Unimplemented instruction: s_nop for target architecture");
   auto body_entry = target_for_source_offset(layout, layout.source_entry);
   if (!body_entry) {
     return kernel_text_append_error(
@@ -259,11 +278,15 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     // the stubs are written after the body offsets have been rebased.
     const uint64_t launch_padding = padding_for_residue(
         translated_text.size(), layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
-    append_nop_padding(translated_text, launch_padding, arch);
+    if (append_nop_padding(translated_text, launch_padding, arch).failed())
+      return kernel_text_append_error(layout.source_entry,
+                                      "Unimplemented instruction: s_nop for target architecture");
     layout.target_entry = translated_text.size();
     const uint64_t launch_end =
         layout.target_entry + kKernargPreloadSkipBytes + kernel_entry_stub_bytes(layout.entry_plan);
-    append_nop_padding(translated_text, launch_end - translated_text.size(), arch);
+    if (append_nop_padding(translated_text, launch_end - translated_text.size(), arch).failed())
+      return kernel_text_append_error(layout.source_entry,
+                                      "Unimplemented instruction: s_nop for target architecture");
     target_delta = translated_text.size();
   } else if (has_descriptor_prologue) {
     // Descriptor ABI prologues are hardware-visible entry stubs. Place the stub
@@ -274,20 +297,28 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     // preserves the body placement invariant used by kernels without prologues.
     const uint64_t launch_padding = padding_for_residue(
         translated_text.size(), layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
-    append_nop_padding(translated_text, launch_padding, arch);
+    if (append_nop_padding(translated_text, launch_padding, arch).failed())
+      return kernel_text_append_error(layout.source_entry,
+                                      "Unimplemented instruction: s_nop for target architecture");
     layout.target_entry = translated_text.size();
     const uint64_t launch_end = layout.target_entry + kernel_entry_stub_bytes(layout.entry_plan);
-    append_nop_padding(translated_text, launch_end - translated_text.size(), arch);
+    if (append_nop_padding(translated_text, launch_end - translated_text.size(), arch).failed())
+      return kernel_text_append_error(layout.source_entry,
+                                      "Unimplemented instruction: s_nop for target architecture");
     const uint64_t body_padding =
         padding_for_residue(translated_text.size() + layout.target_body_entry,
                             layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
-    append_nop_padding(translated_text, body_padding, arch);
+    if (append_nop_padding(translated_text, body_padding, arch).failed())
+      return kernel_text_append_error(layout.source_entry,
+                                      "Unimplemented instruction: s_nop for target architecture");
     target_delta = translated_text.size();
   } else {
     const uint64_t body_padding =
         padding_for_residue(translated_text.size() + layout.target_body_entry,
                             layout.source_entry % kKernelEntryAlignment, kKernelEntryAlignment);
-    append_nop_padding(translated_text, body_padding, arch);
+    if (append_nop_padding(translated_text, body_padding, arch).failed())
+      return kernel_text_append_error(layout.source_entry,
+                                      "Unimplemented instruction: s_nop for target architecture");
     target_delta = translated_text.size();
   }
 
@@ -335,10 +366,17 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   if (!fixup.preserve_marked_long_transfer) {
     if (const auto direct_simm =
             compute_sopp_branch_simm16(fixup.target_window_offset, target_offset)) {
-      if (fixup.is_call)
-        words.push_back(build_s_call_b64(fixup.return_sreg, *direct_simm, arch));
-      else
-        words.push_back(build_s_branch(*direct_simm, arch));
+      if (fixup.is_call) {
+        util::FailureOr<uint32_t> word = build_s_call_b64(fixup.return_sreg, *direct_simm, arch);
+        if (word.failed())
+          return false;
+        words.push_back(word.value());
+      } else {
+        util::FailureOr<uint32_t> word = build_s_branch(*direct_simm, arch);
+        if (word.failed())
+          return false;
+        words.push_back(word.value());
+      }
       return true;
     }
   }
@@ -348,17 +386,30 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     // original transfer already lands correctly and needs no window at all. Emitting one would
     // cost five words and leave an unmarked getpc/add/consumer triple for the next pass to wrap.
     // One word in, one word out, so the reserved window is exact and .text cannot change size.
-    if (fixup.is_call)
-      words.push_back(build_s_swappc_b64(fixup.return_sreg, fixup.target_sreg, arch));
-    else
-      words.push_back(build_s_setpc_b64(fixup.target_sreg, arch));
+    if (fixup.is_call) {
+      util::FailureOr<uint32_t> word =
+          build_s_swappc_b64(fixup.return_sreg, fixup.target_sreg, arch);
+      if (word.failed())
+        return false;
+      words.push_back(word.value());
+    } else {
+      util::FailureOr<uint32_t> word = build_s_setpc_b64(fixup.target_sreg, arch);
+      if (word.failed())
+        return false;
+      words.push_back(word.value());
+    }
     return true;
   }
 
   // Every long recovered transfer carries the same non-padding marker. A later
   // pass can then preserve the exact window even if CFG compaction has brought
   // its target back within direct SOPP range.
-  words.push_back(build_s_nop(kLongDirectBranchMarkerNopImmediate, arch));
+  {
+    util::FailureOr<uint32_t> word = build_s_nop(kLongDirectBranchMarkerNopImmediate, arch);
+    if (word.failed())
+      return false;
+    words.push_back(word.value());
+  }
   const uint64_t sequence_offset = fixup.target_window_offset + sizeof(uint32_t);
 
   constexpr uint64_t kMaxSigned = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
@@ -369,15 +420,27 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   // SGPR pair consumed by the original setpc/swappc. The preceding source-side
   // address builder may still execute, but this sequence overwrites the pair
   // immediately before the actual control transfer.
-  words.push_back(build_s_getpc_b64(fixup.target_sreg, arch));
+  {
+    util::FailureOr<uint32_t> word = build_s_getpc_b64(fixup.target_sreg, arch);
+    if (word.failed())
+      return false;
+    words.push_back(word.value());
+  }
   const int64_t base = static_cast<int64_t>(sequence_offset + sizeof(uint32_t));
   const int64_t delta = static_cast<int64_t>(target_offset) - base;
   if (!append_pc_delta_builder(words, arch, fixup.target_sreg, delta))
     return false;
-  if (fixup.is_call)
-    words.push_back(build_s_swappc_b64(fixup.return_sreg, fixup.target_sreg, arch));
-  else
-    words.push_back(build_s_setpc_b64(fixup.target_sreg, arch));
+  if (fixup.is_call) {
+    util::FailureOr<uint32_t> word = build_s_swappc_b64(fixup.return_sreg, fixup.target_sreg, arch);
+    if (word.failed())
+      return false;
+    words.push_back(word.value());
+  } else {
+    util::FailureOr<uint32_t> word = build_s_setpc_b64(fixup.target_sreg, arch);
+    if (word.failed())
+      return false;
+    words.push_back(word.value());
+  }
   return true;
 }
 
@@ -389,16 +452,28 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   if (sequence_offset > kMaxSigned - sizeof(uint32_t) || target_offset > kMaxSigned)
     return false;
 
-  words.push_back(build_s_getpc_b64(pc_sreg, arch));
+  {
+    util::FailureOr<uint32_t> word = build_s_getpc_b64(pc_sreg, arch);
+    if (word.failed())
+      return false;
+    words.push_back(word.value());
+  }
   const int64_t base = static_cast<int64_t>(sequence_offset + sizeof(uint32_t));
   const int64_t delta = static_cast<int64_t>(target_offset) - base;
   if (!append_pc_delta_builder(words, arch, pc_sreg, delta))
     return false;
 
-  if (call_sdst)
-    words.push_back(build_s_swappc_b64(*call_sdst, pc_sreg, arch));
-  else
-    words.push_back(build_s_setpc_b64(pc_sreg, arch));
+  if (call_sdst) {
+    util::FailureOr<uint32_t> word = build_s_swappc_b64(*call_sdst, pc_sreg, arch);
+    if (word.failed())
+      return false;
+    words.push_back(word.value());
+  } else {
+    util::FailureOr<uint32_t> word = build_s_setpc_b64(pc_sreg, arch);
+    if (word.failed())
+      return false;
+    words.push_back(word.value());
+  }
   return true;
 }
 
@@ -539,7 +614,8 @@ grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
     const TextLayoutInsertion insertion = growth.insertion;
     grown_text.insert(grown_text.end(), text.begin() + static_cast<std::ptrdiff_t>(copied_until),
                       text.begin() + static_cast<std::ptrdiff_t>(insertion.offset));
-    append_nop_padding(grown_text, insertion.size, arch);
+    if (append_nop_padding(grown_text, insertion.size, arch).failed())
+      return std::nullopt;
     copied_until = insertion.offset;
     insertions.push_back(insertion);
   }
@@ -583,26 +659,36 @@ uint64_t next_direct_branch_island_pool_offset(uint64_t current_body_size) {
   return current_body_size + kDirectBranchIslandSpacingBytes;
 }
 
-void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelTextLayout &layout,
-                                      rj_code_arch_t arch) {
-  const uint32_t marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
+util::Result append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text,
+                                              KernelTextLayout &layout, rj_code_arch_t arch) {
+  util::FailureOr<uint32_t> maybe_marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
+  if (maybe_marker.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> maybe_skip =
+      build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), arch);
+  if (maybe_skip.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> maybe_placeholder = build_s_branch(0, arch);
+  if (maybe_placeholder.failed())
+    return util::Result::failure();
+  const uint32_t marker = maybe_marker.value();
   append_words(kernel_text, std::span<const uint32_t>(&marker, 1));
 
   const uint64_t skip_offset = kernel_text.size();
-  const uint32_t skip_pool =
-      build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), arch);
+  const uint32_t skip_pool = maybe_skip.value();
   append_words(kernel_text, std::span<const uint32_t>(&skip_pool, 1));
 
   // Normal fallthrough executes the skip above and lands after the pool. A
   // patched out-of-range branch may instead target one of these private slots,
   // each of which is later rewritten to an unconditional branch to the next
   // island or final target.
-  const uint32_t placeholder = build_s_branch(0, arch);
+  const uint32_t placeholder = maybe_placeholder.value();
   for (uint16_t i = 0; i < kDirectBranchIslandPoolSlots; ++i) {
     layout.branch_island_slots.push_back(skip_offset + sizeof(uint32_t) +
                                          static_cast<uint64_t>(i) * sizeof(uint32_t));
     append_words(kernel_text, std::span<const uint32_t>(&placeholder, 1));
   }
+  return util::Result::success();
 }
 
 [[nodiscard]] std::optional<uint32_t> build_inverted_conditional_skip(const Instruction &inst,
@@ -707,7 +793,12 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
     const auto simm = compute_sopp_branch_simm16(window_offset, first_target);
     if (!simm)
       return false;
-    words.push_back(build_s_branch(*simm, arch));
+    {
+      util::FailureOr<uint32_t> word = build_s_branch(*simm, arch);
+      if (word.failed())
+        return false;
+      words.push_back(word.value());
+    }
     return true;
   }
 
@@ -725,7 +816,12 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
     return false;
 
   words.push_back(*inverted);
-  words.push_back(build_s_branch(*simm, arch));
+  {
+    util::FailureOr<uint32_t> word = build_s_branch(*simm, arch);
+    if (word.failed())
+      return false;
+    words.push_back(word.value());
+  }
   return true;
 }
 
@@ -735,7 +831,10 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
                                                       uint64_t window_offset, uint64_t window_bytes,
                                                       uint64_t target_offset, rj_code_arch_t arch,
                                                       uint16_t pc_sreg) {
-  const uint32_t marker = build_s_nop(kLongDirectBranchMarkerNopImmediate, arch);
+  util::FailureOr<uint32_t> maybe_marker = build_s_nop(kLongDirectBranchMarkerNopImmediate, arch);
+  if (maybe_marker.failed())
+    return false;
+  const uint32_t marker = maybe_marker.value();
   if ((inst.flags() & BRANCH) != 0) {
     words.push_back(marker);
     return append_long_pc_transfer(words, arch, pc_sreg, window_offset + sizeof(uint32_t),
@@ -761,6 +860,11 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
 TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
                                                 const KernelTextLayout &layout,
                                                 rj_code_arch_t arch) {
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
+  if (maybe_nop.failed())
+    return relocation_error(0, "Unimplemented instruction: s_nop for target architecture");
+  const uint32_t nop = maybe_nop.value();
+
   struct PlannedWindowPatch {
     uint64_t offset = 0;
     std::vector<uint32_t> words;
@@ -862,7 +966,11 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
             return relocation_error(fixup.source_inst_offset,
                                     "direct branch island patch points outside translated .text");
           }
-          island_patches.push_back({.offset = (*chain)[i], .word = build_s_branch(*simm, arch)});
+          util::FailureOr<uint32_t> branch = build_s_branch(*simm, arch);
+          if (branch.failed())
+            return relocation_error(fixup.source_inst_offset,
+                                    "Unimplemented instruction: s_branch for target architecture");
+          island_patches.push_back({.offset = (*chain)[i], .word = branch.value()});
         }
       } else {
         std::vector<uint32_t> long_words;
@@ -891,8 +999,7 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
       }
     }
 
-    std::vector<uint32_t> window_words(fixup.target_window_bytes / sizeof(uint32_t),
-                                       build_s_nop(0, arch));
+    std::vector<uint32_t> window_words(fixup.target_window_bytes / sizeof(uint32_t), nop);
     std::ranges::copy(words, window_words.begin());
     window_patches.push_back(
         {.offset = fixup.target_inst_offset, .words = std::move(window_words)});
@@ -914,6 +1021,11 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
 TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
                                                      const KernelTextLayout &layout,
                                                      rj_code_arch_t arch) {
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
+  if (maybe_nop.failed())
+    return relocation_error(0, "Unimplemented instruction: s_nop for target architecture");
+  const uint32_t nop = maybe_nop.value();
+
   struct PlannedWindowPatch {
     uint64_t offset = 0;
     std::vector<uint32_t> words;
@@ -973,8 +1085,7 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
       continue;
     }
 
-    std::vector<uint32_t> window_words(fixup.target_window_bytes / sizeof(uint32_t),
-                                       build_s_nop(0, arch));
+    std::vector<uint32_t> window_words(fixup.target_window_bytes / sizeof(uint32_t), nop);
     std::ranges::copy(words, window_words.begin());
     window_patches.push_back(
         {.offset = fixup.target_window_offset, .words = std::move(window_words)});
@@ -993,6 +1104,11 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
 TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
                                                     const KernelTextLayout &layout,
                                                     rj_code_arch_t arch) {
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
+  if (maybe_nop.failed())
+    return relocation_error(0, "Unimplemented instruction: s_nop for target architecture");
+  const uint32_t nop = maybe_nop.value();
+
   std::unordered_map<uint64_t, std::tuple<uint64_t, uint64_t, bool, uint16_t>> rewritten_regions;
   std::vector<uint64_t> compact_builder_fallbacks;
   for (const IndirectCallFixup &fixup : layout.recovered_builder_fixups) {
@@ -1110,7 +1226,6 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
 
     std::memcpy(text.data() + fixup.target_recovery_begin_offset, replacement_words.data(),
                 replacement_size);
-    const uint32_t nop = build_s_nop(0, arch);
     for (uint64_t off = fixup.target_recovery_begin_offset + replacement_size;
          off < fixup.target_recovery_end_offset; off += sizeof(uint32_t)) {
       std::memcpy(text.data() + off, &nop, sizeof(nop));

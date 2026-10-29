@@ -318,7 +318,7 @@ void HsaDbiNopProbeHardwareBase<Params>::run_probe_body_is_actually_called_by_gp
 
   // The first word of the copied body must not already be s_endpgm; otherwise
   // the sabotage proves nothing.
-  const uint32_t s_endpgm_0 = build_s_endpgm(Params.arch);
+  const uint32_t s_endpgm_0 = build_s_endpgm(Params.arch).value();
   uint32_t pre_overwrite = 0;
   std::memcpy(&pre_overwrite, sabotaged.data() + body_file_off, sizeof(pre_overwrite));
   ASSERT_NE(pre_overwrite, s_endpgm_0) << "Probe body already starts with s_endpgm?";

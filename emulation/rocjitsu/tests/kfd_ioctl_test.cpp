@@ -1171,7 +1171,9 @@ TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
   RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, rdna);
   RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, rdna);
   std::memcpy(code.data(), &kd, sizeof(kd));
-  const uint32_t endpgm = rocjitsu::build_s_endpgm(soc_->arch());
+  util::FailureOr<uint32_t> maybe_s_endpgm = rocjitsu::build_s_endpgm(soc_->arch());
+  ASSERT_TRUE(maybe_s_endpgm.succeeded());
+  const uint32_t endpgm = maybe_s_endpgm.value();
   std::memcpy(code.data() + sizeof(kd), &endpgm, sizeof(endpgm));
   auto *process = driver_->find_process(driver_->local_process_id()).get();
   ASSERT_NE(process, nullptr);
@@ -2150,7 +2152,9 @@ TEST_F(KfdIoctlCdna5Test, ZeroRingSizeNormalizesAndNullBaseSuspendsAql) {
   kernel_descriptor_t descriptor{};
   descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
   std::memcpy(code.data(), &descriptor, sizeof(descriptor));
-  const uint32_t endpgm = rocjitsu::build_s_endpgm(soc_->arch());
+  util::FailureOr<uint32_t> maybe_s_endpgm_2 = rocjitsu::build_s_endpgm(soc_->arch());
+  ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+  const uint32_t endpgm = maybe_s_endpgm_2.value();
   std::memcpy(code.data() + sizeof(descriptor), &endpgm, sizeof(endpgm));
   auto process = driver_->find_process(driver_->local_process_id());
   ASSERT_NE(process, nullptr);
@@ -9031,7 +9035,9 @@ TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches)
     kd.kernel_code_entry_byte_offset = sizeof(kd);
     kd.private_segment_fixed_size = 32u << i;
     std::memcpy(code.data() + i * 4096, &kd, sizeof(kd));
-    const uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_3.value();
     std::memcpy(code.data() + i * 4096 + sizeof(kd), &endpgm, sizeof(endpgm));
   }
   process->map_pages(kCodeAddress, code.data(), code.size());

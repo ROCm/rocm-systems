@@ -82,12 +82,13 @@ protected:
     map_page(kBranchPc, kBranchPhysicalPage);
     // s_setpc_b64 / s_set_pc_i64 s[4:5], or
     // s_swappc_b64 / s_swap_pc_i64 s[6:7], s[4:5].
-    memory.write32(kBranchPhysicalPage, GetParam().swap ? build_s_swappc_b64(6, 4, GetParam().arch)
-                                                        : build_s_setpc_b64(4, GetParam().arch));
+    memory.write32(kBranchPhysicalPage, GetParam().swap
+                                            ? build_s_swappc_b64(6, 4, GetParam().arch).value()
+                                            : build_s_setpc_b64(4, GetParam().arch).value());
     // s_mov_b32 s8, 42: execution proves the high target was actually fetched.
     memory.write32(kTargetPhysicalPage,
-                   build_s_mov_b32(8, scalar_positive_inline_u32(42), GetParam().arch));
-    memory.write32(kTargetPhysicalPage + 4, build_s_endpgm(GetParam().arch));
+                   build_s_mov_b32(8, scalar_positive_inline_u32(42), GetParam().arch).value());
+    memory.write32(kTargetPhysicalPage + 4, build_s_endpgm(GetParam().arch).value());
   }
 
   void TearDown() override {

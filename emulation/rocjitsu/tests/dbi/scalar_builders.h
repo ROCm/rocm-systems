@@ -54,11 +54,11 @@ static_assert(cdna3::OPR_SSRC_SRC_LITERAL == kScalarSrcLiteral &&
                                                     rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return build_sop1_encoding(arch, cdna3::kSBcnt1I32B64Sop1, sdst, ssrc0);
+    return build_sop1_encoding(arch, cdna3::kSBcnt1I32B64Sop1, sdst, ssrc0).value();
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return build_sop1_encoding(arch, cdna4::kSBcnt1I32B64Sop1, sdst, ssrc0);
+    return build_sop1_encoding(arch, cdna4::kSBcnt1I32B64Sop1, sdst, ssrc0).value();
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return build_sop1_encoding(arch, rdna4::kSBcnt1I32B64Sop1, sdst, ssrc0);
+    return build_sop1_encoding(arch, rdna4::kSBcnt1I32B64Sop1, sdst, ssrc0).value();
   default:
     throw util::UnimplementedInst("s_bcnt1_i32_b64 for target architecture");
   }
@@ -72,11 +72,11 @@ static_assert(cdna3::OPR_SSRC_SRC_LITERAL == kScalarSrcLiteral &&
                                                         rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return build_sop1_encoding(arch, cdna3::kSFf1I32B64Sop1, sdst, ssrc0);
+    return build_sop1_encoding(arch, cdna3::kSFf1I32B64Sop1, sdst, ssrc0).value();
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return build_sop1_encoding(arch, cdna4::kSFf1I32B64Sop1, sdst, ssrc0);
+    return build_sop1_encoding(arch, cdna4::kSFf1I32B64Sop1, sdst, ssrc0).value();
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return build_sop1_encoding(arch, rdna4::kSCtzI32B64Sop1, sdst, ssrc0);
+    return build_sop1_encoding(arch, rdna4::kSCtzI32B64Sop1, sdst, ssrc0).value();
   default:
     throw util::UnimplementedInst("s_ff1_i32_b64 for target architecture");
   }
@@ -87,11 +87,11 @@ static_assert(cdna3::OPR_SSRC_SRC_LITERAL == kScalarSrcLiteral &&
                                               rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return build_sop2_encoding(arch, cdna3::kSAndB32Sop2, sdst, ssrc0, ssrc1);
+    return build_sop2_encoding(arch, cdna3::kSAndB32Sop2, sdst, ssrc0, ssrc1).value();
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return build_sop2_encoding(arch, cdna4::kSAndB32Sop2, sdst, ssrc0, ssrc1);
+    return build_sop2_encoding(arch, cdna4::kSAndB32Sop2, sdst, ssrc0, ssrc1).value();
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return build_sop2_encoding(arch, rdna4::kSAndB32Sop2, sdst, ssrc0, ssrc1);
+    return build_sop2_encoding(arch, rdna4::kSAndB32Sop2, sdst, ssrc0, ssrc1).value();
   default:
     throw util::UnimplementedInst("s_and_b32 for target architecture");
   }

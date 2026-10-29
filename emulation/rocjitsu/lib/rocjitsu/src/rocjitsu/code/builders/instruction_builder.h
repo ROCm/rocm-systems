@@ -19,9 +19,10 @@
 ///
 /// The encoding format of a family is stable across generations, but the opcodes
 /// are not. For example, s_branch is opcode 2 on GFX9 (CDNA1-4) and 32 on GFX12
-/// (RDNA4). Every build_* therefore takes rj_code_arch_t. The s_delay_alu builder
-/// and SOPP layout builder return failure for an unsupported arch; other builders
-/// currently throw util::UnimplementedInst. Scalar-operand codes
+/// (RDNA4). Every build_* therefore takes rj_code_arch_t. The scalar builders
+/// and operand lookups
+/// return failure for an unsupported architecture or an unrepresentable field;
+/// an optional diagnostic emitter receives the reason. Scalar-operand codes
 /// (VCC, EXEC, M0) and inline constants come from the generated operand tables
 /// (operand_types.h); see scalar_operand_m0 / scalar_operand_vcc_lo /
 /// scalar_operand_exec_lo.
@@ -75,7 +76,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 #include "util/diagnostic.h"
-#include "util/except.h"
 
 namespace rocjitsu {
 
@@ -150,8 +150,14 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 }
 
 /// @brief Build a SOP1 word using the generated layout for @p arch.
-[[nodiscard]] inline constexpr uint32_t build_sop1_encoding(rj_code_arch_t arch, uint16_t op,
-                                                            uint16_t sdst, uint16_t ssrc0) {
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_sop1_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ssrc0,
+                    const util::DiagnosticEmitter *error = nullptr) {
+  if (op > 0xFFu || sdst > 0x7Fu || ssrc0 > 0xFFu)
+    return error != nullptr ? error->emit() << "SOP1 encoding field out of range"
+                            : util::Result::failure();
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::build_sop1(
@@ -184,14 +190,21 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
     return cdna5::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
   default:
-    throw util::UnimplementedInst("SOP1 builder for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: SOP1 builder for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Build a SOP2 word using the generated layout for @p arch.
-[[nodiscard]] inline constexpr uint32_t build_sop2_encoding(rj_code_arch_t arch, uint16_t op,
-                                                            uint16_t sdst, uint16_t ssrc0,
-                                                            uint16_t ssrc1) {
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_sop2_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1,
+                    const util::DiagnosticEmitter *error = nullptr) {
+  if (op > 0x7Fu || sdst > 0x7Fu || ssrc0 > 0xFFu || ssrc1 > 0xFFu)
+    return error != nullptr ? error->emit() << "SOP2 encoding field out of range"
+                            : util::Result::failure();
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
@@ -234,7 +247,9 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
   default:
-    throw util::UnimplementedInst("SOP2 builder for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: SOP2 builder for target architecture"
+               : util::Result::failure();
   }
 }
 
@@ -247,8 +262,14 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 }
 
 /// @brief Build a SOPC word using the generated layout for @p arch.
-[[nodiscard]] inline constexpr uint32_t build_sopc_encoding(rj_code_arch_t arch, uint16_t op,
-                                                            uint16_t ssrc0, uint16_t ssrc1) {
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_sopc_encoding(rj_code_arch_t arch, uint16_t op, uint16_t ssrc0, uint16_t ssrc1,
+                    const util::DiagnosticEmitter *error = nullptr) {
+  if (op > 0x7Fu || ssrc0 > 0xFFu || ssrc1 > 0xFFu)
+    return error != nullptr ? error->emit() << "SOPC encoding field out of range"
+                            : util::Result::failure();
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::build_sopc(
@@ -281,7 +302,9 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
     return cdna5::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
   default:
-    return pack_sopc(op, ssrc0, ssrc1);
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: SOPC builder for target architecture"
+               : util::Result::failure();
   }
 }
 
@@ -291,8 +314,14 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 }
 
 /// @brief Build a SOPK word using the generated layout for @p arch.
-[[nodiscard]] inline constexpr uint32_t build_sopk_encoding(rj_code_arch_t arch, uint16_t op,
-                                                            uint16_t sdst, uint16_t simm16) {
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_sopk_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t simm16,
+                    const util::DiagnosticEmitter *error = nullptr) {
+  if (op > 0x1Fu || sdst > 0x7Fu)
+    return error != nullptr ? error->emit() << "SOPK encoding field out of range"
+                            : util::Result::failure();
 #define ROCJITSU_BUILD_SOPK(isa)                                                                   \
   return isa::build_sopk(op, {.simm16 = simm16, .sdst = static_cast<uint8_t>(sdst)})[0]
   switch (arch) {
@@ -317,7 +346,9 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
   case ROCJITSU_CODE_ARCH_CDNA5:
     ROCJITSU_BUILD_SOPK(cdna5);
   default:
-    throw util::UnimplementedInst("SOPK builder for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: SOPK builder for target architecture"
+               : util::Result::failure();
   }
 #undef ROCJITSU_BUILD_SOPK
 }
@@ -332,7 +363,9 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 /// M0 is operand 124 on gfx9 / gfx10.x (CDNA1-4, RDNA1/2) but was moved to 125
 /// on gfx11+ (RDNA3/3.5/4, gfx1250), where 124 became NULL. Each case returns
 /// that arch's generated OPR_SDST_M0 code so the value tracks the operand table.
-[[nodiscard]] inline constexpr uint16_t scalar_operand_m0(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint16_t>
+scalar_operand_m0(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::OPR_SDST_M0;
@@ -355,7 +388,10 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::OPR_SDST_M0;
   default:
-    throw util::UnimplementedInst("M0 operand code for target architecture");
+    return error != nullptr
+               ? error->emit()
+                     << "Unimplemented instruction: M0 operand code for target architecture"
+               : util::Result::failure();
   }
 }
 
@@ -364,7 +400,9 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 /// VCC_LO is operand 106 on every modeled AMDGPU generation; each case still
 /// returns that arch's generated OPR_SDST_VCC_LO so the value tracks the operand
 /// table rather than a hard-coded constant.
-[[nodiscard]] inline constexpr uint16_t scalar_operand_vcc_lo(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint16_t>
+scalar_operand_vcc_lo(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::OPR_SDST_VCC_LO;
@@ -387,7 +425,10 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::OPR_SDST_VCC_LO;
   default:
-    throw util::UnimplementedInst("VCC_LO operand code for target architecture");
+    return error != nullptr
+               ? error->emit()
+                     << "Unimplemented instruction: VCC_LO operand code for target architecture"
+               : util::Result::failure();
   }
 }
 
@@ -396,7 +437,9 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 /// EXEC_LO is operand 126 on every modeled AMDGPU generation; each case still
 /// returns that arch's generated OPR_SDST_EXEC_LO so the value tracks the operand
 /// table rather than a hard-coded constant.
-[[nodiscard]] inline constexpr uint16_t scalar_operand_exec_lo(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint16_t>
+scalar_operand_exec_lo(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::OPR_SDST_EXEC_LO;
@@ -419,7 +462,10 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::OPR_SDST_EXEC_LO;
   default:
-    throw util::UnimplementedInst("EXEC_LO operand code for target architecture");
+    return error != nullptr
+               ? error->emit()
+                     << "Unimplemented instruction: EXEC_LO operand code for target architecture"
+               : util::Result::failure();
   }
 }
 
@@ -428,7 +474,9 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 /// A b64 source sign-extends to all ones, so `s_mov_b64 exec, -1` = all lanes
 /// active. Code 193 on every modeled generation; each case returns that arch's
 /// generated code so the value tracks the operand table.
-[[nodiscard]] inline constexpr uint16_t scalar_inline_neg_one(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint16_t>
+scalar_inline_neg_one(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::OPR_SRC_NEG_INT_MIN;
@@ -451,7 +499,10 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::OPR_SRC_NEG_INT_MIN;
   default:
-    throw util::UnimplementedInst("inline -1 source code for target architecture");
+    return error != nullptr
+               ? error->emit()
+                     << "Unimplemented instruction: inline -1 source code for target architecture"
+               : util::Result::failure();
   }
 }
 
@@ -515,43 +566,61 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
     return cdna5::opcode
 
 /// @brief Get the s_branch opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sopp_op_branch(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sopp_op_branch(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSBranchSopp);
   default:
-    throw util::UnimplementedInst("s_branch for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_branch for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Get the s_endpgm opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sopp_op_endpgm(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sopp_op_endpgm(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSEndpgmSopp);
   default:
-    throw util::UnimplementedInst("s_endpgm for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_endpgm for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Get the s_trap opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sopp_op_trap(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sopp_op_trap(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSTrapSopp);
   default:
-    throw util::UnimplementedInst("s_trap for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_trap for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Get the s_nop opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sopp_op_nop(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sopp_op_nop(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSNopSopp);
   default:
-    throw util::UnimplementedInst("s_nop for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_nop for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Get the s_getpc_b64 SOP1 opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sop1_op_getpc_b64(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sop1_op_getpc_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::kSGetPcB64Sop1;
@@ -574,12 +643,16 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSGetPcI64Sop1;
   default:
-    throw util::UnimplementedInst("s_getpc for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_getpc for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Get the s_setpc_b64 SOP1 opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sop1_op_setpc_b64(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sop1_op_setpc_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::kSSetPcB64Sop1;
@@ -602,12 +675,16 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSSetPcI64Sop1;
   default:
-    throw util::UnimplementedInst("s_setpc for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_setpc for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Get the s_swappc_b64 SOP1 opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sop1_op_swappc_b64(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sop1_op_swappc_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::kSSwapPcB64Sop1;
@@ -630,12 +707,16 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSSwapPcI64Sop1;
   default:
-    throw util::UnimplementedInst("s_swappc for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_swappc for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Get the s_call_b64 SOPK opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sopk_op_call_b64(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sopk_op_call_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::kSCallB64Sopk;
@@ -658,25 +739,35 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSCallI64Sopk;
   default:
-    throw util::UnimplementedInst("s_call_b64 for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_call_b64 for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Get the s_lshl_b32 opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sop2_op_lshl_b32(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sop2_op_lshl_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSLshlB32Sop2);
   default:
-    throw util::UnimplementedInst("s_lshl_b32 for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_lshl_b32 for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Get the s_lshr_b32 opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sop2_op_lshr_b32(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sop2_op_lshr_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSLshrB32Sop2);
   default:
-    throw util::UnimplementedInst("s_lshr_b32 for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_lshr_b32 for target architecture"
+               : util::Result::failure();
   }
 }
 
@@ -697,38 +788,54 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 }
 
 /// @brief Get the s_mov_b32 opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sop1_op_mov_b32(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sop1_op_mov_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSMovB32Sop1);
   default:
-    throw util::UnimplementedInst("s_mov_b32 for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_mov_b32 for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Get the s_mov_b64 opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sop1_op_mov_b64(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sop1_op_mov_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSMovB64Sop1);
   default:
-    throw util::UnimplementedInst("s_mov_b64 for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_mov_b64 for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief SOP2 opcode for s_cselect_b32 on @p arch.
-[[nodiscard]] inline constexpr uint32_t sop2_op_cselect_b32(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sop2_op_cselect_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSCselectB32Sop2);
   default:
-    throw util::UnimplementedInst("s_cselect_b32 for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_cselect_b32 for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief SOPC opcode for s_cmp_lg_u32 on @p arch.
-[[nodiscard]] inline constexpr uint32_t sopc_op_cmp_lg_u32(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sopc_op_cmp_lg_u32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSCmpLgU32Sopc);
   default:
-    throw util::UnimplementedInst("s_cmp_lg_u32 for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_cmp_lg_u32 for target architecture"
+               : util::Result::failure();
   }
 }
 
@@ -739,33 +846,75 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 /// @param offset_dwords  Signed offset in dwords from (PC + 4).
 /// @param arch           Target ISA architecture.
 /// @returns The encoded 32-bit instruction word.
-[[nodiscard]] inline constexpr uint32_t build_s_branch(int16_t offset_dwords, rj_code_arch_t arch) {
-  // Opcode selection rejects architectures without a generated SOPP layout.
-  const uint32_t op = sopp_op_branch(arch);
-  return build_sopp_encoding(arch, op, static_cast<uint16_t>(offset_dwords)).value();
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_branch(int16_t offset_dwords, rj_code_arch_t arch,
+               const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sopp_op_branch(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  return build_sopp_encoding(arch, op.value(), static_cast<uint16_t>(offset_dwords), error);
 }
 
 /// @brief Encode an s_getpc_b64 instruction for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_getpc_b64(uint16_t sdst, rj_code_arch_t arch) {
-  return build_sop1_encoding(arch, sop1_op_getpc_b64(arch), sdst, 0);
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_getpc_b64(uint16_t sdst, rj_code_arch_t arch,
+                  const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sop1_op_getpc_b64(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> word = build_sop1_encoding(arch, op.value(), sdst, 0);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_getpc_b64 encoding field out of range";
+  return word;
 }
 
 /// @brief Encode an s_setpc_b64 instruction for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_setpc_b64(uint16_t ssrc0, rj_code_arch_t arch) {
-  return build_sop1_encoding(arch, sop1_op_setpc_b64(arch), 0, ssrc0);
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_setpc_b64(uint16_t ssrc0, rj_code_arch_t arch,
+                  const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sop1_op_setpc_b64(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> word = build_sop1_encoding(arch, op.value(), 0, ssrc0);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_setpc_b64 encoding field out of range";
+  return word;
 }
 
 /// @brief Encode an s_swappc_b64 instruction for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0,
-                                                           rj_code_arch_t arch) {
-  return build_sop1_encoding(arch, sop1_op_swappc_b64(arch), sdst, ssrc0);
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
+                   const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sop1_op_swappc_b64(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> word = build_sop1_encoding(arch, op.value(), sdst, ssrc0);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_swappc_b64 encoding field out of range";
+  return word;
 }
 
 /// @brief Encode an s_call_b64 instruction for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_call_b64(uint16_t sdst, int16_t offset_dwords,
-                                                         rj_code_arch_t arch) {
-  return build_sopk_encoding(arch, sopk_op_call_b64(arch), sdst,
-                             static_cast<uint16_t>(offset_dwords));
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rj_code_arch_t arch,
+                 const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sopk_op_call_b64(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> word =
+      build_sopk_encoding(arch, op.value(), sdst, static_cast<uint16_t>(offset_dwords));
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_call_b64 encoding field out of range";
+  return word;
 }
 
 /// @brief Patch an emitted direct PC-relative branch instruction in-place.
@@ -802,30 +951,40 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 /// @param cycles  Number of additional stall cycles (0-based).
 /// @param arch    Target ISA architecture.
 /// @returns The encoded 32-bit instruction word.
-[[nodiscard]] inline constexpr uint32_t
-build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
-  // Opcode selection rejects architectures without a generated SOPP layout.
-  const uint32_t op = sopp_op_nop(arch);
-  return build_sopp_encoding(arch, op, cycles).value();
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4,
+            const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sopp_op_nop(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  return build_sopp_encoding(arch, op.value(), cycles, error);
 }
 
 /// @brief Encode an s_endpgm instruction for the given target ISA.
 ///
 /// @param arch    Target ISA architecture.
 /// @returns The encoded 32-bit instruction word.
-[[nodiscard]] inline constexpr uint32_t build_s_endpgm(rj_code_arch_t arch) {
-  // Opcode selection rejects architectures without a generated SOPP layout.
-  const uint32_t op = sopp_op_endpgm(arch);
-  return build_sopp_encoding(arch, op, 0).value();
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_endpgm(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sopp_op_endpgm(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  return build_sopp_encoding(arch, op.value(), 0, error);
 }
 
 /// @brief Encode an s_trap instruction for the given target ISA.
 ///
 /// @details The immediate is a caller-defined trap code, not a printable message.
-[[nodiscard]] inline constexpr uint32_t build_s_trap(rj_code_arch_t arch, uint16_t simm16 = 0) {
-  // Opcode selection rejects architectures without a generated SOPP layout.
-  const uint32_t op = sopp_op_trap(arch);
-  return build_sopp_encoding(arch, op, simm16).value();
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_trap(rj_code_arch_t arch, uint16_t simm16 = 0,
+             const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sopp_op_trap(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  return build_sopp_encoding(arch, op.value(), simm16, error);
 }
 
 /// @brief Encode s_delay_alu for the given target ISA.
@@ -854,53 +1013,119 @@ build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch,
 }
 
 /// @brief Encode s_mov_b32 for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_mov_b32(uint16_t sdst, uint16_t ssrc0,
-                                                        rj_code_arch_t arch) {
-  return build_sop1_encoding(arch, sop1_op_mov_b32(arch), sdst, ssrc0);
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_mov_b32(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
+                const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sop1_op_mov_b32(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> word = build_sop1_encoding(arch, op.value(), sdst, ssrc0);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_mov_b32 encoding field out of range";
+  return word;
 }
 
 /// @brief Encode s_mov_b64 for the given target ISA (SGPR pair or EXEC/VCC).
-[[nodiscard]] inline constexpr uint32_t build_s_mov_b64(uint16_t sdst, uint16_t ssrc0,
-                                                        rj_code_arch_t arch) {
-  return build_sop1_encoding(arch, sop1_op_mov_b64(arch), sdst, ssrc0);
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
+                const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sop1_op_mov_b64(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> word = build_sop1_encoding(arch, op.value(), sdst, ssrc0);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_mov_b64 encoding field out of range";
+  return word;
 }
 
 /// @brief Encode s_lshl_b32 for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0,
-                                                         uint16_t ssrc1, rj_code_arch_t arch) {
-  return build_sop2_encoding(arch, sop2_op_lshl_b32(arch), sdst, ssrc0, ssrc1);
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+                 const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sop2_op_lshl_b32(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, op.value(), sdst, ssrc0, ssrc1);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_lshl_b32 encoding field out of range";
+  return word;
 }
 
 /// @brief Encode s_lshr_b32 for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_lshr_b32(uint16_t sdst, uint16_t ssrc0,
-                                                         uint16_t ssrc1, rj_code_arch_t arch) {
-  return build_sop2_encoding(arch, sop2_op_lshr_b32(arch), sdst, ssrc0, ssrc1);
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_lshr_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+                 const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sop2_op_lshr_b32(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, op.value(), sdst, ssrc0, ssrc1);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_lshr_b32 encoding field out of range";
+  return word;
 }
 
 /// @brief Encode s_add_u32 for the given target ISA (SOP2 opcode 0, all gens).
-[[nodiscard]] inline constexpr uint32_t build_s_add_u32(uint16_t sdst, uint16_t ssrc0,
-                                                        uint16_t ssrc1, rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_add_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+                const util::DiagnosticEmitter *error = nullptr) {
   constexpr uint16_t kSop2AddU32 = 0;
-  return build_sop2_encoding(arch, kSop2AddU32, sdst, ssrc0, ssrc1);
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, kSop2AddU32, sdst, ssrc0, ssrc1);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_add_u32 encoding for target architecture or field out of range";
+  return word;
 }
 
 /// @brief Encode s_addc_u32 for the given target ISA (SOP2 opcode 4, all gens).
-[[nodiscard]] inline constexpr uint32_t build_s_addc_u32(uint16_t sdst, uint16_t ssrc0,
-                                                         uint16_t ssrc1, rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_addc_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+                 const util::DiagnosticEmitter *error = nullptr) {
   constexpr uint16_t kSop2AddcU32 = 4;
-  return build_sop2_encoding(arch, kSop2AddcU32, sdst, ssrc0, ssrc1);
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, kSop2AddcU32, sdst, ssrc0, ssrc1);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_addc_u32 encoding for target architecture or field out of range";
+  return word;
 }
 
 /// @brief Encode s_cselect_b32 for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0,
-                                                            uint16_t ssrc1, rj_code_arch_t arch) {
-  return build_sop2_encoding(arch, sop2_op_cselect_b32(arch), sdst, ssrc0, ssrc1);
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+                    const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sop2_op_cselect_b32(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, op.value(), sdst, ssrc0, ssrc1);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_cselect_b32 encoding field out of range";
+  return word;
 }
 
 /// @brief Encode s_cmp_lg_u32 for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1,
-                                                           rj_code_arch_t arch) {
-  return build_sopc_encoding(arch, sopc_op_cmp_lg_u32(arch), ssrc0, ssrc1);
+/// @returns Failure for an unsupported architecture or an unrepresentable field; emits a reason
+/// when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+                   const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sopc_op_cmp_lg_u32(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  util::FailureOr<uint32_t> word = build_sopc_encoding(arch, op.value(), ssrc0, ssrc1);
+  if (word.failed() && error != nullptr)
+    return error->emit() << "s_cmp_lg_u32 encoding field out of range";
+  return word;
 }
 
 // VOP3 src-operand encoders used by the DBI register-spilling primitives, whose
