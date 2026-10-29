@@ -6,6 +6,7 @@ import MetricsGrid from '../../src/components/overview/MetricsGrid.jsx';
 import DurationHistory from '../../src/components/overview/DurationHistory.jsx';
 import { readDashboardRoute, buildDashboardUrl } from '../../src/hooks/useDashboardState.js';
 import { formatFullDate } from '../../src/utils/formatters.js';
+import { trendSlotStatus } from '../../src/components/overview/overviewPresentation.js';
 
 const capture = vi.hoisted(() => ({ props: null }));
 vi.mock('../../src/components/shared/Chart.jsx', () => ({ default: (props) => { capture.props = props; return createElement('div'); } }));
@@ -43,6 +44,23 @@ test('relative chart has only configuration series, no gap bridges, dots or fill
   expect(option.tooltip.formatter([{ dataIndex: 1 }])).toBe('');
   expect(option.tooltip.formatter([{ dataIndex: 0 }])).toContain('Commit abc');
 });
+test.each([
+  { duration: 12.3456, reference: 60.9876, expected: '12.3s', expectedReference: '1m 1.0s' },
+  { duration: 12, reference: 0.1, expected: '12.0s', expectedReference: '0.10s' },
+  { duration: 0.004, reference: 119.999, expected: '0.00s', expectedReference: '2m 0.0s' },
+  { duration: 75.25, reference: 9.876, expected: '1m 15.3s', expectedReference: '9.88s' },
+])('trend tooltip and keyboard status share duration units and precision: $duration', ({ duration, reference, expected, expectedReference }) => {
+  const row = projection.rows[0];
+  const model = { ...projection, rows: [{ ...row,
+    points: [{ ...point, durationSeconds: duration }, row.points[1]],
+    reference: { ...point, durationSeconds: reference },
+  }] };
+  renderToStaticMarkup(createElement(DurationHistory, { projection: model, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
+  const html = capture.props.option.tooltip.formatter([{ dataIndex: 0 }]);
+  expect(html).toContain(`<b>1.000×</b> · ${expected} · ref ${expectedReference}`);
+  expect(trendSlotStatus(model, 0)).toContain(`gfx950 single: 1.000× · ${expected}`);
+});
+
 test('trend tooltip starts with commit identity and commit time rather than execution time', () => {
   const committed = { ...run, commitTimestamp: '2025-12-31T23:00:00Z' };
   renderToStaticMarkup(createElement(DurationHistory, { projection: { ...projection, slots: [{ run: committed, x: 0 }, projection.slots[1]] }, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
@@ -51,7 +69,7 @@ test('trend tooltip starts with commit identity and commit time rather than exec
   expect(html).not.toContain(formatFullDate(run.timestamp));
   expect(html).not.toContain('Attempt:');
   expect(html).not.toContain('Reference:');
-  expect(html.split('<br/>').slice(2)).toEqual(['gfx950 single · <b>1.000×</b> · 12s · ref 12s']);
+  expect(html.split('<br/>').slice(2)).toEqual(['gfx950 single · <b>1.000×</b> · 12.0s · ref 12.0s']);
 });
 
 test.each(['1M', '3M', 'ALL'])('%s date labels use regular whole-day intervals without short edge ticks', (range) => {

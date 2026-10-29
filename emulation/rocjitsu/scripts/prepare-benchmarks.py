@@ -220,7 +220,7 @@ class Preparation:
             ('tensile', self.env['TENSILE_SOURCE'], self.env['TENSILE_SHA']),
             ('nanobind', self.env['NANOBIND_SOURCE'], self.env['NANOBIND_SHA']),
             ('corpus', self.env['CORPUS_SOURCE_DIR'], self.env['CORPUS_SHA']),
-            ('rocjitsu', self.env['ROCJITSU_SOURCE_DIR'], self.env['GITHUB_SHA']),
+            ('rocjitsu', self.env['ROCJITSU_SOURCE_DIR'], self.env['BENCHMARK_SHA']),
         ]:
             require(
                 re.fullmatch(r'[a-f0-9]{40}', revision),
@@ -453,7 +453,7 @@ class Preparation:
             True,
         )
         require(
-            f'git revision: {self.env["GITHUB_SHA"]}' in version,
+            f'git revision: {self.env["BENCHMARK_SHA"]}' in version,
             'Built runtime source attribution mismatch',
         )
         self.binary_inventory(
