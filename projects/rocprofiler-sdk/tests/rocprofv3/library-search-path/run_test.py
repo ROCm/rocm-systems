@@ -50,7 +50,7 @@ def main():
         )
         check(
             "Through rocprofv3",
-            [args.rocprofv3, "--rocm-root", root, "--", args.app],
+            [args.rocprofv3, "--marker-trace", "--rocm-root", root, "--", args.app],
             "from local copy",
             env,
             root,
