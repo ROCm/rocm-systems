@@ -225,6 +225,18 @@ class SummarizeTests(unittest.TestCase):
             self.assertIn("cli test (exit 1)", text)
             self.assertIn("Example amd_smi_nodrm_ex", text)
 
+    def test_nic_suite_exit_code_fails_the_summary(self):
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            (results / "test_nic_vpd_suite.log").write_text("20 tests run, 0 failed\n")
+            (results / "test_nic_stats_suite.log").write_text("175 tests run, 1 failed\nExit code: 1\n")
+            summary = results / "summary.md"
+            n = rab.summarize_results(results, "TestOS", summary)
+            text = summary.read_text()
+            self.assertEqual(n, 1)
+            self.assertIn("test_nic_stats_suite (exit 1)", text)
+            self.assertNotIn("test_nic_vpd_suite", text)
+
     def test_cli_test_failures_are_counted(self):
         with tempfile.TemporaryDirectory() as td:
             results = Path(td)

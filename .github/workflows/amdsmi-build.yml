@@ -258,6 +258,12 @@ jobs:
           echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
           run "$RESULTS_DIR/amdsmi_tests.log" ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}"
 
+          # Standalone NIC suites. They read fake sysfs trees, so they need no NIC and no root.
+          for suite in test_nic_telemetry_suite test_nic_discovery_suite test_nic_stats_suite \
+              test_nic_log_suite test_nic_vpd_suite test_nic_check_suite; do
+            run "$RESULTS_DIR/${suite}.log" "./${suite}"
+          done
+
           cd /opt/rocm/share/amd_smi/tests/python_unittest
           run "$RESULTS_DIR/integration_test_output.txt" ./integration_test.py -v
           run "$RESULTS_DIR/unit_test_output.txt" ./unit_tests.py -v
