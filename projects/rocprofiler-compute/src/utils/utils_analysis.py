@@ -1951,16 +1951,3 @@ def assign_native_ids(counter_set: pd.DataFrame) -> pd.DataFrame:
         Kernel_ID=kernel_groups.ngroup(),
     )
     return numbered.loc[:, COUNTER_RESULTS_COLUMNS]
-
-
-def get_matrix_ops_type(gpu_series: str) -> str:
-    """
-    Get the matrix operation type supported by the profiled hardware in roofline
-    run_parameters.
-    For the supported architecture of this tool, only CDNA2/3/4 supports Matrix
-    Fused Multiply-Add instructions; all other architectures support Warp
-    Matrix Multiply-Accumulate operations.
-    """
-    if gpu_series.upper() in ["MI200", "MI300", "MI350"]:
-        return "MFMA"
-    return "WMMA"

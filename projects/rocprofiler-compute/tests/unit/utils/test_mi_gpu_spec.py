@@ -9,7 +9,7 @@ from unittest.mock import patch
 import common
 import pytest
 
-from utils.mi_gpu_spec import MIGPUSpecs
+from utils.mi_gpu_spec import ROOFLINE_DATA_TYPES, MIGPUSpecs
 from utils.specs import _extract_gpu_info
 
 
@@ -221,6 +221,22 @@ class TestMIGPUSpecs:
         result_lower = MIGPUSpecs.get_memory_levels("mi300x_a1")
         result_upper = MIGPUSpecs.get_memory_levels("MI300X_A1")
         assert result_lower == result_upper
+
+    # -- roofline ------------------------------------------------------------
+
+    def test_roofline_bandwidth_is_a_memory_level_of_every_model(self):
+        for gpu_arch in MIGPUSpecs.get_roofline_archs():
+            bandwidth = MIGPUSpecs.get_roofline_bandwidth(gpu_arch)
+            for gpu_model in MIGPUSpecs._gpu_model_dict[gpu_arch]:
+                levels = MIGPUSpecs.get_memory_levels(gpu_model)
+                assert set(bandwidth) <= set(levels), (gpu_arch, gpu_model)
+
+    def test_roofline_data_types_are_known(self):
+        """An unknown data type would be measured but silently left out of the plot."""
+        for gpu_arch in MIGPUSpecs.get_roofline_archs():
+            valu = MIGPUSpecs._roofline_list(gpu_arch, "valu")
+            matrix = MIGPUSpecs._roofline_list(gpu_arch, "matrix")
+            assert {*valu, *matrix} <= set(ROOFLINE_DATA_TYPES), gpu_arch
 
     # -- extract_gpu_info (gfx1250 partition defaults) -----------------------
 
