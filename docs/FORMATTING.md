@@ -7,7 +7,7 @@ request, regardless of its target branch or changed paths:
 | --- | --- | --- |
 | runtimes | `pre-commit / runtimes` | `.pre-commit-config.yaml` |
 | RocJITsu | `pre-commit` | `.pre-commit-config.yaml` |
-| CUID | `pre-commit / cuid` | `projects/cuid/.pre-commit-config.yaml` |
+| CUID | `pre-commit / cuid` | `shared/cuid/.pre-commit-config.yaml` |
 | rocprofiler-compute | `pre-commit / rocprofiler-compute` | `projects/rocprofiler-compute/.pre-commit-config.yaml` |
 
 RocJITsu retains the `pre-commit` name required by the base branch's PR policy.
@@ -19,10 +19,9 @@ does not cancel the other rows.
 Formatting steps live directly in the workflow. Each row calls the shared
 `.github/actions/changed-files` selector, also used by the unit-test workflow.
 The selector inspects the complete local Git diff between the event's merge
-base and head. It does not use
-GitHub's capped path filters or PR-files API. It includes deleted paths and
-both sides of renames, preserves unusual filename bytes, and fails if Git
-cannot establish an unambiguous comparison. The formatter uses the same
+base and head. It does not use GitHub's capped path filters or PR-files API.
+It includes deleted paths and both sides of renames, preserves unusual filename
+bytes, and fails if Git cannot establish an unambiguous comparison. The formatter uses the same
 validated comparison commits.
 
 The matrix's include/exclude regular expressions decide whether a row needs
@@ -44,7 +43,7 @@ python -m pip install pre-commit
 pre-commit run --config .pre-commit-config.yaml --all-files --show-diff-on-failure
 ```
 
-Use `--config projects/<project>/.pre-commit-config.yaml` for a project configuration.
+Use the configuration path listed in the table for CUID or rocprofiler-compute.
 
 ## Registering lightweight unit tests
 
