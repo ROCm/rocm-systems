@@ -29,7 +29,9 @@ def test_ds_dword_store_snapshots_observed_registers(name, size, elements):
     )
     body = codegen._gen_ds_write([], [], semantics)
     assert f'read_vgpr_region(data_base, {size * elements // 4}, exec)' in body
-    assert 'if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;' in body
+    assert (
+        'if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;' in body
+    )
     assert '(inst_.acc ? 256u : 0u)' in body
     assert body.index('ds_calculate_addresses(') < body.index('read_vgpr_region(')
     assert body.index('if (data.valid())') < body.index('copy_dwords_lane_major(')
