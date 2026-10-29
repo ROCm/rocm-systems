@@ -1263,6 +1263,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../memory-backing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KFD and GEM backing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../style/" class="md-nav__link">
         
   
@@ -2322,7 +2350,7 @@ the simulated GPU. It operates in four modes:</p>
 <li><strong>Daemon mode</strong>: Spawns a daemon child process that hosts the simulation
   engine, then <code>LD_PRELOAD</code> + <code>execve</code>s the target. Client processes
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
-  is shared using memfds passed via SCM_RIGHTS.</li>
+  is shared using backing descriptors passed via SCM_RIGHTS.</li>
 <li><strong>Attach mode</strong>: Launches an application against an already-running daemon.</li>
 <li><strong>VFIO-user mode</strong>: Serves each configured local GPU as a PCI function to an
   external VMM through its own AF_UNIX socket. This mode is available only in
@@ -2330,6 +2358,16 @@ the simulated GPU. It operates in four modes:</p>
 </ul>
 <p>Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.</p>
+<p>Daemon mode currently rejects dma-buf export with <code>EOPNOTSUPP</code>; its RPC protocol
+does not transfer exported descriptors. HIP VMM allocation (<code>hipMemCreate</code>)
+depends on that export even with <code>hipMemHandleTypeNone</code>, so ROCr may report it
+as out of memory. Use local mode for VMM allocation and its shareable-handle APIs.
+Ordinary daemon <code>hipMalloc</code>, copies, and kernel dispatch remain supported.</p>
+<p>For HIP IPC between daemon clients (<code>hipIpcGetMemHandle</code> and
+<code>hipIpcOpenMemHandle</code>), set <code>HSA_ENABLE_IPC_MODE_LEGACY=1</code> before launching the
+clients to select the supported legacy KFD IPC path. The current runtime's
+default dma-buf IPC path fails at handle creation in both local and daemon
+mode; switching to local mode does not resolve that limitation.</p>
 <h3 id="the-fork-boundary">The fork boundary<a class="headerlink" href="#the-fork-boundary" title="Permanent link">&para;</a></h3>
 <p>A child created with <code>fork()</code> before the parent has started a GPU backend can
 initialize its own rocJITsu context. This supports Python forkserver workers.
@@ -2509,7 +2547,7 @@ destroys the topology root (VirtualMachine), which destroys the driver.</p>
 <th>Opcode</th>
 <th>Direction</th>
 <th>Payload</th>
-<th>Memfd</th>
+<th>Backing descriptor</th>
 </tr>
 </thead>
 <tbody>
@@ -2552,21 +2590,26 @@ arrays. The client serializes these by inlining the pointed-to array after
 the struct. The daemon reconstructs the pointer to its local buffer. The
 client saves and restores original pointers across the RPC round-trip.</p>
 <h3 id="file-descriptor-passing">File Descriptor Passing<a class="headerlink" href="#file-descriptor-passing" title="Permanent link">&para;</a></h3>
-<p>Memfds are passed via <code>sendmsg()</code>/<code>recvmsg()</code> with <code>SCM_RIGHTS</code> ancillary
-data. This is the standard Unix mechanism for cross-process file descriptor
+<p>Backing descriptors (memfds or fallback socket tokens) are passed via
+<code>sendmsg()</code>/<code>recvmsg()</code> with <code>SCM_RIGHTS</code> ancillary data.
+This is the standard Unix mechanism for cross-process file descriptor
 sharing (same pattern as QEMU vhost-user and CRIU).</p>
-<p>Two RPC operations carry memfds:</p>
+<p>Two RPC response forms carry backing descriptors with different lifetimes:</p>
 <ul>
-<li><code>RPC_IOCTL</code> (ALLOC_MEMORY response) --- allocation backing memfd</li>
-<li><code>RPC_MMAP</code> (response) --- doorbell and event page memfds</li>
+<li><code>RPC_IOCTL</code> (<code>ALLOC_MEMORY</code> and <code>IPC_IMPORT_HANDLE</code> responses): the client
+  stores the allocation or import descriptor until free or driver cleanup.</li>
+<li><code>RPC_MMAP</code> responses: temporary aliases of allocation, doorbell, or event-page
+  backing. <code>RemoteDriver::mmap</code> closes the received alias on every exit, including
+  size-check and mapping failures. If the reply has no descriptor, it borrows
+  the stored allocation or import descriptor and leaves that descriptor open.</li>
 </ul>
 <h3 id="thread-safety">Thread Safety<a class="headerlink" href="#thread-safety" title="Permanent link">&para;</a></h3>
 <p>ROCR is heavily multithreaded. The <code>rpc_mutex_</code> in <code>RemoteDriver</code> serializes
 all send+recv pairs. <code>WAIT_EVENTS</code> uses client-side polling with <code>ppoll</code> on
 a shutdown <code>eventfd</code> between daemon timeout=0 polls, avoiding mutex starvation.</p>
 <h2 id="memory-sharing-same-va-architecture">Memory Sharing (Same-VA Architecture)<a class="headerlink" href="#memory-sharing-same-va-architecture" title="Permanent link">&para;</a></h2>
-<p>Both client and daemon map every memfd at the <strong>same virtual address</strong> using
-MAP_FIXED. GPU VAs are in the GPUVM aperture (<code>0x1000000000</code> - <code>0x3FFFFFFFFFFF</code>),
+<p>Both client and daemon map shared backing at the <strong>same virtual address</strong> using
+<code>map_memory_backing</code> with <code>MAP_FIXED</code>. GPU VAs are in the GPUVM aperture (<code>0x1000000000</code> - <code>0x3FFFFFFFFFFF</code>),
 which doesn't collide with either process's normal address space.</p>
 <p>This means <code>reinterpret_cast&lt;void*&gt;(gpu_va)</code> works in both processes ---
 AQL packets, kernarg pointers, signal handles, ring buffers, and rptr/wptr
@@ -2579,24 +2622,33 @@ all resolve correctly without VA translation.</p>
 
 2. ROCR: hsaKmtAllocMemory()
    RemoteDriver::send_ioctl(ALLOC)  ----&gt;  alloc_memory_ioctl()
-                                            memfd_create + ftruncate + fallocate
-                                            MAP_FIXED memfd at VA (proactive)
-                                    &lt;----  response + memfd (SCM_RIGHTS)
+                                            create_memory_backing via rocjitsu-memory
+                                            MAP_FIXED backing at VA (proactive)
+                                    &lt;----  response + backing fd (SCM_RIGHTS)
+   [store fd until free or driver cleanup]
    [USERPTR: mincore+copy, MAP_FIXED]
 
 3. ROCR: fmm_map_to_cpu()
    mmap(drm_fd, MAP_FIXED, offset)
    interposer routes DRM fd     ----&gt;     mmap() -&gt; already mapped, return
-                                    &lt;----  response
+                                    &lt;----  response + temporary backing fd (SCM_RIGHTS)
+   [map backing; close reply fd on every exit]
 </code></pre></div>
+<p>The private helper sizes ordinary memfds when its inherited hard file limit
+allows. Larger allocations use System V shared RAM retained by Unix socket
+tokens, which travel through the same <code>SCM_RIGHTS</code> path. The mapping and metadata
+adapters support both representations; tokens require those adapters and do not
+support <code>pread</code>/<code>pwrite</code>. The PCI <code>VramStore</code> uses separate file-backed storage.
+See <a href="../memory-backing/">memory backing</a> for keeper-lifetime and credential
+constraints, the same-UID trust assumption, and shared-memory budgets.</p>
 <h3 id="proactive-mapping">Proactive Mapping<a class="headerlink" href="#proactive-mapping" title="Permanent link">&para;</a></h3>
 <p>The daemon MAP_FIXED maps all allocations at ALLOC_MEMORY time, not at
 mmap time. This prevents a race where the CP thread dereferences kernarg
 pointers before the client's fmm_map_to_cpu RPC arrives.</p>
 <h3 id="userptr-sharing">USERPTR Sharing<a class="headerlink" href="#userptr-sharing" title="Permanent link">&para;</a></h3>
 <p>For USERPTR allocations (ring buffer, rptr/wptr), the client receives the
-daemon's memfd, copies committed pages via mincore, then MAP_FIXED replaces
-the anonymous pages with the shared memfd. The interposer suppresses
+daemon's backing descriptor, copies committed pages via mincore, then MAP_FIXED
+replaces the anonymous pages with shared backing. The interposer suppresses
 MADV_HUGEPAGE and MADV_DONTFORK on GPUVM addresses to prevent kernel 6.17
 shmem fault failures.</p>
 <h3 id="trust-model">Trust Model<a class="headerlink" href="#trust-model" title="Permanent link">&para;</a></h3>
@@ -2651,16 +2703,16 @@ waiters simultaneously.</p>
 </ol>
 <h2 id="fd-management">Fd Management<a class="headerlink" href="#fd-management" title="Permanent link">&para;</a></h2>
 <h3 id="fd-reservation-dmtcp-pattern">Fd Reservation (DMTCP Pattern)<a class="headerlink" href="#fd-reservation-dmtcp-pattern" title="Permanent link">&para;</a></h3>
-<p>The driver reserves a contiguous fd range (4000-4255) for internal memfds.
+<p>The driver reserves a contiguous fd range (4000-4255) for internal backing descriptors.
 <code>claim_fd(real_fd)</code> moves a real fd into this range via <code>dup2</code>. The
 interposer's <code>close()</code> checks <code>owns_reserved_fd(fd)</code> to protect internal
 fds from ROCR's normal fd lifecycle.</p>
 <h3 id="fd-protection">Fd Protection<a class="headerlink" href="#fd-protection" title="Permanent link">&para;</a></h3>
 <p>ROCR opens and closes many fds during init (topology files, /proc, DRM
 render nodes). Without protection, a transient file's fd number could
-collide with an allocation memfd. The <code>owned_fds_</code> set in <code>SimulatedDriver</code>
-tracks all internal memfds, and the interposer suppresses close() on
-protected fds.</p>
+collide with an allocation backing descriptor. The <code>owned_fds_</code> set in
+<code>SimulatedKfd</code> tracks internal backing descriptors, including socket tokens,
+and the interposer suppresses close() on protected fds.</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <h3 id="kernel-617-shmem-bug">Kernel 6.17 shmem Bug<a class="headerlink" href="#kernel-617-shmem-bug" title="Permanent link">&para;</a></h3>
 <p>MAP_SHARED at GPUVM addresses can trigger SIGBUS on kernel 6.17 due to a

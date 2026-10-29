@@ -990,6 +990,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../memory-backing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KFD and GEM backing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../style/" class="md-nav__link">
         
   
@@ -2007,8 +2035,13 @@ for target identity, static provider composition, and model-only linkage.</p>
 <li><strong>RemoteDriver</strong> — Client-side RPC stub for daemon mode. Forwards
   ioctls over a Unix socket to the daemon's SimulatedDriver.</li>
 <li><strong>EventState</strong> — KFD event lifecycle (create, set, reset, wait,
-  destroy). Signal page shared via memfd between daemon and client.</li>
+  destroy). Signal page uses the same shared backing as GPU allocations.</li>
 </ul>
+<p>GPU allocations, doorbells, event pages, and GEM objects use the private
+<code>rocjitsu-memory</code> helper to keep backing creation independent of application
+file-size limits. It provides native memfds or shared-memory tokens consumed
+through the <code>memory_backing</code> adapters. See <a href="../memory-backing/">KFD and GEM memory backing</a>
+for allocation policy, mapping semantics, resource limits, and helper lifecycle.</p>
 <h3 id="code-executable-loading-analysis-code">Code — Executable Loading &amp; Analysis (<code>code/</code>)<a class="headerlink" href="#code-executable-loading-analysis-code" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Executable</strong> — Loads x86 HIP fat binaries, extracts Clang offload
