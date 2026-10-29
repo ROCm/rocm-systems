@@ -1139,9 +1139,10 @@ TEST_F(BootstrapMicrotest, Grow_ExistingAndNewRanksCloseOneRing) {
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 
-// With OOB net + bidir net a grow's reverse ring never connects, so init hangs until abort.
-// Pins AICOMRCCL-3004; a fix flips this pin.
-TEST_F(BootstrapMicrotest, Grow_KnownBug_NetBidirReverseRingNeverConnectsSoInitHangs) {
+// With OOB net + bidir net a grow's reverse ring would never connect and init would hang. The fix
+// disables net bidir during grow, so init falls back to the one-way ring and completes regardless of
+// NCCL_BOOTSTRAP_BIDIR_NET. Guards AICOMRCCL-3004.
+TEST_F(BootstrapMicrotest, Grow_NetBidirFallsBackToUnidirRing) {
   params_["OOB_NET_ENABLE"] = 1;
   for (int bidir : {0, 1})
     for (int existing : {2, 3}) {
@@ -1158,14 +1159,13 @@ TEST_F(BootstrapMicrotest, Grow_KnownBug_NetBidirReverseRingNeverConnectsSoInitH
       ASSERT_EQ(ncclSuccess, bootstrapGetUniqueId(&grow, parent[0]->comm.get()));
       for (auto* p : parent) p->comm->childCount++;
       MakeRanks(existing + 2);
-      watchdog_ = bidir ? std::chrono::milliseconds(300) : g_waitLimit;
       auto res = OnRanks([&](int r) {
         Comm(r)->isGrow = true;
         if (r >= existing) return bootstrapInit(1, &grow, Comm(r), nullptr);
         bool boundary = r == 0 || r == existing - 1;  // only these receive the handle
         return bootstrapInit(boundary ? 1 : 0, boundary ? &grow : nullptr, Comm(r), parent[r]->comm.get());
       });
-      for (int r = 0; r < existing + 2; r++) EXPECT_EQ(bidir ? ncclInternalError : ncclSuccess, res[r]) << r;
+      for (int r = 0; r < existing + 2; r++) EXPECT_EQ(ncclSuccess, res[r]) << r;
       WaitRoots();
     }
 }

@@ -10,6 +10,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <ios>
 #include <utility>
 #include <vector>
 
@@ -289,6 +290,26 @@ TEST(WaitcheckStream, UntrackedScalarMemoryDestinationsStopBeforeLosingDependenc
         EXPECT_EQ(report.instructions_analyzed, 0u);
         EXPECT_FALSE(report.incomplete->reason.empty());
       }
+    }
+  }
+}
+
+TEST(WaitcheckStream, BranchStackInstructionsStopTheStream) {
+  // S_CBRANCH_I_FORK has no PC destination operand, so only its branch flag
+  // marks it as a control-flow transfer.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (uint32_t instruction : {
+             0xB86A0002u, // s_cbranch_i_fork vcc, 2
+             0x9480246Au, // s_cbranch_g_fork vcc, s[36:37]
+             0xBE802E22u, // s_cbranch_join s34
+         }) {
+      SCOPED_TRACE(testing::Message() << "arch=" << arch << " instruction=" << instruction);
+      const auto report = analyze({instruction}, arch);
+      ASSERT_TRUE(report.incomplete);
+      EXPECT_EQ(report.incomplete->offset, 0u);
+      EXPECT_EQ(report.instructions_analyzed, 0u);
+      EXPECT_NE(report.incomplete->reason.find("control flow"), std::string::npos)
+          << report.incomplete->reason;
     }
   }
 }
@@ -723,9 +744,10 @@ TEST(WaitcheckStream, RelativeRegisterOperandsAreIncomplete) {
 }
 
 TEST(WaitcheckStream, ScalarMaskDestinationsFollowWaveWidth) {
-  // Carry outputs (add/subtract/multiply-add) and f32/f64 divide-scale define s2
-  // in Wave32 and s[2:3] in Wave64. Encodings checked with LLVM's assembler.
-  const std::array<std::array<uint32_t, 2>, 10> encodings{{{0xd7000200u, 0x02020501u},
+  // Carry outputs (add/subtract/multiply-add), f32/f64 divide-scale and a VOP3
+  // compare define s2 in Wave32 and s[2:3] in Wave64. Encodings checked with
+  // LLVM's assembler.
+  const std::array<std::array<uint32_t, 2>, 11> encodings{{{0xd7000200u, 0x02020501u},
                                                            {0xd7010200u, 0x02020501u},
                                                            {0xd7020200u, 0x02020501u},
                                                            {0xd5200200u, 0x00120501u},
@@ -734,7 +756,8 @@ TEST(WaitcheckStream, ScalarMaskDestinationsFollowWaveWidth) {
                                                            {0xd6fc0200u, 0x040e0501u},
                                                            {0xd6fd0200u, 0x041a0902u},
                                                            {0xd6fe0200u, 0x040e0501u},
-                                                           {0xd6ff0200u, 0x040e0501u}}};
+                                                           {0xd6ff0200u, 0x040e0501u},
+                                                           {0xd44a0002u, 0x02020501u}}};
   for (const std::array<uint32_t, 2> &encoding : encodings) {
     for (uint32_t wave_size : {32u, 64u}) {
       for (uint32_t loaded : {2u, 3u}) {
@@ -753,6 +776,26 @@ TEST(WaitcheckStream, ScalarMaskDestinationsFollowWaveWidth) {
   }
 }
 
+TEST(WaitcheckStream, Cdna5CompareDestinationIsOneSgprAtEitherWaveSize) {
+  // gfx1250 decodes v_cmp_eq_u32_e64 s2, v1, v2 as s2 alone, so Wave64 (the
+  // default options) must not widen it to s[2:3]. Encodings checked with LLVM's
+  // assembler.
+  for (uint32_t wave_size : {32u, 64u}) {
+    for (uint32_t loaded : {2u, 3u}) {
+      const auto report =
+          analyze({0xf4000002u | (loaded << 6), 0xf8000000u, 0xd44a0002u, 0x00020501u},
+                  ROCJITSU_CODE_ARCH_CDNA5, false, wave_size);
+      ASSERT_FALSE(report.incomplete);
+      const bool conflicts = loaded == 2;
+      ASSERT_EQ(report.diagnostics.size(), conflicts ? 1u : 0u);
+      if (conflicts) {
+        EXPECT_EQ(report.diagnostics[0].reg.index, loaded);
+        EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+      }
+    }
+  }
+}
+
 TEST(WaitcheckStream, LegacyMadScalarDestinationsFollowWaveWidth) {
   // RDNA3/3.5 use v_mad_{u64_u32,i64_i32}; RDNA4 adds _co to their names.
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
@@ -764,6 +807,39 @@ TEST(WaitcheckStream, LegacyMadScalarDestinationsFollowWaveWidth) {
                       wave_size);
           ASSERT_FALSE(report.incomplete);
           EXPECT_EQ(report.diagnostics.size(), wave_size == 64 || loaded == 2 ? 1u : 0u);
+        }
+      }
+    }
+  }
+}
+
+TEST(WaitcheckStream, ScalarMaskSourcesFollowWaveWidth) {
+  // src2 names s8 (s[8:9] in Wave64) as the v_cndmask_b32 selector and the
+  // v_add_co_ci_u32 carry-in, but s[8:9] in either wave size as the 64-bit
+  // addend of v_mad_co_u64_u32 (v_mad_u64_u32 on RDNA3/3.5). Encodings
+  // checked with LLVM's disassembler.
+  constexpr uint32_t kSources = 257u | (258u << 9) | (8u << 18); // v1, v2, s8.
+  struct Case {
+    uint32_t word0;
+    bool wave_mask;
+  };
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (const Case &tc :
+         {Case{0xd5010000u, true}, Case{0xd5200200u, true}, Case{0xd6fe0200u, false}}) {
+      for (uint32_t wave : {32u, 64u}) {
+        for (uint32_t loaded : {8u, 9u}) {
+          SCOPED_TRACE(testing::Message()
+                       << std::hex << tc.word0 << std::dec << " wave" << wave << " s" << loaded);
+          const auto report = analyze(
+              {0xf4000002u | (loaded << 6), 0xf8000000u, tc.word0, kSources}, arch, false, wave);
+          ASSERT_FALSE(report.incomplete);
+          const bool reads = !tc.wave_mask || wave == 64 || loaded == 8;
+          ASSERT_EQ(report.diagnostics.size(), reads ? 1u : 0u);
+          if (reads) {
+            EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Read);
+            EXPECT_EQ(report.diagnostics[0].reg.index, loaded);
+          }
         }
       }
     }

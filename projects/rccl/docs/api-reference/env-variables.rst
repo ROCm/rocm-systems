@@ -617,6 +617,56 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``RCCL_IB_GDR_FLUSH_FLAG``
+        | Replaces the GPUDirect RDMA flush of Simple-protocol receives in the
+          ``IB`` network transport (``net_ib``). By default, the proxy fences
+          each receive with an RDMA read on a loopback QP and waits for it
+          before handing the data to the GPU. With this variable set, the
+          sender writes a per-QP flag into GPU memory after the payload, on the
+          same QP and without relaxed ordering, and the GPU waits for the flag
+          instead.
+        | A communicator uses it only when every rank sets it and can use it:
+          gfx942 or gfx950, the ``IB`` transport, and no adaptive routing
+          (``NCCL_IB_ADAPTIVE_ROUTING``), out-of-order receive queues
+          (``NCCL_IB_OOO_RQ``), ID-based receive matching
+          (``NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1``) or port-failover
+          resiliency (``NCCL_IB_RESILIENCY_PORT_FAILOVER``). Otherwise every
+          rank keeps the RDMA read flush. A connection also keeps it when
+          either side uses more than one NIC (NIC Fusion, including a fused
+          vNIC chosen by ``NCCL_IB_SUBNET_AWARE_ROUTING``), a request spans
+          more than 8 QPs, or the flag memory cannot be registered. LL and
+          LL128 receives never use the flag.
+        | On gfx950 with 2 to 8 nodes of 8 GPUs, a communicator using it also
+          adjusts the ``ncclAllReduce`` algorithm and protocol choice from
+          16 MB per node upward, and switches ``ncclReduceScatter`` from LL128
+          to Simple above 6 MB per rank instead of 8 MB, unless ``NCCL_ALGO``
+          or ``NCCL_PROTO`` is set.
+        | Read once per process.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``RCCL_IB_GDR_FLUSH_FLAG_TUNE``
+        | Turns on additional collective tuning for communicators that use
+          ``RCCL_IB_GDR_FLUSH_FLAG``, on gfx950 with 8 GPUs per node on 2 to 8
+          or 16 nodes. It has no effect on other communicators.
+        | The LL128 buffer of ring and tree connections grows to 4 times its
+          default size; send/recv connections keep the default.
+          ``NCCL_LL128_BUFFSIZE`` disables the larger buffer.
+        | ``ncclAllReduce`` selects Ring/LL128 from 12 MB per node for as long
+          as one ring loop can carry the data (about 98 MiB per node with the
+          larger buffer), Tree/Simple up to 64 MB per node, and Ring/Simple on
+          48 channels from 64 to 128 MB per node. On 16 nodes it selects
+          Tree/Simple from 8 to 64 MB per node.
+        | ``ncclReduceScatter`` keeps LL128 up to 7 MB per rank instead of 6 MB,
+          and switches to Simple above that on 16 nodes too.
+        | Tree/LL128, and Ring/LL128 ``ncclBroadcast`` and ``ncclReduce`` below
+          about ``nRanks / 2`` chunks per channel, keep the default chunk size.
+        | The algorithm and protocol choices do not apply when ``NCCL_ALGO``
+          or ``NCCL_PROTO`` is set.
+        | Read once per process. All ranks must use the same value.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
     * - | ``NCCL_NCHANNELS_PER_NET_PEER``
         | Sets the number of channels used per network (remote) peer.
         | This overrides the value of the ``nChannelsPerNetPeer`` field in
@@ -1113,6 +1163,15 @@ threshold table introduced for gfx1250.
         | ``0``: Disabled.
         | ``1``: Force-enabled (CTA_POLICY check bypassed).
 
+    * - | ``RCCL_CE_REDUCESCATTER``
+        | Opt-in Copy Engine ReduceScatter. Off by default. When enabled, it shares
+          the CE AllReduce staging buffer (``ceARTmpBuf``); user buffers do not need
+          symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
+          Single-node symmetric communicators only. There is no message-size cap;
+          large messages are pipelined through the staging slots.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled, subject to the other eligibility checks.
+
     * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
           the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
@@ -1122,22 +1181,14 @@ threshold table introduced for gfx1250.
       - | ``-1``: Resolved from the per-arch table (default).
         | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce size cap.
 
-    * - | ``RCCL_CE_AR_REG_MAX_MSG_BYTES``
-        | Overrides the CE registered-window AllReduce message size cap. When ``-1``
-          (default), the cap is read from ``ceRegMax[AllReduce]`` in the per-arch
-          table. This is the upper bound for the path where both send and receive
-          buffers are in symmetric windows (``-R 2`` mode in rccl-tests).
-      - | ``-1``: Resolved from the per-arch table (default).
-        | ``N`` (bytes): Use ``N`` as the registered AllReduce size cap.
-
     * - | ``RCCL_CE_AR_STAGING_BYTES``
         | Overrides the total allocation size of the CE AllReduce staging buffer
           (``ceARTmpBuf``). When ``-1`` (default), the buffer is allocated at the
-          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (256 MiB). Increasing
+          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
           this reduces pipelining overhead for large messages but raises per-rank
           GPU memory usage. This variable sizes the buffer only; the selector cap
-          is controlled separately by ``RCCL_CE_AR_2SHOT_MAX_BYTES``.
-      - | ``-1``: Use the compile-time default of 256 MiB (default).
+          is controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
+      - | ``-1``: Use the compile-time default of 16 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
     * - | ``RCCL_TDM_LL128_ENABLE``
