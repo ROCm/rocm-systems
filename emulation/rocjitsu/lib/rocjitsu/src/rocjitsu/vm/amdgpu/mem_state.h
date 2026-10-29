@@ -194,6 +194,10 @@ public:
   // the routed observation's callback snapshot.
   uint64_t flat_local_lane_mask = 0;
   uint64_t flat_dds_lane_mask = 0;
+  // Captured during routing after RDNA4 U17 address math, before the workgroup
+  // LDS base is added. Keep addresses intact for routed observations and retries.
+  uint64_t flat_local_oob_lane_mask = 0;
+  std::optional<uint64_t> flat_local_allocation_end;
   bool non_temporal = false;
   // Keep this outside Mtype: cluster loads force only the request-side vector
   // L1 lookup to miss, while mtype must still preserve the instruction/PTE
