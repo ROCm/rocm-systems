@@ -10,9 +10,12 @@ Loads subcommands/firmware.py standalone with a stubbed ``amdsmi`` package so
 the control flow is exercised without a built libamd_smi.so or NIC hardware.
 """
 
+import ast
 import importlib.util
+import logging
 import os
 import sys
+import threading
 import types
 import unittest
 from unittest import mock
@@ -21,6 +24,11 @@ from common.common import amdsmi_path, cli_search_order, find_cli_dir
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 _MODULE_PATH = os.path.join(_CLI_DIR, "subcommands", "firmware.py") if _CLI_DIR else None
+_HELPERS_PATH = os.path.join(_CLI_DIR, "amdsmi_helpers.py") if _CLI_DIR else None
+
+_NIC_PROCESSOR_TYPE = 7
+_NIC_TYPE_NAME = "AMD_NIC"
+_OVERLAP_TIMEOUT_SECONDS = 2
 
 if not _MODULE_PATH or not os.path.isfile(_MODULE_PATH):
     raise unittest.SkipTest(
@@ -60,18 +68,40 @@ def _load_firmware():
     return module, amdsmi_stub
 
 
-def _handle_ainics(args, logger, subcommand):
-    """Faithful stand-in for AMDSMIHelpers.handle_ainics's dispatch shape."""
-    if isinstance(args.nic, list):
-        if len(args.nic) > 1:
-            for handle in args.nic:
-                subcommand(args, multiple_devices=True, nic=handle)
-            logger.print_output(multiple_device_enabled=True)
-            return True, args.nic
-        elif len(args.nic) == 1:
-            return False, args.nic[0]
-        return True, args.nic
-    return False, args.nic
+def _real_handle_ainics():
+    """``AMDSMIHelpers.handle_ainics`` compiled from the shipped source.
+
+    Importing amdsmi_helpers needs the whole CLI import chain, so the one method is extracted and
+    bound to a stand-in ``self``. Only ``run_device_subcommand`` and the processor-type lookup are
+    faked.
+    """
+    with open(_HELPERS_PATH, encoding="utf-8") as source:
+        tree = ast.parse(source.read())
+    helpers_class = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "AMDSMIHelpers"
+    )
+    method = next(
+        node
+        for node in helpers_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "handle_ainics"
+    )
+
+    interface = types.SimpleNamespace(
+        amdsmi_get_processor_type=lambda handle: {"processor_type": _NIC_TYPE_NAME},
+        AmdSmiProcessorType=lambda value: types.SimpleNamespace(name=_NIC_TYPE_NAME),
+        amdsmi_wrapper=types.SimpleNamespace(AMDSMI_PROCESSOR_TYPE_AMD_NIC=_NIC_PROCESSOR_TYPE),
+    )
+    namespace = {"amdsmi_interface": interface, "logging": logging}
+    exec(compile(ast.Module([method], []), _HELPERS_PATH, "exec"), namespace)
+
+    helpers = types.SimpleNamespace(
+        run_device_subcommand=lambda subcommand, args, **device_kwarg: subcommand(
+            args, multiple_devices=True, **device_kwarg
+        )
+    )
+    return types.MethodType(namespace["handle_ainics"], helpers)
 
 
 class TestFirmwareNicPrefetch(unittest.TestCase):
@@ -83,7 +113,7 @@ class TestFirmwareNicPrefetch(unittest.TestCase):
                 self.helpers.get_ainic_id_from_device_handle.side_effect = lambda h: (
                     device_handles.index(h)
                 )
-                self.helpers.handle_ainics.side_effect = _handle_ainics
+                self.helpers.handle_ainics.side_effect = _real_handle_ainics()
                 self.logger = mock.Mock()
 
         return _Command()
@@ -102,6 +132,26 @@ class TestFirmwareNicPrefetch(unittest.TestCase):
         self.assertEqual(get_fw_info.call_count, len(handles))
         stored = [c.args[2] for c in command.logger.store_ainic_output.call_args_list]
         self.assertEqual(stored, [{"FW": "v0"}, {"FW": "v1"}, {"FW": "v2"}])
+
+    def test_prefetch_queries_the_nics_concurrently(self):
+        module, amdsmi_stub = _load_firmware()
+        handles = [mock.Mock(value=i) for i in range(2)]
+        command = self._make_command(module, handles)
+        both_queries_running = threading.Barrier(2, timeout=_OVERLAP_TIMEOUT_SECONDS)
+
+        def _query_after_the_other_starts(handle):
+            both_queries_running.wait()
+            return {"FW": f"v{handle.value}"}
+
+        amdsmi_stub.amdsmi_interface.amdsmi_get_nic_fw_info = mock.Mock(
+            side_effect=_query_after_the_other_starts
+        )
+
+        args = types.SimpleNamespace(nic=None, fw_list=None)
+        command.firmware_nic(args)
+
+        stored = [c.args[2] for c in command.logger.store_ainic_output.call_args_list]
+        self.assertEqual(stored, [{"FW": "v0"}, {"FW": "v1"}])
 
     def test_single_nic_has_no_prefetch(self):
         module, amdsmi_stub = _load_firmware()
