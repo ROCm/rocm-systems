@@ -581,7 +581,7 @@ TEST_F(GinRocshmemGdaTemplateTest, GetReset_SignalAndCounter) {
   EXPECT_EQ(ctr[0], 0ULL);   // set to 77 then reset
 }
 
-// G12: ResetSignal with a non-indexed descriptor is a no-op.
+// G12: ResetSignal with a NONE descriptor is a no-op.
 __global__ void kernelResetSignalNone(GdaHarness* h) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
@@ -598,7 +598,7 @@ TEST_F(GinRocshmemGdaTemplateTest, ResetSignal_NoneIsNoOp) {
   kernelResetSignalNone<<<1, 1>>>(env.dHarness.ptr);
   syncAndCheck();
   auto sigs = env.signals.copyTo();
-  EXPECT_EQ(sigs[0], 42ULL);  // untouched by non-indexed reset
+  EXPECT_EQ(sigs[0], 42ULL);  // untouched by NONE reset
 }
 
 // G13: GDA device dispatch selects the GPU context indexed by ncclGinCtx::contextId
@@ -853,6 +853,84 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_GpuModeDataLandsAtRemote) {
 
 TEST_F(GinRocshmemGdaTemplateTest, Put_CtaModeDataLandsAtRemote) {
   expectModeDataLands(NCCL_GIN_RESOURCE_SHARING_CTA);
+}
+
+// G18: VA signals (AICOMRCCL-3180) target a cell in the dst window, never the indexed signal buffer.
+constexpr size_t kVaSignalOff = 256;
+constexpr size_t kVaWindowBytes = kVaSignalOff + sizeof(uint64_t);
+
+__global__ void kernelPutVaSignal(GdaHarness* h, bool putValue, uint64_t val) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_VA;
+  sig.vaSignal.signalWindow = reinterpret_cast<ncclGinWindow_t>(&h->dstMh);
+  sig.vaSignal.signalOffset = kVaSignalOff;
+  if (putValue) {
+    ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+        ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, val, sig, ncclGinSignalAdd, 9,
+        false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+  } else {
+    ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+        ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+        reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, sizeof(uint64_t), sig, ncclGinSignalAdd, 9, false, 0, false,
+        nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+  }
+}
+
+static uint64_t readU64At(const DeviceBuffer<uint8_t>& buf, size_t off) {
+  auto got = buf.copyTo();
+  uint64_t v = 0;
+  std::memcpy(&v, got.data() + off, sizeof(v));
+  return v;
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, VaSignal_PutSignalsWindowCell) {
+  const uint64_t kVal = 0x1122334455667788ULL;
+  for (const bool putValue : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << "putValue=" << putValue);
+    GdaEnv env(kVaWindowBytes);
+    std::vector<uint8_t> src(kVaWindowBytes, 0);
+    std::memcpy(src.data(), &kVal, sizeof(kVal));
+    env.src.copyFrom(src);
+    env.dst.zero();
+    env.build();
+    resetSignalCount();
+    kernelPutVaSignal<<<1, 1>>>(env.dHarness.ptr, putValue, kVal);
+    syncAndCheck();
+    EXPECT_EQ(readSignalCount(), 1ULL);
+    EXPECT_EQ(readU64At(env.dst, 0), kVal) << "payload must still land at the destination offset";
+    EXPECT_EQ(readU64At(env.dst, kVaSignalOff), 9ULL) << "the VA cell must take the signal";
+    EXPECT_EQ(env.signals.copyTo(), std::vector<uint64_t>(GdaEnv::kNSignals, 0))
+        << "a VA signal must not touch the indexed signal buffer";
+  }
+}
+
+// G19: ResetSignal clears a VA signal's cell through the window's local VA.
+__global__ void kernelResetVaSignal(GdaHarness* h) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_VA;
+  sig.vaSignal.signalWindow = reinterpret_cast<ncclGinWindow_t>(&h->dstMh);
+  sig.vaSignal.signalOffset = kVaSignalOff;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, sig);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, ResetSignal_VaClearsWindowCell) {
+  GdaEnv env(kVaWindowBytes);
+  std::vector<uint8_t> dst(kVaWindowBytes, 0);
+  const uint64_t armed = 5;
+  std::memcpy(dst.data() + kVaSignalOff, &armed, sizeof(armed));
+  env.dst.copyFrom(dst);
+  env.build();
+  env.signals.copyFrom(std::vector<uint64_t>(GdaEnv::kNSignals, 7));
+  kernelResetVaSignal<<<1, 1>>>(env.dHarness.ptr);
+  syncAndCheck();
+  EXPECT_EQ(readU64At(env.dst, kVaSignalOff), 0ULL);
+  EXPECT_EQ(env.signals.copyTo(), std::vector<uint64_t>(GdaEnv::kNSignals, 7))
+      << "a VA reset must not clear indexed signals";
 }
 
 }  // namespace RcclUnitTesting

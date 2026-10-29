@@ -19,6 +19,25 @@ namespace detail {
 NCCL_DEVICE_INLINE ncclGinRocshmemGdaGPUContext* gdaGpuCtx(ncclGinCtx ctx) {
   return &reinterpret_cast<ncclGinRocshmemGdaGPUContext*>(ctx.handle)[ctx.contextId];
 }
+
+struct GdaSignalTarget {
+  uintptr_t raddr;
+  uint32_t rkey;
+};
+
+// Remote cell a signal increments on peer. vaSignal and indexedSignal share a
+// union, so the descriptor type must pick the field that is read.
+NCCL_DEVICE_INLINE GdaSignalTarget gdaSignalTarget(ncclGinRocshmemGdaGPUContext* rsCtx, int peer,
+                                                   const ncclGinSignalDescriptor& signal) {
+  using nccl::utility::loadConst;
+  if (signal.type == NCCL_GIN_SIGNAL_TYPE_VA) {
+    ncclGinRocshmemGdaMemHandle* mh = (ncclGinRocshmemGdaMemHandle*)signal.vaSignal.signalWindow;
+    return {loadConst(loadConst(&mh->remote_vas) + peer) + signal.vaSignal.signalOffset,
+            loadConst(loadConst(&mh->rkeys) + peer)};
+  }
+  return {loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId,
+          loadConst(loadConst(&rsCtx->signal_rkeys) + peer)};
+}
 }  // namespace detail
 }  // namespace rocshmem_gda
 }  // namespace gin
@@ -84,10 +103,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-        uintptr_t sigAddr =
-          loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
-        uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add(sigAddr, sigRkey, signalOpArg, wf_info, PostOpt{RingDB<true>, ThreadSafe<threadSafe>});
+        auto target = nccl::gin::rocshmem_gda::detail::gdaSignalTarget(rsCtx, peer, signal);
+        qp->atomic_add(target.raddr, target.rkey, signalOpArg, wf_info, PostOpt{RingDB<true>, ThreadSafe<threadSafe>});
       } else if (hasCounter) {
         qp->quiet(wf_info);
       }
@@ -163,10 +180,8 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-        uintptr_t sigAddr =
-          loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
-        uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add(sigAddr, sigRkey, signalOpArg, wf_info, PostOpt{RingDB<true>, ThreadSafe<threadSafe>});
+        auto target = nccl::gin::rocshmem_gda::detail::gdaSignalTarget(rsCtx, peer, signal);
+        qp->atomic_add(target.raddr, target.rkey, signalOpArg, wf_info, PostOpt{RingDB<true>, ThreadSafe<threadSafe>});
       }
     }
     coop.sync();
@@ -216,9 +231,14 @@ struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 template <>
 struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinSignalDescriptor signal) {
+    using nccl::utility::loadConst;
     ncclGinRocshmemGdaGPUContext* rsCtx = nccl::gin::rocshmem_gda::detail::gdaGpuCtx(ctx);
-    if (signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED)
-      nccl::utility::loadConst(&rsCtx->signals)[signal.indexedSignal.signalId] = 0;
+    if (signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED) {
+      loadConst(&rsCtx->signals)[signal.indexedSignal.signalId] = 0;
+    } else if (signal.type == NCCL_GIN_SIGNAL_TYPE_VA) {
+      ncclGinRocshmemGdaMemHandle* mh = (ncclGinRocshmemGdaMemHandle*)signal.vaSignal.signalWindow;
+      *reinterpret_cast<uint64_t*>(loadConst(&mh->local_va) + signal.vaSignal.signalOffset) = 0;
+    }
   }
 };
 
