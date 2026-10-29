@@ -9,6 +9,7 @@ add_library(
     test_config_store.cpp
     test_source_parsers.cpp
     test_file_preset.cpp
+    test_value_provider.cpp
 )
 
 target_link_libraries(
