@@ -23,7 +23,7 @@ Link mode (--link):
 Device address sanitizer:
     --dasan-tu-rt=<bc> compiles through bitcode (see ir_codegen_cmd).
     --derive-dasan-tu-rt=<archive> -o <bc> writes that bitcode.
-    --ir-codegen runs only the codegen step.
+    --ir-codegen runs only the codegen step; --dasan-tu-rt is optional there.
 
 Target selection (--arch / --target-id):
     --arch is the bare processor name (gfx942); --target-id is the full target
@@ -615,22 +615,22 @@ def _codegen_flags(forwarded_flags):
 
 def ir_codegen_cmd(clang, target_id, forwarded_flags, out, bitcode, dasan_tu_rt,
                    emit='-S'):
-    """Codegen of optimized device bitcode with the DASAN runtime linked in.
+    """Codegen of optimized device bitcode, with the DASAN runtime linked in
+    if given.
 
     Register and scratch usage are only known for callees in the module, and
     the report calls only exist after optimization.
     """
-    return [
+    cmd = [
         clang,
         '-target', 'amdgcn-amd-amdhsa',
         f'-mcpu={target_id}',
         '-x', 'ir',
         '-w',
-    ] + _codegen_flags(forwarded_flags) + [
-        '-Xclang', '-disable-llvm-passes',
-        '-Xclang', '-mlink-builtin-bitcode', '-Xclang', dasan_tu_rt,
-        emit, '-o', out, bitcode,
-    ]
+    ] + _codegen_flags(forwarded_flags) + ['-Xclang', '-disable-llvm-passes']
+    if dasan_tu_rt:
+        cmd += ['-Xclang', '-mlink-builtin-bitcode', '-Xclang', dasan_tu_rt]
+    return cmd + [emit, '-o', out, bitcode]
 
 
 def compile_device_asm(clang, target_id, forwarded_flags, asm_out, source,
@@ -999,8 +999,6 @@ def main():
             raise SystemExit(
                 "ERROR: --ir-codegen requires --arch=<target>, -o <output> and "
                 "one bitcode input")
-        if not args.dasan_tu_rt:
-            raise SystemExit("ERROR: --ir-codegen requires --dasan-tu-rt=<bitcode>")
         clang, _ = discover_tools(args.clang)
         run(ir_codegen_cmd(clang, args.target_id, forwarded_flags, args.output,
                            positional[0], args.dasan_tu_rt, emit='-c'),

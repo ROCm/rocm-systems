@@ -172,6 +172,11 @@ if(ENABLE_FULL_COVERAGE)
     "Device Linker: coverage enabled, device profile RT = ${DL_DEVICE_PROFILE_RT}")
 endif()
 
+set(DL_DASAN_TU_RT_FLAG "")
+if(BUILD_DEVICE_ADDRESS_SANITIZER)
+  set(DL_DASAN_TU_RT_FLAG --dasan-tu-rt=${RCCL_DASAN_TU_RT})
+endif()
+
 # Profile section anchor (ENABLE_FULL_COVERAGE).
 #
 # A coverage-instrumented device TU that emits no counters (e.g. a fat object
@@ -390,13 +395,21 @@ function(dl_add_fat_object NAME SRC)
     if(_half STREQUAL "host")
       set(_obj "${DEVICE_BUILD_DIR}/${NAME}.o")
       set(_half_flags --offload-host-only ${DL_OFFLOAD_ARCH_FLAGS})
+      set(_out "${_obj}")
+      set(_codegen "")
       set(_deps "")
     else()
       set(_obj "${DEVICE_BUILD_DIR}/${_half}/${NAME}.o")
       file(MAKE_DIRECTORY "${DEVICE_BUILD_DIR}/${_half}")
       # Each TU is self-contained on the device; internalize as non-RDC does.
+      # Codegen is a separate step because ROCm 7.0's clang emits bitcode here
+      # even with -fno-offload-lto; see ir_codegen_cmd in tools/rccl-device-compile.
       set(_half_flags --offload-device-only --offload-arch=${DL_TARGET_ID_${_half}}
-        -fno-offload-lto -mllvm -amdgpu-internalize-symbols ${FO_EXTRA_FLAGS})
+        -fno-offload-lto -mllvm -amdgpu-internalize-symbols ${FO_EXTRA_FLAGS} -emit-llvm)
+      set(_out "${_obj}.bc")
+      set(_codegen COMMAND ${CMAKE_RCCLDEV_COMPILER} --ir-codegen --arch=${_half}
+        --target-id=${DL_TARGET_ID_${_half}} --clang=${DL_CLANG}
+        ${DL_DASAN_TU_RT_FLAG} ${_flags} -o ${_obj} ${_out})
       set(_deps ${FO_EXTRA_DEPENDS})
       set(DL_MIXED_DEVICE_OBJS_${_half} ${DL_MIXED_DEVICE_OBJS_${_half}} "${_obj}" PARENT_SCOPE)
     endif()
@@ -404,25 +417,13 @@ function(dl_add_fat_object NAME SRC)
     # object stale. CMake < 3.20 has no DEPFILE for custom commands.
     set(_depfile "")
     if(FO_DEPFILE_TRACKING AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
-      list(APPEND _half_flags -MD -MF "${_obj}.d")
+      list(APPEND _half_flags -MD -MF "${_obj}.d" -MT "${_obj}")
       set(_depfile DEPFILE "${_obj}.d")
-    endif()
-    set(_commands COMMAND ${DL_CLANG} -x hip ${_half_flags} ${_flags} -c -o ${_obj} ${SRC})
-    if(BUILD_DEVICE_ADDRESS_SANITIZER AND NOT _half STREQUAL "host")
-      # See ir_codegen_cmd in tools/rccl-device-compile.
-      set(_mt "")
-      if(_depfile)
-        set(_mt -MT ${_obj})
-      endif()
-      set(_commands
-        COMMAND ${DL_CLANG} -x hip ${_half_flags} ${_mt} ${_flags} -emit-llvm -c -o ${_obj}.bc ${SRC}
-        COMMAND ${CMAKE_RCCLDEV_COMPILER} --ir-codegen --arch=${_half}
-          --target-id=${DL_TARGET_ID_${_half}} --clang=${DL_CLANG}
-          --dasan-tu-rt=${RCCL_DASAN_TU_RT} ${_flags} -o ${_obj} ${_obj}.bc)
     endif()
     add_custom_command(
       OUTPUT  ${_obj}
-      ${_commands}
+      COMMAND ${DL_CLANG} -x hip ${_half_flags} ${_flags} -c -o ${_out} ${SRC}
+      ${_codegen}
       DEPENDS ${SRC} ${_deps}
       ${_depfile}
       COMMENT "DL compile (${_half}): ${NAME}"
@@ -628,9 +629,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     -fPIC
     ${DL_INHERITED_FLAGS}
   )
-  if(BUILD_DEVICE_ADDRESS_SANITIZER)
-    target_compile_options(${_dev_target} PRIVATE --dasan-tu-rt=${RCCL_DASAN_TU_RT})
-  endif()
+  target_compile_options(${_dev_target} PRIVATE ${DL_DASAN_TU_RT_FLAG})
   target_compile_definitions(${_dev_target} PRIVATE RCCL_DEVICE_LINKER)
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
@@ -685,7 +684,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   endif()
   set(_dl_dasan_rt_arg "")
   if(BUILD_DEVICE_ADDRESS_SANITIZER)
-    set(_dl_dasan_rt_arg "--dasan-rt=${RCCL_DASAN_DEVICE_RT}" "--dasan-tu-rt=${RCCL_DASAN_TU_RT}")
+    set(_dl_dasan_rt_arg "--dasan-rt=${RCCL_DASAN_DEVICE_RT}" ${DL_DASAN_TU_RT_FLAG})
   endif()
 
   add_custom_command(

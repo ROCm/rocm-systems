@@ -404,6 +404,14 @@ class DasanTuRuntimeTest(unittest.TestCase):
                                      "-Xclang", "rt.bc",
                                      "-c", "-o", "k.o", "k.bc"])
 
+    def test_codegen_without_runtime(self):
+        cmd = driver.ir_codegen_cmd("clang", "gfx942", ["-O3"], "k.o", "k.bc",
+                                    None, emit="-c")
+
+        self.assertNotIn("-mlink-builtin-bitcode", cmd)
+        self.assertEqual(cmd[-6:], ["-Xclang", "-disable-llvm-passes",
+                                    "-c", "-o", "k.o", "k.bc"])
+
     def test_compile_device_asm_goes_through_bitcode_only_under_dasan(self):
         with unittest.mock.patch.object(driver, "run") as run:
             driver.compile_device_asm("clang", "gfx942", ["-O3"], "d/full.s",
