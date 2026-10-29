@@ -20,6 +20,8 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -65,6 +67,8 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -89,6 +93,8 @@ SCmpkEqI32Sopk::SCmpkEqI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -113,6 +119,8 @@ SCmpkLgI32Sopk::SCmpkLgI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -137,6 +145,8 @@ SCmpkGtI32Sopk::SCmpkGtI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -161,6 +171,8 @@ SCmpkGeI32Sopk::SCmpkGeI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -185,6 +197,8 @@ SCmpkLtI32Sopk::SCmpkLtI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -209,6 +223,8 @@ SCmpkLeI32Sopk::SCmpkLeI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -233,6 +249,8 @@ SCmpkEqU32Sopk::SCmpkEqU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -257,6 +275,8 @@ SCmpkLgU32Sopk::SCmpkLgU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -281,6 +301,8 @@ SCmpkGtU32Sopk::SCmpkGtU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -305,6 +327,8 @@ SCmpkGeU32Sopk::SCmpkGeU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -329,6 +353,8 @@ SCmpkLtU32Sopk::SCmpkLtU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -353,6 +379,8 @@ SCmpkLeU32Sopk::SCmpkLeU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -400,6 +428,8 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -531,6 +561,8 @@ SWaitcntVscntSopk::SWaitcntVscntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -554,6 +586,8 @@ SWaitcntVmcntSopk::SWaitcntVmcntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -577,6 +611,8 @@ SWaitcntExpcntSopk::SWaitcntExpcntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {
@@ -600,6 +636,8 @@ SWaitcntLgkmcntSopk::SWaitcntLgkmcntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  flags_ |= EXEC_WRITE_EFFECTS_KNOWN;
+  flags_ |= VCC_WRITE_EFFECTS_KNOWN;
 }
 
 namespace detail {

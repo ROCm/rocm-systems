@@ -89,6 +89,50 @@ _ADDR_CALC_CALLS: frozenset[str] = frozenset(
 _EXEC_CONTEXT_IDS: frozenset[str] = frozenset({'EXEC', 'EXEC_RAW'})
 
 
+@dataclass(frozen=True)
+class ContextWrite:
+    """A possible named-context write, without a must-write or extent claim.
+
+    Retain assignment kind and indexing depth so consumers can distinguish the
+    established property patterns from compound or nested partial writes.
+    """
+
+    target: str
+    assignment_kind: SemaNodeKind
+    index_depth: int
+
+
+def derive_context_writes(block: SemaBlock) -> tuple[ContextWrite, ...]:
+    """Collect context destinations through casts and nested indexing."""
+    writes = []
+    for node in block.body.walk():
+        if (
+            node.kind
+            not in (
+                SemaNodeKind.ASSIGN,
+                SemaNodeKind.ADD_ASSIGN,
+                SemaNodeKind.SUB_ASSIGN,
+            )
+            or not node.children
+        ):
+            continue
+        target = node.children[0]
+        index_depth = 0
+        while (
+            target.kind in (SemaNodeKind.CAST, SemaNodeKind.ARRAYDEREF)
+            and target.children
+        ):
+            index_depth += target.kind == SemaNodeKind.ARRAYDEREF
+            target = target.children[0]
+        if (
+            target.kind == SemaNodeKind.ID
+            and target.id_name
+            and target.id_name.isupper()
+        ):
+            writes.append(ContextWrite(target.id_name, node.kind, index_depth))
+    return tuple(writes)
+
+
 def derive_properties(block: SemaBlock) -> InstructionProperty:
     """Derive instruction properties by walking the SemaAST.
 
@@ -110,22 +154,21 @@ def derive_properties(block: SemaBlock) -> InstructionProperty:
         props |= InstructionProperty.IS_BRANCH
         props |= InstructionProperty.IGNORES_EXEC
 
-    for node in nodes:
-        if node.kind == SemaNodeKind.ASSIGN and node.children:
-            lhs = _unwrap_cast(node.children[0])
-            if lhs.kind == SemaNodeKind.ID and lhs.id_name:
-                if lhs.id_name == 'SCC':
-                    props |= InstructionProperty.WRITES_SCC
-                elif lhs.id_name in _EXEC_CONTEXT_IDS:
-                    props |= InstructionProperty.WRITES_EXEC
-            if lhs.kind == SemaNodeKind.ARRAYDEREF and lhs.children:
-                arr = _unwrap_cast(lhs.children[0])
-                if arr.kind == SemaNodeKind.ID:
-                    if arr.id_name == 'VCC':
-                        props |= InstructionProperty.WRITES_VCC
-                    elif arr.id_name in _EXEC_CONTEXT_IDS:
-                        props |= InstructionProperty.WRITES_EXEC
+    # Keep the established property contract: additional possible writes must
+    # not silently broaden WRITES_EXEC, which generated EXEC-state consumers
+    # interpret as a whole-mask definition. Coverage audits inspect the complete
+    # ContextWrite set and withhold coverage for unrepresented writes.
+    for write in derive_context_writes(block):
+        if write.assignment_kind != SemaNodeKind.ASSIGN or write.index_depth > 1:
+            continue
+        if write.target == 'SCC' and write.index_depth == 0:
+            props |= InstructionProperty.WRITES_SCC
+        elif write.target == 'VCC' and write.index_depth == 1:
+            props |= InstructionProperty.WRITES_VCC
+        elif write.target in _EXEC_CONTEXT_IDS:
+            props |= InstructionProperty.WRITES_EXEC
 
+    for node in nodes:
         if node.kind == SemaNodeKind.CALL and node.call_name:
             cn = node.call_name
             effects = inline_binary_op_effects(cn)

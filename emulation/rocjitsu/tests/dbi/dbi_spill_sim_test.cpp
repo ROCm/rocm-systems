@@ -121,7 +121,9 @@ protected:
     // v_mov v2, K ; v_mov v3, v2 (ANCHOR at offset 4, v2 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(2, kSentinel), kMovV3V2, endpgm}, /*private_bytes=*/64,
-        /*granulated_sgpr_count=*/3, a_.e_flags);
+        /*granulated_sgpr_count=*/3, a_.e_flags, /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
+        /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false, /*wave32=*/a_.wave_size == 32);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {kMovV2Zero, setpc}, a_.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
@@ -251,8 +253,11 @@ protected:
         build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch);
     const uint32_t mov_s8_0 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch);
     // s_mov s8, K ; v_mov v3, s8 (ANCHOR at offset 4, s8 live) ; s_endpgm.
-    auto target = test::make_amdgpu_kernel_elf({mov_s8_k, kMovV3S8, endpgm}, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        {mov_s8_k, kMovV3S8, endpgm}, /*private_bytes=*/64,
+        /*granulated_sgpr_count=*/3, a_.e_flags, /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
+        /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false, /*wave32=*/a_.wave_size == 32);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {mov_s8_0, setpc}, a_.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
@@ -382,9 +387,11 @@ protected:
         build_s_mov_b32(kSpilledSgprHi, static_cast<uint16_t>(128 + kSentinel2), a_.arch);
     // s_mov s8,K1 ; s_mov s9,K2 ; v_mov v3,s8 (ANCHOR at offset 8: reads s8, s9 read
     // next -> both live) ; v_mov v4,s9 ; s_endpgm.
-    auto target =
-        test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
-                                     /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        {mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
+        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags, /*granulated_vgpr_count=*/0,
+        /*accum_offset=*/0, /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false, /*wave32=*/a_.wave_size == 32);
     auto probe =
         test::make_amdgpu_probe_elf("rj_test_probe", {kMovS8Zero, kMovS9Zero, setpc}, a_.e_flags);
 
@@ -486,7 +493,9 @@ protected:
     auto target = test::make_amdgpu_kernel_elf(
         {kAccWriteA0ZeroLo, test::make_accvgpr_write_a0_inline_hi(kSentinel), kAccReadV3A0Lo,
          kAccReadV3A0Hi, endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags, /*granulated_vgpr_count=*/0,
+        /*accum_offset=*/0, /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false, /*wave32=*/a_.wave_size == 32);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc}, a_.e_flags);
 
@@ -623,7 +632,9 @@ protected:
          test::make_accvgpr_write_a0_inline_hi(kSentinel), kMovV5V2, kMovV6S8, kAccReadV7A0Lo,
          kAccReadV7A0Hi, endpgm},
         /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags,
-        /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
+        /*granulated_vgpr_count=*/1, /*accum_offset=*/1, /*unterminated_kd_name=*/false,
+        /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
+        /*kd_crosses_section=*/false, /*wave32=*/a_.wave_size == 32);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {kMovV2Zero, mov_s8_0, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc},
         a_.e_flags);
@@ -770,7 +781,9 @@ protected:
         {test::make_mov_vgpr_inline(0, kSentinel), mov_s8_k, vadd(1, kVgprSrc + 0, 1),
          vadd(3, kVgprSrc + 2, 3), vadd(5, kVgprSrc + 4, 5), vadd(7, kVgprSrc + 6, 7),
          vadd(1, kSpilledSgpr, 1), endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags, /*granulated_vgpr_count=*/0,
+        /*accum_offset=*/0, /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false, /*wave32=*/a_.wave_size == 32);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {test::make_mov_vgpr_inline(0, 0), kMovS8Zero, setpc}, a_.e_flags);
 
@@ -942,8 +955,12 @@ protected:
     code.push_back(mov_v3_k);
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/0,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/0,
+        /*granulated_sgpr_count=*/3, a_.base.e_flags, /*granulated_vgpr_count=*/0,
+        /*accum_offset=*/0, /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false,
+        /*wave32=*/a_.base.wave_size == 32);
     auto probe =
         test::make_amdgpu_probe_elf("rj_test_probe", {probe_clobber_exec, setpc}, a_.base.e_flags);
 
@@ -1083,8 +1100,12 @@ protected:
     code.push_back(mov_v3_v2);
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/64,
+        /*granulated_sgpr_count=*/3, a_.base.e_flags, /*granulated_vgpr_count=*/0,
+        /*accum_offset=*/0, /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false,
+        /*wave32=*/a_.base.wave_size == 32);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {probe_widen, kMovV2Zero, setpc},
                                              a_.base.e_flags);
 
@@ -1228,8 +1249,12 @@ protected:
     code.insert(code.end(), a_.restore_full_mask.begin(), a_.restore_full_mask.end());
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/64,
+        /*granulated_sgpr_count=*/3, a_.base.e_flags, /*granulated_vgpr_count=*/0,
+        /*accum_offset=*/0, /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false,
+        /*wave32=*/a_.base.wave_size == 32);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
     ASSERT_TRUE(obj.is_valid());

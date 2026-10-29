@@ -22,9 +22,9 @@ namespace {
 
 // InstDefUse surfaces only ordinary register-file refs (SGPR/VGPR/AccVGPR)
 // through to_register_ref(). A generic selector operand can decode to a special
-// register (e.g. EXEC_LO/EXEC_HI in an OPR_SDST field), but that ref collapses
-// the LO/HI halves into one class-wide singleton, so it is dropped here rather
-// than recorded imprecisely. Genuinely
+// register (e.g. EXEC_LO/EXEC_HI in an OPR_SDST field), including its LO/HI index.
+// RegisterSet collapses it to a singleton, so it is dropped here rather than
+// recording a partial write as a whole-register definition. Genuinely
 // fieldless special operands are surfaced instead through to_special_reg_class().
 // See def_use_chain.h.
 [[nodiscard]] std::optional<RegisterRef> ordinary_register_ref(const Operand &op) {
@@ -103,8 +103,8 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
   // added for gfx1250, it must expose an operand with a VGPR-MSB role so global
   // usage can resolve the physical bank instead of recording only the raw low
   // eight-bit index. Merge only the ordinary projection: an implicit hook that
-  // surfaces a special via a generic selector (to_register_ref()) collapses it
-  // to a class-wide singleton, so it is dropped here for the same reason the
+  // surfaces a special via a generic selector loses its partial-write extent
+  // in RegisterSet's singleton storage, so it is dropped for the same reason the
   // explicit dst loop above drops selector-encoded specials.
   RegisterSet implicit_defs_set;
   inst.implicit_defs(implicit_defs_set);

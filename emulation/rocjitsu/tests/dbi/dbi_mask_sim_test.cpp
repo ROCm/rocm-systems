@@ -36,12 +36,30 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <ostream>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 namespace rocjitsu {
 namespace {
+
+// Check the dispatch's actual wave size, including when kernarg properties
+// are supplied: lane readback length alone cannot establish this.
+TEST(DbiSim, ExecutesRequestedWaveSize) {
+  for (uint32_t wave_size : {32u, 64u}) {
+    SCOPED_TRACE(wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize("rdna4", wave_size));
+    sim.set_kernarg({1, 2, 3, 4});
+    const std::vector<uint32_t> code{build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+    sim.run_and_read_vgpr(code, 0, 0);
+    const test::WavefrontSnapshot *snapshot = sim.halted_wavefront();
+    ASSERT_NE(snapshot, nullptr);
+    EXPECT_EQ(snapshot->wf_size, wave_size);
+    EXPECT_EQ(snapshot->sgpr64(0), test::DbiSim::KERNARG_ADDR);
+  }
+}
 
 using test::kMovV1V0;
 using test::kMovV3V0;
@@ -77,13 +95,15 @@ struct MaskSimArch {
   rj_code_arch_t arch;
   uint32_t e_flags;
   uint32_t wave_size;
-  // The descriptor's wave32 bit drives the patch-time gates, which is all this
-  // selects. It does not reach execution: DbiSim synthesizes its own descriptor
-  // without the bit, so every target dispatches Wave64 and wave_size only says
-  // how many lanes to read back (see dbi_sim.h). Only RDNA has a bit to set;
-  // CDNA is Wave64 by construction.
+  // Keep the patched ELF and DbiSim dispatch descriptor on the same wave size.
   bool wave32;
+  const char *sim_target = "";
 };
+
+void PrintTo(const MaskSimArch &target, std::ostream *out) {
+  *out << (target.sim_target[0] ? target.sim_target : target.sim_arch) << "Wave"
+       << target.wave_size;
+}
 
 inline constexpr MaskSimArch kCdna3MaskArch{"cdna3", ROCJITSU_CODE_ARCH_CDNA3,
                                             EF_AMDGPU_MACH_AMDGCN_GFX942, /*wave_size=*/64,
@@ -94,6 +114,160 @@ inline constexpr MaskSimArch kCdna4MaskArch{"cdna4", ROCJITSU_CODE_ARCH_CDNA4,
 inline constexpr MaskSimArch kRdna4MaskArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4,
                                             EF_AMDGPU_MACH_AMDGCN_GFX1200, /*wave_size=*/32,
                                             /*wave32=*/true};
+
+// Compare an uninstrumented guest with both a modeled nop and an unmodeled
+// system instruction. Two sites share one copied body; the first argument site spills v0,
+// while v0 is dead at the second. Guest instructions after both sites consume
+// EXEC/VCC, so final snapshot equality also checks the continuation's inputs.
+class DbiNonwriterSim : public ::testing::TestWithParam<MaskSimArch> {};
+
+TEST_P(DbiNonwriterSim, SharedProbePreservesGuestStateAcrossSiteWindows) {
+  const MaskSimArch target = GetParam();
+  for (uint16_t mask : {uint16_t{128}, uint16_t{131}, scalar_inline_neg_one(target.arch)}) {
+    for (bool arguments : {false, true}) {
+      for (bool full_exec : {false, true}) {
+        SCOPED_TRACE(::testing::Message()
+                     << target.sim_arch << " wave=" << target.wave_size << " mask=" << mask
+                     << " args=" << arguments << " full=" << full_exec);
+        const std::vector<uint32_t> code{
+            test::make_mov_vgpr_inline(0, 7),
+            test::make_mov_vgpr_inline(3, 9),
+            build_s_mov_b64(scalar_operand_vcc_lo(target.arch), 131, target.arch),
+            build_s_mov_b64(scalar_operand_exec_lo(target.arch), mask, target.arch),
+            kMovV1V0,
+            test::make_mov_vgpr_inline(3, 42),
+            build_s_mov_b64(8, scalar_operand_exec_lo(target.arch), target.arch),
+            build_s_mov_b64(10, scalar_operand_vcc_lo(target.arch), target.arch),
+            build_s_endpgm(target.arch)};
+        test::DbiSim baseline;
+        ASSERT_NO_FATAL_FAILURE(
+            baseline.initialize(target.sim_arch, target.wave_size, target.sim_target));
+        baseline.run_and_read_vgprs(code, 64, {1, 3});
+        const test::WavefrontSnapshot *expected = baseline.halted_wavefront();
+        ASSERT_NE(expected, nullptr);
+        std::vector<size_t> sizes;
+        for (bool unknown : {false, true}) {
+          const uint32_t instruction =
+              unknown ? build_sopp_encoding(target.arch,
+                                            target.arch == ROCJITSU_CODE_ARCH_RDNA4
+                                                ? rdna4::kSSetprioSopp
+                                                : cdna4::kSSetprioSopp,
+                                            0)
+                      : build_s_nop(1, target.arch);
+          const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
+              code, /*private_bytes=*/64, /*granulated_sgpr_count=*/3, target.e_flags,
+              /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
+              /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+              /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false,
+              /*wave32=*/target.wave32);
+          const std::vector<uint8_t> probe_image = test::make_amdgpu_probe_elf(
+              "nonwriter", {instruction, build_s_setpc_b64(30, target.arch)}, target.e_flags);
+          AmdGpuCodeObject object(image.data(), image.size());
+          AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+          Instrumentor instrumentor(object, target.arch);
+          for (uint64_t offset : {16, 20}) {
+            InstrumentationPoint point;
+            point.anchor_offset = offset;
+            point.probe_obj = &probe;
+            point.probe_symbol = "nonwriter";
+            point.force_full_exec = full_exec;
+            if (arguments)
+              point.probe_args = {probe_arg_imm(static_cast<uint32_t>(offset))};
+            instrumentor.add_point(point);
+          }
+          const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+          ASSERT_TRUE(result.errors.empty())
+              << (result.errors.empty() ? "" : result.errors.front());
+          ASSERT_EQ(result.patches.size(), 2u);
+          AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+          const std::vector<uint32_t> text = test::section_words(patched, ".text");
+          sizes.push_back(text.size());
+          test::DbiSim sim;
+          ASSERT_NO_FATAL_FAILURE(
+              sim.initialize(target.sim_arch, target.wave_size, target.sim_target));
+          sim.run_and_read_vgprs(text, test::patched_private_segment_size(patched), {1, 3});
+          const test::WavefrontSnapshot *actual = sim.halted_wavefront();
+          ASSERT_NE(actual, nullptr);
+          EXPECT_EQ(actual->wf_size, target.wave_size);
+          EXPECT_EQ(actual->exec, expected->exec);
+          EXPECT_EQ(actual->vcc, expected->vcc);
+          EXPECT_EQ(actual->sgpr64(8), expected->sgpr64(8));
+          EXPECT_EQ(actual->sgpr64(10), expected->sgpr64(10));
+          for (uint32_t lane = 0; lane < target.wave_size; ++lane) {
+            EXPECT_EQ(actual->vgpr(1, lane), expected->vgpr(1, lane));
+            EXPECT_EQ(actual->vgpr(3, lane), expected->vgpr(3, lane));
+          }
+        }
+        // Both sites need the full-mask window when arguments or full-exec
+        // are requested; only VCC can then be omitted. Otherwise each saves 4.
+        EXPECT_EQ(sizes[1] - sizes[0], arguments || full_exec ? 4u : 8u);
+      }
+    }
+  }
+}
+
+TEST_P(DbiNonwriterSim, RemovingWriterRestoreChangesGuestObservation) {
+  const MaskSimArch target = GetParam();
+  for (bool exec : {false, true}) {
+    SCOPED_TRACE(exec ? "EXEC" : "VCC");
+    const uint16_t special =
+        exec ? scalar_operand_exec_lo(target.arch) : scalar_operand_vcc_lo(target.arch);
+    const std::vector<uint32_t> code{
+        build_s_mov_b64(scalar_operand_exec_lo(target.arch), 131, target.arch),
+        build_s_mov_b64(scalar_operand_vcc_lo(target.arch), 131, target.arch),
+        build_s_mov_b64(8, special, target.arch), build_s_endpgm(target.arch)};
+    const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/0, /*granulated_sgpr_count=*/3, target.e_flags,
+        /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
+        /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false,
+        /*wave32=*/target.wave32);
+    const std::vector<uint8_t> probe_image = test::make_amdgpu_probe_elf(
+        "writer", {build_s_mov_b64(special, 128, target.arch), build_s_setpc_b64(30, target.arch)},
+        target.e_flags);
+    AmdGpuCodeObject object(image.data(), image.size());
+    AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+    Instrumentor instrumentor(object, target.arch);
+    InstrumentationPoint point;
+    point.anchor_offset = 8;
+    point.probe_obj = &probe;
+    point.probe_symbol = "writer";
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    const std::vector<uint32_t> text = test::section_words(patched, ".text");
+    std::vector<uint32_t> broken = text;
+    size_t restores = 0;
+    for (uint32_t &word : broken) {
+      if ((word >> 23) == kSop1EncodingPrefix &&
+          ((word >> 8) & 0xffu) == sop1_op_mov_b64(target.arch) &&
+          ((word >> 16) & 0x7fu) == special && (word & 0xffu) < 30) {
+        word = build_s_nop(0, target.arch);
+        ++restores;
+      }
+    }
+    ASSERT_EQ(restores, 1u);
+    for (bool sabotage : {false, true}) {
+      test::DbiSim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize(target.sim_arch, target.wave_size, target.sim_target));
+      const std::optional<uint64_t> observed =
+          sim.run_and_read_sgpr64(sabotage ? broken : text, 0, 8);
+      ASSERT_TRUE(observed);
+      EXPECT_EQ(*observed, sabotage ? 0u : 3u);
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ConcreteWaves, DbiNonwriterSim,
+    ::testing::Values(kCdna3MaskArch, kCdna4MaskArch, kRdna4MaskArch,
+                      MaskSimArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
+                                  64, false},
+                      MaskSimArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201,
+                                  32, true, "gfx1201"},
+                      MaskSimArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201,
+                                  64, false, "gfx1201"}));
 
 class DbiMaskSimBase : public ::testing::Test {
 protected:

@@ -3,6 +3,8 @@
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/operand.h"
+#include "rocjitsu/isa/register_set.h"
 #include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
@@ -145,6 +147,45 @@ TEST(DecoderWindow, PreservesDecoderDiagnostics) {
   EXPECT_TRUE(decoder->decode_window(invalid, 0, bounded.emitter()).failed());
   EXPECT_FALSE(bounded.message().empty());
   EXPECT_EQ(bounded.message(), direct.message());
+}
+
+TEST(DecoderWindow, TrapTemporaryTuplesRespectRegisterFileBounds) {
+  struct SmemCase {
+    rj_code_arch_t arch;
+    uint32_t load_word;
+    uint32_t offset_word;
+  };
+  // The three SMEM layouts all encode a 256-bit load's SDATA in bits [12:6].
+  // Exercise every generated ISA, independently of the DBI proof consumer.
+  for (const SmemCase &tc : {SmemCase{ROCJITSU_CODE_ARCH_CDNA1, 0xc00e0000u, 0},
+                             SmemCase{ROCJITSU_CODE_ARCH_CDNA2, 0xc00e0000u, 0},
+                             SmemCase{ROCJITSU_CODE_ARCH_CDNA3, 0xc00e0000u, 0},
+                             SmemCase{ROCJITSU_CODE_ARCH_CDNA4, 0xc00e0000u, 0},
+                             SmemCase{ROCJITSU_CODE_ARCH_RDNA1, 0xf40e0000u, 0},
+                             SmemCase{ROCJITSU_CODE_ARCH_RDNA2, 0xf40e0000u, 0},
+                             SmemCase{ROCJITSU_CODE_ARCH_RDNA3, 0xf40e0000u, 0},
+                             SmemCase{ROCJITSU_CODE_ARCH_RDNA3_5, 0xf40e0000u, 0},
+                             SmemCase{ROCJITSU_CODE_ARCH_RDNA4, 0xf4006000u, 0xf8000000u},
+                             SmemCase{ROCJITSU_CODE_ARCH_CDNA5, 0xf4006000u, 0xf8000000u}}) {
+    SCOPED_TRACE(tc.arch);
+    std::unique_ptr<Decoder> decoder = Decoder::create(tc.arch);
+    ASSERT_NE(decoder, nullptr);
+    for (uint16_t first : {0, 8, 12}) {
+      SCOPED_TRACE(first);
+      const std::array<uint32_t, 2> words{tc.load_word | ((108u + first) << 6), tc.offset_word};
+      util::StringDiagnostic diagnostic;
+      DecodeResult decoded = decoder->decode_window(words, 0, diagnostic.emitter());
+      if (first == 12) {
+        EXPECT_TRUE(decoded.failed()); // ttmp[12:19] exceeds TTMP15.
+        EXPECT_NE(diagnostic.message().find("invalid scalar register selector"), std::string::npos);
+      } else {
+        ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+        ASSERT_EQ(decoded.value()->num_dst_operands(), 1);
+        EXPECT_EQ(decoded.value()->dst_operand(0)->to_register_ref(),
+                  (RegisterRef{RegClass::TTMP, first, 8}));
+      }
+    }
+  }
 }
 
 } // namespace

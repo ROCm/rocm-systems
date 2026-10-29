@@ -4,26 +4,27 @@
 #include "rocjitsu/code/patch/probe_clobber.h"
 
 #include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/error_report.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
-#include <string_view>
+#include <vector>
 
 namespace rocjitsu {
 
 namespace {
 
-// Record an explicit operand's special-state class on the summary. Ordinary
+// Record a decoder-exposed operand's special-state class on the summary. Ordinary
 // classes (SGPR/VGPR/AccVGPR) are handled precisely via InstDefUse and ignored
 // here.
 void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
@@ -48,69 +49,70 @@ void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
   }
 }
 
-// Special-state detection by operand display name.
-//
-// The generated Operand::to_register_ref() currently returns nullopt for the
-// special-state operand forms this gate exists to catch (OPR_SDST_EXEC,
-// OPR_SDST_M0, OPR_FLAT_SCRATCH, OPR_VCC, OPR_SSRC_SPECIAL_SCC), so the
-// ref-based path below is blind to them even though the operand itself is
-// present. We map the display name ("exec_lo", "m0", "vcc", ...), until
-// operands expose their special RegClass structurally.
-//
-// NOTE: this sees any write the decoder exposes as a named operand, including
-// special-state results some ops write to a named "vcc"/"exec" dst. A truly
-// operand-less def (e.g. SCC from scalar ALU) stays invisible; SCC is covered by
-// the envelope's save/restore, and EXEC/VCC by the trampoline's unconditional
-// preserve.
-//
-// Matching is case-insensitive: operand display names are lowercase on some
-// arches (CDNA2) but uppercase on others (CDNA4: "EXEC_LO", "M0", ...).
-// TODO: drop this name fallback once the operand-type modeling work lands.
-std::optional<RegClass> special_class_from_name(std::string_view name) {
-  std::string lower(name);
-  std::ranges::transform(lower, lower.begin(),
-                         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  const std::string_view n = lower;
-  auto starts_with = [&](std::string_view prefix) { return n.substr(0, prefix.size()) == prefix; };
-  if (starts_with("exec"))
-    return RegClass::EXEC; // exec, exec_lo, exec_hi
-  if (starts_with("vcc"))
-    return RegClass::VCC; // vcc, vcc_lo, vcc_hi
-  if (starts_with("flat_scratch"))
-    return RegClass::FLAT_SCRATCH; // flat_scratch_lo/hi/all
-  if (n == "m0")
-    return RegClass::M0;
-  if (n == "scc" || n == "src_scc")
-    return RegClass::SCC;
-  return std::nullopt;
+void invalidate_no_write(ProbeWriteProof &proof) {
+  if (proof == ProbeWriteProof::NoWrite)
+    proof = ProbeWriteProof::Unknown;
 }
 
-// Flag the special-state class an operand names. Prefers the precise ref-based
-// class; falls back to the display name for the special forms to_register_ref()
-// does not map (see special_class_from_name).
-void note_operand(const Operand &op, ProbeClobberSummary &summary) {
-  if (auto ref = op.to_register_ref()) {
-    note_special_state(summary, ref->cls);
-    return;
+// Generated operands expose both selector-encoded references and fieldless
+// architectural effects. An unclassified destination invalidates no-write
+// proofs; an absence in the best-effort access summary never grants one.
+bool note_operand(const Operand &op, ProbeClobberSummary &summary, bool destination) {
+  const std::optional<RegisterRef> ref = op.to_register_ref();
+  // A vector mask may fit in TTMP15 on Wave32 but overflow on Wave64.
+  // This callee-only summary has no wave-size context, so it cannot use a
+  // decode-time minimum-width check to prove the maximum extent harmless.
+  if (ref && ref->cls == RegClass::TTMP &&
+      uint32_t{ref->index} + ref->width > amdgpu::kTtmpRegisterCount) {
+    invalidate_no_write(summary.exec_write);
+    invalidate_no_write(summary.vcc_write);
   }
-  if (auto cls = special_class_from_name(op.name()))
-    note_special_state(summary, *cls);
+  const std::optional<RegClass> cls = ref ? std::optional(ref->cls) : op.to_special_reg_class();
+  if (!cls)
+    return !op.is_writable();
+  note_special_state(summary, *cls);
+  if (destination && *cls == RegClass::EXEC)
+    summary.exec_write = ProbeWriteProof::MayWrite;
+  if (destination && *cls == RegClass::VCC)
+    summary.vcc_write = ProbeWriteProof::MayWrite;
+  return true;
 }
 
-// Scan every explicit operand and flag special-state register classes. This is
-// best-effort: it sees operands the decoder exposes, not implicit side effects.
-void scan_special_state(const Instruction &inst, ProbeClobberSummary &summary) {
+// Scan decoder-exposed source/destination operands, including fieldless special
+// operands. Implicit effects not exposed as operands are covered separately by
+// the generated instruction flags in build_probe_clobber_summary().
+void scan_special_state(const Instruction &inst, rj_code_arch_t arch,
+                        ProbeClobberSummary &summary) {
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const Operand *op = inst.dst_operand(i);
-    if (op == nullptr)
+    if (op == nullptr) {
+      invalidate_no_write(summary.exec_write);
+      invalidate_no_write(summary.vcc_write);
       continue;
-    note_operand(*op, summary);
+    }
+    // A tuple beginning in ordinary SGPRs can extend across a special selector.
+    // Decoder alignment alone does not prove the whole extent is ordinary.
+    const std::optional<RegisterRef> ref = op->to_register_ref();
+    if (ref && ref->cls == RegClass::SGPR && op->has_register_selector()) {
+      const uint32_t begin = static_cast<uint32_t>(op->encoding_value());
+      const uint32_t end = begin + ref->width;
+      const uint32_t exec = scalar_operand_exec_lo(arch);
+      const uint32_t vcc = scalar_operand_vcc_lo(arch);
+      if (begin < exec + 2 && end > exec)
+        summary.exec_write = ProbeWriteProof::MayWrite;
+      if (begin < vcc + 2 && end > vcc)
+        summary.vcc_write = ProbeWriteProof::MayWrite;
+    }
+    if (!note_operand(*op, summary, /*destination=*/true)) {
+      invalidate_no_write(summary.exec_write);
+      invalidate_no_write(summary.vcc_write);
+    }
   }
   for (int i = 0; i < inst.num_src_operands(); ++i) {
     const Operand *op = inst.src_operand(i);
     if (op == nullptr)
       continue;
-    note_operand(*op, summary);
+    note_operand(*op, summary, /*destination=*/false);
   }
 }
 
@@ -141,6 +143,13 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
   // a field for summary completeness; a future analysis-derived probe may set it.
   summary.uses_private_segment = false;
 
+  bool self_contained = callable.target != ROCJITSU_CODE_TARGET_INVALID && !body.empty() &&
+                        is_valid_probe_abi(callable.abi);
+  summary.exec_write = ProbeWriteProof::NoWrite;
+  summary.vcc_write = ProbeWriteProof::NoWrite;
+  std::vector<int64_t> instruction_offsets;
+  std::vector<int64_t> branch_targets;
+
   size_t w = 0;
   while (w < body.size()) {
     util::StringDiagnostic decode_error;
@@ -164,9 +173,49 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
     const InstDefUse du(*inst);
     summary.ordinary_clobbers |= du.defs.ordinary_only();
 
-    scan_special_state(*inst, summary);
+    scan_special_state(*inst, callable.arch, summary);
+
+    if ((inst->flags() & EXEC_WRITE_EFFECTS_KNOWN) == 0)
+      invalidate_no_write(summary.exec_write);
+    if ((inst->flags() & VCC_WRITE_EFFECTS_KNOWN) == 0)
+      invalidate_no_write(summary.vcc_write);
+    if ((inst->flags() & WRITES_EXEC) != 0)
+      summary.exec_write = ProbeWriteProof::MayWrite;
+    if ((inst->flags() & WRITES_VCC) != 0)
+      summary.vcc_write = ProbeWriteProof::MayWrite;
+
+    const int64_t offset = static_cast<int64_t>(w * sizeof(uint32_t));
+    instruction_offsets.push_back(offset);
+    const bool final_instruction = w + inst_words == body.size();
+    if (final_instruction) {
+      self_contained &= is_probe_abi_return(*inst, callable.abi);
+    } else if (inst->is_branch()) {
+      const std::optional<int64_t> delta = inst->branch_offset_bytes();
+      if (delta)
+        branch_targets.push_back(offset + inst->size() + *delta);
+      else
+        self_contained = false;
+    } else if ((inst->flags() & (INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR)) != 0) {
+      self_contained = false;
+    }
 
     w += inst_words;
+  }
+
+  // Direct branches must stay within the copied body and land on instruction
+  // boundaries, never on a literal/extension word. Calls/unknown indirect edges
+  // remain conservative. Inspect even unreachable instructions; no CFG reachability
+  // or special-register liveness assumption is needed to prove absence of writes.
+  for (int64_t target : branch_targets)
+    self_contained &= std::ranges::binary_search(instruction_offsets, target);
+  if (summary.ordinary_clobbers.contains(
+          RegisterRef{RegClass::SGPR, callable.abi.link_pair_base, 1}) ||
+      summary.ordinary_clobbers.contains(
+          RegisterRef{RegClass::SGPR, static_cast<uint16_t>(callable.abi.link_pair_base + 1), 1}))
+    self_contained = false;
+  if (!self_contained) {
+    invalidate_no_write(summary.exec_write);
+    invalidate_no_write(summary.vcc_write);
   }
 
   return summary;

@@ -63,6 +63,29 @@ void expect_declared_footprint(rj_code_arch_t arch) {
   EXPECT_FALSE(summary->touches_exec);
 }
 
+TEST(LogRecordProbe, GeneratedEffectsProveNoMaskWritesForRealLoggingBodies) {
+  struct Target {
+    rj_code_arch_t arch;
+    rj_code_target_id_t target;
+  };
+  for (Target target : {Target{ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942},
+                        Target{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950},
+                        Target{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1200},
+                        Target{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201}}) {
+    ProbeCallable callable;
+    callable.arch = target.arch;
+    callable.target = target.target;
+    callable.abi =
+        *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, kLogRecordProbeArgDwords);
+    ASSERT_NO_FATAL_FAILURE(
+        build_log_record_probe_body(target.arch, kRecordType, kSlotCount, callable.body_words));
+    const std::optional<ProbeClobberSummary> summary = build_probe_clobber_summary(callable);
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->exec_write, ProbeWriteProof::NoWrite) << target.target;
+    EXPECT_EQ(summary->vcc_write, ProbeWriteProof::NoWrite) << target.target;
+  }
+}
+
 // LLVM's amdgpu-wait-sgpr-hazards pass, run on this body for gfx1200, places
 // `s_wait_alu 0xfffe` after s_and_b32 s12, s_lshl_b32 s12, s_add_u32 s12 and
 // s_addc_u32 s11. The simulator models no hazards, so the positions are what

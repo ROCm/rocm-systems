@@ -16,7 +16,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/smem.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -632,12 +634,17 @@ TEST(ExecutionPluginTest, ScalarMemoryRejectsDestinationThatCrossesTtmpFile) {
                                        {.sbase = 0, .sdata = amdgpu::kTtmpSelectorLast, .imm = 1});
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
-  ASSERT_NE(load, nullptr);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(decoder->decode_window(words, 0, diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("invalid scalar register selector"), std::string::npos);
 
-  EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+  // Bypass decode validation deliberately to retain the execution guard's
+  // coverage for directly constructed instructions. No memory request may issue.
+  ScopedIsaExecutionBackend execution_scope(&cdna4::execution_backend());
+  cdna4::SLoadDwordx2Smem load(reinterpret_cast<const cdna4::MachineInst *>(words.data()));
+  EXPECT_TRUE(cu->execute_instruction(&load, *wf).succeeded());
 
-  EXPECT_EQ(load->data(), nullptr);
+  EXPECT_EQ(load.data(), nullptr);
   EXPECT_EQ(cu->read_sgpr_storage(adjacent->sgpr_alloc().base + kAdjacentOffset), kSentinel);
 }
 

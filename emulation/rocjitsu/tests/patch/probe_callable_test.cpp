@@ -272,7 +272,7 @@ TEST(ProbeCallableTest, RejectsMissingReturn) {
   EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
-  EXPECT_NE(err.find("s_setpc_b64"), std::string::npos) << err;
+  EXPECT_NE(err.find("absolute return through the ABI link pair"), std::string::npos) << err;
 }
 
 TEST(ProbeCallableTest, RejectsWrongReturnRegister) {
@@ -285,7 +285,7 @@ TEST(ProbeCallableTest, RejectsWrongReturnRegister) {
   EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
-  EXPECT_NE(err.find("s_setpc_b64"), std::string::npos) << err;
+  EXPECT_NE(err.find("absolute return through the ABI link pair"), std::string::npos) << err;
 }
 
 TEST(ProbeCallableTest, RejectsRelocationInBody) {

@@ -97,7 +97,9 @@ protected:
     // v_mov v0, K0 ; v_mov v1, v0 (ANCHOR at offset 4, v0 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(0, kGuestValue), kMovV1V0, endpgm}, /*private_bytes=*/64,
-        /*granulated_sgpr_count=*/3, a_.e_flags);
+        /*granulated_sgpr_count=*/3, a_.e_flags, /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
+        /*unterminated_kd_name=*/false, /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false, /*wave32=*/a_.wave_size == 32);
     auto probe = test::make_amdgpu_probe_elf("rj_test_arg_probe", {kMovV3V0, setpc}, a_.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());

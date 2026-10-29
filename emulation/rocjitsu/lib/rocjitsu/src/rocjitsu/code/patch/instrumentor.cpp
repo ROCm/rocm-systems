@@ -1334,12 +1334,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
-      // Orchestrator policy: save EXEC/VCC unconditionally so correctness does
-      // not depend on complete per-opcode implicit-def coverage. The summary
-      // sees decoder-exposed operands; M0 follows touches_m0, which includes
-      // exposed reads as well as writes.
-      plan.preserve_exec = true;
-      plan.preserve_vcc = true;
+      // Only an audited whole-body no-write proof can waive preservation.
+      // Unknown effects and possible writes retain the conservative policy;
+      // the builder independently saves EXEC for its full-mask windows.
+      plan.preserve_exec = summary->exec_write != ProbeWriteProof::NoWrite;
+      plan.preserve_vcc = summary->vcc_write != ProbeWriteProof::NoWrite;
       plan.preserve_m0 = summary->touches_m0;
       // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
       // never lands past its .sgpr_count

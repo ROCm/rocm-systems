@@ -144,6 +144,14 @@ RegisterSet supplied_registers(const ProbeAbi &abi) {
   return regs;
 }
 
+bool is_probe_abi_return(const Instruction &inst, const ProbeAbi &abi) {
+  if (!is_valid_probe_abi(abi) || (inst.flags() & ABSOLUTE_INDIRECT_BRANCH) == 0)
+    return false;
+  const Operand *source = inst.src_operand(0);
+  const std::optional<RegisterRef> link = source ? source->to_register_ref() : std::nullopt;
+  return link && *link == probe_link_pair(abi);
+}
+
 std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
                                                   rj_code_arch_t arch, uint8_t num_arg_dwords,
@@ -221,10 +229,8 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     return std::nullopt;
   }
 
-  // Use strings to hold info between iterations (currently deleting inst)
-  std::string_view last_mnemonic;
-  std::string last_src0_name;
-  bool last_has_src0 = false;
+  // Retain the return classification after releasing each decoded instruction.
+  bool last_is_return = false;
   const std::span<const uint32_t> body(words);
   size_t w = 0;
   while (w < num_words) {
@@ -256,16 +262,12 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
                         "does not fully model");
       return std::nullopt;
     }
-    last_mnemonic = m;
-    const Operand *src0 = inst->src_operand(0);
-    last_has_src0 = src0 != nullptr;
-    last_src0_name = last_has_src0 ? src0->name() : std::string();
+    last_is_return = is_probe_abi_return(*inst, *abi);
     w += inst_words;
   }
 
-  // Must return through the s[30:31] link pair
-  if (last_mnemonic != "s_setpc_b64" || !last_has_src0 || last_src0_name != "s[30:31]") {
-    report(error_out, "probe body does not return via s_setpc_b64 s[30:31]");
+  if (!last_is_return) {
+    report(error_out, "probe body does not end in an absolute return through the ABI link pair");
     return std::nullopt;
   }
 
@@ -274,7 +276,7 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   callable.arch = arch;
   callable.target = target;
   callable.body_words = std::move(words);
-  // The body was just verified to return through s[30:31]; the argument count
+  // The body was just verified to return through the ABI link pair; the argument count
   // was screened on entry. Whether the body agrees with that count is
   // analyze_probe_live_ins()'s to decide.
   callable.abi = *abi;

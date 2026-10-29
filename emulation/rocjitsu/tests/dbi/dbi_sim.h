@@ -28,11 +28,9 @@
 /// starts at the original entry and skips the prologue. The simulator does not
 /// check the entry's 256-byte alignment, so this cannot catch a misplaced stub.
 ///
-/// Wave size is a place they do **not** agree: the synthesized descriptor never
-/// sets ENABLE_WAVEFRONT_SIZE32, so kernel_wavefront_size() reports 64 and an
-/// RDNA target dispatches Wave64 however its patched ELF was planned. The
-/// wave_size constructor argument only says how many lanes to read back. A test
-/// whose correctness depends on the executing wave size cannot get it here.
+/// The synthesized descriptor selects the requested execution wave size while
+/// preserving the supplied kernarg enable bits. run() checks the halt snapshot
+/// against that request; readback length alone is not proof of the wave size.
 
 #pragma once
 
@@ -68,11 +66,13 @@ namespace test {
 class DbiSim {
 public:
   /// @param arch Config/VM arch string: "cdna3", "cdna4", or "rdna4".
-  /// @param wave_size 64 for CDNA, 32 for RDNA4.
-  void initialize(std::string_view arch, uint32_t wave_size) {
+  /// @param wave_size 64 for CDNA, 32 or 64 for RDNA4.
+  void initialize(std::string_view arch, uint32_t wave_size, std::string_view target = {}) {
+    ASSERT_TRUE(wave_size == 32 || wave_size == 64);
     wave_size_ = wave_size;
     const std::string json =
         std::string(R"({"max_ticks":100000,"num_threads":1,"vm":{"arch":")") + std::string(arch) +
+        R"(","target":")" + std::string(target) +
         R"("},)"
         R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
         R"({"name":"vram","type":"gpu_memory"},)"
@@ -98,6 +98,11 @@ public:
     engine_->create();
     plugin_group_ = make_halt_snapshot_group(&snapshot_plugin_);
     soc_->set_plugin_group(plugin_group_);
+  }
+
+  /// @brief Actual execution state captured at halt, absent before a wave halts.
+  const WavefrontSnapshot *halted_wavefront() const {
+    return snapshot_plugin_->snapshots().empty() ? nullptr : &snapshot_plugin_->snapshots().front();
   }
 
   amdgpu::CommandProcessor *cp() { return soc_->xcd(0)->command_processor(); }
@@ -161,6 +166,8 @@ public:
                        ((104 / 8) - 1));
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgpr_count_);
     kd.kernel_code_properties = kernarg_properties_;
+    RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                       wave_size_ == 32);
     kd.kernarg_size = static_cast<uint32_t>(kernarg_bytes_.size());
     kd.private_segment_fixed_size = private_bytes;
 
@@ -264,7 +271,9 @@ private:
 
     if (snapshot_plugin_->snapshots().empty())
       return nullptr;
-    return &snapshot_plugin_->snapshots().front();
+    const WavefrontSnapshot *snapshot = halted_wavefront();
+    EXPECT_EQ(snapshot->wf_size, wave_size_) << "dispatch executed with the wrong wave size";
+    return snapshot;
   }
 
   uint32_t wave_size_ = 64;

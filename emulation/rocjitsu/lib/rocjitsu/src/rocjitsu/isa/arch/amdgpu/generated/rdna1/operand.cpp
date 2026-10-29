@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include <format>
 #include <optional>
@@ -24,9 +25,11 @@ std::string reg_name(const char *prefix, int reg_num, int size_bits) {
 }
 } // namespace
 
-Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
+Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
+                 ScalarExtent scalar_extent)
     : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
       execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())) {
+  const int minimum_size_bits = scalar_extent == ScalarExtent::WaveMask ? 32 : size_bits;
   switch (opr_type) {
   case OperandType::OPR_ATTR:
     if (!((encoding_value >= 0 && encoding_value <= 32)))
@@ -59,6 +62,12 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
   case OperandType::OPR_SDST:
     if (!((encoding_value >= 0 && encoding_value <= 127)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSdst::OPR_SDST_TTMP_MIN &&
+        encoding_value <= OpSelSdst::OPR_SDST_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSdst::OPR_SDST_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SDST_EXEC:
     if (!((encoding_value >= 126 && encoding_value <= 127)))
@@ -75,12 +84,24 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
   case OperandType::OPR_SMEM_OFFSET:
     if (!((encoding_value >= 0 && encoding_value <= 125)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
+        encoding_value <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SRC:
     if (!((encoding_value >= 0 && encoding_value <= 208) ||
           (encoding_value >= 235 && encoding_value <= 248) ||
           (encoding_value >= 251 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSrc::OPR_SRC_TTMP_MIN &&
+        encoding_value <= OpSelSrc::OPR_SRC_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSrc::OPR_SRC_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     if (encoding_value >= OpSelSrc::OPR_SRC_VGPR_MIN &&
         encoding_value <= OpSelSrc::OPR_SRC_VGPR_MAX) {
       initialize_vgpr_reference(encoding_value - OpSelSrc::OPR_SRC_VGPR_MIN + 0);
@@ -92,6 +113,12 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 251 && encoding_value <= 253) ||
           (encoding_value >= 255 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN &&
+        encoding_value <= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     if (encoding_value >= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN &&
         encoding_value <= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MAX) {
       initialize_vgpr_reference(encoding_value - OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN + 0);
@@ -103,6 +130,12 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 251 && encoding_value <= 253) ||
           (encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN &&
+        encoding_value <= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     if (encoding_value >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
         encoding_value <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX) {
       initialize_vgpr_reference(encoding_value - OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN + 0);
@@ -120,6 +153,12 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
     if (!((encoding_value >= 0 && encoding_value <= 123) ||
           (encoding_value >= 125 && encoding_value <= 125)))
       defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSreg::OPR_SREG_TTMP_MIN &&
+        encoding_value <= OpSelSreg::OPR_SREG_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSreg::OPR_SREG_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SREG_M0_INL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
@@ -127,9 +166,21 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 235 && encoding_value <= 248) ||
           (encoding_value >= 251 && encoding_value <= 253)))
       defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN &&
+        encoding_value <= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SREG_NONULL:
     if (!((encoding_value >= 0 && encoding_value <= 123)))
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSregNonull::OPR_SREG_NONULL_TTMP_MIN &&
+        encoding_value <= OpSelSregNonull::OPR_SREG_NONULL_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSregNonull::OPR_SREG_NONULL_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
       defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SSRC:
@@ -137,11 +188,23 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 235 && encoding_value <= 248) ||
           (encoding_value >= 251 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
+        encoding_value <= OpSelSsrc::OPR_SSRC_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSsrc::OPR_SSRC_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
           (encoding_value >= 128 && encoding_value <= 192)))
       defer_encoding_error(EncodingError::InvalidLaneSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
+        encoding_value <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SSRC_NOLDS:
     if (!((encoding_value >= 0 && encoding_value <= 208) ||
@@ -149,6 +212,12 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 251 && encoding_value <= 253) ||
           (encoding_value >= 255 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+    if (minimum_size_bits > 32 && encoding_value >= OpSelSsrcNolds::OPR_SSRC_NOLDS_TTMP_MIN &&
+        encoding_value <= OpSelSsrcNolds::OPR_SSRC_NOLDS_TTMP_MAX &&
+        static_cast<uint32_t>(encoding_value - OpSelSsrcNolds::OPR_SSRC_NOLDS_TTMP_MIN) +
+                (minimum_size_bits + 31) / 32 >
+            amdgpu::kTtmpRegisterCount)
+      defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
     break;
   case OperandType::OPR_SSRC_SPECIAL_SCC:
     if (!((encoding_value >= 253 && encoding_value <= 253)))
@@ -1028,6 +1097,8 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
     break;
   }
   case OperandType::OPR_FLAT_SCRATCH: {
+    if (encoding_value_ == OpSelFlatScratch::OPR_FLAT_SCRATCH_FLAT_SCRATCH)
+      return RegisterRef{RegClass::FLAT_SCRATCH, 0, reg_width};
     break;
   }
   case OperandType::OPR_GPUMEM: {
@@ -1050,6 +1121,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::TTMP,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_M0)
+      return RegisterRef{RegClass::M0, 0, reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
@@ -1064,6 +1141,8 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
     break;
   }
   case OperandType::OPR_SDST_M0: {
+    if (encoding_value_ == OpSelSdstM0::OPR_SDST_M0_M0)
+      return RegisterRef{RegClass::M0, 0, reg_width};
     break;
   }
   case OperandType::OPR_SIMM8: {
@@ -1082,6 +1161,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::TTMP,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0)
+      return RegisterRef{RegClass::M0, 0, reg_width};
     break;
   }
   case OperandType::OPR_SRC: {
@@ -1095,10 +1180,18 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::TTMP,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_M0)
+      return RegisterRef{RegClass::M0, 0, reg_width};
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
       return RegisterRef{RegClass::EXEC, 1, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SCC)
+      return RegisterRef{RegClass::SCC, 0, reg_width};
     if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN &&
         encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX)
       return RegisterRef{RegClass::VGPR,
@@ -1119,10 +1212,18 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::TTMP,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_M0)
+      return RegisterRef{RegClass::M0, 0, reg_width};
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_HI)
       return RegisterRef{RegClass::EXEC, 1, reg_width};
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_SCC)
+      return RegisterRef{RegClass::SCC, 0, reg_width};
     if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN &&
         encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MAX)
       return RegisterRef{
@@ -1144,10 +1245,18 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::TTMP,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_M0)
+      return RegisterRef{RegClass::M0, 0, reg_width};
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_HI)
       return RegisterRef{RegClass::EXEC, 1, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_SCC)
+      return RegisterRef{RegClass::SCC, 0, reg_width};
     if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
         encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX)
       return RegisterRef{
@@ -1175,6 +1284,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::TTMP,
                          static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SREG_M0_INL: {
@@ -1190,6 +1303,14 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::TTMP,
           static_cast<uint16_t>(encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_M0)
+      return RegisterRef{RegClass::M0, 0, reg_width};
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_SRC_SCC)
+      return RegisterRef{RegClass::SCC, 0, reg_width};
     break;
   }
   case OperandType::OPR_SREG_NONULL: {
@@ -1205,6 +1326,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::TTMP,
           static_cast<uint16_t>(encoding_value_ - OpSelSregNonull::OPR_SREG_NONULL_TTMP_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSregNonull::OPR_SREG_NONULL_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSregNonull::OPR_SREG_NONULL_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SSRC: {
@@ -1218,10 +1343,18 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::TTMP,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_M0)
+      return RegisterRef{RegClass::M0, 0, reg_width};
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
       return RegisterRef{RegClass::EXEC, 1, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SCC)
+      return RegisterRef{RegClass::SCC, 0, reg_width};
     break;
   }
   case OperandType::OPR_SSRC_LANESEL: {
@@ -1237,6 +1370,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::TTMP,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_M0)
+      return RegisterRef{RegClass::M0, 0, reg_width};
     break;
   }
   case OperandType::OPR_SSRC_NOLDS: {
@@ -1252,19 +1391,31 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::TTMP,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcNolds::OPR_SSRC_NOLDS_TTMP_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSsrcNolds::OPR_SSRC_NOLDS_VCC_LO)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
+    if (encoding_value_ == OpSelSsrcNolds::OPR_SSRC_NOLDS_VCC_HI)
+      return RegisterRef{RegClass::VCC, 1, reg_width};
+    if (encoding_value_ == OpSelSsrcNolds::OPR_SSRC_NOLDS_M0)
+      return RegisterRef{RegClass::M0, 0, reg_width};
     if (encoding_value_ == OpSelSsrcNolds::OPR_SSRC_NOLDS_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSsrcNolds::OPR_SSRC_NOLDS_EXEC_HI)
       return RegisterRef{RegClass::EXEC, 1, reg_width};
+    if (encoding_value_ == OpSelSsrcNolds::OPR_SSRC_NOLDS_SRC_SCC)
+      return RegisterRef{RegClass::SCC, 0, reg_width};
     break;
   }
   case OperandType::OPR_SSRC_SPECIAL_SCC: {
+    if (encoding_value_ == OpSelSsrcSpecialScc::OPR_SSRC_SPECIAL_SCC_SRC_SCC)
+      return RegisterRef{RegClass::SCC, 0, reg_width};
     break;
   }
   case OperandType::OPR_TGT: {
     break;
   }
   case OperandType::OPR_VCC: {
+    if (encoding_value_ == OpSelVcc::OPR_VCC_VCC)
+      return RegisterRef{RegClass::VCC, 0, reg_width};
     break;
   }
   case OperandType::OPR_VGPR: {
