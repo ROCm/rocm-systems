@@ -157,3 +157,23 @@ class TestGoogleTestSuite:
         assert result.returncode == 0, (
             f"rdc_topology_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
         )
+
+    def test_rdc_diag_kernels(self, rocm_dir, rdctst_path):
+        # Needs no GPU: the binary checks the diagnostic kernels committed in the source tree it
+        # was built from, and skips its tests when that tree is not reachable from the install.
+        # rdctst_path skips this test unless the RDC test package is installed.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_diag_kernel_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=60)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_diag_kernel_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+        if "kernel source tree not available" in result.stdout:
+            pytest.skip("the kernel source tree is not reachable from the installed test")
+        assert "[  PASSED  ] 0 tests" not in result.stdout, "rdc_diag_kernel_tests ran no tests"
