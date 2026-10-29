@@ -44,8 +44,9 @@ RCCL_PARAM(DdaA2APushPeerPieces, "DDA_A2A_PUSH_PEER_PIECES", 0);
 // RCCL_DDA_A2A_PUSH_PEER_EPOCH: 1 (default) uses epoch flags for the peer-major vector and TDM pushes, 0 uses the one-token CAS flags
 // (see FabricGpuBarrier::signalWait / postPeer / waitPeer). Must be the same on every rank.
 RCCL_PARAM(DdaA2APushPeerEpoch, "DDA_A2A_PUSH_PEER_EPOCH", 1);
-// RCCL_DDA_A2A_PUSH_PEER_DRAIN=D: D dedicated drain blocks per source offset (nRanks - 1 offsets) copy the received data
-// out of the scratch, so the push blocks only push. Off (0) by default. All ranks must use the same value.
+// RCCL_DDA_A2A_PUSH_PEER_DRAIN: dedicated drain blocks copy the received data out of the scratch, so the push blocks only
+// push. D > 0: D drain blocks per source offset (nRanks - 1 offsets). 0 (default): no drain blocks. -1: auto, half of
+// the blocks are drain blocks (see ddaAllToAllFabricPeerDrain). All ranks must use the same value.
 RCCL_PARAM(DdaA2APushPeerDrain, "DDA_A2A_PUSH_PEER_DRAIN", 0);
 
 namespace {
@@ -96,6 +97,18 @@ static inline DdaA2APeerGeom ddaAllToAllFabricPeerGeom(ncclComm* comm, size_t wa
   const size_t wavesPerBlock = std::min(kMaxWaves, (waves + bpp - 1) / bpp);
   return {dim3(static_cast<unsigned>(bpp * comm->nRanks)), dim3(static_cast<unsigned>(wavesPerBlock * kWave)),
           static_cast<int>(bpp)};
+}
+
+// Drain blocks per source offset from RCCL_DDA_A2A_PUSH_PEER_DRAIN: D > 0 as given (at most 64), 0 none, < 0 auto. Auto
+// gives the drain blocks half of the barrier's blocks, spread over the nRanks - 1 source offsets, and leaves the push
+// blocks the rest. It depends only on the CVAR, nRanks and the init-time cap, so every rank gets the same value; the
+// caller still limits it to blocksPerPeer.
+static inline unsigned ddaAllToAllFabricPeerDrain(ncclComm* comm) {
+  const int64_t param = rcclParamDdaA2APushPeerDrain();
+  if (param >= 0) return static_cast<unsigned>(std::min<int64_t>(param, 64));
+  if (comm->nRanks < 2) return 0;
+  const size_t half = static_cast<size_t>(comm->ddaFabricMaxBlocks) / 2;
+  return static_cast<unsigned>(std::min<size_t>(half / static_cast<size_t>(comm->nRanks - 1), 64));
 }
 
 // One warp per window of UnrollPeers tiles. The block count stays inside the
@@ -182,7 +195,7 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
     const int tileBytes = rcclParamDdaA2ATdmTileKB() << 10;
     const size_t tilesPerWave = dda::common::kDdaA2ATdmWindowBytes / tileBytes;
     const size_t tiles = (count + tileBytes - 1) / tileBytes;
-    unsigned drain = static_cast<unsigned>(std::clamp<int64_t>(rcclParamDdaA2APushPeerDrain(), 0, 64));
+    unsigned drain = ddaAllToAllFabricPeerDrain(comm);
     const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, (tiles + tilesPerWave - 1) / tilesPerWave,
                                                         dda::common::kDdaA2ATdmMaxWarpsPerBlock,
                                                         /*balanceRounds=*/true,
@@ -293,7 +306,7 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   // that other blocks of this rank may still be reading from sendbuff, so in-place calls take the all-peer push.
   if (rcclParamDdaA2APush() && rcclParamDdaA2APushPeer() && sendbuff != recvbuff) {
     const size_t vecWaves = (count * sizeof(T) / sizeof(uint4) + 31) / 32;
-    unsigned drain = static_cast<unsigned>(std::clamp<int64_t>(rcclParamDdaA2APushPeerDrain(), 0, 64));
+    unsigned drain = ddaAllToAllFabricPeerDrain(comm);
     const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, vecWaves, 8, /*balanceRounds=*/false,
                                                         static_cast<size_t>(drain) * (nRanks - 1));
     if (pg.blocksPerPeer > 0) {
