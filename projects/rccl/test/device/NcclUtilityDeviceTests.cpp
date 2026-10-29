@@ -6,13 +6,17 @@
 
 // Device-side tests for nccl::utility (nccl_device/utility.h): device-only helpers and the NCCL_DEVICE_ARCH branches.
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 #include "DeviceTestBase.hpp"
 
+#include "nccl_device/coop.h"
 #include "nccl_device/utility.h"
 
 namespace RcclUnitTesting {
@@ -530,6 +534,79 @@ TEST_F(NcclUtilityDeviceTest, LoadConstLdgScalars) {
   ASSERT_NO_FATAL_FAILURE(runLoadConst<float>(0x74));
   ASSERT_NO_FATAL_FAILURE(runLoadConst<double>(0x75));
   ASSERT_NO_FATAL_FAILURE(runLoadConst<uint64_t>(0x76));
+}
+
+// ---------------------------------------------------------------------------
+// ncclCoopWarpSpan::sync (software sense-reversing barrier on AMD): two concurrent 2-warp spans with distinct
+// warp0/id in one CTA; every round one warp per span is delayed, then both must see each other's write.
+// ---------------------------------------------------------------------------
+
+constexpr int kSpanRounds = 64;
+constexpr long long kSpanDelayCycles = 100000;
+
+__global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone) {
+  __shared__ int slot[4];
+  const int w = threadIdx.x / warpSize;
+  const int lane = threadIdx.x % warpSize;
+  const int spanId = w / 2;
+  const int idx = w & 1;
+  if (threadIdx.x < 4) slot[threadIdx.x] = 0;
+  ncclCoopNamedBarrierInit();
+  ncclCoopWarpSpan span(/*warp0=*/2 * spanId, /*nWarps=*/2, /*id=*/spanId);
+  volatile int* vslot = slot;
+  int bad = 0;
+  for (int r = 1; r <= kSpanRounds; ++r) {
+    if (idx == (r & 1)) {
+      const long long t0 = clock64();
+      while (clock64() - t0 < kSpanDelayCycles) {}
+    }
+    if (lane == 0) vslot[w] = r;
+    span.sync();
+    if (lane == 0 && vslot[w ^ 1] != r) ++bad;
+    span.sync();
+  }
+  if (lane == 0) {
+    atomicAdd(&mismatches[spanId], bad);
+    roundsDone[w] = kSpanRounds;
+  }
+}
+
+TEST_F(NcclUtilityDeviceTest, CoopWarpSpanSplitSpansSyncReleasesAfterAllArriveAndIsReusable) {
+  DeviceBuffer<int> d_bad(2);
+  DeviceBuffer<int> d_rounds(4);
+  ASSERT_NO_FATAL_FAILURE(d_bad.zero());
+  ASSERT_NO_FATAL_FAILURE(d_rounds.zero());
+  int warpSz = 0;
+  ASSERT_EQ(hipDeviceGetAttribute(&warpSz, hipDeviceAttributeWarpSize, 0), hipSuccess);
+  hipEvent_t done;
+  ASSERT_EQ(hipEventCreate(&done), hipSuccess);
+  kernelWarpSpanSync<<<1, 4 * warpSz>>>(d_bad.ptr, d_rounds.ptr);
+  ASSERT_EQ(hipGetLastError(), hipSuccess);
+  ASSERT_EQ(hipEventRecord(done, 0), hipSuccess);
+
+  // A hung barrier must fail, not stall; the kernel may still touch the buffers, so exit without freeing them.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  hipError_t q;
+  while ((q = hipEventQuery(done)) == hipErrorNotReady) {
+    if (std::chrono::steady_clock::now() > deadline) {
+      ADD_FAILURE() << "ncclCoopWarpSpan::sync kernel did not finish within 60s (barrier hang)";
+      std::fflush(stdout);
+      std::fflush(stderr);
+      std::_Exit(EXIT_FAILURE);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_EQ(q, hipSuccess);
+  (void)hipEventDestroy(done);
+
+  const std::vector<int> bad = d_bad.copyTo();
+  const std::vector<int> rounds = d_rounds.copyTo();
+  for (int s = 0; s < 2; ++s) {
+    EXPECT_EQ(bad[s], 0) << "span " << s << ": partner write not visible/ordered after sync()";
+  }
+  for (int w = 0; w < 4; ++w) {
+    EXPECT_EQ(rounds[w], kSpanRounds) << "warp " << w << " did not complete all rounds";
+  }
 }
 
 }  // namespace
