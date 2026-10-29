@@ -1274,12 +1274,15 @@ bool Device::populateOCLDeviceConstants() {
   // The host writes these signals through the BAR. A profiler tool's host atomics on them are not
   // atomic over PCIe, and its reads after destroy hit an unmapped batch arena.
   const bool tool_attached = amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
-  graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && info_.largeBar_ &&
-                          (device_signal_pool_.handle != 0) && !tool_attached;
+  const bool device_signals =
+      amd::IS_HIP && info_.largeBar_ && (device_signal_pool_.handle != 0) && !tool_attached;
+  graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && device_signals;
+  queue_device_signals_ = DEBUG_CLR_DEV_SIGNALS && device_signals;
   ClPrint(amd::LOG_INFO, amd::LOG_INIT,
-          "Signal pool: %s. Device memory: graph signals %d, AQL rings %d "
-          "(profiler tool: %d)",
-          signal_pool_name, graph_device_signals_, AqlRingsInDeviceMemory(), tool_attached);
+          "Signal pool: %s. Device memory: graph signals %d, queue signals %d, "
+          "AQL rings %d (profiler tool: %d)",
+          signal_pool_name, graph_device_signals_, queue_device_signals_,
+          AqlRingsInDeviceMemory(), tool_attached);
   // Left true by a runtime without the query, since flushing is always correct
   Hsa::agent_get_info(bkendDevice_,
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
@@ -3414,7 +3417,8 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
     bool active_wait =
         !((policy == amd::SyncPolicy::Blocking) & kHipEventBlockingSync) && ActiveWait();
     bool yield = (policy == amd::SyncPolicy::Yield);
-    return WaitForSignal(reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, active_wait, yield);
+    const auto* signal = reinterpret_cast<const ProfilingSignal*>(hw_event);
+    return WaitForSignal(signal->signal_, active_wait, yield, signal->in_device_memory_);
   }
 
   auto signal = reinterpret_cast<ProfilingSignal*>(hw_event)->signal_;
