@@ -2315,9 +2315,7 @@ static ncclResult_t rcclAddonCaptureOrderEnd(struct ncclComm* comm, cudaStream_t
   if (!ncclGraphStreamOrderingSerialize(comm)) {
     return ncclCudaGraphRecordEvent(state.graph, ss->serialEvent, stream);
   }
-  cudaEvent_t finishedEvent = comm->sharedRes->scratchEvent;
-  CUDACHECK(cudaEventRecord(finishedEvent, stream));
-  NCCLCHECK(ncclStreamAdvanceToEvent(state.graph, state.deviceStream, finishedEvent));
+  NCCLCHECK(ncclStreamAdvanceToStream(state.deviceStream, stream));
   return ncclSuccess;
 }
 
@@ -2899,7 +2897,12 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
         // So we could do this:
         //   CUDACHECK(cudaStreamWaitEvent(deviceStream, finishedEvent, 0));
         // But instead we do:
-        NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
+        if (capturing && planner->numStreams == 1) {
+          // launchStream has captured nothing since finishedEvent, so its frontier is the event's.
+          NCCLCHECK(ncclStreamAdvanceToStream(deviceStream, launchStream));
+        } else {
+          NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
+        }
       }
 
       // Each userStream[i] waits on userStream[0]
@@ -3660,6 +3663,8 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
         }
       }
     } else if (info->algorithm == NCCL_ALGO_RING) {
+      // Use the large-step schedule only when the device can select the matching kernel specialization.
+#if NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
       if (proxyOp->isOneRPN && info->func == ncclFuncAllGather) {
         proxyOp->chunkSize = NCCL_MAX_NET_SIZE;
         proxyOp->sliceSize = NCCL_MAX_NET_SIZE;
@@ -3669,6 +3674,7 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
         proxyOp->nsteps = DIVUP(nBytes, proxyOp->loopSize) * nstepsPerLoop;
         proxyOp->loopOffset = 0;
       }
+#endif
     } else {
       WARN("Net registration invalid algorithm %s", ncclAlgoToString(info->algorithm));
       return ncclInternalError;
