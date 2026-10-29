@@ -110,20 +110,14 @@ if(NOT AMD_SMI_HAS_CXX20_SPAN)
     message(FATAL_ERROR "addc-base needs a C++20 compiler and standard library with <span>")
 endif()
 
-# A system nlohmann_json is preferred. Otherwise use the vendored 3.12.0 release
-# (include.zip, sha256 b8cb0ef2dd7f57f18933997c9934bb1fa962594f701cd5a8d3c2c80541559372),
-# so a build needs no extra package or download.
-find_package(nlohmann_json 3.11 QUIET)
-if(nlohmann_json_FOUND)
-    message(STATUS "addc-base: using system nlohmann_json ${nlohmann_json_VERSION}")
-else()
-    message(STATUS "addc-base: using vendored nlohmann_json 3.12.0")
-    add_library(nlohmann_json::nlohmann_json INTERFACE IMPORTED)
-    set_target_properties(
-        nlohmann_json::nlohmann_json
-        PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/third_party/nlohmann_json/include"
-    )
-endif()
+# Always the vendored 3.12.0 release (include.zip, sha256
+# b8cb0ef2dd7f57f18933997c9934bb1fa962594f701cd5a8d3c2c80541559372). A find_package probe
+# is rejected by super-project builds that do not declare the package as a dependency.
+add_library(nlohmann_json::nlohmann_json INTERFACE IMPORTED)
+set_target_properties(
+    nlohmann_json::nlohmann_json
+    PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}/third_party/nlohmann_json/include"
+)
 
 set(ADDC_LIB_STATIC ON)
 set(ADDC_ENABLE_CLI OFF)

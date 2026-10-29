@@ -119,8 +119,12 @@ std::vector<PipelineEvent> decode_ia32x64(
         }
 
         // Shared bank -> event assembly (event_report / validation / ppr).
-        const auto me =
-            context.decode_mca(s.platform, {regs, bank.transaddr});
+        const auto me = context.decode_mca(
+            s.platform,
+            {regs, bank.transaddr,
+             s.cpuid_valid ? std::optional<uint32_t>{static_cast<uint32_t>(
+                                 s.cpuid.eax)}
+                           : std::nullopt});
         if (!me)
         {
             continue;

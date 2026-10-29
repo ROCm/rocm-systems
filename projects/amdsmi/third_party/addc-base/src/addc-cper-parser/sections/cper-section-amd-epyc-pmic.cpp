@@ -2,10 +2,16 @@
 // SPDX-License-Identifier: MIT
 #include "cper-section-amd-epyc-pmic.hpp"
 
+#include "../endian.hpp"
+
 #include "addc/detail/format.hpp"
 
 namespace addc::cper::sections
 {
+
+using addc::cper::read_u16_le;
+using addc::cper::read_u32_le;
+using addc::cper::read_u64_le;
 
 namespace
 {
@@ -16,18 +22,6 @@ inline constexpr Guid kPmicGuid{
     0x6e3bU,
     0x4b91U,
     {0x9aU, 0x2fU, 0xc8U, 0x71U, 0x5dU, 0xe4U, 0x13U, 0x6bU}};
-
-constexpr uint32_t readU32(std::span<const uint8_t> d, std::size_t o) noexcept
-{
-    if (o + 4U > d.size())
-    {
-        return 0U;
-    }
-    return static_cast<uint32_t>(d[o]) |
-           (static_cast<uint32_t>(d[o + 1U]) << 8U) |
-           (static_cast<uint32_t>(d[o + 2U]) << 16U) |
-           (static_cast<uint32_t>(d[o + 3U]) << 24U);
-}
 
 constexpr uint8_t readU8(std::span<const uint8_t> d, std::size_t o) noexcept
 {
@@ -55,9 +49,9 @@ nlohmann::json parse_amd_epyc_pmic(
 {
     nlohmann::json j;
 
-    const uint32_t section_version = readU32(body, 0U);
-    const uint32_t section_length = readU32(body, 4U);
-    const uint32_t valid_bits = readU32(body, 8U);
+    const uint32_t section_version = read_u32_le(body, 0U);
+    const uint32_t section_length = read_u32_le(body, 4U);
+    const uint32_t valid_bits = read_u32_le(body, 8U);
 
     j["section_version"] = addc::format("0x{:08x}", section_version);
     j["section_length"] = addc::format("0x{:08x}", section_length);

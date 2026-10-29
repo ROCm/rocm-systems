@@ -85,7 +85,8 @@ uint32_t decode_afid(McaRegisters regs)
         return kAfidSentinel;
     }
 
-    const auto sev = addc::mca::decode_severity(regs);
+    const auto sev =
+        addc::mca::decode_severity(regs, product::ProductId::venice);
     uint32_t base = range->corrected;
     if (sev == "Fatal")
     {
@@ -100,7 +101,8 @@ uint32_t decode_afid(McaRegisters regs)
 
 McaResult decode(const BankCapture& bank)
 {
-    return decode_common(bank, decode_afid(bank.regs));
+    return decode_common(bank, decode_afid(bank.regs),
+                         product::ProductId::venice);
 }
 
 } // namespace addc::mca::base::venice

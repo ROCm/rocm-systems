@@ -56,11 +56,14 @@ std::vector<PipelineEvent> decode_gpu_mi450_runtime(
         ev.metadata = gpu::make_gpu_metadata(s, context, ci, "Runtime MCA",
                                              "mca", events.size());
         ev.platform = gpu::make_gpu_platform(s, has_ei, ei);
+        ev.platform["gpu"]["check_info"] =
+            has_ei ? gpu::make_mi450_check_info(*ei)
+                   : nlohmann::ordered_json(nullptr);
         ev.event_report = decoded->event_report;
         ev.data_array = to_data_array(bank);
         ev.validation = decoded->validation;
         ev.analysis["afid"] = decoded->decoded.afid;
-        ev.firmware = gpu::make_firmware_json(s);
+        ev.firmware = gpu::make_mi450_firmware_json(s);
         ev.ppr = decoded->ppr;
 
         events.push_back(std::move(ev));

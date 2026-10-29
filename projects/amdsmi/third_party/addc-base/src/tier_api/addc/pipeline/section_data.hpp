@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace addc::pipeline
@@ -290,6 +291,16 @@ struct GpuPldmBundle
     uint8_t production_debug = 0u;
 };
 
+/// MI450 PLDM bundle version.
+struct GpuMi450PldmBundle
+{
+    uint8_t patch = 0u;
+    uint8_t minor = 0u;
+    uint8_t major_year = 0u;
+    uint8_t build_type = 0u; ///< byte 3 bits 0-2
+    uint8_t product_id = 0u; ///< byte 3 bits 3-7
+};
+
 /// One GPU context structure.
 /// raw_bytes carries the register array verbatim.
 struct GpuContextStructure
@@ -303,6 +314,7 @@ struct GpuErrorInfoStructure
 {
     std::string error_structure_type;
     bool check_info_valid = false;
+    uint16_t ms_check_valid_bits = 0u; ///< MS Check structure bits 15:0
     bool target_addr_id_valid = false;
     bool requester_id_valid = false;
     bool responder_id_valid = false;
@@ -357,12 +369,19 @@ struct GpuMi450BootStatus
     uint32_t boot_msg_hi{}; ///< EAM0_BootMsg[7:4]
 };
 
+/// MP0_OutBndMsg-formatted BREAKEVENT.
+struct GpuMi450BreakEvent
+{
+    uint32_t msg_lo{}; ///< BREAKEVENT[3:0]
+    uint32_t msg_hi{}; ///< BREAKEVENT[7:4]
+};
+
 /// GPU context with EPYC-style register array.
 /// context_type == 1 (Crashdump): MCA 32x512B banks + DF/WDT (offset 16400) +
 /// DBG_LOG (offset 16912). context_type == 5 (DBG Log): compact one-frame
 /// DBG_LOG at blob offset 16. context_type == 9 (Boot Status): 8-byte boot
-/// status buffer only — no WDT or DBG_LOG. context_type == 3 (Break Event): no
-/// decoded payload.
+/// status buffer only — no WDT or DBG_LOG. context_type == 3 (Break Event):
+/// 8-byte MP0_OutBndMsg-formatted BREAKEVENT buffer.
 struct GpuMi450Context
 {
     uint16_t context_type{};
@@ -372,6 +391,7 @@ struct GpuMi450Context
     std::optional<std::array<uint8_t, 128>> df_wdt_addr; ///< type 1 only
     std::vector<DbgLogGroup> dbg_logs;                   ///< type 1 or type 5
     std::optional<GpuMi450BootStatus> boot_status;       ///< type 9 only
+    std::optional<GpuMi450BreakEvent> break_event;       ///< type 3 only
 };
 
 /// AMD GPU MI450 Crashdump section.
@@ -394,7 +414,7 @@ struct AmdGpuMi450CrashdumpSection
     bool pldm_bundle_valid = false;
     uint8_t gpu_context_info_count = 0u;
     std::string pcie_dev_id;
-    GpuPldmBundle pldm_bundle;
+    GpuMi450PldmBundle pldm_bundle;
     std::string fw_id;
 
     std::vector<GpuErrorInfoStructure> error_info_structures;
@@ -431,7 +451,7 @@ struct AmdGpuMi450RuntimeSection
     uint8_t gpu_error_info_count = 0u;
     uint8_t gpu_context_info_count = 0u;
     std::string pcie_dev_id;
-    GpuPldmBundle pldm_bundle;
+    GpuMi450PldmBundle pldm_bundle;
     std::string fw_id;
 
     std::vector<GpuErrorInfoStructure> error_info_structures;
@@ -545,22 +565,41 @@ struct AmdEpycPmicSection
     std::vector<std::pair<std::string, std::string>> persistent_logs;
 };
 
-// --- AINIC Platform Context section ------------------------------------------
-// GUID: 3a8f1d2e-7c4b-5e96-af01-23b456c78d9e
-// Fully structured JSON - no binary payload.
+// --- AMD MI450 Scale Up section ----------------------------------------------
+// GUID: 5eee25c9-83a0-234d-82bb-7b7fc140f21f
 
-struct AinicPlatformContextSection
+/// One Scale Up context structure. The buffer is kept raw; Base does not
+/// interpret it.
+struct ScaleUpContext
+{
+    uint16_t context_type{}; ///< 1: UALoE Event, 2: UALoE Telemetry
+    uint16_t array_size{};
+    int32_t relative_to_err{}; ///< 0: at event, <0: before, >0: after
+    std::string timestamp;
+    std::vector<uint8_t> raw_data; ///< context buffer
+};
+
+struct AmdMi450ScaleUpSection
 {
     SectionDescriptorFlags descriptor_flags;
     static constexpr std::string_view kGuid =
-        "3a8f1d2e-7c4b-5e96-af01-23b456c78d9e";
+        "5eee25c9-83a0-234d-82bb-7b7fc140f21f";
 
-    std::string category;
-    std::string type;
-    std::string board_serial;
-    std::string fw_version;
+    std::string platform;
+    std::string platform_name;
     std::string fru;
     std::string fru_id;
+    std::string addc_version;
+
+    bool fw_id_valid = false;
+    bool pcie_devid_valid = false;
+    bool pldm_bundle_valid = false;
+    std::string pcie_dev_id;
+    GpuMi450PldmBundle pldm_bundle;
+    std::string fw_id;
+
+    std::vector<GpuErrorInfoStructure> error_info_structures;
+    std::vector<ScaleUpContext> contexts;
 };
 
 [[nodiscard]] SectionDescriptor parse_descriptor(

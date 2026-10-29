@@ -100,77 +100,15 @@ std::optional<AmdEpycCrashdumpSection> parseEpycCrashdumpSection(
                 ectx.df_wdt_addr = wdt;
             }
 
-            // DBG_LOG frames: blob offset 16912, variable (all context types).
-            // Frame layout: [u16-BE: block_id(8)|num_instances(8)][u16-LE:
-            // block_size]
-            //               followed by num_instances Ã— block_size bytes.
-            // Corruption sentinel: header==0x7ADA && block_size==0xBAAD.
+            // DBG_LOG frames start at blob offset 16912 (all context types).
+            // Uncore Trace DRB (block 25) reports no instances in its header
+            // but is padded to 2048 records when the CPER is generated.
             constexpr std::size_t kDbgLogOffset = 16912U;
-            if (blob.size() > kDbgLogOffset + 4U)
+            constexpr uint16_t kUncoreTraceDrbInstances = 2048U;
+            for (auto& grp : parse_dbg_log_frames(sp, kDbgLogOffset,
+                                                  kUncoreTraceDrbInstances))
             {
-                const std::size_t payload_size = blob.size() - kDbgLogOffset;
-                std::size_t off = 0U;
-                while (off + 4U <= payload_size)
-                {
-                    const std::size_t base = kDbgLogOffset + off;
-                    const uint16_t hdr = read_u16_be(sp, base);
-                    const uint16_t bsz = read_u16_le(sp, base + 2U);
-                    if (hdr == 0x7ADAU && bsz == 0xBAADU)
-                    {
-                        break;
-                    }
-                    const uint8_t block_id = static_cast<uint8_t>(hdr >> 8U);
-                    const uint8_t num_instances =
-                        static_cast<uint8_t>(hdr & 0xFFU);
-
-                    uint16_t eff_num = (block_id == 40U && num_instances == 0U)
-                                           ? 1U
-                                           : num_instances;
-                    uint16_t eff_bsz =
-                        (block_id == 40U && bsz == 0U) ? 256U : bsz;
-
-                    // Uncore Trace DRB (block_id 25) reports num_instances==0
-                    // in its header but is auto-padded to 2048 fixed-size
-                    // records at CPER generation time, so the real count is
-                    // implicit.
-                    if (block_id == 25U)
-                    {
-                        eff_num = 2048U;
-                    }
-
-                    const std::size_t frame_bytes =
-                        4U + static_cast<std::size_t>(eff_num) * eff_bsz;
-                    if (frame_bytes == 0U || off + frame_bytes > payload_size)
-                    {
-                        break;
-                    }
-                    DbgLogGroup grp;
-                    grp.block_id = block_id;
-                    grp.block_size = eff_bsz;
-                    grp.instances.reserve(eff_num);
-                    for (uint16_t ni = 0U; ni < eff_num; ++ni)
-                    {
-                        const std::size_t inst_off =
-                            base + 4U + static_cast<std::size_t>(ni) * eff_bsz;
-                        if (inst_off + eff_bsz > blob.size())
-                        {
-                            break;
-                        }
-                        grp.instances.push_back(DbgLogInstance{
-                            .data =
-                                std::vector<uint8_t>{
-                                    blob.begin() +
-                                        static_cast<std::ptrdiff_t>(inst_off),
-                                    blob.begin() + static_cast<std::ptrdiff_t>(
-                                                       inst_off + eff_bsz)},
-                        });
-                    }
-                    if (!grp.instances.empty())
-                    {
-                        ectx.dbg_logs.push_back(std::move(grp));
-                    }
-                    off += frame_bytes;
-                }
+                ectx.dbg_logs.push_back(std::move(grp));
             }
         }
 

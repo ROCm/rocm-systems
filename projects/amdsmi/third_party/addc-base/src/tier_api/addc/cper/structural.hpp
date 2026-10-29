@@ -22,10 +22,6 @@ namespace addc::cper
 enum class SectionKind
 {
     Opaque,
-    AinicPlatformContext,
-    AinicInterface,
-    AinicPoison,
-    AinicEcc,
     AmdEpycCrashdump,
     AmdEpycMtl,
     AmdMi450Mtl,
@@ -35,6 +31,7 @@ enum class SectionKind
     AmdMi450Crashdump,
     AmdMi300Runtime,
     AmdMi450Runtime,
+    AmdMi450ScaleUp,
     Ia32X64,
     Pcie,
 };
@@ -60,13 +57,13 @@ struct OpaqueSection
 };
 
 using SectionPayload = std::variant<
-    OpaqueSection, pipeline::AinicPlatformContextSection,
+    OpaqueSection,
     pipeline::AmdEpycCrashdumpSection, pipeline::Ia32x64Section,
     pipeline::PcieSection, pipeline::AmdGpuCrashdumpSection,
     pipeline::AmdGpuMi450CrashdumpSection,
     pipeline::AmdGpuMi450RuntimeSection, pipeline::AmdGpuRuntimeSection,
     pipeline::AmdEpycMtlSection, pipeline::AmdEpycCddSection,
-    pipeline::AmdEpycPmicSection>;
+    pipeline::AmdEpycPmicSection, pipeline::AmdMi450ScaleUpSection>;
 
 struct StructuralSection
 {

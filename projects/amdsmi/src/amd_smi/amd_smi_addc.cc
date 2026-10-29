@@ -82,7 +82,8 @@ auto log_failure(const char* operation, addc_status_t status, const addc_error_i
 }
 
 // addc reports a size problem as a parse error; the public API reports UNEXPECTED_SIZE.
-auto check_record_size(const void* cper, size_t size) -> amdsmi_status_t {
+// On success, *record_size is the header's record_length: addc rejects bytes after the record.
+auto check_record_size(const void* cper, size_t size, size_t* record_size) -> amdsmi_status_t {
   auto ss = std::ostringstream{};
   if ((cper == nullptr) || (size == 0)) {
     ss << "[CPER] record buffer must be non-null and non-empty\n";
@@ -102,6 +103,7 @@ auto check_record_size(const void* cper, size_t size) -> amdsmi_status_t {
     LOG_ERROR(ss);
     return AMDSMI_STATUS_UNEXPECTED_SIZE;
   }
+  *record_size = header->record_length;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -109,7 +111,8 @@ auto check_record_size(const void* cper, size_t size) -> amdsmi_status_t {
 
 auto cper_get_afids(const void* cper, size_t size, std::vector<int>* afids) -> amdsmi_status_t {
   afids->clear();
-  const auto record_status = check_record_size(cper, size);
+  auto record_size = size_t{0};
+  const auto record_status = check_record_size(cper, size, &record_size);
   if (record_status != AMDSMI_STATUS_SUCCESS) {
     return record_status;
   }
@@ -124,13 +127,13 @@ auto cper_get_afids(const void* cper, size_t size, std::vector<int>* afids) -> a
     auto entries = std::vector<addc_cper_summary_entry_t>(kInitialAfidCapacity);
     auto count = entries.size();
     auto info = make_error_info();
-    auto status =
-        g_addc_api->get_summary(context, bytes, size, nullptr, entries.data(), &count, &info);
+    auto status = g_addc_api->get_summary(context, bytes, record_size, nullptr, entries.data(),
+                                          &count, &info);
     if (status == ADDC_STATUS_INSUFFICIENT_SIZE) {
       entries.assign(count, addc_cper_summary_entry_t{});
       info = make_error_info();
-      status =
-          g_addc_api->get_summary(context, bytes, size, nullptr, entries.data(), &count, &info);
+      status = g_addc_api->get_summary(context, bytes, record_size, nullptr, entries.data(), &count,
+                                       &info);
       // The record is the same on both calls, so a second size request means addc misreported
       // the count.
       if (status == ADDC_STATUS_INSUFFICIENT_SIZE) {
@@ -164,7 +167,8 @@ auto cper_get_report_json(const void* cper, size_t size, char* json, uint32_t* j
   if (json_size == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  const auto record_status = check_record_size(cper, size);
+  auto record_size = size_t{0};
+  const auto record_status = check_record_size(cper, size, &record_size);
   if (record_status != AMDSMI_STATUS_SUCCESS) {
     return record_status;
   }
@@ -175,8 +179,8 @@ auto cper_get_report_json(const void* cper, size_t size, char* json, uint32_t* j
 
   auto capacity = static_cast<size_t>(*json_size);
   auto info = make_error_info();
-  const auto status = g_addc_api->decode_json(context, static_cast<const uint8_t*>(cper), size,
-                                              nullptr, json, &capacity, &info);
+  const auto status = g_addc_api->decode_json(context, static_cast<const uint8_t*>(cper),
+                                              record_size, nullptr, json, &capacity, &info);
   // A too-small buffer is the expected first step of the two-call contract, not a failure.
   const auto is_size_reported =
       ((status == ADDC_STATUS_SUCCESS) || (status == ADDC_STATUS_INSUFFICIENT_SIZE));

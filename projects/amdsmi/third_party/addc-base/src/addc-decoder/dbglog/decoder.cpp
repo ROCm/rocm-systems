@@ -52,11 +52,11 @@ std::vector<DecodedDbgLog> decode_base_dbglog(
             return decode_mi450_dbglog(groups);
 #endif
 #if defined(ADDC_HAS_VENICE) || defined(ADDC_HAS_TURIN) || \
-    defined(ADDC_HAS_GENOA) || defined(ADDC_HAS_FIRERANGE)
+    defined(ADDC_HAS_GENOA) || defined(ADDC_HAS_EMBEDDED_2005)
         case addc::product::ProductId::venice:
         case addc::product::ProductId::turin:
         case addc::product::ProductId::genoa:
-        case addc::product::ProductId::firerange:
+        case addc::product::ProductId::embedded_2005:
             return decode_epyc_dbglog(groups);
 #endif
         default:

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "section_helpers.hpp"
 
+#include "addc/cper/section_dispatch.hpp"
 #include "addc/cper/structural.hpp"
 
 
@@ -15,6 +16,8 @@ std::optional<AmdGpuCrashdumpSection> parseGpuCrashdumpSection(
 std::optional<AmdGpuMi450CrashdumpSection> parseGpuMi450CrashdumpSection(
     const nlohmann::json&, const nlohmann::json&);
 std::optional<AmdGpuMi450RuntimeSection> parseGpuMi450RuntimeSection(
+    const nlohmann::json&, const nlohmann::json&);
+std::optional<AmdMi450ScaleUpSection> parseMi450ScaleUpSection(
     const nlohmann::json&, const nlohmann::json&);
 std::optional<AmdGpuRuntimeSection> parseGpuRuntimeSection(
     const nlohmann::json&, const nlohmann::json&);
@@ -30,8 +33,6 @@ std::optional<AmdEpycCddSection> parseCddSection(const nlohmann::json&,
                                                    const nlohmann::json&);
 std::optional<AmdEpycPmicSection> parsePmicSection(const nlohmann::json&,
                                                      const nlohmann::json&);
-std::optional<AinicPlatformContextSection> parseAinicSection(
-    const nlohmann::json&, const nlohmann::json&);
 
 SectionDescriptor parse_descriptor(const nlohmann::json& descriptor)
 {
@@ -134,6 +135,9 @@ SectionPayload convert_section(SectionKind kind,
         return typedOrOpaque(
             parseGpuMi450RuntimeSection(descriptor, section), descriptor,
             section, source, original_bytes);
+    case SectionKind::AmdMi450ScaleUp:
+        return typedOrOpaque(parseMi450ScaleUpSection(descriptor, section),
+                             descriptor, section, source, original_bytes);
     case SectionKind::AmdMi450Mtl:
         return typedOrOpaque(parseMi450MtlSection(descriptor, section),
                              descriptor, section, source, original_bytes);
@@ -153,13 +157,7 @@ SectionPayload convert_section(SectionKind kind,
     case SectionKind::Pcie:
         return typedOrOpaque(parsePcieSection(descriptor, section), descriptor,
                              section, source, original_bytes);
-    case SectionKind::AinicPlatformContext:
-        return typedOrOpaque(parseAinicSection(descriptor, section), descriptor,
-                             section, source, original_bytes);
     case SectionKind::Opaque:
-    case SectionKind::AinicInterface:
-    case SectionKind::AinicPoison:
-    case SectionKind::AinicEcc:
         break;
     }
     return SectionPayload{

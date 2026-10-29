@@ -4,6 +4,7 @@
 
 #include "../base64.hpp"
 #include "../endian.hpp"
+#include "addc/cper/amd_section_ids.hpp"
 #include "addc/detail/format.hpp"
 
 #include <string_view>
@@ -55,9 +56,8 @@ bool matches_amd_mi450_mtl(
         return false;
     }
 
-    const uint8_t program_gen = desc.revision_major & 0xFU;
-    const uint8_t ras_gen = (desc.revision_major >> 4U) & 0xFU;
-    if (ras_gen < 0x3U)
+    const uint8_t program = program_gen(desc.revision_major);
+    if (ras_gen(desc.revision_major) < 0x3U)
     {
         return false;
     }
@@ -65,8 +65,8 @@ bool matches_amd_mi450_mtl(
     // MI450 normally uses program generation 2. Early firmware used the
     // Venice-compatible 0x31 revision and zero GPU DID; its MID/AID topology
     // FRU is the only product discriminator carried by those descriptors.
-    return program_gen == 0x2U ||
-           (program_gen == 0x1U && hasMi450TopologyName(desc.fru_text));
+    return program == 0x2U ||
+           (program == 0x1U && hasMi450TopologyName(desc.fru_text));
 }
 
 nlohmann::json parse_amd_mi450_mtl(

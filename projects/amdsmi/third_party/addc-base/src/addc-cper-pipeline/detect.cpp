@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "addc/pipeline/detect.hpp"
 
+#include "addc/cper/amd_section_ids.hpp"
 #include "addc/product.hpp"
 
 namespace addc::pipeline
@@ -9,8 +10,9 @@ namespace addc::pipeline
 
 std::optional<std::string> detect_platform(uint32_t revision_major)
 {
-    uint32_t program_rev = revision_major & 0xFU;
-    const uint32_t gen_rev = (revision_major >> 4U) & 0xFU;
+    const auto major = static_cast<uint8_t>(revision_major & 0xFFU);
+    uint32_t program_rev = cper::program_gen(major);
+    const uint32_t gen_rev = cper::ras_gen(major);
 
     // Some firmware encodes program_rev=0 while gen_rev is valid.
     // program_rev=0 is otherwise unused, so promote it to 1 (EPYC).
@@ -31,11 +33,6 @@ std::optional<std::string> detect_platform(uint32_t revision_major)
         }
     }
 
-    if (program_rev == 5U)
-    { // NTSG AINIC (all gen_rev)
-        return "ainic";
-    }
-
     return std::nullopt;
 }
 
@@ -44,10 +41,6 @@ std::string_view platform_display_name(std::string_view platform) noexcept
     if (const auto* definition = product::find_compiled_product(platform))
     {
         return definition->identity.display_name;
-    }
-    if (platform == "ainic")
-    {
-        return "AMD NTSG AINIC";
     }
     return "AMD EPYC";
 }
