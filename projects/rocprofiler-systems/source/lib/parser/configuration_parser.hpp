@@ -52,7 +52,7 @@ public:
 
     /**
      * Load a schema and install the built-in value providers.
-     * An empty path uses the schema embedded at build time.
+     * An empty path uses get_default_schema().
      * @return false, leaving any previously loaded schema in place, when loading fails.
      */
     [[nodiscard]] bool initialize(std::string_view schema_path = {});
