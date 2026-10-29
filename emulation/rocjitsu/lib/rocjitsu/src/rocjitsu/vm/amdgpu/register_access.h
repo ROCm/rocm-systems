@@ -1536,20 +1536,24 @@ public:
 
   Result write_sgpr(uint32_t physical_reg, uint32_t value) const {
     if (!mutable_wf_) {
-      if (const Wavefront *owner = sgpr_owner_for_range(physical_reg, 1))
+      if (const Wavefront *owner = wf_ ? wf_ : sgpr_owner_for_range(physical_reg, 1))
         return reject(*owner, "RegisterAccess was not constructed from mutable Wavefront");
       return Result::failure();
     }
+    if (!owns_sgpr_range(physical_reg, 1))
+      return reject(*mutable_wf_, "physical SGPR write exceeds the wave allocation");
     mutable_cu().write_sgpr(mutable_wavefront(), physical_reg, value);
     return Result::success();
   }
 
   Result write_sgpr64(uint32_t physical_reg, uint64_t value) const {
     if (!mutable_wf_) {
-      if (const Wavefront *owner = sgpr_owner_for_range(physical_reg, 2))
+      if (const Wavefront *owner = wf_ ? wf_ : sgpr_owner_for_range(physical_reg, 2))
         return reject(*owner, "RegisterAccess was not constructed from mutable Wavefront");
       return Result::failure();
     }
+    if (!owns_sgpr_range(physical_reg, 2))
+      return reject(*mutable_wf_, "physical SGPR write exceeds the wave allocation");
     mutable_cu().write_sgpr64(mutable_wavefront(), physical_reg, value);
     return Result::success();
   }
@@ -1595,7 +1599,7 @@ public:
                                                   uint64_t lane_mask,
                                                   uint8_t byte_mask = 0xF) const {
     if (!mutable_cu_) {
-      if (const Wavefront *owner = vgpr_owner_for_range(physical_base, reg_count))
+      if (const Wavefront *owner = wf_ ? wf_ : vgpr_owner_for_range(physical_base, reg_count))
         (void)reject(*owner,
                      "RegisterAccess constructed from const CU cannot write physical VGPRs");
       return VgprWriteRegion::rejected(physical_base, reg_count,

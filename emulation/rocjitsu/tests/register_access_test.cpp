@@ -776,10 +776,14 @@ TEST(RegisterAccessTest, CuBoundSgprWritesCannotBypassObservation) {
 
   RegisterAccess registers(*fx.cu);
   fx.wf->clear_instruction_execution_error();
-  EXPECT_NO_THROW(EXPECT_TRUE(registers.write_sgpr(reg, 0x33334444u).failed()));
+  bool failed = false;
+  EXPECT_NO_THROW(failed = registers.write_sgpr(reg, 0x33334444u).failed());
+  EXPECT_TRUE(failed);
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
   fx.wf->clear_instruction_execution_error();
-  EXPECT_NO_THROW(EXPECT_TRUE(registers.write_sgpr64(reg, 0x5555666677778888ull).failed()));
+  failed = false;
+  EXPECT_NO_THROW(failed = registers.write_sgpr64(reg, 0x5555666677778888ull).failed());
+  EXPECT_TRUE(failed);
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
 
   EXPECT_EQ(fx.cu->read_sgpr_storage(reg), 0x11112222u);
@@ -1811,9 +1815,9 @@ TEST(RegisterAccessTest, ConstPhysicalReadWriteAcquisitionRejectsBeforeObservati
 }
 
 TEST(RegisterAccessTest, RejectedReadRegionsReportIssuingWaveAtInstructionBoundary) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, 2);
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
-  Wavefront *neighbor = fx.cu->dispatch_wf(1, 0, kSgprsPerWave, kVgprsPerWave);
+  Wavefront *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
   ASSERT_NE(neighbor, nullptr);
   const uint32_t destination = fx.vgpr_base() + 4;
   const uint32_t neighbor_base = neighbor->vgpr_alloc().base;
@@ -1858,8 +1862,9 @@ TEST(RegisterAccessTest, RejectedReadRegionsReportIssuingWaveAtInstructionBounda
     const uint32_t source = snapshot ? issuer_last : neighbor_base;
     RejectedRead instruction(source, snapshot);
     std::string detail;
-    EXPECT_NO_THROW(
-        EXPECT_TRUE(fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed()));
+    bool failed = false;
+    EXPECT_NO_THROW(failed = fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed());
+    EXPECT_TRUE(failed);
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
     const char *expected = snapshot ? "VGPR snapshot destination is smaller than the wave region"
@@ -1876,6 +1881,88 @@ TEST(RegisterAccessTest, RejectedReadRegionsReportIssuingWaveAtInstructionBounda
     EXPECT_EQ(fx.wf->instruction_execution_error_detail(), nullptr);
     EXPECT_EQ(fx.cu->read_vgpr(destination, 0), 0x55667788u);
     EXPECT_EQ(fx.cu->read_vgpr(neighbor_base, 0), 0x11223344u);
+  }
+}
+
+TEST(RegisterAccessTest, RejectedPhysicalWritesReportIssuingWaveAtInstructionBoundary) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  ASSERT_NE(fx.wf, nullptr);
+  Wavefront *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
+  ASSERT_NE(neighbor, nullptr);
+  const uint32_t neighbor_sgpr = neighbor->sgpr_alloc().base;
+  const uint32_t issuer_last = fx.sgpr_base() + fx.cu->sgpr_allocation_block_size() - 1;
+  const uint32_t neighbor_vgpr = neighbor->vgpr_alloc().base;
+  ASSERT_EQ(issuer_last + 1, neighbor_sgpr);
+  fx.cu->write_sgpr(issuer_last, 0x11223344u);
+  fx.cu->write_sgpr(neighbor_sgpr, 0x55667788u);
+  fx.cu->write_vgpr(neighbor_vgpr, 0, 0xAABBCCDDu);
+
+  enum class Operation { Sgpr, Sgpr64, ConstSgpr, ConstSgpr64, ConstVgpr, ConstReadWriteVgpr };
+  class RejectedWrite : public Instruction {
+  public:
+    RejectedWrite(Operation operation, uint32_t sgpr, uint32_t vgpr)
+        : Instruction("rejected_write",
+                      [](Instruction &inst, void *ctx) {
+                        auto &self = static_cast<RejectedWrite &>(inst);
+                        auto &wf = *static_cast<Wavefront *>(ctx);
+                        RegisterAccess mutable_regs(wf);
+                        RegisterAccess const_regs(static_cast<const Wavefront &>(wf));
+                        switch (self.operation_) {
+                        case Operation::Sgpr:
+                          self.rejected = mutable_regs.write_sgpr(self.sgpr_, 1).failed();
+                          break;
+                        case Operation::Sgpr64:
+                          self.rejected = mutable_regs.write_sgpr64(self.sgpr_, 1).failed();
+                          break;
+                        case Operation::ConstSgpr:
+                          self.rejected = const_regs.write_sgpr(self.sgpr_, 1).failed();
+                          break;
+                        case Operation::ConstSgpr64:
+                          self.rejected = const_regs.write_sgpr64(self.sgpr_, 1).failed();
+                          break;
+                        case Operation::ConstVgpr: {
+                          auto region = const_regs.write_vgpr_region(self.vgpr_, 1, 1);
+                          self.rejected = !region.valid();
+                          region.set_lane(0, 0, 1);
+                          break;
+                        }
+                        case Operation::ConstReadWriteVgpr: {
+                          auto region = const_regs.readwrite_vgpr_region(self.vgpr_, 1, 1);
+                          self.rejected = !region.write().valid();
+                          region.set_linear_word(0, 1);
+                          break;
+                        }
+                        }
+                      }),
+          operation_(operation), sgpr_(sgpr), vgpr_(vgpr) {}
+    bool rejected = false;
+
+  private:
+    Operation operation_;
+    uint32_t sgpr_;
+    uint32_t vgpr_;
+  };
+
+  for (Operation operation :
+       {Operation::Sgpr, Operation::Sgpr64, Operation::ConstSgpr, Operation::ConstSgpr64,
+        Operation::ConstVgpr, Operation::ConstReadWriteVgpr}) {
+    SCOPED_TRACE(static_cast<int>(operation));
+    const bool pair = operation == Operation::Sgpr64 || operation == Operation::ConstSgpr64;
+    RejectedWrite instruction(operation, pair ? issuer_last : neighbor_sgpr, neighbor_vgpr);
+    std::string detail;
+    bool failed = false;
+    EXPECT_NO_THROW(failed = fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed());
+    EXPECT_TRUE(failed);
+    EXPECT_TRUE(instruction.rejected);
+    EXPECT_EQ(fx.wf->instruction_execution_error(),
+              InstructionExecutionError::InvalidRegisterAccess);
+    EXPECT_FALSE(detail.empty());
+    EXPECT_EQ(fx.cu->read_sgpr_storage(issuer_last), 0x11223344u);
+    EXPECT_EQ(fx.cu->read_sgpr_storage(neighbor_sgpr), 0x55667788u);
+    EXPECT_EQ(fx.cu->read_vgpr(neighbor_vgpr, 0), 0xAABBCCDDu);
+    EXPECT_FALSE(neighbor->instruction_execution_failed());
+    EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
+    EXPECT_TRUE(fx.plugin->writes.empty());
   }
 }
 

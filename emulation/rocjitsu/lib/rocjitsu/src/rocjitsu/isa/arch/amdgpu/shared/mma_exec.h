@@ -1239,7 +1239,7 @@ Result convert_packed_matrix_region(const RegisterAccess::VgprReadRegion &source
                                     uint32_t elements_per_word, Convert convert) {
   const size_t elements_per_reg = static_cast<size_t>(source.wf_size()) * elements_per_word;
   size_t converted = 0;
-  auto conversion_result = source.for_each([&](std::span<const uint32_t> lanes) {
+  Result conversion_result = source.for_each([&](std::span<const uint32_t> lanes) {
     if (converted == element_count)
       return;
     const size_t count = std::min(elements_per_reg, element_count - converted);
