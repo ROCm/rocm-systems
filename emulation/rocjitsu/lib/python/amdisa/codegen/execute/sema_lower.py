@@ -142,6 +142,10 @@ class LoweringContext:
     mask_result_writer: str | None = None
     true16_dst_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
+    # Membership enables numeric F16 scalar-inline formatting. Each boolean
+    # selects its carrier half: False means low, True means high. An absent
+    # source keeps its raw carrier, as pseudo-scalar F16 transcendentals do.
+    scalar_f16_source_reads_high_half: dict[int, bool] = field(default_factory=dict)
     true16_vop3_opsel: str | None = None
     # amdgpu::fp_format tag (F16 or F32) whose sign bit ABS/NEG modify in
     # integer-typed source reads. None ignores them, as integer operations do.
@@ -1023,6 +1027,9 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
             if binding.bit_width == 64:
                 return f'amdgpu::RegisterAccess(wf).read_scalar64({name})'
             value = f'amdgpu::RegisterAccess(wf).read_scalar({name})'
+            if tag != 'D' and idx in ctx.scalar_f16_source_reads_high_half:
+                high = ', true' if ctx.scalar_f16_source_reads_high_half[idx] else ''
+                value = f'amdgpu::read_scalar_f16_carrier({name}, wf{high})'
             if tag != 'D' and idx in ctx.true16_src_selects:
                 select = ctx.true16_src_selects[idx]
                 return f'(({select}) != 0 ? ({value} >> 16) : {value})'
