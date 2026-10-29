@@ -4251,6 +4251,66 @@ struct Gfx1250AddP2pScene {
     return nullptr;
   }
 };
+
+// Single-node all-XGMI gfx942/gfx950 legacy-LL gate. cudaArch is 100*major+10*minor,
+// so gfx942 is 940; BatchPlanComm's default 942 does not enter the branch.
+// p2pChunkSize is the single-node default (512 KiB), so the SIMPLE estimate is 1
+// channel at or below 64 KiB/peer. nChannelsMax is 1 on purpose: the bug is the
+// protocol choice, not how many channels the LL recompute would then stripe.
+struct Gfx94P2pLlScene {
+  BatchPlanComm bp;
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclChannelPeer> peers;
+  std::vector<ncclChannelPeer*> peerSlots;
+  char llBuf[8]{};
+  char sendMem[8]{};
+  char recvMem[8]{};
+  int planTotalTasks[2]{1, 1};
+
+  explicit Gfx94P2pLlScene(int cudaArch) : bp(/*nNodes=*/1, cudaArch) {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = 2;
+    c->nNodes = 1;
+    c->cudaArch = cudaArch;
+    c->isAllNvlink = 1;
+    c->allocP2pNetLLBuffers = 0;
+    c->p2pnChannels = 1;
+    c->p2pnChannelsPerPeer = 1;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = 1 << 19;
+    c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    SetSingleGpuArch(topo.get(), cudaArch == 950 ? "gfx950" : "gfx942");
+    topo->ll128Enabled = false;
+    c->topo = topo.get();
+
+    peers.resize(2);
+    peerSlots.resize(2);
+    for (int i = 0; i < 2; ++i) {
+      peerSlots[i] = &peers[i];
+      for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci)
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL] = peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+    }
+    c->channels[0].peers = peerSlots.data();
+  }
+
+  ncclResult_t add(ssize_t bytes) {
+    struct ncclTaskP2p* tasks[2] = {nullptr, nullptr};
+    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/1, /*p2pRound=*/0,
+                        /*sendRank=*/1, sendMem, bytes, /*recvRank=*/1, recvMem, bytes,
+                        /*sendOpCount=*/0, /*recvOpCount=*/0, planTotalTasks, tasks);
+  }
+
+  ncclDevWorkP2p* p2pWork() {
+    for (auto* node = bp.p()->workQueue.head; node != nullptr; node = node->next) {
+      if (node->workType == ncclDevWorkTypeP2p) return reinterpret_cast<ncclDevWorkP2p*>(node + 1);
+    }
+    return nullptr;
+  }
+};
 }  // namespace
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1Mixed2KiB8KiB_OneLl128WorkItem) {
@@ -4318,4 +4378,45 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   auto* batch = sc.bp.tailBatch();
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
+}
+
+// Pin the numeric cutoff through the redirected ncclParamP2pLLThreshold (g_loadParam,
+// no cache). Presence of NCCL_P2P_LL_THRESHOLD is a separate ncclGetEnv read: the
+// widen applies only when that name is absent, so an explicit 4096 stays on the
+// stock per-channel rule even though the number matches the default.
+void PinP2pLlThreshold(bool userSet) {
+  if (userSet) SetMicroEnv("NCCL_P2P_LL_THRESHOLD", "4096");
+  else SetMicroEnvAbsent("NCCL_P2P_LL_THRESHOLD");
+  SetParam("P2P_LL_THRESHOLD", 4096);
+}
+
+void ExpectGfx94RecvProtoLL(int cudaArch, ssize_t bytes, int protoLL) {
+  Gfx94P2pLlScene sc(cudaArch);
+  ASSERT_EQ(ncclSuccess, sc.add(bytes)) << "arch=" << cudaArch << " bytes=" << bytes;
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work) << "arch=" << cudaArch << " bytes=" << bytes;
+  EXPECT_EQ(protoLL, int(work->recvProtoLL)) << "arch=" << cudaArch << " bytes=" << bytes;
+  EXPECT_EQ(protoLL, int(work->sendProtoLL)) << "arch=" << cudaArch << " bytes=" << bytes;
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94UnsetLlThreshold_WidensLlThrough64KiB) {
+  PinP2pLlThreshold(/*userSet=*/false);
+  const struct {
+    ssize_t bytes;
+    int protoLL;
+  } cases[] = {
+      {16 << 10, 1}, {32 << 10, 1}, {64 << 10, 1}, {(64 << 10) + 1, 0},
+      {128 << 10, 0}, {256 << 10, 0}, {512 << 10, 0},
+  };
+  for (const auto& c : cases) ExpectGfx94RecvProtoLL(940, c.bytes, c.protoLL);
+  // gfx950 shares the gate. 942 is not 100*9+10*4, so the default BatchPlanComm
+  // arch must stay SIMPLE at 16 KiB.
+  ExpectGfx94RecvProtoLL(950, 16 << 10, 1);
+  ExpectGfx94RecvProtoLL(942, 16 << 10, 0);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94UserLlThreshold_KeepsPerChannelRule) {
+  PinP2pLlThreshold(/*userSet=*/true);
+  ExpectGfx94RecvProtoLL(940, 16 << 10, 0);
+  ExpectGfx94RecvProtoLL(950, 16 << 10, 0);
 }
