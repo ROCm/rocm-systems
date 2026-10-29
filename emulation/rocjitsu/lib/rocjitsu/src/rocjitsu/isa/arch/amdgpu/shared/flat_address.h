@@ -67,6 +67,29 @@ inline bool flat_address_in_hole(const Wavefront &wf, uint64_t address, unsigned
   return !translate_flat_address(wf, address, 0, layout).private_address;
 }
 
+/// @brief Address of an RDNA FLAT lane after IOFFSET is added.
+/// @details RDNA3/3.5/4 select the aperture from the base address, before
+/// IOFFSET (section 11.3), and keep a shared or private offset to 32 bits, so
+/// an IOFFSET that would cross the aperture boundary wraps inside it. Section
+/// 11.1.1 leaves such crossings undefined; this follows gfx1100 and gfx1201:
+/// private base + 0xfffffff8 with IOFFSET 16 reads scratch offset 8, private
+/// base with IOFFSET -8 addresses scratch offset 0xfffffff8, and a 64-bit
+/// atomic there still raises the private-atomic MEMVIOL. A global base adds
+/// IOFFSET without wrapping, even into the hole.
+/// @param base VADDR plus SADDR, before IOFFSET.
+inline uint64_t rdna_flat_lane_address(const Wavefront &wf, uint64_t base, int64_t ioffset) {
+  const auto wrap_within = [&](uint64_t aperture) {
+    return aperture + static_cast<uint32_t>(base - aperture + static_cast<uint64_t>(ioffset));
+  };
+  const uint64_t shared_base = wf.shared_aperture_base();
+  if (shared_base != 0 && base >= shared_base && base <= wf.shared_aperture_limit())
+    return wrap_within(shared_base);
+  const uint64_t private_window = wf.private_aperture_base() & ~uint64_t{UINT32_MAX};
+  if (private_window != 0 && (base & ~uint64_t{UINT32_MAX}) == private_window)
+    return wrap_within(private_window);
+  return base + static_cast<uint64_t>(ioffset);
+}
+
 /// @brief Whether a FLAT atomic that resolved to the private aperture must
 /// raise MEMVIOL.
 /// @details RDNA3/3.5/4 section 11.1.1 and CDNA5 section 10.1.1: FLAT atomics

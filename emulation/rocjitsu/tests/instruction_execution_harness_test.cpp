@@ -1402,6 +1402,142 @@ TEST(Gfx1250MemoryExecutionHarness, FlatHoleAddressesRaiseApertureViolation) {
   });
 }
 
+// RDNA FLAT selects the aperture from the base address and keeps a shared or
+// private offset to 32 bits, so IOFFSET wraps inside the aperture instead of
+// leaving it. Measured on gfx1100 and gfx1201 (ROCm 7.2.4): private base +
+// 0xfffffff8 with IOFFSET 16 loads scratch offset 8; the shared equivalent
+// loads LDS offset 8. RDNA4 also measured the negative forms: shared base with
+// IOFFSET -8 loads 0 without a fault, and a 64-bit atomic at private base with
+// IOFFSET -8 raises the private-atomic MEMVIOL (HSA aperture violation).
+// RDNA3/3.5 FLAT does not encode negative immediates. RDNA3.5 is unmeasured
+// and shares the RDNA3 address path.
+template <typename Isa, typename Encode>
+void check_rdna_flat_offsets_stay_in_aperture(rj_code_arch_t arch, Encode encode) {
+  enum class Kind { Load, Atomic64 };
+  enum class Aperture { Private, Shared };
+  struct Case {
+    const char *name;
+    Kind kind;
+    Aperture aperture;
+    uint32_t base_offset;
+    int32_t immediate;
+    bool rdna4_only;
+  };
+  const std::array cases{
+      Case{"private_top_plus16", Kind::Load, Aperture::Private, 0xfffffff8u, 16, false},
+      Case{"shared_top_plus16", Kind::Load, Aperture::Shared, 0xfffffff8u, 16, false},
+      Case{"shared_base_minus8", Kind::Load, Aperture::Shared, 0, -8, true},
+      Case{"private_base_minus8_atomic64", Kind::Atomic64, Aperture::Private, 0, -8, true},
+  };
+  for (const Case &test : cases) {
+    if (test.rdna4_only && arch != ROCJITSU_CODE_ARCH_RDNA4)
+      continue;
+    SCOPED_TRACE(test.name);
+    amdgpu::GpuMemory memory("flat_aperture_wrap");
+    amdgpu::L2Cache cache("flat_aperture_wrap_cache");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    MemoryTestCu<Isa> cu("flat_aperture_wrap", config, &memory, &cache);
+    constexpr uint64_t shared_base = uint64_t{1} << 48;
+    constexpr uint64_t private_base = uint64_t{2} << 48;
+    constexpr uint64_t scratch_base = 0x8000;
+    cu.set_apertures(shared_base, shared_base + UINT32_MAX, private_base,
+                     private_base + UINT32_MAX);
+    auto *wave = cu.dispatch_wf(0, 0, 128, 256, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    wave->set_scratch_base(scratch_base);
+    wave->set_scratch_lane_size(256);
+    ASSERT_EQ(cu.allocate_lds(256), 0u);
+    wave->set_lds_base(cu.allocate_lds(256));
+    wave->set_lds_size(256);
+    wave->lds().write32(wave->lds_base() + 8, 0x5a5a0002);
+    memory.write32(scratch_base + 8, 0x7e7e0002);
+    memory.write64(scratch_base + 0x100, 0x1111);
+    const uint64_t base =
+        (test.aperture == Aperture::Private ? private_base : shared_base) + test.base_offset;
+    const uint32_t vb = wave->vgpr_alloc().base;
+    cu.write_vgpr(vb, 0, static_cast<uint32_t>(base));
+    cu.write_vgpr(vb + 1, 0, static_cast<uint32_t>(base >> 32));
+    cu.write_vgpr(vb + 4, 0, 1);
+    cu.write_vgpr(vb + 5, 0, 0);
+    cu.write_vgpr(vb + 8, 0, 0xdeadbeef);
+    cu.write_vgpr(vb + 9, 0, 0xdeadbeef);
+    const auto words = encode(test.kind == Kind::Atomic64, test.immediate);
+    auto decoder = Decoder::create(arch);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
+    const bool memviol = test.kind == Kind::Atomic64;
+    EXPECT_EQ(inst->data_as<amdgpu::VectorMemState>()->memviol_lane_mask, memviol ? 1u : 0u);
+    EXPECT_EQ(cu.route_memory_inst(inst.release(), *wave),
+              memviol ? amdgpu::VmAccessOutcome::ApertureViolation
+                      : amdgpu::VmAccessOutcome::Complete);
+    cu.flush_all();
+    if (!memviol) {
+      const uint32_t expected = test.immediate < 0                   ? 0u // LDS out of range.
+                                : test.aperture == Aperture::Private ? 0x7e7e0002u
+                                                                     : 0x5a5a0002u;
+      EXPECT_EQ(cu.read_vgpr(vb + 8, 0), expected);
+    }
+    EXPECT_TRUE(wave->wait_counters().empty());
+    wave->halt();
+  }
+}
+
+TEST(Rdna3MemoryExecutionHarness, FlatOffsetsStayInTheBaseAperture) {
+  check_rdna_flat_offsets_stay_in_aperture<rdna3::Isa>(
+      ROCJITSU_CODE_ARCH_RDNA3, [](bool atomic64, int32_t offset) {
+        std::array<uint32_t, 3> words{};
+        std::ranges::copy(
+            rdna3::build_flat(atomic64 ? rdna3::kFlatAtomicAddU64Flat : rdna3::kFlatLoadB32Flat,
+                              {.offset = uint16_t(offset & 0x1fff),
+                               .glc = 1,
+                               .seg = 0,
+                               .addr = 0,
+                               .data = 4,
+                               .saddr = 127,
+                               .vdst = 8}),
+            words.begin());
+        return words;
+      });
+}
+
+TEST(Rdna3_5MemoryExecutionHarness, FlatOffsetsStayInTheBaseAperture) {
+  check_rdna_flat_offsets_stay_in_aperture<rdna3_5::Isa>(
+      ROCJITSU_CODE_ARCH_RDNA3_5, [](bool atomic64, int32_t offset) {
+        std::array<uint32_t, 3> words{};
+        std::ranges::copy(rdna3_5::build_flat(atomic64 ? rdna3_5::kFlatAtomicAddU64Flat
+                                                       : rdna3_5::kFlatLoadB32Flat,
+                                              {.offset = uint16_t(offset & 0x1fff),
+                                               .glc = 1,
+                                               .seg = 0,
+                                               .addr = 0,
+                                               .data = 4,
+                                               .saddr = 127,
+                                               .vdst = 8}),
+                          words.begin());
+        return words;
+      });
+}
+
+TEST(Rdna4MemoryExecutionHarness, FlatOffsetsStayInTheBaseAperture) {
+  check_rdna_flat_offsets_stay_in_aperture<rdna4::Isa>(
+      ROCJITSU_CODE_ARCH_RDNA4, [](bool atomic64, int32_t offset) {
+        return rdna4::build_vflat(atomic64 ? rdna4::kFlatAtomicAddU64Vflat
+                                           : rdna4::kFlatLoadB32Vflat,
+                                  {.saddr = 124,
+                                   .vdst = 8,
+                                   .th = uint8_t(atomic64 ? 1 : 0),
+                                   .vsrc = 4,
+                                   .ioffset = uint32_t(offset) & 0xffffffu});
+      });
+}
+
 TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAllocations) {
   struct Case {
     uint32_t address_offset, logical_offset, valid_words;

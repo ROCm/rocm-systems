@@ -189,12 +189,15 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
     remaining &= remaining - 1;
     const uint64_t vector =
         address ? registers.vector_control_value(*address, lane).value_or(0) : 0;
+    const uint64_t base = scalar + flat_vector_offset(vector,
+                                                      modifiers.flat_scalar_address &&
+                                                          arch == ROCJITSU_CODE_ARCH_CDNA5,
+                                                      modifiers.flat_scale);
+    // RDNA keeps the base's aperture across IOFFSET, exactly as execution does.
     const uint64_t value =
-        scalar +
-        flat_vector_offset(vector,
-                           modifiers.flat_scalar_address && arch == ROCJITSU_CODE_ARCH_CDNA5,
-                           modifiers.flat_scale) +
-        modifiers.flat_offset;
+        layout == FlatPrivateLayout::Linear
+            ? rdna_flat_lane_address(wf, base, static_cast<int64_t>(modifiers.flat_offset))
+            : base + modifiers.flat_offset;
     const auto translated = translate_flat_address(wf, value, lane, layout);
     if (!translated.swizzled && translated.value >= shared_base && translated.value <= shared_limit)
       result.shared |= uint64_t{1} << lane;
