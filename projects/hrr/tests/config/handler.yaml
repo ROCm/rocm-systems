@@ -41,6 +41,11 @@ cases:
   Unit_HRR_HostBudget_HostAllocationHandlersRefuseOverBudget: {}
   Unit_HRR_HostBudget_LandingBufferChargesWholeBlock: {}
   Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth: {}
+  Unit_HRR_Memcpy3DArray_FreedHandleIsForgotten: {}
+  Unit_HRR_Memcpy3DArray_HostCopiesAreNotIssued: {}
+  Unit_HRR_Memcpy3DArray_TranslatesRecordedHandles: {}
+  Unit_HRR_Memcpy3DArray_UnknownHandleIsRefused: {}
+  Unit_HRR_Memcpy3DBatchArray_BadOperandIsRefused: {}
   Unit_HRR_Query_CompletingQueryReturnsSuccess: {}
   Unit_HRR_Query_DefaultHasNoAttemptBound: {}
   Unit_HRR_Query_NeverCompletingQueryEndsTheReplay: {}

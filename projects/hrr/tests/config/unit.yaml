@@ -40,18 +40,26 @@ cases:
   Unit_HRR_Limits_FatalFlagEndsWait: {}
   Unit_HRR_Limits_FindDuplicateSeq: {}
   Unit_HRR_Limits_FindSeqGap: {}
+  Unit_HRR_Limits_LoadByteBudget: {}
+  Unit_HRR_Limits_LoadChargesBlobAndCodeObjectMaps: {}
+  Unit_HRR_Limits_LoadChargesEventVectorAndSort: {}
+  Unit_HRR_Limits_LoadChargesParsedKernelExpansion: {}
+  Unit_HRR_Limits_LoadChargesPerAllocationOverhead: {}
   Unit_HRR_Limits_NoStallWhileACallIsInFlight: {}
   Unit_HRR_Limits_ParseU64: {}
   Unit_HRR_Limits_PlaybackContextHostBudget: {}
+  Unit_HRR_Limits_PlaybackInfoRefusesOverByteBudget: {}
   Unit_HRR_Limits_PlaybackRefusesTooManyEvents: {}
   Unit_HRR_Limits_PlaybackRefusesTooManyThreads: {}
   Unit_HRR_Limits_PlaybackRefusesWallSecondsAboveMaximum: {}
   Unit_HRR_Limits_QueryRetryIsBounded: {}
   Unit_HRR_Limits_ReadFileMissing: {}
   Unit_HRR_Limits_ReadFileRefusesOversize: {}
+  Unit_HRR_Limits_RecordChargedBeforeAllocation: {}
   Unit_HRR_Limits_ScopedCharge: {}
   Unit_HRR_Limits_SequenceGapEndsReplay: {}
   Unit_HRR_Limits_ThreadCap: {}
+  Unit_HRR_Limits_WallClockEndsBlockedLoad: {}
   Unit_HRR_Limits_WallClockWatchdog: {}
   Unit_HRR_Playback_PlacementHeldRanges: {}
   Unit_HRR_Playback_PlacementRangeChecked: {}
@@ -65,6 +73,7 @@ cases:
   Unit_HRR_Recovery_NoTrailer: {}
   Unit_HRR_Recovery_OversizeRecordBeforeTrailer: {}
   Unit_HRR_Recovery_RecordAfterTrailer: {}
+  Unit_HRR_Recovery_RepairRootHonoursMaxHostBytes: {}
   Unit_HRR_Recovery_RepairRootRewritesMiscountedTrailer: {}
   Unit_HRR_Recovery_RepairWritesProcessManifest: {}
   Unit_HRR_Recovery_RootInfoChecksTrailerCount: {}
