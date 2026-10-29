@@ -41,6 +41,12 @@ cases:
   Unit_HRR_HostBudget_HostAllocationHandlersRefuseOverBudget: {}
   Unit_HRR_HostBudget_LandingBufferChargesWholeBlock: {}
   Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth: {}
+  Unit_HRR_KernelArgsSignature_ArgumentsCarryReadPadding: {}
+  Unit_HRR_KernelArgsSignature_GraphKernelNode: {}
+  Unit_HRR_KernelArgsSignature_GraphSetParams: {}
+  Unit_HRR_KernelArgsSignature_NarrowArgument: {}
+  Unit_HRR_KernelArgsSignature_SetParamsWithoutParameters: {}
+  Unit_HRR_KernelArgsSignature_TooFewArguments: {}
   Unit_HRR_Memcpy3DArray_FreedHandleIsForgotten: {}
   Unit_HRR_Memcpy3DArray_HostCopiesAreNotIssued: {}
   Unit_HRR_Memcpy3DArray_TranslatesRecordedHandles: {}
