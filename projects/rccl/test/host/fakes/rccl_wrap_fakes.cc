@@ -445,6 +445,11 @@ size_t rcclCeAr2ShotMax(const ncclComm*) {
 size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
 }
+// enqueue.cc taskAppend calls this (formerly rcclCeAr2ShotMax) on the unregistered
+// AllReduce path. Host tests that stay off that path still need the symbol to link.
+size_t rcclCeArNonRegCap(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
+}
 bool rcclNcclAlgoEnvIsSet() {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
 }
