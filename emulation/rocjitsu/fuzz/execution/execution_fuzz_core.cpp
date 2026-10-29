@@ -492,40 +492,41 @@ make_async_execution_resources(unsigned helpers) {
 std::vector<uint8_t> random_input(uint64_t seed, size_t size, std::optional<FuzzTarget> target) {
   if (size == 0 || size > kMaxInputSize)
     throw std::invalid_argument("execution fuzz input size must be 1..1024");
-  std::vector<uint8_t> result;
-  result.reserve(size);
+  // The final size is known. Fill in place to avoid GCC 14's false positive
+  // -Wfree-nonheap-object in vector's reserve/push_back reallocation path.
+  std::vector<uint8_t> result(size);
+  size_t cursor = std::min(size, kHeaderSize);
   const uint64_t mode_seed = seed;
   const FuzzTarget resolved_target =
       target.value_or(static_cast<FuzzTarget>(static_cast<uint8_t>(seed) % kTargets.size()));
-  result.push_back(static_cast<uint8_t>(resolved_target));
-  if (result.size() < size)
-    result.push_back(0);
+  result[0] = static_cast<uint8_t>(resolved_target);
   const bool async_wmma_bias = target_info(resolved_target).arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-                               (seed & 15) == 1 && size - result.size() >= 16;
-  size_t protected_prefix = result.size();
+                               (seed & 15) == 1 && size - cursor >= 16;
+  size_t protected_prefix = cursor;
   if (async_wmma_bias) {
     auto append = [&](const auto &words) {
       for (uint32_t word : words)
         for (unsigned byte = 0; byte < 4; ++byte)
-          result.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+          result[cursor++] = static_cast<uint8_t>(word >> (8 * byte));
     };
     append(cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
                               {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}));
     append(cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
                               {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3}));
-    protected_prefix = result.size();
+    protected_prefix = cursor;
   }
   // Preserve fully arbitrary coverage while biasing most cases toward long
   // sequences that have already crossed the decoder boundary.
   if ((seed & 7) == 0) {
-    while (result.size() < size)
-      result.push_back(static_cast<uint8_t>(next_random(seed)));
+    while (cursor < size)
+      result[cursor++] = static_cast<uint8_t>(next_random(seed));
   } else {
     const auto &seeds = instruction_seeds(resolved_target);
-    while (result.size() < size) {
+    while (cursor < size) {
       const auto &instruction = seeds[next_random(seed) % seeds.size()];
-      const size_t count = std::min(instruction.size(), size - result.size());
-      result.insert(result.end(), instruction.begin(), instruction.begin() + count);
+      const size_t count = std::min(instruction.size(), size - cursor);
+      std::copy_n(instruction.begin(), count, result.begin() + cursor);
+      cursor += count;
     }
     // One sparse mutation per input explores operand and opcode neighborhoods
     // without turning every first instruction into a decode rejection.

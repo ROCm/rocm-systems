@@ -12,6 +12,8 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -65,6 +67,32 @@ TEST(ExecutionFuzzTargetTest, GeneratedEncodingsReachExecutionAcrossTargets) {
     EXPECT_GT(stats.executed, 0u);
     EXPECT_EQ(stats.inputs_executed, 1u);
   }
+}
+
+TEST(ExecutionFuzzInputTest, GeneratedInputsRespectEverySizeAndTarget) {
+  for (uint8_t index = 0; index < static_cast<uint8_t>(FuzzTarget::Count); ++index) {
+    const FuzzTarget target = *indexed_target(index);
+    SCOPED_TRACE(target_name(target));
+    for (size_t size = 1; size <= kMaxInputSize; ++size) {
+      SCOPED_TRACE(size);
+      for (uint64_t seed :
+           {uint64_t{0}, uint64_t{1}, uint64_t{17}, std::numeric_limits<uint64_t>::max()}) {
+        SCOPED_TRACE(seed);
+        const auto input = random_input(seed, size, target);
+        ASSERT_EQ(input.size(), size);
+        EXPECT_EQ(input.front(), static_cast<uint8_t>(target));
+        EXPECT_EQ(input, random_input(seed, size, target));
+        if (size >= kHeaderSize) {
+          EXPECT_EQ(input[1] & ~(kAsyncSelectBit | kConcurrentIssuerMask | kFullExecMaskBit), 0);
+        }
+      }
+    }
+  }
+}
+
+TEST(ExecutionFuzzInputTest, GeneratedInputsRejectInvalidSizes) {
+  for (size_t size : {size_t{0}, kMaxInputSize + 1, std::numeric_limits<size_t>::max()})
+    EXPECT_THROW(random_input(0, size), std::invalid_argument);
 }
 
 TEST(ExecutionFuzzInputTest, InitialAddressPairsReachMappedMemory) {
