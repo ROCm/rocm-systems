@@ -11,6 +11,7 @@
 #
 # Usage:
 #   make              - Build the shared library (default)
+#   make build        - Build the shared library (root-Makefile entry point)
 #   make lib          - Build shared library (libnccl_m2n.so)
 #   make bench        - Delegate to benchmarks/Makefile (all benches)
 #   make bench <name> - Delegate to benchmarks/Makefile, named picker. <name> is:
@@ -23,17 +24,17 @@
 #   make tests-clean  - Delegate to tests/Makefile (clean test binaries)
 #   make help         - Show all targets and options
 #
-# Required environment variables:
-#   NCCL_HOME         - Path to NCCL build directory (must contain internal
-#                       headers like nccl_device.h)
-#
 # Optional environment variables:
+#   NCCL_HOME         - Path to NCCL build directory (must contain internal
+#                       headers like nccl_device.h). Defaults to the vendored
+#                       NCCL submodule's build output if unset — see
+#                       `make nccl-submodule`.
 #   CUDA_HOME         - Path to CUDA installation (default: /usr/local/cuda)
 #   MPI_HOME          - Path to MPI installation (for benchmarks only)
 #   PREFIX            - Install prefix (default: /usr/local)
 #   NVCC_GENCODE      - GPU arch flags (default: sm_80, sm_90, sm_100)
 #   DEBUG             - 1=lineinfo, full=device debug
-#   BUILDDIR          - Override build/ output directory
+#   BUILDDIR          - Override the output directory
 
 include Makefile.common
 
@@ -42,10 +43,11 @@ include Makefile.common
 # own picker semantics).
 BENCH_PICK_NAMES := reshard reshard_batch_user_window reshard_model
 
-.PHONY: all lib bench bench-clean tests basic_api_test_mpi basic_api_test_local \
+.PHONY: all build lib bench bench-clean tests basic_api_test_mpi basic_api_test_local \
         clean tests-clean install help $(BENCH_PICK_NAMES)
 
 all: lib
+build: lib
 
 # ============================================================================
 # Library
@@ -107,14 +109,16 @@ install: lib
 # ============================================================================
 # Clean / help
 # ============================================================================
-clean:
-	rm -rf $(BUILDDIR)
+clean: bench-clean tests-clean
+	rm -rf $(OBJDIR)
+	rm -f $(M2N_LIBTARGET) $(M2N_HEADER_TARGET)
 
 help:
 	@echo "NCCL M2N Library Makefile — reshard release"
 	@echo ""
 	@echo "Targets:"
 	@echo "  all (default)         - Build shared library"
+	@echo "  build                 - Build shared library (root-Makefile entry point)"
 	@echo "  lib                   - Build shared library (libnccl_m2n.so)"
 	@echo "  bench                 - Build all benchmarks (delegates to benchmarks/)"
 	@echo "  bench <name>          - Build only named bench(es). <name> is one of:"
@@ -134,7 +138,7 @@ help:
 	@echo "           PREFIX       - Install prefix (default: /usr/local)"
 	@echo "           NVCC_GENCODE - GPU arch flags (default: sm_80, sm_90, sm_100)"
 	@echo "           DEBUG        - 1=lineinfo, full=device debug"
-	@echo "           BUILDDIR     - Override build/ output directory"
+	@echo "           BUILDDIR     - Override the output directory"
 	@echo ""
 	@echo "See benchmarks/Makefile and tests/Makefile for the bench and test"
 	@echo "build rules (each cross-references Makefile.common via"

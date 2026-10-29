@@ -35,6 +35,8 @@
 #
 # Required env: NCCL_HOME (see ../Makefile.common).
 
+.DEFAULT_GOAL := all
+
 include ../Makefile.common
 include gtest.mk
 
@@ -42,12 +44,39 @@ include gtest.mk
 # test_helpers.cu is the only nvcc-required TU; both binaries link it in.
 TEST_HDRS := $(TESTSDIR)/test_helpers.h $(TESTSDIR)/basic_api_test_core.h
 TEST_HELPERS_SRC := $(TESTSDIR)/test_helpers.cu
-TEST_MPI_SRCS    := $(TESTSDIR)/basic_api_test_mpi.cc   $(TEST_HELPERS_SRC)
-TEST_LOCAL_SRCS  := $(TESTSDIR)/basic_api_test_local.cc $(TEST_HELPERS_SRC)
+TEST_MPI_SRCS    := $(TESTSDIR)/basic_api_test_mpi.cc   \
+                    $(TESTSDIR)/pipe_graph_path_test.cc \
+                    $(TEST_HELPERS_SRC)
+TEST_LOCAL_SRCS  := $(TESTSDIR)/nonblocking_comm_test.cc \
+                    $(TESTSDIR)/basic_api_test_local.cc \
+                    $(TESTSDIR)/pack_staging_pool_test.cc \
+                    $(TESTSDIR)/devcomm_cache_test.cc \
+                    $(TEST_HELPERS_SRC)
 
 .PHONY: all tests basic_api_test_mpi basic_api_test_local gtest gtest-clean clean help
 
+# Multi-dimensional planning and MPI checks do not depend on GTest.
+.PHONY: multi_dim_geometry_test multi_dim_test_mpi
+multi_dim_geometry_test: $(BINDIR)/multi_dim_geometry_test
+multi_dim_test_mpi: $(BINDIR)/multi_dim_test_mpi
+$(BINDIR)/multi_dim_geometry_test: $(TESTSDIR)/multi_dim_geometry_test.cc $(LIB_SRCS) $(LIB_HDRS)
+	@mkdir -p $(BINDIR)
+	$(NVCC) -o $@ $(NVCUFLAGS) -I$(NCCL_RESHARD_ROOT)/src $< $(LIB_SRCS) $(LIB_LDFLAGS) -lpthread -ldl
+$(BINDIR)/multi_dim_test_mpi: $(TESTSDIR)/multi_dim_test.cc $(M2N_LIBTARGET) $(LIB_HDRS)
+	@mkdir -p $(BINDIR)
+	$(NVCC) -o $@ $(NVCUFLAGS) $(MPI_CFLAGS) -DOMPI_SKIP_MPICXX=1 $< $(M2N_CLIENT_LDFLAGS) $(BENCH_LDFLAGS) -lpthread
+
 all: tests
+tests: multi_dim_geometry_test multi_dim_test_mpi
+.PHONY: pipe_commb_resources_test
+pipe_commb_resources_test: $(BINDIR)/pipe_commb_resources_test
+	$<
+
+$(BINDIR)/pipe_commb_resources_test: $(TESTSDIR)/pipe_commb_resources_test.cc $(SRCDIR)/reshard_pipe_resources.h
+	@mkdir -p $(BINDIR)
+	$(CXX) -std=c++17 -Wall -Wextra -I$(SRCDIR) $< -o $@
+
+tests: pipe_commb_resources_test
 
 ifeq ($(GTEST_AVAILABLE),0)
 
@@ -56,8 +85,10 @@ ifeq ($(GTEST_AVAILABLE),0)
 # point GTEST_DIR at a googletest source tree to build the tests.
 tests basic_api_test_mpi basic_api_test_local gtest:
 	@echo "tests/Makefile: googletest not found — skipping basic_api test build."
-	@echo "  Looked for vendored copy at \$$(TESTSDIR)/googletest."
-	@echo "  To build the tests, point GTEST_DIR at a googletest source tree:"
+	@echo "  Looked for $(GTEST_SUBMODULE) and \$$(TESTSDIR)/googletest."
+	@echo "  Fetch the submodule:"
+	@echo "    git submodule update --init third_party/googletest"
+	@echo "  Or point GTEST_DIR at a googletest source tree:"
 	@echo "    make tests GTEST_DIR=/path/to/googletest"
 
 gtest-clean:
@@ -65,7 +96,7 @@ gtest-clean:
 
 clean: gtest-clean
 	@printf "Cleaning test binaries...\n"
-	rm -f $(BINDIR)/basic_api_test_mpi $(BINDIR)/basic_api_test_local
+	rm -f $(BINDIR)/basic_api_test_mpi $(BINDIR)/basic_api_test_local $(BINDIR)/multi_dim_geometry_test $(BINDIR)/multi_dim_test_mpi
 
 else
 
@@ -82,17 +113,20 @@ $(BINDIR)/basic_api_test_mpi: $(TEST_MPI_SRCS) $(GTEST_A) \
 	    $(TEST_MPI_SRCS) $(GTEST_A) $(M2N_CLIENT_LDFLAGS) $(BENCH_LDFLAGS) -lpthread
 	@printf "Done! Test binary at: $@\n"
 
-$(BINDIR)/basic_api_test_local: $(TEST_LOCAL_SRCS) $(GTEST_A) \
-                                $(M2N_LIBTARGET) $(LIB_HDRS) $(TEST_HDRS)
+# basic_api_test_local exercises library-internal symbols, including the
+# NCCL_M2N_TESTING-only reshardTestBroadcastMaxInt, so link the library sources
+# directly (same pattern as tests/ci/unit_tests) instead of -lnccl_m2n.
+$(BINDIR)/basic_api_test_local: $(TEST_LOCAL_SRCS) $(LIB_SRCS) $(GTEST_A) \
+                                $(LIB_HDRS) $(TEST_HDRS)
 	@printf "Building basic_api_test_local (gtest, no MPI, GTEST_DIR=$(GTEST_DIR))...\n"
 	@mkdir -p $(BINDIR)
-	$(NVCC) -o $@ $(NVCUFLAGS) -I$(TESTSDIR) -I$(GTEST_INC) \
-	    $(TEST_LOCAL_SRCS) $(GTEST_A) $(M2N_CLIENT_LDFLAGS) $(LIB_LDFLAGS) -lpthread
+	$(NVCC) -o $@ $(NVCUFLAGS) -DNCCL_M2N_TESTING -I$(TESTSDIR) -I$(GTEST_INC) \
+	    $(TEST_LOCAL_SRCS) $(LIB_SRCS) $(GTEST_A) $(LIB_LDFLAGS) -lpthread -ldl
 	@printf "Done! Test binary at: $@\n"
 
 clean:
 	@printf "Cleaning test binaries...\n"
-	rm -f $(BINDIR)/basic_api_test_mpi $(BINDIR)/basic_api_test_local
+	rm -f $(BINDIR)/basic_api_test_mpi $(BINDIR)/basic_api_test_local $(BINDIR)/multi_dim_geometry_test $(BINDIR)/multi_dim_test_mpi
 	rm -rf $(GTEST_OBJDIR)
 
 endif
@@ -106,11 +140,13 @@ help:
 	@echo "tests/Makefile — public basic_api correctness suite"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all (default)         - Build gtest basic_api binaries"
+	@echo "  all (default)         - Build placement tests and available GTest binaries"
 	@echo "  tests                 - Same as all"
 	@echo "  basic_api_test_mpi    - Build only the MPI gtest matrix binary"
 	@echo "  basic_api_test_local  - Build only the local pthread gtest matrix binary"
-	@echo "  gtest                 - Build gtest.a / gtest_main.a (from tests/googletest/)"
+	@echo "  multi_dim_geometry_test - Build the host placement geometry test"
+	@echo "  multi_dim_test_mpi    - Build the MPI placement test (requires MPI)"
+	@echo "  gtest                 - Build gtest.a / gtest_main.a (from \$$(GTEST_DIR))"
 	@echo "  clean                 - Remove all test binaries + gtest objects"
 	@echo "  help                  - Show this help"
 	@echo ""
