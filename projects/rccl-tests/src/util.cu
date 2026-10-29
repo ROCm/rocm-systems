@@ -380,6 +380,17 @@ void jsonOutputInit(const char *in_path,
   jsonKey("rccl_version"); jsonInt(test_ncclVersion);
 }
 
+void jsonOutputBufferLayout(const char* kind, size_t mappedBytes, int gpuSegments,
+                            int hostSegments, size_t segmentBytes, int registerMode) {
+  if (!write_json) return;
+  jsonKey("buffer_layout"); jsonStr(kind);
+  jsonKey("mapped_bytes"); jsonSize_t(mappedBytes);
+  jsonKey("gpu_segments"); jsonInt(gpuSegments);
+  jsonKey("host_segments"); jsonInt(hostSegments);
+  jsonKey("segment_bytes"); jsonSize_t(segmentBytes);
+  jsonKey("local_register"); jsonInt(registerMode);
+}
+
 void jsonIdentifyWriter(bool is_writer) {
   write_json &= is_writer;
 }
