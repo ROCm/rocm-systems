@@ -152,12 +152,40 @@ void stagingPipeLaunchCompletionFinalize() {
 #endif
 }
 
+#if defined(__HIP_PLATFORM_AMD__)
+// gfx950 has no hardware named barriers; emulate a subset barrier with a
+// block-scoped, sense-reversing shared-memory barrier. State is zeroed once
+// at kernel entry via barrier_subset_init().
+__shared__ unsigned m2n_bar_arrive[8];
+__shared__ unsigned m2n_bar_sense[8];
+__device__ __forceinline__ void barrier_subset_init() {
+  for (int i = (int)threadIdx.x; i < 8; i += (int)blockDim.x) {
+    m2n_bar_arrive[i] = 0u;
+    m2n_bar_sense[i] = 0u;
+  }
+  __syncthreads();
+}
+__device__ __forceinline__ void barrier_sync_subset(int id, int count) {
+  unsigned s = m2n_bar_sense[id];
+  __threadfence_block();
+  unsigned a = atomicInc(&m2n_bar_arrive[id], 0x7fffffffu) + 1u;
+  if (a == (unsigned)count) {
+    m2n_bar_arrive[id] = 0u;
+    __threadfence_block();
+    atomicExch(&m2n_bar_sense[id], s ^ 1u);
+  } else {
+    while (atomicAdd(&m2n_bar_sense[id], 0u) == s) { }
+  }
+  __threadfence_block();
+}
+#else
 // Named barrier for a subset of threads within a CTA.
 // __barrier_sync(id) syncs ALL CTA threads; to sync only `count` threads
 // we need the PTX "bar.sync id, count" instruction directly.
 __device__ __forceinline__ void barrier_sync_subset(int id, int count) {
   asm volatile("bar.sync %0, %1;" ::"r"(id), "r"(count) : "memory");
 }
+#endif
 
 // ============================================================================
 // Direct-Algorithm Kernel - StagingReshardKernel_Direct
@@ -196,6 +224,9 @@ __device__ __forceinline__ void barrier_sync_subset(int id, int count) {
 __global__ __launch_bounds__(DIRECT_TOTAL_WARPS * 32, 1) void StagingReshardKernel_Direct(
   StagingKernelParams* __restrict__ params, ncclDevComm devComm) {
   const int channel_id = (int)blockIdx.x;
+#if defined(__HIP_PLATFORM_AMD__)
+  barrier_subset_init();
+#endif
 
   int ginContext = reshardMapCtaToGinContext((int)blockIdx.x, (int)gridDim.x, (int)devComm.ginContextCount);
   ncclGin gin{devComm, ginContext};
@@ -1683,9 +1714,15 @@ static ncclResult_t launchPipeGeneratorSpecialized(const StagingKernelParams* ho
    * body.  That keeps RDMA-only, LSA-only, and mixed generator roles on the
    * same data-flow path without carrying every stage's live state. */
   if constexpr (DoLsaSources) {
+    /* Bind the kernel template instantiation to a local before passing it to
+     * cudaFuncSetAttribute.  Older hipify-perl mistranslates a multi-argument
+     * template-id written directly as a call argument here ("expected '>'");
+     * the local is equivalent for CUDA and NVCC and keeps the ROCm build
+     * portable across hipify-perl versions. */
+    auto pipeGenKernel = StagingReshardKernel_PipeGenerator<TmaTileSize, DoRdmaSources, DoRingForward, DoLsaForward,
+                                                            DoLsaSources, SplitMixedRoleCtas>;
     NCCL_M2N_CUDACHECK(
-      cudaFuncSetAttribute(StagingReshardKernel_PipeGenerator<TmaTileSize, DoRdmaSources, DoRingForward, DoLsaForward,
-                                                              DoLsaSources, SplitMixedRoleCtas>,
+      cudaFuncSetAttribute(pipeGenKernel,
                            cudaFuncAttributeMaxDynamicSharedMemorySize, dynamic_smem_bytes));
   }
 #if NCCLM2N_PIPE_HAS_LAUNCH_COMPLETION_EVENT
