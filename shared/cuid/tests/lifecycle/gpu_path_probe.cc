@@ -266,6 +266,16 @@ int main(int argc, char** argv) {
   if (action == "nic-functions") {
     return nic_functions() ? 0 : 1;
   }
+  // Each argument looked up three times; one status per line.
+  if (action == "repeat") {
+    for (int n = 2; n < argc; ++n) {
+      for (int attempt = 0; attempt < 3; ++attempt) {
+        amdcuid_id_t id{};
+        std::cout << argv[n] << "\t" << amdcuid_status_to_string(lookup(argv[n], id)) << '\n';
+      }
+    }
+    return 0;
+  }
   if (action == "temporary-gpu") {
     amdcuid_id_t first{}, second{}, id{};
     if (!whole_devices(first, second)) return 1;

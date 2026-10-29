@@ -390,7 +390,7 @@ class AMDSMIHelpers:
             return "N/A"
 
     def get_gpu_cuid_info(self, device_handle, include_primary=False):
-        """CUID presentation metadata; unavailable metadata does not imply a legacy UUID."""
+        """CUID presentation metadata."""
         result = {
             "derived_cuid": "N/A",
             "primary_cuid": "N/A" if include_primary else "N/A (not requested)",

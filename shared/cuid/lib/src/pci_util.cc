@@ -51,10 +51,13 @@ amdcuid_status_t PciUtil::read_identity(const std::string& path, const std::stri
 // GPUs, NICs, and NPUs. It may later include storage devices as well.
 amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf, uint8_t* buffer,
                                                 size_t buffer_size, uint16_t offset) {
-  if (geteuid() != 0) {
+  if (bdf.empty() || !buffer || buffer_size == 0) return AMDCUID_STATUS_INVALID_ARGUMENT;
+  // The kernel lets anyone read the 64-byte header, so a component's IDs and
+  // class read the same for every caller; the rest needs root.
+  if (geteuid() != 0 && (buffer_size > kPciWorldReadableConfigSize ||
+                         offset > kPciWorldReadableConfigSize - buffer_size)) {
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
-  if (bdf.empty() || !buffer || buffer_size == 0) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
   std::string pci_config_path = "/sys/bus/pci/devices/" + bdf + "/config";
 
