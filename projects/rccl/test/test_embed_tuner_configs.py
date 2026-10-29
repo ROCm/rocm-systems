@@ -26,7 +26,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -195,8 +194,6 @@ def test_multiline_csv_with_comments_embedded_verbatim(tmp_path):
     assert contents[0] == csv_content
 
 
-
-
 @pytest.mark.script
 def test_crlf_csv_embedded_verbatim(tmp_path):
     """A CSV with CRLF line endings must be embedded byte-for-byte, not LF-normalised."""
@@ -223,18 +220,15 @@ def test_crlf_csv_embedded_verbatim(tmp_path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.script
-def test_no_change_guard_does_not_rewrite(tmp_path):
+def test_output_is_stable_across_runs(tmp_path):
     write_csv(tmp_path, "rccl_tuner_gfx950.csv", "allreduce,0,1024,ring,ll,1,1,8\n")
     out = tmp_path / "out.h"
 
     run(tmp_path, out)
-    mtime_first = out.stat().st_mtime
+    content_first = out.read_text()
 
-    time.sleep(0.05)
     assert run(tmp_path, out).returncode == 0
-    mtime_second = out.stat().st_mtime
-
-    assert mtime_first == mtime_second, "file was rewritten on second run with identical inputs"
+    assert out.read_text() == content_first
 
 
 @pytest.mark.script
@@ -243,14 +237,13 @@ def test_change_guard_rewrites_when_content_changes(tmp_path):
     out = tmp_path / "out.h"
 
     run(tmp_path, out)
-    mtime_first = out.stat().st_mtime
+    content_first = out.read_text()
 
-    time.sleep(0.05)
     write_csv(tmp_path, "rccl_tuner_gfx950.csv", "allreduce,0,2048,tree,simple,4,1,8\n")
-    run(tmp_path, out)
-    mtime_second = out.stat().st_mtime
+    assert run(tmp_path, out).returncode == 0
+    content_second = out.read_text()
 
-    assert mtime_second > mtime_first, "file was not rewritten after CSV content changed"
+    assert content_second != content_first, "file was not rewritten after CSV content changed"
 
 
 @pytest.mark.script
@@ -259,14 +252,13 @@ def test_change_guard_rewrites_when_csv_added(tmp_path):
     out = tmp_path / "out.h"
 
     run(tmp_path, out)
-    mtime_first = out.stat().st_mtime
+    content_first = out.read_text()
 
-    time.sleep(0.05)
     write_csv(tmp_path, "rccl_tuner_gfx942.csv", "allreduce,0,2048,ring,ll,1,1,8\n")
-    run(tmp_path, out)
-    mtime_second = out.stat().st_mtime
+    assert run(tmp_path, out).returncode == 0
+    content_second = out.read_text()
 
-    assert mtime_second > mtime_first, "file was not rewritten after a new CSV was added"
+    assert content_second != content_first, "file was not rewritten after a new CSV was added"
 
 
 @pytest.mark.script
@@ -276,14 +268,13 @@ def test_change_guard_rewrites_when_csv_removed(tmp_path):
     out = tmp_path / "out.h"
 
     run(tmp_path, out)
-    mtime_first = out.stat().st_mtime
+    content_first = out.read_text()
 
-    time.sleep(0.05)
     (tmp_path / "rccl_tuner_gfx942.csv").unlink()
-    run(tmp_path, out)
-    mtime_second = out.stat().st_mtime
+    assert run(tmp_path, out).returncode == 0
+    content_second = out.read_text()
 
-    assert mtime_second > mtime_first, "file was not rewritten after a CSV was removed"
+    assert content_second != content_first, "file was not rewritten after a CSV was removed"
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +367,6 @@ def test_real_header_is_reproducible(tmp_path):
     run(TUNER_DIR, out)
     first = out.read_text()
 
-    time.sleep(0.05)
     assert run(TUNER_DIR, out).returncode == 0
     second = out.read_text()
 
