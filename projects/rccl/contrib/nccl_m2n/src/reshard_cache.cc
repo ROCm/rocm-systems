@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <vector>
 #include "nccl.h"
@@ -59,6 +60,19 @@ static int gDevcommCacheCapacity = 0;
  * The vector itself just owns memory; handles inside it are released
  * explicitly there before the vector is cleared. */
 static std::vector<StreamPoolEntry> gStreamPool;
+
+/* Guards all process-global caches above (window cache, DevComm cache, stream
+ * pool, staging pool). In single-process / multi-rank (one host thread per rank,
+ * all sharing this address space) every rank thread hits these globals
+ * concurrently. Without this lock the non-atomic count and array/vector updates
+ * race, so ranks can read a torn count or half-written slot and reserve the same
+ * cache index, corrupting the cache and leaving ranks disagreeing on whether a
+ * DevComm/window exists -> a subset skips the COLLECTIVE ncclDevCommCreate /
+ * ncclCommWindowRegister and the reshard deadlocks. Recursive so the public
+ * helpers stay composable; never held across ncclDevCommCreate /
+ * ncclCommWindowRegister themselves (those collectives are issued outside these
+ * helpers, in reshard_call_setup / the reshard hot path). */
+static std::recursive_mutex gCacheMutex;
 
 #ifdef NCCL_M2N_TESTING
 static bool gFailNextCompletionEventRecordForTest = false;
@@ -281,11 +295,13 @@ static ncclResult_t cacheWindow(WindowCache* cache, ncclComm_t comm, void* windo
 
 ncclWindow_t* findCachedInternalWindowByPtr(ncclComm_t comm, void* buffer, size_t size,
                                             ReshardInternalWindowKind kind) {
+  std::lock_guard<std::recursive_mutex> lk(gCacheMutex);
   return findCachedWindowByPtr(&gInternalWindowCache, comm, buffer, size, kind);
 }
 
 ncclResult_t cacheInternalWindow(ncclComm_t comm, void* buffer, size_t size, ReshardInternalWindowKind kind,
                                  ncclWindow_t window) {
+  std::lock_guard<std::recursive_mutex> lk(gCacheMutex);
   return cacheWindow(&gInternalWindowCache, comm, buffer, size, kind, window);
 }
 
@@ -297,6 +313,7 @@ ncclDevComm* findCachedDevComm(const ReshardDevCommCacheKey& key, cudaEvent_t* o
   if (outUseState != nullptr) {
     outUseState->reset();
   }
+  std::lock_guard<std::recursive_mutex> lk(gCacheMutex);
   for (int i = 0; i < gDevcommCacheCount; i++) {
     DevCommCacheEntry& e = gDevcommCache[i];
     if (e.valid && e.key == key) {
@@ -313,10 +330,12 @@ ncclDevComm* findCachedDevComm(const ReshardDevCommCacheKey& key, cudaEvent_t* o
 }
 
 ReshardDevCommCacheReservation::~ReshardDevCommCacheReservation() {
+  std::lock_guard<std::recursive_mutex> lk(gCacheMutex);
   if (index >= 0) gDevcommCache[index].reserved = false;
 }
 
 ncclResult_t reserveDevCommCacheEntry(ReshardDevCommCacheReservation* reservation) {
+  std::lock_guard<std::recursive_mutex> lk(gCacheMutex);
   NCCL_M2N_CHECK_ARG(reservation != nullptr && reservation->index < 0, -1,
                      "DevComm cache reservation must be empty");
   if (gDevcommCache == nullptr) {
@@ -346,6 +365,7 @@ ncclResult_t reserveDevCommCacheEntry(ReshardDevCommCacheReservation* reservatio
 
 ncclResult_t cacheDevComm(const ReshardDevCommCacheKey& key, const ncclDevComm* devComm,
                            bool retainPersistentState, ReshardDevCommCacheReservation* reservation) {
+  std::lock_guard<std::recursive_mutex> lk(gCacheMutex);
   ReshardDevCommCacheReservation localReservation;
   if (reservation == nullptr) {
     NCCL_M2N_CHECK(reserveDevCommCacheEntry(&localReservation));
@@ -413,6 +433,7 @@ ncclResult_t ensureStagingBufferPool(ncclComm_t comm, uint64_t poolKey, cudaStre
   NCCL_M2N_CHECK_ARG(outState != nullptr, -1, "ensureStagingBufferPool called with null outState");
   *outState = nullptr;
 
+  std::lock_guard<std::recursive_mutex> lk(gCacheMutex);
   StagingBufferPoolEntry* entry = findStagingPoolEntry(comm, poolKey);
   if (entry != nullptr) {
     NCCL_M2N_CHECK_ARG(activeChannels <= entry->capacityChannels, -1,
@@ -483,6 +504,7 @@ ncclResult_t ensureStagingBufferPool(ncclComm_t comm, uint64_t poolKey, cudaStre
 }
 
 ncclResult_t stagingBufferPoolRecordEvent(ncclComm_t comm, uint64_t poolKey, cudaStream_t stream) {
+  std::lock_guard<std::recursive_mutex> lk(gCacheMutex);
   StagingBufferPoolEntry* e = findStagingPoolEntry(comm, poolKey);
   if (e != nullptr) {
     const ncclResult_t result = reshardRecordCompletionEvent(e->event, stream, "staging buffer", &e->poisoned);
@@ -590,6 +612,7 @@ ncclResult_t streamPoolAcquire(ncclComm_t comm, int dev, cudaStream_t* outStream
                      "streamPoolAcquire called while NCCL_RESHARD_USE_INTERNAL_STREAMS=0; caller must bypass the "
                      "pool");
 
+  std::lock_guard<std::recursive_mutex> lk(gCacheMutex);
   /* Find existing entry for (comm, dev). */
   for (StreamPoolEntry& e : gStreamPool) {
     if (e.comm == comm && e.dev == dev) {
