@@ -188,6 +188,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `transport/net_telemetry.cc` and `include/net_telemetry.h`
     (`NET_TELEMETRY_CC_PATH`, from `net-telemetry-test.cc`); suites
     `NetTelemetry*Microtest.*`.
+  - `transport/net_socket.cc` and `transport/net_socket/common.cc`
+    (`NET_SOCKET_CC_PATH`, `NET_SOCKET_COMMON_CC_PATH`, from
+    `net-socket-test.cc`); suites `NetSocket*Microtest.*`. Three disabled tests
+    pin production bugs and are enabled with their fixes:
+    `NetSocketTransferMicrotest.DISABLED_Test_RecvInlinePayloadAfterSizeFrame_CompletesWithPayload`
+    ([AICOMRCCL-3104](https://amd-hub.atlassian.net/browse/AICOMRCCL-3104)),
+    `NetSocketAcceptMicrotest.DISABLED_Accept_AfterRejectedIndex_StartsNewHandshake`
+    ([AICOMRCCL-3105](https://amd-hub.atlassian.net/browse/AICOMRCCL-3105)), and
+    `NetSocketTaskMicrotest.DISABLED_Test_SplitFailed_LaterPollDoesNotUseControlSocket`
+    ([AICOMRCCL-3106](https://amd-hub.atlassian.net/browse/AICOMRCCL-3106)).
   - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
     `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
     shared step-count, hardware-index, time-estimation, thread-threshold,
@@ -269,8 +279,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `test_categories_micro_onerank.yaml`.
 - **`rccl-UnitTestsMicroMgmtTaskEnq`** — `enqueue/mgmt_task_enq.cc` (via `MGMT_TASK_ENQ_CC_PATH`,
   from `mgmt-task-enq-test.cc`); suite `MgmtTaskEnq*`. Its own binary because
-  `fakes/nccl_stubs.cc` fakes `ncclMgmtTaskEnqueue`, which this target drops via
-  `RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue`. See `test_categories_micro_mgmt_task_enq.yaml`.
+  `fakes/mgmt_task_enq_fakes.cc`, which the other targets link, fakes `ncclMgmtTaskEnqueue`.
+  See `test_categories_micro_mgmt_task_enq.yaml`.
 - **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
   `CeCollMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`, both in
   `ce-coll-test.cc`. Its own binary because every other target links
@@ -720,6 +730,7 @@ symbol.
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
 | `src/enqueue/enqueue.cc`'s own symbols (targets that do not compile the real file) | `fakes/enqueue_fakes.cc` |
+| `src/enqueue/mgmt_task_enq.cc` (targets that do not compile the real file) | `fakes/mgmt_task_enq_fakes.cc` |
 | `src/init.cc` comm lifecycle, CTA/channel params, `allocTracker` | `fakes/comm_fakes.cc`; `rccl-UnitTestsMicroRmaProxy` keeps a local `allocTracker` because that isolated target does not link the broader comm fake |
 | `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc`; `ncclMemTrack*` / `ncclMemUntrack*` in `fakes/nccl_fakes.cc` |
@@ -739,7 +750,7 @@ symbol.
 | `src/misc/socket.cc` | `fakes/socket_fakes.cc` |
 | `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
-| `src/os/linux.cc` | `fakes/os_fakes.cc` |
+| `src/os/linux.cc` (including socket close) | `fakes/os_fakes.cc` |
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
 | `src/plugin/profiler.cc` (`ncclProfilerProxyTraceDumpIfAny`, recorded) | `fakes/profiler_fakes.cc` |
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
@@ -768,7 +779,7 @@ symbol.
 | `src/transport/coll_net.cc` registration entry points, macro-renamed via `fakes/transport_collnet_reg_seam.h` when the real file shares the binary | `fakes/transport_stubs.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
-| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`) | `fakes/libc_fakes.cc` |
+| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`; `open`/`read`/`close` for `transport/net_socket.cc`) | `fakes/libc_fakes.cc` |
 | libdl macro-renamed in one unit via `fakes/dl_seam.h` (the `misc/*symbols.cc` builders) | `fakes/dl_fakes.cc` |
 | reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
@@ -788,7 +799,7 @@ and that default silently selects which production arm runs. Driving a seam mean
 marker. The marker travels with the declaration rather than a block comment so it cannot drift from
 what it describes. Call *counters* do not take the marker unless the counter itself is unread.
 
-Five things do NOT follow the TU-per-file rule, deliberately:
+Four things do NOT follow the TU-per-file rule, deliberately:
 
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
@@ -800,10 +811,6 @@ Five things do NOT follow the TU-per-file rule, deliberately:
 - `ncclStrongStreamAcquire` / `Release` stay in `nccl_fakes.cc` rather than
   `strongstream_stubs.cc`: they carry `ASSERT_HOOK_MATCHES_PROD` drift
   assertions and moving those is a larger change.
-- `fakes/collective_stubs.cc` still carries fail-loud `ncclOsCpuCount` and
-  `ncclOsSetAffinity` entries. It cannot link `os_fakes.cc` alongside them, so
-  the `rccl-UnitTestsMicro` target keeps that pair target-shaped; every other
-  target gets them from `os_fakes.cc`.
 - `transport_stubs.cc` and `collective_stubs.cc` both provide several fail-loud
   collective-transport setup symbols. `rccl-UnitTestsMicro` needs both floors,
   so `RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR` omits the transport copy in
