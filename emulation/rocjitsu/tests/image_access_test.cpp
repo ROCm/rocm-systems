@@ -102,7 +102,7 @@ std::array<uint32_t, 8> rdna_image_descriptor(rj_code_arch_t arch,
   set(78, gfx12 ? 16 : 14, image.height - 1);
   set(96, 12, image.selectors);
   set(124, 4, image.type);
-  if (amdgpu::image_resource_encodes_pitch(image.type))
+  if (amdgpu::gfx11_image_resource_encodes_pitch(image.type))
     set(128, gfx12 ? 16 : 14, image.pitch - 1);
   else
     set(128, gfx12 ? 14 : 13, image.depth - 1);
