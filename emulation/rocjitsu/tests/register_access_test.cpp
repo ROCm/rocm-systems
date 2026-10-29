@@ -544,6 +544,31 @@ TEST(RegisterAccessTest, WriteRegionSetLanesRespectsDeniedOwnership) {
   EXPECT_TRUE(fx.plugin->writes.empty());
 }
 
+TEST(RegisterAccessTest, WriteRegionSetLanesRejectsWrongSpanSize) {
+  for (uint32_t wave_size : {32u, 64u}) {
+    Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, 1, kVgprsPerWave, wave_size);
+    ASSERT_NE(fx.wf, nullptr);
+    const uint32_t reg = fx.vgpr_base() + 5;
+    const uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(wave_size));
+    const std::vector<uint32_t> values(wave_size + 1, 0x12345678u);
+    RegisterAccess regs(*fx.wf);
+    // The full-mask path copies whole registers; the masked path writes lane by lane.
+    for (uint64_t mask : {full_mask, full_mask & uint64_t{0xaaaaaaaaaaaaaaaa}}) {
+      for (uint8_t byte_mask : {uint8_t{0xF}, uint8_t{0x5}}) {
+        for (size_t size : {size_t{wave_size} - 1, size_t{wave_size} + 1}) {
+          for (uint32_t lane = 0; lane < 64; ++lane)
+            fx.cu->write_vgpr(reg, lane, 0xAABB0000u + lane);
+          auto writes = regs.write_vgpr_region(reg, 1, mask, byte_mask);
+          EXPECT_THROW(writes.set_lanes(0, std::span<const uint32_t>(values.data(), size)),
+                       std::invalid_argument);
+          for (uint32_t lane = 0; lane < 64; ++lane)
+            EXPECT_EQ(fx.cu->read_vgpr_storage(reg, lane), 0xAABB0000u + lane);
+        }
+      }
+    }
+  }
+}
+
 TEST(RegisterAccessTest, ReadWriteRegionObservesThenAllowsWrites) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);

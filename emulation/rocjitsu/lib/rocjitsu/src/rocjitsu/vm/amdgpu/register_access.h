@@ -865,8 +865,10 @@ public:
     /// @brief Store one wave-width snapshot using the acquired lane and byte masks.
     /// @details Source and destination may overlap. Each call addresses one VGPR;
     /// adjacent registers need not have contiguous backing storage.
+    /// @throws std::invalid_argument if @p values does not hold one word per wave lane.
     void set_lanes(uint32_t relative_reg, std::span<const uint32_t> values) const {
-      assert(values.size() == wf_size_ && "register write needs every wave lane");
+      if (values.size() != wf_size_)
+        throw std::invalid_argument("VGPR lane write needs one value per wave lane");
       if (!cu_)
         return;
       if (lane_mask_ == util::mask<uint64_t>(static_cast<int>(wf_size_)) &&
