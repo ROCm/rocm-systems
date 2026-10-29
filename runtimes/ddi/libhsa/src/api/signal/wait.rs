@@ -189,17 +189,19 @@ pub unsafe extern "C" fn hsa_signal_group_wait_any_relaxed(
     signal: *mut HsaSignal,
     value: *mut SignalValue,
 ) -> Status {
-    // SAFETY: The public entry point forwards the complete signal-group contract.
-    unsafe {
-        signal_group_wait_any(
-            group,
-            conditions,
-            compare_values,
-            wait_state_hint,
-            signal,
-            value,
-        )
-    }
+    boundary(|| {
+        // SAFETY: The public entry point forwards the complete signal-group contract.
+        unsafe {
+            signal_group_wait_any(
+                group,
+                conditions,
+                compare_values,
+                wait_state_hint,
+                signal,
+                value,
+            )
+        }
+    })
 }
 
 #[cfg_attr(
@@ -216,21 +218,23 @@ pub unsafe extern "C" fn hsa_signal_group_wait_any_scacquire(
     signal: *mut HsaSignal,
     value: *mut SignalValue,
 ) -> Status {
-    // SAFETY: The public entry point forwards the complete signal-group contract.
-    let status = unsafe {
-        signal_group_wait_any(
-            group,
-            conditions,
-            compare_values,
-            wait_state_hint,
-            signal,
-            value,
-        )
-    };
-    if status == SUCCESS {
-        fence(Ordering::Acquire);
-    }
-    status
+    boundary(|| {
+        // SAFETY: The public entry point forwards the complete signal-group contract.
+        let status = unsafe {
+            signal_group_wait_any(
+                group,
+                conditions,
+                compare_values,
+                wait_state_hint,
+                signal,
+                value,
+            )
+        };
+        if status == SUCCESS {
+            fence(Ordering::Acquire);
+        }
+        status
+    })
 }
 
 #[cfg_attr(
@@ -248,6 +252,9 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     wait_state_hint: u32,
     satisfying_value: *mut SignalValue,
 ) -> u32 {
+    let Some(_call) = crate::runtime::enter_public_raw_handle() else {
+        return u32::MAX;
+    };
     let mut guard = match lock() {
         Ok(guard) => guard,
         Err(_) => return u32::MAX,
@@ -296,6 +303,9 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_all(
     wait_state_hint: u32,
     satisfying_values: *mut SignalValue,
 ) -> u32 {
+    let Some(_call) = crate::runtime::enter_public_raw_handle() else {
+        return u32::MAX;
+    };
     let mut guard = match lock() {
         Ok(guard) => guard,
         Err(_) => return u32::MAX,
