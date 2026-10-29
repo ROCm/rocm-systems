@@ -5,7 +5,7 @@ import argparse
 import os
 import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
@@ -941,7 +941,7 @@ class ExperimentalAction(argparse.Action):
 
     def __init__(
         self,
-        option_strings: list[str],
+        option_strings: List[str],
         help: str,
         **kwargs,
     ) -> None:
