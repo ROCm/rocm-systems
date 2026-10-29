@@ -23,7 +23,7 @@ DEPRECATED_OPTIONS = {
 }
 
 
-def warn_deprecated_options(argv: list[str]) -> None:
+def warn_deprecated_options(argv: List[str]) -> None:
     """Warn about each deprecated option in argv, up to the "--" before the workload."""
     for arg in argv:
         if arg == "--":
