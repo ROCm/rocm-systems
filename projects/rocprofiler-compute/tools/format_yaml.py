@@ -12,7 +12,7 @@ import sys
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Tuple
 
 import yaml
 
@@ -20,9 +20,18 @@ import yaml
 # Configuration - Edit these to accommodate future YAML updates
 # =============================================================================
 
+# Metric library files, whose top-level keys are also kept sorted
+METRIC_LIBRARY_PATTERN = "metric_library/gfx"
+
+# INHERIT_KEY and REMOVE_TAG of src/utils/yaml_inherit_loader.py. They are repeated here
+# because this hook runs with pip PyYAML only, without src/ on the path.
+INHERIT_KEY = "inherit"
+REMOVE_TAG = "!remove"
+
 # Path patterns that contain metric equations to check (substrings matched against path)
 EQUATION_FILE_PATTERNS = [
     "analysis_configs/gfx",
+    METRIC_LIBRARY_PATTERN,
 ]
 
 # Path suffixes to exclude from equation checking
@@ -36,8 +45,9 @@ SKIP_FILE_PATTERNS = [
     "profiling_config.yaml",
 ]
 
-# YAML keys that contain metric equations
-EQUATION_KEYS = {"value", "avg", "min", "max", "peak"}
+# YAML keys that contain metric equations ("formula" and "peak_empirical" in metric
+# library files)
+EQUATION_KEYS = {"value", "avg", "min", "max", "peak", "formula", "peak_empirical"}
 
 # Literal string values that should not be parsed as equations
 LITERAL_VALUES = {"N/A", "None", "null", "true", "false", "Peak (Empirical)"}
@@ -413,6 +423,37 @@ def extract_metric_equations(
     return equations
 
 
+def sort_top_level_keys(content: str) -> str:
+    """Return content with its top-level blocks sorted by key, "inherit" first.
+
+    A block is a top-level key line and the lines under it: indented lines and sequence
+    items written at column 0. Comment and blank lines stay with the key that follows
+    them, and a leading "---" stays first.
+    """
+    header = ""
+    blocks: List[Tuple[str, str]] = []
+    pending = ""
+    for line in content.splitlines(keepends=True):
+        if line.startswith("---") and not blocks:
+            header += pending + line
+            pending = ""
+        elif line.startswith((" ", "\t", "-")) and blocks:
+            key, text = blocks[-1]
+            blocks[-1] = (key, text + pending + line)
+            pending = ""
+        elif not line.strip() or line.startswith("#"):
+            pending += line
+        else:
+            blocks.append((line.split(":", 1)[0], pending + line))
+            pending = ""
+    ordered = sorted(blocks, key=lambda block: (block[0] != INHERIT_KEY, block[0]))
+    if ordered == blocks:
+        return content
+    # A last block without a final newline must not run into the block after it.
+    texts = [text if text.endswith("\n") else text + "\n" for _, text in ordered]
+    return header + "".join(texts) + pending
+
+
 def _should_check_equations(path: Path) -> bool:
     """Return True if the file contains metric equations to check."""
     path_str = str(path)
@@ -440,6 +481,13 @@ def _should_skip_file(path: Path) -> bool:
     return False
 
 
+class _EquationLoader(yaml.SafeLoader):
+    """SafeLoader that accepts the metric library's REMOVE_TAG."""
+
+
+_EquationLoader.add_constructor(REMOVE_TAG, lambda loader, node: None)
+
+
 def _apply_fixes(content: str, equations: list[tuple[str, str, str]]) -> str:
     """Apply equation normalizations using regex to handle multi-line YAML."""
     result = content
@@ -449,6 +497,16 @@ def _apply_fixes(content: str, equations: list[tuple[str, str, str]]) -> str:
             pattern = re.escape(original).replace(r"\ ", r"\s+")
             result = re.sub(pattern, normalized, result, count=1)
     return result
+
+
+def _loads_the_same(content: str, rewritten: str) -> bool:
+    """Return True if rewritten loads to the same data as content."""
+    try:
+        return yaml.load(rewritten, Loader=_EquationLoader) == yaml.load(
+            content, Loader=_EquationLoader
+        )
+    except yaml.YAMLError:
+        return False
 
 
 def check_file(
@@ -461,7 +519,7 @@ def check_file(
     try:
         with open(path, encoding="utf-8") as f:
             content = f.read()
-        data = yaml.safe_load(content)
+        data = yaml.load(content, Loader=_EquationLoader)
     except (yaml.YAMLError, OSError) as e:
         return False, [f"Failed to parse YAML: {e}"]
 
@@ -481,10 +539,22 @@ def check_file(
                 issues.append(f"    - {value}")
                 issues.append(f"    + {normalized}")
 
-    if fix and equations_to_fix:
+    fixed = _apply_fixes(content, equations_to_fix)
+    if METRIC_LIBRARY_PATTERN in str(path):
+        ordered = sort_top_level_keys(fixed)
+        if ordered != fixed and not _loads_the_same(fixed, ordered):
+            return False, [
+                "  top-level keys are not sorted, and sorting them changes what the "
+                "file loads (an alias before its anchor?); sort them by hand"
+            ]
+        if ordered != fixed:
+            issues.append("  top-level keys are not sorted")
+            fixed = ordered
+
+    if fix and fixed != content:
         with open(path, "w", encoding="utf-8") as f:
-            f.write(_apply_fixes(content, equations_to_fix))
-        return True, [f"  Fixed {len(equations_to_fix)} equation(s)"]
+            f.write(fixed)
+        return True, ["  Fixed:", *issues]
 
     return len(issues) == 0, issues
 
