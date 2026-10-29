@@ -40,6 +40,7 @@ using RcclUnitTesting::LogHas;
 class NetIbCastGinMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
+    InstallSucceedingSocketFakes();  // logging reads the peer address
     InitFakeContext(&ctx_, &device_);
     snprintf(device_.name, sizeof(device_.name), "ionic_0");
     pd_.context = &ctx_;

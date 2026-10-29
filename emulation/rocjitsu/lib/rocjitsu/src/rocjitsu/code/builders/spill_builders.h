@@ -242,16 +242,17 @@ build_wait_all_loads_complete(rj_code_arch_t arch, const util::DiagnosticEmitter
   // probe call still reaches emit_probe_call and needs the unconditional boundary
   // drain. Its monolithic s_waitcnt 0 drains vmcnt+lgkmcnt, same as CDNA3/4.
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return std::vector<uint32_t>{build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0)};
+    return std::vector<uint32_t>{build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return std::vector<uint32_t>{build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0)};
+    return std::vector<uint32_t>{build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return std::vector<uint32_t>{build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0)};
+    return std::vector<uint32_t>{build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return std::vector<uint32_t>{build_sopp_encoding(arch, rdna4::kSWaitLoadcntDscntSopp, 0),
-                                 build_sopp_encoding(arch, rdna4::kSWaitSamplecntSopp, 0),
-                                 build_sopp_encoding(arch, rdna4::kSWaitBvhcntSopp, 0),
-                                 build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0)};
+    return std::vector<uint32_t>{
+        build_sopp_encoding(arch, rdna4::kSWaitLoadcntDscntSopp, 0).value(),
+        build_sopp_encoding(arch, rdna4::kSWaitSamplecntSopp, 0).value(),
+        build_sopp_encoding(arch, rdna4::kSWaitBvhcntSopp, 0).value(),
+        build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0).value()};
   default:
     return error != nullptr
                ? error->emit()

@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
@@ -1033,6 +1034,19 @@ ExpandResult lower_cvt_f32_bf16_vop1_cdna4_to_cdna3(const Instruction &inst, uin
   }
 
   std::vector<uint32_t> words;
+  if (auto bf16 = amdgpu::resolve_inline_bfloat16_statically(src.src0)) {
+    // Resolve the source numerically before selecting the raw move carrier.
+    // Reuse an FP32 inline only when it exactly matches the widened BF16 bits.
+    const uint32_t widened = uint32_t{*bf16} << 16;
+    const bool reuse_inline = amdgpu::resolve_src_scalar_statically(src.src0) == widened;
+    words.push_back(
+        cdna3::build_vop1(cdna3::kVMovB32Vop1,
+                          {.src0 = reuse_inline ? static_cast<uint16_t>(src.src0) : kSrcLiteral32,
+                           .vdst = static_cast<uint8_t>(src.vdst)})[0]);
+    if (!reuse_inline)
+      words.push_back(widened);
+    return ExpandResult::success(std::move(words));
+  }
   // BF16 has the same sign and exponent layout as FP32, with the mantissa
   // truncated to the high 7 fraction bits. Converting BF16 bits in SRC0[15:0]
   // to FP32 is therefore just placing those 16 bits in FP32[31:16] and zeroing

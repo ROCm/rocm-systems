@@ -133,7 +133,7 @@ inline void append(std::vector<uint32_t> &words,
 // 0xfffe is the value LLVM's amdgpu-wait-sgpr-hazards pass emits for it.
 inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    words.push_back(build_sopp_encoding(arch, rdna4::kSWaitAluSopp, 0xfffe));
+    words.push_back(build_sopp_encoding(arch, rdna4::kSWaitAluSopp, 0xfffe).value());
 }
 
 } // namespace detail
