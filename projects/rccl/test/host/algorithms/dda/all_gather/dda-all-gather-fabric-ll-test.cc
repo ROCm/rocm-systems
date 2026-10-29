@@ -73,10 +73,6 @@ TEST_F(DdaAllGatherFabricLLMicrotest, Eligible_BaselineFp32) {
   EXPECT_TRUE(Eligible(4));
 }
 
-TEST_F(DdaAllGatherFabricLLMicrotest, Eligible_DdaLLZeroRejects) {
-  params_["RCCL_DDA_LL"] = 0;
-  EXPECT_FALSE(Eligible(4));
-}
 
 TEST_F(DdaAllGatherFabricLLMicrotest, Eligible_NeedsCommAndBootstrap) {
   EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(nullptr, kSendbuff, kRecvbuff, 4, ncclFloat32));

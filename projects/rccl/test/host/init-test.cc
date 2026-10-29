@@ -22,10 +22,6 @@
 #include <memory>
 #include <new>
 #include <string>
-#if defined(__linux__)
-#include <sys/prctl.h>
-#endif
-#include <sys/resource.h>
 #include <tuple>
 #include <utility>
 #include <atomic>
@@ -35,6 +31,7 @@
 #include "fakes/init_fakes.h"
 #include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
 #include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
+#include "fakes/rccl_wrap_fakes.h"                   // g_rcclScaleCollLl128BuffSize{Calls,Factor}
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
@@ -87,6 +84,7 @@ static inline int __get_cpuid(unsigned int __leaf, unsigned int* __eax,
 #include "kernel_config.h"
 #include "os.h"
 
+#include "ExpectedCrash.h"
 #include "ScopedHook.h"
 
 // Each default forwards to what the UUT would otherwise call, so an uninstalled redirect is a no-op.
@@ -191,33 +189,6 @@ class DeleteWatch {
   }
   int hits() const { return g_deleteWatchHits; }
 };
-
-// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it; match the exit instead.
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
-#else
-#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
-#endif
-
-// These tests deliberately raise fatal signals. Some CI environments enable core dumps, and a
-// shuffled death test can inherit a large address space from an earlier test. Dumping that address
-// space turns a millisecond assertion into a multi-second test. PR_SET_DUMPABLE covers both regular
-// core files and piped collectors (for which Linux ignores RLIMIT_CORE); retain the limit as defense
-// in depth. Apply both inside the death statement so only gtest's child is affected and unexpected
-// parent-process crashes remain dumpable.
-static void DisableCoreDumpsForExpectedCrash() {
-#if defined(__linux__)
-  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
-    std::perror("prctl(PR_SET_DUMPABLE) failed");
-    _exit(1);
-  }
-#endif
-  const struct rlimit noCore = {0, 0};
-  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
-    std::perror("setrlimit(RLIMIT_CORE) failed");
-    _exit(1);
-  }
-}
 
 class InitMicrotest : public ::testing::Test {
  protected:
@@ -1788,7 +1759,7 @@ class FillInfoComm {
   std::unique_ptr<ncclNet_t> net_;
 };
 
-hsa_status_t FakeExportDmaBuf(const void*, size_t, int*, uint64_t*) {
+hsa_status_t FakeInitExportDmaBuf(const void*, size_t, int*, uint64_t*) {
   return hsa_status_t(0);
 }
 }  // namespace
@@ -1816,7 +1787,7 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
   // AMD dmaBufSupported arm: regMrDmaBuf present + pfn_hsa non-null -> ncclSuccess.
   c.net()->regMrDmaBuf =
       reinterpret_cast<decltype(c.net()->regMrDmaBuf)>(static_cast<uintptr_t>(0x1));
-  pfn_hsa_amd_portable_export_dmabuf = &FakeExportDmaBuf;
+  pfn_hsa_amd_portable_export_dmabuf = &FakeInitExportDmaBuf;
   ncclPeerInfo info{};
   EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
   EXPECT_TRUE(info.hasFineGrain);
@@ -2145,6 +2116,166 @@ TEST_F(InitMicrotest, SetTuningPartition_OnlyRankZeroOfGfx1250Logs) {
     EXPECT_EQ(&kFakeSpxTable, t.comm.get()->archThresholds);
     EXPECT_FALSE(LogHas(log, "tuning")) << "actual log:\n" << log;
   }
+}
+
+namespace {
+hipError_t FakeDevicePropsWithArch(hipDeviceProp_t* prop, const char* arch) {
+  *prop = hipDeviceProp_t{};
+  std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "%s:sramecc+:xnack-", arch);
+  return hipSuccess;
+}
+}  // namespace
+
+// A rank can use RCCL_IB_GDR_FLUSH_FLAG only on the internal IB net, with net_ib's own conditions met, on a
+// GPU whose fine-grained VRAM the proxy can write (gfx942/gfx950).
+TEST_F(InitMicrotest, FillInfo_IbGdrFlushFlagNeedsNetIbLocalSupportAndArch) {
+  FillInfoComm c;
+  auto run = [&](ncclNet_t* net, bool localSupport, const char* arch) {
+    c.get()->ncclNet = net;
+    g_ibGdrFlushFlagLocalSupport = localSupport;
+    g_hipGetDeviceProperties = [arch](hipDeviceProp_t* prop, int) { return FakeDevicePropsWithArch(prop, arch); };
+    ncclPeerInfo info{};
+    EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+    return info.ibGdrFlushFlag;
+  };
+  EXPECT_TRUE(run(&ncclNetIb, true, "gfx950"));
+  EXPECT_TRUE(run(&ncclNetIb, true, "gfx942"));
+  EXPECT_FALSE(run(c.net(), true, "gfx950")) << "another net";
+  EXPECT_FALSE(run(&ncclNetIb, false, "gfx950")) << "net_ib rules it out (or the flag is off)";
+  EXPECT_FALSE(run(&ncclNetIb, true, "gfx90a")) << "no CPU-writable fine-grained VRAM";
+  EXPECT_FALSE(run(&ncclNetIb, true, "gfx1250")) << "no CPU-writable fine-grained VRAM";
+}
+
+namespace {
+// A comm on `net` whose ranks reported `capable` in AllGather1, as rcclSetIbGdrFlushFlag sees it.
+struct IbGdrFlushFlagComm {
+  IbGdrFlushFlagComm(std::initializer_list<bool> capable, ncclNet_t* net = &ncclNetIb, int rank = 0)
+      : peers(capable.size()) {
+    size_t i = 0;
+    for (bool c : capable) peers[i++].ibGdrFlushFlag = c;
+    comm.get()->peerInfo = peers.data();
+    comm.get()->nRanks = static_cast<int>(peers.size());
+    comm.get()->rank = rank;
+    comm.get()->ncclNet = net;
+    comm.get()->netContext = &ctx;
+  }
+  ~IbGdrFlushFlagComm() { comm.get()->peerInfo = nullptr; }
+  std::string Run(ncclComm* parent = nullptr) {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    return RcclUnitTesting::CaptureLog([&] { rcclSetIbGdrFlushFlag(comm.get(), parent); });
+  }
+  FillInfoComm comm;
+  std::vector<ncclPeerInfo> peers;
+  int ctx = 0;
+};
+}  // namespace
+
+// Ranks set up net receives and pick algorithms on their own, so the comm uses the flag only when all can.
+TEST_F(InitMicrotest, SetIbGdrFlushFlag_OnOnlyWhenEveryRankCan) {
+  {
+    IbGdrFlushFlagComm t({true, true, true});
+    const std::string log = t.Run();
+    EXPECT_TRUE(t.comm.get()->ibGdrFlushFlag);
+    ASSERT_EQ(1u, g_ibSetGdrFlushFlagCalls.size());
+    EXPECT_EQ(std::make_pair((void*)&t.ctx, 1), g_ibSetGdrFlushFlagCalls[0]);
+    EXPECT_TRUE(LogHas(log, "RCCL_IB_GDR_FLUSH_FLAG enabled for this comm")) << "actual log:\n" << log;
+  }
+  g_ibSetGdrFlushFlagCalls.clear();
+  {
+    IbGdrFlushFlagComm t({true, false, true});
+    const std::string log = t.Run();
+    EXPECT_FALSE(t.comm.get()->ibGdrFlushFlag);
+    ASSERT_EQ(1u, g_ibSetGdrFlushFlagCalls.size());
+    EXPECT_EQ(std::make_pair((void*)&t.ctx, 0), g_ibSetGdrFlushFlagCalls[0]);
+    EXPECT_TRUE(LogHas(log, "2 of 3 ranks can use it")) << "actual log:\n" << log;
+  }
+  g_ibSetGdrFlushFlagCalls.clear();
+  {
+    IbGdrFlushFlagComm t({false, false});
+    const std::string log = t.Run();
+    EXPECT_FALSE(t.comm.get()->ibGdrFlushFlag);
+    EXPECT_FALSE(LogHas(log, "ranks can use it")) << "nobody asked for it, nothing to report:\n" << log;
+  }
+}
+
+// Only rank 0 reports a mixed comm; other nets have no context to set.
+TEST_F(InitMicrotest, SetIbGdrFlushFlag_MixedReportedByRankZeroAndOtherNetsUntouched) {
+  {
+    IbGdrFlushFlagComm t({true, false}, &ncclNetIb, /*rank=*/1);
+    const std::string log = t.Run();
+    EXPECT_FALSE(t.comm.get()->ibGdrFlushFlag);
+    EXPECT_FALSE(LogHas(log, "ranks can use it")) << "actual log:\n" << log;
+  }
+  g_ibSetGdrFlushFlagCalls.clear();
+  ncclNet_t otherNet{};
+  IbGdrFlushFlagComm t({false, false}, &otherNet);
+  t.Run();
+  EXPECT_FALSE(t.comm.get()->ibGdrFlushFlag);
+  EXPECT_TRUE(g_ibSetGdrFlushFlagCalls.empty()) << "only an ncclNetIb context holds the decision";
+}
+
+// A net context shared with the parent keeps the parent's decision; the votes, which carry the parent's
+// decision (rcclFillSharedParentInfo), decide for the comm.
+TEST_F(InitMicrotest, SetIbGdrFlushFlag_SharedNetContextKeepsTheParentsDecision) {
+  for (bool vote : {false, true}) {
+    g_ibSetGdrFlushFlagCalls.clear();
+    IbGdrFlushFlagComm t({true, vote});
+    FillInfoComm parent;
+    parent.get()->netContext = &t.ctx;
+    parent.get()->ibGdrFlushFlag = true;
+    t.Run(parent.get());
+    EXPECT_EQ(vote, t.comm.get()->ibGdrFlushFlag) << "vote " << vote;
+    EXPECT_TRUE(g_ibSetGdrFlushFlagCalls.empty()) << "the shared context belongs to the parent";
+  }
+  g_ibSetGdrFlushFlagCalls.clear();
+  IbGdrFlushFlagComm t({true, true});
+  FillInfoComm parent;
+  int parentCtx = 0;
+  parent.get()->netContext = &parentCtx;
+  parent.get()->ibGdrFlushFlag = false;
+  t.Run(parent.get());
+  EXPECT_TRUE(t.comm.get()->ibGdrFlushFlag) << "a comm with its own context decides alone";
+  EXPECT_EQ(1u, g_ibSetGdrFlushFlagCalls.size());
+}
+
+// A rank sharing its parent's resources votes the parent's flag decision and LL128 sizes, so the new ranks of an
+// ncclCommGrow, which have no parent, reach the same decision as the existing ones.
+TEST_F(InitMicrotest, FillSharedParentInfo_SharingRankVotesTheParentsDecision) {
+  FillInfoComm parent;
+  parent.get()->buffSizes[NCCL_PROTO_LL128] = 4 << 20;
+  parent.get()->p2pLl128BuffSize = 1 << 20;
+  for (bool share : {false, true}) {
+    for (bool parentOn : {false, true}) {
+      parent.get()->shareResources = share;
+      parent.get()->ibGdrFlushFlag = parentOn;
+      ncclPeerInfo info{};
+      info.ibGdrFlushFlag = true;
+      rcclFillSharedParentInfo(&info, parent.get());
+      EXPECT_EQ(!share || parentOn, info.ibGdrFlushFlag) << "share " << share << " parent " << parentOn;
+      EXPECT_EQ(share ? 4 << 20 : 0, info.sharedLl128BuffSize) << "share " << share;
+      EXPECT_EQ(share ? 1 << 20 : 0, info.sharedP2pLl128BuffSize) << "share " << share;
+    }
+  }
+  {
+    ncclPeerInfo info{};
+    rcclFillSharedParentInfo(&info, parent.get());
+    EXPECT_FALSE(info.ibGdrFlushFlag) << "the parent's decision cannot make an incapable rank capable";
+  }
+  {
+    ncclPeerInfo info{};
+    info.ibGdrFlushFlag = true;
+    rcclFillSharedParentInfo(&info, nullptr);
+    EXPECT_TRUE(info.ibGdrFlushFlag);
+    EXPECT_EQ(0, info.sharedLl128BuffSize);
+  }
+
+  // Existing ranks 0 and 1 share a parent that decided 0; new ranks 2 and 3 are capable and have no parent.
+  IbGdrFlushFlagComm grown({true, true, true, true}, &ncclNetIb, /*rank=*/2);
+  parent.get()->shareResources = true;
+  parent.get()->ibGdrFlushFlag = false;
+  for (int r = 0; r < 2; r++) rcclFillSharedParentInfo(&grown.peers[r], parent.get());
+  grown.Run();
+  EXPECT_FALSE(grown.comm.get()->ibGdrFlushFlag) << "a new rank counts the existing ranks' parent decision";
 }
 
 TEST_F(InitMicrotest, CommInitAll_GetDeviceFault_StopsBeforeCount) {
@@ -5492,6 +5623,110 @@ TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwnerWithLargerShared_KeepsIt
   EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 15, s.comm()->p2pChunkSize);
   EXPECT_EQ(1 << 20, s.shared()->tpP2pChunkSize);
+}
+
+// --- computeBuffSizes: the collective LL128 scaling (rcclScaleCollLl128BuffSize) and its shared-parent override ---
+
+namespace {
+// The rcclScaleCollLl128BuffSize fake multiplies buffSizes[NCCL_PROTO_LL128] by this factor.
+struct ScopedLl128ScaleFake {
+  explicit ScopedLl128ScaleFake(int factor) {
+    g_rcclScaleCollLl128BuffSizeCalls = 0;
+    g_rcclScaleCollLl128BuffSizeFactor = factor;
+  }
+  ~ScopedLl128ScaleFake() {
+    g_rcclScaleCollLl128BuffSizeCalls = 0;
+    g_rcclScaleCollLl128BuffSizeFactor = 1;
+  }
+};
+}  // namespace
+
+TEST_F(InitMicrotest, ComputeBuffSizes_DefaultLl128_ScalesTheCollectiveBufferOnly) {
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1, g_rcclScaleCollLl128BuffSizeCalls);
+  ASSERT_GT(s.comm()->p2pLl128BuffSize, 0);
+  EXPECT_EQ(4 * s.comm()->p2pLl128BuffSize, s.comm()->buffSizes[NCCL_PROTO_LL128])
+      << "send/recv must keep the unscaled size: it is read before the scaling";
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_UserLl128BuffSize_SkipsTheScaling) {
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  SetParams({{"LL128_BUFFSIZE", 1 << 20}});
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(0, g_rcclScaleCollLl128BuffSizeCalls) << "NCCL_LL128_BUFFSIZE turns the scaling off";
+  EXPECT_EQ(1 << 20, s.comm()->buffSizes[NCCL_PROTO_LL128]);
+  EXPECT_EQ(1 << 20, s.comm()->p2pLl128BuffSize);
+}
+namespace {
+// peerInfo for nRanks ranks; shared[r] is rank r's sharedLl128BuffSize (send/recv size: 448 KiB when nonzero).
+std::vector<ncclPeerInfo> SharedLl128Peers(const std::vector<int>& shared) {
+  std::vector<ncclPeerInfo> peers(shared.size() + 1);  // + the CollNet root slot, as in initTransportsRank
+  for (size_t r = 0; r < shared.size(); r++) {
+    peers[r].sharedLl128BuffSize = shared[r];
+    peers[r].sharedP2pLl128BuffSize = shared[r] > 0 ? 448 << 10 : 0;
+  }
+  return peers;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, ComputeBuffSizes_RankSharingAProxy_TakesItsLl128Sizes) {
+  // The rank's proxy, shared with its parent, sized and strides its LL128 net buffers with the parent's sizes.
+  for (int ownFactor : {1, 4}) {
+    for (int sharedFactor : {1, 4}) {
+      ScopedLl128ScaleFake scale(ownFactor);
+      BuffSizes_Scene s;
+      s.comm()->nNodes = 2;
+      s.comm()->nRanks = 2;
+      s.comm()->rank = 0;
+      auto peers = SharedLl128Peers({sharedFactor * (448 << 10), sharedFactor * (448 << 10)});
+      s.comm()->peerInfo = peers.data();
+      EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+      EXPECT_EQ(sharedFactor * (448 << 10), s.comm()->buffSizes[NCCL_PROTO_LL128])
+          << "shared x" << sharedFactor << ", own x" << ownFactor;
+      EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize) << "shared x" << sharedFactor << ", own x" << ownFactor;
+    }
+  }
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_GrowNewRank_AdoptsTheExistingRanksLl128Sizes) {
+  // ncclCommGrow 1x8 -> 2x8: existing ranks share the old comm's unscaled proxy, new ranks have no parent and would
+  // scale; they must match or the ranks pick different algorithms (rcclUpdateRemoteFlushAlgoProto reads buffSizes).
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  s.comm()->nRanks = 4;
+  s.comm()->rank = 3;
+  auto peers = SharedLl128Peers({0, 448 << 10, 448 << 10, 0});
+  s.comm()->peerInfo = peers.data();
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(448 << 10, s.comm()->buffSizes[NCCL_PROTO_LL128]);
+  EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_OwnSharedSizeWinsOverLowerRanks) {
+  ScopedLl128ScaleFake scale(1);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  s.comm()->nRanks = 2;
+  s.comm()->rank = 1;
+  auto peers = SharedLl128Peers({448 << 10, 4 * (448 << 10)});
+  s.comm()->peerInfo = peers.data();
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(4 * (448 << 10), s.comm()->buffSizes[NCCL_PROTO_LL128]) << "this rank's own proxy sizes";
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NoRankShares_KeepsItsOwnLl128Sizes) {
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  s.comm()->nRanks = 2;
+  s.comm()->rank = 0;
+  auto peers = SharedLl128Peers({0, 0});
+  s.comm()->peerInfo = peers.data();
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  ASSERT_GT(s.comm()->p2pLl128BuffSize, 0);
+  EXPECT_EQ(4 * s.comm()->p2pLl128BuffSize, s.comm()->buffSizes[NCCL_PROTO_LL128]);
 }
 
 // --- fillInfo: the AMD SMI UALoE/MNNVL fabric probe (init.cc:1200-1219) ---

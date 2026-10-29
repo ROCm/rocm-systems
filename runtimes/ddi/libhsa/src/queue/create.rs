@@ -77,6 +77,9 @@ pub(crate) unsafe fn create_hardware_queue(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
+        if runtime.stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         let Some(index) = runtime.gpu_index(agent) else {
             return INVALID_AGENT;
         };
@@ -303,15 +306,25 @@ pub(crate) unsafe fn create_hardware_queue(
             callback,
             callback_data: data,
             vm_faulted: false,
+            vm_fault_callback_state: VmFaultCallbackState::Unseen,
             vm_fault_address: 0,
             vm_fault_reason: 0,
             teardown_started: false,
         },
     );
     runtime.queue_state.released_counted_queues.remove(&public);
+    let observer_failed = runtime.system_event_failed.clone();
     let event_worker = thread::Builder::new()
         .name("rocddi-queue-events".into())
-        .spawn(move || queue_event_worker(&prepared.stop, &worker_alive, &worker_signal, public));
+        .spawn(move || {
+            queue_event_worker(
+                &prepared.stop,
+                &worker_alive,
+                &worker_signal,
+                &observer_failed,
+                public,
+            )
+        });
     let Ok(event_worker) = event_worker else {
         let Some(mut record) = runtime.queue_state.queues.remove(&public) else {
             prepared.tracker.quarantine();
@@ -407,31 +420,6 @@ fn abandon_unpublished_retained(
     }
 }
 
-/// Validates the requested SDMA engine against the queue transport.
-fn validated_sdma_engine(info: QueueTransport, size: u32) -> Option<u32> {
-    let engine_id = info.sdma_engine_id?;
-    (info.ring_size_bytes == u64::from(size)
-        && info.ring_host_address != 0
-        && info.index_unit_bytes == 1
-        && !info.read_index_wraps
-        && info.read_index_width == QueueAccessWidth::Bits64
-        && info.write_index_width == QueueAccessWidth::Bits64
-        && info.doorbell_width == QueueAccessWidth::Bits64
-        && info.read_index_host_address != 0
-        && info.read_index_host_address % std::mem::align_of::<AtomicU64>() == 0
-        && info.write_index_host_address != 0
-        && info.write_index_host_address % std::mem::align_of::<AtomicU64>() == 0
-        && info.read_index_host_address != info.write_index_host_address
-        && info.read_index_device_address != 0
-        && info.write_index_device_address != 0
-        && info.doorbell_host_address != 0
-        && info.doorbell_host_address % std::mem::align_of::<u64>() == 0
-        && info
-            .doorbell_device_address
-            .is_some_and(|address| address != 0))
-    .then_some(engine_id)
-}
-
 /// # Safety
 /// `queue` addresses writable output storage. The caller serializes native
 /// queue publication and destruction with all producers.
@@ -459,6 +447,9 @@ pub(crate) unsafe fn create_sdma_queue(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
+        if runtime.stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         let Some(index) = runtime.gpu_index(agent) else {
             return INVALID_AGENT;
         };
@@ -517,7 +508,7 @@ pub(crate) unsafe fn create_sdma_queue(
         }
     };
     let info = native.info();
-    let Some(engine_id) = validated_sdma_engine(info, size_bytes) else {
+    let Some(engine_id) = info.sdma_engine_id else {
         return abandon_unpublished_tracked(
             native,
             (),

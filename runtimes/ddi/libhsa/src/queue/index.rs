@@ -25,19 +25,20 @@ pub(crate) unsafe fn with_queue_index<R>(
     index: QueueIndex,
     operation: impl for<'a> FnOnce(&'a AtomicU64) -> R,
 ) -> Option<R> {
+    let _admission = crate::runtime::enter_public_raw_handle()?;
     if queue.is_null() {
         return None;
     }
     let address = if queue as usize & COUNTED_QUEUE_HANDLE_BIT != 0 {
         // SAFETY: A live counted handle points at CountedQueuePublic::header,
         // whose preceding word holds the stable hardware queue address.
-        let hardware = unsafe {
-            (*queue
+        let public = unsafe {
+            &*queue
                 .cast::<u8>()
                 .sub(COUNTED_QUEUE_HANDLE_BIT)
-                .cast::<CountedQueuePublic>())
-            .hardware_queue
+                .cast::<CountedQueuePublic>()
         };
+        let hardware = public.hardware_queue;
         // SAFETY: The counted handle retains this validated hardware control.
         match index {
             QueueIndex::Read => unsafe { AqlControlRegion::read_index_address_at(hardware) },
