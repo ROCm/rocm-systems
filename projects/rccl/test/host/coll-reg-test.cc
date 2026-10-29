@@ -1319,32 +1319,22 @@ TEST_F(RegisterCollRingMicrotest, GraphNetMissWithoutLocalRegister_LeavesBufferU
   EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
 }
 
-TEST_F(RegisterCollRingMicrotest, OneRpnBroadcastRegistered_CapsChannelsAtNetCount) {
+TEST_F(RegisterCollRingMicrotest, OneRpnGatherRegistered_CapsChannelsAtNetCount) {
   comm_->isAllDirectP2p = false;
   comm_->isOneRPN = true;
   comm_->minNetCount = 3;
-  task_.func = ncclFuncBroadcast;
-  task_.nMaxChannels = 32;
   NetLocalRegisters({1, 1, 1});
-  EXPECT_EQ(Run(), ncclSuccess);
-  EXPECT_EQ(task_.nMaxChannels, 3);
-}
-
-TEST_F(RegisterCollRingMicrotest, OneRpnAllGatherRegistered_CapsChannelsOnlyWithNetOffloadKernel) {
-  comm_->isAllDirectP2p = false;
-  comm_->isOneRPN = true;
-  comm_->minNetCount = 3;
-  task_.func = ncclFuncAllGather;
-  task_.nMaxChannels = 32;
-  NetLocalRegisters({1, 1, 1});
-  EXPECT_EQ(Run(), ncclSuccess);
-  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
-#if NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
-  EXPECT_EQ(task_.nMaxChannels, 3);
-#else
-  // Without the net-offload kernel the ring kernel runs, so registration keeps its channel count.
-  EXPECT_EQ(task_.nMaxChannels, 32);
-#endif
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncBroadcast}) {
+    task_.func = func;
+    task_.nMaxChannels = 32;
+    EXPECT_EQ(Run(), ncclSuccess);
+    EXPECT_EQ(task_.nMaxChannels, 3) << func;
+    free(task_.sendNetHandles);
+    free(task_.recvNetHandles);
+    free(task_.srecvNetHandles);
+    task_.sendNetHandles = task_.recvNetHandles = task_.srecvNetHandles = nullptr;
+    netLocal_.clear();
+  }
 }
 
 TEST_F(RegisterCollRingMicrotest, OneRpnGatherRegistered_KeepsChannelsWithinCtaLimits) {
