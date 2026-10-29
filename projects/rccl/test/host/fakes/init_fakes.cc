@@ -99,6 +99,7 @@ void ResetInitFakes() {
   ResetMemManagerFakes();
   ResetNcclFakes();
   ResetNcclStubs();
+  ResetChannelFakes();
   ResetOsFakes();
   ResetRcclArchThresholdsFakes();
   ResetRcclWrapFakes();
