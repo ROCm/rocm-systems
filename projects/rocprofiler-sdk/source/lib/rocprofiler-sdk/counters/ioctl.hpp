@@ -41,16 +41,16 @@ kfd_profiler_version();
 
 // Whether the given KFD profiler interface version supports dispatch mode (see
 // KFD_IOC_PROFILER_VERSION_NUM history in kfd_ioctl.h). Exposed separately from
-// dispatch_mode_supported() so the version-comparison logic can be unit tested without a real
+// perfmon_clock_supported() so the version-comparison logic can be unit tested without a real
 // /dev/kfd.
 bool
-dispatch_mode_supported_for_version(uint32_t version);
+perfmon_clock_supported_for_version(uint32_t version);
 
-// Whether the running KFD supports dispatch mode, i.e. dispatch_mode_supported_for_version()
+// Whether the running KFD supports dispatch mode, i.e. perfmon_clock_supported_for_version()
 // on the version reported by kfd_profiler_version(). Used internally by
 // counter_collection_dispatch_perfmon_enable() to gate the dispatch-mode ioctl below.
 bool
-dispatch_mode_supported();
+perfmon_clock_supported();
 
 bool
 counter_collection_has_device_lock();
@@ -68,7 +68,7 @@ counter_collection_device_unlock(const rocprofiler_agent_t* agent);
 // unlike device counting above -- it needs no device lock to isolate its counters; there is
 // really no "lock" involved here at all, which is why this is a separate call rather than a
 // mode of counter_collection_device_lock(). Starting at KFD_IOC_PROFILER_VERSION_NUM 2 (see
-// dispatch_mode_supported()) KFD supports a non-exclusive KFD_IOC_PROFILER_PMC request
+// perfmon_clock_supported()) KFD supports a non-exclusive KFD_IOC_PROFILER_PMC request
 // (lock=0, perfcount_enable=1) that just forces the perfmon clock on, without requiring
 // CAP_PERFMON; a no-op success on older Linux kernels that lack this. KFD only clears the
 // perfmon clock request when this process's KFD device context is torn down (e.g. process

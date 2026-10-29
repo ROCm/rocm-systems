@@ -135,23 +135,32 @@ get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_ve
     return AMDKFD_IOC_PROFILER;
 }
 
+// The KFD profiler interface version at which KFD_IOC_PROFILER_PMC lock also started forcing
+// the perfmon clock on (see the KFD_IOC_PROFILER_VERSION_NUM history in kfd_ioctl.h). This is
+// intentionally NOT KFD_IOC_PROFILER_VERSION_NUM: that macro is the latest version this header
+// knows about and keeps climbing as unrelated ops are added, whereas this feature's minimum
+// version is fixed at the version that introduced it. Comparing against the live macro would
+// wrongly require a newer kernel than necessary whenever the SDK is built against a header with
+// a higher KFD_IOC_PROFILER_VERSION_NUM than the running kernel implements.
+constexpr uint32_t kPerfmonClockMinVersion = 2;
+
 bool
-dispatch_mode_supported_for_version(uint32_t version)
+perfmon_clock_supported_for_version(uint32_t version)
 {
-    return version >= KFD_IOC_PROFILER_VERSION_NUM;
+    return version >= kPerfmonClockMinVersion;
 }
 
 // Dispatch mode (KFD_IOC_PROFILER_PMC with lock=0, perfcount_enable=1) trades the old
 // exclusive profiler_process lock for a per-process perfmon clock override, and relies on
 // process teardown (not an explicit unlock ioctl) to release it. The kernel only honors this
-// behavior starting at KFD_IOC_PROFILER_VERSION_NUM 2; older Linux kernels don't support it at
+// behavior starting at kPerfmonClockMinVersion (2); older Linux kernels don't support it at
 // all, so counter_collection_dispatch_perfmon_enable() treats this as a no-op rather than
 // issuing the ioctl. Version numbers are cumulative (see the history comment above
 // KFD_IOC_PROFILER_VERSION_NUM in kfd_ioctl.h), so any version >= 2 retains this behavior.
 bool
-dispatch_mode_supported()
+perfmon_clock_supported()
 {
-    return dispatch_mode_supported_for_version(kfd_profiler_version());
+    return perfmon_clock_supported_for_version(kfd_profiler_version());
 }
 
 uint32_t
@@ -218,7 +227,7 @@ counter_collection_dispatch_perfmon_enable(const rocprofiler_agent_t* agent)
     CHECK(agent);
 
     // A no-op success on kernels that don't support dispatch mode.
-    if(!dispatch_mode_supported()) return ROCPROFILER_STATUS_SUCCESS;
+    if(!perfmon_clock_supported()) return ROCPROFILER_STATUS_SUCCESS;
 
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_PMC;
