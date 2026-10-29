@@ -64,8 +64,13 @@ def _load_function(wrapper: types.SimpleNamespace) -> Any:
 
 
 def _fake_wrapper() -> Tuple[types.SimpleNamespace, List[tuple]]:
-    """A wrapper that reports one counter and logs every scoped call. It has no setter."""
+    """A wrapper that reports one counter and logs every scoped call and every scope-setter call."""
     calls: List[tuple] = []
+    setter_calls: List[tuple] = []
+
+    def fake_set_scope(*args: Any) -> int:
+        setter_calls.append(args)
+        return _STATUS_SUCCESS
 
     def fake_get_stats(*args: Any) -> int:
         calls.append(args)
@@ -81,6 +86,8 @@ def _fake_wrapper() -> Tuple[types.SimpleNamespace, List[tuple]]:
         amdsmi_nic_stat_t=_Stat,
         AMDSMI_NIC_STAT_SCOPE_DEFAULT=_SCOPE_DEFAULT,
         amdsmi_get_nic_vendor_statistics_with_scope=fake_get_stats,
+        amdsmi_set_nic_stat_scope=fake_set_scope,
+        setter_calls=setter_calls,
     )
     return wrapper, calls
 
@@ -106,8 +113,9 @@ class TestNicVendorStatisticsScope(unittest.TestCase):
     def test_no_state_is_set_on_the_handle(self) -> None:
         wrapper, _ = _fake_wrapper()
 
-        # The fake wrapper has no amdsmi_set_nic_stat_scope: a call to it raises AttributeError.
         _load_function(wrapper)(_FakeHandle(), _PORT_INDEX, scope=_SCOPE_EXTENDED)
+
+        self.assertEqual(wrapper.setter_calls, [])
 
     def test_a_failed_query_is_reported(self) -> None:
         wrapper, _ = _fake_wrapper()
