@@ -19,6 +19,12 @@ rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rocmwrap_fakes.cc"
   "int64_t rcclParamForceEnableDMABUF() { return g_loadParam(\"RCCL_FORCE_ENABLE_DMABUF\", 0); }"
   "the ForceEnableDMABUF fake default")
+rccl_assert_source_line("${_rccl_src_root}/transport/net.cc"
+  "NCCL_PARAM(GdrCopySyncEnable, \"GDRCOPY_SYNC_ENABLE\", 1);"
+  "fakes/transport_stubs.cc: ncclParamGdrCopySyncEnable()")
+rccl_assert_source_line("${_rccl_src_root}/transport/net.cc"
+  "NCCL_PARAM(GdrCopyFlushEnable, \"GDRCOPY_FLUSH_ENABLE\", 0);"
+  "fakes/transport_stubs.cc: ncclParamGdrCopyFlushEnable()")
 # src/enqueue/task_prep/*.cc declare these five but define none, and param_redirect.h only rewrites
 # NCCL_PARAM where it expands, so the hand-written bodies below are the only definitions on that link line.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
@@ -209,6 +215,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro -- the broad-coverage micro binary.
   set(TEST_MICRO_SOURCE_FILES
     p2p-test.cc
+    coll-net-test.cc                     # src/transport/coll_net.cc
     rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
     gin-plugin-init-test.cc
@@ -224,6 +231,7 @@ function(rccl_define_micro_source_lists)
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
     net-telemetry-test.cc                # src/transport/net_telemetry.cc, src/include/net_telemetry.h
+    net-socket-test.cc                   # src/transport/net_socket.cc, src/transport/net_socket/common.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
@@ -248,6 +256,7 @@ function(rccl_define_micro_source_lists)
     rccl-graph-gen-test.cc               # src/graph/rccl_graph_gen.cc ring construction + cut balancing
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
@@ -263,8 +272,12 @@ function(rccl_define_micro_source_lists)
     fakes/recorder_fakes.cc
     fakes/profiler_fakes.cc
     fakes/roctx_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/topo_stubs.cc
     fakes/utils_fakes.cc
     fakes/collective_stubs.cc
+    fakes/os_fakes.cc
+    fakes/socket_fakes.cc
     fakes/devcomm_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
@@ -304,6 +317,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes
@@ -381,6 +395,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
@@ -490,6 +505,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
@@ -562,6 +578,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/ce_reduce_fakes.cc             # src/device/ce_reduce.cc
@@ -632,6 +649,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
@@ -671,6 +689,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/collectives_fakes.cc
@@ -695,6 +714,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/collectives_fakes.cc
@@ -730,6 +750,7 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
+    fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
@@ -902,6 +923,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc                  # core floor, incl. proxy profiler hooks
+    fakes/channel_fakes.cc
     fakes/net_ib_cast_common_fakes.cc    # netIbCast
     fakes/net_ib_cast_connect_fakes.cc   # rcclCastNetP2pPolicy
     fakes/os_fakes.cc
@@ -1215,7 +1237,7 @@ function(rccl_standalone_setup)
       message(FATAL_ERROR "GenerateEmbeddedTunerConfigs.cmake failed: ${_gen_tuner_error}")
     endif()
   endif()
-  message(STATUS "hipcc: ${CMAKE_CXX_COMPILER}")
+  message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
   message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 
   # --- Detect whether the system amdsmi.h exposes the UALoE fabric struct ---
@@ -1335,6 +1357,11 @@ function(rccl_standalone_setup)
     __HIP_PLATFORM_AMD__
     NCCL_OS_LINUX
     ROCM_VERSION=70000
+    # init.cc selects amdsmi_wrap.h (amd_smi/amdsmi.h, ships with ROCm) over the
+    # legacy rocm_smi_wrap.h; the amd_smi_* wrapper API it declares is stubbed by
+    # init_fakes.cc, so no SMI runtime is linked. The in-RCCL-build path inherits
+    # this from RCCL_COMMON_COMPILE_DEFS instead.
+    USE_AMDSMI
     $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
     $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
@@ -1551,6 +1578,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroBootstrap
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     BOOTSTRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/bootstrap.cc"
+    RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/bootstrap_micro_fakes.cc defines it
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_bootstrap.yaml")
 
 # ---------------------------------------------------------------------------
@@ -1564,6 +1592,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+    COLL_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/coll_net.cc"
+    RCCL_TRANSPORT_STUBS_OMIT_COLL_NET
+    RCCL_COLLECTIVE_STUBS_OMIT_COLL_NET
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
     # collectives_tmp.cc, not collectives.cc: src/CMakeLists.txt lists src/collectives.cc first,
@@ -1577,6 +1608,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
     NET_TELEMETRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc"
+    NET_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket.cc"
+    # common_tmp.cc: src/CMakeLists.txt lists transport/net_ib/common.cc first.
+    NET_SOCKET_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket/common_tmp.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
@@ -2162,6 +2196,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroProxy
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/proxy.cc"
+    RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/proxy_micro_fakes.cc defines it
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_proxy.yaml")
 
 # ---------------------------------------------------------------------------
