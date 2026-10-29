@@ -10,39 +10,105 @@ import common
 import pandas as pd
 
 from tests.integration import common as integration_common
-from tests.integration.common import CSVS, config, num_devices, num_kernels
+from tests.integration.common import (
+    CSVS,
+    MEMORY_CHART_COUNTERS,
+    SPI_BUSY_COUNTERS,
+    config,
+    num_devices,
+    num_kernels,
+)
 from utils.utils_common import load_yaml
 
 
-def test_block_filter(binary_handler_profile_rocprof_compute):
-    # Memory Chart is block 3 across the supported architecture configurations.
-    options = ["--block", "3"]
-    workload_dir = common.get_output_dir()
-    binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=True, roof=False
-    )
+def profile_block_selection(binary_handler, workload_dir, blocks):
+    options = ["--block", *blocks]
+    binary_handler(config, workload_dir, options, check_success=True, roof=False)
 
     output_files = integration_common.check_csv_files(
         workload_dir, num_devices, num_kernels
     )
     assert sorted(output_files) == CSVS
     profiling_config = load_yaml(Path(workload_dir) / "profiling_config.yaml")
-    assert profiling_config["filter_blocks"] == ["3"]
+    assert profiling_config["filter_blocks"] == blocks
 
     counter_results = integration_common.read_counter_results(workload_dir)
-    assert not counter_results.empty, "Block 3 produced no counter rows"
+    selection = f"Block {' '.join(blocks)}"
+    assert not counter_results.empty, f"{selection} produced no counter rows"
     counter_names = counter_results["Counter_Name"]
-    assert counter_names.notna().all(), "Block 3 produced missing counter names"
+    assert counter_names.notna().all(), f"{selection} produced missing counter names"
     assert counter_names.str.strip().ne("").all(), (
-        "Block 3 produced empty counter names"
+        f"{selection} produced empty counter names"
     )
-    # gfx115x and gfx1250 report this counter with the reduced _sum spelling.
-    assert counter_names.isin([
-        "SQC_TC_DATA_READ_REQ",
-        "SQC_TC_DATA_READ_REQ_sum",
-    ]).any(), "Block 3 did not collect the expected Memory Chart counter"
     counter_values = pd.to_numeric(counter_results["Counter_Value"], errors="coerce")
-    assert counter_values.map(isfinite).all(), "Block 3 produced invalid counter values"
+    assert counter_values.map(isfinite).all(), (
+        f"{selection} produced invalid counter values"
+    )
+    return output_files, set(counter_names)
+
+
+def assert_selected_counters(counter_names, expected_counters, selection):
+    unexpected_counters = counter_names - expected_counters
+    assert not unexpected_counters, (
+        f"{selection} collected counters outside the selected block: "
+        f"{sorted(unexpected_counters)}"
+    )
+
+
+def test_block_filter(binary_handler_profile_rocprof_compute):
+    # Memory Chart is block 3 across the supported architecture configurations.
+    workload_dir = common.get_output_dir()
+    output_files, counter_names = profile_block_selection(
+        binary_handler_profile_rocprof_compute, workload_dir, ["3"]
+    )
+    assert counter_names & MEMORY_CHART_COUNTERS, (
+        "Block 3 did not collect the expected Memory Chart counter"
+    )
+    gpu_arch = output_files["sysinfo.csv"]["gpu_arch"].iloc[0]
+    tables = integration_common.metric_table_counters(gpu_arch, 3)
+    expected_counters = set().union(*tables.values())
+    assert_selected_counters(counter_names, expected_counters, "Block 3")
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_multiple_block_filter(binary_handler_profile_rocprof_compute):
+    workload_dir = common.get_output_dir()
+    output_files, counter_names = profile_block_selection(
+        binary_handler_profile_rocprof_compute, workload_dir, ["3", "6"]
+    )
+    gpu_arch = output_files["sysinfo.csv"]["gpu_arch"].iloc[0]
+    tables = integration_common.metric_table_counters(gpu_arch, 6)
+    workgroup_counters = set().union(*tables.values())
+    spi_busy_counters = workgroup_counters & SPI_BUSY_COUNTERS
+    assert spi_busy_counters, f"{gpu_arch}: block 6 has no SPI utilization counter"
+    assert spi_busy_counters <= counter_names, (
+        "Block 6 SPI utilization counter is missing"
+    )
+    assert counter_names & MEMORY_CHART_COUNTERS, (
+        "Block 3 Memory Chart counter is missing"
+    )
+    memory_tables = integration_common.metric_table_counters(gpu_arch, 3)
+    expected_counters = workgroup_counters | set().union(*memory_tables.values())
+    assert_selected_counters(counter_names, expected_counters, "Blocks 3 6")
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_subsection_filter(binary_handler_profile_rocprof_compute):
+    workload_dir = common.get_output_dir()
+    output_files, counter_names = profile_block_selection(
+        binary_handler_profile_rocprof_compute, workload_dir, ["6.1"]
+    )
+    gpu_arch = output_files["sysinfo.csv"]["gpu_arch"].iloc[0]
+    tables = integration_common.metric_table_counters(gpu_arch, 6)
+    selected_counters = tables[601]
+    spi_busy_counters = selected_counters & SPI_BUSY_COUNTERS
+    sibling_counters = set().union(*tables.values()) - selected_counters
+    assert spi_busy_counters, (
+        f"{gpu_arch}: subsection 6.1 has no SPI utilization counter"
+    )
+    assert sibling_counters, f"{gpu_arch}: subsection 6.1 must narrow block 6"
+    assert spi_busy_counters <= counter_names, "Subsection 6.1 SPI counter is missing"
+    assert_selected_counters(counter_names, selected_counters, "Subsection 6.1")
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
