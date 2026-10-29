@@ -27,7 +27,8 @@ and wait for approval before proceeding. Do NOT commit without confirmation.
 
 **Commit message rules for this repo:**
 
-- First line: concise summary under 72 characters
+- First line: concise summary under 72 characters, in the same
+  `<type>(rocprofiler-compute): ` form as PR titles (see [`pr-workflow.md`](pr-workflow.md))
 - Body: explain the "why", not the "what" — the diff shows the what
 - Separate logical points as bullet list items
 - Highlight bugfixes explicitly and distinctly from feature changes
@@ -50,7 +51,7 @@ and wait for approval before proceeding. Do NOT commit without confirmation.
 
 ```bash
 git commit -m "$(cat <<'EOF'
-[rocprofiler-compute] Your title here
+<type>(rocprofiler-compute): Your title here
 
 - Bullet point one
 - Bullet point two
@@ -106,7 +107,6 @@ while hooks are skipped because pre-commit is missing.
 
 ## What NOT to do
 
-- Do not use `--no-verify` to bypass hooks.
 - Do not use `--no-gpg-sign` to disable commit signing to remote unless explicitly asked.
 - Do not use `--no-verify` or `--no-gpg-sign` to bypass hooks.
 - Do not commit when pre-commit is unavailable. Install it first.

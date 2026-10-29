@@ -20,7 +20,7 @@ Look at ALL commits, not just the latest one.
 
 Never hardcode the PR template. Always infer it from recent PRs:
 
-- Use GitHub MCP tools to search for recent rocprofiler-compute PRs in the repo.
+- Use `gh pr list` and `gh pr view` to find recent rocprofiler-compute PRs in the repo.
 - Read 2-3 recent PR bodies to identify the required sections and format.
 - Match the template exactly — section names, ordering, and checklist format.
 
@@ -74,16 +74,14 @@ approval. Do NOT create the PR without confirmation.
   the repo name — verify it. The rocprofiler-compute project lives within the
   `rocm-systems` monorepo.
 - Ensure the branch is pushed to the remote before creating the PR.
-- Use GitHub MCP tools to create the PR.
-- When using MCP tools, pass the body as a plain string with actual newlines,
-  NOT with escaped `\n` characters — escaped newlines render as literal `\n`
-  in the PR body and break markdown formatting.
+- Create the PR with `gh pr create`, passing the body with `--body-file` so its
+  newlines and markdown arrive unchanged.
 
 ### 6. Verify and fix formatting
 
 - After creation, read back the PR to verify markdown renders correctly.
 - If formatting is broken (e.g., literal `\n`, HTML-escaped characters),
-  update the PR body immediately using the update PR tool.
+  update the PR body immediately with `gh pr edit --body-file`.
 
 ### 7. Return the PR URL
 
@@ -105,7 +103,7 @@ review it.
 - Do not target `develop` unless the PR is an urgent hotfix that must go into the
   upcoming release; otherwise target `rocprofiler-compute-develop`.
 - Do not create a PR on the wrong repository.
-- Do not use escaped `\n` in PR body strings passed to MCP tools.
+- Do not pass the PR body with escaped `\n`; use `--body-file`.
 - Do not hardcode the PR template — always infer it from recent PRs.
 - Do not skip asking the user for JIRA ID.
 - Do not include sensitive information (API keys, tokens) in PR descriptions.
