@@ -522,6 +522,38 @@ TEST_F(UtilsMicrotest, MemoryStack_ReusesTheEmptyHunkLeftAboveByPop) {
   EXPECT_EQ(Addr(above) + above->size, stack_.topFrame.end);
 }
 
+// Every ncclMemoryStackAlloc overload zeroes its whole n*sizeof(T) bytes even when handed back memory a popped frame dirtied.
+TEST_F(UtilsMicrotest, MemoryStackAlloc_ZeroesReusedMemoryOfEveryOverload) {
+  struct alignas(16) Wide {
+    char c[48];
+  };
+  struct Header {
+    uint32_t n;
+  };
+  Alloc(100);  // creates the hunk in the nil frame
+  // Dirties `size` bytes in a pushed frame, pops, pushes again and checks `alloc` reuses those bytes and zeroes all of them.
+  auto check = [&](size_t size, size_t align, auto alloc) {
+    ncclMemoryStackPush(&stack_);
+    unsigned char* dirty = static_cast<unsigned char*>(Alloc(size, align));
+    std::memset(dirty, 0xA5, size);
+    ncclMemoryStackPop(&stack_);
+    ncclMemoryStackPush(&stack_);
+    unsigned char* got = reinterpret_cast<unsigned char*>(alloc());
+    ASSERT_EQ(dirty, got);
+    EXPECT_EQ(0u, Addr(got) % align);
+    for (size_t i = 0; i < size; i++) ASSERT_EQ(0, got[i]) << "byte " << i;
+    ncclMemoryStackPop(&stack_);
+  };
+
+  const size_t nRanks = 8;
+  check(nRanks * sizeof(size_t), alignof(size_t), [&] { return ncclMemoryStackAlloc<size_t>(&stack_, nRanks); });
+  check(3 * sizeof(Wide), alignof(Wide), [&] { return ncclMemoryStackAlloc<Wide>(&stack_, 3); });
+  check(48, 16, [&] { return ncclMemoryStackAlloc(&stack_, 48, 16); });
+  check(8 + 5 * sizeof(uint64_t), alignof(uint64_t),
+        [&] { return ncclMemoryStackAllocInlineArray<Header, uint64_t>(&stack_, 5); });
+  EXPECT_EQ(1u, g_mallocSizes.size());
+}
+
 // A new hunk replaces a too-small empty hunk above in the chain, and the old one is never freed; a fix flips this pin.
 TEST_F(UtilsMicrotest, MemoryStack_KnownBug_ReplacingAnUnusableHunkAboveLeaksIt) {
   Alloc(100);
