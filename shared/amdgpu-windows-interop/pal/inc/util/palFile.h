@@ -32,8 +32,9 @@
 #pragma once
 
 // pal
-#include "palUtil.h"
 #include "palInlineFuncs.h"
+#include "palSpan.h"
+#include "palUtil.h"
 
 // stl
 #include <chrono>
@@ -154,29 +155,38 @@ public:
 
     /// Writes a stream of bytes to the file.
     ///
-    /// @param [in] pBuffer    Byte stream to be written to the file.
-    /// @param [in] bufferSize Number of bytes to write.
+    /// @param [in] span Byte stream to be written to the file.
     ///
     /// @returns Success if successful, otherwise an appropriate error.
-    Result Write(const void* pBuffer, size_t bufferSize);
+    Result Write(ConstByteSpan span);
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1014
+    Result Write(const void* pBuffer, size_t bufferSize)
+    { return Write(ConstByteSpan::FromBytes(pBuffer, bufferSize)); }
+#endif
 
     /// Reads a stream of bytes from the file.
     ///
-    /// @param [out] pBuffer    Buffer to be written with data read from file.
-    /// @param [in]  bufferSize Size of the output buffer.
+    /// @param [out] span       Buffer to be written with data read from file.
     /// @param [out] pBytesRead Number of bytes actually read (can be null).
     ///
     /// @returns Success if successful, otherwise an appropriate error.
-    Result Read(void* pBuffer, size_t bufferSize, size_t* pBytesRead);
+    Result Read(ByteSpan span, size_t* pBytesRead = nullptr);
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1014
+    Result Read(void* pBuffer, size_t bufferSize, size_t* pBytesRead)
+    { return Read(ByteSpan::FromBytes(pBuffer, bufferSize), pBytesRead); }
+#endif
 
     /// Reads a single line of bytes from the file.
     ///
-    /// @param [out] pBuffer    Buffer to be written with data read from file.
-    /// @param [in]  bufferSize Size of the output buffer.
+    /// @param [out] span       Buffer to be written with data read from file.
     /// @param [out] pBytesRead Number of bytes actually read (can be null).
     ///
     /// @returns Success if successful, otherwise an appropriate error.
-    Result ReadLine(void* pBuffer, size_t bufferSize, size_t* pBytesRead);
+    Result ReadLine(ByteSpan span, size_t* pBytesRead = nullptr);
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1014
+    Result ReadLine(void* pBuffer, size_t bufferSize, size_t* pBytesRead)
+    { return ReadLine(ByteSpan::FromBytes(pBuffer, bufferSize), pBytesRead); }
+#endif
 
     /// Prints a formatted string to the file.
     ///
@@ -255,8 +265,7 @@ public:
     /// Reads a file into memory.
     ///
     /// @param [in]  pFilename  Name of the file to read.
-    /// @param [in]  pData      Buffer where the file contents are written to.
-    /// @param [in]  dataSize   Size of the buffer in bytes.
+    /// @param [in]  span       Buffer where the file contents are written to.
     /// @param [out] pBytesRead Number of bytes successfully read into the input buffer (can be null).
     /// @param [in]  binary     True for binary mode, false for text. Defaults to binary.
     ///
@@ -274,10 +283,18 @@ public:
     /// to null-terminate the buffer.
     static Result ReadFile(
         const char* pFilename,
+        ByteSpan    span,
+        size_t*     pBytesRead = nullptr,
+        bool        binary = true);
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1014
+    static Result ReadFile(
+        const char* pFilename,
         void*       pData,
         size_t      dataSize,
         size_t*     pBytesRead = nullptr,
-        bool        binary = true);
+        bool        binary = true)
+    { return ReadFile(pFilename, ByteSpan::FromBytes(pData, dataSize), pBytesRead, binary); }
+#endif
 
     /// Gets the handle associated with this file.
     ///
