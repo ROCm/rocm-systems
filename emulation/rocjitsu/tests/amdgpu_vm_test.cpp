@@ -6664,6 +6664,46 @@ TEST(CommandProcessorGwsPlacementTest, UnsatisfiedGwsGridFailsWithoutCompletion)
   }
 }
 
+// RDNA4 section 3.3.5.1 returns MEMVIOL for a misaligned LDS atomic. No
+// translation fault accompanies it, so ROCr's trap handler reports an aperture
+// violation; the dispatch must fail rather than wait forever for completion.
+TEST(CommandProcessorAqlTest, MisalignedLdsAtomicPublishesApertureViolation) {
+  for (const uint32_t address : {6u, 4u}) {
+    const bool misaligned = address % sizeof(uint32_t) != 0;
+    SCOPED_TRACE(misaligned ? "misaligned" : "aligned");
+    VmFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize("rdna4", 1, 4, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
+    std::atomic<uint64_t> exception_status = 0;
+    f.cu()->set_queue_exception_handler(
+        [&](uint32_t, uint32_t, uint64_t status, bool, amdgpu::QueueExceptionDeliveryPolicy) {
+          exception_status.store(status);
+          return true;
+        });
+
+    constexpr uint32_t kInlineIntegerZero = 128;
+    const auto address_src = static_cast<uint16_t>(kInlineIntegerZero + address);
+    const uint32_t code[] = {
+        rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = address_src, .vdst = 0})[0],
+        rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = kInlineIntegerZero + 1, .vdst = 1})[0],
+        rdna4::build_vds(rdna4::kDsAddU32Vds, {.addr = 0, .data0 = 1})[0],
+        rdna4::build_vds(rdna4::kDsAddU32Vds, {.addr = 0, .data0 = 1})[1],
+        rdna4::build_sopp(rdna4::kSWaitDscntSopp, {.simm16 = 0})[0],
+        rdna4::build_sopp(rdna4::kSEndpgmSopp)[0]};
+    const uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104, /*vgprs=*/32,
+                                       /*user_sgprs=*/2, /*group_segment_fixed_size=*/256);
+    constexpr uint64_t kSignal = 0x7000;
+    init_completion_signal(f.mem(), kSignal);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(make_dispatch_packet(ko, kSignal, /*grid_size_x=*/32, /*workgroup_size_x=*/32));
+
+    ASSERT_NO_THROW(f.engine->run());
+    EXPECT_FALSE(f.cu()->has_active_wfs());
+    EXPECT_EQ(completion_signal_value(f.mem(), kSignal), misaligned ? 1 : 0);
+    EXPECT_EQ(f.cp()->queue_faulted_for_test(1, 0), misaligned);
+    EXPECT_EQ(exception_status.load(), misaligned ? amdgpu::kAqlQueueApertureViolation : 0u);
+  }
+}
+
 // gfx90a raises MEMVIOL for an S_ATOMIC_*_X2 that is 4 mod 8. VMID 0 has no VM
 // fault reporter and no runtime owner, so the compute unit must publish the
 // aperture violation itself; otherwise the dispatch never completes or fails.

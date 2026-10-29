@@ -1276,6 +1276,31 @@ void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 
   }
 }
 
+// RDNA3/3.5 section 12.7, RDNA4 section 3.3.5.1 and CDNA5 section 3.3.4.1
+// require payload-aligned LDS atomics. Validate every requesting LDS lane
+// before a mixed FLAT instruction can commit global or LDS side effects.
+bool rejects_misaligned_lds_atomic(const VectorMemState &d, const Wavefront &wf,
+                                   uint64_t lds_lanes) {
+  if (d.atomic_op == AtomicOp::NONE || d.elem_size <= 1)
+    return false;
+  switch (wf.cu().arch()) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    break;
+  default:
+    return false;
+  }
+  const auto misaligned = [&](const std::array<uint64_t, 64> &addresses) {
+    for (uint64_t lanes = lds_lanes; lanes; lanes &= lanes - 1)
+      if (addresses[std::countr_zero(lanes)] % d.elem_size != 0)
+        return true;
+    return false;
+  };
+  return misaligned(d.per_lane_addr) || (d.ds2_active && misaligned(d.ds2_per_lane_addr));
+}
+
 bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t request_lanes) {
   if (!(inst.data_as<VectorMemState>()->flat_dds_lane_mask & request_lanes))
     return false;
@@ -1297,6 +1322,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Unsupported;
   const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
+  if (rejects_misaligned_lds_atomic(d, wf, shared_lanes))
+    return VmAccessOutcome::ApertureViolation;
   const VmAccessOutcome outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
   if (outcome != VmAccessOutcome::Complete || shared_lanes == 0)
     return outcome;
@@ -1421,6 +1448,8 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   // Uniform shared-aperture FLAT must reject unsupported DDS too.
   if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Unsupported;
+  if (rejects_misaligned_lds_atomic(d, wf, request_lanes))
+    return VmAccessOutcome::ApertureViolation;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   if (d.lds_stack_inputs) {
