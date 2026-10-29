@@ -80,12 +80,12 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
 }
 
 /// @brief Encode an off-mode scratch store of @p vdata at @p byte_offset.
+/// @param error Optional caller-owned emitter for the failure reason.
 /// @param acc When true, @p vdata names an AccVGPR (CDNA `acc` bit) rather than an
 ///   ordinary VGPR, so the store reads its data from the accumulator file. AGPRs
 ///   exist only on CDNA; requesting @p acc on an arch without them is rejected.
 /// @note CDNA offset is 12-bit (0..4095); RDNA is 24-bit. 2 words on CDNA, 3 on RDNA.
 /// @returns Failure for an unsupported architecture or unsupported AccVGPR access.
-/// @param error Optional caller-owned emitter for the failure reason.
 inline util::FailureOr<std::vector<uint32_t>>
 build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t arch,
                           const util::DiagnosticEmitter *error = nullptr, bool acc = false) {
@@ -127,12 +127,12 @@ build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t a
 }
 
 /// @brief Encode an off-mode scratch load into @p vdst at @p byte_offset.
+/// @param error Optional caller-owned emitter for the failure reason.
 /// @param acc When true, @p vdst names an AccVGPR (CDNA `acc` bit) rather than an
 ///   ordinary VGPR, so the load writes its result into the accumulator file. AGPRs
 ///   exist only on CDNA; requesting @p acc on an arch without them is rejected.
 /// @note A build_wait_loads_complete() must precede any use of @p vdst.
 /// @returns Failure for an unsupported architecture or unsupported AccVGPR access.
-/// @param error Optional caller-owned emitter for the failure reason.
 inline util::FailureOr<std::vector<uint32_t>>
 build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch,
                          const util::DiagnosticEmitter *error = nullptr, bool acc = false) {

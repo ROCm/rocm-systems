@@ -3766,12 +3766,12 @@ protected:
     ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
     EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
     const util::FailureOr<std::vector<uint32_t>> maybe_store =
-        build_scratch_store_dword(/*acc=*/0, /*off=*/64, a_.arch, nullptr, /*acc=*/true);
+        build_scratch_store_dword(/*vdata=*/0, /*off=*/64, a_.arch, nullptr, /*acc=*/true);
     ASSERT_TRUE(maybe_store.succeeded());
     const auto &store = maybe_store.value();
     expect_drain_before_store(cave, store);
     const util::FailureOr<std::vector<uint32_t>> maybe_scratch_load_dword =
-        build_scratch_load_dword(/*acc=*/0, /*off=*/64, a_.arch, nullptr, /*acc=*/true);
+        build_scratch_load_dword(/*vdst=*/0, /*off=*/64, a_.arch, nullptr, /*acc=*/true);
     ASSERT_TRUE(maybe_scratch_load_dword.succeeded());
     expect_drain_after_return(cave, store, maybe_scratch_load_dword.value());
     EXPECT_EQ(caved.scratch, 68u);
