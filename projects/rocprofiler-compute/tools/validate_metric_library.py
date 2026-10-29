@@ -17,19 +17,29 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
   5. no two metrics on the arch share a formula (except SHARED_FORMULA_IDS) or a name,
      and a formula has one id on every arch (except SPLIT_FORMULA_IDS);
   6. units use one spelling, and each metric id has one name and one unit on every
-     arch.
+     arch;
+  7. the library matches analysis_configs: every equation a row shows is a library
+     formula (DISPLAY_VARIANTS list the rows that show one in another form), every
+     formula is shown, every row's unit is its metric's unit (except UNIT_VARIANTS),
+     each row's peak is its metric's "peak" or "peak_empirical" and each library peak
+     is shown by a row, the no-filter counters equal detect_counters(), and the
+     variables equal get_build_in_vars(). Check 7 is temporary; see "Equivalence with
+     analysis_configs" below.
 """
 
 import re
 import sys
 from collections import defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import (
     Any,
     Callable,
     Dict,
     Hashable,
+    Iterator,
     List,
+    NamedTuple,
     Optional,
     Sequence,
     Set,
@@ -42,16 +52,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from format_yaml import normalize_equation
 
+import config
+from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
 from utils import metric_library
 from utils.metric_library import (
     VARIABLES_FILENAME,
+    MetricLibrary,
     arch_files,
     default_metric_library_dir,
     iter_library_documents,
     load_metric_library,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import canonical_config_arch
+from utils.utils_common import MEMBW_ANALYSIS_PANEL_ID, canonical_config_arch
+from utils.utils_counter_defs import get_build_in_vars, metric_value_keys
 from utils.yaml_inherit_loader import InheritanceError, declared_parent
 from vendored import yaml
 
@@ -92,11 +106,66 @@ SHARED_FORMULA_IDS = {}
 # the id until the metric owners choose one.
 SPLIT_FORMULA_IDS = {}
 
+# A row's equation comes from the first of these columns it has; a row with none
+# shows one equation in each of its table's value columns.
+MAIN_FORMS = ("avg", "value", "expr")
+# Value columns that _Row reads separately rather than as equations.
+ROW_FIELDS = ("unit", "peak")
 ROUND_RE = re.compile(r"^\s*ROUND\((.*),\s*\d+\s*\)\s*$", re.DOTALL)
+# Time in seconds (Bytes/s rows) and in nanoseconds (GB/s).
+SECONDS_SCALE = "/(SUM(End_Timestamp-Start_Timestamp)/1e9)"
+NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
+# Metric unit -> the unit of a row that shows the metric in seconds.
+SECONDS_SCALE_UNITS = {"GB/s": "Bytes/s"}
+# TODO(AIPROFCOMP-820): remove with the row equation check when the old panel files are
+# deleted (see "Equivalence with analysis_configs" below).
+# Rows that write a metric's formula differently (positional id -> label, metric id,
+# row equation). A row whose time is in seconds needs no entry: it shows a GB/s formula
+# scaled by 1e9, and its unit must say Bytes/s.
+# The roofline's L2 bandwidth at its bytes per request (64 up to gfx941, then 128).
+_ROOFLINE_L2_BW_EQUATION = (
+    "{} * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+    "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "
+    "/ SUM(End_Timestamp - Start_Timestamp)"
+)
+_ROOFLINE_L2_BW = (
+    "L2 Cache Bandwidth",
+    "vl1d.l2_bw",
+    _ROOFLINE_L2_BW_EQUATION.format(64),
+)
+_ROOFLINE_LDS_BW = (
+    "LDS Bandwidth",
+    "lds.theoretical_bw",
+    "SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu) "
+    "/ SUM(End_Timestamp - Start_Timestamp)",
+)
+_PIPELINE_MFMA_UTIL = (
+    "MFMA Utilization",
+    "compute.mfma_util",
+    "100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) "
+    "/ (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))",
+)
+DISPLAY_VARIANTS = {
+    "gfx908": {
+        "4.1.9": _ROOFLINE_L2_BW,
+        "4.1.11": _ROOFLINE_LDS_BW,
+    },
+    "gfx90a": {
+        "4.1.9": _ROOFLINE_L2_BW,
+        "4.1.11": _ROOFLINE_LDS_BW,
+        "11.2.7": _PIPELINE_MFMA_UTIL,
+    },
+}
+# Rows whose unit differs from their metric's (positional id -> label, unit).
+_CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
+UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a")}
 
 
-def validate(metric_dir: Path) -> List[str]:
-    """Validate every arch in a metric library tree. Return error messages."""
+def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> List[str]:
+    """Validate every arch in a metric library tree. Return error messages.
+
+    With analysis_dir, also check each valid arch against its analysis configs.
+    """
     errors: List[str] = []
     valid_archs = []
     for arch in metric_library.METRIC_LIBRARY_PARENT_ARCH:
@@ -105,6 +174,8 @@ def validate(metric_dir: Path) -> List[str]:
         arch_errors = validate_arch(metric_dir, arch)
         if not arch_errors:
             valid_archs.append(arch)
+            if analysis_dir is not None:
+                arch_errors = equivalence_errors(metric_dir, analysis_dir, arch)
         errors.extend(arch_errors)
     errors.extend(_formula_id_errors(metric_dir, valid_archs))
     errors.extend(_name_unit_errors(metric_dir, valid_archs))
@@ -143,9 +214,38 @@ def validate_arch(metric_dir: Path, arch: str) -> List[str]:
     return errors
 
 
+def equivalence_errors(metric_dir: Path, analysis_dir: Path, arch: str) -> List[str]:
+    """Check one arch's library against its analysis configs. Temporary; see below."""
+    library = load_metric_library(metric_dir, arch)
+    rows = list(_row_equations(analysis_dir / arch))
+    variants = DISPLAY_VARIANTS.get(arch, {})
+    formulas = {
+        _canonical(metric["formula"]): metric_id
+        for metric_id, metric in library.metrics.items()
+        if metric_id not in SHARED_FORMULA_IDS
+    }
+    names = {
+        metric["name"].casefold(): metric_id
+        for metric_id, metric in library.metrics.items()
+    }
+    metric_ids = [
+        _row_metric_id(row, variants, formulas, names, set(library.metrics))
+        for row in rows
+    ]
+    return [
+        *_row_errors(arch, rows, metric_ids, library),
+        *_unshown_errors(arch, rows, metric_ids, library),
+        *_unit_errors(arch, rows, metric_ids, library),
+        *_peak_errors(arch, rows, metric_ids, library),
+        *_counter_errors(arch, library, analysis_dir),
+        *_builtin_var_errors(arch, library),
+        *_unused_variant_errors(arch, rows),
+    ]
+
+
 def main() -> int:
     """Entry point. Returns 0 on success, 1 on validation failure."""
-    errors = validate(default_metric_library_dir())
+    errors = validate(default_metric_library_dir(), config.analysis_configs_dir)
     if errors:
         print("Metric library validation failed:\n")
         for error in errors:
@@ -405,6 +505,286 @@ def _arch_ceilings(arch: str) -> Set[str]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Equivalence with analysis_configs
+#
+# TODO(AIPROFCOMP-820): these checks are temporary. Remove them at the cutover
+# (Stage 8), with the old panel files, as the LLD's Stage 3 "Removal" says: this
+# section, DISPLAY_VARIANTS, UNIT_VARIANTS, equivalence_errors() and the analysis_dir
+# argument of validate().
+# ---------------------------------------------------------------------------
+
+
+def _row_metric_id(
+    row: "_Row",
+    variants: Dict[str, tuple],
+    formulas: Dict[str, str],
+    names: Dict[str, str],
+    library_ids: Set[str],
+) -> Optional[str]:
+    """Return the id of the metric a row shows, or None if it shows none.
+
+    A row without an equation (value: None) is hidden; its label names the metric. A
+    row whose label names an id of SHARED_FORMULA_IDS shows that id.
+    """
+    if row.legacy_id in variants:
+        metric_id = variants[row.legacy_id][1]
+        return metric_id if metric_id in library_ids else None
+    named_id = names.get(row.label.casefold())
+    if row.equation is None:
+        return named_id
+    metric_id = formulas.get(_gb_per_second(row))
+    if metric_id is not None and SHARED_FORMULA_IDS.get(named_id) == metric_id:
+        return named_id
+    return metric_id
+
+
+def _row_errors(
+    arch: str,
+    rows: List["_Row"],
+    metric_ids: List[Optional[str]],
+    library: MetricLibrary,
+) -> List[str]:
+    variants = DISPLAY_VARIANTS.get(arch, {})
+    errors = []
+    for row, metric_id in zip(rows, metric_ids):
+        if row.legacy_id in variants:
+            errors.extend(_variant_errors(arch, row, variants[row.legacy_id], library))
+        elif row.equation is not None and metric_id is None:
+            errors.append(
+                f"[{arch}] {row.legacy_id} {row.label}: not a library formula"
+            )
+    return errors
+
+
+def _variant_errors(
+    arch: str, row: "_Row", variant: tuple, library: MetricLibrary
+) -> List[str]:
+    label, metric_id, row_equation = variant
+    if row.label != label:
+        return [f"[{arch}] {row.legacy_id} is now {row.label!r}; update variants"]
+    if metric_id not in library.metrics:
+        return [f"[{arch}] {row.legacy_id} {label}: no metric {metric_id}"]
+    if row.equation == _canonical(row_equation):
+        return []
+    return [f"[{arch}] {row.legacy_id} {label}: not the listed form of {metric_id}"]
+
+
+def _unused_variant_errors(arch: str, rows: List["_Row"]) -> List[str]:
+    """Report DISPLAY_VARIANTS and UNIT_VARIANTS entries at a position no row has."""
+    positions = {row.legacy_id for row in rows}
+    return [
+        f"[{arch}] {name} lists {legacy_id}, but no row has that position"
+        for name, listed in (
+            ("DISPLAY_VARIANTS", DISPLAY_VARIANTS.get(arch, {})),
+            ("UNIT_VARIANTS", UNIT_VARIANTS.get(arch, {})),
+        )
+        for legacy_id in listed
+        if legacy_id not in positions
+    ]
+
+
+def _unshown_errors(
+    arch: str,
+    rows: List["_Row"],
+    metric_ids: List[Optional[str]],
+    library: MetricLibrary,
+) -> List[str]:
+    shown = {
+        metric_id
+        for row, metric_id in zip(rows, metric_ids)
+        if row.equation is not None
+    }
+    return [
+        f"[{arch}] {metric_id}: no analysis config row shows its formula"
+        for metric_id in library.metrics
+        if metric_id not in shown
+    ]
+
+
+def _unit_errors(
+    arch: str,
+    rows: List["_Row"],
+    metric_ids: List[Optional[str]],
+    library: MetricLibrary,
+) -> List[str]:
+    unit_variants = UNIT_VARIANTS.get(arch, {})
+    errors = []
+    for row, metric_id in zip(rows, metric_ids):
+        if row.unit is None or metric_id is None:
+            continue
+        metric_unit = library.metrics[metric_id]["unit"]
+        label, unit = unit_variants.get(row.legacy_id, (row.label, metric_unit))
+        if row.legacy_id in unit_variants and unit == metric_unit:
+            errors.append(
+                f"[{arch}] {row.legacy_id} {row.label}: the unit of {metric_id}; "
+                "remove it from UNIT_VARIANTS"
+            )
+            continue
+        if _in_seconds(row):
+            unit = SECONDS_SCALE_UNITS.get(unit, unit)
+        if row.label != label:
+            errors.append(
+                f"[{arch}] {row.legacy_id} is now {row.label!r}; update unit variants"
+            )
+        elif UNIT_ALIASES.get(row.unit, row.unit) != unit:
+            errors.append(
+                f"[{arch}] {row.legacy_id} {row.label}: unit {row.unit!r} is not "
+                f"{unit!r} ({metric_id})"
+            )
+    return errors
+
+
+def _peak_errors(
+    arch: str,
+    rows: List["_Row"],
+    metric_ids: List[Optional[str]],
+    library: MetricLibrary,
+) -> List[str]:
+    """Check that row peaks and library peaks match, both ways.
+
+    Each row's peak is its metric's "peak" or "peak_empirical", and each library peak
+    is the peak of a row that shows the metric. A Bytes/s row shows its peak in Bytes/s.
+    A row's measured peak is skipped where the roofline benchmark does not measure that
+    ceiling on the arch (always, on an arch without a benchmark); a ceiling that is no
+    roofline.csv column is still an error.
+    """
+    unmeasured = mi_gpu_specs.get_all_roofline_columns() - _arch_ceilings(arch)
+    errors = []
+    shown_fields = defaultdict(set)
+    for row, metric_id in zip(rows, metric_ids):
+        if row.peak is None or metric_id is None:
+            continue
+        ceiling = EMPIRICAL_PEAK_RE.search(row.peak)
+        if ceiling and ceiling.group(1) in unmeasured:
+            continue
+        metric = library.metrics[metric_id]
+        fields = [
+            field
+            for field in ("peak", "peak_empirical")
+            if field in metric and row.peak == _row_peak(row, _canonical(metric[field]))
+        ]
+        shown_fields[metric_id].update(fields)
+        if not fields:
+            errors.append(
+                f"[{arch}] {row.legacy_id} {row.label}: peak {row.peak} is neither the "
+                f"'peak' nor the 'peak_empirical' of {metric_id}"
+            )
+    errors.extend(
+        f"[{arch}] {metric_id}: no analysis config row shows its '{field}'"
+        for metric_id, metric in library.metrics.items()
+        for field in ("peak", "peak_empirical")
+        if field in metric and field not in shown_fields[metric_id]
+    )
+    return errors
+
+
+def _make_soc(analysis_dir: Path, arch: str, membw_analysis: bool) -> OmniSoC_Base:
+    """Return an OmniSoC_Base that reads analysis_dir without a GPU (16 L2 channels)."""
+    args = SimpleNamespace(
+        config_dir=analysis_dir,
+        filter_blocks=[],
+        membw_analysis=membw_analysis,
+        roof_only=False,
+        set_selected=None,
+    )
+    machine_specs = SimpleNamespace(
+        gpu_arch=arch,
+        gpu_series=mi_gpu_specs.get_gpu_series(arch),
+        l2_banks=16,
+        num_xcd=1,
+        rocminfo_lines=None,
+    )
+    soc = OmniSoC_Base(args, machine_specs)
+    soc.set_arch(arch)
+    return soc
+
+
+def _gb_per_second(row: "_Row") -> Optional[str]:
+    """Return a row's equation, with time in seconds turned into nanoseconds (GB/s)."""
+    if _in_seconds(row):
+        return row.equation[: -len(SECONDS_SCALE)] + NANOSECONDS
+    return row.equation
+
+
+def _in_seconds(row: "_Row") -> bool:
+    """Return whether a row divides by the kernel time in seconds (a Bytes/s row)."""
+    return row.equation is not None and row.equation.endswith(SECONDS_SCALE)
+
+
+def _row_peak(row: "_Row", peak: str) -> str:
+    """Return a library peak (GB/s) as row shows it.
+
+    A Bytes/s row shows a theoretical "<MHz term> / 1000" as "<MHz term> * 1e6", and a
+    measured "$<ceiling>_empirical_peak" as "... * 1e9".
+    """
+    if not _in_seconds(row):
+        return peak
+    if peak.endswith("/1000"):
+        return peak[: -len("/1000")] + "*1e6"
+    return f"{peak}*1e9"
+
+
+def _counter_errors(arch: str, library: MetricLibrary, analysis_dir: Path) -> List[str]:
+    has_membw_panel = any(
+        (analysis_dir / arch).glob(f"{MEMBW_ANALYSIS_PANEL_ID}_*.yaml")
+    )
+    gpu_series = _gpu_series(arch)
+    soc = _make_soc(analysis_dir, _member_arch(arch), has_membw_panel)
+    expected, _ = soc.detect_counters()
+    actual = soc._expand_tcc_template_counters(
+        library.get_counters_for_metrics(list(library.metrics), gpu_series)
+    )
+    errors = []
+    if expected - actual:
+        errors.append(f"[{arch}] counters missing: {sorted(expected - actual)}")
+    if actual - expected:
+        errors.append(f"[{arch}] extra counters: {sorted(actual - expected)}")
+    return errors
+
+
+def _builtin_var_errors(arch: str, library: MetricLibrary) -> List[str]:
+    actual = {
+        name: _canonical(variable["formula"])
+        for name, variable in library.variables.items()
+    }
+    gpu_series = _gpu_series(arch)
+    expected = {
+        name: _canonical(formula)
+        for name, formula in get_build_in_vars(gpu_series).items()
+    }
+    if actual == expected:
+        return []
+    return [f"[{arch}] variables differ from get_build_in_vars()"]
+
+
+def _row_equations(arch_dir: Path) -> Iterator["_Row"]:
+    """Yield each equation a row of arch_dir shows.
+
+    A per-channel table's last key, placeholder_range, shows no column and adds no row.
+    """
+    for item in iter_analysis_config_metrics(arch_dir, set()):
+        legacy_id = f"{item.table_id // 100}.{item.table_id % 100}.{item.metric_idx}"
+        for form in _row_forms(item.table, item.metric):
+            yield _Row(
+                legacy_id,
+                item.metric_name,
+                _canonical(item.metric[form]),
+                _canonical(item.metric.get("peak")),
+                item.metric.get("unit"),
+            )
+
+
+def _row_forms(table: Dict[str, Any], row: Dict[str, Any]) -> List[str]:
+    """Return the columns of row that show an equation."""
+    main_forms = [form for form in MAIN_FORMS if form in row]
+    if main_forms:
+        return main_forms[:1]
+    return [
+        key for key in row if key in metric_value_keys(table) and key not in ROW_FIELDS
+    ]
+
+
 def _canonical(equation: object) -> Optional[str]:
     """Return equation in format_yaml.py form without display ROUND(); None if empty.
 
@@ -415,6 +795,19 @@ def _canonical(equation: object) -> Optional[str]:
     match = ROUND_RE.match(str(equation))
     text = normalize_equation(match.group(1) if match else str(equation))
     return re.sub(r"\s+", "", text)
+
+
+def _gpu_series(arch: str) -> Optional[str]:
+    return mi_gpu_specs.get_gpu_series(_member_arch(arch))
+
+
+def _member_arch(arch: str) -> str:
+    """Return a GPU arch that uses arch's analysis configs (gfx1150 for gfx115x)."""
+    return next(
+        gpu_arch
+        for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
+        if canonical_config_arch(gpu_arch) == arch
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -452,6 +845,16 @@ def _text_errors(
         for field in fields
         if not isinstance(entry.get(field), str) or not entry[field].strip()
     ]
+
+
+class _Row(NamedTuple):
+    """One equation an analysis config row shows."""
+
+    legacy_id: str
+    label: str
+    equation: Optional[str]
+    peak: Optional[str]
+    unit: Optional[str]
 
 
 if __name__ == "__main__":

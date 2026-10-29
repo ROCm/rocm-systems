@@ -6,6 +6,8 @@
 Run from the project directory: python3 -m pytest tools/test_validate_metric_library.py
 """
 
+import functools
+import shutil
 import sys
 from pathlib import Path
 
@@ -16,6 +18,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 import validate_metric_library
 from common import use_metric_library_family, write_text_file
 from validate_metric_library import main, validate
+
+import config
+from utils.metric_library import MetricLibrary, arch_chain, default_metric_library_dir
 
 BASE_METRIC = """\
 compute.valu_util:
@@ -41,6 +46,27 @@ def measured(monkeypatch):
     )
 
 
+@pytest.fixture
+def shipped_copy(tmp_path, monkeypatch):
+    """copy_shipped_trees() into tmp_path, with an empty metric library cache."""
+    monkeypatch.setattr(MetricLibrary, "_cache", {})
+    return functools.partial(copy_shipped_trees, tmp_path)
+
+
+def copy_shipped_trees(root, arch):
+    """Copy the shipped metric library and analysis configs of arch and its ancestors
+    under root, and return the (library, configs) copies."""
+    library = root / "metric_library"
+    configs = root / "analysis_configs"
+    for source, target in (
+        (default_metric_library_dir(), library),
+        (config.analysis_configs_dir, configs),
+    ):
+        for chain_arch in arch_chain(arch):
+            shutil.copytree(source / chain_arch, target / chain_arch)
+    return library, configs
+
+
 def write_base_metrics(root, text):
     write_text_file(root / "gfx_base" / "compute.yaml", text)
 
@@ -64,6 +90,7 @@ def test_main_reports_errors(tree, monkeypatch, capsys):
     monkeypatch.setattr(
         validate_metric_library, "default_metric_library_dir", lambda: tree
     )
+    monkeypatch.setattr(config, "analysis_configs_dir", None)
     assert main() == 0
     write_base_metrics(tree, BASE_METRIC.replace("compute.valu_util", "Bad"))
     assert main() == 1
@@ -306,3 +333,227 @@ def test_an_id_has_one_name_and_unit_on_every_arch(tree, field, shown):
 def test_unknown_arch_directory(tree):
     (tree / "gfx_other").mkdir()
     assert "[gfx_other] is not a known metric library arch" in validate(tree)
+
+
+# =============================================================================
+# Equivalence with analysis_configs
+# =============================================================================
+
+
+def test_schema_errors_skip_the_equivalence_check(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    replace_in(library / "gfx908" / "grbm.yaml", "unit: Cycles", "unit: Gbps")
+    assert validate(library, configs) == [
+        "[gfx908/grbm.yaml] grbm.gui_active_cycles: 'unit' 'Gbps' is an alias; "
+        "use 'GB/s'"
+    ]
+
+
+def test_changed_library_formula(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    replace_in(
+        library / "gfx908" / "cp.yaml",
+        "100 * SUM(CPF_CPF_STAT_BUSY)",
+        "99 * SUM(CPF_CPF_STAT_BUSY)",
+    )
+    errors = validate(library, configs)
+    assert any("not a library formula" in error for error in errors)
+    assert any("no analysis config row shows its formula" in error for error in errors)
+
+
+def test_extra_library_counter(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    replace_in(
+        library / "gfx908" / "grbm.yaml",
+        "unit: Cycles\n",
+        "unit: Cycles\n  peak: SUM(SQ_EXTRA_LEVEL)\n",
+    )
+    errors = validate(library, configs)
+    assert "[gfx908] extra counters: ['SQ_EXTRA_LEVEL']" in errors
+
+
+def test_changed_unit(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    replace_in(library / "gfx908" / "cp.yaml", "unit: Percent", "unit: Cycles")
+    errors = validate(library, configs)
+    assert any("unit 'Percent' is not 'Cycles' (cp.cpc_l2_util)" in e for e in errors)
+
+
+def test_unit_variant_must_differ(shipped_copy, monkeypatch):
+    monkeypatch.setitem(
+        validate_metric_library.UNIT_VARIANTS,
+        "gfx908",
+        {"7.1.8": ("LDS Allocation", "Bytes per Workgroup")},
+    )
+    assert any(
+        "remove it from UNIT_VARIANTS" in error
+        for error in validate(*shipped_copy("gfx908"))
+    )
+
+
+def test_changed_variable(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    replace_in(
+        library / "gfx908" / "variables.yaml", "GRBM_COUNT / $num_xcd", "GRBM_COUNT / 2"
+    )
+    assert any("variables differ" in error for error in validate(library, configs))
+
+
+def test_changed_row_peak(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    path = configs / "gfx908" / "0200_system_speed_of_light.yaml"
+    replace_in(path, "peak: $max_sclk / 1000 * 64 *", "peak: $max_sclk / 1000 * 32 *")
+    errors = validate(library, configs)
+    assert any("is neither the 'peak' nor the 'peak_empirical'" in e for e in errors)
+
+
+def test_changed_hidden_row_peak(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    path = configs / "gfx908" / "0200_system_speed_of_light.yaml"
+    replace_in(path, "$cu_per_gpu * 512 / 1000", "$cu_per_gpu * 999 / 1000")
+    errors = validate(library, configs)
+    assert any("2.1.1 MFMA FLOPs (BF16): peak" in error for error in errors)
+
+
+def test_library_peak_must_be_shown(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    replace_in(
+        library / "gfx908" / "cp.yaml",
+        "CPC_CPC_TCIU_IDLE)\n  unit: Percent\n",
+        "CPC_CPC_TCIU_IDLE)\n  unit: Percent\n  peak: 100\n",
+    )
+    errors = validate(library, configs)
+    assert "[gfx908] cp.cpc_l2_util: no analysis config row shows its 'peak'" in errors
+
+
+def test_changed_row_measured_peak(shipped_copy):
+    library, configs = shipped_copy("gfx90a")
+    path = configs / "gfx90a" / "0400_roofline.yaml"
+    replace_in(path, "$LDSBw_empirical_peak", "$L2Bw_empirical_peak")
+    errors = validate(library, configs)
+    assert any("4.1.11 LDS Bandwidth: peak $L2Bw_empirical_peak" in e for e in errors)
+
+
+@pytest.mark.parametrize(
+    "label, metric_id",
+    [
+        ("MFMA FLOPs (MXF8)", "compute.mfma_flops_mxf8"),
+        ("MFMA FLOPs (F8)", "compute.mfma_flops_f8"),
+    ],
+)
+def test_shared_formula_rows_show_the_id_their_label_names(
+    monkeypatch, label, metric_id
+):
+    """MXF8 rows read the F8 counter but are checked against their own id."""
+    monkeypatch.setattr(
+        validate_metric_library,
+        "SHARED_FORMULA_IDS",
+        {"compute.mfma_flops_mxf8": "compute.mfma_flops_f8"},
+    )
+    names = {
+        "mfma flops (mxf8)": "compute.mfma_flops_mxf8",
+        "mfma flops (f8)": "compute.mfma_flops_f8",
+    }
+    row = validate_metric_library._Row("4.1.0", label, "SUM(F8)", None, None)
+    assert (
+        validate_metric_library._row_metric_id(
+            row, {}, {"SUM(F8)": "compute.mfma_flops_f8"}, names, set(names.values())
+        )
+        == metric_id
+    )
+
+
+def test_display_variant_row_is_checked_for_its_unit(shipped_copy):
+    """4.1.11 shows lds.theoretical_bw in another form; its unit is still checked."""
+    library, configs = shipped_copy("gfx908")
+    replace_in(
+        configs / "gfx908" / "0400_roofline.yaml",
+        "* 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)\n"
+        "          unit: GB/s",
+        "* 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)\n"
+        "          unit: Cycles",
+    )
+    errors = validate(library, configs)
+    assert any("4.1.11 LDS Bandwidth: unit 'Cycles'" in error for error in errors)
+
+
+def test_variant_position_must_exist(shipped_copy, monkeypatch):
+    monkeypatch.setitem(
+        validate_metric_library.UNIT_VARIANTS,
+        "gfx908",
+        {**validate_metric_library.UNIT_VARIANTS["gfx908"], "99.9.9": ("X", "Y")},
+    )
+    errors = validate(*shipped_copy("gfx908"))
+    assert "[gfx908] UNIT_VARIANTS lists 99.9.9, but no row has that position" in errors
+
+
+def test_unknown_measured_peak_is_an_error(shipped_copy):
+    """gfx908 has no roofline benchmark, so its row peaks are not checked; a typo
+    still is."""
+    library, configs = shipped_copy("gfx908")
+    replace_in(
+        configs / "gfx908" / "0400_roofline.yaml",
+        "$LDSBw_empirical_peak",
+        "$LDSBz_empirical_peak",
+    )
+    errors = validate(library, configs)
+    assert any("peak $LDSBz_empirical_peak is neither" in e for e in errors)
+
+
+@pytest.mark.parametrize(
+    "peak, shown",
+    [
+        ("$L1Bw_empirical_peak", "$L1Bw_empirical_peak*1e9"),
+        ("$max_sclk*64/1000", "$max_sclk*64*1e6"),
+    ],
+)
+def test_bytes_per_second_row_shows_its_peak_scaled(peak, shown):
+    """A row in seconds shows a GB/s peak in Bytes/s."""
+    equation = "SUM(TCP_TCC_READ_REQ_sum)" + validate_metric_library.SECONDS_SCALE
+    row = validate_metric_library._Row("4.1.3", "L1 Cache BW", equation, None, None)
+    assert validate_metric_library._row_peak(row, peak) == shown
+
+
+def test_changed_rewritten_display_variant(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    replace_in(
+        configs / "gfx908" / "0400_roofline.yaml",
+        "* 4 * $lds_banks_per_cu) / SUM(End",
+        "* 8 * $lds_banks_per_cu) / SUM(End",
+    )
+    errors = validate(library, configs)
+    assert any("4.1.11 LDS Bandwidth: not the listed form" in e for e in errors)
+
+
+def test_changed_bytes_per_second_row(shipped_copy):
+    """3.1.26 shows fabric.rd_bw in Bytes/s; it is checked even though row 17.2.0 also
+    shows fabric.rd_bw."""
+    library, configs = shipped_copy("gfx90a")
+    replace_in(
+        configs / "gfx90a" / "0300_memory_chart.yaml",
+        "TCC_EA_RDREQ_32B_sum) * 64) / (SUM(End",
+        "TCC_EA_RDREQ_32B_sum) * 128) / (SUM(End",
+    )
+    errors = validate(library, configs)
+    assert any("3.1.26 L2-Fabric Read BW: not a library formula" in e for e in errors)
+
+
+def test_scaled_display_variant_unit(shipped_copy):
+    """A row that shows a GB/s metric in seconds must say Bytes/s."""
+    library, configs = shipped_copy("gfx908")
+    replace_in(
+        configs / "gfx908" / "0300_memory_chart.yaml",
+        "/ 1e9)\n          unit: Bytes/s",
+        "/ 1e9)\n          unit: GB/s",
+    )
+    errors = validate(library, configs)
+    assert any(
+        "3.1.16 VL1_L2 Read BW: unit 'GB/s' is not 'Bytes/s'" in e for e in errors
+    )
+
+
+def test_renamed_display_variant(shipped_copy):
+    library, configs = shipped_copy("gfx908")
+    path = configs / "gfx908" / "0400_roofline.yaml"
+    replace_in(path, "LDS Bandwidth:", "LDS BW:")
+    assert any("4.1.11 is now" in error for error in validate(library, configs))
