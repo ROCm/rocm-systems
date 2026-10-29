@@ -520,6 +520,10 @@ private:
     std::vector<ResolvedInstrumentationSite> sites;
     std::vector<ProbeCallable> probes;
     std::vector<std::string> errors;
+    // The object's kernel descriptors and the wave size they share. A probe-call
+    // site is resolved only when there is at least one kernel and one wave size.
+    std::vector<KernelDescriptorInfo> kernels;
+    std::optional<uint8_t> wave_size;
   };
 
   // Validate and resolve every queued point in one pass.
