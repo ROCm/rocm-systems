@@ -18,18 +18,17 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-/// The names mirage addressed its first three agents by, before it read
-/// the whole directory.
+/// Short names for Instinct agents.
 ///
-/// They are not derivable — `gfx1250_mi455x` describes an MI455X and
-/// mirage has always called it `mi450x` — and they are load-bearing:
-/// `--profile` defaults to `mi350x`, the shipped topologies name
-/// `MI350X` and `MI300X`, and every agent and profile a user already has
-/// on disk was written under them. Everything else is addressed by its
-/// config's file stem, which is unique and needs no table.
-const ESTABLISHED_NAMES: [(&str, &str); 3] = [
+/// Mirage uses product names for Instinct GPUs. `mi450x` is the exception:
+/// it is the released name for the MI455X config and stays stable because
+/// `--profile`, shipped topologies and saved user documents refer to
+/// agents by name. Everything else is addressed by its config's file stem,
+/// which is unique and needs no table.
+const INSTINCT_NAMES: [(&str, &str); 4] = [
     ("gfx942_cdna3", "mi300x"),
     ("gfx950_mi350x", "mi350x"),
+    ("gfx950_mi355x", "mi355x"),
     ("gfx1250_mi455x", "mi450x"),
 ];
 
@@ -84,7 +83,7 @@ fn main() {
         // MI210's only config and is therefore taken as it is.
         candidates.sort_by_key(|c| (variant_rank(&c.stem), c.stem.len(), c.stem.clone()));
         let chosen = candidates.remove(0);
-        let name = ESTABLISHED_NAMES
+        let name = INSTINCT_NAMES
             .iter()
             .find_map(|(stem, name)| (*stem == chosen.stem).then_some((*name).to_string()))
             .unwrap_or_else(|| chosen.stem.clone());
@@ -99,17 +98,16 @@ fn main() {
         presets.insert(name, (chosen.stem, chosen.config));
     }
 
-    // A rocjitsu config that is renamed or retired takes a mirage name
-    // with it, and the three below are the ones nothing on a user's disk
-    // survives losing. Fail here, where the fix is to add the new stem to
-    // the table above, rather than shipping a mirage whose default
-    // `--profile mi350x` names nothing.
-    for (stem, name) in ESTABLISHED_NAMES {
+    // A rocjitsu config that is renamed or retired takes a mirage name with
+    // it. Fail here, where the fix is to point the table above at the new
+    // stem, rather than shipping a mirage whose default `--profile mi350x`
+    // names nothing.
+    for (stem, name) in INSTINCT_NAMES {
         assert!(
             presets.get(name).is_some_and(|(chosen, _)| chosen == stem),
             "no rocjitsu config maps to the mirage name {name:?}: it came from \
              configs/{stem}.json, which is no longer the config chosen for its \
-             device. Point ESTABLISHED_NAMES at the config that replaced it."
+             device. Point INSTINCT_NAMES at the config that replaced it."
         );
     }
 

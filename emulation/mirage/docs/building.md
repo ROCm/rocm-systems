@@ -26,11 +26,12 @@ merely loads at runtime.
 
 The complete builtin `vm` and component `topology` are read from the
 RocJITsu configs and validated at build time. Every GPU RocJITsu has a
-config for becomes one builtin agent: `mi300x`, `mi350x` and `mi450x`
-from `gfx942_cdna3.json`, `gfx950_mi350x.json` and `gfx1250_mi455x.json`
-(including their 320, 288 and 256 CU topologies), and `gfx90a_mi210_kmd`,
-`gfx950_mi355x`, `gfx1100_w7900`, `gfx1151` and `gfx1201_r9700` under their
-config's own name. GPUs are distinguished by ISA plus PCI vendor and device
+config for becomes one builtin agent. Instinct agents use short names:
+`mi300x`, `mi350x`, `mi355x` and `mi450x` come from `gfx942_cdna3.json`,
+`gfx950_mi350x.json`, `gfx950_mi355x.json` and `gfx1250_mi455x.json`.
+`mi450x` remains the released name for the MI455X config. The
+`gfx90a_mi210_kmd`, `gfx1100_w7900`, `gfx1151` and `gfx1201_r9700` agents
+use their config names. GPUs are distinguished by ISA plus PCI vendor and device
 IDs, so MI350X and MI355X remain separate agents. Where RocJITsu ships several
 configs for one GPU — a `_kmd`
 variant, an `_Ngpu` one — Mirage takes the plainest, because the GPU

@@ -123,14 +123,12 @@ mod tests {
         }
     }
 
-    /// The three names that were mirage's whole builtin set are still
-    /// there: `--profile` defaults to `mi350x`, the shipped topologies
-    /// name `MI350X` and `MI300X`, and users have all three on disk.
+    /// Instinct agents keep stable short names.
     #[test]
-    fn the_established_names_survive_reading_the_whole_directory() {
+    fn instinct_agents_have_short_names() {
         let names: Vec<&str> = agents().into_iter().map(|(name, _)| name).collect();
-        for established in ["mi300x", "mi350x", "mi450x"] {
-            assert!(names.contains(&established), "{established} in {names:?}");
+        for name in ["mi300x", "mi350x", "mi355x", "mi450x"] {
+            assert!(names.contains(&name), "{name} in {names:?}");
         }
     }
 
@@ -155,7 +153,7 @@ mod tests {
     fn gfx950_products_retain_distinct_source_configs() {
         for (name, device_id, marketing_name) in [
             ("mi350x", 0x75a0, "AMD Instinct MI350X"),
-            ("gfx950_mi355x", 0x75a3, "AMD Instinct MI355X"),
+            ("mi355x", 0x75a3, "AMD Instinct MI355X"),
         ] {
             let agent = agent(name).unwrap();
             assert_eq!(agent.vm.gpu.device.device_id, device_id);
