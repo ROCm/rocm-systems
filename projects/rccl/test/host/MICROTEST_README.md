@@ -571,6 +571,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `NetIbOpsFault*`), driven through fake verbs devices (`IbVerbsScene.h`). One binary
   because p2p.cc calls both units for real. See `test_categories_micro_net_ib_cast_data_path.yaml`.
 
+- **`rccl-UnitTestsMicroP2pResiliency`**: `src/transport/net_ib_cast/p2p_resiliency.cc`,
+  `p2p_resiliency_recovery.cc` and `p2p_resiliency_recovery_ainic.cc`, one test TU each
+  (`P2P_RESILIENCY*_CC_PATH`, suites `P2pResiliency*Microtest.*`), over the fake verbs
+  context in `P2pResiliencyScene.h`. Its own binary: the `net_ib_cast_*` fakes it links
+  stand in for `connect.cc`, `p2p.cc` and `common.cc`. See
+  `test_categories_micro_p2p_resiliency.yaml`.
+
 - **`rccl-UnitTestsMicroNetIbCastInit`** — `transport/net_ib_cast/init.cc`
   (`NET_IB_CAST_INIT_CC_PATH`, from `net-ib-cast-init-test.cc`), plus `common.cc`,
   `capability.cc`, `reg.cc`, `gdr.cc`, `multiplane.cc`, `gin.cc` and
@@ -768,6 +775,7 @@ symbol.
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/net_ib/` (`ncclParamIbQpsPerConn`, `ncclIbGidInfoQuery`, `ncclNetIb`, GDR flush-flag support and enable) | `fakes/transport_net_ib_fakes.cc` |
 | `src/transport/net_ib/connect.cc`'s `rcclNetP2pPolicy` and GDR flush-flag accessors (targets that do not compile the real file) | `fakes/transport_net_ib_connect_net_fakes.cc` |
+| `src/transport/net_ib_cast/capability.cc` | `fakes/net_ib_cast_capability_fakes.cc` |
 | `src/transport/net_ib_cast/common.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_common_fakes.cc` |
 | `src/transport/net_ib_cast/{connect,p2p,p2p_resiliency,p2p_resiliency_recovery,qp_sharing,scheduler}.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_<file>_fakes.cc` |
 | `src/transport/net_ib_cast/init.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_init_fakes.cc` |
@@ -1117,7 +1125,8 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroNet`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`, `rccl-UnitTestsMicroMisc`,
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`, `rccl-UnitTestsMicroNvls`,
-`rccl-UnitTestsMicroNetIbCastDataPath`, `rccl-UnitTestsMicroRmaProxy` and `rccl-UnitTestsMicroNetIbCastInit` — **without configuring/building all of
+`rccl-UnitTestsMicroNetIbCastDataPath`, `rccl-UnitTestsMicroRmaProxy`, `rccl-UnitTestsMicroNetIbCastInit` and
+`rccl-UnitTestsMicroP2pResiliency` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -1193,6 +1202,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroNetIbCastDataPath  # net_ib_cast p2p/scheduler/ops-fault tests
 ./build/rccl-UnitTestsMicroNet                # src/transport/net.cc tests
 ./build/rccl-UnitTestsMicroMisc               # src/misc/ IB verbs + dv loaders, gdr_peermem.cc
+./build/rccl-UnitTestsMicroP2pResiliency      # src/transport/net_ib_cast/p2p_resiliency*.cc tests
 ./build/rccl-HostUnitTests
 ./build/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests
 ./build/rccl-UnitTestsMicroRoctxNvml-roctx    # same, ROCTX_ENABLE arm
