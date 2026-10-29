@@ -28,6 +28,7 @@
 
 #include "lib/common/container/ring_buffer.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/units.hpp"
 
 #include <fmt/format.h>
@@ -63,24 +64,27 @@ suspend_fork_output() noexcept;
 void
 resume_fork_output() noexcept;
 
-// fork() handling for file buffers. Before fork() every file buffer is locked with its pending
-// output flushed, so no half-written data or held lock is copied into the child. After fork() the
-// parent unlocks them and the child drops the records it inherited from the parent before
-// unlocking them, so each record is reported only by the process that produced it.
+// Capture/flush under short parent-side locks. No registry/file lock is retained when this
+// prepare callback returns. A later lifecycle change invalidates the child's snapshot.
+void
+initialize_fork_file_buffers();
+
 void
 prepare_fork_file_buffers();
 
 void
 parent_fork_file_buffers();
 
+bool
+fork_file_buffers_unchanged() noexcept;
+
 void
 child_fork_file_buffers();
 
 struct file_buffer_fork_handlers
 {
-    void (*lock)()   = nullptr;
-    void (*unlock)() = nullptr;
-    void (*reset)()  = nullptr;
+    void (*flush)() = nullptr;
+    void (*reset)() = nullptr;
 };
 
 void
@@ -123,8 +127,7 @@ file_buffer<Tp>::reset()
     buffer.clear();
 }
 
-// Called in a fork() child with file.file_mutex held: drop the parent's records, and write to a
-// new tmp file instead of the parent's.
+// Called only for a validated quiescent snapshot: drop inherited records and use a child file.
 template <typename Tp>
 void
 file_buffer<Tp>::forget_inherited()
@@ -146,26 +149,18 @@ file_buffer<Tp>*&
 get_tmp_file_buffer(domain_type type)
 {
     static file_buffer<Tp>* val        = new file_buffer<Tp>{type};
-    static file_buffer<Tp>* locked     = nullptr;
     static bool             registered = []() {
-        auto lock = []() {
-            if((locked = val))
+        auto flush = []() {
+            if(val)
             {
-                locked->file.file_mutex.lock();
-                locked->file.flush();
+                auto lock = std::lock_guard<std::mutex>{val->file.file_mutex};
+                val->file.flush();
             }
         };
-        auto unlock = []() {
-            if(locked) locked->file.file_mutex.unlock();
-            locked = nullptr;
-        };
         auto reset = []() {
-            if(!locked) return;
-            locked->forget_inherited();
-            locked->file.file_mutex.unlock();
-            locked = nullptr;
+            if(val) val->forget_inherited();
         };
-        register_file_buffer(file_buffer_fork_handlers{lock, unlock, reset});
+        register_file_buffer(file_buffer_fork_handlers{flush, reset});
         return true;
     }();
     (void) registered;
@@ -188,6 +183,8 @@ offload_buffer(domain_type type)
     auto                  _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
     [[maybe_unused]] auto _success = filebuf->file.open();
     auto&                 _fs      = filebuf->file.stream;
+    _fs.clear();
+    _fs.seekp(0, std::ios::end);
 
     ROCP_CI_LOG_IF(WARNING, _fs.tellg() != _fs.tellp())  // this should always be true
         << "tellg=" << _fs.tellg() << ", tellp=" << _fs.tellp();
@@ -210,8 +207,10 @@ template <typename Tp>
 void
 write_ring_buffer(Tp _v, domain_type type)
 {
-    // A later pthread_atfork prepare handler may emit a trace while the file-buffer registry is
-    // locked. Drop output from the forking thread until parent/child handlers release those locks.
+    if(common::static_objects_abandoned()) return;
+
+    // Application prepare handlers must not append direct tool output around the snapshot.
+    // The coordinator temporarily permits the intentional SDK-buffer flush before suspending again.
     if(is_fork_output_suspended()) return;
 
     auto* filebuf = get_tmp_file_buffer<Tp>(type);

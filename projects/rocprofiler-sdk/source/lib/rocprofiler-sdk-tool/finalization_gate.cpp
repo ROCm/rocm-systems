@@ -77,6 +77,23 @@ finalization_gate::run_or_wait(const std::function<void()>& func)
 }
 
 finalization_gate::status
+finalization_gate::run_or_wait(const std::function<void()>& func,
+                               const std::function<void()>& after_complete)
+{
+    status result;
+    try
+    {
+        result = run_or_wait(func);
+    } catch(...)
+    {
+        if(after_complete) after_complete();
+        throw;
+    }
+    if(result != status::reentered && after_complete) after_complete();
+    return result;
+}
+
+finalization_gate::status
 finalization_gate::wait_until_complete_or_reentered()
 {
     while(true)
@@ -88,6 +105,20 @@ finalization_gate::wait_until_complete_or_reentered()
             return status::reentered;
         wait_while_equal(m_state, current);
     }
+}
+finalization_gate::status
+finalize_once_and_join(finalization_gate&           request_gate,
+                       finalization_gate&           completion_gate,
+                       const std::function<void()>& request,
+                       const std::function<void()>& join)
+{
+    using status = finalization_gate::status;
+    auto result  = request_gate.run_or_wait(request);
+    if(result == status::reentered) return result;
+    if(completion_gate.wait_until_complete_or_reentered() == status::reentered)
+        return status::reentered;
+    if(join) join();
+    return result;
 }
 }  // namespace tool
 }  // namespace rocprofiler

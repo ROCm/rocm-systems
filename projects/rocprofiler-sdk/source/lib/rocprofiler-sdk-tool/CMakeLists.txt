@@ -33,6 +33,9 @@ endif()
 
 add_library(rocprofiler-sdk-tool SHARED)
 target_sources(rocprofiler-sdk-tool PRIVATE ${TOOL_SOURCES} ${TOOL_HEADERS})
+if(ROCPROFILER_BUILD_TESTS)
+    target_compile_definitions(rocprofiler-sdk-tool PRIVATE ROCPROFILER_TOOL_TEST_HOOKS=1)
+endif()
 
 target_link_libraries(
     rocprofiler-sdk-tool

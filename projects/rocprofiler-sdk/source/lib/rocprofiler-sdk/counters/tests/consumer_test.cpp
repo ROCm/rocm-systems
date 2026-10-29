@@ -37,6 +37,7 @@
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <rocprofiler-sdk/registration.h>
 
 #include "lib/rocprofiler-sdk/counters/sample_consumer.hpp"
 
@@ -141,7 +142,8 @@ TEST(consumer, restart)
         EXPECT_EQ(var.load(), static_cast<size_t>(CYCLES));
 }
 
-// A fork of the running callback consumer must return from the child.
+// A fork of the running callback consumer must return from the child while preserving the
+// never-configured SDK status.
 TEST(consumer, fork_handler_resets_callback_consumer)
 {
     callback_thread_start();
@@ -151,6 +153,12 @@ TEST(consumer, fork_handler_resets_callback_consumer)
     if(pid == 0)
     {
         alarm(10);
+        int initialized = -1;
+        int finalized   = -1;
+        if(rocprofiler_is_initialized(&initialized) != ROCPROFILER_STATUS_SUCCESS ||
+           rocprofiler_is_finalized(&finalized) != ROCPROFILER_STATUS_SUCCESS || initialized != 0 ||
+           finalized != 0)
+            _exit(2);
         callback_thread_stop();
         _exit(0);
     }

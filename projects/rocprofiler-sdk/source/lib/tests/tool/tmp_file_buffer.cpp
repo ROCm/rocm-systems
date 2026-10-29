@@ -21,15 +21,22 @@
 // THE SOFTWARE.
 
 #include "lib/output/tmp_file_buffer.hpp"
+#include "lib/output/buffered_output.hpp"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <new>
+#include <vector>
 
 namespace
 {
 struct test_record
+{
+    uint64_t value = 0;
+};
+
+struct retry_record
 {
     uint64_t value = 0;
 };
@@ -58,4 +65,45 @@ TEST(tmp_file_buffer, suspended_fork_output_does_not_offload_a_full_buffer)
     tool::resume_fork_output();
 
     EXPECT_TRUE(filebuf->buffer.is_full());
+}
+
+TEST(tmp_file_buffer, snapshot_releases_registry_before_later_prepare_work)
+{
+    namespace tool = ::rocprofiler::tool;
+    tool::prepare_fork_file_buffers();
+    ASSERT_TRUE(tool::fork_file_buffers_unchanged());
+    // Same-thread registration would deadlock if prepare retained the registry mutex.
+    tool::register_file_buffer({[]() {}, []() {}});
+    EXPECT_FALSE(tool::fork_file_buffers_unchanged());
+    tool::parent_fork_file_buffers();
+}
+
+TEST(tmp_file_buffer, preserved_read_stream_reopens_for_append)
+{
+    namespace tool        = ::rocprofiler::tool;
+    constexpr auto domain = domain_type::HIP;
+
+    tool::get_tmp_file_name_callback() = [](domain_type) {
+        return "/tmp/rocprofiler-sdk-tmp-file-buffer-retry-test.dat";
+    };
+
+    auto output = tool::buffered_output<retry_record, domain>{true};
+    output.reset();
+    tool::write_ring_buffer(retry_record{1}, domain);
+    output.read();
+    output.preserve();
+
+    tool::write_ring_buffer(retry_record{2}, domain);
+    output.read();
+
+    auto values = std::vector<uint64_t>{};
+    {
+        auto gen = output.get_generator();
+        for(auto block : gen)
+            for(const auto& record : gen.get(block))
+                values.emplace_back(record.value);
+    }
+
+    EXPECT_EQ(values, (std::vector<uint64_t>{1, 2}));
+    output.reset();
 }

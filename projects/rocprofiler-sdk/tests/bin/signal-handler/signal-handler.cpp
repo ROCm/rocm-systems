@@ -44,19 +44,24 @@
 
 #include <hip/hip_runtime.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
+#include <rocprofiler-sdk/registration.h>
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <cerrno>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstring>
 #include <sstream>
 #include <string>
 
 #include <atomic>
 #include <stdexcept>
+#include <thread>
 
 namespace
 {
@@ -264,6 +269,171 @@ mode_fork_prepare_marker()
     waitpid(child, nullptr, 0);
     emit_roctx_marker("exit_marker parent fork-prepare-marker ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
+    return 0;
+}
+
+volatile sig_atomic_t custom_signal_seen = 0;
+
+void
+lifecycle_custom_signal(int signo, siginfo_t* info, void*)
+{
+    sigset_t mask{};
+    sigprocmask(SIG_SETMASK, nullptr, &mask);
+    custom_signal_seen = signo == SIGTERM && info && sigismember(&mask, SIGUSR1) ? 1 : -1;
+}
+
+int
+mode_fork_during_lifecycle(const char* mode, const char* self_path)
+{
+    const bool  detaching         = std::strstr(mode, "detach") != nullptr;
+    const bool  handoff           = std::strstr(mode, "handoff") != nullptr;
+    const bool  tool_only         = std::strcmp(mode, "fork-during-tool-finalization") == 0;
+    const bool  full_child_matrix = std::strcmp(mode, "fork-during-finalization") == 0;
+    const char* phase             = handoff     ? "detach-handoff"
+                                    : detaching ? "detach"
+                                    : tool_only ? "finalization"
+                                                : mode + std::strlen("fork-during-");
+    int         ready[2]{};
+    int         release[2]{};
+    int         attempt[2]{};
+    if(handoff)
+    {
+        if(pipe(attempt) != 0) throw std::runtime_error{"test admission pipe failed"};
+        setenv("ROCPROF_INTERNAL_TEST_FINALIZE_ATTEMPT_FD", std::to_string(attempt[1]).c_str(), 1);
+    }
+    if(pipe(ready) != 0 || pipe(release) != 0) throw std::runtime_error{"test pipe failed"};
+    setenv("ROCPROF_INTERNAL_TEST_FORK_PHASE", phase, 1);
+    setenv("ROCPROF_INTERNAL_TEST_FORK_READY_FD", std::to_string(ready[1]).c_str(), 1);
+    setenv("ROCPROF_INTERNAL_TEST_FORK_RELEASE_FD", std::to_string(release[0]).c_str(), 1);
+    emit_roctx_marker("exit_marker parent %s", mode);
+    roctxRangePushA("inherited thread range");
+    const auto inherited_range = roctxRangeStartA("inherited process range");
+
+    using query_type  = rocprofiler_status_t (*)(int*);
+    using attach_type = rocprofiler_status_t (*)();
+    auto initialized =
+        reinterpret_cast<query_type>(dlsym(RTLD_DEFAULT, "rocprofiler_is_initialized"));
+    auto finalized = reinterpret_cast<query_type>(dlsym(RTLD_DEFAULT, "rocprofiler_is_finalized"));
+    auto attach    = reinterpret_cast<attach_type>(dlsym(RTLD_DEFAULT, "rocprofiler_attach"));
+    auto detach_entry = reinterpret_cast<attach_type>(dlsym(RTLD_DEFAULT, "rocprofiler_detach"));
+    if(!initialized || !finalized || !attach || !detach_entry)
+        throw std::runtime_error{"missing SDK queries"};
+    struct sigaction action
+    {};
+    action.sa_sigaction = lifecycle_custom_signal;
+    action.sa_flags     = SA_SIGINFO | SA_RESTART;
+    sigemptyset(&action.sa_mask);
+    sigaddset(&action.sa_mask, SIGUSR1);
+    if(sigaction(SIGTERM, &action, nullptr) != 0) throw std::runtime_error{"test sigaction failed"};
+
+    std::thread operation;
+    if(detaching)
+    {
+        operation = std::thread{[detach_entry]() {
+            if(detach_entry() != ROCPROFILER_STATUS_SUCCESS) std::_Exit(80);
+        }};
+    }
+    else if(tool_only)
+    {
+        auto fini =
+            reinterpret_cast<void (*)()>(dlsym(RTLD_DEFAULT, "rocprofiler_tool_test_finalize"));
+        if(!fini) throw std::runtime_error{"missing tool test entry"};
+        operation = std::thread{fini};
+    }
+    else
+        std::thread{[]() { std::exit(0); }}.detach();
+
+    char    token  = 0;
+    ssize_t result = 0;
+    do
+    {
+        result = read(ready[0], &token, 1);
+    } while(result < 0 && errno == EINTR);
+    if(result != 1) throw std::runtime_error{"test lifecycle did not become ready"};
+    if(handoff)
+    {
+        // Detach owns SDK/tool lifecycle state and has not published its output decision yet.
+        std::thread{[]() { std::exit(0); }}.detach();
+        do
+        {
+            result = read(attempt[0], &token, 1);
+        } while(result < 0 && errno == EINTR);
+        if(result != 1 || write(release[1], &token, 1) != 1)
+            throw std::runtime_error{"competing finalization did not reach admission"};
+        operation.join();
+        for(;;)
+            pause();
+    }
+
+    const int child_mode_count = full_child_matrix ? 6 : 1;
+    for(int child_mode = 0; child_mode < child_mode_count; ++child_mode)
+    {
+        const auto child = fork();
+        if(child == 0)
+        {
+            struct rlimit no_core
+            {
+                0, 0
+            };
+            setrlimit(RLIMIT_CORE, &no_core);
+            int init = -2;
+            int fini = -2;
+            if(initialized(&init) != ROCPROFILER_STATUS_SUCCESS || init != 0 ||
+               finalized(&fini) != ROCPROFILER_STATUS_SUCCESS || fini != 1 ||
+               attach() != ROCPROFILER_STATUS_ERROR_FINALIZED ||
+               detach_entry() != ROCPROFILER_STATUS_ERROR_FINALIZED)
+                std::_Exit(81);
+            // These inherited stacks must be bypassed by the range wrappers, including pop/stop.
+            roctxRangePop();
+            roctxRangeStop(inherited_range);
+            roctxRangePushA("abandoned new thread range");
+            roctxRangePop();
+            roctxRangeStop(roctxRangeStartA("abandoned new process range"));
+            if(child_mode == 1)
+            {
+                signal(SIGTERM, SIG_DFL);
+                raise(SIGTERM);
+            }
+            if(child_mode == 2)
+            {
+                signal(SIGTERM, SIG_IGN);
+                raise(SIGTERM);
+            }
+            if(child_mode == 3)
+            {
+                raise(SIGTERM);
+                struct sigaction restored
+                {};
+                if(custom_signal_seen != 1 || sigaction(SIGTERM, nullptr, &restored) != 0 ||
+                   (restored.sa_flags & (SA_SIGINFO | SA_RESTART)) != (SA_SIGINFO | SA_RESTART) ||
+                   !sigismember(&restored.sa_mask, SIGUSR1))
+                    std::_Exit(82);
+            }
+            if(child_mode == 4) std::abort();
+            if(child_mode == 5)
+            {
+                // exec discards every inherited flag and initializes a new profiling session.
+                unsetenv("ROCPROF_INTERNAL_TEST_FORK_PHASE");
+                execl(self_path, self_path, "--fork-exec-fresh", nullptr);
+                std::_Exit(127);
+            }
+            emit_roctx_marker("exit_marker child abandoned lifecycle");
+            std::exit(0);
+        }
+        if(child < 0) throw std::runtime_error{"test fork failed"};
+        int       status          = 0;
+        const int expected_signal = child_mode == 1 ? SIGTERM : child_mode == 4 ? SIGABRT : 0;
+        if(waitpid(child, &status, 0) != child ||
+           (expected_signal ? (!WIFSIGNALED(status) || WTERMSIG(status) != expected_signal)
+                            : (!WIFEXITED(status) || WEXITSTATUS(status) != 0)))
+            throw std::runtime_error{"child lifecycle/signal behavior failed"};
+    }
+    fprintf(stderr, "%s: children completed while parent output remained blocked\n", mode);
+    if(write(release[1], &token, 1) != 1) throw std::runtime_error{"test lifecycle release failed"};
+    if(operation.joinable()) operation.join();
+    if(!detaching && !tool_only)
+        for(;;)
+            pause();
     return 0;
 }
 
@@ -574,7 +744,20 @@ main(int argc, char** argv)
            std::strcmp(argv[i], "--fork-exec") == 0 || std::strcmp(argv[i], "--spawn") == 0 ||
            std::strcmp(argv[i], "--lingering-child") == 0 ||
            std::strcmp(argv[i], "--fork-after-work") == 0 ||
-           std::strcmp(argv[i], "--fork-prepare-marker") == 0)
+           std::strcmp(argv[i], "--fork-prepare-marker") == 0 ||
+           std::strcmp(argv[i], "--fork-prepare-detach") == 0 ||
+           std::strcmp(argv[i], "--startup-fork-check") == 0 ||
+           std::strcmp(argv[i], "--fork-child-transition-abort") == 0 ||
+           std::strcmp(argv[i], "--detach-output-retry") == 0 ||
+           std::strcmp(argv[i], "--detach-output-retry-reattach") == 0 ||
+           std::strcmp(argv[i], "--fork-during-finalization") == 0 ||
+           std::strcmp(argv[i], "--fork-during-detach") == 0 ||
+           std::strcmp(argv[i], "--fork-during-detach-sync") == 0 ||
+           std::strcmp(argv[i], "--fork-during-sdk-finalization") == 0 ||
+           std::strcmp(argv[i], "--fork-during-tool-finalization") == 0 ||
+           std::strcmp(argv[i], "--fork-exec-fresh") == 0 ||
+           std::strcmp(argv[i], "--detach-finalization-handoff") == 0 ||
+           std::strcmp(argv[i], "--detach-finalization-handoff-sync") == 0)
         {
             mode = argv[i];
         }
@@ -598,6 +781,76 @@ main(int argc, char** argv)
     if(std::strcmp(mode, "--lingering-child") == 0) return mode_lingering_child();
     if(std::strcmp(mode, "--fork-after-work") == 0) return mode_fork_after_work();
     if(std::strcmp(mode, "--fork-prepare-marker") == 0) return mode_fork_prepare_marker();
+    if(std::strcmp(mode, "--fork-prepare-detach") == 0)
+    {
+        emit_roctx_marker("exit_marker parent fork-prepare-detach");
+        const auto child = fork();
+        if(child == 0) std::exit(0);
+        int status = 0;
+        if(child < 0 || waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+           WEXITSTATUS(status) != 0)
+            throw std::runtime_error{"prepare-detach child failed"};
+        return 0;
+    }
+    if(std::strcmp(mode, "--startup-fork-check") == 0)
+    {
+        emit_roctx_marker("exit_marker parent startup-fork-check");
+        return 0;
+    }
+    if(std::strcmp(mode, "--fork-child-transition-abort") == 0)
+    {
+        struct rlimit no_core
+        {
+            0, 0
+        };
+        setrlimit(RLIMIT_CORE, &no_core);
+        signal(SIGABRT, SIG_DFL);
+        const auto child = fork();
+        if(child == 0) std::_Exit(96);  // the earlier child handler must abort before fork returns
+        int status = 0;
+        if(child < 0 || waitpid(child, &status, 0) != child || !WIFSIGNALED(status) ||
+           WTERMSIG(status) != SIGABRT)
+            throw std::runtime_error{"pre-rebuild abort did not preserve child signal behavior"};
+        emit_roctx_marker("exit_marker parent fork-child-transition-abort");
+        return 0;
+    }
+    if(std::strncmp(mode, "--detach-output-retry", std::strlen("--detach-output-retry")) == 0)
+    {
+        emit_roctx_marker("exit_marker parent %s", mode + 2);
+        auto detach =
+            reinterpret_cast<rocprofiler_status_t (*)()>(dlsym(RTLD_DEFAULT, "rocprofiler_detach"));
+        if(!detach || detach() != ROCPROFILER_STATUS_SUCCESS)
+            throw std::runtime_error{"async detach retry regression failed to detach"};
+        if(std::strcmp(mode, "--detach-output-retry-reattach") == 0)
+        {
+            auto attach = reinterpret_cast<rocprofiler_status_t (*)()>(
+                dlsym(RTLD_DEFAULT, "rocprofiler_attach"));
+            if(!attach || attach() != ROCPROFILER_STATUS_SUCCESS)
+                throw std::runtime_error{"retry regression failed to reattach"};
+            emit_roctx_marker("exit_marker reattached session after failed detach");
+        }
+        return 0;  // normal finalization joins the failed output thread and retries preserved input
+    }
+    if(std::strcmp(mode, "--fork-exec-fresh") == 0)
+    {
+        using query_type = rocprofiler_status_t (*)(int*);
+        auto initialized =
+            reinterpret_cast<query_type>(dlsym(RTLD_DEFAULT, "rocprofiler_is_initialized"));
+        auto finalized =
+            reinterpret_cast<query_type>(dlsym(RTLD_DEFAULT, "rocprofiler_is_finalized"));
+        int init = 0;
+        int fini = 1;
+        if(!initialized || !finalized || initialized(&init) != ROCPROFILER_STATUS_SUCCESS ||
+           finalized(&fini) != ROCPROFILER_STATUS_SUCCESS || init != 1 || fini != 0)
+            throw std::runtime_error{"exec did not initialize a fresh SDK session"};
+        emit_roctx_marker("exit_marker exec fresh initialization");
+        return 0;
+    }
+    if(std::strncmp(mode,
+                    "--detach-finalization-handoff",
+                    std::strlen("--detach-finalization-handoff")) == 0 ||
+       std::strncmp(mode, "--fork-during-", 14) == 0)
+        return mode_fork_during_lifecycle(mode + 2, argv[0]);
 
     if(app_handles_signals)
     {

@@ -28,6 +28,7 @@
 #include "lib/common/container/record_header_buffer.hpp"
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/demangle.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <fmt/format.h>
 
@@ -121,6 +122,8 @@ template <typename Tp>
 inline bool
 rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& value)
 {
+    if(registration::fork_child_abandoned()) return false;
+
     struct local_sync
     {
         local_sync(uint64_t buffer_id, uint64_t idx, std::atomic_flag& flag)

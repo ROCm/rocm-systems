@@ -83,6 +83,11 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-rocprof-trace-decoder)
 
+if(ROCPROFILER_BUILD_TESTS)
+    target_compile_definitions(rocprofiler-sdk-object-library
+                               PRIVATE ROCPROFILER_SDK_TEST_HOOKS=1)
+endif()
+
 target_compile_definitions(
     rocprofiler-sdk-object-library
     PRIVATE rocprofiler_EXPORTS=1

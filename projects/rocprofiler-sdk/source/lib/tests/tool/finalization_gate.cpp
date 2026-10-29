@@ -228,3 +228,71 @@ TEST(finalization_gate, waiters_are_released_when_the_finalization_throws)
                  std::runtime_error);
     EXPECT_EQ(gate.run_or_wait([]() {}), status::completed);
 }
+
+TEST(finalization_gate, outer_publication_follows_completion)
+{
+    finalization_gate gate{};
+    std::atomic<bool> expected{true};
+    auto              result = gate.run_or_wait(
+        [&]() {
+            EXPECT_TRUE(expected.load());
+            EXPECT_EQ(gate.run_or_wait([]() {}, [&]() { expected.store(false); }),
+                      status::reentered);
+            EXPECT_TRUE(expected.load());
+        },
+        [&]() {
+            EXPECT_EQ(gate.wait_until_complete_or_reentered(), status::completed);
+            expected.store(false);
+        });
+    EXPECT_EQ(result, status::ran);
+    EXPECT_FALSE(expected.load());
+}
+
+TEST(finalization_gate, exception_publication_follows_completion)
+{
+    finalization_gate gate{};
+    bool              published = false;
+    EXPECT_THROW(gate.run_or_wait([]() { throw std::runtime_error{"test"}; },
+                                  [&]() {
+                                      EXPECT_EQ(gate.wait_until_complete_or_reentered(),
+                                                status::completed);
+                                      published = true;
+                                  }),
+                 std::runtime_error);
+    EXPECT_TRUE(published);
+}
+
+TEST(finalization_gate, completed_callers_also_join)
+{
+    finalization_gate request{};
+    finalization_gate completion{};
+    int               requests = 0;
+    int               joins    = 0;
+    auto              run      = [&]() {
+        return rocprofiler::tool::finalize_once_and_join(
+            request,
+            completion,
+            [&]() {
+                ++requests;
+                completion.run_or_wait([]() {});
+            },
+            [&]() { ++joins; });
+    };
+    EXPECT_EQ(run(), status::ran);
+    EXPECT_EQ(run(), status::completed);
+    EXPECT_EQ(requests, 1);
+    EXPECT_EQ(joins, 2);
+}
+
+TEST(finalization_gate, reentered_request_does_not_join)
+{
+    finalization_gate request{};
+    finalization_gate completion{};
+    int               joins = 0;
+    request.run_or_wait([&]() {
+        EXPECT_EQ(rocprofiler::tool::finalize_once_and_join(
+                      request, completion, []() {}, [&]() { ++joins; }),
+                  status::reentered);
+    });
+    EXPECT_EQ(joins, 0);
+}

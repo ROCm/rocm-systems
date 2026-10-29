@@ -29,8 +29,10 @@
 #include "lib/common/elf_utils.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
+#include "lib/common/fork_lifecycle.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
+#include "lib/common/session_lifecycle.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/static_tl_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -84,11 +86,15 @@
 
 #include <dlfcn.h>
 #include <link.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -122,6 +128,34 @@ namespace registration
 namespace
 {
 namespace fs = ::rocprofiler::common::filesystem;
+
+common::fork_lifecycle             lifecycle = {};
+thread_local common::fork_sequence sdk_fork_sequence{};
+
+auto&
+get_session_lifecycle()
+{
+    static auto* state = new common::session_lifecycle{};
+    return *state;
+}
+void
+notify_finalization_attempt()
+{
+#if defined(ROCPROFILER_SDK_TEST_HOOKS)
+    if(const char* attempt = std::getenv("ROCPROF_INTERNAL_TEST_FINALIZE_ATTEMPT_FD"))
+    {
+        char    token  = 1;
+        ssize_t result = 0;
+        do
+        {
+            result = write(std::atoi(attempt), &token, 1);
+        } while(result < 0 && errno == EINTR);
+        ROCP_FATAL_IF(result != 1) << "finalization admission test readiness failed";
+    }
+#endif
+}
+
+using status_state_t = std::pair<std::atomic<int>, std::atomic<int>>;
 
 bool
 resolved_exists(std::string_view fname)
@@ -287,8 +321,7 @@ void invoke_client_finalizer(rocprofiler_client_id_t);
 auto*
 get_status()
 {
-    static auto*& _v =
-        common::static_object<std::pair<std::atomic<int>, std::atomic<int>>>::construct(0, 0);
+    static auto*& _v = common::static_object<status_state_t>::construct(0, 0);
     return _v;
 }
 
@@ -959,6 +992,11 @@ invoke_client_attaches()
 rocprofiler_status_t
 invoke_client_detaches()
 {
+    if(fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+    auto activity  = common::fork_lifecycle::activity{lifecycle};
+    auto ownership = get_session_lifecycle().update();
+    if(!ownership) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     ROCP_INFO << "Calling tool_detach for all registered clients. # of clients: "
               << get_num_clients();
 
@@ -1010,6 +1048,12 @@ invoke_client_detaches()
 void
 invoke_client_finalizer(rocprofiler_client_id_t client_id)
 {
+    if(fork_child_abandoned()) return;
+    auto activity = common::fork_lifecycle::activity{lifecycle};
+    notify_finalization_attempt();
+    auto ownership = get_session_lifecycle().dispatch_finalizer();
+    if(get_fini_status() > 0) return;
+
     ROCP_INFO << __FUNCTION__ << "(client_id=" << client_id.handle << ")";
 
     auto _lk = scoped_lock_t{get_registration_mutex()};
@@ -1059,6 +1103,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 bool
 is_attached()
 {
+    if(fork_child_abandoned()) return false;
     return (get_attach_status()) ? get_attach_status()->is_attached.load(std::memory_order_acquire)
                                  : false;
 }
@@ -1066,6 +1111,7 @@ is_attached()
 bool
 supports_attachment()
 {
+    if(fork_child_abandoned()) return false;
     return (get_attach_status())
                ? get_attach_status()->has_attach_table.load(std::memory_order_acquire)
                : false;
@@ -1096,24 +1142,88 @@ get_client_offset()
 int
 get_init_status()
 {
+    if(fork_child_abandoned()) return 0;
     return (get_status()) ? get_status()->first.load(std::memory_order_acquire) : 1;
 }
 
 int
 get_fini_status()
 {
+    if(fork_child_abandoned()) return 1;
     return (get_status()) ? get_status()->second.load(std::memory_order_acquire) : 1;
+}
+
+void
+initialize_fork_state()
+{
+    (void) get_status();
+    (void) get_session_lifecycle();
+}
+
+void
+fork_prepare() noexcept
+{
+    if(lifecycle.abandoned()) return;
+    // Prime this DSO's TLS in the parent; no first-use allocation is needed by child TID reset.
+    common::reset_tid_after_fork();
+    if(!sdk_fork_sequence.begin())
+    {
+        internal_threading::prepare_fork_participants(false);
+        return;
+    }
+    // Never wait for an application thread that a later prepare handler may itself need.
+    auto ownership             = get_session_lifecycle().try_update();
+    sdk_fork_sequence.admitted = ownership && lifecycle.try_prepare();
+    internal_threading::prepare_fork_participants(sdk_fork_sequence.admitted);
+}
+
+void
+fork_parent() noexcept
+{
+    if(lifecycle.abandoned()) return;
+    internal_threading::parent_fork_participants();
+    if(!sdk_fork_sequence.finish()) return;
+    if(sdk_fork_sequence.admitted) lifecycle.parent_complete();
+}
+
+void
+abandon_fork_child() noexcept
+{
+    lifecycle.child_complete(true);
+    common::abandon_static_objects_after_fork();
+}
+
+void
+fork_child() noexcept
+{
+    // Peek without invoking get_status(): an early/late child must never initialize it here.
+    const auto* status    = common::static_object<status_state_t>::get();
+    const bool  finalized = status && status->second.load(std::memory_order_acquire) != 0;
+    lifecycle.child_complete(!sdk_fork_sequence.admitted || sdk_fork_sequence.nested() ||
+                             finalized);
+    if(lifecycle.abandoned())
+        common::abandon_static_objects_after_fork();
+    else
+        sdk_fork_sequence.finish();
+}
+
+bool
+fork_child_abandoned() noexcept
+{
+    return lifecycle.abandoned();
 }
 
 void
 set_init_status(int v)
 {
+    if(fork_child_abandoned()) return;
     if(get_status()) get_status()->first.store(v, std::memory_order_release);
 }
 
 void
 set_fini_status(int v)
 {
+    if(fork_child_abandoned()) return;
     if(get_status()) get_status()->second.store(v, std::memory_order_release);
 }
 
@@ -1131,6 +1241,12 @@ client_initialize(std::optional<client_library>& client)
 void
 initialize()
 {
+    if(fork_child_abandoned()) return;
+    internal_threading::register_fork_handler();
+    auto activity  = common::fork_lifecycle::activity{lifecycle};
+    auto ownership = get_session_lifecycle().update();
+    if(!ownership) return;
+
     init_logging();
 
     ROCP_INFO << "rocprofiler initialize called...";
@@ -1162,6 +1278,8 @@ initialize()
         // initialization is in process
         set_init_status(-1);
         std::atexit([]() {
+            if(fork_child_abandoned()) return;
+            auto activity = common::fork_lifecycle::activity{lifecycle};
             finalize();
             common::destroy_static_tl_objects();
             common::destroy_static_objects();
@@ -1204,6 +1322,11 @@ initialize()
 void
 finalize()
 {
+    if(fork_child_abandoned()) return;
+    auto activity = common::fork_lifecycle::activity{lifecycle};
+    notify_finalization_attempt();
+    auto ownership = get_session_lifecycle().finalize();
+
 #if defined(CODECOV) && CODECOV > 0
     if(get_fini_status() > 0) __gcov_dump();
 #endif
@@ -1229,6 +1352,29 @@ finalize()
     std::call_once(_once, []() {
         auto num_clients = get_num_clients();
         set_fini_status(-1);
+
+#if defined(ROCPROFILER_SDK_TEST_HOOKS)
+        // Test-only rendezvous before tool_fini, while only the SDK owns finalization.
+        const char* phase = std::getenv("ROCPROF_INTERNAL_TEST_FORK_PHASE");
+        if(phase && std::strcmp(phase, "sdk-finalization") == 0)
+        {
+            const char* ready   = std::getenv("ROCPROF_INTERNAL_TEST_FORK_READY_FD");
+            const char* release = std::getenv("ROCPROF_INTERNAL_TEST_FORK_RELEASE_FD");
+            ROCP_FATAL_IF(!ready || !release) << "missing SDK lifecycle test pipes";
+            char    token  = 1;
+            ssize_t result = 0;
+            do
+            {
+                result = write(std::atoi(ready), &token, 1);
+            } while(result < 0 && errno == EINTR);
+            ROCP_FATAL_IF(result != 1) << "SDK lifecycle test readiness failed";
+            do
+            {
+                result = read(std::atoi(release), &token, 1);
+            } while(result < 0 && errno == EINTR);
+            ROCP_FATAL_IF(result != 1) << "SDK lifecycle test release failed";
+        }
+#endif
 
         // Signal-less teardown steps 1-6, in the one order that strands no EOP-proven
         // completion. Must precede the sequence below: queue_controller_fini stops the
@@ -1269,6 +1415,10 @@ finalize()
 rocprofiler_status_t
 attach()
 {
+    if(fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+    auto activity  = common::fork_lifecycle::activity{lifecycle};
+    auto ownership = get_session_lifecycle().update();
+    if(!ownership) return ROCPROFILER_STATUS_ERROR_FINALIZED;
     if(get_clients() && get_tool_library_load_failed())
     {
         ROCP_ERROR << "attach failed because a ROCP_TOOL_LIBRARIES library could not be loaded "
@@ -1306,6 +1456,31 @@ rocprofiler_is_finalized(int* status)
 rocprofiler_status_t
 rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 {
+    if(rocprofiler::registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+    rocprofiler::internal_threading::register_fork_handler();
+    auto activity =
+        rocprofiler::common::fork_lifecycle::activity{rocprofiler::registration::lifecycle};
+    auto ownership = rocprofiler::registration::get_session_lifecycle().update();
+    if(!ownership) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+#if defined(ROCPROFILER_SDK_TEST_HOOKS)
+    if(std::getenv("ROCPROF_INTERNAL_TEST_FORCE_CONFIGURE_FORK"))
+    {
+        std::thread fork_thread{[]() {
+            const auto child = fork();
+            if(child == 0)
+            {
+                if(!rocprofiler::registration::fork_child_abandoned()) std::_Exit(92);
+                std::exit(0);
+            }
+            int status = 0;
+            if(child < 0 || waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+               WEXITSTATUS(status) != 0)
+                std::_Exit(93);
+        }};
+        fork_thread.join();
+    }
+#endif
+
     using scoped_lock_t = rocprofiler::registration::scoped_lock_t;
 
     rocprofiler::registration::init_logging();
@@ -1414,6 +1589,8 @@ rocprofiler_status_t
 rocprofiler_iterate_runtime_registration_info(rocprofiler_runtime_registration_info_cb_t callback,
                                               void*                                      data)
 {
+    if(rocprofiler::registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     auto registrations = ::rocprofiler::registration::iterate::get_runtime_registrations(nullptr);
 
     if(!registrations.has_value()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION;
@@ -1434,6 +1611,8 @@ rocprofiler_set_api_table(const char* name,
                           void**      tables,
                           uint64_t    num_tables)
 {
+    if(rocprofiler::registration::fork_child_abandoned()) return 0;
+
     // implementation has a call once
     rocprofiler::registration::init_logging();
 

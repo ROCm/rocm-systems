@@ -50,6 +50,11 @@ public:
     // Runs `func` unless finalization has already started; otherwise waits for it to finish.
     status run_or_wait(const std::function<void()>& func);
 
+    // Publish outer lifecycle state only after completion has become visible. Reentrant calls
+    // never publish; exception unwinding publishes after the inner completion guard executes.
+    status run_or_wait(const std::function<void()>& func,
+                       const std::function<void()>& after_complete);
+
     // Waits for finalization to start and finish without claiming ownership. A same-thread call
     // returns reentered so a finalizer cannot deadlock waiting on itself.
     status wait_until_complete_or_reentered();
@@ -65,5 +70,12 @@ private:
     std::atomic<uint32_t>        m_state     = {static_cast<uint32_t>(state::not_started)};
     std::atomic<std::thread::id> m_finalizer = {};
 };
+// Requests finalization, waits for the actual tool callback, and routes every non-reentrant
+// caller through its join operation. The join callback preserves worker self-join avoidance.
+finalization_gate::status
+finalize_once_and_join(finalization_gate&           request_gate,
+                       finalization_gate&           completion_gate,
+                       const std::function<void()>& request,
+                       const std::function<void()>& join);
 }  // namespace tool
 }  // namespace rocprofiler

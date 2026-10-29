@@ -26,6 +26,48 @@ Before tracing or profiling your HIP application using ``rocprofv3``, build it u
    cmake -B <build-directory> <source-directory> -DCMAKE_PREFIX_PATH=/opt/rocm
    cmake --build <build-directory> --target all --parallel <N>
 
+Process creation and profiling output
+-------------------------------------
+
+For reliable profiling of a new process, use ``fork()`` followed by ``exec()`` or a spawn
+operation that executes a new program. The new program initializes a fresh profiling session
+when the profiling environment and tool configuration are propagated to it.
+
+``rocprofv3`` also retains best-effort host-side output for an idle plain-fork child. Traced API
+and marker producers must be quiescent at the fork boundary. Events recorded before fork belong
+to the parent; an eligible child receives a separate process identity and records subsequent
+host events in its own output. String tables and other metadata can still contain inherited
+parent entries. This event isolation does not make inherited HIP runtime state safe to use.
+
+If a child inherits initialization, detach, finalization, or asynchronous output in progress,
+the inherited profiling session is disabled in that child. It emits no profiler output and does
+not wait for parent callbacks or join parent threads. The same fallback applies to a concurrent
+fork that cannot acquire output ownership. Recursively calling ``fork()`` from a
+``pthread_atfork`` prepare handler is outside this contract. In particular, glibc serializes
+prepare dispatch with an internal non-recursive lock, so such a call can block before any SDK or
+tool handler runs. The original parent continues its lifecycle and writes its own output normally.
+The status queries set their output parameters to ``initialized = 0`` and ``finalized = 1``;
+attach/detach entry points reject the abandoned session with
+``ROCPROFILER_STATUS_ERROR_FINALIZED``. An ``exec()`` creates a fresh session.
+
+SDK and tool child decisions are combined before worker reconstruction. This coordination
+requires the updated SDK and tool together. When attached to an older SDK without the internal
+coordination hook, the tool retains the older SDK's best-effort fork behavior.
+Prepare handlers release snapshot locks before subsequent application prepare handlers run.
+Lifecycle work after a snapshot invalidates it, even when that work finishes before fork.
+Startup and profiler-owned signal-disposition changes participate in this activity tracking.
+Handled signals remain blocked on the forking thread until the child decision and worker setup
+finish. A PID ownership check also prevents inherited worker use before the child handlers run,
+including ``abort()`` unblocking ``SIGABRT`` during that transition.
+Failed asynchronous detach output retains its inputs for finalization to retry; detach is only
+marked successful once output generation completes.
+
+This fallback prevents specific profiler teardown hangs; it is not a general guarantee for
+arbitrary multithreaded post-fork execution. Fork inside an active SDK or tool callback and
+concurrent traced producers remain outside the deterministic plain-fork contract. Existing
+child reconstruction for eligible idle sessions still uses operations that are not generally
+async-signal-safe. These changes do not establish general fork+exec handler safety.
+
 .. _gpu-performance-level:
 
 Setting GPU performance level for PMC profiling

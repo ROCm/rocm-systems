@@ -26,6 +26,8 @@
 
 #include <fmt/format.h>
 
+#include <array>
+#include <atomic>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -87,42 +89,77 @@ get_file_buffer_registry()
     static auto* val = new std::vector<file_buffer_fork_handlers>{};
     return *val;
 }
+
+std::atomic<uint64_t> registry_epoch{0};
+static_assert(std::atomic<uint64_t>::is_always_lock_free);
+struct fork_snapshot
+{
+    static constexpr size_t                             max_handlers = 64;
+    std::array<file_buffer_fork_handlers, max_handlers> handlers{};
+    size_t                                              size  = 0;
+    uint64_t                                            epoch = 0;
+    bool                                                valid = false;
+};
+thread_local fork_snapshot snapshot{};
+
 }  // namespace
 
 void
 register_file_buffer(file_buffer_fork_handlers handlers)
 {
-    ROCP_FATAL_IF(!handlers.lock || !handlers.unlock || !handlers.reset)
-        << "incomplete file-buffer fork handlers";
+    ROCP_FATAL_IF(!handlers.flush || !handlers.reset) << "incomplete file-buffer fork handlers";
     auto _lk = std::lock_guard<std::mutex>{get_file_buffer_registry_mutex()};
+    registry_epoch.fetch_add(1, std::memory_order_acq_rel);
     get_file_buffer_registry().emplace_back(handlers);
+}
+
+void
+initialize_fork_file_buffers()
+{
+    // Resolve every lazy parent-side accessor before this thread can enter an atfork prepare.
+    (void) get_file_buffer_registry_mutex();
+    (void) get_file_buffer_registry();
+    snapshot = {};
 }
 
 void
 prepare_fork_file_buffers()
 {
-    // Stays locked until parent/child_fork_file_buffers() so no file buffer is created mid-fork.
-    get_file_buffer_registry_mutex().lock();
-    for(const auto& itr : get_file_buffer_registry())
-        itr.lock();
+    auto  lock     = std::lock_guard<std::mutex>{get_file_buffer_registry_mutex()};
+    auto& registry = get_file_buffer_registry();
+    snapshot.valid = false;
+    snapshot.size  = 0;
+    if(registry.size() > snapshot.handlers.size()) return;
+    for(const auto& handler : registry)
+        snapshot.handlers.at(snapshot.size++) = handler;
+    for(size_t i = 0; i < snapshot.size; ++i)
+        snapshot.handlers.at(i).flush();
+    snapshot.epoch = registry_epoch.load(std::memory_order_acquire);
+    snapshot.valid = true;
 }
 
 void
 parent_fork_file_buffers()
 {
-    for(auto itr = get_file_buffer_registry().rbegin(); itr != get_file_buffer_registry().rend();
-        ++itr)
-        itr->unlock();
-    get_file_buffer_registry_mutex().unlock();
+    snapshot.size  = 0;
+    snapshot.valid = false;
+}
+
+bool
+fork_file_buffers_unchanged() noexcept
+{
+    return snapshot.valid && snapshot.epoch == registry_epoch.load(std::memory_order_acquire);
 }
 
 void
 child_fork_file_buffers()
 {
-    for(auto itr = get_file_buffer_registry().rbegin(); itr != get_file_buffer_registry().rend();
-        ++itr)
-        itr->reset();
-    get_file_buffer_registry_mutex().unlock();
+    // No registry traversal or inherited lock acquisition. The coordinator validates both the
+    // registry epoch and the tool lifecycle epoch before permitting this reconstruction.
+    for(size_t i = 0; i < snapshot.size; ++i)
+        snapshot.handlers.at(i).reset();
+    snapshot.size  = 0;
+    snapshot.valid = false;
 }
 
 tmp_file_name_callback_t&
