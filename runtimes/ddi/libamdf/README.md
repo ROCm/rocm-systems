@@ -25,6 +25,10 @@ The instance's `native_lifetime` selects a process-owned or instance-owned
 driver context. On Linux KFD, PROCESS can reuse the primary connection;
 INSTANCE GPU activation requires a secondary context supported by KFD UAPI
 1.19 or newer.
+Each instance owns its own rocddi session and teardown state. A busy or failed
+destruction attempt on one instance does not close another instance. Native
+teardown failures retain the affected public instance for a destruction retry;
+there is no process-wide AMDF init or shutdown reference count.
 
 The CMake build stages `libamdf.a` and a `libamdf.so` alias of the shared image
 that also exports HSA. Each ABI owns a separate rocddi session and public
