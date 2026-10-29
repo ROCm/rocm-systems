@@ -92,9 +92,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       }
       if (published != VmAccessOutcome::Complete) {
         queue.publication_faulted = true;
-        util::Logger::warn("PM4 read pointer publication failed");
-        context.fault_queue();
-        return util::Result::success();
+        return fail("PM4 read pointer publication failed");
       }
       auto &submission = state.submissions.front();
       if (submission.ready) {
@@ -579,9 +577,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
             return fail("SET_UCONFIG_REG requires a register write callback");
           if (queue.packet_callbacks.write_uconfig_register) {
             if (words.size() != 2 || (words[0] & ~0xffffu)) {
-              util::Logger::warn("invalid SET_UCONFIG_REG payload");
-              context.fault_queue();
-              return util::Result::success();
+              return fail("invalid SET_UCONFIG_REG payload");
             }
             const auto result =
                 queue.packet_callbacks.write_uconfig_register(0xc000 + words[0], words[1]);
@@ -592,9 +588,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
               return util::Result::success();
             }
             if (result != Pm4RegisterWriteStatus::Complete) {
-              util::Logger::warn("SET_UCONFIG_REG write rejected");
-              context.fault_queue();
-              return util::Result::success();
+              return fail("SET_UCONFIG_REG write rejected");
             }
           }
         }
@@ -756,13 +750,14 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           return util::Result::failure();
         const bool chained = words[2] & (1u << 20);
         const uint32_t dwords = words[2] & 0xfffff;
-        if ((words[0] & 3) || address(0) > UINT64_MAX - uint64_t{dwords} * 4)
+        if (words[0] & 3)
+          return fail("unsupported PM4 indirect buffer swap function");
+        if (address(0) > UINT64_MAX - uint64_t{dwords} * 4)
           return fail("invalid PM4 indirect buffer address or extent");
         const uint32_t depth = ib.depth + (chained ? 0 : 1);
         if (++submission.indirect_expansions > Pm4Submission::kMaxIndirectExpansions ||
             depth >= Pm4Submission::kMaxIndirectDepth) {
-          context.fault_queue();
-          return util::Result::success();
+          return fail("PM4 indirect buffer expansion or depth limit exceeded");
         }
         // CHAIN jumps at the current IB level; a non-chained IB returns here.
         // Other root IBs supplied by the same CS remain queued behind this one.
@@ -825,9 +820,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         }
         if (published != VmAccessOutcome::Complete) {
           queue.publication_faulted = true;
-          util::Logger::warn("PM4 read pointer publication failed");
-          context.fault_queue();
-          return util::Result::success();
+          return fail("PM4 read pointer publication failed");
         }
       }
       if (!queue.dispatches.entries.empty())

@@ -6,6 +6,8 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/soc.h"
 #include "simdojo/sim/simulation.h"
 
@@ -40,7 +42,7 @@ public:
                         .address = address,
                         .contiguous_bytes = bytes_.size() - address,
                         .mtype = Mtype::RW,
-                        .permissions = {.readable = true, .writable = true, .executable = false}}};
+                        .permissions = {.readable = true, .writable = true, .executable = true}}};
   }
 
   VmAccessOutcome read(VmMemoryDomain, uint64_t address, std::span<std::byte> bytes) override {
@@ -114,6 +116,7 @@ public:
     unavailable_read_.reset();
     unavailable_store_.reset();
     faulted_store_.reset();
+    write_failure_.reset();
   }
 
 private:
@@ -367,6 +370,162 @@ TEST_F(Pm4ComputeQueueTest, FailedDependencyCancelsQueuedSubmissionsOnce) {
   EXPECT_EQ(completions, 2u);
   service();
   EXPECT_EQ(completions, 2u);
+}
+
+class Pm4FlushPlugin final : public ExecutionPlugin {
+public:
+  Pm4FlushPlugin() : ExecutionPlugin("pm4-flush") {}
+  void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &) override {
+    ++processed;
+    if (on_processed)
+      on_processed();
+  }
+  void onAmdgpuDispatchExecutionBegin(uint32_t id) override { begins.push_back(id); }
+  void onAmdgpuDispatchExecutionEnd(uint32_t id) override { ends.push_back(id); }
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override {
+    if (on_completed)
+      on_completed();
+  }
+  std::function<void()> on_processed;
+  std::function<void()> on_completed;
+  uint32_t processed = 0;
+  std::vector<uint32_t> begins, ends;
+};
+
+class Pm4DispatchFlushTest : public Pm4ComputeQueueTest {
+protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(Pm4ComputeQueueTest::SetUp());
+    l2->set_backing_memory(gpu_memory);
+    l2->set_gpu_vm(&gpu_vm);
+    auto owned_plugin = std::make_unique<Pm4FlushPlugin>();
+    plugin = owned_plugin.get();
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(owned_plugin)));
+    cp->set_plugin_group(group);
+  }
+
+  void inject_flush_failure() {
+    std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+    dirty.fill(0xab);
+    ASSERT_EQ(l2->writeback_line(kDirtyLine, dirty.data(), Mtype::RW, 1),
+              VmAccessOutcome::Complete);
+    memory->fail_write(kDirtyLine, VmAccessOutcome::Faulted);
+  }
+
+  void submit_dispatch(bool begun) {
+    // SET_SH_REG sets 1x1x1 threads and the program address; dispatch then
+    // precedes a register callback that must not execute after either flush gate.
+    const std::array words{0xc0037600u,
+                           kPm4ComputeNumThreadX,
+                           1u,
+                           1u,
+                           1u,
+                           0xc0017600u,
+                           kPm4ComputePgmLo,
+                           0x20u,
+                           0xc0031500u,
+                           begun ? 1u : 0u,
+                           1u,
+                           1u,
+                           1u,
+                           0xc0017900u,
+                           0x40u,
+                           0xdeadbeefu};
+    memory->store<uint32_t>(0x2000, 0xbf810000u); // s_endpgm
+    for (size_t i = 0; i < words.size(); ++i)
+      memory->store<uint32_t>(kRing + i * 4, words[i]);
+    ASSERT_TRUE(cp->register_drm_queue(
+        {.address_space = address_space,
+         .queue_id = 1,
+         .packet_callbacks = {.write_uconfig_register = [&](uint64_t, uint32_t) {
+           ++successors;
+           return Pm4RegisterWriteStatus::Complete;
+         }}}));
+    Pm4Submission submission;
+    submission.buffers.push_back({.address = kRing, .dwords = words.size()});
+    submission.complete = [&](bool success) {
+      EXPECT_FALSE(success);
+      ++completions;
+    };
+    ASSERT_TRUE(cp->submit_pm4(1, 0, std::move(submission)));
+  }
+
+  void expect_cancelled() {
+    for (uint32_t i = 0; i < 100 && !completions; ++i)
+      service();
+    EXPECT_EQ(completions, 1u);
+    EXPECT_EQ(successors, 0u);
+    service();
+    EXPECT_EQ(completions, 1u);
+  }
+
+  static constexpr uint64_t kDirtyLine = 0x1000;
+  Pm4FlushPlugin *plugin = nullptr;
+  uint32_t completions = 0, successors = 0;
+};
+
+TEST_F(Pm4DispatchFlushTest, AdmissionFlushFailurePreventsDispatchAndSuccessor) {
+  ASSERT_NO_FATAL_FAILURE(inject_flush_failure());
+  ASSERT_NO_FATAL_FAILURE(submit_dispatch(false));
+  expect_cancelled();
+  EXPECT_EQ(plugin->processed, 0u);
+}
+
+TEST_F(Pm4DispatchFlushTest, RetirementFlushFailurePreventsSuccessor) {
+  plugin->on_processed = [&] { inject_flush_failure(); };
+  ASSERT_NO_FATAL_FAILURE(submit_dispatch(false));
+  expect_cancelled();
+  EXPECT_EQ(plugin->processed, 1u);
+  EXPECT_TRUE(plugin->begins.empty());
+  EXPECT_TRUE(plugin->ends.empty());
+}
+
+TEST_F(Pm4DispatchFlushTest, RetirementFlushFailureEndsCompletedDispatch) {
+  plugin->on_completed = [&] { inject_flush_failure(); };
+  ASSERT_NO_FATAL_FAILURE(submit_dispatch(true));
+  expect_cancelled();
+  EXPECT_EQ(plugin->processed, 1u);
+  ASSERT_EQ(plugin->begins.size(), 1u);
+  EXPECT_EQ(plugin->ends, plugin->begins);
+}
+
+TEST_F(Pm4ComputeQueueTest, ForeignFlushFailureDoesNotBlockFreshQueues) {
+  l2->set_backing_memory(gpu_memory);
+  l2->set_gpu_vm(&gpu_vm);
+  constexpr uint64_t kDirtyLine = 0x1000;
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0xab);
+  ASSERT_EQ(l2->writeback_line(kDirtyLine, dirty.data(), Mtype::RW, 1), VmAccessOutcome::Complete);
+  memory->fail_write(kDirtyLine, VmAccessOutcome::Faulted);
+  auto healthy_memory = std::make_shared<Pm4QueueMemory>();
+  const auto healthy_space = gpu_vm.register_translated(2, healthy_memory, healthy_memory);
+  ASSERT_TRUE(healthy_space);
+  constexpr uint32_t kOutput = 0x300;
+  const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
+  for (size_t i = 0; i < words.size(); ++i)
+    healthy_memory->store<uint32_t>(kRing + i * 4, words[i]);
+  uint32_t completions = 0;
+  for (uint32_t id : {1u, 2u}) {
+    ASSERT_TRUE(cp->register_drm_queue({.address_space = healthy_space, .queue_id = id}));
+    healthy_memory->store<uint32_t>(kOutput, 0);
+    Pm4Submission submission;
+    submission.buffers.push_back({.address = kRing, .dwords = words.size()});
+    submission.complete = [&](bool success) {
+      EXPECT_TRUE(success);
+      ++completions;
+    };
+    ASSERT_TRUE(cp->submit_pm4(id, 0, std::move(submission)));
+    for (uint32_t i = 0; i < 10 && completions != id; ++i)
+      service();
+    EXPECT_EQ(completions, id);
+    EXPECT_EQ(healthy_memory->load<uint32_t>(kOutput), 0xdeadbeefu);
+    EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0u);
+  }
+  // Scoped maintenance must retain the failed owner's dirty bytes for retry.
+  memory->make_available();
+  EXPECT_EQ(l2->flush_address_space(1), VmAccessOutcome::Complete);
+  EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0xababababu);
 }
 
 class Pm4QueueCacheFlushFailureTest : public Pm4ComputeQueueTest,

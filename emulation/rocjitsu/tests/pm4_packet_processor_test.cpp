@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 
+#include <stdexcept>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -489,6 +491,24 @@ INSTANTIATE_TEST_SUITE_P(NonComplete, Pm4CacheFlushFailureTest,
                          ::testing::Values(VmAccessOutcome::Unavailable, VmAccessOutcome::Faulted,
                                            VmAccessOutcome::Malformed));
 
+TEST_F(Pm4PacketProcessorTest, PropagatesDispatchCallbackExceptionAfterCommittedWrite) {
+  const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu,
+                         0xc0031500u, 1u,     1u,      1u, 1u};
+  submit(words, true);
+  uint32_t faults = 0, completions = 0;
+  context.fault_queue = [&] { ++faults; };
+  queue.commands.submissions.front().complete = [&](bool) { ++completions; };
+  context.dispatch = [](const std::array<uint32_t, 4> &, util::DiagnosticEmitter) -> util::Result {
+    throw std::runtime_error("dispatch callback");
+  };
+  EXPECT_THROW(service(), std::runtime_error);
+  EXPECT_EQ(faults, 0u);
+  EXPECT_EQ(completions, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0xdeadbeefu);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 5u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 5u);
+}
+
 struct RejectedPm4Packet {
   const char *name;
   std::vector<uint32_t> words;
@@ -538,6 +558,9 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         RejectedPm4Packet{"Type", {0u, 0u}, "invalid PM4 packet size or type"},
         RejectedPm4Packet{"RequireSize", {0xc0001500u, 0u}, "expects 4 payload words"},
+        RejectedPm4Packet{"IndirectSwap",
+                          {0xc0023f00u, 0x401u, 0u, 1u},
+                          "unsupported PM4 indirect buffer swap function"},
         RejectedPm4Packet{"Opcode", {0xc000ff00u, 0u}, "unsupported PM4 opcode"},
         RejectedPm4Packet{
             "WriteDestination", {0xc0033700u, 0u, 0x800u, 0u, 99u}, "unsupported WRITE_DATA"}),

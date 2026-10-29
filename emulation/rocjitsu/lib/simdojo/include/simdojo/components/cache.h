@@ -19,6 +19,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -328,8 +329,8 @@ public:
     }
   }
 
-  /// @brief Invalidate all cache lines.
-  void invalidate_all() {
+  /// @brief Invalidate all cache lines, optionally restricted to one VMID.
+  void invalidate_all(std::optional<uint32_t> vmid = std::nullopt) {
     for (uint32_t first = 0; first < NumSets; first += sizeof(uint64_t)) {
       const uint32_t end = std::min<uint32_t>(first + sizeof(uint64_t), NumSets);
       uint64_t touched = 0;
@@ -343,12 +344,15 @@ public:
           continue;
         for (uint32_t w = 0; w < Associativity; ++w) {
           auto &t = tag_at(s, w);
+          if (vmid && t.vmid != *vmid)
+            continue;
           t.coherence_epoch = 0;
           t.valid = false;
           t.dirty = false;
           t.coherence = CoherenceState::INVALID;
         }
-        touched_sets_[s] = 0;
+        if (!vmid)
+          touched_sets_[s] = 0;
       }
     }
   }

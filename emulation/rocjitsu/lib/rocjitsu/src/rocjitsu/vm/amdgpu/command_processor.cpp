@@ -1069,6 +1069,8 @@ void CommandProcessor::drain_fanout_inbox() {
     // Honour the packet's acquire fence on this XCD too. The owner invalidated
     // only its own CUs; this runs on our partition's thread, so ours are safe
     // to touch here and the peer ends up with the same view the owner has.
+    // AQL fanout retains its existing best-effort maintenance policy. PM4
+    // admission and retirement instead reject incomplete maintenance.
     if (shard.acquire_invalidate)
       (void)flush_gpu_caches();
     if (!shard.is_non_kernel()) {
@@ -3116,15 +3118,16 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
     }
     while (!state.entries.empty() && state.entries.front().fully_completed()) {
       const auto &entry = state.entries.front();
-      if (flush_gpu_caches() != VmAccessOutcome::Complete) {
-        util::Logger::warn("PM4 queue failed: PM4 cache flush failed");
-        fail_pm4_queue(queue, state);
-        break;
-      }
+      const VmAccessOutcome flushed = flush_gpu_caches(queue.address_space);
       if (entry.execution_begun)
         plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
       erase_cluster_workgroups(entry.dispatch_id);
       state.entries.pop_front();
+      if (flushed != VmAccessOutcome::Complete) {
+        util::Logger::warn("PM4 queue failed: PM4 cache flush failed");
+        fail_pm4_queue(queue, state);
+        break;
+      }
     }
     fetch_pm4(queue, state, now);
     service_pm4_ring(queue, now);
@@ -3329,7 +3332,7 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.wait_for_predecessors = true;
   util::Logger::vm("PM4 dispatch pc=", std::hex, dp.kernel_entry_pc, " rsrc1=", rsrc1,
                    " rsrc2=", rsrc2, std::dec, " workgroups=", total);
-  if (flush_gpu_caches() != VmAccessOutcome::Complete)
+  if (flush_gpu_caches(queue.address_space) != VmAccessOutcome::Complete)
     return emit_error.emit() << "PM4 cache flush failed";
   KernelDispatchInfo info{};
   info.dispatch_id = dp.dispatch_id;
@@ -3371,7 +3374,7 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
       }
     });
   }
-  if (flush_gpu_caches() != VmAccessOutcome::Complete)
+  if (flush_gpu_caches(queue.address_space) != VmAccessOutcome::Complete)
     util::Logger::warn("PM4 queue cancellation cache flush failed");
   qs.entries.clear();
   for (auto &submission : queue.commands.submissions)
@@ -3388,7 +3391,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
       {
           .arch = cus_.empty() ? ROCJITSU_CODE_ARCH_INVALID : cus_[0]->config().arch,
           .xcc_id = scratch_xcc_id_,
-          .flush_caches = [this] { return flush_gpu_caches(); },
+          .flush_caches = [this, &queue] { return flush_gpu_caches(queue.address_space); },
           .dispatch =
               [this, &queue, &qs](const std::array<uint32_t, 4> &dimensions,
                                   util::DiagnosticEmitter emit_error) {
@@ -4938,7 +4941,14 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   }
 }
 
-VmAccessOutcome CommandProcessor::flush_gpu_caches() {
+VmAccessOutcome CommandProcessor::flush_gpu_caches(AddressSpaceHandle address_space) {
+  std::optional<uint32_t> vmid;
+  if (address_space) {
+    const auto info = gpu_vm_ ? gpu_vm_->lookup(address_space) : std::nullopt;
+    if (!info)
+      return VmAccessOutcome::Faulted;
+    vmid = info->vmid;
+  }
   // Both L1 caches are write-through, so discard their clean snapshots around
   // direct backing writes. Flush dirty L2 data before the direct write so a
   // later L2 flush cannot overwrite it.
@@ -4946,7 +4956,7 @@ VmAccessOutcome CommandProcessor::flush_gpu_caches() {
     cu->l1_scalar().invalidate_all();
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   for (auto *l2 : l2_caches_) {
-    const VmAccessOutcome flushed = l2->flush_all();
+    const VmAccessOutcome flushed = vmid ? l2->flush_address_space(*vmid) : l2->flush_all();
     if (outcome == VmAccessOutcome::Complete)
       outcome = flushed;
   }
