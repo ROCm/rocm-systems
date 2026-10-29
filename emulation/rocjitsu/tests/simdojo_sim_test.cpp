@@ -1242,8 +1242,9 @@ TEST(TerminationTest, RequestExitRacingShutdownIsSafe) {
       auto root = std::make_unique<CompositeComponent>("root");
       root->add_child(std::make_unique<CounterComponent>("c0", 4));
       engine.topology().set_root(std::move(root));
-      if (partitions > 1)
+      if (partitions > 1) {
         ASSERT_TRUE(engine.topology().partition_balanced(partitions).succeeded());
+      }
       ASSERT_TRUE(engine.create().succeeded());
 
       // Mirrors rj_vm_run(): run to self-termination, then tear the contexts down.
@@ -1273,8 +1274,9 @@ TEST(TerminationTest, IdleExitAndLastPrimaryReleaseWakeEveryWorkerMode) {
         if (release_primary)
           root->add_child(std::make_unique<AsyncPrimaryComponent>("primary"));
         engine.topology().set_root(std::move(root));
-        if (partitions > 1)
+        if (partitions > 1) {
           ASSERT_TRUE(engine.topology().partition_balanced(partitions).succeeded());
+        }
         ASSERT_TRUE(engine.create().succeeded());
 
         ExitStatus exit_status;
@@ -1827,10 +1829,11 @@ TEST(AsyncCausalityTest, NextTickRetryDoesNotStarveScheduledDeviceWork) {
     auto *component = static_cast<NextTickRetryFairnessComponent *>(root->add_child(
         std::make_unique<NextTickRetryFairnessComponent>("next-tick-retry", kRetryCount)));
     engine.topology().set_root(std::move(root));
-    if (num_threads > 1)
+    if (num_threads > 1) {
       ASSERT_TRUE(engine.topology()
                       .partition_manual(num_threads, [](Component *) { return PartitionID{0}; })
                       .succeeded());
+    }
     ASSERT_TRUE(engine.create().succeeded());
 
     ExitStatus exit = engine.run();

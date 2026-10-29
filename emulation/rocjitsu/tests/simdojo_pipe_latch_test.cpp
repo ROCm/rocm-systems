@@ -59,6 +59,7 @@ TEST(PipeLatchTest, CarriesMoveOnlyValues) {
   PipeLatch<std::unique_ptr<int>> latch;
   latch.write(std::make_unique<int>(3));
   latch.clock();
+  ASSERT_TRUE(latch.valid());
   auto value = latch.take();
   ASSERT_NE(value, nullptr);
   EXPECT_EQ(*value, 3);
