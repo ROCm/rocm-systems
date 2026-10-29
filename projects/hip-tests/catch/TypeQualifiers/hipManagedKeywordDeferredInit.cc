@@ -80,7 +80,9 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyHtoD) {
 
   SECTION("Sync") {
     std::vector<int> host(kN);
-    for (int i = 0; i < kN; ++i) host[i] = i + kSeed;
+    for (int i = 0; i < kN; ++i) { 
+      host[i] = i + kSeed; 
+    }
     HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(g_managed_a),
                             host.data(), kN * sizeof(int)));
 
