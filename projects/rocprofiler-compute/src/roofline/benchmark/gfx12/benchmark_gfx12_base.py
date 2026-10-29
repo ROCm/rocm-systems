@@ -19,7 +19,6 @@ class Bench_gfx12(benchmark_base.Bench_base):
         super().__init__(device_id, cache_sizes)
 
         self.WAVEFRONT_SIZE = 32
-        self.MATRIX_OPS_TYPE = "WMMA"
 
         # gfx1250: 384KB shared LDS/GL0, with max. LDS being 320KB
         # Confirm if the default is 128KB, and if the amd-smi tools can read
@@ -61,31 +60,6 @@ class Bench_gfx12(benchmark_base.Bench_base):
             "WMMA-F32": super().matrix_f32_bench,
             "WMMA-F64": super().matrix_f64_bench,
             "WMMA-I8": super().matrix_i8_bench,
-        }
-
-        self.csv_cols_map = {
-            "HBM": "HBMBw",
-            "MALL": "MALLBw",
-            "L2": "L2Bw",
-            "L1": "L1Bw",
-            "L0": "L0Bw",
-            "LDS": "LDSBw",
-            "F16": "FP16Flops",
-            "F32": "FP32Flops",
-            "F64": "FP64Flops",
-            "I8": "I8Ops",
-            "I32": "I32Ops",
-            "I64": "I64Ops",
-            "WMMA-F4": "WMMAF4Flops",
-            "WMMA-F6": "WMMAF6Flops",
-            "WMMA-F6F4": "WMMAF6F4Flops",
-            "WMMA-MXF8": "WMMAMXF8Flops",
-            "WMMA-F8": "WMMAF8Flops",
-            "WMMA-F16": "WMMAF16Flops",
-            "WMMA-BF16": "WMMABF16Flops",
-            "WMMA-F32": "WMMAF32Flops",
-            "WMMA-F64": "WMMAF64Flops",
-            "WMMA-I8": "WMMAI8Ops",
         }
 
     # -----------------------------------------------------------------------------
