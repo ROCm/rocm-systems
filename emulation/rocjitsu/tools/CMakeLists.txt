@@ -28,19 +28,76 @@ target_include_directories(
     rocjitsu_translate_cli
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_link_libraries(rocjitsu_translate_cli PUBLIC rocjitsu_tooling)
+target_link_libraries(
+    rocjitsu_translate_cli
+    PUBLIC rocjitsu_tooling rocjitsu_cli
+)
 rj_configure_target(rocjitsu_translate_cli TOOL)
 
 add_executable(rj_dbt_translate rj_dbt_translate_main.cpp)
 target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_translate_cli)
 rj_configure_target(rj_dbt_translate TOOL)
 
-add_executable(rj_decode_benchmark rj_decode_benchmark.cpp)
+add_executable(
+    rj_decode_benchmark
+    rj_decode_benchmark.cpp
+    decode_benchmark_cli.cpp
+)
 target_link_libraries(
     rj_decode_benchmark
-    PRIVATE rocjitsu_analysis_internal rocjitsu_amdgpu_isa_model_registry
+    PRIVATE
+        rocjitsu_cli
+        rocjitsu_analysis_internal
+        rocjitsu_amdgpu_isa_model_registry
 )
 rj_configure_target(rj_decode_benchmark PRIVATE_INCLUDES WARNINGS)
+
+if(BUILD_TESTING)
+    include(GoogleTest)
+    add_executable(
+        rocjitsu_benchmark_cli_test
+        ../tests/tools/benchmark_cli_test.cpp
+        decode_benchmark_cli.cpp
+    )
+    target_include_directories(
+        rocjitsu_benchmark_cli_test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(
+        rocjitsu_benchmark_cli_test
+        PRIVATE rocjitsu_cli GTest::gtest_main
+    )
+    rj_configure_target(rocjitsu_benchmark_cli_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(rocjitsu_benchmark_cli_test TEST_PREFIX "cli." TEST_FILTER "*")
+    if(RJ_INSTALL_TESTS)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"rocjitsu_benchmark_cli_test.cmake\")\n"
+        )
+    endif()
+
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    if(RJ_INSTALL_TESTS)
+        install(
+            FILES
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/cli_fixtures.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_decode_benchmark_cli.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_shared_cli_tools.py
+            DESTINATION ${RJ_INSTALL_TEST_DIR}/tools
+        )
+    endif()
+    rj_add_test(
+        NAME cli.decode_benchmark_process
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_decode_benchmark_cli.py
+            $<TARGET_FILE:rj_decode_benchmark>
+        INSTALL_COMMAND
+            ${Python3_EXECUTABLE}
+            tools/test_decode_benchmark_cli.py
+            bin/rj_decode_benchmark
+    )
+endif()
 
 # Ahead-of-time population of the shared translation tier.
 #
@@ -62,7 +119,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(
         rj_pretranslate
-        PRIVATE rocjitsu_gfx1250_b0_to_a0 Threads::Threads ${CMAKE_DL_LIBS}
+        PRIVATE
+            rocjitsu_cli
+            rocjitsu_gfx1250_b0_to_a0
+            Threads::Threads
+            ${CMAKE_DL_LIBS}
     )
     rj_configure_target(rj_pretranslate PRIVATE_INCLUDES WARNINGS)
     # Bind to the translator installed beside us. Two copies would carry two
@@ -71,5 +132,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_target_properties(
         rj_pretranslate
         PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    rj_add_test(
+        NAME cli.tools_process
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_shared_cli_tools.py
+            $<TARGET_FILE:rj_dbt_translate> $<TARGET_FILE:rj_pretranslate>
+            $<TARGET_FILE:rj_ip_discovery> $<TARGET_FILE:rj_decode_fuzz>
+            $<TARGET_FILE:rocjitsu_bin>
+        INSTALL_COMMAND
+            ${Python3_EXECUTABLE}
+            tools/test_shared_cli_tools.py
+            bin/rj_dbt_translate
+            \${RJ_INSTALLED_BINDIR}/rj_pretranslate
+            bin/rj-ip-discovery
+            bin/rj_decode_fuzz
+            \${RJ_INSTALLED_BINDIR}/rocjitsu
     )
 endif()
