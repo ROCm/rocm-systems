@@ -135,10 +135,9 @@ rails is rejected.
    NCCLCHECK(ncclCommQueryProperties(comm, &properties));
    if (properties.ginMinStride == INT_MAX) {
      // This communicator has no uniform GIN stride.
+     return;
    }
-   ncclTeam_t rail = ncclTeamRail(comm);
    int stride = properties.ginMinStride;  // or another legal multiple
-   if (stride > rail.stride) stride = rail.stride;
 
    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
    reqs.ginConnectionType = NCCL_GIN_CONNECTION_CUSTOM_STRIDE;
