@@ -326,6 +326,7 @@ function(rccl_define_micro_source_lists)
     fakes/comm_fakes.cc
     fakes/dev_runtime_fakes.cc
     fakes/env_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/proxy_fakes.cc
     fakes/profiler_fakes.cc
@@ -358,6 +359,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
+    fakes/mgmt_task_enq_fakes.cc
     fakes/rccl_wrap_fakes.cc
     fakes/recorder_fakes.cc
     fakes/strongstream_stubs.cc
@@ -376,7 +378,7 @@ function(rccl_define_micro_source_lists)
     PARENT_SCOPE)
 
   # rccl-UnitTestsMicroMgmtTaskEnq -- src/enqueue/mgmt_task_enq.cc. Own binary: it defines
-  # ncclMgmtTaskEnqueue, which fakes/nccl_stubs.cc drops here via RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue.
+  # ncclMgmtTaskEnqueue, which fakes/mgmt_task_enq_fakes.cc fakes for every other target.
   set(TEST_MICRO_MGMT_TASK_ENQ_SOURCE_FILES
     mgmt-task-enq-test.cc
     fakes/group_fakes.cc
@@ -411,6 +413,7 @@ function(rccl_define_micro_source_lists)
     fakes/kernel_config_fakes.cc
     fakes/libc_interposers.cc
     fakes/mem_manager_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/profiler_fakes.cc
     fakes/rccl_wrap_fakes.cc
@@ -509,6 +512,7 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/allocator_fakes.cc
     fakes/ce_fakes.cc
     fakes/collconfig_fakes.cc
     fakes/collectives_fakes.cc
@@ -516,12 +520,14 @@ function(rccl_define_micro_source_lists)
     fakes/dev_runtime_fakes.cc
     fakes/env_fakes.cc
     fakes/group_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/proxy_fakes.cc
     fakes/profiler_fakes.cc
     fakes/rccl_wrap_fakes.cc
     fakes/recorder_fakes.cc
     fakes/register_stubs.cc
+    fakes/rma_fakes.cc
     fakes/roctx_fakes.cc
     fakes/sched_stubs.cc
     fakes/strongstream_stubs.cc
@@ -587,6 +593,7 @@ function(rccl_define_micro_source_lists)
     fakes/dev_runtime_fakes.cc
     fakes/devcomm_fakes.cc               # ncclTeamLsa
     fakes/env_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/profiler_fakes.cc
     fakes/rccl_wrap_fakes.cc             # rcclParamCeAllReduce, rcclParamCeReduceScatter, rcclParamCeArStagingBytes
@@ -654,6 +661,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
     fakes/devcomm_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/profiler_fakes.cc
     fakes/strongstream_stubs.cc
@@ -696,6 +704,7 @@ function(rccl_define_micro_source_lists)
     fakes/comm_fakes.cc
     fakes/dev_runtime_fakes.cc
     fakes/env_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/recorder_fakes.cc
     fakes/strongstream_stubs.cc
@@ -721,6 +730,7 @@ function(rccl_define_micro_source_lists)
     fakes/comm_fakes.cc
     fakes/dev_runtime_fakes.cc
     fakes/env_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/recorder_fakes.cc
     fakes/strongstream_stubs.cc
@@ -762,6 +772,7 @@ function(rccl_define_micro_source_lists)
     fakes/enqueue_fakes.cc               # src/enqueue/enqueue.cc
     fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
     fakes/group_fakes.cc                 # src/group.cc
+    fakes/mgmt_task_enq_fakes.cc         # src/enqueue/mgmt_task_enq.cc
     fakes/os_fakes.cc                    # src/os/linux.cc aligned alloc
     fakes/profiler_fakes.cc             # src/plugin/profiler.cc proxy-trace dump
     fakes/proxy_fakes.cc                 # src/proxy.cc
@@ -926,6 +937,7 @@ function(rccl_define_micro_source_lists)
     fakes/channel_fakes.cc
     fakes/net_ib_cast_common_fakes.cc    # netIbCast
     fakes/net_ib_cast_connect_fakes.cc   # rcclCastNetP2pPolicy
+    fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
@@ -1030,6 +1042,25 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvwrap.cc      # real verbs wrappers; tests set the ibvSymbols slots
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc  # real commId routing table
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc         # real telemetry counters
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroP2pResiliency -- src/transport/net_ib_cast/p2p_resiliency*.cc. Own binary: the
+  # net_ib_cast fakes stand in for connect.cc, p2p.cc and common.cc, which other targets do not fake.
+  set(TEST_MICRO_P2P_RESILIENCY_SOURCE_FILES
+    p2p-resiliency-test.cc
+    p2p-resiliency-recovery-test.cc
+    p2p-resiliency-recovery-ainic-test.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/libc_fakes.cc                  # g_malloc / g_free for the recovery context
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_capability_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc
+    fakes/net_ib_cast_connect_fakes.cc
+    fakes/net_ib_cast_init_fakes.cc
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_qp_sharing_fakes.cc
+    fakes/os_fakes.cc                    # ncclOsGetPageSize for ncclIbMalloc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1708,7 +1739,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroMgmtTaskEnq
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     MGMT_TASK_ENQ_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/mgmt_task_enq.cc"
-    RCCL_STUBS_OMIT_ncclMgmtTaskEnqueue  # mgmt_task_enq.cc defines it
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mgmt_task_enq.yaml")
 
 # ---------------------------------------------------------------------------
@@ -2358,6 +2388,23 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastDataPath
     NET_IB_CAST_SCHEDULER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/scheduler.cc"
     NET_IB_OPS_FAULT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_ops_fault.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_data_path.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroP2pResiliency
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroP2pResiliency
+  SOURCES ${TEST_MICRO_P2P_RESILIENCY_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # The _tmp names: src/CMakeLists.txt lists net_ib/p2p_resiliency*.cc first, so
+    # add_file_unique() renames these. Re-check after any source-list reorder.
+    P2P_RESILIENCY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_tmp.cc"
+    P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_tmp.cc"
+    P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_p2p_resiliency.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroNetIbCastInit
