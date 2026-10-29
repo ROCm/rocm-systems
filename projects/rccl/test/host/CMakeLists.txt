@@ -996,7 +996,8 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroTransport -- src/transport/. Tests mirror that tree
   # under test/host/transport; one binary owns the subsystem's shared socket,
   # network and GDRCopy seams. No two TUs share a basename (llvm-cov keys
-  # static functions by it), so net_ib/net-ib-p2p-test.cc carries a prefix.
+  # static functions by it), so net_ib/net-ib-p2p-test.cc and the
+  # net_ib_cast/ tests carry a prefix.
   set(TEST_MICRO_TRANSPORT_SOURCE_FILES
     transport/coll-net-test.cc
     transport/net-socket-test.cc
@@ -1013,6 +1014,14 @@ function(rccl_define_micro_source_lists)
     transport/net_ib/p2p-resiliency-recovery-test.cc
     transport/net_ib/reg-test.cc
     transport/net_ib/wqe-lat-mon-test.cc
+    transport/net_ib_cast/net-ib-cast-capability-test.cc
+    transport/net_ib_cast/net-ib-cast-common-test.cc
+    transport/net_ib_cast/net-ib-cast-gdr-test.cc
+    transport/net_ib_cast/net-ib-cast-gid-inspect-test.cc
+    transport/net_ib_cast/net-ib-cast-gin-test.cc
+    transport/net_ib_cast/net-ib-cast-init-test.cc
+    transport/net_ib_cast/net-ib-cast-multiplane-test.cc
+    transport/net_ib_cast/net-ib-cast-reg-test.cc
     transport/nvls-test.cc
     transport/p2p-test.cc
     transport/rma-socket-test.cc
@@ -1030,12 +1039,17 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/hsa_fakes.cc
     fakes/ibvwrap_fakes.cc
+    fakes/ionicdvwrap_fakes.cc
     fakes/libc_fakes.cc
     fakes/mlx5dvwrap_fakes.cc
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
-    fakes/net_ib_cast_common_fakes.cc    # netIbCast
     fakes/net_ib_cast_connect_fakes.cc   # rcclCastNetP2pPolicy
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_p2p_resiliency_fakes.cc
+    fakes/net_ib_cast_p2p_resiliency_recovery_fakes.cc
+    fakes/net_ib_cast_qp_sharing_fakes.cc
+    fakes/net_ib_cast_scheduler_fakes.cc
     fakes/os_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
@@ -1052,8 +1066,11 @@ function(rccl_define_micro_source_lists)
     fakes/transport_net_socket_fakes.cc
     fakes/transport_p2p_fakes.cc
     fakes/transport_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc      # real parser for the net_ib_cast multiplane map
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    # The net_ib_cast units' telemetry; net-telemetry-test.cc renames its own, seamed copy.
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc
     ../common/main_altrsmi.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
@@ -1078,43 +1095,6 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvwrap.cc      # real verbs wrappers; tests set the ibvSymbols slots
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc  # real commId routing table
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc         # real telemetry counters
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroNetIbCastInit -- src/transport/net_ib_cast/{init,common,capability,reg,gdr,multiplane,gin,
-  # net_ib_cast_gid_inspect}.cc. Own binary: it fakes gdr_probe.cc, which rccl-UnitTestsMicro compiles.
-  set(TEST_MICRO_NET_IB_CAST_INIT_SOURCE_FILES
-    net-ib-cast-init-test.cc
-    net-ib-cast-capability-test.cc
-    net-ib-cast-common-test.cc
-    net-ib-cast-gdr-test.cc
-    net-ib-cast-gid-inspect-test.cc
-    net-ib-cast-gin-test.cc
-    net-ib-cast-multiplane-test.cc
-    net-ib-cast-reg-test.cc
-    fakes/env_fakes.cc
-    fakes/gdr_peermem_fakes.cc
-    fakes/gdr_probe_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/ibvwrap_fakes.cc
-    fakes/ionicdvwrap_fakes.cc
-    fakes/libc_fakes.cc
-    fakes/mlx5dvwrap_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/net_ib_cast_connect_fakes.cc
-    fakes/net_ib_cast_p2p_fakes.cc
-    fakes/net_ib_cast_p2p_resiliency_fakes.cc
-    fakes/net_ib_cast_p2p_resiliency_recovery_fakes.cc
-    fakes/net_ib_cast_qp_sharing_fakes.cc
-    fakes/net_ib_cast_scheduler_fakes.cc
-    fakes/os_fakes.cc
-    fakes/rocmwrap_fakes.cc              # rocmLibraryInit (gdr.cc DMA-BUF probe)
-    fakes/socket_fakes.cc
-    fakes/transport_stubs.cc             # rcclUseAinic, NET_OPTIONAL_RECV_COMPLETION
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc             # real parser for the multiplane map
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc            # real NCCL_IB_HCA parsing, pciPathToInt64
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc  # real, off unless RCCL_TELEMETRY_ENABLE=1
-    ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -2365,14 +2345,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroTransport
 # ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc
+  PROPERTIES GENERATED TRUE)
 rccl_add_micro_binary(rccl-UnitTestsMicroTransport
   SOURCES ${TEST_MICRO_TRANSPORT_SOURCE_FILES}
   EXTRA_INCLUDES
     ${RCCL_HOST_HIPIFY_DIR}/src/transport
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # the net_ib_cast fakes' headers
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h and the other cast headers
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_DMABUF_EXPORT_DEF}  # standalone: the cuMem DMA-BUF arms in-build gets from rccl
+    ${_MICRO_AMDSMI_DEF}         # graph/xml.cc
+    # Shipping builds set it. It gates the *gid_inspect.cc units whole, plus cast common.cc's GID-change
+    # hook and fields of net_ib_cast's ncclIbNetCommBase, so every TU must agree on it.
     ENABLE_FAULT_INJECTION
     COLL_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/coll_net.cc"
     NET_IB_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc"
@@ -2388,6 +2375,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTransport
     NET_IB_P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_resiliency_recovery.cc"
     NET_IB_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/reg.cc"
     NET_IB_WQE_LAT_MON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/wqe_lat_mon.cc"
+    # init, common, reg, gdr and gin share basenames with net_ib/ (and init.cc with src/), which
+    # src/CMakeLists.txt lists first, so add_file_unique() renames these copies.
+    NET_IB_CAST_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/init_tmp.cc"
+    NET_IB_CAST_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/common_tmp.cc"
+    NET_IB_CAST_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/reg_tmp.cc"
+    NET_IB_CAST_GDR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/gdr_tmp.cc"
+    NET_IB_CAST_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/gin_tmp.cc"
+    NET_IB_CAST_CAPABILITY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc"
+    NET_IB_CAST_MULTIPLANE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/multiplane.cc"
+    NET_IB_CAST_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_cast_gid_inspect.cc"
     NET_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket.cc"
     # common_tmp.cc: src/CMakeLists.txt lists transport/net_ib/common.cc first.
     NET_SOCKET_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket/common_tmp.cc"
@@ -2431,35 +2428,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastDataPath
     NET_IB_CAST_SCHEDULER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/scheduler.cc"
     NET_IB_OPS_FAULT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_ops_fault.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_data_path.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroNetIbCastInit
-# ---------------------------------------------------------------------------
-set_source_files_properties(
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc
-  PROPERTIES GENERATED TRUE)
-rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastInit
-  SOURCES ${TEST_MICRO_NET_IB_CAST_INIT_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h and the other cast headers
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h, net_ib_gid_inspect.h
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ${_MICRO_AMDSMI_DEF}
-    ENABLE_FAULT_INJECTION  # net_ib_cast_gid_inspect.cc and the GID-change hook exist only with it
-    # init, common, reg, gdr and gin share basenames with net_ib/ (and init.cc with src/), which
-    # src/CMakeLists.txt lists first, so add_file_unique() renames these copies.
-    NET_IB_CAST_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/init_tmp.cc"
-    NET_IB_CAST_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/common_tmp.cc"
-    NET_IB_CAST_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/reg_tmp.cc"
-    NET_IB_CAST_GDR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/gdr_tmp.cc"
-    NET_IB_CAST_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/gin_tmp.cc"
-    NET_IB_CAST_CAPABILITY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc"
-    NET_IB_CAST_MULTIPLANE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/multiplane.cc"
-    NET_IB_CAST_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_cast_gid_inspect.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_init.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroMisc

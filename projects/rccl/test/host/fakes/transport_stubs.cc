@@ -80,8 +80,9 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
 bool g_rcclUseAinicValue = false;
 static bool DefaultUseAinic() { return g_rcclUseAinicValue; }
 std::function<bool()> g_useAinic = DefaultUseAinic;
+bool micro_rcclUseAinic() { return g_useAinic(); }
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_NET
-bool rcclUseAinic() { return g_useAinic(); }
+bool rcclUseAinic() { return micro_rcclUseAinic(); }
 #endif
 
 // src/transport/net.cc:212, read by net_ib_cast/common.cc.

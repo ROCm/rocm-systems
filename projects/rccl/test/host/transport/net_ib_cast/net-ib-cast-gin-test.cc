@@ -18,8 +18,8 @@
 #include <string>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
-#include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../../../common/LogCapture.hpp"
+#include "../../../common/ProcessIsolatedTestRunner.hpp"
 #include "AsanCheck.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"

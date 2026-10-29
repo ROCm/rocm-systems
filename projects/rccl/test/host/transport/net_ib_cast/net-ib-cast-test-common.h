@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Shared by the rccl-UnitTestsMicroNetIbCastInit test TUs: param and comm helpers, fake verbs
-// objects whose context ops call back into the test, and the reset of the transport's globals.
+// Shared by net-ib-cast-{capability,common,gdr,gid-inspect,gin,init,multiplane,reg}-test.cc: param and comm
+// helpers, fake verbs objects whose context ops call back into the test, and the reset of the transport's globals.
 #pragma once
 
 #include <gtest/gtest.h>

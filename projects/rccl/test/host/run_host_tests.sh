@@ -205,7 +205,6 @@ do_host_tests() {
     "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
     "rccl-UnitTestsMicroDda:$SCRIPT_DIR/host_tests_micro_dda.xml"
     "rccl-UnitTestsMicroTransport:$SCRIPT_DIR/host_tests_micro_transport.xml"
-    "rccl-UnitTestsMicroNetIbCastInit:$SCRIPT_DIR/host_tests_micro_net_ib_cast_init.xml"
     "rccl-UnitTestsMicroNetIbCastDataPath:$SCRIPT_DIR/host_tests_micro_net_ib_cast_data_path.xml"
     "rccl-UnitTestsMicroMisc:$SCRIPT_DIR/host_tests_micro_misc.xml"
   )

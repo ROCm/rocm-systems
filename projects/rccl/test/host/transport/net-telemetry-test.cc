@@ -36,6 +36,19 @@
 
 #include <gtest/gtest.h>
 
+// Rename the definitions so this seamed copy links beside the plain net_telemetry.cc the net_ib_cast units use.
+#define rcclTelemetryCfg NetTelemetryTestCfg
+#define rcclTelemetryDevs NetTelemetryTestDevs
+#define rcclTelemetryEnabled NetTelemetryTestEnabled
+#define rcclTelemetryFlush NetTelemetryTestFlush
+#define rcclTelemetryInit NetTelemetryTestInit
+#define rcclTelemetryLatencySampleMask NetTelemetryTestLatencySampleMask
+#define rcclTelemetryLatencySampleN NetTelemetryTestLatencySampleN
+#define rcclTelemetryNumDevs NetTelemetryTestNumDevs
+#define rcclTelemetryRegisterDevice NetTelemetryTestRegisterDevice
+#define rcclTelemetrySetupChannel NetTelemetryTestSetupChannel
+#define rcclTelemetrySwCapture NetTelemetryTestSwCapture
+
 #include "../../common/ProcessIsolatedTestRunner.hpp"
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"

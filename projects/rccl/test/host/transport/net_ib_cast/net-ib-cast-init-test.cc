@@ -19,8 +19,8 @@
 #include <new>
 #include <string>
 
-#include "../common/LogCapture.hpp"
-#include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../../../common/LogCapture.hpp"
+#include "../../../common/ProcessIsolatedTestRunner.hpp"
 #include "fakes/env_fakes.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
@@ -35,9 +35,11 @@
 static std::function<char*(const char*, char*)> g_initRealpath = [](const char*, char*) -> char* { return nullptr; };
 static char* InitTestRealpath(const char* path, char* resolved) { return g_initRealpath(path, resolved); }
 
+#include "fakes/transport_net_seam.h"
 #define realpath InitTestRealpath
 #include NET_IB_CAST_INIT_CC_PATH
 #undef realpath
+#include "fakes/transport_net_seam_undef.h"
 
 void NetIbCastResetGlobals() {
   netRefCount = 0;

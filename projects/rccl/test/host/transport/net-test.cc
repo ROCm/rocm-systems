@@ -32,7 +32,6 @@
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
-#include "fakes/net_ib_cast_common_fakes.h"
 #include "fakes/net_ib_cast_connect_fakes.h"
 #include "fakes/proxy_fakes.h"
 #include "fakes/rccl_wrap_fakes.h"
@@ -379,7 +378,6 @@ class NetMicrotestBase : public ::testing::Test {
     ResetProxyFakes();
     ResetRcclWrapFakes();
     ResetTopoStubs();
-    ResetNetIbCastCommonFakes();
     ResetNetIbCastConnectFakes();
     ResetTransportNetIbConnectNetFakes();
     ResetTransportNetIbFakes();

@@ -539,10 +539,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroTransport`** — `src/transport/`, one binary for units
   sharing the socket, network-plugin and GDRCopy seams; tests mirror the source
   tree under `test/host/transport/`, and no two TUs share a basename (llvm-cov
-  keys `static` functions by it), so `net_ib/net-ib-p2p-test.cc` carries a
-  prefix. See `test_categories_micro_transport.yaml`. The target defines
-  `ENABLE_FAULT_INJECTION` in both build modes so `net_ib_gid_inspect.cc` is
-  present consistently.
+  keys `static` functions by it), so `net_ib/net-ib-p2p-test.cc` and the
+  `net_ib_cast/` tests carry a prefix. See `test_categories_micro_transport.yaml`.
+  The target defines `ENABLE_FAULT_INJECTION` in both build modes so
+  `net_ib/net_ib_gid_inspect.cc` and `net_ib_cast/net_ib_cast_gid_inspect.cc`,
+  which it gates whole, are present consistently, and so every TU agrees on the
+  fault fields it adds to `net_ib_cast`'s `ncclIbNetCommBase`.
   - `coll_net.cc` (`COLL_NET_CC_PATH`, from `coll-net-test.cc`); suites `CollNet*`,
     driven through a fake `ncclCollNet_t`. `RCCL_TRANSPORT_STUBS_OMIT_COLL_NET` drops
     the stub copies of its entry points.
@@ -576,6 +578,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `net_ib/net_ib_gid_inspect.cc` (`NET_IB_GID_INSPECT_CC_PATH`, from
     `net_ib/net-ib-gid-inspect-test.cc`); suites
     `NetIbGidInspectMicrotest.*`.
+  - `net_ib_cast/init.cc` (`NET_IB_CAST_INIT_CC_PATH`, from `net_ib_cast/net-ib-cast-init-test.cc`),
+    plus `common.cc`, `capability.cc`, `reg.cc`, `gdr.cc`, `multiplane.cc`, `gin.cc` and
+    `net_ib_cast_gid_inspect.cc` from `net_ib_cast/net-ib-cast-<unit>-test.cc`; suites
+    `NetIbCast*`.
   - `net_socket.cc` and `net_socket/common.cc`
     (`NET_SOCKET_CC_PATH`, `NET_SOCKET_COMMON_CC_PATH`, from
     `net-socket-test.cc`); suites `NetSocket*Microtest.*`. The test renames the
@@ -595,7 +601,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `RCCL_TRANSPORT_STUBS_OMIT_NET` drops the stub copies of the names `net.cc` defines.
   - `net_telemetry.cc` and `src/include/net_telemetry.h`
     (`NET_TELEMETRY_CC_PATH`, from `net-telemetry-test.cc`); suites
-    `NetTelemetry*Microtest.*`.
+    `NetTelemetry*Microtest.*`. The test renames its copy's external definitions so it
+    links beside the plain `net_telemetry.cc` the `net_ib_cast` units use.
   - `nvls.cc` (`NVLS_CC_PATH`, from `nvls-test.cc`); suite `NvlsHipStubTest.*`.
     RCCL always compiles the NVLS stub branch (the multicast code needs
     `CUDART_VERSION >= 12010`), and the suite checks that the stubs leave NVLS off
@@ -629,7 +636,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   reason by the `p2p_resiliency*.cc` tests) and `NetIbResiliencyScene.h` (a
   send/recv comm pair with failover contexts on two `IbVerbsScene` devices).
   Device discovery runs against `IbVerbsWorld.h`, the fake HCAs and verbs
-  libraries that `FakeIbWorld` in `net-ib-cast-test-common.h` also builds on.
+  libraries that `FakeIbWorld` in `net_ib_cast/net-ib-cast-test-common.h` also builds on.
 
 - **`rccl-UnitTestsMicroNetIbCastDataPath`** — the net_ib_cast data path in
   `src/transport/net_ib_cast/`: `p2p.cc` (`NET_IB_CAST_P2P_CC_PATH`, suites
@@ -637,13 +644,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `NetIbCastScheduler*`) and `net_ib_ops_fault.cc` (`NET_IB_OPS_FAULT_CC_PATH`, suite
   `NetIbOpsFault*`), driven through fake verbs devices (`IbVerbsScene.h`). One binary
   because p2p.cc calls both units for real. See `test_categories_micro_net_ib_cast_data_path.yaml`.
-
-- **`rccl-UnitTestsMicroNetIbCastInit`** — `transport/net_ib_cast/init.cc`
-  (`NET_IB_CAST_INIT_CC_PATH`, from `net-ib-cast-init-test.cc`), plus `common.cc`,
-  `capability.cc`, `reg.cc`, `gdr.cc`, `multiplane.cc`, `gin.cc` and
-  `net_ib_cast_gid_inspect.cc` from `net-ib-cast-<unit>-test.cc`; suites `NetIbCast*`.
-  Its own binary: it fakes `misc/gdr_probe.cc`, which `rccl-UnitTestsMicro` compiles.
-  See `test_categories_micro_net_ib_cast_init.yaml`.
 
 - **`rccl-UnitTestsMicroMisc`** — the `src/misc/` IB verbs and direct-verbs loaders
   (`ibvwrap`, `ibvsymbols`, `mlx5dvwrap`, `mlx5dvsymbols`, `ionicdvwrap`,
@@ -835,6 +835,7 @@ symbol.
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
+| `src/transport/net.cc`'s `rcclUseAinic`, macro-renamed in `net_ib_cast/init.cc` via `fakes/transport_net_seam.h` (`rccl-UnitTestsMicroTransport`, which compiles the real file) | `fakes/transport_stubs.cc` |
 | `src/transport/net_ib/common.cc` (`ncclNetIb`, targets that do not compile the real file) | `fakes/transport_net_ib_common_fakes.cc` |
 | `src/transport/net_ib/connect.cc` (`ncclParamIbQpsPerConn`, `ncclIbGidInfoQuery`, GDR flush-flag support and enable; listen, connect, accept and close fail loudly) | `fakes/transport_net_ib_fakes.{h,cc}` |
 | `src/transport/net_ib/connect.cc`'s `rcclNetP2pPolicy` and GDR flush-flag accessors, macro-renamed in `net.cc` via `fakes/transport_net_ib_connect_net_seam.h` | `fakes/transport_net_ib_connect_net_fakes.cc` |
@@ -1193,7 +1194,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDda`, `rccl-UnitTestsMicroMisc`,
 `rccl-UnitTestsMicroTransport`,
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`,
-`rccl-UnitTestsMicroNetIbCastDataPath`, `rccl-UnitTestsMicroRmaProxy` and `rccl-UnitTestsMicroNetIbCastInit` — **without configuring/building all of
+`rccl-UnitTestsMicroNetIbCastDataPath` and `rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -1273,7 +1274,6 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroRoctxNvml-roctx    # same, ROCTX_ENABLE arm
 ./build/rccl-UnitTestsMicroRocmwrap           # src/misc/rocmwrap.cc cuMem + DMA-BUF init
 ./build/rccl-UnitTestsMicroAmdsmiWrap         # src/misc/amdsmi_wrap.cc
-./build/rccl-UnitTestsMicroNetIbCastInit      # src/transport/net_ib_cast/ init, capability and GIN
 ```
 
 Disable coverage instrumentation for the standalone host-only test binaries
