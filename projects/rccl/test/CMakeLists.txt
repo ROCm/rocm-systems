@@ -294,6 +294,7 @@ if(BUILD_TESTS)
     DoneEventOrderingTests.cpp
     Fp8VerifiableTests.cpp
     GatherTests.cpp
+    GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
     RasJsonTests.cpp
@@ -814,6 +815,7 @@ if(BUILD_TESTS)
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
       CeAllReduceEligibilityTests.cpp
+      CeReduceScatterEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
       GinAlltoAllEligibilityTests.cpp
       GinAllReduceEligibilityTests.cpp
@@ -1058,12 +1060,14 @@ if(BUILD_TESTS)
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp
+      transport/NetIbMPI/GdrFlushFlagTests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/OptRecvCompletionTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
       transport/NetIbMPI/GidChangeTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
+      transport/NetIbMPI/GinProxyErrorPathTests.cpp
       transport/NetIbMPI/NetIbWqeLatMonUnitTests.cpp
       transport/NetIbMPI/NetIbWqeLatMonTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
@@ -1075,6 +1079,7 @@ if(BUILD_TESTS)
       CommMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
       MaxP2pPeersMPITests.cpp
+      GdrFlushFlagProtoSwitchMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp

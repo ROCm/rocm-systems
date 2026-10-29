@@ -19,6 +19,7 @@
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/lds_stack.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -28,6 +29,7 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -773,28 +775,31 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
 
 namespace {
 
+// One mapping selects both scalar-FP dispatch and its evaluator operation.
+// Packed 16-bit additions have their own evaluator and are excluded.
+std::optional<fp_mode::ScalarAtomicOp> scalar_fp_atomic_operation(AtomicOp op) {
+  switch (op) {
+  case AtomicOp::FADD:
+    return fp_mode::ScalarAtomicOp::FADD;
+  case AtomicOp::FMIN:
+    return fp_mode::ScalarAtomicOp::FMIN;
+  case AtomicOp::FMAX:
+    return fp_mode::ScalarAtomicOp::FMAX;
+  case AtomicOp::FCMPSWAP:
+    return fp_mode::ScalarAtomicOp::FCMPSWAP;
+  default:
+    return std::nullopt;
+  }
+}
+
 // Translate the deferred request into the shared ISA floating-point contract.
 template <typename Bits>
 Bits apply_fp_atomic(const VectorMemState &state, Bits old_bits, Bits source_bits,
                      Bits compare_bits, uint32_t denorm_mode, bool local = false) {
-  fp_mode::ScalarAtomicOp operation;
-  switch (state.atomic_op) {
-  case AtomicOp::FADD:
-    operation = fp_mode::ScalarAtomicOp::FADD;
-    break;
-  case AtomicOp::FMIN:
-    operation = fp_mode::ScalarAtomicOp::FMIN;
-    break;
-  case AtomicOp::FMAX:
-    operation = fp_mode::ScalarAtomicOp::FMAX;
-    break;
-  case AtomicOp::FCMPSWAP:
-    operation = fp_mode::ScalarAtomicOp::FCMPSWAP;
-    break;
-  default:
-    return old_bits;
-  }
-  return fp_mode::atomic_scalar(operation, old_bits, source_bits, compare_bits, denorm_mode,
+  const auto operation = scalar_fp_atomic_operation(state.atomic_op);
+  if (!operation)
+    throw std::invalid_argument("unsupported floating-point atomic operation");
+  return fp_mode::atomic_scalar(*operation, old_bits, source_bits, compare_bits, denorm_mode,
                                 state.atomic_legacy_minmax, local || state.atomic_source_nan_first);
 }
 
@@ -803,9 +808,7 @@ bool is_packed_add(AtomicOp op) {
 }
 
 uint32_t atomic_source_stride(const VectorMemState &d, const std::vector<uint8_t> &store_data) {
-  const bool uses_two_sources =
-      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::FCMPSWAP ||
-       d.atomic_op == AtomicOp::MSKOR || d.atomic_op == AtomicOp::WRAP);
+  const bool uses_two_sources = atomic_uses_two_sources(d.atomic_op);
   const uint32_t fallback = uses_two_sources ? d.elem_size * 2 : d.elem_size;
   if (d.wf_size == 0 || store_data.empty())
     return fallback;
@@ -962,10 +965,9 @@ VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d, uint64_t lane_m
 
   const uint32_t width = d.elem_size;
   d.response_data.resize(d.wf_size * width);
-  const bool uses_two_sources = d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR;
+  const bool uses_two_sources = atomic_uses_two_sources(d.atomic_op);
   const uint32_t source_stride = atomic_source_stride(d, d.store_data);
-  const bool is_fp = d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
-                     d.atomic_op == AtomicOp::FMAX;
+  const bool is_fp = scalar_fp_atomic_operation(d.atomic_op).has_value();
 
   assert(d.translated.access.has_value());
   for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
@@ -1049,12 +1051,9 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
                                    uint64_t lane_mask) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
-  const bool uses_two_sources =
-      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::FCMPSWAP ||
-       d.atomic_op == AtomicOp::MSKOR || d.atomic_op == AtomicOp::WRAP);
+  const bool uses_two_sources = atomic_uses_two_sources(d.atomic_op);
   const uint32_t src_stride = atomic_source_stride(d, d.store_data);
-  const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
-                      d.atomic_op == AtomicOp::FMAX || d.atomic_op == AtomicOp::FCMPSWAP);
+  const bool is_fp = scalar_fp_atomic_operation(d.atomic_op).has_value();
 
   if (lane_mask == 0)
     return VmAccessOutcome::Complete;
@@ -1131,12 +1130,9 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
                             std::vector<uint8_t> &response_data, uint64_t lane_mask) {
   const uint32_t esz = d.elem_size;
   response_data.resize(d.wf_size * esz);
-  const bool uses_two_sources =
-      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::FCMPSWAP ||
-       d.atomic_op == AtomicOp::MSKOR || d.atomic_op == AtomicOp::WRAP);
+  const bool uses_two_sources = atomic_uses_two_sources(d.atomic_op);
   const uint32_t src_stride = atomic_source_stride(d, store_data);
-  const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
-                      d.atomic_op == AtomicOp::FMAX || d.atomic_op == AtomicOp::FCMPSWAP);
+  const bool is_fp = scalar_fp_atomic_operation(d.atomic_op).has_value();
 
   if (d.atomic_op == AtomicOp::APPEND || d.atomic_op == AtomicOp::CONSUME) {
     uint32_t addr = 0;
@@ -1227,19 +1223,43 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
 
 // Dispatch ordinary LDS loads, stores and atomics for uniform and mixed routes.
 // Callers prepare buffers and complete retryable global work before entering.
-// FLAT LDS addresses include the workgroup base: reject out-of-backing FLAT
-// lanes before the LDS helpers narrow to 32 bits, preserving zero reads and
-// discarded writes. Ordinary DS lanes retain the existing LDS helper behavior.
+// FLAT LDS addresses include the workgroup base. Reject the captured RDNA4
+// allocation-OOB lanes and out-of-backing FLAT lanes before LDS helpers narrow
+// to 32 bits, preserving zero reads and discarded writes. Ordinary DS lanes
+// retain the existing LDS helper behavior.
 void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 64> &addresses,
                         uint64_t lane_mask, const std::vector<uint8_t> &store_data,
                         std::vector<uint8_t> &response_data) {
-  uint64_t out_of_bounds = 0;
+  uint64_t out_of_bounds = lane_mask & d.flat_local_oob_lane_mask;
   for (uint64_t lanes = lane_mask & d.flat_local_lane_mask; lanes; lanes &= lanes - 1) {
     const uint32_t lane = std::countr_zero(lanes);
     if (addresses[lane] >= lds.size_bytes())
       out_of_bounds |= uint64_t{1} << lane;
   }
   lane_mask &= ~out_of_bounds;
+  if (d.atomic_op == AtomicOp::NONE && d.flat_local_allocation_end && d.elem_size != 0) {
+    // gfx1201 FLAT bounds retain complete DWORDs, including for byte-unaligned
+    // accesses. Stores crossing the end also discard the incomplete DWORD;
+    // the DS unaligned byte-store rule does not describe these FLAT requests.
+    const uint64_t limit = std::min<uint64_t>(*d.flat_local_allocation_end, lds.size_bytes());
+    const uint32_t bytes_per_lane = d.elem_size * d.num_elems;
+    const uint64_t local_lanes = lane_mask & d.flat_local_lane_mask;
+    for (uint64_t lanes = local_lanes; lanes; lanes &= lanes - 1) {
+      const uint32_t lane = std::countr_zero(lanes);
+      const uint64_t address = addresses[lane];
+      const uint32_t bytes = static_cast<uint32_t>(
+          whole_element_bytes_in_range(address, bytes_per_lane, d.elem_size, limit));
+      const uint32_t data_offset = lane * bytes_per_lane;
+      if (d.is_load) {
+        std::memset(response_data.data() + data_offset, 0, bytes_per_lane);
+        std::as_const(lds).read(static_cast<uint32_t>(address), response_data.data() + data_offset,
+                                bytes);
+      } else {
+        lds.write(static_cast<uint32_t>(address), store_data.data() + data_offset, bytes);
+      }
+    }
+    lane_mask &= ~local_lanes;
+  }
   if (d.atomic_op != AtomicOp::NONE)
     execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask);
   else if (d.is_load)

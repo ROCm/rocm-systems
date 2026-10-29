@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
@@ -3408,6 +3409,18 @@ TEST(MemoryWaitFootprintTest, ScalarAndInlineSourcesAreNotVectorRegisterNumbers)
   check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA5, 32, 512, cases);
 }
 
+template <typename Raw, typename Words>
+void add_vop3_dpp16_footprint_case(std::vector<std::vector<uint32_t>> &cases, const Words &base) {
+  static_assert(sizeof(Raw) == 3 * sizeof(uint32_t));
+  auto raw = std::bit_cast<Raw>(std::array<uint32_t, 3>{base[0], base[1], 0});
+  raw.vsrc0 = 2;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+  raw.bank_mask = 0xf;
+  raw.row_mask = 0x1;
+  const auto words = std::bit_cast<std::array<uint32_t, 3>>(raw);
+  cases.emplace_back(words.begin(), words.end());
+}
+
 TEST(MemoryWaitFootprintTest, DppUsesPhysicalSourceLanesAndMaskedDestinations) {
   for (const auto arch :
        {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA5}) {
@@ -3423,6 +3436,36 @@ TEST(MemoryWaitFootprintTest, DppUsesPhysicalSourceLanesAndMaskedDestinations) {
     if (arch != ROCJITSU_CODE_ARCH_CDNA4)
       cases.resize(12);
     check_vector_footprints(arch, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32, 256, cases);
+  }
+
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA5}) {
+    std::vector<std::vector<uint32_t>> cases;
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      add_vop3_dpp16_footprint_case<rdna3::Vop3VopDpp16MachineInst>(
+          cases,
+          rdna3::build_vop3(rdna3::kVCndmaskB32Vop3,
+                            {.vdst = 5, .src0 = amdgpu::SRC_DPP, .src1 = 256 + 3, .src2 = 0}));
+      for (const auto opcode : {rdna3::kVAddCoCiU32Vop3SdstEnc, rdna3::kVSubCoCiU32Vop3SdstEnc,
+                                rdna3::kVSubrevCoCiU32Vop3SdstEnc})
+        add_vop3_dpp16_footprint_case<rdna3::Vop3SdstEncVopDpp16MachineInst>(
+            cases,
+            rdna3::build_vop3_sdst_enc(
+                opcode,
+                {.vdst = 5, .sdst = 4, .src0 = amdgpu::SRC_DPP, .src1 = 256 + 3, .src2 = 0}));
+    } else {
+      add_vop3_dpp16_footprint_case<cdna5::Vop3VopDpp16MachineInst>(
+          cases,
+          cdna5::build_vop3(cdna5::kVCndmaskB32Vop3,
+                            {.vdst = 5, .src0 = amdgpu::SRC_DPP, .src1 = 256 + 3, .src2 = 0}));
+      for (const auto opcode : {cdna5::kVAddCoCiU32Vop3SdstEnc, cdna5::kVSubCoCiU32Vop3SdstEnc,
+                                cdna5::kVSubrevCoCiU32Vop3SdstEnc})
+        add_vop3_dpp16_footprint_case<cdna5::Vop3SdstEncVopDpp16MachineInst>(
+            cases,
+            cdna5::build_vop3_sdst_enc(
+                opcode,
+                {.vdst = 5, .sdst = 4, .src0 = amdgpu::SRC_DPP, .src1 = 256 + 3, .src2 = 0}));
+    }
+    check_vector_footprints(arch, 32, 256, cases);
   }
 }
 
