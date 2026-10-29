@@ -11,13 +11,8 @@
 #include <cstdint>
 #include <cstdlib>
 
-// NCCL_GIN_TYPE forces exactly one GIN backend. When it is unset, NCCL_GIN_TYPES
-// (RCCL-only) is a comma-separated list of the backend types allowed to be active
-// together, e.g. "6,7" for rocSHMEM GDA alongside Anvil SDMA. With neither set,
-// each backend keeps its default: rocSHMEM GDA stays off, the others stay on.
-//
-// Both are read with getenv() on every call, not through NCCL_PARAM, whose cached
-// value would ignore a later setenv() from the plugin tests.
+// NCCL_GIN_TYPE forces one backend; if unset, NCCL_GIN_TYPES lists the types allowed together.
+// Uncached getenv() so tests can setenv() between cases.
 
 // Parses list into a bitmask of GIN types (bit t set for type t). Returns false if
 // any entry is not an integer in [1, 63]; valid entries are still recorded in *mask.

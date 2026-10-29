@@ -275,9 +275,7 @@ TEST_F(GinFinalizeTest, AssignToComm_HonorsGinTypesList) {
 }
 
 #ifdef ENABLE_ROCSHMEM_GIN
-// AICOMRCCL-3418: qsort does not keep ties in order, so the default backend is only
-// deterministic if no two active types share a priority. Every registration order
-// must sort to Anvil SDMA, then rocSHMEM GDA, then the proxy.
+// AICOMRCCL-3418: every registration order sorts to Anvil SDMA, then rocSHMEM GDA, then the proxy.
 TEST_F(GinFinalizeTest, SetDefaultBackend_OrdersSdmaThenGdaThenProxy) {
   ncclGinType_t order[] = {NCCL_GIN_TYPE_PROXY, NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_GIN_TYPE_ANVIL_SDMA};
   const uint64_t all = BIT(NCCL_GIN_TYPE_PROXY) | BIT(NCCL_GIN_TYPE_ROCSHMEM_GDA) | BIT(NCCL_GIN_TYPE_ANVIL_SDMA);

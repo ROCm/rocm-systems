@@ -177,9 +177,7 @@ uint64_t listedGinTypes() {
 
 bool ginTypeListed(uint64_t listed, ncclGinType_t type) { return (listed >> type) & 1; }
 
-// AICOMRCCL-3418: NCCL_GIN_TYPE unset and NCCL_GIN_TYPES listing rocSHMEM GDA with
-// Anvil SDMA, the proxy, or both. Anvil SDMA is single-node only, and on one node
-// the NIC backends need intranet mode.
+// AICOMRCCL-3418: single-node Anvil SDMA, and NIC backends on one node need intranet mode.
 std::string gdaAlongsideSkipReason() {
   std::string local = ginEnvDisabledReason();
   if (local.empty()) local = cuMemReason();
@@ -1102,10 +1100,7 @@ TEST_F(GinMPIDeviceTests, Log_ReportsBackendPerComm) {
 }
 
 #ifdef ENABLE_ROCSHMEM_GIN
-// AICOMRCCL-3418: one communicator hosts rocSHMEM GDA alongside Anvil SDMA, the proxy,
-// or both. Run with NCCL_GIN_TYPES=6,7 and with 6,2. Every listed backend must be active
-// and nothing else, Anvil SDMA (or else GDA) must be the default that props.ginType and
-// a default DevComm report, and a DevComm on each listed backend must complete a put + signal.
+// AICOMRCCL-3418: run with NCCL_GIN_TYPES=6,7 and 6,2; each listed backend completes a put + signal.
 TEST_F(GinMPIDeviceTests, MixedBackends_GdaAlongside) {
   if (auto reason = gdaAlongsideSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;

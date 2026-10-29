@@ -433,9 +433,7 @@ static int ncclGetBackendPriority(struct ncclGinBackendState* backend) {
   case NCCL_GIN_TYPE_GDAKI:
     return 0;
 #ifdef ENABLE_ROCSHMEM_GIN
-  // [RCCL] Device-initiated AMD backends rank ahead of the host proxy. qsort does not
-  // keep ties in order, so Anvil SDMA ranks strictly ahead of rocSHMEM GDA and stays
-  // the default when NCCL_GIN_TYPES enables both.
+  // [RCCL] Distinct priorities: qsort is unstable, so ties would make the default backend arbitrary.
   case NCCL_GIN_TYPE_ANVIL_SDMA:
     return 0;
   case NCCL_GIN_TYPE_ROCSHMEM_GDA:
