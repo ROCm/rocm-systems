@@ -5,11 +5,14 @@ Full documentation for AMD Debugger API is available at
 
 ## rocm-dbgapi-0.84.0
 ### Added
+- Support for the following architectures:
+ - `gfx12-5-generic`
+
 - `amd_dbgapi_architecture_is_compatible` to check if a code object compiled
   for one architecture can be loaded and debugged on an agent with a different
   architecture. This enables proper handling of generic code objects
-  (gfx9-4-generic, gfx10-3-generic, gfx11-generic) which are compatible with
-  multiple specific architectures within the same family.
+  (gfx9-4-generic, gfx10-3-generic, gfx11-generic, gfx12-5-generic) which are
+  compatible with multiple specific architectures within the same family.
 
 ## rocm-dbgapi-0.83.0 for ROCm-X
 ### Added

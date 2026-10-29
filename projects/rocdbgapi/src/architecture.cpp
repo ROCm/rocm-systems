@@ -8475,6 +8475,16 @@ gfx12_5_architecture_t::classify_instruction (
   return gfx12_architecture_t::classify_instruction (address, instruction);
 }
 
+class gfx12_5_generic_t final : public gfx12_5_architecture_t
+{
+public:
+  gfx12_5_generic_t ()
+    : gfx12_5_architecture_t (EF_AMDGPU_MACH_AMDGCN_GFX12_5_GENERIC,
+                              "amdgcn-amd-amdhsa--gfx12-5-generic")
+  {
+  }
+};
+
 class gfx1250_t final : public gfx12_5_architecture_t
 {
 public:
@@ -8698,6 +8708,7 @@ decltype (architecture_t::s_architecture_map)
       map.emplace (make_architecture<gfx12_generic_t> ());
       map.emplace (make_architecture<gfx1200_t> ());
       map.emplace (make_architecture<gfx1201_t> ());
+      map.emplace (make_architecture<gfx12_5_generic_t> ());
       map.emplace (make_architecture<gfx1250_t> ());
       map.emplace (make_architecture<gfx1250_strict_t> ());
       return map;
@@ -8802,7 +8813,10 @@ static const std::vector<arch_compat_entry_t> arch_compat_table = {
   /* gfx11.7 family can run gfx11-7-generic code objects.  */
   { EF_AMDGPU_MACH_AMDGCN_GFX1170, EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC },
   { EF_AMDGPU_MACH_AMDGCN_GFX1171, EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC },
-  { EF_AMDGPU_MACH_AMDGCN_GFX1172, EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC }
+  { EF_AMDGPU_MACH_AMDGCN_GFX1172, EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC },
+
+  /* gfx12.5 family can run gfx12-5-generic code objects.  */
+  { EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX12_5_GENERIC }
 };
 
 } /* namespace  */
