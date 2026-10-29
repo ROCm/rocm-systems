@@ -152,6 +152,9 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     }
     uint64_t addr = saddr_val + vaddr + offset;
     if (decode_flat_private) {
+      // CDNA5 section 10.1.1 checks the final address, including IOFFSET.
+      if (amdgpu::flat_address_in_hole(wf, addr, amdgpu::FlatPrivateLayout::EncodedLane))
+        d.memviol_lane_mask |= uint64_t{1} << lane;
       const auto translated =
           amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane);
       if (translated.private_address) {

@@ -116,7 +116,11 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
     } else {
       vaddr = vaddr_region.lane64(0, lane);
     }
-    uint64_t addr = saddr_val + vaddr + offset;
+    // RDNA4 section 11.3 checks the aperture before adding IOFFSET.
+    const uint64_t base_address = saddr_val + vaddr;
+    if (amdgpu::flat_address_in_hole(wf, base_address, amdgpu::FlatPrivateLayout::Linear))
+      d.memviol_lane_mask |= uint64_t{1} << lane;
+    uint64_t addr = base_address + offset;
     const auto translated =
         amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Linear);
     if (translated.private_address && d.atomic_op != amdgpu::AtomicOp::NONE &&

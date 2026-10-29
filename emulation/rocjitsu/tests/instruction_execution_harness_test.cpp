@@ -1221,6 +1221,132 @@ TEST(Gfx1250MemoryExecutionHarness, PrivateFlatAtomic64RaisesApertureViolation) 
   });
 }
 
+template <typename Isa, typename Encode>
+void check_flat_hole_addresses(rj_code_arch_t arch, Encode encode) {
+  const bool cdna5 = arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const uint64_t hole_base = uint64_t{1} << (cdna5 ? 56 : 47);
+  struct Case {
+    uint64_t address;
+    int32_t immediate;
+    bool fault;
+  };
+  const std::array cases{
+      Case{hole_base + 64, 0, true},
+      // RDNA classifies the base; CDNA5 classifies the final address.
+      Case{hole_base, -4, !cdna5},
+      Case{0x2010, 0, false},
+      Case{0xffff800000002010ull, 0, false},
+  };
+  for (const auto &test : cases) {
+    for (const bool store : {false, true}) {
+      for (const bool hole_lane_active : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "address=" << std::hex << test.address << std::dec
+                                        << " immediate=" << test.immediate << " store=" << store
+                                        << " hole_lane_active=" << hole_lane_active);
+        amdgpu::GpuMemory memory("flat_hole");
+        amdgpu::L2Cache cache("flat_hole_cache");
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 256;
+        config.lds_size_kb = 64;
+        MemoryTestCu<Isa> cu("flat_hole", config, &memory, &cache);
+        constexpr uint64_t shared_base = uint64_t{1} << 48;
+        constexpr uint64_t private_base = uint64_t{2} << 48;
+        cu.set_apertures(shared_base, shared_base + UINT32_MAX, private_base,
+                         private_base + UINT32_MAX);
+        auto *wave = cu.dispatch_wf(0, 0, 128, 256, 32);
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(hole_lane_active ? 3 : 1);
+        // Deliberately back the hole in physical sparse memory: backing cannot
+        // make an architecturally forbidden virtual address legal.
+        const uint64_t second_target = test.address + test.immediate;
+        memory.write32(0x2000, 10);
+        memory.write32(second_target, 20);
+        const uint32_t vb = wave->vgpr_alloc().base;
+        for (uint32_t lane = 0; lane < 2; ++lane) {
+          const uint64_t address = lane == 0 ? 0x2000 - test.immediate : test.address;
+          cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
+          cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+          cu.write_vgpr(vb + 4, lane, 42 + lane);
+          cu.write_vgpr(vb + 8, lane, 0xdeadbeef);
+        }
+        const auto words = encode(store, test.immediate);
+        auto decoder = Decoder::create(arch);
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        ASSERT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
+        const bool fault = test.fault && hole_lane_active;
+        EXPECT_EQ(inst->data_as<amdgpu::VectorMemState>()->memviol_lane_mask, fault ? 2u : 0u);
+        EXPECT_EQ(cu.route_memory_inst(inst.release(), *wave),
+                  fault ? amdgpu::VmAccessOutcome::ApertureViolation
+                        : amdgpu::VmAccessOutcome::Complete);
+        cu.flush_all();
+        EXPECT_EQ(memory.read32(0x2000), store && !fault ? 42u : 10u);
+        EXPECT_EQ(memory.read32(second_target), store && !fault && hole_lane_active ? 43u : 20u);
+        EXPECT_EQ(cu.read_vgpr(vb + 8, 0), !store && !fault ? 10u : 0xdeadbeefu);
+        EXPECT_EQ(cu.read_vgpr(vb + 8, 1),
+                  !store && !fault && hole_lane_active ? 20u : 0xdeadbeefu);
+        EXPECT_TRUE(wave->wait_counters().empty());
+        wave->halt();
+      }
+    }
+  }
+}
+
+TEST(Rdna3MemoryExecutionHarness, FlatHoleAddressesRaiseApertureViolation) {
+  check_flat_hole_addresses<rdna3::Isa>(ROCJITSU_CODE_ARCH_RDNA3, [](bool store, int32_t offset) {
+    std::array<uint32_t, 3> words{};
+    std::ranges::copy(rdna3::build_flat(store ? rdna3::kFlatStoreB32Flat : rdna3::kFlatLoadB32Flat,
+                                        {.offset = uint16_t(offset & 0x1fff),
+                                         .seg = 0,
+                                         .addr = 0,
+                                         .data = 4,
+                                         .saddr = 127,
+                                         .vdst = uint8_t(store ? 0 : 8)}),
+                      words.begin());
+    return words;
+  });
+}
+
+TEST(Rdna3_5MemoryExecutionHarness, FlatHoleAddressesRaiseApertureViolation) {
+  check_flat_hole_addresses<rdna3_5::Isa>(
+      ROCJITSU_CODE_ARCH_RDNA3_5, [](bool store, int32_t offset) {
+        std::array<uint32_t, 3> words{};
+        std::ranges::copy(
+            rdna3_5::build_flat(store ? rdna3_5::kFlatStoreB32Flat : rdna3_5::kFlatLoadB32Flat,
+                                {.offset = uint16_t(offset & 0x1fff),
+                                 .seg = 0,
+                                 .addr = 0,
+                                 .data = 4,
+                                 .saddr = 127,
+                                 .vdst = uint8_t(store ? 0 : 8)}),
+            words.begin());
+        return words;
+      });
+}
+
+TEST(Rdna4MemoryExecutionHarness, FlatHoleAddressesRaiseApertureViolation) {
+  check_flat_hole_addresses<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4, [](bool store, int32_t offset) {
+    return rdna4::build_vflat(store ? rdna4::kFlatStoreB32Vflat : rdna4::kFlatLoadB32Vflat,
+                              {.saddr = 124,
+                               .vdst = uint8_t(store ? 0 : 8),
+                               .vsrc = 4,
+                               .ioffset = uint32_t(offset) & 0xffffffu});
+  });
+}
+
+TEST(Gfx1250MemoryExecutionHarness, FlatHoleAddressesRaiseApertureViolation) {
+  check_flat_hole_addresses<cdna5::Isa>(ROCJITSU_CODE_ARCH_CDNA5, [](bool store, int32_t offset) {
+    return cdna5::build_vflat(store ? cdna5::kFlatStoreB32Vflat : cdna5::kFlatLoadB32Vflat,
+                              {.saddr = 124,
+                               .vdst = uint8_t(store ? 0 : 8),
+                               .vsrc = 4,
+                               .ioffset = uint32_t(offset) & 0xffffffu});
+  });
+}
+
 TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAllocations) {
   struct Case {
     uint32_t address_offset, logical_offset, valid_words;

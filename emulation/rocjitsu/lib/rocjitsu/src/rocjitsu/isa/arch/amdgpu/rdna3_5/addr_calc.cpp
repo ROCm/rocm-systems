@@ -129,7 +129,11 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
     } else {
       vaddr = vaddr_region.lane64(0, lane);
     }
-    uint64_t addr = saddr_val + vaddr + offset;
+    const uint64_t base_address = saddr_val + vaddr;
+    if (inst.seg == 0 &&
+        amdgpu::flat_address_in_hole(wf, base_address, amdgpu::FlatPrivateLayout::Linear))
+      d.memviol_lane_mask |= uint64_t{1} << lane;
+    uint64_t addr = base_address + offset;
     if (inst.seg == 0) {
       const auto translated =
           amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Linear);
