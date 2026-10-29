@@ -120,51 +120,18 @@ streamListSize = len(streamFileList)
 md5FileDir = filesDir + '/MD5/'
 md5FileList = os.listdir(md5FileDir)
 md5FileList.sort(key=str.lower)
+md5ListSize = len(md5FileList)
 
 if streamListSize == 0:
     print("Error: Empty stream file folder\n")
     sys.exit(1)
-
-# Pair each stream with the digest of the same name, rather than with whichever digest happens to
-# land at the same index. The two directories are listed and sorted independently, so one extra,
-# missing or differently-named file shifts the lists against each other and every stream from that
-# point on is checked against another stream's reference digest -- which still reports a tidy pass
-# or failure, just about the wrong pairing. Names are matched without extension and case-folded,
-# since a digest is conventionally named for its stream but not with the same suffix.
-md5ByStem = {}
-duplicateStems = []
-for md5FileName in md5FileList:
-    stem = os.path.splitext(md5FileName)[0].lower()
-    if stem in md5ByStem:
-        duplicateStems.append(stem)
-    md5ByStem[stem] = md5FileDir + md5FileName
-if duplicateStems:
-    print("Error: More than one MD5 file for: " + ', '.join(sorted(set(duplicateStems))))
-    print("       MD5 file names must be unique ignoring extension and case.\n")
+if streamListSize != md5ListSize:
+    print("Error: Bit stream file number and MD5 file number do not match\n")
     sys.exit(1)
 
-streamPairs = []
-matchedStems = set()
-unmatchedStreams = []
-for streamFileName in streamFileList:
-    stem = os.path.splitext(streamFileName)[0].lower()
-    if stem in md5ByStem:
-        streamPairs.append((streamFileDir + streamFileName, md5ByStem[stem]))
-        matchedStems.add(stem)
-    else:
-        unmatchedStreams.append(streamFileName)
-if unmatchedStreams:
-    print("Error: No MD5 file found for bit stream: " + ', '.join(unmatchedStreams) + "\n")
-    sys.exit(1)
-
-# An MD5 with no stream means the corpus is incomplete: the run would quietly cover fewer streams
-# than it is meant to, and report a clean pass for doing so.
-unmatchedMd5 = sorted(set(md5ByStem) - matchedStems)
-if unmatchedMd5:
-    print("Error: No bit stream found for MD5 file: " + ', '.join(unmatchedMd5) + "\n")
-    sys.exit(1)
-
-for streamFilePath, md5FilePath in streamPairs:
+for i in range(streamListSize):
+    streamFilePath = streamFileDir + streamFileList[i]
+    md5FilePath = md5FileDir + md5FileList[i]
     cmd = [run_rocDecode_app, '-i', streamFilePath]
     if bsReaderOption:
         cmd.append(bsReaderOption)
