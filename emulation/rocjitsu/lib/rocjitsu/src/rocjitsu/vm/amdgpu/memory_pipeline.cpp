@@ -19,6 +19,7 @@
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/lds_stack.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -1222,19 +1223,43 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
 
 // Dispatch ordinary LDS loads, stores and atomics for uniform and mixed routes.
 // Callers prepare buffers and complete retryable global work before entering.
-// FLAT LDS addresses include the workgroup base: reject out-of-backing FLAT
-// lanes before the LDS helpers narrow to 32 bits, preserving zero reads and
-// discarded writes. Ordinary DS lanes retain the existing LDS helper behavior.
+// FLAT LDS addresses include the workgroup base. Reject the captured RDNA4
+// allocation-OOB lanes and out-of-backing FLAT lanes before LDS helpers narrow
+// to 32 bits, preserving zero reads and discarded writes. Ordinary DS lanes
+// retain the existing LDS helper behavior.
 void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 64> &addresses,
                         uint64_t lane_mask, const std::vector<uint8_t> &store_data,
                         std::vector<uint8_t> &response_data) {
-  uint64_t out_of_bounds = 0;
+  uint64_t out_of_bounds = lane_mask & d.flat_local_oob_lane_mask;
   for (uint64_t lanes = lane_mask & d.flat_local_lane_mask; lanes; lanes &= lanes - 1) {
     const uint32_t lane = std::countr_zero(lanes);
     if (addresses[lane] >= lds.size_bytes())
       out_of_bounds |= uint64_t{1} << lane;
   }
   lane_mask &= ~out_of_bounds;
+  if (d.atomic_op == AtomicOp::NONE && d.flat_local_allocation_end && d.elem_size != 0) {
+    // gfx1201 FLAT bounds retain complete DWORDs, including for byte-unaligned
+    // accesses. Stores crossing the end also discard the incomplete DWORD;
+    // the DS unaligned byte-store rule does not describe these FLAT requests.
+    const uint64_t limit = std::min<uint64_t>(*d.flat_local_allocation_end, lds.size_bytes());
+    const uint32_t bytes_per_lane = d.elem_size * d.num_elems;
+    const uint64_t local_lanes = lane_mask & d.flat_local_lane_mask;
+    for (uint64_t lanes = local_lanes; lanes; lanes &= lanes - 1) {
+      const uint32_t lane = std::countr_zero(lanes);
+      const uint64_t address = addresses[lane];
+      const uint32_t bytes = static_cast<uint32_t>(
+          whole_element_bytes_in_range(address, bytes_per_lane, d.elem_size, limit));
+      const uint32_t data_offset = lane * bytes_per_lane;
+      if (d.is_load) {
+        std::memset(response_data.data() + data_offset, 0, bytes_per_lane);
+        std::as_const(lds).read(static_cast<uint32_t>(address), response_data.data() + data_offset,
+                                bytes);
+      } else {
+        lds.write(static_cast<uint32_t>(address), store_data.data() + data_offset, bytes);
+      }
+    }
+    lane_mask &= ~local_lanes;
+  }
   if (d.atomic_op != AtomicOp::NONE)
     execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask);
   else if (d.is_load)
