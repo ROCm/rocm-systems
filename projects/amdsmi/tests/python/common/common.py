@@ -474,7 +474,13 @@ def build_type_lists():
     link_types = []
     for member in amdsmi.AmdSmiLinkType:
         cond = PASS
-        if member.name in ["AMDSMI_LINK_TYPE_NOT_APPLICABLE", "AMDSMI_LINK_TYPE_UNKNOWN"]:
+        # NUMA and XNUMA only relate a NIC to a GPU, so the GPU nearest-search rejects them.
+        if member.name in [
+            "AMDSMI_LINK_TYPE_NOT_APPLICABLE",
+            "AMDSMI_LINK_TYPE_UNKNOWN",
+            "AMDSMI_LINK_TYPE_NUMA",
+            "AMDSMI_LINK_TYPE_XNUMA",
+        ]:
             cond = FAIL
         link_types.append((member.name, amdsmi.AmdSmiLinkType(member.value), cond))
 
