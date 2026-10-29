@@ -8849,7 +8849,9 @@ class CodeGenerator:
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         if esz == 4:
-            L.append('  if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;')
+            L.append(
+                '  if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;'
+            )
             L.append('  set_data(std::move(d));')
             return '\n'.join(L)
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -9947,7 +9949,9 @@ class CodeGenerator:
                 f'    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, {stride // 4}, exec);'
             )
             L.append('    if (data.valid()) {')
-            L.append('      if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;')
+            L.append(
+                '      if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;'
+            )
             L.append('      set_data(std::move(d));')
             L.append('      return;')
             L.append('    }')
@@ -10124,7 +10128,9 @@ class CodeGenerator:
                     f'  auto maybe_data{group}_{i} = amdgpu::RegisterAccess(cu).read_vgpr_region(data{group}_base + {i}, 1, exec).lanes();'
                 )
                 L.append(f'  if (maybe_data{group}_{i}.failed()) return;')
-                L.append(f'  const auto data{group}_{i} = maybe_data{group}_{i}.value();')
+                L.append(
+                    f'  const auto data{group}_{i} = maybe_data{group}_{i}.value();'
+                )
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append('    uint32_t base = addresses[lane];')
