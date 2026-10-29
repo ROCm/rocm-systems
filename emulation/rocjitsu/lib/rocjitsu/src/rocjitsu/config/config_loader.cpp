@@ -1112,7 +1112,7 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
               se_cus += n * cu_count.value();
             }
       }
-      uint32_t child_copies;
+      uint32_t child_copies = 0;
       if (checked_capacity(copies * n, child_copies).failed() ||
           self(self, child, child_copies).failed())
         return util::Result::failure();

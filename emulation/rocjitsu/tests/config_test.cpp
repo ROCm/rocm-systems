@@ -3236,9 +3236,10 @@ TEST(EffectiveConfigTest, GraphFailureDoesNotPublishLaunchCopy) {
   for (bool invalid_graph : {false, true}) {
     SCOPED_TRACE(invalid_graph);
     std::string json = system_graph_test_config(kSystemGraphManifest);
-    if (invalid_graph)
+    if (invalid_graph) {
       ASSERT_TRUE(
           replace_exactly_once(json, R"({"id":"tray7","gpus":)", R"({"id":"tray0","gpus":)"));
+    }
     const auto source = write_temp_config(json);
     const test::ScopedTempDirectory runtime("rocjitsu-graph-launch-failure-");
     test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
