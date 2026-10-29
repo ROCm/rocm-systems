@@ -47,6 +47,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -70,6 +71,7 @@ RJ_DIAGNOSTIC_POP
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -6166,6 +6168,139 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3Bitop3UsesSpillBackedScratchWhenVgprsAreFu
                                           /*vgpr=*/0, /*offset=*/0, /*is_load=*/true));
   EXPECT_TRUE(contains_flat_scratch_dword(target_words, target_word_count, /*op=*/20,
                                           /*vgpr=*/1, /*offset=*/4, /*is_load=*/true));
+}
+
+TEST(BinaryTranslatorE2E, Cdna4ToCdna3CvtF32Bf16ExecutionPreservesSourceFormats) {
+  using namespace rocjitsu;
+
+  struct SourceCase {
+    uint16_t selector;
+    uint32_t carrier, expected;
+  };
+  // These are BF16 widening results, independently of the emitted instruction
+  // sequence. The inverse-two-pi result differs from its FP32 inline carrier.
+  constexpr std::array cases{
+      SourceCase{240, 0, 0x3f000000u},           SourceCase{241, 0, 0xbf000000u},
+      SourceCase{242, 0, 0x3f800000u},           SourceCase{243, 0, 0xbf800000u},
+      SourceCase{244, 0, 0x40000000u},           SourceCase{245, 0, 0xc0000000u},
+      SourceCase{246, 0, 0x40800000u},           SourceCase{247, 0, 0xc0800000u},
+      SourceCase{248, 0, 0x3e220000u},           SourceCase{0, 0xabcd3f80u, 0x3f800000u},
+      SourceCase{257, 0xabcd4000u, 0x40000000u}, SourceCase{129, 0, 0x00010000u},
+      SourceCase{193, 0, 0xffff0000u},
+  };
+  constexpr std::array<uint64_t, 4> exec_masks{0, 1, 0x8000000000020005ull, UINT64_MAX};
+  class RestoreScalarGate {
+  public:
+    ~RestoreScalarGate() { util::set_force_scalar_for_testing(previous_); }
+
+  private:
+    bool previous_ = util::force_scalar();
+  } restore_scalar_gate;
+
+  const auto execute = [](rj_code_arch_t arch, std::span<const uint32_t> words,
+                          const SourceCase &source, uint64_t exec,
+                          std::array<uint32_t, 64> &result) {
+    amdgpu::GpuMemory memory("bf16_translation_memory");
+    amdgpu::L2Cache cache("bf16_translation_cache");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 102;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("bf16_translation", config, &memory, &cache);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(cu, nullptr);
+    ASSERT_NE(decoder, nullptr);
+    auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_EQ(wave->wf_size(), 64u);
+    wave->set_exec(exec);
+    wave->set_mode_raw(0xf0);
+    wave->write_scc(true);
+    constexpr uint64_t vcc = 0x0123456789abcdefull;
+    wave->set_vcc(vcc);
+    const uint32_t vb = wave->vgpr_alloc().base;
+    const uint32_t sb = wave->sgpr_alloc().base;
+    cu->write_sgpr(sb, source.carrier);
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      cu->write_vgpr(vb + 1, lane, source.carrier);
+      cu->write_vgpr(vb + 4, lane, 0xdead0000u + lane);
+      cu->write_vgpr(vb + 5, lane, 0xa5a5a5a5u);
+    }
+    bool reached_end = false;
+    for (size_t offset = 0; offset < words.size();) {
+      std::array<uint32_t, 4> window{};
+      std::copy_n(words.begin() + offset, std::min(window.size(), words.size() - offset),
+                  window.begin());
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, window.data()));
+      ASSERT_NE(instruction, nullptr) << "arch=" << arch << " word=" << offset;
+      if (std::string_view(instruction->mnemonic()) == "s_endpgm") {
+        reached_end = true;
+        break;
+      }
+      ASSERT_GE(instruction->size(), 4);
+      ASSERT_EQ(instruction->size() % sizeof(uint32_t), 0u);
+      ASSERT_LE(static_cast<size_t>(instruction->size()) / sizeof(uint32_t), words.size() - offset);
+      ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded())
+          << instruction->mnemonic();
+      offset += static_cast<size_t>(instruction->size()) / sizeof(uint32_t);
+    }
+    ASSERT_TRUE(reached_end);
+    EXPECT_EQ(wave->exec(), exec);
+    EXPECT_TRUE(wave->read_scc());
+    EXPECT_EQ(wave->vcc(), vcc);
+    EXPECT_EQ(cu->read_sgpr(sb), source.carrier);
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      result[lane] = cu->read_vgpr(vb + 4, lane);
+      EXPECT_EQ(cu->read_vgpr(vb + 1, lane), source.carrier);
+      EXPECT_EQ(cu->read_vgpr(vb + 5, lane), 0xa5a5a5a5u);
+    }
+    wave->halt();
+  };
+
+  for (const auto &source_case : cases) {
+    SCOPED_TRACE(source_case.selector);
+    const auto conversion =
+        cdna4::build_vop1(cdna4::kVCvtF32Bf16Vop1, {.src0 = source_case.selector, .vdst = 4});
+    const std::vector<uint32_t> source_words{conversion[0],
+                                             build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+    const auto image =
+        test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(source_words);
+    AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+    const auto translated = translator.translate(source);
+    ASSERT_TRUE(translated.ok()) << (translated.diagnostics.empty()
+                                         ? ""
+                                         : translated.diagnostics.front().message);
+    AmdGpuCodeObject target(translated.elf_bytes.data(), translated.elf_bytes.size());
+    ASSERT_TRUE(target.is_valid());
+    ASSERT_FALSE(target.text_sections().empty());
+    const auto *text = target.text_sections().front();
+    ASSERT_EQ(text->size() % sizeof(uint32_t), 0u);
+    std::vector<uint32_t> target_words(text->size() / sizeof(uint32_t));
+    std::memcpy(target_words.data(), text->data(), text->size());
+    for (bool force_scalar : {false, true}) {
+      util::set_force_scalar_for_testing(force_scalar);
+      SCOPED_TRACE(force_scalar);
+      for (uint64_t exec : exec_masks) {
+        SCOPED_TRACE(exec);
+        std::array<uint32_t, 64> interpreted{}, lowered{};
+        ASSERT_NO_FATAL_FAILURE(
+            execute(ROCJITSU_CODE_ARCH_CDNA4, source_words, source_case, exec, interpreted));
+        ASSERT_NO_FATAL_FAILURE(
+            execute(ROCJITSU_CODE_ARCH_CDNA3, target_words, source_case, exec, lowered));
+        EXPECT_EQ(lowered, interpreted);
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          const uint32_t expected =
+              exec & (uint64_t{1} << lane) ? source_case.expected : 0xdead0000u + lane;
+          EXPECT_EQ(interpreted[lane], expected) << "lane=" << lane;
+          EXPECT_EQ(lowered[lane], expected) << "lane=" << lane;
+        }
+      }
+    }
+  }
 }
 
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3CvtPkBf16SpillScratchAvoidsVgprSources) {
