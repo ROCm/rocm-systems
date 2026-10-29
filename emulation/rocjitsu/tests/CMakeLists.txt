@@ -526,6 +526,7 @@ add_executable(
     host_mapping_lock_test.cpp
     util_result_test.cpp
     util_unique_handle_test.cpp
+    util_intrusive_shared_ptr_test.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp

@@ -573,7 +573,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       for (uint32_t preload_index = 0; preload_index < preload_length; ++preload_index) {
         const uint64_t address = preload_addr + preload_index * 4;
         const AtomicLoadResult loaded = pkt.execution_access
-                                            ? read_gpu_u32(*pkt.execution_access, address)
+                                            ? read_gpu_u32(pkt.execution_access->value, address)
                                             : read_gpu_u32(pkt.address_space, address);
         if (loaded.outcome != VmAccessOutcome::Complete)
           return loaded.outcome;
@@ -744,7 +744,8 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       return VmAccessOutcome::Malformed;
     uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
     std::optional<GpuVmAccess> fallback_scratch_access;
-    const GpuVmAccess *scratch_access = pkt.execution_access.get();
+    const GpuVmAccess *scratch_access =
+        pkt.execution_access ? &pkt.execution_access->value : nullptr;
     if (scratch_access == nullptr) {
       fallback_scratch_access = snapshot_gpu_access(pkt.address_space);
       scratch_access = fallback_scratch_access ? &*fallback_scratch_access : nullptr;
@@ -2367,7 +2368,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   // A dispatch may remain queued after its admission snapshot is invalidated.
   // Fall back to current operation snapshots for subsequent wave setup rather
   // than retrying the permanently revoked snapshot forever.
-  if (entry.execution_access && entry.execution_access->revoked())
+  if (entry.execution_access && entry.execution_access->value.revoked())
     entry.execution_access.reset();
 
   // A peer can publish the shared terminal-fault latch before this CP drains
@@ -3482,7 +3483,7 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
     if (queue.queue_desc_va == 0)
       return {.status = AqlAdmissionStatus::Faulted};
     state.phase = QueueScratchRequestPhase::PublishReadPointer;
-    state.access = std::make_shared<GpuVmAccess>(transaction_access);
+    state.access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(transaction_access);
     state.packet_index = packet_index;
     state.status = status;
     util::Logger::cp([&](auto &os) {
@@ -3503,7 +3504,8 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
       // Earlier dispatches have retired; leave the requesting packet itself
       // unconsumed at packet_index.
       if (!queue.read_pointer_journal.publication_pending()) {
-        queue.read_pointer_journal.retire(state.packet_index, state.packet_index, *state.access);
+        queue.read_pointer_journal.retire(state.packet_index, state.packet_index,
+                                          state.access->value);
       }
       const VmAccessOutcome outcome = queue.read_pointer_journal.publish();
       if (outcome != VmAccessOutcome::Complete)
@@ -3514,7 +3516,7 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
 
     case QueueScratchRequestPhase::ReadSignalHandle: {
       const VmAccessOutcome outcome =
-          read_gpu_block(*state.access, queue.queue_desc_va + kQueueInactiveSignalOffset,
+          read_gpu_block(state.access->value, queue.queue_desc_va + kQueueInactiveSignalOffset,
                          &state.signal_address, sizeof(state.signal_address));
       if (outcome != VmAccessOutcome::Complete)
         return admission_from_vm_outcome(outcome);
@@ -3525,7 +3527,7 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
     }
 
     case QueueScratchRequestPhase::StoreStatus: {
-      const AtomicCompareExchangeResult stored = state.access->compare_exchange(
+      const AtomicCompareExchangeResult stored = state.access->value.compare_exchange(
           state.signal_address + kSignalValueOffset, sizeof(uint64_t), 0, state.status);
       if (stored.outcome != VmAccessOutcome::Complete)
         return admission_from_vm_outcome(stored.outcome);
@@ -3537,7 +3539,7 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
 
     case QueueScratchRequestPhase::ReadMailboxPointer: {
       const VmAccessOutcome outcome =
-          read_gpu_block(*state.access, state.signal_address + kMailboxPointerOffset,
+          read_gpu_block(state.access->value, state.signal_address + kMailboxPointerOffset,
                          &state.mailbox_pointer, sizeof(state.mailbox_pointer));
       if (outcome != VmAccessOutcome::Complete)
         return admission_from_vm_outcome(outcome);
@@ -3547,8 +3549,8 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
 
     case QueueScratchRequestPhase::ReadEventId: {
       const VmAccessOutcome outcome =
-          read_gpu_block(*state.access, state.signal_address + kEventIdOffset, &state.event_id,
-                         sizeof(state.event_id));
+          read_gpu_block(state.access->value, state.signal_address + kEventIdOffset,
+                         &state.event_id, sizeof(state.event_id));
       if (outcome != VmAccessOutcome::Complete)
         return admission_from_vm_outcome(outcome);
       state.phase = QueueScratchRequestPhase::StoreMailbox;
@@ -3557,7 +3559,7 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
 
     case QueueScratchRequestPhase::StoreMailbox:
       if (state.mailbox_pointer != 0) {
-        const VmAccessOutcome outcome = state.access->atomic_store(
+        const VmAccessOutcome outcome = state.access->value.atomic_store(
             state.mailbox_pointer, sizeof(uint64_t), uint64_t(state.event_id));
         if (outcome != VmAccessOutcome::Complete)
           return admission_from_vm_outcome(outcome);
@@ -3614,7 +3616,7 @@ VmAccessOutcome CommandProcessor::advance_scratch_reclaim(ComputeQueueRecord &qu
       if (queue.queue_desc_va == 0 || !entry.address_space)
         return VmAccessOutcome::Faulted;
       if (std::optional<GpuVmAccess> access = snapshot_gpu_access(entry.address_space))
-        state.access = std::make_shared<GpuVmAccess>(std::move(*access));
+        state.access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*access));
       else
         return VmAccessOutcome::Faulted;
       state.phase = QueueScratchReclaimPhase::ReadSignalHandle;
@@ -3622,7 +3624,7 @@ VmAccessOutcome CommandProcessor::advance_scratch_reclaim(ComputeQueueRecord &qu
 
     case QueueScratchReclaimPhase::ReadSignalHandle: {
       const VmAccessOutcome outcome =
-          read_gpu_block(*state.access, queue.queue_desc_va + kQueueInactiveSignalOffset,
+          read_gpu_block(state.access->value, queue.queue_desc_va + kQueueInactiveSignalOffset,
                          &state.signal_address, sizeof(state.signal_address));
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
@@ -3633,7 +3635,7 @@ VmAccessOutcome CommandProcessor::advance_scratch_reclaim(ComputeQueueRecord &qu
     }
 
     case QueueScratchReclaimPhase::StoreStatus: {
-      const AtomicCompareExchangeResult stored = state.access->compare_exchange(
+      const AtomicCompareExchangeResult stored = state.access->value.compare_exchange(
           state.signal_address + kSignalValueOffset, sizeof(uint64_t), 0, kLargeScratchReclaim);
       if (stored.outcome != VmAccessOutcome::Complete)
         return stored.outcome;
@@ -3645,7 +3647,7 @@ VmAccessOutcome CommandProcessor::advance_scratch_reclaim(ComputeQueueRecord &qu
 
     case QueueScratchReclaimPhase::ReadMailboxPointer: {
       const VmAccessOutcome outcome =
-          read_gpu_block(*state.access, state.signal_address + kMailboxPointerOffset,
+          read_gpu_block(state.access->value, state.signal_address + kMailboxPointerOffset,
                          &state.mailbox_pointer, sizeof(state.mailbox_pointer));
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
@@ -3655,8 +3657,8 @@ VmAccessOutcome CommandProcessor::advance_scratch_reclaim(ComputeQueueRecord &qu
 
     case QueueScratchReclaimPhase::ReadEventId: {
       const VmAccessOutcome outcome =
-          read_gpu_block(*state.access, state.signal_address + kEventIdOffset, &state.event_id,
-                         sizeof(state.event_id));
+          read_gpu_block(state.access->value, state.signal_address + kEventIdOffset,
+                         &state.event_id, sizeof(state.event_id));
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
       state.phase = QueueScratchReclaimPhase::StoreMailbox;
@@ -3665,7 +3667,7 @@ VmAccessOutcome CommandProcessor::advance_scratch_reclaim(ComputeQueueRecord &qu
 
     case QueueScratchReclaimPhase::StoreMailbox:
       if (state.mailbox_pointer != 0) {
-        const VmAccessOutcome outcome = state.access->atomic_store(
+        const VmAccessOutcome outcome = state.access->value.atomic_store(
             state.mailbox_pointer, sizeof(uint64_t), uint64_t(state.event_id));
         if (outcome != VmAccessOutcome::Complete)
           return outcome;
@@ -3683,24 +3685,24 @@ VmAccessOutcome CommandProcessor::advance_scratch_reclaim(ComputeQueueRecord &qu
 
     case QueueScratchReclaimPhase::WaitingForRuntime: {
       const AtomicLoadResult signal_status =
-          read_gpu_u64(*state.access, state.signal_address + kSignalValueOffset);
+          read_gpu_u64(state.access->value, state.signal_address + kSignalValueOffset);
       if (signal_status.outcome != VmAccessOutcome::Complete)
         return signal_status.outcome;
 
       uint32_t queue_properties = 0;
       VmAccessOutcome outcome =
-          read_gpu_block(*state.access, queue.queue_desc_va + kQueuePropertiesOffset,
+          read_gpu_block(state.access->value, queue.queue_desc_va + kQueuePropertiesOffset,
                          &queue_properties, sizeof(queue_properties));
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
 
       const AtomicLoadResult scratch_backing =
-          read_gpu_u64(*state.access, queue.queue_desc_va + kScratchBackingOffset);
+          read_gpu_u64(state.access->value, queue.queue_desc_va + kScratchBackingOffset);
       if (scratch_backing.outcome != VmAccessOutcome::Complete)
         return scratch_backing.outcome;
 
       uint32_t compute_tmpring_size = 0;
-      outcome = read_gpu_block(*state.access, queue.queue_desc_va + kComputeTmpringSizeOffset,
+      outcome = read_gpu_block(state.access->value, queue.queue_desc_va + kComputeTmpringSizeOffset,
                                &compute_tmpring_size, sizeof(compute_tmpring_size));
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
@@ -3756,7 +3758,7 @@ VmAccessOutcome CommandProcessor::retire_aql_packet(ComputeQueueRecord &queue,
     // retirement starts. Capture a current view then; once slot release starts,
     // its retained snapshot must finish or fail without switching generations.
     std::optional<GpuVmAccess> refreshed;
-    const GpuVmAccess *access = entry.execution_access.get();
+    const GpuVmAccess *access = entry.execution_access ? &entry.execution_access->value : nullptr;
     if (!access || access->revoked()) {
       refreshed = snapshot_gpu_access(queue.address_space);
       if (!refreshed)
@@ -4042,7 +4044,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.enabled_cus = queue.enabled_cus;
   dp.queue_packet_id = queue_packet_id;
   dp.address_space = queue.address_space;
-  dp.execution_access = std::make_shared<GpuVmAccess>(transaction_access);
+  dp.execution_access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(transaction_access);
   if (!uses_kfd_queue_abi && private_segment_fixed_size > 0 && scratch_resolver_)
     dp.scratch_backing_addr = scratch_resolver_(queue.process_id);
   dp.interrupt_sink = queue.interrupt_sink;
@@ -4304,7 +4306,7 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
       .dispatch_id = allocate_dispatch_id(),
       .queue_id = queue->queue_id,
       .address_space = queue->address_space,
-      .execution_access = std::make_shared<GpuVmAccess>(request.access),
+      .execution_access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(request.access),
       .interrupt_sink = queue->interrupt_sink,
       .process_id = queue->process_id,
       .aql_packet_id = request.packet_index,

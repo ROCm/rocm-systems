@@ -275,10 +275,12 @@ public:
   }
 
   /// @brief Return the immutable VM snapshot captured when this wave was admitted.
-  const GpuVmAccess *vm_access() const { return vm_access_.get(); }
+  const GpuVmAccess *vm_access() const { return vm_access_ ? &vm_access_->value : nullptr; }
 
   /// @brief Share the dispatch-scoped VM snapshot with this wave.
-  void set_vm_access(std::shared_ptr<const GpuVmAccess> access) { vm_access_ = std::move(access); }
+  void set_vm_access(util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> access) {
+    vm_access_ = std::move(access);
+  }
   /// @brief Select host monotonic timestamps for PM4, modeled time for AQL.
   void set_system_clock(bool enabled) { use_system_clock_ = enabled; }
   /// @brief Read the realtime clock selected by the launch ABI.
@@ -1117,8 +1119,9 @@ protected:
   uint32_t queue_packet_id_ = 0; ///< Wrapped AQL ring slot of the dispatch (debugger correlation).
   uint64_t code_load_bias_ = 0;  ///< GPU load bias for code-object-relative call targets.
   uint32_t wave_in_group_ = 0;   ///< Position of this wave within its workgroup (debugger).
-  AddressSpaceHandle address_space_;             ///< Generation-safe GPU address-space identity.
-  std::shared_ptr<const GpuVmAccess> vm_access_; ///< Dispatch-scoped immutable VM snapshot.
+  AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
+  util::IntrusiveSharedPtr<const GpuVmAccessSnapshot>
+      vm_access_;           ///< Dispatch-scoped immutable VM snapshot.
   uint32_t process_id_ = 0; ///< Owning process ID (PASID analog, set per dispatch).
 
   bool use_system_clock_ = false;                ///< PM4 shader timestamps use host monotonic time.

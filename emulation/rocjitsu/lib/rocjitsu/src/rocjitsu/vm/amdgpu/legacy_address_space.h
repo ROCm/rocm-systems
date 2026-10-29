@@ -155,7 +155,8 @@ public:
   util::DistributedSharedMutex *page_table_mutex = nullptr;
   const uint64_t *page_table_generation = nullptr;
   std::shared_ptr<util::DistributedSharedMutex> request_mutex;
-  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch{};
+  util::IntrusiveSharedPtr<const util::RefCountedCacheAligned<std::atomic<uint64_t>>>
+      mutation_epoch{};
   /// Requires request_mutex so all users serialize policy-cache invalidations.
   std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state{};
   pid_t client_pid = 0;

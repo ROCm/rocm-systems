@@ -2465,7 +2465,8 @@ TEST_F(L1CacheMtypeTest, LiveResolverWithoutGenerationDoesNotCacheMutationToken)
 
 TEST_F(L1CacheMtypeTest, MutationTokenRefreshesPolicyWithoutGenerationPublication) {
   map_pages(Mtype::UC, Mtype::RW);
-  auto epoch = std::make_shared<std::atomic<uint64_t>>(1);
+  auto epoch =
+      util::IntrusiveSharedPtr<util::RefCountedCacheAligned<std::atomic<uint64_t>>>::make(1);
   ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
   address_space_ = legacy_vm_.register_address_space(
       kVmid, {.page_table = &process_.page_table_,
@@ -2481,7 +2482,7 @@ TEST_F(L1CacheMtypeTest, MutationTokenRefreshesPolicyWithoutGenerationPublicatio
     // throws before publishing the ordinary page-table generation.
     std::unique_lock request_lock(*process_.page_table_request_mutex());
     std::unique_lock table_lock(process_.page_table_mutex_);
-    epoch->fetch_add(1, std::memory_order_release);
+    epoch->value.fetch_add(1, std::memory_order_release);
     process_.page_table_.at(kBase >> GpuMemory::PAGE_SHIFT).mtype = Mtype::CC;
   }
   EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
