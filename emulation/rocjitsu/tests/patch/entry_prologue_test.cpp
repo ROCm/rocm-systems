@@ -183,9 +183,11 @@ TEST(DbiEntryStorageFloor, DisabledWorkgroupDimensionsConsumeNoSgpr) {
 // writes s1 alone, so the floor is s2.
 TEST(DbiEntryStorageFloor, CountsAWave32CompareMaskAsOneSgpr) {
   constexpr rj_code_arch_t kRdna4 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kRdna4);
+  static_assert(endpgm.succeeded());
   constexpr auto compare = rdna4::build_vop3(rdna4::kVCmpEqU32Vop3,
                                              {.vdst = 1, .src0 = kInlineZero, .src1 = kInlineZero});
-  const Kernel kernel({compare[0], compare[1], build_s_endpgm(kRdna4)}, kRdna4);
+  const Kernel kernel({compare[0], compare[1], endpgm.value()}, kRdna4);
 
   const KD wave64{};
   KD wave32{};

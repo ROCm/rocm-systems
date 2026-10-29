@@ -2549,14 +2549,20 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
 // DBI analyzes kernels and probes at one wave size per code object, and kernels
 // that mix Wave32 and Wave64 have none. Two Wave32 kernels are the control.
 TEST(InstrumentorProbePatch, MixedWaveSizesFailClosed) {
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(nop.succeeded());
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(endpgm.succeeded());
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(setpc.succeeded());
+
   for (const std::array<bool, 2> wave32 : {std::array{true, false}, std::array{true, true}}) {
     const bool mixed = !wave32[1];
     SCOPED_TRACE(mixed ? "mixed" : "both Wave32");
-    auto target = make_amdgpu_two_kernel_elf(
-        {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4), build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)},
-        /*private_bytes=*/0, /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1200, wave32);
-    auto probe =
-        make_gfx1200_probe_elf("rj_test_probe", {build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4)});
+    auto target = make_amdgpu_two_kernel_elf({nop.value(), endpgm.value()},
+                                             /*private_bytes=*/0, /*granulated_sgpr_count=*/3,
+                                             EF_AMDGPU_MACH_AMDGCN_GFX1200, wave32);
+    auto probe = make_gfx1200_probe_elf("rj_test_probe", {setpc.value()});
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
 
@@ -2613,18 +2619,26 @@ void expect_only_probe_calls_refused(const std::vector<uint8_t> &target,
 // Both gates refuse a probe call before its body is analyzed. Each probe here
 // also reads s3 before defining it, and that must not be the error reported.
 TEST(InstrumentorProbePatch, ProbeCallGatesPrecedeProbeAnalysis) {
+  constexpr util::FailureOr<uint32_t> cdna4_mov = build_s_mov_b32(4, 3, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(cdna4_mov.succeeded());
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(nop.succeeded());
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(endpgm.succeeded());
+  constexpr util::FailureOr<uint32_t> rdna4_mov = build_s_mov_b32(4, 3, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(rdna4_mov.succeeded());
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(setpc.succeeded());
+
   expect_only_probe_calls_refused(
       make_gfx950_elf_with_two_nops(),
-      make_gfx950_probe_elf("rj_test_probe",
-                            {build_s_mov_b32(4, 3, ROCJITSU_CODE_ARCH_CDNA4), kProbeSetpcS30S31}),
+      make_gfx950_probe_elf("rj_test_probe", {cdna4_mov.value(), kProbeSetpcS30S31}),
       ROCJITSU_CODE_ARCH_CDNA4, /*anchor_offset=*/4, "discovered kernel descriptor");
   expect_only_probe_calls_refused(
-      make_amdgpu_two_kernel_elf(
-          {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4), build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)},
-          /*private_bytes=*/0, /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1200,
-          {true, false}),
-      make_gfx1200_probe_elf("rj_test_probe", {build_s_mov_b32(4, 3, ROCJITSU_CODE_ARCH_RDNA4),
-                                               build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4)}),
+      make_amdgpu_two_kernel_elf({nop.value(), endpgm.value()},
+                                 /*private_bytes=*/0, /*granulated_sgpr_count=*/3,
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1200, {true, false}),
+      make_gfx1200_probe_elf("rj_test_probe", {rdna4_mov.value(), setpc.value()}),
       ROCJITSU_CODE_ARCH_RDNA4, /*anchor_offset=*/0, "mix Wave32 and Wave64");
 }
 
@@ -2632,16 +2646,21 @@ TEST(InstrumentorProbePatch, ProbeCallGatesPrecedeProbeAnalysis) {
 // register it never defined. The probe is analyzed at its kernel's wave size; at
 // Wave64 the compare writes s[2:3] and the same probe is admitted.
 TEST(InstrumentorProbePatch, ProbeReadingAboveAWave32CompareIsRefused) {
+  constexpr util::FailureOr<uint32_t> setpc =
+      build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(setpc.succeeded());
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(nop.succeeded());
+
   const auto compare =
       rdna4::build_vop3(rdna4::kVCmpEqU32Vop3, {.vdst = 2, .src0 = 128, .src1 = 128});
   const std::vector<uint32_t> body = {
       compare[0],
       compare[1],
       rdna4::build_sop1(rdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 4})[0],
-      build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4),
+      setpc.value(),
   };
-  const std::vector<uint32_t> text = {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
-                                      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4)};
+  const std::vector<uint32_t> text = {nop.value(), nop.value()};
   for (const bool wave32 : {true, false}) {
     SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
     auto target = wave32 ? make_gfx1200_wave32_kernel_elf(text, /*private_bytes=*/0)
@@ -2672,16 +2691,26 @@ TEST(InstrumentorProbePatch, ProbeReadingAboveAWave32CompareIsRefused) {
 // comparing into s2 clobbers only s2 in Wave32, so nothing live needs a spill;
 // in Wave64 it clobbers s[2:3] and the site is refused for want of scratch.
 TEST(InstrumentorProbePatch, ProbeCompareClobbersTheSgprAboveOnlyInWave64) {
+  constexpr util::FailureOr<uint32_t> mov =
+      build_s_mov_b32(/*sdst=*/3, scalar_positive_inline_u32(42), ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(mov.succeeded());
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(nop.succeeded());
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(endpgm.succeeded());
+  constexpr util::FailureOr<uint32_t> setpc =
+      build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(setpc.succeeded());
+
   const std::vector<uint32_t> text = {
-      build_s_mov_b32(/*sdst=*/3, scalar_positive_inline_u32(42), ROCJITSU_CODE_ARCH_RDNA4),
-      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4), // The anchor.
+      mov.value(),
+      nop.value(), // The anchor.
       rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 3, .vdst = 3})[0],
-      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+      endpgm.value(),
   };
   const auto compare =
       rdna4::build_vop3(rdna4::kVCmpEqU32Vop3, {.vdst = 2, .src0 = 128, .src1 = 128});
-  const std::vector<uint32_t> body = {compare[0], compare[1],
-                                      build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4)};
+  const std::vector<uint32_t> body = {compare[0], compare[1], setpc.value()};
   for (const bool wave32 : {true, false}) {
     SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
     auto target = wave32 ? make_gfx1200_wave32_kernel_elf(text, /*private_bytes=*/0)

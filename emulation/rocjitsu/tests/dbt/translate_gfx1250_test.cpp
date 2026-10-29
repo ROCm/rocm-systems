@@ -2720,6 +2720,11 @@ TEST(BinaryTranslatorE2E, Gfx1250KernargFactSurvivesWriteToTheRegisterAboveThePa
 // v_cmp_eq_u32_e64 s79 names s[79:80], but a Wave32 kernel's compare writes only s79, so the pair
 // in s[80:81] survives. Analyzed at Wave64, the compare would kill it and refuse the transfer.
 TEST(BinaryTranslatorE2E, Rdna4KernargFactSurvivesWave32CompareBelowThePair) {
+  constexpr util::FailureOr<uint32_t> swappc = rocjitsu::build_s_swappc_b64(
+      kKernargReturnSreg, kKernargTargetSreg, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(swappc.succeeded());
+  constexpr util::FailureOr<uint32_t> endpgm = rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(endpgm.succeeded());
   const auto load = rdna4::build_smem(
       rdna4::kSLoadB64Smem,
       {.sbase = 0, .sdata = static_cast<uint8_t>(kKernargTargetSreg), .soffset = 124});
@@ -2727,13 +2732,7 @@ TEST(BinaryTranslatorE2E, Rdna4KernargFactSurvivesWave32CompareBelowThePair) {
       rdna4::kVCmpEqU32Vop3,
       {.vdst = static_cast<uint8_t>(kKernargTargetSreg - 1), .src0 = 256, .src1 = 257});
   const std::vector<uint32_t> words = {
-      load[0],
-      load[1],
-      compare[0],
-      compare[1],
-      rocjitsu::build_s_swappc_b64(kKernargReturnSreg, kKernargTargetSreg,
-                                   ROCJITSU_CODE_ARCH_RDNA4),
-      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+      load[0], load[1], compare[0], compare[1], swappc.value(), endpgm.value(),
   };
   rocjitsu::test_support::TestKernelDescriptor kd{};
   RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
