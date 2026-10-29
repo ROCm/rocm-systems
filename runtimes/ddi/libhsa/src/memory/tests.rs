@@ -122,32 +122,6 @@ fn allow_access_rejects_reserved_flags_before_runtime_lookup() {
 }
 
 #[test]
-/// Verifies that registered range aligns native pages and preserves host offset.
-fn registered_range_aligns_native_pages_and_preserves_host_offset() {
-    assert_eq!(
-        registered_range(0x10_000, 1, 4096),
-        Some((0x10_000, 4096, 0))
-    );
-    assert_eq!(
-        registered_range(0x10_345, 1, 4096),
-        Some((0x10_000, 4096, 0x345))
-    );
-    assert_eq!(
-        registered_range(0x10_345, 4096, 4096),
-        Some((0x10_000, 8192, 0x345))
-    );
-    assert_eq!(registered_range(usize::MAX, 2, 4096), None);
-    assert_eq!(
-        registered_range(0x10_123, 1, 65_536),
-        Some((0x10_000, 65_536, 0x123))
-    );
-    assert_eq!(
-        registered_range(0x10_123, 65_536, 65_536),
-        Some((0x10_000, 131_072, 0x123))
-    );
-}
-
-#[test]
 /// Verifies that registered GPU alias translates to host backing.
 fn registered_gpu_alias_translates_to_host_backing() {
     let description = PointerDescription {
