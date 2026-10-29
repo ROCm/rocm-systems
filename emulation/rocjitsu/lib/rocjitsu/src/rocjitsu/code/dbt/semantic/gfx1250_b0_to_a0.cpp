@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -32,6 +33,10 @@
 namespace rocjitsu {
 
 namespace {
+
+// gfx1250 is Wave32-only.
+constexpr uint8_t kGfx1250WaveSize =
+    static_cast<uint8_t>(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).wave_size_max);
 
 [[nodiscard]] bool always_residual(const Instruction &) { return true; }
 [[nodiscard]] bool scale16_residual(const Instruction &inst);
@@ -281,9 +286,7 @@ constexpr uint16_t kGfx1250ScratchBaseSgprEnd = 104;
 /// high-bank operand conservatively forbids its low-bank alias. Supporting
 /// high-bank scratch requires physicalizing this set first.
 [[nodiscard]] RegisterSet gfx1250_instruction_registers(const Instruction &inst) {
-  // Wave64 keeps the decoded widths, so the VOPD3 cndmask selector stays a
-  // pair. Narrowing to gfx1250's Wave32 is deferred.
-  const InstDefUse def_use(inst, /*wave_size=*/64);
+  const InstDefUse def_use(inst, kGfx1250WaveSize);
   return (def_use.uses | def_use.defs).ordinary_only();
 }
 

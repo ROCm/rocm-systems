@@ -3365,9 +3365,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // entry at +256, which hardware enters with unknown EXEC) and pass it to
       // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
       // EXEC is provably full, freeing more scratch registers. Reference issue #9733.
-      liveness =
-          LivenessAnalysis(KernelBlockScope(scope.blocks), scope.translation->guest_wavefront_size,
-                           /*exec=*/nullptr, liveness_options, scope_analysis_edges);
+      //
+      // gfx1250 keeps the decoded widths, so its VOPD3 cndmask selector stays a
+      // pair. Narrowing gfx1250 liveness to Wave32 changes B0-to-A0 output and is
+      // deferred.
+      const uint8_t liveness_wave_size =
+          guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 ? 64 : scope.translation->guest_wavefront_size;
+      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_wave_size,
+                                  /*exec=*/nullptr, liveness_options, scope_analysis_edges);
     }
 
     std::unique_ptr<Gfx1250VgprMsbAnalysis> wmma_completion_wait_vgpr_msb;
