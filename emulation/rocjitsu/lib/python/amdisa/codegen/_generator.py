@@ -1497,6 +1497,11 @@ class CodeGenerator:
 
     @staticmethod
     def _semantic_stages_src0(sem: InstructionSemantics | None) -> bool:
+        """Whether MOVREL builds and stages rel_src from the semantic source.
+
+        These operations must skip ordinary source staging because their
+        semantic source can differ from the encoded source used there.
+        """
         return (
             sem is not None
             and sem.semantic_class == 'vector_movrel'
