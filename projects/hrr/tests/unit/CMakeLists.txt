@@ -114,6 +114,7 @@ if(TARGET hrr-playback AND NOT WIN32)
     hrr_access_policy_window_test.cc
     hrr_capture_state_test.cc
     hrr_unmapped_note_test.cc
+    hrr_kernel_args_signature_test.cc
     hrr_memcpy3d_array_test.cc
   )
 

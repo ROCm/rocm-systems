@@ -713,6 +713,12 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
     return func;
 }
 
+// Zeroed bytes after each decoded argument; see decode_kernel_args.
+static constexpr size_t kArgOverreadPad = 8;
+static size_t recorded_arg_size(const std::vector<uint8_t>& storage) {
+    return storage.size() - kArgOverreadPad;
+}
+
 // Decode the recorded argument list at `p` into `arg_storage` (owning) and
 // `arg_ptrs` (what a launch or node-parameter build wants), translating every
 // recorded device address on the way. `p` is advanced past the arguments.
@@ -724,6 +730,19 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
 //
 // `rls` is the caller's per-launch guard bookkeeping, or null on the graph
 // kernel-node path where a relocation could never be undone.
+//
+// A payload that ends before the `num_args` arguments the record declares do
+// leaves what was decoded in the outputs: an argument the payload cuts short is
+// dropped whole, so what remains is fewer arguments, never narrower ones, and
+// kernel_args_fit_signature refuses it when that is fewer than the kernel
+// declares.
+//
+// Every `arg_storage` entry carries kArgOverreadPad zeroed bytes past the
+// recorded size, and `arg_ptrs` points at the entry: CLR copies 8 bytes out of
+// kernelParams[i] for any pointer parameter whatever size the code object gives
+// it (rocclr/platform/kernel.cpp, captureHIPArgs), so a record that is narrower
+// than 8 bytes, or empty, must not be the end of the allocation. The recorded
+// size is `size() - kArgOverreadPad`; use recorded_arg_size().
 static void decode_kernel_args(
     PlaybackContext& ctx, const uint8_t*& p, const uint8_t* end,
     uint16_t num_args, const std::string& kernel_name,
@@ -782,11 +801,11 @@ static void decode_kernel_args(
     };
 
     for (uint16_t i = 0; i < num_args; i++) {
-        if (p + 3 > end) break;
+        if (end - p < 3) return;
         uint8_t  value_kind = *p++;
         uint16_t arg_size;
         memcpy(&arg_size, p, 2); p += 2;
-        if (p + arg_size > end) break;
+        if (end - p < arg_size) return;
 
         const uint8_t* data = p;
         p += arg_size;
@@ -822,10 +841,10 @@ static void decode_kernel_args(
         // value_kind 3 carries a trailing list of embedded-pointer byte offsets.
         std::vector<uint16_t> ptr_offsets;
         if (value_kind == 3) {
-            if (p + 2 > end) break;
+            if (end - p < 2) return;
             uint16_t n_ptrs; memcpy(&n_ptrs, p, 2); p += 2;
             for (uint16_t k = 0; k < n_ptrs; k++) {
-                if (p + 2 > end) { n_ptrs = k; break; }
+                if (end - p < 2) return;
                 uint16_t off; memcpy(&off, p, 2); p += 2;
                 ptr_offsets.push_back(off);
             }
@@ -975,6 +994,7 @@ static void decode_kernel_args(
                 fprintf(stderr, "\n");
             }
         }
+        storage.resize(storage.size() + kArgOverreadPad, 0);
         arg_ptrs.push_back(storage.data());
 
         const size_t store_idx = arg_storage.size() - 1;
@@ -1030,6 +1050,87 @@ static void decode_kernel_args(
             prev_half.valid = false;
         }
     }
+}
+
+// Test seam: decode_kernel_args without the launch's guard bookkeeping.
+void hrr_decode_kernel_args(PlaybackContext& ctx, const uint8_t* p,
+                            const uint8_t* end, uint16_t num_args,
+                            std::vector<void*>& arg_ptrs,
+                            std::vector<std::vector<uint8_t>>& arg_storage) {
+    decode_kernel_args(ctx, p, end, num_args, "", arg_ptrs, arg_storage);
+}
+
+// Whether the arguments a launch record carries cover the kernel's signature: at
+// least as many arguments, each at least as many bytes as its parameter. HIP
+// walks the signature of the loaded code object and copies each parameter's size
+// out of kernelParams[i] (rocclr/platform/kernel.cpp, captureHIPArgs), so only a
+// short list or a narrower argument is read past; extra arguments and wider ones
+// are never touched. CLR reads 8 bytes for a pointer parameter whatever its
+// declared size, which the comparison cannot see: kArgOverreadPad covers it.
+// On a mismatch `why` says which.
+static bool kernel_args_match(const std::vector<size_t>& recorded,
+                              const std::vector<size_t>& declared,
+                              std::string& why) {
+    char buf[160];
+    if (recorded.size() < declared.size()) {
+        snprintf(buf, sizeof(buf),
+                 "the record carries %zu arguments, the kernel declares %zu",
+                 recorded.size(), declared.size());
+        why = buf;
+        return false;
+    }
+    for (size_t i = 0; i < declared.size(); i++) {
+        if (recorded[i] >= declared[i]) continue;
+        snprintf(buf, sizeof(buf),
+                 "argument %zu is %zu bytes, the kernel declares %zu", i,
+                 recorded[i], declared[i]);
+        why = buf;
+        return false;
+    }
+    return true;
+}
+
+// Refuse a launch whose decoded arguments do not cover the signature of the
+// kernel it resolved to. A short list or an argument narrower than its
+// parameter is an over-read of replay's own vectors. The archive is input like
+// any other: the record and the code object it names are not guaranteed to
+// agree. Returns true when the launch may go ahead; otherwise says why on
+// stderr.
+static bool kernel_args_fit_signature(
+    PlaybackContext& ctx, const char* api, const std::string& kernel_name,
+    hipFunction_t func,
+    const std::vector<std::vector<uint8_t>>& arg_storage) {
+    std::vector<size_t> declared;
+    if (ctx.kernel_param_sizes) {
+        ctx.kernel_param_sizes(func, declared);
+    } else {
+        // hipKernelGetParamInfo has no count: on a resolved function it
+        // answers hipSuccess for each parameter and hipErrorInvalidValue for the
+        // first index past the end. That last call is not a failure, so it must
+        // not stay HIP's last error: replay would report it against this
+        // launch (--sync-after-event aborts on it, the warm-up pass logs it).
+        // An error already pending from an earlier call is overwritten by that
+        // call anyway, so clearing loses nothing that was still there.
+        for (size_t i = 0;; i++) {
+            size_t off = 0, size = 0;
+            if (hipKernelGetParamInfo(reinterpret_cast<hipKernel_t>(func), i,
+                                      &off, &size) != hipSuccess)
+                break;
+            declared.push_back(size);
+        }
+        (void)hipGetLastError();
+    }
+    std::vector<size_t> recorded;
+    recorded.reserve(arg_storage.size());
+    for (const auto& a : arg_storage) recorded.push_back(recorded_arg_size(a));
+    std::string why;
+    if (kernel_args_match(recorded, declared, why)) return true;
+    fprintf(stderr,
+            "[HRR] %s seq=%llu kernel '%s': %s — launch refused; its arguments "
+            "would not cover the kernel's signature\n",
+            api, (unsigned long long)hrr_dispatch_seq,
+            compact_kernel_name(kernel_name).c_str(), why.c_str());
+    return false;
 }
 
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
@@ -1105,9 +1206,14 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0) || ctx.audit_host_args;
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_ptrs;  // (arg_idx, recorded, live)
     std::string dbg_args;
-    decode_kernel_args(ctx, p, end, num_args, kernel_name, arg_ptrs,
-                       arg_storage, &rls, dbg_dump_ptrs ? &dbg_ptrs : nullptr,
-                       dbg_dump_ptrs ? &dbg_args : nullptr);
+    decode_kernel_args(
+        ctx, p, end, num_args, kernel_name, arg_ptrs, arg_storage, &rls,
+        dbg_dump_ptrs ? &dbg_ptrs : nullptr, dbg_dump_ptrs ? &dbg_args : nullptr);
+    if (!kernel_args_fit_signature(ctx, "kernel launch", kernel_name, func,
+                                   arg_storage)) {
+        for (const auto& g : rls.guards) hrr_block_guard_teardown(g);
+        return hipErrorInvalidValue;
+    }
 
     const uint8_t* snapshots = p;
     if (!hrr_host_snapshots_fit(p, end, num_snapshots)) {
@@ -1370,7 +1476,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             uint32_t cursor = 0;
             std::vector<uint32_t> koffsets(arg_storage.size());
             for (size_t i = 0; i < arg_storage.size(); ++i) {
-                uint32_t sz = static_cast<uint32_t>(arg_storage[i].size());
+                uint32_t sz = static_cast<uint32_t>(recorded_arg_size(arg_storage[i]));
                 uint32_t align = (sz >= 8) ? 8u : sz ? sz : 1u;
                 cursor = (cursor + align - 1) & ~(align - 1);
                 koffsets[i] = cursor;
@@ -1378,11 +1484,17 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             }
             // Round up to 64-byte alignment; add 256 bytes for hidden arg space.
             uint32_t kbuf_sz = ((cursor + 63) & ~63u) + 256;
-            std::vector<uint8_t> kbuf(kbuf_sz, 0);
+            // The 256 bytes are inside the size handed to CLR, which only checks
+            // offset + size against it and then reads 8 bytes for a pointer
+            // parameter whatever size the code object gives it (rocclr
+            // captureHIPArgs): a 4-byte pointer at kbuf_sz - 4 would read past
+            // the end. Allocate kArgOverreadPad more than the size we pass.
+            std::vector<uint8_t> kbuf(kbuf_sz + kArgOverreadPad, 0);
             for (size_t i = 0; i < arg_storage.size(); ++i) {
                 const auto& s = arg_storage[i];
-                if (koffsets[i] + s.size() <= kbuf_sz)
-                    memcpy(kbuf.data() + koffsets[i], s.data(), s.size());
+                const size_t n = recorded_arg_size(s);
+                if (koffsets[i] + n <= kbuf_sz)
+                    memcpy(kbuf.data() + koffsets[i], s.data(), n);
             }
             size_t extra_sz = kbuf_sz;
             void* extra[5] = {
@@ -5503,6 +5615,18 @@ static hipError_t node_add_failed(PlaybackContext& ctx, const char* api,
     return r;
 }
 
+// What a kernel set-params handler returns when it could not rebuild the
+// parameters: hipErrorInvalidValue, with the node left on its old arguments.
+// Capture records the call even when HIP refused it, and a null pNodeParams is
+// refused with exactly that error, so a recorded hipErrorInvalidValue is the
+// call failing the same way here.
+static hipError_t set_params_refused(PlaybackContext& ctx, const char* api,
+                                     int32_t recorded_ret) {
+    return hrr_replayed_recorded_error(ctx, api, recorded_ret,
+                                       hipErrorInvalidValue)
+               ? hipSuccess : hipErrorInvalidValue;
+}
+
 // Rebuild hipKernelNodeParams from the recorded struct plus the kernel tail.
 // `storage` and `arg_ptrs` own what the returned params point at and must
 // outlive the call that consumes them.
@@ -5547,6 +5671,8 @@ static bool rebuild_kernel_node_params(
 
     arg_storage.reserve(num_args);
     decode_kernel_args(ctx, p, end, num_args, kernel_name, arg_ptrs, arg_storage);
+    if (!kernel_args_fit_signature(ctx, api, kernel_name, func, arg_storage))
+        return false;
 
     // CLR's GraphKernelNode::getFunc first asks the statically-registered
     // code-object table what host address this is, and falls back to reading
@@ -5611,7 +5737,7 @@ hipError_t playback_hipGraphKernelNodeSetParams(PlaybackContext& ctx,
                                     sizeof(*a), a->pNodeParams_bytes,
                                     a->pNodeParams_present, knp, arg_ptrs,
                                     arg_storage))
-        return hipSuccess;
+        return set_params_refused(ctx, "hipGraphKernelNodeSetParams", a->ret);
     hipError_t r = hipGraphKernelNodeSetParams(node, &knp);
     return hrr_replayed_recorded_error(ctx, "hipGraphKernelNodeSetParams",
                                        a->ret, r) ? hipSuccess : r;
@@ -5632,7 +5758,8 @@ hipError_t playback_hipGraphExecKernelNodeSetParams(PlaybackContext& ctx,
                                     sizeof(*a), a->pNodeParams_bytes,
                                     a->pNodeParams_present, knp, arg_ptrs,
                                     arg_storage))
-        return hipSuccess;
+        return set_params_refused(ctx, "hipGraphExecKernelNodeSetParams",
+                                  a->ret);
     hipError_t r = hipGraphExecKernelNodeSetParams(exec, node, &knp);
     return hrr_replayed_recorded_error(ctx, "hipGraphExecKernelNodeSetParams",
                                        a->ret, r) ? hipSuccess : r;
