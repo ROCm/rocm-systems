@@ -12,6 +12,8 @@ import pandas as pd
 import pytest
 
 from utils import schema
+from utils.metrics.expression import build_eval_string
+from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
     XMAX_DEFAULT,
@@ -23,6 +25,7 @@ from utils.roofline_calc import (
     roofline_mem_levels,
     sanitize_ai_value,
 )
+from vendored import yaml
 
 
 def assert_graph_points_positive_finite(
@@ -267,6 +270,54 @@ def test_roofline_mem_levels_skips_mall() -> None:
     """MALL is left out because the roofline benchmark does not measure it."""
     expected = [m for m in mi_gpu_specs.get_memory_levels("rdna35_halo") if m != "MALL"]
     assert roofline_mem_levels("rdna35_halo") == expected
+
+
+def test_gfx1201_roofline_includes_device_memory() -> None:
+    """The historical HBM column holds the measured GDDR6 bandwidth."""
+    assert roofline_mem_levels("rdna4_navi48") == ["LDS", "L0", "L1", "L2", "HBM"]
+
+
+def test_gfx1201_roofline_arithmetic_intensity_uses_matching_traffic() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[3]
+        / "src/rocprof_compute_soc/analysis_configs/gfx1201/0400_roofline.yaml"
+    )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    metrics = config["Panel Config"]["data source"][1]["metric_table"]["metric"]
+    counters = {
+        "SQ_INSTS_VALU_sum": [100],
+        "SQ_WMMA_VALU_INSTS_sum": [2],
+        "GL1C_GL2_REQ_READ_32B_sum": [1],
+        "GL1C_GL2_REQ_READ_64B_sum": [2],
+        "GL1C_GL2_REQ_READ_128B_sum": [3],
+        "GL1C_GL2_REQ_WRITE_32B_sum": [4],
+        "GL1C_GL2_REQ_WRITE_64B_sum": [5],
+        "TCP_GL1_REQ_READ_sum": [6],
+        "TCP_GL1_REQ_WRITE_sum": [7],
+        "TCP_REQ_sum": [8],
+        "GL2C_EA_RDREQ_DRAM_sum": [9],
+        "GL2C_EA_WRREQ_DRAM_sum": [10],
+        "SQC_LDS_IDX_ACTIVE_sum": [20],
+        "SQC_LDS_BANK_CONFLICT_sum": [4],
+    }
+    evaluator = MetricEvaluator(
+        pd.DataFrame(counters),
+        {"ammolite__wave_size": 32, "ammolite__lds_banks_per_cu": 32},
+        {},
+    )
+    numerator = 32 * (100 - 2) + 8192 * 2
+    expected_bytes = {
+        "AI L2": 992,
+        "AI L1": 832,
+        "AI L0": 512,
+        "AI LDS": 2048,
+        "AI HBM": 4864,
+    }
+    for metric, byte_count in expected_bytes.items():
+        expression = build_eval_string(metrics[metric]["value"])
+        assert evaluator.eval_expression(expression) == pytest.approx(
+            numerator / byte_count
+        )
 
 
 ##############################################################################

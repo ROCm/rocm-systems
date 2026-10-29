@@ -166,6 +166,23 @@ def set_cache_sizes(
             ]
             if sa_level_cache:
                 cache_sizes["L1"] = int(sa_level_cache[0]["cache_size"]) * 1024
+            else:
+                # Some devices report shader-array caches in separate groups
+                # when the number of CUs sharing each cache differs.
+                groups: dict[int, list[int]] = {}
+                for cache in l1_data_caches:
+                    size = int(cache["cache_size"])
+                    groups.setdefault(size, []).append(int(cache["num_cache_instance"]))
+                matches = [
+                    size
+                    for size, instances in groups.items()
+                    if len(instances) > 1
+                    and sum(instances) == int(num_se) * int(num_sa_se)
+                ]
+                if len(matches) == 1:
+                    cache_sizes["L1"] = matches[0] * 1024
+                elif len(matches) > 1:
+                    console_warning("Ambiguous GL1 cache size reported by AMD-SMI.")
 
     for cache_values in cache_info["cache"]:
         if cache_values["cache_level"] == 2:

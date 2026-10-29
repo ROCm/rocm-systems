@@ -4,7 +4,7 @@
 # gfx1201 (Navi48 XTW, e.g. AMD Radeon AI PRO R9700):
 #   - 64 CUs, wave32, 128 FP32 FLOPs/CU/cycle
 #   - New WMMA unit: 16×16×16 F16→F32 in ~16 cycles = 512 FLOPs/CU/cycle
-#   - 256-byte L2 cache-lines (vs 96/128B on gfx11); use GL2C_EA_RDREQ_sum residual
+#   - 256-byte GL2-to-device-memory transactions
 #   - WMMA events (229, 233, 256) require patched aqlprofile with SqcCounterBlockMaxEvent=511
 # Cache hierarchy: TCP Cache (GL0) -> GL1 Cache -> GL2 Cache -> System Memory (GDDR6)
 # =============================================================================
@@ -41,7 +41,7 @@ Panel Config:
         VALU FLOPs (F64):
           value: SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $max_sclk * $cu_per_gpu * $simd_per_cu * $wave_size * 2 / 32 / 1000
+          peak: $FP64Flops_empirical_peak
         GL2 Cache BW:
           # Note: GL1C-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.
           value: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_WRITE_32B_sum * 32 + GL1C_GL2_REQ_WRITE_64B_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
@@ -73,11 +73,16 @@ Panel Config:
         # Total FLOP numerator (used for AI + Performance): vector VALU FLOPs (excluding the
         # WMMA instructions already in SQ_INSTS_VALU) plus WMMA FLOPs at 8192/instruction.
         AI L2:
-          # gfx1201: GL2→fabric uses 256B lines; residual = total - explicit smaller buckets.
-          value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_128B_sum * 128 + (GL2C_EA_RDREQ_sum - GL2C_EA_RDREQ_32B_sum - GL2C_EA_RDREQ_64B_sum - GL2C_EA_RDREQ_128B_sum) * 256)
+          value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_WRITE_32B_sum * 32 + GL1C_GL2_REQ_WRITE_64B_sum * 64)
           unit: FLOPs/Byte
         AI L1:
+          value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (64 * SUM(TCP_GL1_REQ_READ_sum + TCP_GL1_REQ_WRITE_sum))
+          unit: FLOPs/Byte
+        AI L0:
           value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (64 * SUM(TCP_REQ_sum))
+          unit: FLOPs/Byte
+        AI LDS:
+          value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu)
           unit: FLOPs/Byte
         AI HBM:
           # gfx1201 (Navi48) has no on-package HBM; "HBM" here is the GDDR6 device
@@ -121,9 +126,11 @@ Panel Config:
       density relative to L2 cache traffic. Higher values indicate better data
       reuse upstream of L2, while lower values suggest heavy traffic into L2.
     AI L1: >-
-      Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate
-      more compute operations per byte of data loaded, suggesting compute-bound
-      behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
+      Arithmetic intensity relative to the GL1 cache.
+    AI L0: >-
+      Arithmetic intensity relative to the GL0 (TCP) cache.
+    AI LDS: >-
+      Arithmetic intensity relative to Local Data Share traffic.
     AI HBM: >-
       Arithmetic Intensity relative to GDDR6 device memory ("HBM"). Bytes are the
       DRAM-destined GL2C->EA traffic (GL2C_EA_{RD,WR}REQ_DRAM x 256B lines). This is
