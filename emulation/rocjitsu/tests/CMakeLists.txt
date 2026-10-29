@@ -1325,6 +1325,29 @@ set(RJ_HIP_TEST_2GPU_CONFIG
     CACHE FILEPATH
     "rocjitsu config used by basic two-GPU HIP tests"
 )
+# Older builds cached the MI350X configs under gfx950_mi355x names.
+if(
+    RJ_HIP_TEST_CONFIG
+        STREQUAL
+        "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json"
+)
+    set_property(
+        CACHE RJ_HIP_TEST_CONFIG
+        PROPERTY VALUE "${RJ_CDNA4_KMD_CONFIG}"
+    )
+    set(RJ_HIP_TEST_CONFIG "${RJ_CDNA4_KMD_CONFIG}")
+endif()
+if(
+    RJ_HIP_TEST_2GPU_CONFIG
+        STREQUAL
+        "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd_2gpu.json"
+)
+    set_property(
+        CACHE RJ_HIP_TEST_2GPU_CONFIG
+        PROPERTY VALUE "${RJ_CDNA4_KMD_2GPU_CONFIG}"
+    )
+    set(RJ_HIP_TEST_2GPU_CONFIG "${RJ_CDNA4_KMD_2GPU_CONFIG}")
+endif()
 get_filename_component(RJ_CDNA4_KMD_CONFIG_NAME "${RJ_CDNA4_KMD_CONFIG}" NAME)
 get_filename_component(RJ_CDNA3_KMD_CONFIG_NAME "${RJ_CDNA3_KMD_CONFIG}" NAME)
 get_filename_component(RJ_CDNA2_KMD_CONFIG_NAME "${RJ_CDNA2_KMD_CONFIG}" NAME)
