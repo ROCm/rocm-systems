@@ -110,10 +110,10 @@ public:
   util::FailureOr<std::span<const SystemGpuInstance>>
   local_gpus(util::DiagnosticEmitter emit_error, std::string_view node_id = {}) const;
 
-  /// Returns failure with one diagnostic when node selection fails.
   /// Copy eligible local peer paths. Descriptive legacy links never qualify.
   /// Missing, ambiguous, GPU-transit, remote-tainted, or overlong paths grant
   /// no route.
+  /// Returns failure with one diagnostic when node selection fails.
   util::FailureOr<SystemPeerRouteProjection> local_peer_routes(util::DiagnosticEmitter emit_error,
                                                                std::string_view node_id = {}) const;
 };

@@ -781,7 +781,7 @@ build_children(simdojo::CompositeComponent *parent,
       auto &fmap = factories(build_mode);
       auto it = fmap.find(tp);
       if (it == fmap.end())
-        return emit_error.emit() << "Unknown type: " + tp;
+        return emit_error.emit() << "Unknown type: " << tp;
       auto maybe_comp = it->second(n, cfg, mode, arch, target, mem, resources, emit_error);
       if (maybe_comp.failed())
         return util::Result::failure();
@@ -949,7 +949,7 @@ build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_c
   auto &f = factories(build_mode);
   auto it = f.find(rt);
   if (it == f.end())
-    return emit_error.emit() << "Unknown component type for root: " + rt;
+    return emit_error.emit() << "Unknown component type for root: " << rt;
   auto maybe_root_comp =
       it->second(rn, root_cfg, mode, arch, target, nullptr, resources, emit_error);
   if (maybe_root_comp.failed())

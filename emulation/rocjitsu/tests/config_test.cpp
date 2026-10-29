@@ -99,12 +99,14 @@ testing::AssertionResult require_config_value(T &output, util::FailureOr<T> resu
   return testing::AssertionSuccess();
 }
 
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
 testing::AssertionResult read_config_file_valid(std::string &output, const std::string &path) {
   util::StringDiagnostic diagnostic;
   return require_config_value(output, config::read_config_file(path, diagnostic.emitter()),
                               diagnostic);
 }
 
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
 testing::AssertionResult load_system_graph_valid(config::SystemGraph &output,
                                                  const std::string &path,
                                                  const std::string &schema) {
@@ -113,6 +115,7 @@ testing::AssertionResult load_system_graph_valid(config::SystemGraph &output,
                               diagnostic);
 }
 
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
 testing::AssertionResult load_system_graph_from_string_valid(config::SystemGraph &output,
                                                              const std::string &json,
                                                              const std::string &schema) {
@@ -122,24 +125,7 @@ testing::AssertionResult load_system_graph_from_string_valid(config::SystemGraph
       diagnostic);
 }
 
-testing::AssertionResult load_config_valid(config::LoadedConfig &output, const std::string &path,
-                                           const std::string &schema,
-                                           std::optional<uint32_t> host_threads = std::nullopt) {
-  util::StringDiagnostic diagnostic;
-  auto result = host_threads
-                    ? config::load_config(path, schema, diagnostic.emitter(), *host_threads)
-                    : config::load_config(path, schema, diagnostic.emitter());
-  return require_config_value(output, std::move(result), diagnostic);
-}
-
-testing::AssertionResult load_config_from_string_valid(config::LoadedConfig &output,
-                                                       const std::string &json,
-                                                       const std::string &schema) {
-  util::StringDiagnostic diagnostic;
-  return require_config_value(
-      output, config::load_config_from_string(json, schema, diagnostic.emitter()), diagnostic);
-}
-
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
 testing::AssertionResult load_config_for_node_valid(config::LoadedConfig &output,
                                                     const std::string &path,
                                                     const std::string &schema,
@@ -152,6 +138,7 @@ testing::AssertionResult load_config_for_node_valid(config::LoadedConfig &output
       diagnostic);
 }
 
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
 testing::AssertionResult
 load_config_from_string_for_node_valid(config::LoadedConfig &output, const std::string &json,
                                        const std::string &schema, std::string_view node_id,
@@ -165,6 +152,7 @@ load_config_from_string_for_node_valid(config::LoadedConfig &output, const std::
   return require_config_value(output, std::move(result), diagnostic);
 }
 
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
 testing::AssertionResult load_execution_thread_settings_from_string_for_node_valid(
     config::ExecutionThreadSettings &output, const std::string &json, const std::string &schema,
     std::string_view node_id) {
@@ -175,6 +163,7 @@ testing::AssertionResult load_execution_thread_settings_from_string_for_node_val
                               diagnostic);
 }
 
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
 testing::AssertionResult validate_config_valid(const std::string &path, const std::string &schema) {
   util::StringDiagnostic diagnostic;
   if (config::validate_config(path, schema, diagnostic.emitter()).failed())
@@ -640,7 +629,8 @@ TEST(SystemGraphTest, InfinityFabricProjectsOnlyLocalGpuRoutes) {
                                                         rocjitsu::kEmbeddedSchema, emit_error);
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
-    EXPECT_FALSE(messages.front().empty());
+    EXPECT_THAT(messages.front(),
+                testing::HasSubstr("Infinity Fabric link has a network endpoint"));
   }
 }
 
@@ -910,7 +900,8 @@ TEST(SystemGraphTest, RejectsAmbiguousLegacyReplicationAndUnselectedConstruction
         config::load_system_graph_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
-    EXPECT_FALSE(messages.front().empty());
+    EXPECT_THAT(messages.front(),
+                testing::HasSubstr("system cannot be combined with vm.gpu.num_gpus replication"));
   }
 
   json = system_graph_test_config(kSystemGraphManifest);
@@ -921,7 +912,7 @@ TEST(SystemGraphTest, RejectsAmbiguousLegacyReplicationAndUnselectedConstruction
     auto result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
-    EXPECT_FALSE(messages.front().empty());
+    EXPECT_THAT(messages.front(), testing::HasSubstr("multi-node system requires a local node ID"));
   }
   {
     std::vector<std::string> messages;
@@ -931,7 +922,7 @@ TEST(SystemGraphTest, RejectsAmbiguousLegacyReplicationAndUnselectedConstruction
         json, rocjitsu::kEmbeddedSchema, emit_error);
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
-    EXPECT_FALSE(messages.front().empty());
+    EXPECT_THAT(messages.front(), testing::HasSubstr("multi-node system requires a local node ID"));
   }
 
   json = system_graph_test_config(kSystemGraphManifest);
@@ -945,7 +936,8 @@ TEST(SystemGraphTest, RejectsAmbiguousLegacyReplicationAndUnselectedConstruction
         config::load_system_graph_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
-    EXPECT_FALSE(messages.front().empty());
+    EXPECT_THAT(messages.front(),
+                testing::HasSubstr("system cannot be combined with dbt_guest mode"));
   }
   const auto file = write_temp_config(json);
   util::StringDiagnostic diagnostic;
@@ -964,7 +956,7 @@ TEST(SystemGraphTest, RejectsManifestWithNonGpuTopologyRoot) {
                                                            emit_error);
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
-    EXPECT_FALSE(messages.front().empty());
+    EXPECT_THAT(messages.front(), testing::HasSubstr("system topology root must be an SoC"));
   }
 }
 
@@ -985,7 +977,7 @@ TEST(SystemGraphTest, KeepsLegacyUnknownFieldsButRejectsManifestTypos) {
                                                         rocjitsu::kEmbeddedSchema, emit_error);
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
-    EXPECT_FALSE(messages.front().empty());
+    EXPECT_THAT(messages.front(), testing::HasSubstr("unknown field: typo"));
   }
 }
 
@@ -1064,7 +1056,7 @@ TEST(SystemGraphTest, ProjectsGfx1250TwoNodeNetFixture) {
     auto result = config::load_config(path, rocjitsu::kEmbeddedSchema, emit_error);
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
-    EXPECT_FALSE(messages.front().empty());
+    EXPECT_THAT(messages.front(), testing::HasSubstr("multi-node system requires a local node ID"));
   }
 }
 
@@ -1126,7 +1118,7 @@ TEST(SystemGraphTest, RequiresArgumentAndConfigSelectorsToAgree) {
   const auto selected = config::json_with_local_node(system_graph_thread_test_config(), "tray0");
   ASSERT_TRUE(selected.succeeded());
   config::LoadedConfig loaded;
-  ASSERT_TRUE(load_config_from_string_valid(loaded, selected.value(), rocjitsu::kEmbeddedSchema));
+  ASSERT_TRUE(test::load_valid_config_from_string(selected.value(), loaded));
   EXPECT_EQ(loaded.local_node_id, "tray0");
   {
     std::vector<std::string> messages;
@@ -1136,7 +1128,8 @@ TEST(SystemGraphTest, RequiresArgumentAndConfigSelectorsToAgree) {
         selected.value(), rocjitsu::kEmbeddedSchema, "tray7", emit_error);
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
-    EXPECT_FALSE(messages.front().empty());
+    EXPECT_THAT(messages.front(),
+                testing::HasSubstr("local node argument disagrees with config.local_node"));
   }
 
   std::string typo = selected.value();
@@ -1149,7 +1142,7 @@ TEST(SystemGraphTest, RequiresArgumentAndConfigSelectorsToAgree) {
     auto result = config::load_config_from_string(typo, rocjitsu::kEmbeddedSchema, emit_error);
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
-    EXPECT_FALSE(messages.front().empty());
+    EXPECT_THAT(messages.front(), testing::HasSubstr("unknown field: typo"));
   }
 }
 
@@ -3205,7 +3198,7 @@ TEST(EffectiveConfigTest, WritesOneNodeAndBudgetCopyWithoutChangingSource) {
   ASSERT_TRUE(read_config_file_valid(after, source.path()));
   EXPECT_EQ(after, before);
   config::LoadedConfig projected;
-  ASSERT_TRUE(load_config_valid(projected, copy.value(), rocjitsu::kEmbeddedSchema, 8));
+  ASSERT_TRUE(test::load_valid_config(copy.value(), projected, 8));
   EXPECT_EQ(projected.local_node_id, "tray7");
   EXPECT_EQ(projected.num_gpus, 2u);
   EXPECT_EQ(projected.cpu_thread_budget, 4u);
@@ -3219,11 +3212,10 @@ TEST(EffectiveConfigTest, EscapesLocalNodeIdAndRejectsUnknownNode) {
   ASSERT_TRUE(rewritten.succeeded());
   EXPECT_THAT(rewritten.value(), testing::HasSubstr(R"("local_node": "tray\"7")"));
   config::LoadedConfig original;
-  ASSERT_TRUE(load_config_from_string_valid(original, json, rocjitsu::kEmbeddedSchema));
+  ASSERT_TRUE(test::load_valid_config_from_string(json, original));
   EXPECT_EQ(original.local_node_id, "tray\"7");
   config::LoadedConfig projected;
-  ASSERT_TRUE(
-      load_config_from_string_valid(projected, rewritten.value(), rocjitsu::kEmbeddedSchema));
+  ASSERT_TRUE(test::load_valid_config_from_string(rewritten.value(), projected));
   EXPECT_EQ(projected.local_node_id, "tray\"7");
 
   util::StringDiagnostic diagnostic;
@@ -3355,7 +3347,7 @@ TEST(EffectiveConfigTest, ReadsSelectedNodeLaunchConfigHandoff) {
 
   config::LoadedConfig projected;
 
-  ASSERT_TRUE(load_config_valid(projected, effective_path, rocjitsu::kEmbeddedSchema, 8));
+  ASSERT_TRUE(test::load_valid_config(effective_path, projected, 8));
   EXPECT_EQ(projected.local_node_id, "tray7");
   EXPECT_EQ(projected.cpu_thread_budget, 4u);
   ASSERT_EQ(projected.devices.size(), 2u);

@@ -327,9 +327,9 @@ util::Result validate_config(const std::string &json_path, const std::string &sc
 
 /// @brief Load simulation config from a JSON file.
 /// @details File-reading, parsing, KFD/DBT device conversion, architecture/target
-/// validation, component-range, link-expression, and execution-thread allocation
-/// failures emit a diagnostic and return failure. Other validation and allocation
-/// exceptions propagate.
+/// validation, system-graph validation, node selection, component-range,
+/// link-expression, and execution-thread allocation failures emit a diagnostic and
+/// return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -356,8 +356,9 @@ util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
 
 /// @brief Load simulation config from a JSON string.
 /// @details Parsing, KFD/DBT device conversion, architecture/target validation,
-/// component-range, link-expression, and execution-thread allocation failures emit
-/// a diagnostic and return failure. Other validation and allocation exceptions propagate.
+/// system-graph validation, node selection, component-range, link-expression, and
+/// execution-thread allocation failures emit a diagnostic and return failure.
+/// Other validation and allocation exceptions propagate.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
