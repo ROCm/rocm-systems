@@ -5,7 +5,7 @@ import argparse
 import os
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
@@ -122,6 +122,32 @@ def add_general_group(
             "--pc-sampling-interval)\n"
         ),
     )
+
+
+def build_parser(
+    rocprof_compute_home: Path,
+    supported_archs: Dict[str, str],
+    rocprof_compute_version: Dict[str, Optional[str]],
+    experimental_enabled: bool = False,
+) -> argparse.ArgumentParser:
+    """Return the rocprof-compute command-line parser."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
+        ),
+        prog="rocprof-compute",
+        allow_abbrev=False,
+        formatter_class=lambda prog: CliHelpFormatter(prog, max_help_position=30),
+        usage="rocprof-compute [mode] [options]",
+    )
+    omniarg_parser(
+        parser,
+        rocprof_compute_home,
+        supported_archs,
+        rocprof_compute_version,
+        experimental_enabled,
+    )
+    return parser
 
 
 def omniarg_parser(

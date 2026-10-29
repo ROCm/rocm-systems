@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 from common import SUPPORTED_ARCHS
 
-from argparser import omniarg_parser
+from argparser import build_parser
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
@@ -32,22 +32,13 @@ HELP_DEFAULT_RE = re.compile(r"\(Default( when given without a value)?: ([^)]*)\
 
 
 def build_args(argv, experimental=False):
-    """Construct the argument parser."""
-    parser = argparse.ArgumentParser(
-        prog="tool", usage="rocprof-compute [mode] [options]"
-    )
-    omniarg_parser(parser, HOME, SUPPORTED_ARCHS, VERSION, experimental)
-    return parser.parse_args(argv)
+    """Parse argv with the rocprof-compute parser."""
+    return build_parser(HOME, SUPPORTED_ARCHS, VERSION, experimental).parse_args(argv)
 
 
 def help_text(home, argv, capsys):
     """Return the help output for argv with the given rocprof-compute home."""
-    parser = argparse.ArgumentParser(
-        prog="tool",
-        description="CLI",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    omniarg_parser(parser, home, SUPPORTED_ARCHS, VERSION)
+    parser = build_parser(home, SUPPORTED_ARCHS, VERSION)
     with pytest.raises(SystemExit):
         parser.parse_args([*argv, "--help"])
     return capsys.readouterr().out
@@ -63,8 +54,7 @@ def write_skills_readme(skills_dir):
 
 def all_parsers():
     """Return the top-level parser and the profile and analyze parsers."""
-    parser = argparse.ArgumentParser()
-    omniarg_parser(parser, HOME, SUPPORTED_ARCHS, VERSION, True)
+    parser = build_parser(HOME, SUPPORTED_ARCHS, VERSION, True)
     return [parser, *parser._subparsers._group_actions[0].choices.values()]
 
 
