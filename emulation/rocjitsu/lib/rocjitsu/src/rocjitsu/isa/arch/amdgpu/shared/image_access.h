@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ACCESS_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ACCESS_H_
+#pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
@@ -210,5 +209,3 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
 }
 
 } // namespace rocjitsu::amdgpu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ACCESS_H_

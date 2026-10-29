@@ -7,8 +7,7 @@
 /// register operands, so it must remain free of VM dependencies. Keep only
 /// encoding-level value types here; execution helpers belong in image_access.h.
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ADDRESS_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ADDRESS_H_
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -79,5 +78,3 @@ inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineIn
 }
 
 } // namespace rocjitsu::amdgpu
-
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ADDRESS_H_
