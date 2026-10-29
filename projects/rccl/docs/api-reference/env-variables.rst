@@ -1155,6 +1155,15 @@ threshold table introduced for gfx1250.
         | ``0``: No lower-bound suppression (symk eligible at all sizes).
         | ``N`` (bytes): Below ``N``, prefer DDA over the symmetric kernel.
 
+    * - | ``RCCL_SYM_RS_HIER_WARPS``
+        | Sets the warps per block of the hierarchical ReduceScatter symmetric
+          kernel (``ReduceScatter_HierLsaLD``). Each block splits its warps into
+          senders, which store partial sums on the other GPUs, and finishers,
+          which add the sums that arrive to the local result. Values are clamped
+          to the range 2 to 16.
+      - | ``8``: Eight warps per block (default).
+        | ``N``: ``N`` warps per block.
+
     * - | ``NCCL_SYM_TMA_ENABLE``
         | Controls the Tensor Data Mover (TDM) symmetric kernels
           (``AllGather_TmaST``, ``AllReduce_RSxTmaLD_AGxTmaST`` and

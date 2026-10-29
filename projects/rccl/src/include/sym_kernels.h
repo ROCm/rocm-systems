@@ -44,6 +44,16 @@ constexpr __host__ __device__ int ncclSymkAgHierGroupBlocks(int nBlocks, int nGr
   return n > 1 ? n : 1;
 }
 
+// Max blocks for the hierarchical LSA ReduceScatter kernel, and the bytes of partial sums a block sends
+// each other package per round. Each block lands two rounds of these, one slot per sending package.
+constexpr int ncclSymkRsHierMaxBlocks = 32;
+constexpr size_t ncclSymkRsHierChunkBytes = 64 << 10;
+// Flags a block of it keeps: a ready count from each other package, the block's round count, then a
+// credit count from each other package and one spare.
+constexpr __host__ __device__ int ncclSymkRsHierFlagsPerBlock(int nGroups) {
+  return 2 * nGroups;
+}
+
 // [RCCL] Launch width for the GIN and Tma symmetric kernels. The rest default to ncclSymkMaxThreads.
 // This was tuned for TDM, so if you need to change it, please add a constexpr function that 
 // selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
@@ -81,6 +91,7 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_ReduceScatter_LDMC,
   ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD,
   ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC,
+  ncclSymkKernelId_ReduceScatter_HierLsaLD,
 
   ncclSymkKernelId_Count
 };
@@ -106,7 +117,8 @@ constexpr char const* ncclSymKernelStr[] = {
   "ReduceScatter_LD",
   "ReduceScatter_LDMC",
   "ReduceScatter_RailA2A_LsaLD",
-  "ReduceScatter_RailA2A_LsaLDMC"
+  "ReduceScatter_RailA2A_LsaLDMC",
+  "ReduceScatter_HierLsaLD"
 };
 
 struct ncclSymkDevComm {
@@ -123,6 +135,12 @@ struct ncclSymkDevComm {
   // Per block of the hierarchical AllGather, a row of flags, one per package group, that the pushing
   // block on another rank raises after each chunk.
   ncclDevResourceHandle hierPushFlags;
+  // Per block of the hierarchical ReduceScatter, two rounds of landing slots, one for each other
+  // package, that the same block on that package's counterpart rank stores partial sums into.
+  ncclDevResourceHandle rsHierSlots;
+  // Per block of the hierarchical ReduceScatter, the flags that pace those slots: counterparts raise a
+  // ready count when a round's sums land, and owners raise a credit count once they have read them.
+  ncclDevResourceHandle rsHierFlags;
   // Profiler counters (host-pinned), indexed by channel id and per-channel slot.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;

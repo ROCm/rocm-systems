@@ -36,15 +36,15 @@ GENERATE_PY = RCCL_ROOT / "src" / "device" / "symmetric" / "generate.py"
 # If a change moves these numbers, update them here AND explain in the PR
 # description WHY. Do not blind-update.
 # ---------------------------------------------------------------------------
-EXPECTED_TOTAL = 44
+EXPECTED_TOTAL = 54
 EXPECTED_PER_COLL = {
     "AllGather": 4,
     "AllReduce": 10,
-    "ReduceScatter": 30,
+    "ReduceScatter": 40,
 }
 EXPECTED_DIMS = {
     "coll": {"AllGather", "AllReduce", "ReduceScatter"},
-    "algo": {"LL", "ST", "RailRing_LsaST", "HierLsaST", "AGxLL_R", "RSxLD_AGxST", "LD", "RailA2A_LsaLD"},
+    "algo": {"LL", "ST", "RailRing_LsaST", "HierLsaST", "AGxLL_R", "RSxLD_AGxST", "LD", "RailA2A_LsaLD", "HierLsaLD"},
     "red": {"sum", "avg"},
     "ty": {"f32", "f16", "bf16", "f8e4m3", "f8e5m2"},
 }
@@ -62,11 +62,11 @@ EXPECTED_DIMS = {
 # arch from one that only asks whether any target was given.
 GPU_TARGETS_WITHOUT_TDM = "gfx942;gfx950"
 GPU_TARGETS_WITH_TDM = "gfx942;gfx1250"
-EXPECTED_TDM_TOTAL = 60
+EXPECTED_TDM_TOTAL = 70
 EXPECTED_TDM_PER_COLL = {
     "AllGather": 5,
     "AllReduce": 15,
-    "ReduceScatter": 40,
+    "ReduceScatter": 50,
 }
 EXPECTED_TDM_ALGOS = {"TmaST", "RSxTmaLD_AGxTmaST", "TmaLD"}
 

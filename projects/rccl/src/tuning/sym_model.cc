@@ -21,7 +21,9 @@ NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 static constexpr float disableTime = 1.e30f;
 
 int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId) {
-  int maxBlocks = kernelId == ncclSymkKernelId_AllGather_HierLsaST ? ncclSymkAgHierMaxBlocks : ncclSymkMaxBlocks;
+  int maxBlocks = kernelId == ncclSymkKernelId_AllGather_HierLsaST     ? ncclSymkAgHierMaxBlocks :
+                  kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLD ? ncclSymkRsHierMaxBlocks :
+                                                                         ncclSymkMaxBlocks;
   int64_t nUserCTAs = ncclParamSymCTAs();
   if (nUserCTAs < 1) return 0;
   if (nUserCTAs > maxBlocks) return maxBlocks;
@@ -73,6 +75,18 @@ static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* con
   return kernelId != afterLL && kernelId != ncclSymkKernelId_AllGather_LL;
 }
 
+// The hierarchical ReduceScatter has no measured crossover yet, so it runs only when the user picks it,
+// either with NCCL_SYM_KERNEL or with a per-call selection narrowed to some of the symmetric kernels.
+static bool rcclSymkReduceScatterHierNotRequested(struct ncclTuningInput_t* const inputs,
+                                                  enum ncclSymkKernelId kernelId) {
+  return kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLD && !inputs->comm->tuningContext.forced[inputs->func] &&
+         (inputs->tuningMask & NCCL_TUNING_MASK_SYM_KERNELS) == NCCL_TUNING_MASK_SYM_KERNELS;
+}
+
+// Warps per block of the hierarchical ReduceScatter. It splits them into senders and finishers, so it
+// needs at least two, and its launch bound in symmetric/generate.py allows at most ncclSymkWarpsPerBlock.
+RCCL_PARAM(SymRsHierWarps, "SYM_RS_HIER_WARPS", 8)
+
 static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum ncclSymkKernelId kernelId) {
   struct ncclComm* comm = inputs->comm;
   bool isLL = ncclSymkLLKernelMask() >> kernelId & 1;
@@ -83,6 +97,8 @@ static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum n
   int nThreads = ncclSymkMaxThreads;
   if (fullWidth) {
     nThreads = ncclSymkWarpsPerBlock * comm->WarpSize;
+  } else if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLD) {
+    nThreads = int(std::clamp<int64_t>(rcclParamSymRsHierWarps(), 2, ncclSymkWarpsPerBlock)) * comm->WarpSize;
   } else if (ncclSymkIsGfx950(comm) && isLsa) {
     // The width tuning is fitted to the gfx950 LSA kernels.
     nThreads = ncclSymkGfx950BlockThreads(inputs->func, isLL, comm->nRanks, inputs->nBytes);
@@ -133,7 +149,8 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask) ||
-      rcclSymkAllGatherYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
+      rcclSymkAllGatherYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask) ||
+      rcclSymkReduceScatterHierNotRequested(inputs, (enum ncclSymkKernelId)tuning->symKernelId)) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;
