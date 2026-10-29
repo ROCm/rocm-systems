@@ -96,6 +96,58 @@ static const std::map<amdsmi_memory_partition_type_t, rsmi_memory_partition_type
                           {AMDSMI_MEMORY_PARTITION_NPS4, RSMI_MEMORY_PARTITION_NPS4},
                           {AMDSMI_MEMORY_PARTITION_NPS8, RSMI_MEMORY_PARTITION_NPS8}};
 
+// Switch (not a table) so a missing case warns at compile time when a new block is added.
+#define AMDSMI_BLOCK_CASE(name) \
+  case AMDSMI_GPU_BLOCK_##name: \
+    return #name
+static const char* get_gpu_block_name(amdsmi_gpu_block_t block) {
+  switch (block) {
+    AMDSMI_BLOCK_CASE(INVALID);
+    AMDSMI_BLOCK_CASE(UMC);
+    AMDSMI_BLOCK_CASE(SDMA);
+    AMDSMI_BLOCK_CASE(GFX);
+    AMDSMI_BLOCK_CASE(MMHUB);
+    AMDSMI_BLOCK_CASE(ATHUB);
+    AMDSMI_BLOCK_CASE(PCIE_BIF);
+    AMDSMI_BLOCK_CASE(HDP);
+    AMDSMI_BLOCK_CASE(XGMI_WAFL);
+    AMDSMI_BLOCK_CASE(DF);
+    AMDSMI_BLOCK_CASE(SMN);
+    AMDSMI_BLOCK_CASE(SEM);
+    AMDSMI_BLOCK_CASE(MP0);
+    AMDSMI_BLOCK_CASE(MP1);
+    AMDSMI_BLOCK_CASE(FUSE);
+    AMDSMI_BLOCK_CASE(MCA);
+    AMDSMI_BLOCK_CASE(VCN);
+    AMDSMI_BLOCK_CASE(JPEG);
+    AMDSMI_BLOCK_CASE(IH);
+    AMDSMI_BLOCK_CASE(MPIO);
+    AMDSMI_BLOCK_CASE(MMSCH);
+    AMDSMI_BLOCK_CASE(MP5);
+    AMDSMI_BLOCK_CASE(ATU);
+    AMDSMI_BLOCK_CASE(DACC_BE);
+    AMDSMI_BLOCK_CASE(ECLR);
+    AMDSMI_BLOCK_CASE(KPX_SERDES);
+    AMDSMI_BLOCK_CASE(LSDMA);
+    AMDSMI_BLOCK_CASE(MPART);
+    AMDSMI_BLOCK_CASE(MPIFOE);
+    AMDSMI_BLOCK_CASE(MPRAS);
+    AMDSMI_BLOCK_CASE(NBIF);
+    AMDSMI_BLOCK_CASE(NBIO);
+    AMDSMI_BLOCK_CASE(OXRP);
+    AMDSMI_BLOCK_CASE(PCIE_PL);
+    AMDSMI_BLOCK_CASE(PCS_XGMI);
+    AMDSMI_BLOCK_CASE(PIE);
+    AMDSMI_BLOCK_CASE(CS);
+    AMDSMI_BLOCK_CASE(SHUB);
+    AMDSMI_BLOCK_CASE(SSBDCI);
+    AMDSMI_BLOCK_CASE(UCIE_PCS);  // == AMDSMI_GPU_BLOCK_LAST
+    AMDSMI_BLOCK_CASE(RESERVED);
+  }
+  return "UNKNOWN";
+}
+#undef AMDSMI_BLOCK_CASE
+
 template <typename F, typename... Args>
 amdsmi_status_t rsmi_wrapper(F&& f, amdsmi_processor_handle processor_handle,
                              uint32_t increment_gpu_id, Args&&... args) {
@@ -1403,6 +1455,370 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
   return status;
 }
 
+#ifdef BUILD_CUID
+namespace {
+
+// A CUID library failure in amd-smi's vocabulary. The distinction that has to
+// survive the mapping is "this caller may not know" against "this node cannot
+// answer": they ask different things of an operator.
+amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
+  switch (status) {
+    case AMDCUID_STATUS_SUCCESS:
+      return AMDSMI_STATUS_SUCCESS;
+    case AMDCUID_STATUS_FILE_NOT_FOUND:
+      return AMDSMI_STATUS_FILE_NOT_FOUND;
+    case AMDCUID_STATUS_DEVICE_NOT_FOUND:
+      return AMDSMI_STATUS_NOT_FOUND;
+    case AMDCUID_STATUS_PERMISSION_DENIED:
+      return AMDSMI_STATUS_NO_PERM;
+    case AMDCUID_STATUS_INVALID_ARGUMENT:
+      return AMDSMI_STATUS_INVAL;
+    case AMDCUID_STATUS_UNSUPPORTED:
+    // No serial, or no machine-id to key a temporary CUID with: this component
+    // has no CUID, which is what amdsmi_get_cuid_components() also concludes.
+    case AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND:
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    case AMDCUID_STATUS_INSUFFICIENT_SIZE:
+      return AMDSMI_STATUS_INSUFFICIENT_SIZE;
+    case AMDCUID_STATUS_FILE_ERROR:
+      return AMDSMI_STATUS_FILE_ERROR;
+    case AMDCUID_STATUS_INVALID_FORMAT:
+      return AMDSMI_STATUS_UNEXPECTED_DATA;
+    default:
+      return AMDSMI_STATUS_API_FAILED;
+  }
+}
+// Sysfs mount point for the driver-published CUID attributes.
+//
+// Relocating this root lets any unprivileged user forge AMDSMI_CUID_SOURCE_DRIVER,
+// so the environment override exists only in a build configured with
+// AMDSMI_CUID_TEST_SYSFS_OVERRIDE. A release build reads /sys.
+// AMDSMI_TTM_SYSFS_NAME is not a precedent for relocating this one: it
+// relocates a data read, not a provenance verdict.
+std::string cuid_sysfs_root() {
+#ifdef AMDSMI_CUID_TEST_SYSFS_OVERRIDE
+  // getenv races only against setenv, which this library never calls.
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  const char* override_env = std::getenv("AMDSMI_CUID_SYSFS_ROOT");
+  if (override_env != nullptr && override_env[0] != '\0') {
+    return override_env;
+  }
+#endif
+  return "/sys";
+}
+
+// The handle's render node under /sys/class/drm, below `root`. Empty when the
+// handle has none.
+std::string cuid_render_node(amdsmi_processor_handle processor_handle, const std::string& root) {
+  amdsmi_enumeration_info_t enumeration_info = {};
+  if (amdsmi_get_gpu_enumeration_info(processor_handle, &enumeration_info) !=
+      AMDSMI_STATUS_SUCCESS) {
+    return "";
+  }
+  return root + "/class/drm/renderD" + std::to_string(enumeration_info.drm_render);
+}
+
+// The partition node amdgpu publishes for this handle, <render device>/xcp,
+// which it does only in a mode with two or more partitions. Empty otherwise.
+std::string cuid_partition_node(amdsmi_processor_handle processor_handle) {
+  const std::string render = cuid_render_node(processor_handle, cuid_sysfs_root());
+  if (render.empty()) {
+    return "";
+  }
+  const std::string node = render + "/device/xcp";
+  // cuid_unit_id is world-readable, so its presence is what says the kernel
+  // publishes here.
+  if (access((node + "/cuid_unit_id").c_str(), F_OK) != 0) {
+    return "";
+  }
+  return node;
+}
+
+// Resolve a processor handle to its CUID handle, which is the component's
+// derived CUID. A partition node amdgpu publishes names the partition, and
+// its answer stands. Otherwise the library resolves the render node: to a
+// partition where KFD shows the GPU split, else to the whole GPU. A handle
+// without a render node is named by its BDF.
+amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle,
+                                amdcuid_id_t& handle_out) {
+  const std::string partition_node = cuid_partition_node(processor_handle);
+  if (!partition_node.empty()) {
+    return cuid_status_to_amdsmi(amdcuid_get_handle_by_dev_path(
+        partition_node.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
+  }
+  const std::string render = cuid_render_node(processor_handle, "/sys");
+  if (!render.empty() && access(render.c_str(), F_OK) == 0) {
+    return cuid_status_to_amdsmi(
+        amdcuid_get_handle_by_dev_path(render.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
+  }
+  amdsmi_bdf_t bdf = {};
+  const amdsmi_status_t smi_status = amdsmi_get_gpu_device_bdf(processor_handle, &bdf);
+  if (smi_status != AMDSMI_STATUS_SUCCESS) {
+    return smi_status;
+  }
+  const std::string bdf_str = stringify_bdf(bdf);
+  return cuid_status_to_amdsmi(
+      amdcuid_get_handle_by_bdf(bdf_str.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
+}
+
+// The BDF amd-smi gives each GPU component it has a handle for, keyed by the
+// library's device path for that component. The library gives a partition no BDF, since
+// its parent's names the whole GPU; amd-smi's own, as `amd-smi list` shows it,
+// carries the partition index in the function number.
+std::map<std::string, std::string> cuid_partition_bdfs() {
+  std::map<std::string, std::string> bdfs;
+  uint32_t socket_count = 0;
+  if (amdsmi_get_socket_handles(&socket_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
+    return bdfs;
+  }
+  std::vector<amdsmi_socket_handle> sockets(socket_count);
+  if (amdsmi_get_socket_handles(&socket_count, sockets.data()) != AMDSMI_STATUS_SUCCESS) {
+    return bdfs;
+  }
+  for (auto socket : sockets) {
+    uint32_t processor_count = 0;
+    if (amdsmi_get_processor_handles(socket, &processor_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    std::vector<amdsmi_processor_handle> processors(processor_count);
+    if (amdsmi_get_processor_handles(socket, &processor_count, processors.data()) !=
+        AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    for (auto processor : processors) {
+      processor_type_t type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
+      amdsmi_bdf_t bdf = {};
+      if (amdsmi_get_processor_type(processor, &type) != AMDSMI_STATUS_SUCCESS ||
+          type != AMDSMI_PROCESSOR_TYPE_AMD_GPU ||
+          amdsmi_get_gpu_device_bdf(processor, &bdf) != AMDSMI_STATUS_SUCCESS) {
+        continue;
+      }
+      amdcuid_id_t handle = {};
+      char path[sizeof(amdsmi_cuid_component_t::device_path)] = {};
+      uint32_t length = sizeof(path);
+      if (cuid_handle_for(processor, handle) == AMDSMI_STATUS_SUCCESS &&
+          amdcuid_query_device_property(handle, AMDCUID_QUERY_DEVICE_PATH, path, &length) ==
+              AMDCUID_STATUS_SUCCESS) {
+        path[sizeof(path) - 1] = '\0';
+        bdfs[path] = stringify_bdf(bdf);
+      }
+    }
+  }
+  return bdfs;
+}
+
+// Which stage of the staged lookup produced the value just returned, as
+// recorded by the library. amdcuid_source_t and amdsmi_cuid_source_t share
+// values, so the mapping is a cast.
+amdsmi_cuid_source_t cuid_source_for(const amdcuid_id_t& handle) {
+  amdcuid_source_t source = AMDCUID_SOURCE_UNKNOWN;
+  uint32_t length = sizeof(source);
+  if (amdcuid_query_device_property(handle, AMDCUID_QUERY_SOURCE, &source, &length) !=
+      AMDCUID_STATUS_SUCCESS) {
+    return AMDSMI_CUID_SOURCE_UNKNOWN;
+  }
+  return static_cast<amdsmi_cuid_source_t>(source);
+}
+
+void copy_cuid_string(const amdcuid_id_t& id, char* out, size_t out_size) {
+  const char* str = amdcuid_id_to_string(id);
+  if (!str) {
+    out[0] = '\0';
+    return;
+  }
+  snprintf(out, out_size, "%s", str);
+}
+
+void clear_cuid_info(amdsmi_cuid_info_t* info) {
+  memset(info, 0, sizeof(*info));
+  info->component_type = AMDSMI_CUID_COMPONENT_UNKNOWN;
+  info->source = AMDSMI_CUID_SOURCE_UNKNOWN;
+}
+
+// Everything but the source. On failure info is cleared.
+amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* info) {
+  clear_cuid_info(info);
+
+  // The handle is the derived CUID.
+  copy_cuid_string(handle, info->derived, sizeof(info->derived));
+
+  // The primary is CAP_SYS_ADMIN-gated at the source because its payload embeds
+  // the raw serial number. An unprivileged caller gets an empty string and a
+  // successful call: the derived CUID is what it is supposed to be reading, and
+  // failing the whole snapshot would push it back onto the legacy UUID.
+  amdcuid_id_t primary = {};
+  uint32_t length = sizeof(primary);
+  const amdcuid_status_t primary_status =
+      amdcuid_query_device_property(handle, AMDCUID_QUERY_PRIMARY_CUID, &primary, &length);
+  if (primary_status == AMDCUID_STATUS_SUCCESS) {
+    copy_cuid_string(primary, info->primary, sizeof(info->primary));
+  }
+
+  // The type is answered by the handle's own device class rather than by any
+  // privileged read, so a failure here means the handle died between calls.
+  // UNKNOWN is already set, and that is what such a handle should report.
+  amdcuid_device_type_t device_type = AMDCUID_DEVICE_TYPE_NONE;
+  length = sizeof(device_type);
+  if (amdcuid_query_device_property(handle, AMDCUID_QUERY_DEVICE_TYPE, &device_type, &length) ==
+      AMDCUID_STATUS_SUCCESS) {
+    info->component_type = static_cast<amdsmi_cuid_component_type_t>(device_type);
+  }
+
+  // The auxiliary flag has no "unknown" encoding, so keeping the zero on a
+  // failed query would present an unestablished value as canonical. Fail with
+  // the reason instead: an absent primary can say so with an empty string,
+  // this cannot.
+  bool temporary = false;
+  length = sizeof(temporary);
+  const amdcuid_status_t auxiliary_status =
+      amdcuid_query_device_property(handle, AMDCUID_QUERY_TEMPORARY_CUID, &temporary, &length);
+  if (auxiliary_status != AMDCUID_STATUS_SUCCESS) {
+    clear_cuid_info(info);
+    return cuid_status_to_amdsmi(auxiliary_status);
+  }
+
+  // A canonical CUID was keyed from its primary or published beside it, so a
+  // caller allowed to read the primary and not getting it has hit a fault. A
+  // temporary CUID may have no primary behind it at all.
+  if (primary_status != AMDCUID_STATUS_SUCCESS &&
+      primary_status != AMDCUID_STATUS_PERMISSION_DENIED && !temporary) {
+    clear_cuid_info(info);
+    return cuid_status_to_amdsmi(primary_status);
+  }
+  info->auxiliary = temporary ? 1 : 0;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+void query_cuid_string(const amdcuid_id_t& handle, amdcuid_query_t query, char* out,
+                       size_t out_size) {
+  uint32_t length = static_cast<uint32_t>(out_size);
+  if (amdcuid_query_device_property(handle, query, out, &length) != AMDCUID_STATUS_SUCCESS) {
+    out[0] = '\0';
+  }
+  out[out_size - 1] = '\0';
+}
+
+amdsmi_status_t fill_cuid_component(const amdcuid_id_t& handle,
+                                    const std::map<std::string, std::string>& partition_bdfs,
+                                    amdsmi_cuid_component_t* component) {
+  memset(component, 0, sizeof(*component));
+  const amdsmi_status_t status = fill_cuid_info(handle, &component->info);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  component->info.source = cuid_source_for(handle);
+  query_cuid_string(handle, AMDCUID_QUERY_BDF, component->bdf, sizeof(component->bdf));
+  query_cuid_string(handle, AMDCUID_QUERY_DEVICE_PATH, component->device_path,
+                    sizeof(component->device_path));
+  const auto partition = partition_bdfs.find(component->device_path);
+  if (component->bdf[0] == '\0' && partition != partition_bdfs.end()) {
+    snprintf(component->bdf, sizeof(component->bdf), "%s", partition->second.c_str());
+  }
+  uint16_t vendor_id = 0;
+  uint32_t length = sizeof(vendor_id);
+  if (amdcuid_query_device_property(handle, AMDCUID_QUERY_VENDOR_ID, &vendor_id, &length) ==
+      AMDCUID_STATUS_SUCCESS) {
+    component->vendor_id = vendor_id;
+  }
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+}  // namespace
+#endif  // BUILD_CUID
+
+// The CUID entry points below are defined unconditionally and gate only
+// their bodies on BUILD_CUID: the exported symbol set must not depend on
+// whether libamdcuid was found, or a build without it would drop symbols from
+// the ABI and turn a consumer's unconditional call into a link error.
+amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handle,
+                                         amdsmi_cuid_info_t* info) {
+  AMDSMI_CHECK_INIT();
+
+  if (info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  memset(info, 0, sizeof(*info));
+  info->component_type = AMDSMI_CUID_COMPONENT_UNKNOWN;
+  info->source = AMDSMI_CUID_SOURCE_UNKNOWN;
+
+#ifdef BUILD_CUID
+  amdcuid_id_t handle = {};
+  const amdsmi_status_t lookup = cuid_handle_for(processor_handle, handle);
+  if (lookup != AMDSMI_STATUS_SUCCESS) {
+    return lookup;
+  }
+
+  const amdsmi_status_t status = fill_cuid_info(handle, info);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+
+  info->source = cuid_source_for(handle);
+  return AMDSMI_STATUS_SUCCESS;
+#else
+  (void)processor_handle;
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+}
+
+amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_component_t* components) {
+  AMDSMI_CHECK_INIT();
+
+  if (count == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef BUILD_CUID
+  std::vector<amdcuid_id_t> handles;
+  amdcuid_status_t cuid_status = AMDCUID_STATUS_INSUFFICIENT_SIZE;
+  uint32_t total = 0;
+  while (cuid_status == AMDCUID_STATUS_INSUFFICIENT_SIZE) {
+    handles.resize(total);
+    cuid_status = amdcuid_get_all_handles(handles.data(), &total);
+  }
+  // No component at all, or none with an identity (no GPU and no
+  // machine-id): an empty inventory, not a failure.
+  if (cuid_status == AMDCUID_STATUS_UNSUPPORTED || cuid_status == AMDCUID_STATUS_DEVICE_NOT_FOUND ||
+      cuid_status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
+    total = 0;
+  } else if (cuid_status != AMDCUID_STATUS_SUCCESS) {
+    return cuid_status_to_amdsmi(cuid_status);
+  }
+  handles.resize(total);
+
+  const auto partition_bdfs = cuid_partition_bdfs();
+  std::vector<amdsmi_cuid_component_t> found(total);
+  for (uint32_t i = 0; i < total; ++i) {
+    const amdsmi_status_t status = fill_cuid_component(handles[i], partition_bdfs, &found[i]);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      return status;
+    }
+  }
+  std::sort(found.begin(), found.end(),
+            [](const amdsmi_cuid_component_t& a, const amdsmi_cuid_component_t& b) {
+              if (a.info.component_type != b.info.component_type) {
+                return a.info.component_type < b.info.component_type;
+              }
+              const int bdf = strcmp(a.bdf, b.bdf);
+              return bdf != 0 ? bdf < 0 : strcmp(a.device_path, b.device_path) < 0;
+            });
+
+  const uint32_t capacity = components == nullptr ? 0 : *count;
+  const uint32_t written = std::min(capacity, total);
+  if (written > 0) {
+    memcpy(components, found.data(), written * sizeof(found[0]));
+  }
+  *count = total;
+  return (components != nullptr && capacity < total) ? AMDSMI_STATUS_INSUFFICIENT_SIZE
+                                                     : AMDSMI_STATUS_SUCCESS;
+#else
+  (void)components;
+  *count = 0;
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+}
+
 amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_handle,
                                            unsigned int* cuid_length, char* cuid) {
   AMDSMI_CHECK_INIT();
@@ -1410,43 +1826,28 @@ amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_han
   if (cuid_length == nullptr || cuid == nullptr || *cuid_length < AMDSMI_GPU_CUID_SIZE) {
     return AMDSMI_STATUS_INVAL;
   }
-#ifdef BUILD_CUID
-  amdsmi_status_t smi_status;
-  amdcuid_status_t cuid_status;
 
-  amdsmi_bdf_t bdf = {};
-  // find the cuid by bdf
-  smi_status = amdsmi_get_gpu_device_bdf(processor_handle, &bdf);
-  if (smi_status != AMDSMI_STATUS_SUCCESS) {
-    return smi_status;
+  // One lookup path: two paths to one value is how the two CUID producers came
+  // to disagree.
+  amdsmi_cuid_info_t info = {};
+  const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(processor_handle, &info);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    *cuid_length = 0;
+    return status;
   }
-  std::string bdf_str = stringify_bdf(bdf);
 
-  amdcuid_id_t device_cuid;
-  cuid_status = amdcuid_get_handle_by_bdf(bdf_str.c_str(), AMDCUID_DEVICE_TYPE_GPU, &device_cuid);
-  if (cuid_status != AMDCUID_STATUS_SUCCESS) {
+  const size_t len = strlen(info.derived);
+  if (len == 0) {
     *cuid_length = 0;
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-
-  const char* cuid_str = amdcuid_id_to_string(device_cuid);
-  if (!cuid_str) {
-    *cuid_length = 0;
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-  size_t cuid_str_len = std::strlen(cuid_str);
-  if (cuid_str_len >= *cuid_length) {
-    *cuid_length = cuid_str_len;
+  if (len >= *cuid_length) {
+    *cuid_length = static_cast<unsigned int>(len);
     return AMDSMI_STATUS_INSUFFICIENT_SIZE;
   }
-  snprintf(cuid, *cuid_length, "%s", cuid_str);
-  *cuid_length = cuid_str_len;
-
+  snprintf(cuid, *cuid_length, "%s", info.derived);
+  *cuid_length = static_cast<unsigned int>(len);
   return AMDSMI_STATUS_SUCCESS;
-#else
-  (void)processor_handle;
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-#endif
 }
 
 // Add a static cache for KFD nodes with initialization flag
@@ -1598,9 +1999,10 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
 
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "[Before rocm smi correction] "
-     << "Returning status = AMDSMI_STATUS_SUCCESS" << "\n; info->model_number: |"
-     << board_info->model_number << "|" << "\n; info->product_serial: |"
-     << board_info->product_serial << "|" << "\n; info->fru_id: |" << board_info->fru_id << "|"
+     << "Returning status = AMDSMI_STATUS_SUCCESS"
+     << "\n; info->model_number: |" << board_info->model_number << "|"
+     << "\n; info->product_serial: |" << board_info->product_serial << "|"
+     << "\n; info->fru_id: |" << board_info->fru_id << "|"
      << "\n; info->manufacturer_name: |" << board_info->manufacturer_name << "|"
      << "\n; info->product_name: |" << board_info->product_name << "|";
   LOG_INFO(ss);
@@ -1651,9 +2053,10 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   }
 
   ss << __PRETTY_FUNCTION__ << " | [After rocm smi correction] "
-     << "Returning status = AMDSMI_STATUS_SUCCESS" << "\n; info->model_number: |"
-     << board_info->model_number << "|" << "\n; info->product_serial: |"
-     << board_info->product_serial << "|" << "\n; info->fru_id: |" << board_info->fru_id << "|"
+     << "Returning status = AMDSMI_STATUS_SUCCESS"
+     << "\n; info->model_number: |" << board_info->model_number << "|"
+     << "\n; info->product_serial: |" << board_info->product_serial << "|"
+     << "\n; info->fru_id: |" << board_info->fru_id << "|"
      << "\n; info->manufacturer_name: |" << board_info->manufacturer_name << "|"
      << "\n; info->product_name: |" << board_info->product_name << "|";
   LOG_INFO(ss);
@@ -1724,13 +2127,13 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
     return AMDSMI_STATUS_INVAL;
   }
 
-  // Get the PLX temperature from the gpu_metrics
+  // PLX comes from gpu_metrics. The unit tests cover the helper; this
+  // delegation is covered by TempRead on an APU, where the sensor is absent.
   if (sensor_type == AMDSMI_TEMPERATURE_TYPE_PLX) {
     amdsmi_gpu_metrics_t metric_info;
     auto r_status = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
     if (r_status != AMDSMI_STATUS_SUCCESS) return r_status;
-    *temperature = metric_info.temperature_vrsoc;
-    return r_status;
+    return smi_amdgpu_plx_temp_from_metrics(metric_info, temperature);
   }
   amdsmi_status_t amdsmi_status = rsmi_wrapper(
       rsmi_dev_temp_metric_get, processor_handle, 0, static_cast<uint32_t>(sensor_type),
@@ -1980,6 +2383,135 @@ amdsmi_status_t amdsmi_get_npm_supported_balancing_modes(amdsmi_node_handle node
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handle,
+                                         char version[AMDSMI_MAX_STRING_LENGTH],
+                                         uint32_t* num_profiles, amdsmi_ampp_profile_t* profiles) {
+  AMDSMI_CHECK_INIT();
+
+  if (num_profiles == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  static_assert(AMDSMI_MAX_STRING_LENGTH == RSMI_AMPP_MAX_STRING_LENGTH,
+                "AMDSMI and RSMI AMPP string lengths must match");
+  static_assert(sizeof(amdsmi_ampp_profile_t) == sizeof(rsmi_ampp_profile_t),
+                "AMDSMI and RSMI AMPP profile structs must match");
+  static_assert(offsetof(amdsmi_ampp_profile_t, name) == offsetof(rsmi_ampp_profile_t, name),
+                "AMDSMI and RSMI AMPP profile name offsets must match");
+  static_assert(offsetof(amdsmi_ampp_profile_t, index) == offsetof(rsmi_ampp_profile_t, index),
+                "AMDSMI and RSMI AMPP profile index offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_profile_t, is_active) == offsetof(rsmi_ampp_profile_t, is_active),
+      "AMDSMI and RSMI AMPP profile active offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_profile_t, is_writable) == offsetof(rsmi_ampp_profile_t, is_writable),
+      "AMDSMI and RSMI AMPP profile writable offsets must match");
+  static_assert(offsetof(amdsmi_ampp_profile_t, is_configured) ==
+                    offsetof(rsmi_ampp_profile_t, is_configured),
+                "AMDSMI and RSMI AMPP profile configured offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_profile_t, reserved) == offsetof(rsmi_ampp_profile_t, reserved),
+      "AMDSMI and RSMI AMPP profile reserved offsets must match");
+
+  amdsmi_status_t amdsmi_status =
+      rsmi_wrapper(rsmi_dev_ampp_profiles_get, processor_handle, 0, version, num_profiles,
+                   reinterpret_cast<rsmi_ampp_profile_t*>(profiles));
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_ampp_fields(amdsmi_processor_handle processor_handle,
+                                       const char* profile_name, uint32_t* num_fields,
+                                       amdsmi_ampp_field_t* fields) {
+  AMDSMI_CHECK_INIT();
+
+  if (profile_name == nullptr || num_fields == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  static_assert(sizeof(amdsmi_ampp_field_t) == sizeof(rsmi_ampp_field_t),
+                "AMDSMI and RSMI AMPP field structs must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, name) == offsetof(rsmi_ampp_field_t, name),
+                "AMDSMI and RSMI AMPP field name offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, unit) == offsetof(rsmi_ampp_field_t, unit),
+                "AMDSMI and RSMI AMPP field unit offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, value) == offsetof(rsmi_ampp_field_t, value),
+                "AMDSMI and RSMI AMPP field value offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, limit_min) == offsetof(rsmi_ampp_field_t, limit_min),
+                "AMDSMI and RSMI AMPP field minimum offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, limit_max) == offsetof(rsmi_ampp_field_t, limit_max),
+                "AMDSMI and RSMI AMPP field maximum offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_field_t, has_limits) == offsetof(rsmi_ampp_field_t, has_limits),
+      "AMDSMI and RSMI AMPP field limit flag offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, reserved) == offsetof(rsmi_ampp_field_t, reserved),
+                "AMDSMI and RSMI AMPP field reserved offsets must match");
+
+  amdsmi_status_t amdsmi_status =
+      rsmi_wrapper(rsmi_dev_ampp_fields_get, processor_handle, 0, profile_name, num_fields,
+                   reinterpret_cast<rsmi_ampp_field_t*>(fields));
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_handle,
+                                             const char* profile_name) {
+  AMDSMI_CHECK_INIT();
+
+  if (profile_name == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  return rsmi_wrapper(rsmi_dev_ampp_profile_activate, processor_handle, 0, profile_name);
+}
+
+amdsmi_status_t amdsmi_configure_ampp_profile(amdsmi_processor_handle processor_handle,
+                                              const char* profile_name,
+                                              const amdsmi_ampp_field_t* fields,
+                                              uint32_t num_fields) {
+  AMDSMI_CHECK_INIT();
+
+  if (profile_name == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  static_assert(sizeof(amdsmi_ampp_field_t) == sizeof(rsmi_ampp_field_t),
+                "amdsmi_ampp_field_t and rsmi_ampp_field_t must remain layout-compatible");
+
+  return rsmi_wrapper(rsmi_dev_ampp_profile_configure, processor_handle, 0, profile_name,
+                      reinterpret_cast<const rsmi_ampp_field_t*>(fields), num_fields);
+}
+
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,
                                           amdsmi_vram_usage_t* vram_info) {
   AMDSMI_CHECK_INIT();
@@ -2106,14 +2638,14 @@ static void system_wait(int milli_seconds) {
   // 1 ms = 1000 us
   int waitTime = milli_seconds * 1000;
 
-  ss << __PRETTY_FUNCTION__ << " | " << "** Waiting for " << std::dec << waitTime << " us ("
-     << waitTime / 1000 << " seconds) **";
+  ss << __PRETTY_FUNCTION__ << " | "
+     << "** Waiting for " << std::dec << waitTime << " us (" << waitTime / 1000 << " seconds) **";
   LOG_DEBUG(ss);
   usleep(static_cast<unsigned int>(waitTime));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  ss << __PRETTY_FUNCTION__ << " | " << "** Waiting took " << duration.count() / 1000
-     << " milli-seconds **";
+  ss << __PRETTY_FUNCTION__ << " | "
+     << "** Waiting took " << duration.count() / 1000 << " milli-seconds **";
   LOG_DEBUG(ss);
 }
 
@@ -2350,9 +2882,9 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     } else {
       violation_status->active_ppt_pwr = 0;
     }
-    ss << __PRETTY_FUNCTION__ << " | " << "ENTERED ppt_residency_acc | per_ppt_pwr: " << std::dec
-       << violation_status->per_ppt_pwr << "%; active_ppt_pwr = " << std::dec
-       << violation_status->active_ppt_pwr << "\n";
+    ss << __PRETTY_FUNCTION__ << " | "
+       << "ENTERED ppt_residency_acc | per_ppt_pwr: " << std::dec << violation_status->per_ppt_pwr
+       << "%; active_ppt_pwr = " << std::dec << violation_status->active_ppt_pwr << "\n";
     LOG_DEBUG(ss);
   }
   if ((metric_info_b.socket_thm_residency_acc != std::numeric_limits<uint64_t>::max() ||
@@ -2387,7 +2919,8 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     } else {
       violation_status->active_vr_thrm = 0;
     }
-    ss << __PRETTY_FUNCTION__ << " | " << "ENTERED vr_thm_residency_acc | per_vr_thrm: " << std::dec
+    ss << __PRETTY_FUNCTION__ << " | "
+       << "ENTERED vr_thm_residency_acc | per_vr_thrm: " << std::dec
        << violation_status->per_vr_thrm << "%; active_ppt_pwr = " << std::dec
        << violation_status->active_vr_thrm << "\n";
     LOG_DEBUG(ss);
@@ -2516,7 +3049,8 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
        std::ref(violation_status->active_low_utilization),
        std::ref(violation_status->active_gfx_clk_below_host_limit_total)});
 
-  ss << __PRETTY_FUNCTION__ << " | " << "RETURNING AMDSMI_STATUS_SUCCESS | "
+  ss << __PRETTY_FUNCTION__ << " | "
+     << "RETURNING AMDSMI_STATUS_SUCCESS | "
      << "violation_status->reference_timestamp (time since epoch): " << std::dec
      << violation_status->reference_timestamp
      << "; violation_status->violation_timestamp (ms): " << std::dec
@@ -3715,7 +4249,8 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
                                       0, memory_caps, kLenCapsSize);
   ss << __PRETTY_FUNCTION__ << " | rsmi_dev_memory_partition_capabilities_get Returning: "
      << smi_amdgpu_get_status_string(status_mem_caps, false)
-     << " | Type: memory_partition_capabilities" << " | Data: " << memory_caps;
+     << " | Type: memory_partition_capabilities"
+     << " | Data: " << memory_caps;
   LOG_DEBUG(ss);
   std::string memory_caps_str = "N/A";
   if (status_mem_caps == AMDSMI_STATUS_SUCCESS) {  // older kernels may not support this
@@ -4398,7 +4933,8 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
      << " | profile->profile_type: " << partition_type_str << "\n"
      << " | profile->profile_index: " << profile->profile_index << "\n"
      << " | profile->num_resources: " << profile->num_resources << "\n"
-     << " | profile->memory_caps: " << "\n"
+     << " | profile->memory_caps: "
+     << "\n"
      << " | nps1_cap: " << profile->memory_caps.nps_flags.nps1_cap << "\n"
      << " | nps2_cap: " << profile->memory_caps.nps_flags.nps2_cap << "\n"
      << " | nps4_cap: " << profile->memory_caps.nps_flags.nps4_cap << "\n"
@@ -4448,7 +4984,8 @@ amdsmi_status_t amdsmi_set_gpu_accelerator_partition_profile(
       partition_type_str = it->second;
     }
 
-    ss << __PRETTY_FUNCTION__ << " | " << "config.profiles[" << i
+    ss << __PRETTY_FUNCTION__ << " | "
+       << "config.profiles[" << i
        << "].profile_type: " << static_cast<int>(config.profiles[i].profile_type) << "\n"
        << "| config.profiles[" << i << "].profile_type (str): " << partition_type_str << "\n"
        << "| config.profiles[" << i
@@ -4786,6 +5323,10 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
       amdsmi_clk_info_t clk_info = {};
       amdsmi_status_t ret = b->GetClockInfo(clk_type, &clk_info);
       if (ret != AMDSMI_STATUS_SUCCESS) return ret;
+      // amdsmi_frequencies_t has no N/A translation downstream (unlike
+      // amdsmi_get_clock_info()'s clk field), so an unavailable sensor must
+      // surface as NOT_SUPPORTED rather than a bogus ~4.29e9 MHz reading.
+      if (clk_info.clk == std::numeric_limits<uint32_t>::max()) return AMDSMI_STATUS_NOT_SUPPORTED;
       if (f == nullptr) return AMDSMI_STATUS_INVAL;
       std::memset(f, 0, sizeof(*f));
       f->num_supported = 1;
@@ -5066,6 +5607,14 @@ amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle) {
 
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* gpu_busy_percent) {
+#ifdef ENABLE_WSL_BACKEND
+  {
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS) return r;
+    if (auto* b = gpu_device->backend()) return b->GetBusyPercent(gpu_busy_percent);
+  }
+#endif
   return rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
 }
 
@@ -5679,22 +6228,53 @@ amdsmi_status_t amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
-  amdsmi_ras_err_state_t state = {};
+  // Read the enabled-blocks mask once and reuse it for every block below; calling
+  // amdsmi_get_gpu_ras_block_features_enabled() per block re-reads ras/features from
+  // sysfs on each call, which can trip host-side RAS read throttling on SR-IOV guests.
+  //
+  // The mask is read once for the entire call; only each enabled block's error-count
+  // fetch happens per block.
+  uint64_t features_mask = 0;
+  amdsmi_status_t mask_status = smi_amdgpu_get_enabled_blocks(gpu_device, &features_mask);
+  if (mask_status != AMDSMI_STATUS_SUCCESS) {
+    // Propagate the failure so callers can distinguish "couldn't read RAS state"
+    // from a genuine zero-error total.
+    return mask_status;
+  }
+  // The loop below only adds to *ec; without this it returns garbage for any
+  // caller whose struct wasn't already zeroed (or is being reused).
+  *ec = {};
+
   // Iterate through the ecc blocks
   for (auto block = AMDSMI_GPU_BLOCK_FIRST; block <= AMDSMI_GPU_BLOCK_LAST;
        block = (amdsmi_gpu_block_t)(block * 2)) {
+    if (!(features_mask & block)) {
+      continue;
+    }
     // Clear the previous ecc block counts
     amdsmi_error_count_t block_ec = {};
-    // Check if the current ecc block is enabled
-    status = amdsmi_get_gpu_ras_block_features_enabled(processor_handle, block, &state);
-    if (status == AMDSMI_STATUS_SUCCESS && state == AMDSMI_RAS_ERR_STATE_ENABLED) {
-      // Increment the total ecc counts by the ecc block counts
-      status = amdsmi_get_gpu_ecc_count(processor_handle, block, &block_ec);
-      if (status == AMDSMI_STATUS_SUCCESS) {
-        // Increase the total ecc counts
-        ec->correctable_count += block_ec.correctable_count;
-        ec->uncorrectable_count += block_ec.uncorrectable_count;
-        ec->deferred_count += block_ec.deferred_count;
+    status = amdsmi_get_gpu_ecc_count(processor_handle, block, &block_ec);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+      // Increase the total ecc counts
+      ec->correctable_count += block_ec.correctable_count;
+      ec->uncorrectable_count += block_ec.uncorrectable_count;
+      ec->deferred_count += block_ec.deferred_count;
+    } else {
+      // Not propagated to the overall return status: AMDSMI_STATUS_NOT_SUPPORTED
+      // here is ambiguous (covers both "block genuinely unsupported" and "GPU
+      // mid-reset," both benign) and any other status would mean *ec below is a
+      // real undercount with no caller-visible signal -- tracked as a follow-up
+      // to properly distinguish and propagate the latter case.
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | block 0x" << std::hex << block << std::dec << " ("
+         << get_gpu_block_name(block) << ")"
+         << " enabled per mask but amdsmi_get_gpu_ecc_count() returned "
+         << smi_amdgpu_get_status_string(status, false)
+         << "; total ecc count below may be incomplete";
+      if (status == AMDSMI_STATUS_NOT_SUPPORTED) {
+        LOG_DEBUG(ss);
+      } else {
+        LOG_ERROR(ss);
       }
     }
   }
@@ -6028,20 +6608,9 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
 
   std::memset(info, 0, sizeof(*info));
   int length = AMDSMI_MAX_STRING_LENGTH;
-  char module_version[AMDSMI_MAX_STRING_LENGTH] = {};
 
   // Get the driver version
-  status = smi_amdgpu_get_driver_version(gpu_device, &length, module_version);
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
-  }
-
-  auto package_version = std::string{};
-  auto uts = utsname{};
-  if (uname(&uts) == 0) {
-    smi_amdgpu_get_active_dkms_version(kAmdgpuDkmsRoot, uts.release, uts.machine, &package_version);
-  }
-  status = smi_amdgpu_parse_driver_versions(module_version, package_version, info);
+  status = smi_amdgpu_get_driver_version(gpu_device, &length, info->driver_version);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
@@ -6113,11 +6682,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   snprintf(info->driver_name, AMDSMI_MAX_STRING_LENGTH, "%s", driver_name.c_str());
   drm_free_version(version);
   libdrm.unload();
-  ss << __PRETTY_FUNCTION__ << " | Driver kernel version: " << info->driver_kernel_version << "\n"
-     << " | amdgpu driver version: " << info->amdgpu_driver_version << "\n"
-     << " | Driver version: " << info->driver_version << "\n"
-     << " | Driver build version: " << info->driver_build_version << "\n"
-     << " | Driver full version: " << info->driver_full_version << "\n"
+  ss << __PRETTY_FUNCTION__ << " | Driver version: " << info->driver_version << "\n"
      << " | Driver date: " << info->driver_date << "\n"
      << " | Driver name: " << info->driver_name << "\n"
      << " | Returning: " << smi_amdgpu_get_status_string(status, false);

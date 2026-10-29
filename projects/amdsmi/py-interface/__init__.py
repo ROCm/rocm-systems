@@ -106,6 +106,8 @@ from .amdsmi_interface import amdsmi_get_processor_handle_from_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_uuid
 from .amdsmi_interface import amdsmi_get_gpu_device_cuid
+from .amdsmi_interface import amdsmi_get_gpu_cuid_info
+from .amdsmi_interface import amdsmi_get_cuid_components
 from .amdsmi_interface import amdsmi_get_gpu_enumeration_info
 
 # # Functions not dependent on ESMI library
@@ -349,6 +351,12 @@ from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
 from .amdsmi_interface import amdsmi_get_ttm_info
 from .amdsmi_interface import amdsmi_set_ttm_pages_limit
 from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
+
+# AMPP (amdsmi power profile)
+from .amdsmi_interface import amdsmi_get_ampp_profiles
+from .amdsmi_interface import amdsmi_get_ampp_fields
+from .amdsmi_interface import amdsmi_activate_ampp_profile
+from .amdsmi_interface import amdsmi_configure_ampp_profile
 
 # # Fabric (IFoE/UALoE) Information
 from .amdsmi_interface import amdsmi_get_fabric_telemetry_data

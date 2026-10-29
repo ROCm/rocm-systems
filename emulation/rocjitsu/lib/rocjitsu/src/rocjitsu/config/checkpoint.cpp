@@ -119,10 +119,10 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
         // means unbounded for a new checkpoint, while field absence remains the
         // legacy signal that restore should use ComputeUnitCore's native default.
         builder.ForceDefaults(true);
-        fb_cu = fb::CreateComputeUnitConfig(builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf,
-                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb,
-                                            cu_cfg.functional_quantum,
-                                            se->compute_unit(0)->scratch_slots_per_cu());
+        fb_cu = fb::CreateComputeUnitConfig(
+            builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf, cu_cfg.vgprs_per_wf,
+            cu_cfg.lds_size_kb, cu_cfg.functional_quantum,
+            se->compute_unit(0)->scratch_slots_per_cu(), cu_cfg.gws_wait_limit);
         builder.ForceDefaults(false);
       }
     }
@@ -188,6 +188,7 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
           // old omitted zero would otherwise be reinterpreted as 1024.
           if (flatbuffers::IsFieldPresent(cu, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM))
             cu_cfg.functional_quantum = cu->functional_quantum();
+          cu_cfg.gws_wait_limit = cu->gws_wait_limit();
           vm_config.soc.scratch_slots_per_cu = cu->scratch_slots_per_cu();
         }
       }
@@ -219,6 +220,9 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
     for (auto *se : xcd->shader_engines()) {
       for (uint32_t ci = 0; ci < se->num_compute_units(); ++ci) {
         auto *cu = se->compute_unit(ci);
+        if (cu->gws_device().tracked_process_count() != 0)
+          throw std::runtime_error("Cannot checkpoint GWS resource state: the shared table "
+                                   "is not part of the checkpoint format");
         std::vector<flatbuffers::Offset<fb::WavefrontState>> wf_offsets;
         for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
           const auto *w = cu->wf(i);
@@ -281,7 +285,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
         auto cus = fb::CreateComputeUnitState(
             builder, name, wfs_vec, 0, cu->config().functional_quantum, true,
             cu->config().memory_wait_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
-            cu->config().xcnt_diagnostics != amdgpu::MemoryWaitDiagnostics::Off);
+            cu->config().xcnt_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
+            cu->config().gws_wait_limit);
         cu_offsets.push_back(cus);
       }
     }
@@ -433,6 +438,8 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       if (!cu_state)
         continue;
       auto *cu = all_cus[i];
+      if (cu_state->gws_wait_limit())
+        cu->set_gws_wait_limit(*cu_state->gws_wait_limit());
       if (cu_state->functional_quantum_present())
         cu->set_functional_quantum(cu_state->functional_quantum());
       using amdgpu::MemoryWaitDiagnostics;

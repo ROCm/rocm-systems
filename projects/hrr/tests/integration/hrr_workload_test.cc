@@ -915,17 +915,17 @@ TEST_CASE("Unit_HRR_StressApis_Direct", "[.][hrr-direct]") {
 // values, validated via D2H.
 //
 // Each written value gets its OWN D2H readback rather than one combined 16-byte
-// readback, because hrr-playback's D2H validator falls back to candidate float
-// encodings (f32/bf16/f16/f64, atol=rtol=1e-3) when the bytes differ and skips
-// byte-identical elements. A 16-byte readback holding the 32-bit sentinel in the
+// readback, because hrr-playback's D2H validator used to fall back to candidate
+// float encodings (f32/bf16/f16/f64, atol=rtol=1e-3) when the bytes differed and
+// skipped byte-identical elements. A 16-byte readback holding the 32-bit sentinel in the
 // low half of an 8-byte slot decodes, under the f64 candidate, to the subnormal
 // 1.68e-314; a lost 32-bit write reads back as 0.0, which is inside the 1e-3
 // tolerance, so the buffer would be accepted as "f64 within tolerance" while the
 // 64-bit slot stayed byte-identical (skipped). Splitting the readbacks makes the
 // 32-bit blob 4 bytes, and 4 % 8 != 0 excludes the f64 candidate outright; the
 // remaining candidates reject 0.0-vs-0xCAFEBABE by ~1000x (f32 sees -8.35e6
-// against a tolerance of 8.35e3). Unit_HRR_StreamWriteValueRoundtrip also pins
-// HIP_HRR_D2H_EXACT=1 so the replay gate really is byte-for-byte.
+// against a tolerance of 8.35e3). Validation is byte-exact by default now; the
+// split keeps the workload falsifiable under a HIP_HRR_D2H_TOL opt-in too.
 // ===========================================================================
 TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -1035,8 +1035,8 @@ constexpr size_t kD2DTotal = kD2DPitch * kD2DRows;      // 6144 bytes
 constexpr size_t kD2DPad   = kD2DPitch - kD2DWidth;     // 64 untouched bytes/row
 
 // Sentinel pre-fill of the WHOLE buffer vs the pattern written into the
-// WIDTH sub-region.  The two must be far apart under every dtype the replay
-// D2H validator guesses (f32/bf16/f16/f64 at atol=rtol=1e-3), otherwise a
+// WIDTH sub-region.  The two must be far apart under every dtype a
+// HIP_HRR_D2H_TOL opt-in can name (f32/bf16/f16/f64 at atol=rtol=1e-3), otherwise a
 // replay that never ran the memsets (HRR zero-initialises replay allocations,
 // so the buffer reads back all-zero) would land inside the tolerance and
 // "pass".  0x5A5A5A5A and 0x44444444 decode to (f32) 1.54e16 / 785.07,
@@ -1205,10 +1205,9 @@ TEST_CASE("Unit_HRR_MemsetVariants_Direct", "[.][hrr-direct]") {
   constexpr int    N  = 1024;
   constexpr size_t SZ = N * sizeof(int);  // 4096 bytes
 
-  // Final validation pattern.  Replay zero-initialises its allocations and the
-  // playback D2H validator falls back to a float tolerance (atol=rtol=1e-3 over
-  // f32/bf16/f16/f64, accepting the first encoding that fits), so a small
-  // integer canary cannot detect a no-op replay: 2 decodes to f32 2.8e-45, well
+  // Final validation pattern.  Replay zero-initialises its allocations, and
+  // under a float tolerance (HIP_HRR_D2H_TOL, atol=rtol=1e-3 over any of
+  // f32/bf16/f16/f64) a small integer canary cannot detect a no-op replay: 2 decodes to f32 2.8e-45, well
   // inside atol, and would validate against an all-zero buffer.  0x44444444 is
   // far from zero in every candidate encoding (f32 785.07, bf16 784, f16 4.27,
   // f64 7.5e20).
@@ -2771,12 +2770,10 @@ TEST_CASE("Unit_HRR_MiscAPIs_Direct", "[.][hrr][direct]") {
 // ---------------------------------------------------------------------------
 // Workload V — Driver-style 3D/2D memcpy variants
 //
-// Canary choice matters here.  Replay zero-initialises allocations, and the D2H
-// validator falls back from memcmp to a float tolerance (atol=rtol=1e-3) over
-// candidate f32/bf16/f16/f64 decodings, accepting the first encoding with no
-// out-of-tolerance element.  A canary that decodes near 0.0 in any candidate
-// encoding therefore passes against an all-zero replay buffer, which makes the
-// whole roundtrip vacuous.  Both values below decode far from zero in all four:
+// Canary choice matters under a float tolerance.  Replay zero-initialises
+// allocations, and a HIP_HRR_D2H_TOL opt-in (atol=rtol=1e-3) over f32, bf16, f16
+// or f64 accepts a canary that decodes near 0.0 against an all-zero replay
+// buffer, which makes the whole roundtrip vacuous.  Both values below decode far from zero in all four:
 //   0x5C5C5C5C -> f32 2.48e17, bf16 2.48e17, f16 279, f64 8.25e136
 //   0x4B4B4B4B -> f32 1.33e7,  bf16 1.33e7,  f16 14.6, f64 5.23e54
 // (0x2D2D2D2D, for contrast, is 9.84e-12 as f32, i.e. inside atol.)
@@ -3197,6 +3194,95 @@ TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
 }
 
 // ---------------------------------------------------------------------------
+// Workload — a capture that fails at hipStreamEndCapture, then direct work on
+// the same stream. A fork onto a second stream that never joins back makes
+// EndCapture return hipErrorStreamCaptureUnjoined, which still ends the
+// capture on both streams. The H2D restore, kernel and D2H that follow run
+// directly; a replay that still thinks the stream is capturing records them
+// into a graph nobody launches and the D2H never sees the kernel's output.
+// ---------------------------------------------------------------------------
+// The direct H2D restore, kernel and D2H that run on s after its capture
+// failed at hipStreamEndCapture.
+static void failed_endcapture_direct_work(hipStream_t s, float* d_in, float* d_out) {
+  std::vector<float> h_in(N), h_out(N, 0.0f);
+  for (int i = 0; i < N; ++i) h_in[i] = static_cast<float>(i + 1);
+  HRR_HIP_CHECK(hipMemcpyAsync(d_in, h_in.data(), SZ, hipMemcpyHostToDevice, s));
+  hipLaunchKernelGGL(hrr_vectorScale, dim3((N + 255) / 256), dim3(256), 0, s,
+                     d_in, d_out, 2.0f, N);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipMemcpyAsync(h_out.data(), d_out, SZ, hipMemcpyDeviceToHost, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h_out[i] == 2.0f * static_cast<float>(i + 1));
+}
+
+TEST_CASE("Unit_HRR_FailedEndCapture_Direct", "[.][hrr][direct]") {
+  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  HRR_HIP_CHECK(hipSetDevice(0));
+  float* d_in = nullptr;
+  float* d_out = nullptr;
+  float* d_side = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d_in, SZ));
+  HRR_HIP_CHECK(hipMalloc(&d_out, SZ));
+  HRR_HIP_CHECK(hipMalloc(&d_side, SZ));
+  hipStream_t s, side;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+  HRR_HIP_CHECK(hipStreamCreate(&side));
+  hipEvent_t fork;
+  HRR_HIP_CHECK(hipEventCreate(&fork));
+
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeGlobal));
+  HRR_HIP_CHECK(hipEventRecord(fork, s));
+  HRR_HIP_CHECK(hipStreamWaitEvent(side, fork, 0));
+  HRR_HIP_CHECK(hipMemsetAsync(d_side, 0, SZ, side));
+  REQUIRE(hipStreamEndCapture(s, &graph) == hipErrorStreamCaptureUnjoined);
+  (void)hipGetLastError();
+  REQUIRE(graph == nullptr);
+
+  failed_endcapture_direct_work(s, d_in, d_out);
+
+  HRR_HIP_CHECK(hipEventDestroy(fork));
+  HRR_HIP_CHECK(hipStreamDestroy(side));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipFree(d_side));
+  HRR_HIP_CHECK(hipFree(d_out));
+  HRR_HIP_CHECK(hipFree(d_in));
+}
+
+// ---------------------------------------------------------------------------
+// Workload — the same direct work after a capture that a prohibited call
+// invalidated. hipMalloc during a global-mode capture fails and invalidates
+// it; the failed call is not recorded, so replay's own capture stays valid,
+// its EndCapture succeeds, and replay must discard that graph and go on
+// running the later work directly.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_FailedEndCaptureInvalidated_Direct", "[.][hrr][direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  float* d_in = nullptr;
+  float* d_out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d_in, SZ));
+  HRR_HIP_CHECK(hipMalloc(&d_out, SZ));
+  hipStream_t s;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+
+  hipGraph_t graph = nullptr;
+  void* prohibited = nullptr;
+  HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeGlobal));
+  HRR_HIP_CHECK(hipMemsetAsync(d_out, 0, SZ, s));
+  REQUIRE(hipMalloc(&prohibited, SZ) == hipErrorStreamCaptureUnsupported);
+  (void)hipGetLastError();
+  REQUIRE(hipStreamEndCapture(s, &graph) == hipErrorStreamCaptureInvalidated);
+  (void)hipGetLastError();
+  REQUIRE(graph == nullptr);
+
+  failed_endcapture_direct_work(s, d_in, d_out);
+
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipFree(d_out));
+  HRR_HIP_CHECK(hipFree(d_in));
+}
+
+// ---------------------------------------------------------------------------
 // Workload Y — hipHostRegister/Unregister + hipLaunchKernel
 // ---------------------------------------------------------------------------
 __global__ void hrr_fill(int* out, int val, int n) {
@@ -3342,9 +3428,9 @@ TEST_CASE("Unit_HRR_ModuleAPI_Direct", "[.][hrr][direct]") {
       HRR_HIP_CHECK(hipModuleGetFunction(&fn_file, mod_file, "rtc_fill"));
       int* d_file = nullptr;
       HRR_HIP_CHECK(hipMalloc(&d_file, SZ));
-      // Replay compares D2H buffers under a float tolerance, so a small
-      // integer would also pass against a buffer the kernel never wrote.
-      // 0x3F800000 is 1.0f, which is outside the tolerance of an unwritten buffer.
+      // Under a HIP_HRR_D2H_TOL float tolerance a small integer would also pass
+      // against a buffer the kernel never wrote. 0x3F800000 is 1.0f, which is
+      // outside the tolerance of an unwritten buffer.
       int  val   = 0x3F800000;
       int  n     = N;
       void* args[] = { &d_file, &val, &n };
@@ -4057,6 +4143,45 @@ TEST_CASE("Unit_HRR_ForkWhileNotingUnreplayable_Direct", "[.][hrr-direct]") {
   REQUIRE(g_unreplayable_ran_out.load());
 }
 
+// ---------------------------------------------------------------------------
+// The forked child drops the overflowing copy of Unit_HRR_OverflowingMemcpy3D_Direct
+// before its first record, which opens its archive. Unit_HRR_ForkedChildStaysIncomplete
+// checks that only the child's archive is incomplete.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ForkedChildStaysIncomplete_Direct", "[.][hrr-direct]") {
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipStream_t stream = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&stream));
+  void* dst = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dst, 1024));
+  std::vector<char> host(1024, 1);
+  hipMemcpy3DParms p{};
+  p.srcPtr = make_hipPitchedPtr(host.data(), 256, 256, 4);
+  p.dstPtr = make_hipPitchedPtr(dst, 256, 256, 4);
+  p.extent = make_hipExtent(256, (size_t{1} << 56) + 1, 1);  // 2^64 + 256 bytes
+  p.kind = hipMemcpyHostToDevice;
+  HRR_HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+
+  const pid_t pid = fork();
+  if (pid == 0) {
+    g_hrr_after_capture_shutdown = [] {};
+    if (hipMemcpy3DAsync(&p, stream) != hipSuccess) _exit(3);
+    (void)hipGetLastError();  // opens the child's archive
+    exit(0);
+  }
+  const int status = pid > 0 ? hrr_wait_child(pid, 30) : -1;
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HRR_HIP_CHECK(hipGraphDestroy(graph));
+  HRR_HIP_CHECK(hipFree(dst));
+  HRR_HIP_CHECK(hipStreamDestroy(stream));
+  INFO("child wait status " << status);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
+}
+
 // Records through the compiler dispatch table, which the capture shutdown
 // leaves in place.
 static void hrr_push_pop_launch_config() {
@@ -4128,14 +4253,21 @@ TEST_CASE("Unit_HRR_ForkAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
 
 // ---------------------------------------------------------------------------
 // mkdir() for this test binary, for the same reason as fsync() above: CLR
-// resolves it here first. The capture writer creates an archive's directories
-// with it while it opens the archive. With no hook set it is a plain mkdir.
+// resolves it here first. The capture writer creates the path to an archive
+// with it, and the directories inside it with mkdirat, while it opens the
+// archive. The hook gets the path or the name as given. With no hook set they
+// are a plain mkdir and mkdirat.
 // ---------------------------------------------------------------------------
 static std::atomic<void (*)(const char*)> g_hrr_mkdir_hook{nullptr};
 
 extern "C" int mkdir(const char* path, mode_t mode) noexcept {
   if (auto hook = g_hrr_mkdir_hook.load(std::memory_order_acquire)) hook(path);
   return static_cast<int>(syscall(SYS_mkdirat, AT_FDCWD, path, mode));
+}
+
+extern "C" int mkdirat(int dirfd, const char* path, mode_t mode) noexcept {
+  if (auto hook = g_hrr_mkdir_hook.load(std::memory_order_acquire)) hook(path);
+  return static_cast<int>(syscall(SYS_mkdirat, dirfd, path, mode));
 }
 
 // ---------------------------------------------------------------------------
@@ -4155,7 +4287,7 @@ namespace {
 std::atomic<bool> g_child_open_held{false};
 
 void child_open_mkdir_hook(const char* path) {
-  static constexpr char kSuffix[] = "/code_objects";
+  static constexpr char kSuffix[] = "code_objects";
   constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
   const size_t len = strlen(path);
   if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
@@ -4188,16 +4320,23 @@ TEST_CASE("Unit_HRR_ShutdownWhileChildOpensArchive_Direct", "[.][hrr-direct]") {
 }
 
 // ---------------------------------------------------------------------------
-// rename() for this test binary, for the same reason as fsync() above: CLR
-// resolves it here first. The capture shutdown calls it to publish the root
-// manifest, after it has written the trailer and before it closes events.bin.
-// With no hook set it is a plain rename.
+// rename() and renameat() for this test binary, for the same reason as fsync()
+// above: CLR resolves them here first. The capture shutdown calls renameat to
+// publish the root manifest, by its path, after it has written the trailer and
+// before it closes events.bin. With no hook set they are a plain rename and
+// renameat.
 // ---------------------------------------------------------------------------
 static std::atomic<void (*)(const char*)> g_hrr_rename_hook{nullptr};
 
 extern "C" int rename(const char* oldpath, const char* newpath) noexcept {
   if (auto hook = g_hrr_rename_hook.load(std::memory_order_acquire)) hook(newpath);
   return static_cast<int>(syscall(SYS_renameat2, AT_FDCWD, oldpath, AT_FDCWD, newpath, 0));
+}
+
+extern "C" int renameat(int olddirfd, const char* oldpath, int newdirfd,
+                        const char* newpath) noexcept {
+  if (auto hook = g_hrr_rename_hook.load(std::memory_order_acquire)) hook(newpath);
+  return static_cast<int>(syscall(SYS_renameat2, olddirfd, oldpath, newdirfd, newpath, 0));
 }
 
 // ---------------------------------------------------------------------------
@@ -4347,6 +4486,151 @@ TEST_CASE("Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct", "[.][hrr-direct]") 
     g_flush_fork_status = pid > 0 ? hrr_wait_child(pid, 30) : -1;
     g_forked_after_flush = true;
   }).detach();
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_CloseDuringCrashManifest_Direct
+//
+// The crash callback opens manifest.json through the archive's directory
+// descriptor, and the capture shutdown's close() closes that descriptor. close()
+// must wait for a callback that holds it, or another thread could reuse the
+// number in between and the callback write its manifest into that directory.
+// Here a second thread raises SIGSEGV, the fsync hook holds CLR's crash
+// callback in the fsync() of its manifest.json, and the main thread returns,
+// which runs the capture shutdown. The hold ends a second after the shutdown
+// starts, and prints a line if it started. The process exits 3 if the shutdown
+// got past close() during the hold; otherwise it dies of its SIGSEGV once the
+// callback returns. Unit_HRR_CloseDuringCrashManifest checks both.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_crash_close_hold{false};
+std::atomic<bool> g_crash_close_held{false};
+std::atomic<bool> g_crash_close_exiting{false};
+
+void crash_close_fsync_hook(int fd) {
+  if (!hrr_fd_is_manifest(fd) || !g_crash_close_hold.exchange(false)) return;
+  g_crash_close_held = true;
+  for (int ms = 0; ms < 10000 && !g_crash_close_exiting.load(); ++ms) hrr_sleep_1ms();
+  for (int ms = 0; ms < 1000; ++ms) hrr_sleep_1ms();
+  if (g_crash_close_exiting.load()) {
+    static constexpr char kLine[] = "capture shutdown started while the crash callback was held\n";
+    (void)!write(2, kLine, sizeof(kLine) - 1);
+  }
+  g_crash_close_held = false;
+}
+
+void crash_close_exiting() { g_crash_close_exiting = true; }
+
+void crash_close_after_shutdown() {
+  if (g_crash_close_held.load()) _exit(3);
+  for (;;) pause();  // for the SIGSEGV the callback raises again
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_CloseDuringCrashManifest_Direct", "[.][hrr-direct]") {
+  // The crash is the point; a core file is not.
+  struct rlimit no_core{0, 0};
+  (void)setrlimit(RLIMIT_CORE, &no_core);
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+  // After it, so it runs first.
+  REQUIRE(std::atexit(crash_close_exiting) == 0);
+
+  g_hrr_after_capture_shutdown = crash_close_after_shutdown;
+  g_hrr_fsync_hook = crash_close_fsync_hook;
+  g_crash_close_hold = true;
+  std::thread([] { raise(SIGSEGV); }).detach();
+  for (int ms = 0; ms < 10000 && !g_crash_close_held.load(); ++ms) hrr_sleep_1ms();
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkDuringBlobWrite_Direct
+//
+// A blob write opens its blobs/<xx> for that write only and closes it on the
+// writing thread, which a forked child does not have. Here the rename hook
+// holds a second thread inside a blob write, with that directory open, for two
+// seconds, and the main thread forks meanwhile. The child exits 3 if it holds a
+// descriptor of a directory in the parent's blobs/.
+// Unit_HRR_ForkDuringBlobWrite checks the exit code.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_blob_write_hold{false};
+std::atomic<bool> g_blob_write_held{false};
+
+void blob_write_rename_hook(const char* path) {
+  static constexpr char kSuffix[] = ".blob";
+  constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
+  const size_t len = strlen(path);
+  if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
+  if (!g_blob_write_hold.exchange(false)) return;
+  g_blob_write_held = true;
+  for (int ms = 0; ms < 2000; ++ms) hrr_sleep_1ms();
+  g_blob_write_held = false;
+}
+
+// Descriptors open on something inside `dir`. Async-signal-safe, for a child.
+int hrr_fds_inside(const char* dir) {
+  const size_t dir_len = strlen(dir);
+  int found = 0;
+  for (int fd = 0; fd < 1024; ++fd) {
+    char link[32] = "/proc/self/fd/";
+    size_t n = strlen(link);
+    char digits[12];
+    size_t k = 0;
+    int v = fd;
+    do {
+      digits[k++] = static_cast<char>('0' + v % 10);
+      v /= 10;
+    } while (v > 0);
+    while (k > 0) link[n++] = digits[--k];
+    link[n] = '\0';
+    char target[4096];
+    const ssize_t len = readlink(link, target, sizeof(target));
+    if (len > static_cast<ssize_t>(dir_len) && memcmp(target, dir, dir_len) == 0 &&
+        target[dir_len] == '/')
+      ++found;
+  }
+  return found;
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_ForkDuringBlobWrite_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  const char* base = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  REQUIRE(base != nullptr);
+  const std::string blobs_path =
+      std::string(base) + "/pid-" + std::to_string(::getpid()) + "/blobs";
+  char blobs[4096];
+  REQUIRE(::realpath(blobs_path.c_str(), blobs) != nullptr);
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, SZ));
+
+  g_hrr_rename_hook = blob_write_rename_hook;
+  g_blob_write_hold = true;
+  // Nothing below may REQUIRE before the join.
+  std::thread writer([d] {
+    const std::vector<int> h(N, 0x5eed);
+    (void)hipMemcpy(d, h.data(), SZ, hipMemcpyHostToDevice);
+  });
+  for (int ms = 0; ms < 10000 && !g_blob_write_held.load(); ++ms) hrr_sleep_1ms();
+  const bool held = g_blob_write_held.load();
+  int status = -1;
+  if (held) {
+    const pid_t pid = fork();
+    if (pid == 0) _exit(hrr_fds_inside(blobs) == 0 ? 0 : 3);
+    if (pid > 0) status = hrr_wait_child(pid, 10);
+  }
+  writer.join();
+  g_hrr_rename_hook = nullptr;
+  HRR_HIP_CHECK(hipFree(d));
+
+  INFO("child wait status " << status);
+  REQUIRE(held);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
 }
 #endif  // !_WIN32
 
@@ -4532,4 +4816,79 @@ TEST_CASE("Unit_HRR_FailedShimCalls_Direct", "[.][hrr-direct]") {
 
   HRR_HIP_CHECK(hipStreamDestroy(stream));
   HRR_HIP_CHECK(hipMemPoolDestroy(pool));
+}
+
+// ---------------------------------------------------------------------------
+// hipExtMemcpyBatchAsync with offset pointers, per-entry sizes, a zeroed
+// sizesDst array and two attribute ranges; D2H of both destinations. A second
+// batch issues an asymmetric swap (sizesDst != sizes) where swap is supported;
+// D2H covers both operands.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ExtMemcpyBatch_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  constexpr size_t kBytes = 4096;
+  unsigned char *src = nullptr, *dst0 = nullptr, *dst1 = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&src, kBytes));
+  HRR_HIP_CHECK(hipMalloc(&dst0, kBytes));
+  HRR_HIP_CHECK(hipMalloc(&dst1, kBytes));
+  std::vector<unsigned char> h(kBytes);
+  for (size_t i = 0; i < kBytes; ++i) h[i] = static_cast<unsigned char>(i * 7 + 1);
+  HRR_HIP_CHECK(hipMemcpy(src, h.data(), kBytes, hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipMemset(dst0, 0, kBytes));
+  HRR_HIP_CHECK(hipMemset(dst1, 0, kBytes));
+  hipStream_t stream = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {dst0, dst1 + 128};
+  void* srcs[] = {src + 64, src};
+  size_t sizes[] = {1024, 2048};
+  size_t sizes_dst[] = {0, 0};
+  hipExtMemcpyAttributes attrs[2] = {};
+  attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[1].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[1].flags = hipMemcpyFlagExtPreferLinear;
+  size_t attr_idxs[] = {0, 1};
+  HRR_HIP_CHECK(hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizes_dst, nullptr, nullptr, 2,
+                                       attrs, attr_idxs, 2, stream));
+  HRR_HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<unsigned char> out0(kBytes), out1(kBytes);
+  HRR_HIP_CHECK(hipMemcpy(out0.data(), dst0, kBytes, hipMemcpyDeviceToHost));
+  HRR_HIP_CHECK(hipMemcpy(out1.data(), dst1, kBytes, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < kBytes; ++i) {
+    REQUIRE(out0[i] == (i < 1024 ? h[i + 64] : 0));
+    REQUIRE(out1[i] == (i >= 128 && i < 128 + 2048 ? h[i - 128] : 0));
+  }
+
+  // Asymmetric swap: dst0[0, 2048) <- src[0, 2048), src[0, 1024) <- dst0[0, 1024).
+  HRR_HIP_CHECK(hipMemcpy(dst0, out0.data(), kBytes, hipMemcpyHostToDevice));
+  void* swap_dsts[] = {dst0};
+  void* swap_srcs[] = {src};
+  size_t swap_sizes[] = {2048};
+  size_t swap_sizes_dst[] = {1024};
+  hipExtMemcpyAttributes swap_attr{};
+  swap_attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  swap_attr.flags = hipMemcpyFlagExtOpSwap;
+  size_t swap_attr_idx[] = {0};
+  const hipError_t swap_err = hipExtMemcpyBatchAsync(swap_dsts, swap_srcs, swap_sizes,
+                                                     swap_sizes_dst, nullptr, nullptr, 1,
+                                                     &swap_attr, swap_attr_idx, 1, stream);
+  if (swap_err == hipErrorNotSupported) {
+    (void)hipGetLastError();
+  } else {
+    HRR_HIP_CHECK(swap_err);
+    HRR_HIP_CHECK(hipStreamSynchronize(stream));
+    std::vector<unsigned char> swapped_dst(kBytes), swapped_src(kBytes);
+    HRR_HIP_CHECK(hipMemcpy(swapped_dst.data(), dst0, kBytes, hipMemcpyDeviceToHost));
+    HRR_HIP_CHECK(hipMemcpy(swapped_src.data(), src, kBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kBytes; ++i) {
+      REQUIRE(swapped_dst[i] == (i < 2048 ? h[i] : out0[i]));
+      REQUIRE(swapped_src[i] == (i < 1024 ? out0[i] : h[i]));
+    }
+  }
+
+  HRR_HIP_CHECK(hipStreamDestroy(stream));
+  HRR_HIP_CHECK(hipFree(src));
+  HRR_HIP_CHECK(hipFree(dst0));
+  HRR_HIP_CHECK(hipFree(dst1));
 }

@@ -26,7 +26,7 @@ impl LinuxKfdDriver {
     }
 
     pub(crate) fn supports_system_dma_buf_import(device: &DeviceState) -> bool {
-        device.supports_system_dma_buf_import()
+        device.vm.system_dma_buf_import
     }
 
     /// Imports a borrowed DMA-BUF as a virtual-memory owner.
@@ -38,11 +38,39 @@ impl LinuxKfdDriver {
         descriptor: BorrowedFd<'_>,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        KfdVirtualMemory::import(descriptor.as_raw_fd())
+        self.with_context_resources(|resources| {
+            let kfd = resources.kfd()?;
+            KfdVirtualMemory::import_with_kfd(descriptor.as_raw_fd(), &kfd, |gpu_id| {
+                resources.bindings.svm_identity(gpu_id).ok()
+            })
+        })
     }
 
     pub(crate) fn export_virtual_memory(memory: &KfdVirtualMemory) -> Result<DmaBuf, Error> {
         memory.export_dma_buf()
+    }
+
+    pub(crate) fn fabric_virtual_memory_ready(memory: &KfdVirtualMemory) -> Result<bool, Error> {
+        memory.fabric_ready()
+    }
+
+    pub(crate) fn export_fabric_virtual_memory(
+        memory: &KfdVirtualMemory,
+    ) -> Result<[u8; 16], Error> {
+        memory.export_fabric_handle()
+    }
+
+    pub(crate) fn import_fabric_virtual_memory(
+        &self,
+        device: &DeviceState,
+        fabric: [u8; 16],
+    ) -> Result<Owned<KfdVirtualMemory>, Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        let render = device.vm.render()?;
+        let dma_buf = drm::import_fabric_handle(render, fabric)
+            .map_err(|source| native_error("DRM UALink fabric import", source))?;
+        KfdVirtualMemory::import(dma_buf.as_raw_fd())
     }
 
     pub(crate) fn import_dma_buf(
@@ -130,10 +158,10 @@ impl LinuxKfdDriver {
         size: u64,
     ) -> Result<Owned<LinuxAllocation>, Error> {
         self.ensure_open()?;
-        let words = handle.words();
+        let words = handle.words;
         let owner = devices
             .iter()
-            .find(|device| device.vm.gpu_id() == words[7])
+            .find(|device| device.vm.gpu_id == words[7])
             .ok_or_else(|| {
                 error(
                     ErrorKind::InvalidArgument,
