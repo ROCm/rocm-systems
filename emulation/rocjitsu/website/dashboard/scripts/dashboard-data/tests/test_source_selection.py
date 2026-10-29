@@ -97,30 +97,6 @@ def resolve(
     return result, values, calls.read_text().splitlines() if calls.exists() else []
 
 
-def test_pr_event_measures_frozen_head_not_synthetic_merge_or_later_tip(tmp_path):
-    result, values, calls = resolve(
-        tmp_path,
-        event='pull_request',
-        workflow_ref='refs/pull/42/merge',
-        commit='',
-        event_payload={
-            'number': 42,
-            'pull_request': {'head': {'ref': 'feature/source', 'sha': SOURCE}},
-        },
-        responses=side_responses(),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert values == {
-        'source_branch': 'feature/source',
-        'source_sha': SOURCE,
-        'base_branch': 'develop',
-        'base_sha': 'f' * 40,
-        'pull_request_number': '42',
-        'pull_request_url': f'https://github.com/{REPO}/pull/42',
-    }
-    assert not any('/git/ref/heads/feature' in call for call in calls)
-
-
 def test_manual_source_is_independent_of_workflow_revision(tmp_path):
     result, values, calls = resolve(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -150,6 +126,30 @@ def side_responses(**pr_changes):
             'merge_base_commit': {'sha': SOURCE}
         },
     }
+
+
+def test_pr_event_measures_frozen_head_not_synthetic_merge_or_later_tip(tmp_path):
+    result, values, calls = resolve(
+        tmp_path,
+        event='pull_request',
+        workflow_ref='refs/pull/42/merge',
+        commit='',
+        event_payload={
+            'number': 42,
+            'pull_request': {'head': {'ref': 'feature/source', 'sha': SOURCE}},
+        },
+        responses=side_responses(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert values == {
+        'source_branch': 'feature/source',
+        'source_sha': SOURCE,
+        'base_branch': 'develop',
+        'base_sha': 'f' * 40,
+        'pull_request_number': '42',
+        'pull_request_url': f'https://github.com/{REPO}/pull/42',
+    }
+    assert not any('/git/ref/heads/feature' in call for call in calls)
 
 
 def test_side_source_old_commit_is_valid_pr_metadata(tmp_path):

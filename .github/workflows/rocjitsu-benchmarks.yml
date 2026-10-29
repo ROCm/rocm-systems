@@ -214,6 +214,10 @@ jobs:
   benchmark:
     name: Run performance benchmark
     needs: source-metadata
+    # Supersede obsolete PR measurements without cancelling completed-run publication.
+    concurrency:
+      group: ${{ github.workflow }}-benchmark-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       BENCHMARK_SHA: ${{ needs.source-metadata.outputs.source_sha }}
       BENCHMARK_BRANCH: ${{ needs.source-metadata.outputs.source_branch }}
@@ -676,6 +680,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      actions: read # Resolve run ordering when upgrading an existing marker-only comment.
       pull-requests: write
     # Serialize comment lookup/create/update so concurrent attempts cannot create duplicates.
     concurrency:
@@ -696,6 +701,7 @@ jobs:
         env:
           BENCHMARK_RESULT: ${{ needs.benchmark.result }}
           PUBLICATION_RESULT: ${{ needs.publish.result }}
+          SOURCE_SHA: ${{ needs.source-metadata.outputs.source_sha }}
         with:
           script: |
             const { reportBenchmark } = require(
@@ -706,4 +712,7 @@ jobs:
               context,
               benchmarkResult: process.env.BENCHMARK_RESULT,
               publishResult: process.env.PUBLICATION_RESULT,
+              runNumber: process.env.GITHUB_RUN_NUMBER,
+              runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+              headSha: process.env.SOURCE_SHA,
             });

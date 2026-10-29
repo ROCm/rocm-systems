@@ -124,7 +124,11 @@ def test_report_only_runs_for_executed_pr_benchmarks(
     workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
     job = workflow['jobs']['report']
     assert job['needs'] == ['source-metadata', 'benchmark', 'publish']
-    assert job['permissions'] == {'contents': 'read', 'pull-requests': 'write'}
+    assert job['permissions'] == {
+        'contents': 'read',
+        'actions': 'read',
+        'pull-requests': 'write',
+    }
     assert job['concurrency'] == {
         'group': 'rocjitsu-benchmark-report-${{ github.event.pull_request.number }}',
         'cancel-in-progress': False,
@@ -149,7 +153,11 @@ def test_report_only_runs_for_executed_pr_benchmarks(
     assert report['env'] == {
         'BENCHMARK_RESULT': '${{ needs.benchmark.result }}',
         'PUBLICATION_RESULT': '${{ needs.publish.result }}',
+        'SOURCE_SHA': '${{ needs.source-metadata.outputs.source_sha }}',
     }
+    assert 'runNumber: process.env.GITHUB_RUN_NUMBER' in report['with']['script']
+    assert 'runAttempt: process.env.GITHUB_RUN_ATTEMPT' in report['with']['script']
+    assert 'headSha: process.env.SOURCE_SHA' in report['with']['script']
     assert 'reportBenchmark' in report['with']['script']
 
 
@@ -231,7 +239,43 @@ def test_publication_serializes_shared_branch_writes_without_dropping_pending_jo
         'queue': 'max',
     }
     assert 'concurrency' not in workflow
-    assert 'concurrency' not in workflow['jobs']['benchmark']
+
+
+@pytest.mark.parametrize(
+    'event,pr,run_id,cancel',
+    [
+        ('pull_request', 42, 100, True),
+        ('pull_request', 43, 101, True),
+        ('push', None, 102, False),
+        ('workflow_dispatch', None, 103, False),
+    ],
+)
+def test_only_pr_benchmarks_coalesce(event, pr, run_id, cancel):
+    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
+    concurrency = workflow['jobs']['benchmark']['concurrency']
+    assert concurrency['group'] == (
+        '${{ github.workflow }}-benchmark-${{ github.event.pull_request.number || github.run_id }}'
+    )
+    group = (
+        concurrency['group']
+        .replace('${{ github.workflow }}', 'rocjitsu-benchmarks')
+        .replace(
+            '${{ github.event.pull_request.number || github.run_id }}',
+            str(pr or run_id),
+        )
+    )
+    assert group == f'rocjitsu-benchmarks-benchmark-{pr if pr is not None else run_id}'
+    expression = (
+        concurrency['cancel-in-progress'].removeprefix('${{').removesuffix('}}').strip()
+    )
+    assert (
+        eval(
+            expression.replace('github.event_name', repr(event)),
+            {'__builtins__': {}},
+            {},
+        )
+        is cancel
+    )
 
 
 def test_publication_steps_follow_responsibility_order():
