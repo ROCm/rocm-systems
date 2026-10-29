@@ -389,15 +389,13 @@ class AMDSMIHelpers:
         except amdsmi_exception.AmdSmiLibraryException:
             return "N/A"
 
-    def get_gpu_cuid_info(self, device_handle, include_primary=False):
+    def get_gpu_cuid_info(self, device_handle):
         """CUID presentation metadata."""
         result = {
-            "derived_cuid": "N/A",
-            "primary_cuid": "N/A" if include_primary else "N/A (not requested)",
+            "cuid": "N/A",
             "component_type": "UNKNOWN",
-            "auxiliary": "unknown",
             "source": "UNKNOWN",
-            "identifier_kind": "unknown",
+            "temporary": "unknown",
             "cuid_metadata_status": "unknown",
         }
         try:
@@ -411,8 +409,8 @@ class AMDSMIHelpers:
             ):
                 result.update(
                     component_type="N/A",
-                    auxiliary="N/A",
                     source="N/A",
+                    temporary="N/A",
                     cuid_metadata_status="not_supported",
                 )
             else:
@@ -423,29 +421,25 @@ class AMDSMIHelpers:
             except (amdsmi_exception.AmdSmiLibraryException, AttributeError):
                 return result
             if cuid and cuid != "N/A":
-                result.update(derived_cuid=cuid, identifier_kind="cuid")
+                result["cuid"] = cuid
             return result
 
         cuid = info.get("derived")
         if not cuid or cuid == "N/A":
             result["cuid_metadata_status"] = "invalid_value"
             return result
-        result.update(derived_cuid=cuid, identifier_kind="cuid", cuid_metadata_status="available")
+        result.update(cuid=cuid, cuid_metadata_status="available")
         result["component_type"] = info.get("component_type", "UNKNOWN")
         source = info.get("source")
         if source in ("DRIVER", "LIBRARY", "UNKNOWN"):
             result["source"] = source
         else:
             result["cuid_metadata_status"] = "partial"
-        auxiliary = info.get("auxiliary")
-        if isinstance(auxiliary, bool):
-            result["auxiliary"] = auxiliary
+        temporary = info.get("auxiliary")
+        if isinstance(temporary, bool):
+            result["temporary"] = temporary
         else:
             result["cuid_metadata_status"] = "partial"
-        if include_primary:
-            result["primary_cuid"] = info.get("primary") or (
-                "N/A (requires root)" if os.geteuid() != 0 else "N/A"
-            )
         return result
 
     def get_gpu_choices(self):

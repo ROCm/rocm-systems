@@ -32,6 +32,9 @@ if(NOT GTest_FOUND)
     message("GTest not found on system. Fetching from source...")
     include(FetchContent)
     FetchContent_Declare(googletest GIT_REPOSITORY https://github.com/google/googletest.git GIT_TAG v1.16.0)
+    # Only to build the tests: `make install` must not install googletest.
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
 elseif(TARGET GTest::GTest AND NOT TARGET GTest::gtest)
     # MODULE mode found GTest::GTest — create the canonical aliases expected below.

@@ -115,8 +115,8 @@ class ListDevicesCommands:
                 args.gpu, "physical_acc_id", enumeration_info["physical_acc_id"]
             )
 
-        self.logger.store_output(args.gpu, "cuid", cuid_info["derived_cuid"])
-        for field in ("source", "auxiliary", "cuid_metadata_status"):
+        self.logger.store_output(args.gpu, "cuid", cuid_info["cuid"])
+        for field in ("source", "temporary", "cuid_metadata_status"):
             self.logger.store_output(args.gpu, field, cuid_info[field])
 
         if multiple_devices:

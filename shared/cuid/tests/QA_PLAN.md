@@ -26,23 +26,21 @@ NIC, NPU, Platform, GPU and partition CUID is temporary, with source
 
 | Axis | Cases to distinguish |
 |---|---|
-| Privilege | Root and ordinary user; primary identity is privileged |
+| Privilege | Root and ordinary user get the same CUIDs |
 | Driver support | CUID attributes present and absent |
-| Firmware identity | Adopted system UUID and constructed Platform identity |
-| Hardware | Whole GPU, no readable serial, spatial partition, SR-IOV VF |
+| Hardware | Whole GPU, spatial partition, SR-IOV VF |
 
-A constructed primary encodes component identity. An adopted firmware primary
-is opaque and need not be UUIDv8. A temporary CUID is an HMAC keyed by the
-32-octet structure S, which holds the machine-id; it has no primary. Do not
-decode adopted UUIDs as constructed payloads.
+Every CUID is temporary: an HMAC keyed by the 32-octet structure S, which
+holds the machine-id. Nothing in this release builds or decodes a primary.
 
 ## Builds
 
 Run from the repository root. Use an unused build directory; an installed
-`/opt/rocm` package can shadow in-tree work.
+`/opt/rocm` package can shadow in-tree work. The lifecycle test needs it off
+`/tmp` (below).
 
 ```sh
-W=$(mktemp -d)
+W=$(mktemp -d -p "${XDG_CACHE_HOME:-$HOME/.cache}" cuid-qa.XXXX)
 cmake -S shared/cuid -B "$W/build-cuid" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON \
   -DBUILD_EXAMPLES=ON \
@@ -91,13 +89,15 @@ python3 -m pytest projects/amdsmi/tests/python/unit/gpu/test_cli_cuid_*.py -q
 
 `AMDCUID_BUILD_LIFECYCLE_TESTS=ON` adds `cuid_gpu_paths`, which runs GPU
 discovery against a synthetic `/sys` in a private mount namespace as root. Its
-build directory must be outside `/tmp`, which the namespace replaces. Run it
+build directory must be outside `/tmp`, which the namespace replaces, and on a
+filesystem that allows device nodes (not `nodev`); otherwise it skips. Run it
 with `sudo ctest --test-dir <build> -R cuid_gpu_paths --output-on-failure`.
 Besides GPU path resolution it covers partitions named by `cuid_unit_id` or
 by KFD, synthetic MI350X topology replays in SPX, DPX, QPX and
 CPX, and a non-AMD display device. A fixture that opts in
-also discovers a CPU (from the host's `/proc/cpuinfo`), a NIC and the Platform
-against synthetic SMBIOS and PCI data, all temporary.
+also discovers a CPU (from the host's CPUID and `/proc/cpuinfo`), a NIC
+against synthetic PCI data, and the Platform from the host's machine-id alone,
+all temporary.
 
 For tier 2 use a host without CUID attributes. The fixture tests do not
 require loading or unloading a GPU driver.
@@ -111,7 +111,7 @@ require loading or unloading a GPU driver.
   `85f293ea9d13dd69e296b7d2c32ace32255f2510771d0794a612abd9046af268`.
 * UnitID is zero for a whole component. Partition `k` of a GPU split into
   `n >= 2` has `n*(n-1)/2 + 1 + k`, from `cuid_unit_id` or KFD; an SR-IOV
-  VF's is its one-based index. Values above `0x1fff` are refused, not masked. The suite checks unchanged output on refusal
+  GPU VF's is 0 and a NIC function's, VF or not, is its function number. Values above `0x1fff` are refused, not masked. The suite checks unchanged output on refusal
   and propagation through GPU reconstruction.
 * A partition in DPX and above reports its own temporary CUID, never its
   parent's; in SPX amd-smi reports the whole GPU's. A partition whose UnitID
@@ -120,9 +120,12 @@ require loading or unloading a GPU driver.
   `ColdLookupEnvironment` starts before the test fixtures enumerate, but later
   calls in that environment share the manager warmed by the first lookup; it
   does not independently cold-start each API.
-* CLI checks: derived/primary/type/temporary/source fields per GPU; primary
-  only when explicitly requested and permitted; consistent JSON/CSV field
-  names.
+* CLI checks: `static --cuid` reports `cuid`, `component_type`, `source`,
+  `temporary` and `cuid_metadata_status`; `node --cuid` reports `cuid`,
+  `component_type`, `source`, `temporary`, `bdf` and `device_path` per
+  component; `list` reports `cuid`, `source`, `temporary` and
+  `cuid_metadata_status`. No primary in any CLI output; the same field names
+  and order in human, JSON and CSV.
 * GPU discovery lists AMD GPUs (Vendor ID `0x1002`) only. `cuid_gpu_paths`
   checks this with a synthetic `0x1a03` display device; on a host with a BMC
   display device, `amdcuid_get_all_handles()` must not return it either.

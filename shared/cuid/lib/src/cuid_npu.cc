@@ -76,9 +76,8 @@ amdcuid_status_t discover_via_accel(std::vector<DevicePtr>& npus) {
   return npus.empty() ? AMDCUID_STATUS_UNSUPPORTED : AMDCUID_STATUS_SUCCESS;
 }
 
-// Fallback: discover NPU devices by scanning PCI bus for AMD processing
-// accelerator class devices. This handles systems where /sys/class/accel
-// is not populated (e.g., driver not loaded or accel subsystem absent).
+// Fallback for kernels without the accel class: scan the PCI bus.
+// discover_single() still requires amdxdna.
 amdcuid_status_t discover_via_pci_bus(std::vector<DevicePtr>& npus) {
   const char* pci_path = "/sys/bus/pci/devices";
   DIR* dir = opendir(pci_path);
@@ -98,12 +97,11 @@ amdcuid_status_t discover_via_pci_bus(std::vector<DevicePtr>& npus) {
     uint16_t vendor_id = static_cast<uint16_t>(strtol(vendor_str.c_str(), nullptr, 16));
     if (vendor_id != AMD_VENDOR_ID) continue;
 
-    std::string class_str = CuidUtilities::read_sysfs_file(device_path + "/class");
-    if (class_str.empty()) continue;
-    // sysfs class is 24-bit (class:subclass:prog_if), shift to get
-    // class:subclass
-    uint16_t pci_class = static_cast<uint16_t>(strtol(class_str.c_str(), nullptr, 16) >> 8);
-    uint16_t base_class = pci_class & PCI_CLASS_BASE_MASK;
+    uint16_t pci_class = 0;
+    if (CuidUtilities::read_pci_class(device_path, entry->d_name, pci_class) !=
+        AMDCUID_STATUS_SUCCESS)
+      continue;
+    const uint16_t base_class = pci_class & PCI_CLASS_BASE_MASK;
     if (base_class != PCI_CLASS_PROCESSING_ACCEL && base_class != PCI_CLASS_SIGNAL_PROCESSING)
       continue;
 
@@ -133,26 +131,37 @@ amdcuid_status_t CuidNpu::discover_single(amdcuid_npu_info* npu_info,
                                           const std::string& device_path) {
   amdcuid_npu_info info = {};
   std::string bdf = CuidUtilities::readlink_bdf(device_path);
+  if (bdf.empty()) {
+    const size_t slash = device_path.rfind('/');
+    const std::string last = device_path.substr(slash == std::string::npos ? 0 : slash + 1);
+    if (CuidUtilities::is_valid_bdf(last)) bdf = last;
+  }
 
   const auto identity_status =
       PciUtil::read_identity(device_path, bdf, info.header.fields.npu.vendor_id,
                              info.header.fields.npu.device_id, info.header.fields.npu.revision_id);
   if (identity_status != AMDCUID_STATUS_SUCCESS) return identity_status;
 
-  std::string pci_class = CuidUtilities::read_sysfs_file(device_path + "/class");
   uint16_t pci_class_integer = 0;
-  if (pci_class.empty() && !bdf.empty()) {
-    uint8_t class_id_bytes[2] = {0};
-    const uint16_t offset = 0xa;
-    amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, class_id_bytes, 2, offset);
-    uint16_t class_id_int = PciUtil::load_le16(class_id_bytes);
-    pci_class_integer = (status == AMDCUID_STATUS_SUCCESS) ? class_id_int : 0;
-  } else {
-    // sysfs class file returns 24-bit value (class:subclass:prog_if),
-    // shift right by 8 to get 16-bit class:subclass
-    pci_class_integer = static_cast<uint16_t>(strtol(pci_class.c_str(), nullptr, 16) >> 8);
-  }
+  const amdcuid_status_t class_status =
+      CuidUtilities::read_pci_class(device_path, bdf, pci_class_integer);
+  if (class_status != AMDCUID_STATUS_SUCCESS) return class_status;
   info.header.fields.npu.pci_class = pci_class_integer;
+
+  // An NPU is an AMD signal-processing or accelerator function bound to
+  // amdxdna; other functions of those classes, such as the Sensor Fusion Hub,
+  // are not.
+  const uint16_t base_class = pci_class_integer & PCI_CLASS_BASE_MASK;
+  if (info.header.fields.npu.vendor_id != AMD_VENDOR_ID ||
+      (base_class != PCI_CLASS_PROCESSING_ACCEL && base_class != PCI_CLASS_SIGNAL_PROCESSING))
+    return AMDCUID_STATUS_UNSUPPORTED;
+  char driver[256] = {};
+  const ssize_t driver_length =
+      readlink((device_path + "/driver").c_str(), driver, sizeof(driver) - 1);
+  if (driver_length <= 0) return AMDCUID_STATUS_UNSUPPORTED;
+  const char* driver_name = strrchr(driver, '/');
+  if (std::strcmp(driver_name ? driver_name + 1 : driver, "amdxdna") != 0)
+    return AMDCUID_STATUS_UNSUPPORTED;
 
   // Determine the device node path.
   // If discovered through /sys/class/accel, strip the /device suffix.
@@ -247,7 +256,8 @@ amdcuid_status_t CuidNpu::get_temporary_input(CuidUtilities::AuxiliaryInput& aux
 
   aux = {};
   aux.format = CuidUtilities::kAuxFormatPcie;
-  CuidUtilities::set_pcie_routing(aux, bdf);
+  const amdcuid_status_t routing = CuidUtilities::set_pcie_routing(aux, bdf);
+  if (routing != AMDCUID_STATUS_SUCCESS) return routing;
   aux.revision_id = m_info.header.fields.npu.revision_id;
   aux.device_id = m_info.header.fields.npu.device_id;
   aux.vendor_id = m_info.header.fields.npu.vendor_id;
