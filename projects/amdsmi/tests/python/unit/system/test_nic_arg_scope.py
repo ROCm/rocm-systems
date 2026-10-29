@@ -7,6 +7,7 @@ Elsewhere it parsed silently and the handler fell back to every GPU, so ``reset 
 all of them.
 """
 
+import ast
 import os
 import sys
 import unittest
@@ -107,11 +108,27 @@ class TestNicArgScope(unittest.TestCase):
 
     def test_every_device_subcommand_is_classified(self):
         # Each _add_device_arguments call site is one subcommand; the four consumers pass nic=True.
-        source = Path(_PARSER_PATH).read_text()
-        call_sites = source.count("self._add_device_arguments(")
-        consumer_sites = source.count("required=False, nic=True)")
+        tree = ast.parse(Path(_PARSER_PATH).read_text())
+        call_sites = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and (node.func.attr == "_add_device_arguments")
+        ]
+        consumer_sites = [
+            call
+            for call in call_sites
+            if any(
+                (keyword.arg == "nic")
+                and isinstance(keyword.value, ast.Constant)
+                and (keyword.value.value is True)
+                for keyword in call.keywords
+            )
+        ]
         self.assertEqual(
-            len(self._device_subcommands()) - len(_NIC_CONSUMERS), call_sites - consumer_sites
+            len(self._device_subcommands()) - len(_NIC_CONSUMERS),
+            len(call_sites) - len(consumer_sites),
         )
 
     def test_other_subcommands_reject_nic(self):
