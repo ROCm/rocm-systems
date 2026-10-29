@@ -250,6 +250,8 @@ cases:
   Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime: {}
   Unit_HRR_KernelArgs_Direct: {}
   Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled: {}
+  Unit_HRR_KernelSignature_Direct: {}
+  Unit_HRR_KernelSignature_MismatchedArchiveRefused: {}
   Unit_HRR_LoggingRoundtrip: {}
   Unit_HRR_Logging_Direct: {}
   Unit_HRR_LongKernelNameNotRecorded: {}
