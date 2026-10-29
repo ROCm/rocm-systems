@@ -1,0 +1,10 @@
+inherit: ../gfx940/sets.yaml
+compute_thruput_flops:
+  metrics:
+  - compute.mfma_flops_f8
+  - compute.mfma_flops_mxf8
+  - compute.mfma_flops_bf16
+  - compute.mfma_flops_f16
+  - compute.mfma_flops_f32
+  - compute.mfma_flops_f64
+  - compute.mfma_iops_int8

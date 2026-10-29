@@ -14,6 +14,7 @@ For every arch in METRIC_LIBRARY_PARENT_ARCH, check that:
 - a formula has one id on every arch;
 - every formula and peak parses;
 - each measured roofline ceiling of the arch is the peak_empirical of one metric;
+- each set lists metric ids of the arch and fits in one profiling pass;
 - top-level keys are sorted.
 
 src/rocprof_compute_soc/metric_library/README.md explains the rules.
@@ -34,6 +35,7 @@ from rocprof_compute_soc.metric_library import loader  # noqa: E402
 from utils.metrics.expression import build_eval_string  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_common import canonical_config_arch  # noqa: E402
+from utils.utils_counter_defs import counters_over_block_limits  # noqa: E402
 
 # Categories named after panels, not hardware.
 VIEW_CATEGORIES = ("system", "memchart", "roofline", "wavefront")
@@ -57,6 +59,8 @@ METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical")
 # Metric fields with an expression.
 EXPRESSION_FIELDS = ("formula", *METRIC_OPTIONAL_FIELDS)
 VARIABLE_FIELDS = ("formula",)
+SET_FIELDS = ("title", "metrics")
+SET_OPTION_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$")
 # The measured ceiling in a peak_empirical value.
 EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
 # Measured ceilings with no metric on any arch.
@@ -104,15 +108,18 @@ def validate_arch(metric_dir: Path, arch: str) -> List[str]:
         file_name: loader.load_file(paths) for file_name, paths in files.items()
     }
     variables = documents.pop(loader.VARIABLES_FILENAME, {})
+    sets = documents.pop(loader.SETS_FILENAME, {})
+    set_errors = _sets_errors(sets, f"{arch}/{loader.SETS_FILENAME}")
     return [
         *_key_order_errors(arch, files),
         *_variables_errors(variables, f"{arch}/{loader.VARIABLES_FILENAME}"),
+        *set_errors,
         *(
             error
             for file_name, document in documents.items()
             for error in _metrics_errors(document, f"{arch}/{file_name}")
         ),
-        *_arch_metrics_errors(arch, documents),
+        *_arch_metrics_errors(arch, documents, {} if set_errors else sets),
     ]
 
 
@@ -207,6 +214,35 @@ def _variables_errors(document: Dict[str, Any], source: str) -> List[str]:
     return errors
 
 
+def _sets_errors(document: Dict[str, Any], source: str) -> List[str]:
+    """Report sets with a bad option name, missing fields or a bad metric list."""
+    errors = []
+    for set_option, entry in document.items():
+        item = str(set_option)
+        if not SET_OPTION_RE.match(item):
+            errors.append(f"[{source}] {item}: a set option must be snake_case")
+        field_errors = _field_errors(entry, SET_FIELDS, (), source, item)
+        errors.extend(field_errors)
+        if not field_errors:
+            errors.extend(_set_entry_errors(entry, source, item))
+    return errors
+
+
+def _set_entry_errors(entry: Dict[str, Any], source: str, item: str) -> List[str]:
+    """Report a set without a title, or without a list of distinct metric ids."""
+    errors = _text_errors(entry, ("title",), source, item)
+    metric_ids = entry["metrics"]
+    if (
+        not isinstance(metric_ids, list)
+        or not metric_ids
+        or not all(isinstance(metric_id, str) for metric_id in metric_ids)
+    ):
+        errors.append(f"[{source}] {item}: 'metrics' must list metric ids")
+    elif len(set(metric_ids)) != len(metric_ids):
+        errors.append(f"[{source}] {item}: 'metrics' lists an id twice")
+    return errors
+
+
 def _metrics_errors(document: Dict[str, Any], source: str) -> List[str]:
     """Report bad ids and bad metrics of one merged file."""
     category = Path(source).stem
@@ -293,8 +329,10 @@ def _peak_errors(entry: Dict[str, Any], source: str, metric_id: str) -> List[str
     return errors
 
 
-def _arch_metrics_errors(arch: str, documents: Dict[str, Dict[str, Any]]) -> List[str]:
-    """Report problems across all metrics of arch."""
+def _arch_metrics_errors(
+    arch: str, documents: Dict[str, Dict[str, Any]], sets: Dict[str, Any]
+) -> List[str]:
+    """Report problems across all metrics and sets of arch."""
     try:
         combined = loader.combine_metric_documents(documents)
     except loader.MetricLibraryError as error:
@@ -309,6 +347,56 @@ def _arch_metrics_errors(arch: str, documents: Dict[str, Dict[str, Any]]) -> Lis
         *_ceiling_errors(arch, metrics),
         *_shared_formula_errors(arch, metrics),
         *_shared_name_errors(arch, metrics),
+        *_set_metric_errors(arch, sets, metrics),
+    ]
+
+
+def _set_metric_errors(
+    arch: str, sets: Dict[str, Any], metrics: Dict[str, Any]
+) -> List[str]:
+    """Report sets with unknown metric ids or more counters than one pass holds."""
+    library = loader.MetricLibrary(arch, metrics, {}, sets)
+    errors = []
+    for set_option, entry in sets.items():
+        unknown_metric_ids = [
+            metric_id for metric_id in entry["metrics"] if metric_id not in metrics
+        ]
+        if unknown_metric_ids:
+            errors.append(
+                f"[{arch}] set {set_option}: unknown metric ids {unknown_metric_ids}"
+            )
+            continue
+        for gpu_arch in _member_archs(arch):
+            errors.extend(_one_pass_errors(gpu_arch, set_option, entry, library))
+    return errors
+
+
+def _one_pass_errors(
+    gpu_arch: str,
+    set_option: str,
+    entry: Dict[str, Any],
+    library: loader.MetricLibrary,
+) -> List[str]:
+    """Report each block where the counters of a set exceed one pass on gpu_arch."""
+    limits = mi_gpu_specs.get_perfmon_config(gpu_arch)
+    counters = library.get_counters_for_metrics(
+        entry["metrics"], mi_gpu_specs.get_gpu_series(gpu_arch)
+    )
+    return [
+        f"[{gpu_arch}] set {set_option}: block {block} needs {len(block_counters)} "
+        f"counters but one pass holds {limits[block]}"
+        for block, block_counters in counters_over_block_limits(
+            counters, limits
+        ).items()
+    ]
+
+
+def _member_archs(arch: str) -> List[str]:
+    """Return the GPU archs with the analysis configs of arch."""
+    return [
+        gpu_arch
+        for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
+        if canonical_config_arch(gpu_arch) == arch
     ]
 
 
