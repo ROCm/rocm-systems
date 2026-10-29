@@ -28,7 +28,6 @@ _HOST_HANG_TESTS = (
     "NetIbMPITest.MultiRecvGPUShuffled",
     "NetIbMPITest.FlushRepeated_VNic",
 )
-_FLUSH_CONFIGS = ("net_ib_gdr_flush", "net_ib_gdr_flush_flag_base", "net_ib_flush")
 _TEST_RE = re.compile(r"^\s*TEST(_F|_P)?\(\s*(\w+)\s*,\s*(\w+)\s*\)", re.M)
 
 
@@ -72,10 +71,13 @@ class Mi455AinicNetIbConfigTest(unittest.TestCase):
         self.assertEqual(env.get("RCCL_CTS_OFFLOAD_ENABLED"), "0")
         self.assertEqual(env.get("NCCL_GDR_FLUSH_DISABLE"), "1")
 
-    def test_flush_suites_keep_flush_enabled(self):
-        for name in _FLUSH_CONFIGS:
-            env = self.ainic.combine_configs(name)["env_variables"]
-            self.assertEqual(env.get("NCCL_GDR_FLUSH_DISABLE"), "0", name)
+    def test_gdr_flush_stays_disabled(self):
+        # Meta RoCE (ionic) does not support the flush QP's loopback RDMA READ.
+        for suite in self.suites:
+            for test in suite.get("tests", []):
+                env = {**suite.get("env_variables", {}), **(test.get("env_variables") or {})}
+                self.assertEqual(env.get("NCCL_GDR_FLUSH_DISABLE"), "1",
+                                 f"{suite['suite_details']['name']}: {test.get('name')}")
 
     def test_host_hang_tests_stay_disabled(self):
         for name in _HOST_HANG_TESTS:

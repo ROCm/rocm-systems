@@ -267,8 +267,7 @@
       "extends": "net_ib_base",
       "timeout": 120,
       "env_variables": {
-        "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_GDR_FLUSH_DISABLE": "0"
+        "NCCL_CUMEM_ENABLE": "1"
       },
       "tests": [
         {
@@ -308,8 +307,7 @@
       "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them.",
       "env_variables": {
         "RCCL_IB_GDR_FLUSH_FLAG": "1",
-        "NCCL_IB_ADAPTIVE_ROUTING": "0",
-        "NCCL_GDR_FLUSH_DISABLE": "0"
+        "NCCL_IB_ADAPTIVE_ROUTING": "0"
       }
     },
     "net_ib_gdr_flush_flag": {
@@ -678,21 +676,14 @@
         {
           "name": "NetIB_VNic_FlushRepeated",
           "description": "Repeated GPU-memory flush through a fused vNIC",
-          "test_filter": "NetIbMPITest.FlushRepeated_VNic",
-          "env_variables": {
-            "NCCL_GDR_FLUSH_DISABLE": "0"
-          }
+          "test_filter": "NetIbMPITest.FlushRepeated_VNic"
         }
       ]
     },
     "net_ib_flush": {
       "extends": "net_ib_base",
       "timeout": 120,
-      "description": "iflush after a GPU receive, with the flush enabled. Relaxed ordering is off because ionic rejected the flush RDMA READ of a relaxed-ordering recv MR.",
-      "env_variables": {
-        "NCCL_GDR_FLUSH_DISABLE": "0",
-        "NCCL_IB_PCI_RELAXED_ORDERING": "0"
-      },
+      "description": "iflush after a GPU receive. The flush stays disabled (net_ib_base): its loopback RDMA READ is not supported on Meta RoCE (ionic), so this checks the disabled-flush completion path.",
       "tests": [
         {
           "name": "NetIB_Flush_AfterRecv",
