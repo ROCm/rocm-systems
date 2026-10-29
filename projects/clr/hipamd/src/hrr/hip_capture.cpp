@@ -136,10 +136,10 @@ const char* hip_capture_output_dir() {
 // build (DEBUG from rocclr/utils/macros.hpp, the macro that picks debug() over
 // release() there) honours it; any other build ignores it, because the dumps put
 // a second copy of the workload's kernel arguments in the log, where log
-// collection picks them up. The archive and blob size limits,
-// HIP_HRR_CAPTURE_MAX_MB and HIP_HRR_CAPTURE_MAX_BLOB_MB, are in flags.hpp; the
-// snapshot knobs, HIP_HRR_HOST_SNAPSHOTS and HIP_HRR_HOST_SNAPSHOT_MAX_MB, are
-// read here (hrr_host_snapshots_enabled, hrr_host_snapshot_cap_bytes).
+// collection picks them up. HIP_HRR_HOST_SNAPSHOTS and
+// HIP_HRR_HOST_SNAPSHOT_MAX_MB are not in flags.hpp: they only tune capture, so
+// they are read here (hrr_host_snapshots_enabled, hrr_host_snapshot_cap_bytes)
+// and stay with the HRR code and its reviewers.
 static bool hrr_dbg_args_enabled() {
 #if defined(DEBUG)
   return HIP_HRR_DEBUG_ARGS;

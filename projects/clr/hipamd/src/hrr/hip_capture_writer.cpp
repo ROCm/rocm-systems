@@ -51,7 +51,6 @@
 
 #include "os/os.hpp"           // amd::Os::timeNanos()
 #include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
-#include "utils/flags.hpp"     // HIP_HRR_CAPTURE_MAX_MB, HIP_HRR_CAPTURE_MAX_BLOB_MB
 
 #include <atomic>
 #include <chrono>
@@ -1039,7 +1038,11 @@ static uint64_t              g_max_blob_bytes = 0;     // set by open()
 static std::atomic<uint64_t> g_archive_bytes{0};
 static std::atomic<bool>     g_blob_cap_reported{false};
 
-static uint64_t mib_to_bytes(size_t mib) {
+// The limit in bytes that environment variable `name` sets in MiB, 0 unless
+// set. The MiB count is parsed as the CLR flags registry parses a size_t.
+static uint64_t env_limit_bytes(const char* name) {
+  const char* v = std::getenv(name);
+  const uint64_t mib = v ? static_cast<size_t>(std::atol(v)) : 0;
   return std::min<uint64_t>(mib, UINT64_MAX >> 20) << 20;
 }
 
@@ -1263,8 +1266,11 @@ bool open(const char* output_dir) {
     return open_failed(out_dir, created_pid_dir);
   }
 
-  g_max_archive_bytes = mib_to_bytes(HIP_HRR_CAPTURE_MAX_MB);
-  g_max_blob_bytes = mib_to_bytes(HIP_HRR_CAPTURE_MAX_BLOB_MB);
+  // Read once: a forked child keeps the limits its parent started with.
+  static const uint64_t max_archive_bytes = env_limit_bytes("HIP_HRR_CAPTURE_MAX_MB");
+  static const uint64_t max_blob_bytes = env_limit_bytes("HIP_HRR_CAPTURE_MAX_BLOB_MB");
+  g_max_archive_bytes = max_archive_bytes;
+  g_max_blob_bytes = max_blob_bytes;
   // The file header is the archive's first bytes.
   g_archive_bytes.store(sizeof(hrr_file_header), std::memory_order_relaxed);
   g_blob_cap_reported.store(false, std::memory_order_relaxed);
