@@ -18,16 +18,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from datetime import datetime
 from subprocess import Popen, PIPE, STDOUT
 import argparse
 import os
-import shutil
 import sys
 import platform
-import glob
-import pandas as pd
-from pathlib import Path
 
 __license__ = "MIT"
 __version__ = "1.0"
@@ -102,16 +97,16 @@ if(os.path.isfile(run_rocDecode_app)):
 else:
     print("\nERROR: rocDecode Executable Not Found - "+run_rocDecode_app)
     print("Build the sample first, or pass --videodecode_exe to point at it.\n")
-    exit()
+    sys.exit(1)
 
 if os.path.exists(filesDir) and not os.path.isfile(filesDir):
     # Checking if the directory is empty or not
     if not os.listdir(filesDir):
         print("\nERROR: Empty directory - no videos to decode")
-        exit()
+        sys.exit(1)
 else:
     print("\nERROR: The input directory path is either for a file or directory does not exist!")
-    exit()
+    sys.exit(1)
 
 if os.path.exists(resultsPath+'/rocDecode_output.log'):
     os.remove(resultsPath+'/rocDecode_output.log')
@@ -129,10 +124,10 @@ md5ListSize = len(md5FileList)
 
 if streamListSize == 0:
     print("Error: Empty stream file folder\n")
-    exit()
+    sys.exit(1)
 if streamListSize != md5ListSize:
     print("Error: Bit stream file number and MD5 file number do not match\n")
-    exit()
+    sys.exit(1)
 
 for i in range(streamListSize):
     streamFilePath = streamFileDir + streamFileList[i]
@@ -171,15 +166,35 @@ with open(resultsPath + '/rocDecode_output.log', 'r') as logFile:
             failNum += 1
         line = logFile.readline()
 
+    unfinishedNum = streamListSize - passNum - failNum
     print("Conformance test completed on the", streamListSize, "streams:")
     print("     - The number of passing streams is", passNum)
     print("     - The number of failing streams is", failNum)
-    print("     - The number of streams that did not finish decoding is " + str(streamListSize - passNum - failNum))
+    print("     - The number of streams that did not finish decoding is " + str(unfinishedNum))
     resultFile.write("\n===================================================\n")
     resultFile.write("Conformance test result summary on the " + str(streamListSize) + " streams:\n")
     resultFile.write("===================================================")
     resultFile.write("\n     - The number of passing streams is " + str(passNum))
     resultFile.write("\n     - The number of failing streams is " + str(failNum))
-    resultFile.write("\n     - The number of streams that did not finish decoding is " + str(streamListSize - passNum - failNum))
+    resultFile.write("\n     - The number of streams that did not finish decoding is " + str(unfinishedNum))
     resultFile.close()
 logFile.close()
+
+# Report the outcome through the exit code so callers -- CI jobs in particular --
+# can tell a clean sweep from a failing one without scraping stdout.
+#
+# A pass count above the stream count cannot come from decoding this run's streams: it means the
+# tally was taken over output that is not all from this run. That happens when another run shares
+# the results directory, because run_and_log appends to rocDecode_output.log. Treat it as a failure
+# rather than letting it through as a negative unfinishedNum, which reads as a pass.
+if passNum > streamListSize:
+    print("\nERROR: reported " + str(passNum) + " passing streams out of " + str(streamListSize) + ".")
+    print("       The tally is inconsistent, so these results are not usable. Pass a dedicated")
+    print("       --results_directory and re-run with nothing else decoding on this machine.")
+    sys.exit(1)
+
+if failNum > 0 or unfinishedNum > 0:
+    print("\nConformance test FAILED")
+    sys.exit(1)
+
+print("\nConformance test PASSED")
