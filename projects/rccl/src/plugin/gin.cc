@@ -21,6 +21,7 @@
 
 #include <string.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <mutex>
 
 typedef ncclGin_t* getNcclGin_t(void* ginPluginLib);
@@ -248,11 +249,13 @@ static void initPluginLibsOnceFunc() {
 
   memset(pluginLibs, 0, NCCL_GIN_MAX_PLUGINS * sizeof(ginPluginLib_t));
 
-  const char* envGinTypes = ncclGetEnv("NCCL_GIN_TYPES");
+  // Same getenv() source as ncclGinTypeListMask / ncclGinTypeEnabled, so an
+  // NCCL_ENV_PLUGIN value cannot be logged here and then ignored at init.
+  const char* envGinTypes = getenv("NCCL_GIN_TYPES");
   if (envGinTypes) {
     uint64_t ginTypeMask;
     bool valid = ncclGinParseTypeList(envGinTypes, &ginTypeMask);
-    if (ncclGetEnv("NCCL_GIN_TYPE")) {
+    if (getenv("NCCL_GIN_TYPE")) {
       INFO(NCCL_ENV | NCCL_NET, "NCCL_GIN_TYPES=%s ignored: NCCL_GIN_TYPE is set", envGinTypes);
     } else if (ginTypeMask == 0) {
       WARN("NCCL_GIN_TYPES=%s names no valid GIN type, ignoring it", envGinTypes);
