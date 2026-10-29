@@ -10,7 +10,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
-- Fixed combined `rocprofv3 --pmc` and input-file jobs applying the first job's output file name and directory to CLI passes. CLI output options now configure only CLI passes, while each input-file job retains its own output settings. Other configuration conflicts now report a one-line fatal error instead of a Python traceback.
+- Fixed combined `rocprofv3 --pmc` and input-file jobs applying the first job's output file name and directory to CLI passes. CLI output file name and directory options now configure only CLI passes, while each input-file job retains its own output file name and directory. Other configuration conflicts now report a one-line fatal error instead of a Python traceback.
 
 ### Known issues
 

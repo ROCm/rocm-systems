@@ -1277,11 +1277,18 @@ Where the option ``--pmc`` is used to specify the extra counters to be collected
 Kernel counter collection output
 +++++++++++++++++++++++++++++++++
 
-Using ``rocprofv3`` for counter collection using input file or command line generates a ``./pmc_n/counter_collection.csv`` file prefixed with the process ID. For each ``pmc`` row, a directory ``pmc_n`` containing a ``counter_collection.csv`` file is generated, where n = 1 for the first row and so on.
+The deprecated plain-text input format uses a ``pmc_n`` subdirectory for each
+``pmc`` row, where ``n`` starts at 1. For example, the first row writes its
+counter data below ``./pmc_1/``.
 
-When using input file in JSON or YAML format, for each job, a directory ``pass_n`` containing a ``counter_collection.csv`` file is generated, where n = 1 for the first job and so on.
+Application-replay multi-pass collection uses ``pass_n`` instead. This includes
+multiple command-line ``--pmc`` flags and JSON or YAML input jobs. The
+``pass_n`` directory is placed under that pass's effective output directory, as
+described in the preceding output organization section, and ``n`` follows the
+combined pass order starting at 1.
 
-Each row of the CSV file is an instance of kernel execution. Here is a truncated version of the output file from ``pmc_1``:
+Each row of the CSV file is an instance of kernel execution. Here is a
+truncated example from the deprecated plain-text layout:
 
 .. code-block:: shell
 
