@@ -111,13 +111,14 @@ TEST_F(NicUnit, NicSensorsCopyWithoutAnArrayOnlyReportsTheCount) {
 
 TEST_F(NicUnit, NicSensorsCopyMapsEveryField) {
   auto records = make_records(1);
-  records->sensors[0] = {AMDSMI_METRIC_CATEGORY_POWER,
-                         AMDSMI_NIC_SENSOR_NAME_CRIT,
-                         AMDSMI_METRIC_UNIT_MICROWATT,
-                         7,
-                         3,
-                         "total power",
-                         35340000};
+  // GCC 9 rejects a braced list holding a string literal on the right of a plain assignment.
+  records->sensors[0] = smi_nic_sensor_t{AMDSMI_METRIC_CATEGORY_POWER,
+                                         AMDSMI_NIC_SENSOR_NAME_CRIT,
+                                         AMDSMI_METRIC_UNIT_MICROWATT,
+                                         7,
+                                         3,
+                                         "total power",
+                                         35340000};
   auto out = make_out(1);
   auto num_sensors = uint32_t{1};
 

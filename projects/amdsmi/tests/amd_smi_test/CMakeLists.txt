@@ -143,7 +143,7 @@ target_link_libraries(
 # tools that need a live interface stay in tests/nic/build_tests.sh. -fno-rtti matches amdsminic.
 add_executable(test_nic_telemetry_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_telemetry_suite.cpp)
 target_compile_options(test_nic_telemetry_suite PRIVATE -fno-rtti)
-target_link_libraries(test_nic_telemetry_suite amdsminic ${FILESYSTEM_LIB})
+target_link_libraries(test_nic_telemetry_suite amdsminic Threads::Threads ${FILESYSTEM_LIB})
 add_test(NAME nic_telemetry_suite COMMAND test_nic_telemetry_suite)
 
 # Self-contained NIC discovery suite. Redirects vendor driver sysfs lookups to a

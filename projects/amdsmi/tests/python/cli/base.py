@@ -799,6 +799,10 @@ class TestCliBase(unittest.TestCase):
                             cmd = ""
                     else:
                         cmd = ""
+            # The NIC path prints once and never loops, so the parser rejects --watch with --nic
+            words = cmd.split()
+            if "--nic" in words and ("--watch" in words):
+                cond = [AmdSmiExitCode.INVALID_PARAMETER]
             cmds[index] = (cmd, cond)
 
         # Pare down commands
