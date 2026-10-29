@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from common import SUPPORTED_ARCHS
 
-from argparser import omniarg_parser
+from argparser import build_parser
 from rocprof_compute_base import RocProfCompute
 
 SELECTION_CONFLICT = (
@@ -28,8 +28,7 @@ def make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
 
 
 def parse_profile_args(options: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    omniarg_parser(parser, Path.cwd(), SUPPORTED_ARCHS, {"ver_pretty": "test"})
+    parser = build_parser(Path.cwd(), SUPPORTED_ARCHS, {"ver_pretty": "test"})
     return parser.parse_args(["profile", *options, "--", "./app"])
 
 
