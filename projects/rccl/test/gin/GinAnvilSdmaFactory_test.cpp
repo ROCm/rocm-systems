@@ -248,6 +248,100 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiChannel) {
   destroyOut(&out);
 }
 
+// F10b: multi-rank create. The device table is pe-major (local_pe * numChannels + c) and
+// peers sharing a device share one queue (the connect loop skips an existing queue).
+TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+
+  auto allOnDevice0 = [](void* ctx, void* buf, size_t) -> int {
+    const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
+    auto* devs = static_cast<int*>(buf);
+    for (int i = 0; i < nRanks; ++i) {
+      if (devs[i] < 0) devs[i] = 0;
+    }
+    return 0;
+  };
+
+  auto readTable = [](const CreateOut& out, int n) {
+    std::vector<void*> t(n, reinterpret_cast<void*>(0x1));
+    EXPECT_EQ(hipMemcpy(t.data(), out.gpu_handles, n * sizeof(void*), hipMemcpyDeviceToHost),
+              hipSuccess);
+    return t;
+  };
+
+  void* dev0Handle = nullptr;
+  {
+    CreateOut one{};
+    ASSERT_EQ(tryCreate(1, 0, 0, allOnDevice0, 1, &one), 0);
+    dev0Handle = readTable(one, 1)[0];
+    ASSERT_NE(dev0Handle, nullptr);
+    destroyOut(&one);
+  }
+  for (int nRanks : {2, 3}) {
+    SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
+    std::vector<void*> first;
+    for (int pass = 0; pass < 2; ++pass) {
+      CreateOut out{};
+      ASSERT_EQ(tryCreate(nRanks, 0, 0, allOnDevice0, 1, &out), 0);
+      EXPECT_EQ(gin_anvil_sdma_get_n_ranks(out.handle), nRanks);
+      std::vector<void*> t = readTable(out, nRanks);
+      for (int pe = 0; pe < nRanks; ++pe) {
+        EXPECT_NE(t[pe], nullptr) << "pe=" << pe;
+        EXPECT_EQ(t[pe], t[0]) << "pe=" << pe;
+      }
+      if (pass == 0) {
+        first = t;
+      } else {
+        EXPECT_EQ(t, first);
+      }
+      EXPECT_EQ(t[0], dev0Handle);
+      destroyOut(&out);
+    }
+  }
+
+  int ndev = 0;
+  if (hipGetDeviceCount(&ndev) != hipSuccess || ndev < 2) return;
+
+  auto devPerRank = [](void* ctx, void* buf, size_t) -> int {
+    const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
+    auto* devs = static_cast<int*>(buf);
+    for (int i = 0; i < nRanks; ++i) {
+      if (devs[i] < 0) devs[i] = i;
+    }
+    return 0;
+  };
+  CreateOut out2{};
+  if (tryCreate(2, 0, 0, devPerRank, 1, &out2) != 0) {
+    GTEST_SKIP() << "cross-device SDMA create unavailable (peer access setup)";
+  }
+  std::vector<void*> t2 = readTable(out2, 2);
+  EXPECT_NE(t2[0], nullptr);
+  EXPECT_NE(t2[1], nullptr);
+  EXPECT_NE(t2[0], t2[1]);
+  EXPECT_EQ(t2[0], dev0Handle);
+  destroyOut(&out2);
+
+  // With 2 channels a channel-major table differs from the pe-major one. Peer 2's queues are new, so
+  // both of its channels exist; peers 0 and 1 reuse 1-channel queues from above.
+  if (ndev < 3) return;
+  constexpr int kChannels = 2;
+  CreateOut out3{};
+  ASSERT_EQ(tryCreate(3, 0, 0, devPerRank, kChannels, &out3), 0);
+  std::vector<void*> t3 = readTable(out3, 3 * kChannels);
+  for (int pe = 0; pe < 3; ++pe) {
+    for (int c = 0; c < kChannels; ++c) {
+      sdma_anvil::SdmaQueue* q = sdma_anvil::anvil.getSdmaQueue(0, pe, c);
+      EXPECT_EQ(t3[pe * kChannels + c], q ? static_cast<void*>(q->deviceHandle()) : nullptr)
+          << "pe=" << pe << " c=" << c;
+    }
+  }
+  EXPECT_NE(t3[2 * kChannels], nullptr);
+  EXPECT_NE(t3[2 * kChannels + 1], nullptr);
+  destroyOut(&out3);
+}
+
 // The CPX fold is not visible on a queue handle, and getSdmaEngineIdFromOamMap is
 // private. These assert when the fold runs, including the in-range diagonal a
 // partition must still fold. The engine the fold picks is rocSHMEM's contract and
