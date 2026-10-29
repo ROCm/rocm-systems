@@ -23,7 +23,9 @@
 #   configure       configure test/host
 #   build           build all host binaries (default target)
 #   guards          device-table unittest, the kernel-count and accl-reporter
-#                   pytest suites, plus src/include/test_poison_hip_atomics.py,
+#                   pytest suites, the tools/scripts/test_runner unittests
+#                   (which include the rccl-device-compile driver cases),
+#                   src/include/test_poison_hip_atomics.py,
 #                   test/test_makefile_depflags.py, and the
 #                   tools/RcclReplayer host checks (make test)
 #   run             run the suite (timestamped log + JUnit XML). Always emits
@@ -207,6 +209,8 @@ do_host_tests() {
     "rccl-UnitTestsMicroDda:$SCRIPT_DIR/host_tests_micro_dda.xml"
     "rccl-UnitTestsMicroNetIbCastInit:$SCRIPT_DIR/host_tests_micro_net_ib_cast_init.xml"
     "rccl-UnitTestsMicroNetIbCastDataPath:$SCRIPT_DIR/host_tests_micro_net_ib_cast_data_path.xml"
+    "rccl-UnitTestsMicroNet:$SCRIPT_DIR/host_tests_micro_net.xml"
+    "rccl-UnitTestsMicroMisc:$SCRIPT_DIR/host_tests_micro_misc.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
   # GENERATE_SYM_KERNELS, off via install.sh --disable-sym-kernels); missing is a skip, not an error.
@@ -318,18 +322,32 @@ do_replayer_guards() {
   echo "==> RcclReplayer host checks (make -C tools/RcclReplayer test)"
   make -C "$RCCL_ROOT/tools/RcclReplayer" test
 }
+
+# Test-runner unit tests: `unittest discover` collects every module under
+# tools/scripts/test_runner/tests, not just the rccl-device-compile driver
+# cases, so this also runs test_device_coverage_cmake.py, which shells out to
+# cmake and self-skips when cmake is absent. Nothing here needs a GPU or a
+# build directory. Run via unittest discover, as its README specifies.
+do_test_runner_guards() {
+  echo "==> Test-runner guards (unittest: tools/scripts/test_runner/tests)"
+  ( cd "$RCCL_ROOT/tools/scripts/test_runner" \
+    && python3 -m unittest discover -s tests -t . -v )
+}
+
 # All CPU-only guards: makefile -MM scan, the device-table unittest, the
-# kernel-count and accl-reporter pytest suites, the __hip_atomic_* poison
-# compile probe, then the RcclReplayer host checks. Collected with `|| rc=1`
-# rather than run back to back so that under `set -e` an early failure still
-# leaves the later guards running and reported, instead of aborting the phase
-# at the first one. Same idiom as do_host_tests above.
+# kernel-count and accl-reporter pytest suites, the tools/scripts/test_runner
+# unittests, the __hip_atomic_* poison compile probe, then the RcclReplayer host
+# checks. Collected with `|| rc=1` rather than run back to back so that under
+# `set -e` an early failure still leaves the later guards running and reported,
+# instead of aborting the phase at the first one. Same idiom as do_host_tests
+# above.
 do_guards() {
   local rc=0
   do_makefile_depflags || rc=1
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
   do_accl_report_guards || rc=1
+  do_test_runner_guards || rc=1
   do_poison_hip_atomics || rc=1
   do_replayer_guards || rc=1
   return "$rc"
