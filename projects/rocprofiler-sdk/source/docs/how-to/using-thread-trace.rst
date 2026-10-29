@@ -94,12 +94,13 @@ The following table lists the parameters relevant to thread tracing:
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | Parameter                   | Type    | Range   | Typical   | Description                                                  |
 +=============================+=========+=========+===========+==============================================================+
-| att-target-cu               | Integer | 0 - 15  | 1         | Defines the CU used to gather detail tokens (WGP on Navi)    |
+| att-target-cu               | Integer | 0 - 15  | 1         | Defines the CU (WGP) used to gather detail tokens. -1 = Auto |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-shader-engine-mask      | Bitmask | 1 - ~0u | 0x1       | Defines the Shader Engines (SE) to be traced. Max 2^32 - 1   |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-simd-select             | Integer | 0 - 0xF | gfx9: 0xF | Defines one or more SIMDs to be traced, out of four.         |
-|                             |         |         | Navi: 0x0 | Bitmask on GFX9 and SIMD_ID[0,3] on Navi.                    |
+|                             |         |         | gfx10+:   | Bitmask on gfx9 and SIMD_ID[0,3] on gfx10 and later.         |
+|                             |         |         | 0x0       |                                                              |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | kernel-iteration-range      | List    |         |           | Defines dispatch iteration of the kernel to be profiled      |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
@@ -362,7 +363,7 @@ Here are some options to handle this:
 
 * Launch more waves.
 
-* Swap the ``target_cu``.
+* Swap the ``target_cu``, or set ``--att-target-cu -1`` to select one automatically.
 
 * Set the ``--att-shader-engine-mask`` to 0x11111111, or possibly to 0xFFFFFFFF
 

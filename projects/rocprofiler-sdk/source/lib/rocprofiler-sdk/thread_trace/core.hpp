@@ -68,7 +68,7 @@ struct thread_trace_parameter_pack
     rocprofiler_user_data_t                         callback_userdata{};
 
     // Parameters
-    uint8_t  target_cu          = 1;
+    int64_t  target_cu          = 1;  // negative: select automatically
     uint8_t  simd_select        = DEFAULT_SIMD;
     uint8_t  perfcounter_ctrl   = 0;
     uint64_t shader_engine_mask = DEFAULT_SE_MASK;

@@ -138,7 +138,7 @@ thread_trace_parameter_pack::are_params_valid() const
         return false;
     }
 
-    if(target_cu > 0xF) return false;
+    if(target_cu > 0xF) return false;    // negative values are resolved per agent
     if(simd_select > 0xF) return false;  // Only 16 CUs and 4 SIMDs
 
     return true;
