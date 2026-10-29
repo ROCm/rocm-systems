@@ -103,18 +103,15 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel) {
   REQUIRE(attrs.hostPointer == attrs.devicePointer);
 }
 
-// hipDeviceReset() frees the allocation behind every __managed__ global, so
-// unless the runtime re-arms their lazy allocation the next launch keeps using
-// the freed address and the host read after it faults. Declared last on purpose:
-// the reset invalidates the managed globals the cases above rely on.
+// A managed global is usable again after a device reset. Declared last: the
+// reset invalidates the managed globals the cases above share.
 HIP_TEST_CASE(Unit_hipManagedKeyword_AfterDeviceReset) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
-  // The backing allocation is created lazily on first launch, so this is what
-  // gives the reset below something to free.
+  // Managed memory is allocated on first launch, so this is what the reset frees.
   managed_assign<<<1, 1>>>(42);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
@@ -122,15 +119,13 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_AfterDeviceReset) {
 
   HIP_CHECK(hipDeviceReset());
 
-  // With more than one device visible the allocation sits on a context spanning
-  // all of them, so the reset cannot free it and the contents must survive.
-  // Reading before any launch also checks that the pointer was left alone.
+  // Memory shared by several devices outlives the reset of any one of them, so
+  // the contents are still there and the pointer is still good.
   if (numDevices > 1) {
     REQUIRE(m_reset == 42);
   }
 
-  // Device and host access both have to work again. On a single device the
-  // pre-reset contents are gone, so only the newly written value is checked.
+  // With one device the memory was freed, so only the new value is defined.
   managed_assign<<<1, 1>>>(7);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
