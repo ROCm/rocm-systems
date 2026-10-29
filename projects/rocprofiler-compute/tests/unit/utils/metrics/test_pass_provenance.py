@@ -136,7 +136,7 @@ def _assert_normalization_metric_stays_unset(
         frozenset({"Avg", "Min"}),
     )
     assert used == set()
-    assert metric_df.loc[0].tolist() == ["None", "None"]
+    assert metric_df.loc[0].tolist() == [UNSET_EXPRESSION, "None"]
 
 
 def _write_gzip_csv(path, text: str) -> None:
