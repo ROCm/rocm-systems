@@ -107,6 +107,8 @@ if(TARGET hrr-playback AND NOT WIN32)
     hrr_capture_state_test.cc
     hrr_unmapped_note_test.cc
     hrr_symbol_copy_bounds_test.cc
+    hrr_kernel_args_signature_test.cc
+    hrr_memcpy3d_array_test.cc
   )
 
   add_executable(hrr-handler-tests
