@@ -54,7 +54,7 @@ rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json
 
 A child daemon process is forked to host the simulation engine and `SimulatedDriver`. The parent then `execve`'s the target application with `LD_PRELOAD` set. Client processes communicate with the daemon over a Unix domain socket using the RPC protocol described below.
 
-GPU memory allocations are backed by `memfd` objects and shared between the daemon and client processes via `SCM_RIGHTS`. Both sides map every `memfd` at the same virtual address (`MAP_FIXED`), so GPU virtual addresses resolve correctly in both processes without translation.
+GPU memory allocations use backing descriptors shared between the daemon and client processes via `SCM_RIGHTS`. These descriptors are ordinary memfds, or socket tokens retaining System V shared RAM when an allocation exceeds the private memory helper's inherited hard file-size limit. Both sides use rocjitsu's mapping adapters to map the backing at the same virtual address (`MAP_FIXED`), so GPU virtual addresses resolve correctly in both processes without translation.
 
 This mode corresponds to `RJ_VM_MODE_DAEMON` in the C API. It supports multi-process workloads such as PyTorch, `torchrun`, `torch.distributed`, and RCCL.
 
@@ -125,7 +125,7 @@ Daemon mode uses a fixed 16-byte message header followed by an opcode-specific p
 
 ### RPC opcodes
 
-| Opcode | Direction | Payload | Memfd |
+| Opcode | Direction | Payload | Backing descriptor |
 | --- | --- | --- | --- |
 | `RPC_HANDSHAKE` | C→D→C | `RpcHandshakeResponse` + topology path | No |
 | `RPC_CLOSE` | C→D→C | None | No |
@@ -133,17 +133,17 @@ Daemon mode uses a fixed 16-byte message header followed by an opcode-specific p
 | `RPC_MUNMAP` | C→D→C | `RpcMunmapRequest` | No |
 | `RPC_IOCTL` | C→D→C | `RpcIoctlRequest` + raw args + inlined arrays | Optional |
 
-File descriptors (`memfd` handles) are passed via `sendmsg()`/`recvmsg()` with `SCM_RIGHTS` ancillary data. Two operations carry `memfd` handles:
+Backing descriptors (memfds or fallback socket tokens) are passed via `sendmsg()`/`recvmsg()` with `SCM_RIGHTS` ancillary data. Two RPC response forms carry backing descriptors with different lifetimes:
 
--   `RPC_IOCTL` (`ALLOC_MEMORY` response) --- allocation backing `memfd`
--   `RPC_MMAP` (response) --- doorbell and event page `memfd` handles
+-   `RPC_IOCTL` (`ALLOC_MEMORY` and `IPC_IMPORT_HANDLE` responses): the client stores the allocation or import descriptor until free or driver cleanup.
+-   `RPC_MMAP` responses: temporary aliases of allocation, doorbell, or event-page backing. `RemoteDriver::mmap` closes the received alias on every exit, including size-check and mapping failures. If the reply has no descriptor, it borrows the stored allocation or import descriptor and leaves that descriptor open.
 
 ## Daemon startup and shutdown sequence
 
 ### Startup
 
 1.  `rocjitsu --daemon` forks a child process.
-2.  The child creates the VM with `RJ_VM_MODE_DAEMON`, which initializes the simulation engine, topology, driver, and `memfd`-backed GPU memory.
+2.  The child creates the VM with `RJ_VM_MODE_DAEMON`, which initializes the simulation engine, topology, driver, and shared GPU memory backing.
 3.  The child creates a listening Unix domain socket at the resolved socket path.
 4.  The child begins accepting client connections and dispatching RPC messages.
 5.  The parent sets `LD_PRELOAD` and `execve`'s the target application (if one was specified with `--`).
