@@ -1,0 +1,374 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# See LICENSE.txt for more license information.
+
+# ============================================================================
+# ROCm build for the NCCL M2N library (reshard release, v0.2).
+# ============================================================================
+#
+# This is the AMD/ROCm counterpart of the upstream (NVIDIA) Makefile. It keeps
+# the exact same project structure, source lists and target names as the CUDA
+# build, but swaps the toolchain:
+#
+#   * CUDA -> HIP conversion is done at BUILD TIME with hipify-perl, exactly
+#     like the main RCCL build (cmake/src/CMakeLists.txt) and RCCL's own
+#     standalone tools (tools/topo_expl/Makefile). The upstream CUDA sources
+#     under src/, tests/ and benchmarks/ are copied into $(HIPIFY_DIR) and
+#     hipified there -- the pristine trees are never hipified in place.
+#   * nvcc            -> hipcc
+#   * -lnccl (NCCL)   -> -lrccl (RCCL, built from source)
+#   * nccl_device.h   comes from the RCCL build/install tree (NCCL_HOME).
+#
+# A handful of device constructs have no hipify mapping and are instead guarded
+# in the sources behind __HIP_PLATFORM_AMD__ so both toolchains compile the same
+# files (warp size for wave64, scoped PTX atomics -> __hip_atomic_*, and the PTX
+# named subset barrier -> a shared-memory sense-reversing barrier on gfx950).
+#
+# Usage:
+#   make -f Makefile.rocm              - Build the shared library (default)
+#   make -f Makefile.rocm lib          - Build libnccl_m2n.so
+#   make -f Makefile.rocm tests        - Build basic_api_test_{mpi,local}
+#   make -f Makefile.rocm bench        - Build all benchmarks
+#   make -f Makefile.rocm hipify       - Stage + hipify sources only
+#   make -f Makefile.rocm install      - Install lib + header to PREFIX
+#   make -f Makefile.rocm clean        - Remove all build artifacts
+#   make -f Makefile.rocm help         - Show this help
+#
+# Required environment variables:
+#   NCCL_HOME (or RCCL_HOME) - Path to the RCCL build/install tree. Must contain
+#                              include/nccl_device.h and lib/librccl.so.
+#
+# Optional environment variables:
+#   ROCM_PATH     - ROCm install (default: /opt/rocm)
+#   RCCL_LIBDIR   - Directory holding librccl.so (default: $(RCCL_HOME)/lib)
+#   OFFLOAD_ARCH  - GPU arch (default: gfx950)
+#   ROCM_VERSION  - 10000*major+100*minor+patch (auto-detected from ROCM_PATH)
+#   GTEST_DIR     - googletest tree with include/ and src/ (for tests)
+#   MPI_HOME      - MPI install (benchmarks + MPI test); auto-detected via mpicc
+#   PREFIX        - Install prefix (default: /usr/local)
+#   DEBUG         - 1=-g, full=-g -O0
+#   BUILDDIR      - Override build/ output directory
+
+# -- Project root = directory containing this Makefile -----------------------
+NCCL_M2N_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+
+# -- Toolchain ---------------------------------------------------------------
+ROCM_PATH    ?= /opt/rocm
+HIPCC        := $(ROCM_PATH)/bin/hipcc
+HIPIFY       := $(ROCM_PATH)/bin/hipify-perl
+HOSTCXX      := $(ROCM_PATH)/bin/amdclang++
+AR           ?= ar
+HIPIFY_FLAGS := -experimental -quiet-warnings
+OFFLOAD_ARCH ?= gfx950
+
+# -- ROCm version ------------------------------------------------------------
+# RCCL's device headers gate behaviour on ROCM_VERSION, which hipcc does NOT
+# predefine: RCCL's own CMake computes it from $(ROCM_PATH)/.info/version and
+# passes -DROCM_VERSION. Consumers of those headers must do the same, or the
+# headers silently take their pre-7.0 fallbacks -- for warp-level coop syncs
+# that fallback is a whole-CTA __syncthreads(), which deadlocks any kernel that
+# calls ncclGin::waitSignal() from a subset of its waves. Same arithmetic as
+# rccl/CMakeLists.txt: 10000*major + 100*minor + patch.
+ROCM_INFO_VERSION_FILE := $(firstword $(wildcard $(ROCM_PATH)/.info/version $(ROCM_PATH)/core/.info/version))
+ifneq ($(ROCM_INFO_VERSION_FILE),)
+    ROCM_VERSION_STRING := $(shell head -n1 $(ROCM_INFO_VERSION_FILE) | tr -d '[:space:]')
+    ROCM_MAJOR_VERSION := $(word 1,$(subst ., ,$(ROCM_VERSION_STRING)))
+    ROCM_MINOR_VERSION := $(word 2,$(subst ., ,$(ROCM_VERSION_STRING)))
+    ROCM_PATCH_VERSION := $(word 3,$(subst ., ,$(ROCM_VERSION_STRING)))
+    ROCM_VERSION ?= $(shell expr 10000 \* $(ROCM_MAJOR_VERSION) + 100 \* $(ROCM_MINOR_VERSION) + $(ROCM_PATCH_VERSION) 2>/dev/null)
+endif
+
+# -- RCCL dependency (device API headers + librccl) --------------------------
+# Keep the upstream env-var name (NCCL_HOME) but point it at the RCCL build so
+# existing tooling/docs stay identical; RCCL_HOME is accepted as an alias.
+RCCL_HOME   ?= $(NCCL_HOME)
+RCCL_LIBDIR ?= $(RCCL_HOME)/lib
+
+# -- Required dependency checks (skipped for clean/help/hipify) --------------
+NO_DEPS_GOALS := clean help
+SKIP_DEP_CHECK := $(if $(MAKECMDGOALS),$(if $(filter-out $(NO_DEPS_GOALS),$(MAKECMDGOALS)),,1))
+ifeq ($(SKIP_DEP_CHECK),)
+ifeq ($(RCCL_HOME),)
+$(error NCCL_HOME/RCCL_HOME is not set. Point it at your RCCL build/install dir, e.g. /path/to/rccl-install)
+endif
+ifeq ($(wildcard $(RCCL_HOME)/include/nccl_device.h),)
+$(error $(RCCL_HOME)/include/nccl_device.h not found. RCCL must be built from source (device API enabled).)
+endif
+ifeq ($(wildcard $(HIPCC)),)
+$(error hipcc not found at $(HIPCC). Set ROCM_PATH correctly.)
+endif
+ifeq ($(ROCM_VERSION),)
+$(error Could not determine ROCM_VERSION: no $(ROCM_PATH)/.info/version or $(ROCM_PATH)/core/.info/version. Pass ROCM_VERSION=<10000*major+100*minor+patch> explicitly.)
+endif
+endif
+
+# -- MPI (benchmarks + MPI test only; the library itself does not link MPI) --
+MPICC ?= mpicc
+ifdef MPI_HOME
+MPI_CFLAGS  := -I$(MPI_HOME)/include
+MPI_LDFLAGS := -L$(MPI_HOME)/lib -lmpi
+else
+MPI_CFLAGS  := $(shell $(MPICC) --showme:compile 2>/dev/null)
+MPI_LDFLAGS := $(shell $(MPICC) --showme:link 2>/dev/null)
+ifeq ($(strip $(MPI_LDFLAGS)),)
+MPI_LDFLAGS := -lmpi
+endif
+endif
+
+# -- Output layout (single shared build/ at the project root) ----------------
+BUILDDIR   ?= $(NCCL_M2N_ROOT)/build
+LIBDIR     := $(BUILDDIR)/lib
+BINDIR     := $(BUILDDIR)/bin
+INCDIR     := $(BUILDDIR)/include
+HIPIFY_DIR := $(BUILDDIR)/hipify
+
+M2N_LIBNAME       := libnccl_m2n.so
+M2N_LIBTARGET     := $(LIBDIR)/$(M2N_LIBNAME)
+M2N_HEADER_TARGET := $(INCDIR)/nccl_m2n.h
+
+# -- Pristine (CUDA) source trees -- hipified into $(HIPIFY_DIR), not in place-
+SRCDIR   := $(NCCL_M2N_ROOT)/src
+TESTSDIR := $(NCCL_M2N_ROOT)/tests
+BENCHDIR := $(NCCL_M2N_ROOT)/benchmarks
+
+# -- Hipified (generated) source trees ---------------------------------------
+HSRC   := $(HIPIFY_DIR)/src
+HTESTS := $(HIPIFY_DIR)/tests
+HBENCH := $(HIPIFY_DIR)/benchmarks
+
+# -- Compiler flags ----------------------------------------------------------
+CXXSTD   := -std=c++17
+INCLUDES := -isystem $(RCCL_HOME)/include \
+            -isystem $(RCCL_HOME)/include/nccl_device \
+            -I$(HSRC) \
+            -isystem $(NCCL_M2N_ROOT)/third_party
+
+# Every library/test TU is compiled as HIP (-x hip); the host-only .cc drivers
+# carry no device code so the device pass is a no-op for them.
+HIPFLAGS := $(CXXSTD) \
+            --offload-arch=$(OFFLOAD_ARCH) \
+            -D__HIP_PLATFORM_AMD__ \
+            -DNCCL_OS_LINUX \
+            -DROCM_VERSION=$(ROCM_VERSION) \
+            -fPIC -O3 -Wall \
+            -Wno-unused-function -Wno-sign-compare -Wno-unused-result \
+            -Wno-unused-variable -Wno-unused-but-set-variable \
+            -x hip \
+            $(INCLUDES)
+
+ifeq ($(DEBUG),full)
+    HIPFLAGS += -g -O0
+    $(info [DEBUG] Full debug enabled (-g -O0))
+else ifeq ($(DEBUG),1)
+    HIPFLAGS += -g
+    $(info [DEBUG] Debug symbols enabled (-g))
+endif
+
+# -- Linker flags ------------------------------------------------------------
+LIB_LDFLAGS        := -L$(RCCL_LIBDIR) -lrccl -Wl,-rpath,$(RCCL_LIBDIR)
+M2N_LIB_LDFLAGS    := $(LIB_LDFLAGS) -Wl,-rpath,'$$ORIGIN'
+M2N_CLIENT_LDFLAGS := -L$(LIBDIR) -lnccl_m2n -Wl,-rpath,'$$ORIGIN/../lib'
+BENCH_LDFLAGS      := $(LIB_LDFLAGS) $(MPI_LDFLAGS)
+
+# -- googletest (optional; source tree with include/ + src/) -----------------
+GTEST_DIR ?=
+ifneq ($(GTEST_DIR),)
+GTEST_INC := $(GTEST_DIR)/include
+GTEST_SRC := $(GTEST_DIR)/src
+GTEST_A   := $(BUILDDIR)/obj/gtest/gtest.a
+GTEST_AVAILABLE := $(if $(wildcard $(GTEST_INC)/gtest/gtest.h),1,0)
+else
+GTEST_AVAILABLE := 0
+endif
+
+# -- Source lists (identical to the CUDA Makefiles: ../Makefile.common) -------
+LIB_CC_NAMES := m2n_config.cc m2n_group.cc reshard_call_setup.cc reshard_cache.cc \
+                reshard_mesh.cc reshard_loadbalance.cc reshard_prepare.cc \
+                reshard_split_prepare.cc pack_staging.cc m2n_init.cc \
+                staging_buffer.cc staging_profile.cc staging_prepare.cc
+LIB_CU_NAMES := reshard_user_window.cu reshard_split_comm.cu \
+                reshard_split_user_window.cu reshard_staging.cu staging_kernel.cu
+LIB_SRC_NAMES := $(LIB_CC_NAMES) $(LIB_CU_NAMES)
+
+# -- Test source lists (identical to tests/Makefile) -------------------------
+TEST_HELPERS_NAME := test_helpers.cu
+TEST_MPI_NAMES    := basic_api_test_mpi.cc pipe_graph_path_test.cc $(TEST_HELPERS_NAME)
+TEST_LOCAL_NAMES  := nonblocking_comm_test.cc basic_api_test_local.cc \
+                     pack_staging_pool_test.cc devcomm_cache_test.cc $(TEST_HELPERS_NAME)
+
+# -- Bench source lists (identical to benchmarks/Makefile) -------------------
+BENCH_KERNELS_NAME := bench_common_kernels.cu
+BENCH_NAMES        := reshard_bench.cc $(BENCH_KERNELS_NAME)
+BATCH_BENCH_NAMES  := reshard_batch_bench_user_window.cu
+MODEL_BENCH_NAMES  := reshard_model_bench.cu $(BENCH_KERNELS_NAME)
+
+# -- Staged (hipified) full paths --------------------------------------------
+LIB_SRCS        := $(addprefix $(HSRC)/,$(LIB_SRC_NAMES))
+TEST_MPI_SRCS   := $(addprefix $(HTESTS)/,$(TEST_MPI_NAMES))
+TEST_LOCAL_SRCS := $(addprefix $(HTESTS)/,$(TEST_LOCAL_NAMES))
+BENCH_SRCS       := $(addprefix $(HBENCH)/,$(BENCH_NAMES))
+BATCH_BENCH_SRCS := $(addprefix $(HBENCH)/,$(BATCH_BENCH_NAMES))
+MODEL_BENCH_SRCS := $(addprefix $(HBENCH)/,$(MODEL_BENCH_NAMES))
+
+# Sentinel that marks a completed hipify pass (all trees staged + converted).
+HIPIFY_STAMP := $(HIPIFY_DIR)/.hipify.stamp
+
+.PHONY: all lib tests bench basic_api_test_mpi basic_api_test_local \
+        reshard reshard_batch_user_window reshard_model \
+        hipify gtest install clean help
+
+all: lib
+
+# ============================================================================
+# Build-time hipify (RCCL style): copy pristine CUDA sources into $(HIPIFY_DIR)
+# and convert them there with hipify-perl. Upstream trees stay untouched.
+# ============================================================================
+hipify: $(HIPIFY_STAMP)
+
+$(HIPIFY_STAMP): $(wildcard $(SRCDIR)/* $(TESTSDIR)/* $(BENCHDIR)/*)
+	@printf ">>> Staging + hipifying sources into $(HIPIFY_DIR) ...\n"
+	@rm -rf $(HIPIFY_DIR)
+	@mkdir -p $(HSRC) $(HTESTS) $(HBENCH)
+	@cp -rL $(SRCDIR)/. $(HSRC)/
+	@if [ -d $(TESTSDIR) ]; then cp -rL $(TESTSDIR)/. $(HTESTS)/ ; fi
+	@if [ -d $(BENCHDIR) ]; then cp -rL $(BENCHDIR)/. $(HBENCH)/ ; fi
+	@# Convert every CUDA TU/header in the staged trees in place. The originals
+	@# are never touched; -inplace leaves a .prehip backup we drop afterwards.
+	@find $(HSRC) $(HTESTS) $(HBENCH) -type f \
+	    \( -name '*.cu' -o -name '*.cuh' -o -name '*.cc' -o -name '*.h' -o -name '*.hpp' \) \
+	    -exec $(HIPIFY) -inplace $(HIPIFY_FLAGS) {} + >/dev/null 2>&1 || true
+	@find $(HIPIFY_DIR) -name '*.prehip' -delete
+	@touch $@
+	@printf ">>> Hipify complete.\n"
+
+# ============================================================================
+# Library
+# ============================================================================
+lib: $(M2N_LIBTARGET) $(M2N_HEADER_TARGET)
+
+$(M2N_LIBTARGET): $(HIPIFY_STAMP)
+	@printf "Building $(M2N_LIBNAME) (hipcc, arch=$(OFFLOAD_ARCH), ROCM_VERSION=$(ROCM_VERSION)) ...\n"
+	@mkdir -p $(LIBDIR)
+	$(HIPCC) -shared -o $@ $(HIPFLAGS) $(LIB_SRCS) $(M2N_LIB_LDFLAGS)
+	@printf "Done! Library at: $@\n"
+
+$(M2N_HEADER_TARGET): $(HIPIFY_STAMP)
+	@mkdir -p $(INCDIR)
+	cp $(HSRC)/nccl_m2n.h $@
+
+# ============================================================================
+# googletest (built from the GTEST_DIR source tree)
+# ============================================================================
+ifeq ($(GTEST_AVAILABLE),1)
+gtest: $(GTEST_A)
+
+$(GTEST_A): $(GTEST_SRC)/gtest-all.cc
+	@printf "Building gtest.a (from $(GTEST_DIR)) ...\n"
+	@mkdir -p $(dir $@)
+	$(HOSTCXX) $(CXXSTD) -O2 -pthread -isystem $(GTEST_INC) -I$(GTEST_DIR) \
+	    -c $(GTEST_SRC)/gtest-all.cc -o $(dir $@)/gtest-all.o
+	$(AR) rcs $@ $(dir $@)/gtest-all.o
+endif
+
+# ============================================================================
+# Tests (gtest). Mirrors tests/Makefile:
+#   * basic_api_test_local links the library SOURCES directly (it exercises
+#     NCCL_M2N_TESTING-only internal symbols), no MPI.
+#   * basic_api_test_mpi links libnccl_m2n.so + MPI.
+# ============================================================================
+ifeq ($(GTEST_AVAILABLE),1)
+tests: basic_api_test_mpi basic_api_test_local
+
+basic_api_test_mpi:   $(BINDIR)/basic_api_test_mpi   ; @:
+basic_api_test_local: $(BINDIR)/basic_api_test_local ; @:
+
+$(BINDIR)/basic_api_test_mpi: $(M2N_LIBTARGET) $(GTEST_A)
+	@printf "Building basic_api_test_mpi (hipcc, gtest, MPI) ...\n"
+	@mkdir -p $(BINDIR)
+	$(HIPCC) -o $@ $(HIPFLAGS) $(MPI_CFLAGS) -DCUDART_CB= -DOMPI_SKIP_MPICXX=1 \
+	    -I$(HTESTS) -isystem $(GTEST_INC) \
+	    $(TEST_MPI_SRCS) -x none $(GTEST_A) $(M2N_CLIENT_LDFLAGS) $(BENCH_LDFLAGS) -lpthread
+	@printf "Done! Test binary at: $@\n"
+
+$(BINDIR)/basic_api_test_local: $(HIPIFY_STAMP) $(GTEST_A)
+	@printf "Building basic_api_test_local (hipcc, gtest, no MPI) ...\n"
+	@mkdir -p $(BINDIR)
+	$(HIPCC) -o $@ $(HIPFLAGS) -DNCCL_M2N_TESTING -DCUDART_CB= \
+	    -I$(HTESTS) -isystem $(GTEST_INC) \
+	    $(TEST_LOCAL_SRCS) $(LIB_SRCS) -x none $(GTEST_A) $(LIB_LDFLAGS) -lpthread -ldl
+	@printf "Done! Test binary at: $@\n"
+else
+tests basic_api_test_mpi basic_api_test_local:
+	@echo "tests: googletest not found -- set GTEST_DIR=/path/to/googletest (with include/ + src/)."
+endif
+
+# ============================================================================
+# Benchmarks (mirrors benchmarks/Makefile)
+# ============================================================================
+bench: reshard reshard_batch_user_window reshard_model
+
+reshard:                   $(BINDIR)/reshard_bench                   ; @:
+reshard_batch_user_window: $(BINDIR)/reshard_batch_bench_user_window ; @:
+reshard_model:             $(BINDIR)/reshard_model_bench             ; @:
+
+$(BINDIR)/reshard_bench: $(M2N_LIBTARGET)
+	@printf "Building reshard_bench ...\n"
+	@mkdir -p $(BINDIR)
+	$(HIPCC) -o $@ $(HIPFLAGS) $(MPI_CFLAGS) -I$(HBENCH) \
+	    $(BENCH_SRCS) $(M2N_CLIENT_LDFLAGS) $(BENCH_LDFLAGS)
+	@printf "Done! Benchmark binary at: $@\n"
+
+$(BINDIR)/reshard_batch_bench_user_window: $(M2N_LIBTARGET)
+	@printf "Building reshard_batch_bench_user_window ...\n"
+	@mkdir -p $(BINDIR)
+	$(HIPCC) -o $@ $(HIPFLAGS) $(MPI_CFLAGS) -I$(HBENCH) \
+	    $(BATCH_BENCH_SRCS) $(M2N_CLIENT_LDFLAGS) $(BENCH_LDFLAGS)
+	@printf "Done! Benchmark binary at: $@\n"
+
+# reshard_model_bench.cu is a host-only driver (JSON model/system configs, no
+# device code) -> compile it -x c++ so clang-HIP does not run a device pass on
+# the vendored nlohmann/json templates. The kernels live in the companion
+# bench_common_kernels.cu, compiled as HIP.
+$(BINDIR)/reshard_model_bench: $(M2N_LIBTARGET)
+	@printf "Building reshard_model_bench ...\n"
+	@mkdir -p $(BINDIR) $(BUILDDIR)/obj
+	$(HIPCC) -x c++ $(CXXSTD) -D__HIP_PLATFORM_AMD__ -DNCCL_OS_LINUX \
+	    -DROCM_VERSION=$(ROCM_VERSION) -fPIC -O3 -isystem $(ROCM_PATH)/include \
+	    $(INCLUDES) $(MPI_CFLAGS) -I$(HBENCH) \
+	    -c $(HBENCH)/reshard_model_bench.cu -o $(BUILDDIR)/obj/reshard_model_bench.o
+	$(HIPCC) $(HIPFLAGS) $(MPI_CFLAGS) -I$(HBENCH) \
+	    -c $(HBENCH)/$(BENCH_KERNELS_NAME) -o $(BUILDDIR)/obj/bench_common_kernels.model.o
+	$(HIPCC) -o $@ --offload-arch=$(OFFLOAD_ARCH) \
+	    $(BUILDDIR)/obj/reshard_model_bench.o $(BUILDDIR)/obj/bench_common_kernels.model.o \
+	    $(M2N_CLIENT_LDFLAGS) $(BENCH_LDFLAGS)
+	@printf "Done! Benchmark binary at: $@\n"
+
+# ============================================================================
+# Install / clean / help
+# ============================================================================
+PREFIX ?= /usr/local
+install: lib
+	@printf "Installing to $(PREFIX) ...\n"
+	@mkdir -p $(PREFIX)/lib $(PREFIX)/include
+	cp $(M2N_LIBTARGET) $(PREFIX)/lib/
+	cp $(M2N_HEADER_TARGET) $(PREFIX)/include/
+	@printf "Done!\n"
+
+clean:
+	rm -rf $(BUILDDIR)
+
+help:
+	@echo "NCCL M2N library - ROCm build (build-time hipify + hipcc, links librccl)"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all (default)        - Build shared library"
+	@echo "  lib                  - Build libnccl_m2n.so"
+	@echo "  hipify               - Stage + hipify sources into build/hipify only"
+	@echo "  tests                - Build basic_api_test_{mpi,local} (needs GTEST_DIR)"
+	@echo "  bench                - Build all benchmarks"
+	@echo "  install              - Install lib + header to PREFIX"
+	@echo "  clean                - Remove all build artifacts"
+	@echo ""
+	@echo "Required: NCCL_HOME (or RCCL_HOME) -> RCCL build/install dir with include/nccl_device.h + lib/librccl.so"
+	@echo "Optional: ROCM_PATH, RCCL_LIBDIR, OFFLOAD_ARCH (default gfx950), ROCM_VERSION,"
+	@echo "          GTEST_DIR, MPI_HOME, PREFIX, DEBUG, BUILDDIR"
