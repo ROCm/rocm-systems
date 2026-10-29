@@ -403,6 +403,9 @@ stream:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [synchronization, P1]
+  Unit_hipStreamWaitEvent_PendingProducerData:
+    <<: *level_2
+    tags: [synchronization, P1]
   Unit_hipStreamGetFlags_spt_Basic:
     <<: *level_default
     tags: [properties, streamperthread, P1]

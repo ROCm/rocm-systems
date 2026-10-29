@@ -14,6 +14,17 @@ different stream with hipStreamWaitEvent api
 
 #include <hip_test_common.hh>
 #include <utils.hh>
+#include <array>
+
+namespace {
+constexpr int kPendingWaitIterations = 8;
+constexpr int kPendingWaitIncrements = 48;
+
+__global__ void IncrementBeforeEvent(int* value) { ++*value; }
+
+__global__ void ReadAfterEvent(const int* value, int* observed) { *observed = *value; }
+}  // namespace
+
 HIP_TEST_CASE(Unit_hipStreamWaitEvent_Negative) {
   enum class StreamTestType { NullStream = 0, StreamPerThread, CreatedStream };
 
@@ -118,4 +129,76 @@ HIP_TEST_CASE(Unit_hipStreamWaitEvent_DifferentStreams) {
   HIP_CHECK(hipStreamDestroy(streamBlockedOnStreamA));
   HIP_CHECK(hipStreamDestroy(unblockingStream));
   HIP_CHECK(hipEventDestroy(waitEvent));
+}
+
+HIP_TEST_CASE(Unit_hipStreamWaitEvent_PendingProducerData) {
+  hipStream_t producer{nullptr}, consumer{nullptr};
+  hipEvent_t event{nullptr};
+  int* values{nullptr};
+  int* observed{nullptr};
+  int* release{nullptr};
+  constexpr size_t bytes = kPendingWaitIterations * sizeof(int);
+
+  HIP_CHECK(hipStreamCreate(&producer));
+  HIP_CHECK(hipStreamCreate(&consumer));
+  HIP_CHECK(hipEventCreate(&event));
+  HIP_CHECK(hipMalloc(&values, bytes));
+  HIP_CHECK(hipMalloc(&observed, bytes));
+  HIP_CHECK(hipHostMalloc(&release, bytes));
+
+  // Load all kernels before the first gated wait. The pinned flag keeps the
+  // producer pending independently of host scheduling and GPU speed.
+  release[0] = 1;
+  HIP_CHECK(hipMemsetAsync(values, 0, bytes, producer));
+  WaitForHostRelease<<<1, 1, 0, producer>>>(release);
+  IncrementBeforeEvent<<<1, 1, 0, producer>>>(values);
+  ReadAfterEvent<<<1, 1, 0, producer>>>(values, observed);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipStreamSynchronize(producer));
+  for (int i = 0; i < kPendingWaitIterations; ++i) release[i] = 0;
+  HIP_CHECK(hipMemsetAsync(values, 0, bytes, producer));
+
+  for (int i = 0; i < kPendingWaitIterations; ++i) {
+    WaitForHostRelease<<<1, 1, 0, producer>>>(release + i);
+    for (int k = 0; k < kPendingWaitIncrements; ++k) {
+      IncrementBeforeEvent<<<1, 1, 0, producer>>>(values + i);
+    }
+    const auto producerLaunch = hipGetLastError();
+    const auto recordResult = hipEventRecord(event, producer);
+    const auto pendingResult = hipEventQuery(event);
+    const auto waitResult = hipStreamWaitEvent(consumer, event, 0);
+    ReadAfterEvent<<<1, 1, 0, consumer>>>(values + i, observed + i);
+    const auto readLaunch = hipGetLastError();
+    const auto destroyResult = i % 2 == 0 ? hipEventDestroy(event) : hipSuccess;
+
+    // Release the producer before any check can throw and leave it blocked.
+    __atomic_store_n(release + i, 1, __ATOMIC_RELEASE);
+    HIP_CHECK(producerLaunch);
+    HIP_CHECK(recordResult);
+    HIP_CHECK_ERROR(pendingResult, hipErrorNotReady);
+    HIP_CHECK(waitResult);
+    HIP_CHECK(readLaunch);
+    HIP_CHECK(destroyResult);
+
+    // Even iterations destroy an event while its producer is still blocked.
+    // Odd iterations re-record the same event object in the next iteration.
+    if (i % 2 == 0) {
+      HIP_CHECK(hipEventCreate(&event));
+    }
+  }
+
+  HIP_CHECK(hipStreamSynchronize(consumer));
+  std::array<int, kPendingWaitIterations> hostObserved{};
+  HIP_CHECK(hipMemcpy(hostObserved.data(), observed, bytes, hipMemcpyDeviceToHost));
+  for (const int value : hostObserved) {
+    REQUIRE(value == kPendingWaitIncrements);
+  }
+
+  HIP_CHECK(hipStreamSynchronize(producer));
+  HIP_CHECK(hipHostFree(release));
+  HIP_CHECK(hipFree(observed));
+  HIP_CHECK(hipFree(values));
+  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipStreamDestroy(consumer));
+  HIP_CHECK(hipStreamDestroy(producer));
 }
