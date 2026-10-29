@@ -22,26 +22,25 @@
 #include <string>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
+#include "../../../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "common_cast.h"
 #include "fakes/env_fakes.h"
+#include "fakes/ibvwrap_fakes.h"
 #include "fakes/libc_fakes.h"
 #include "fakes/nccl_fakes.h"
-#include "fakes/net_ib_cast_common_fakes.h"
 #include "fakes/net_ib_cast_connect_fakes.h"
 #include "fakes/transport_stubs.h"
-#include "ibvsymbols.h"
 #include "p2p_resiliency_cast.h"
 
 #include "fakes/param_redirect.h"
 
+#include "fakes/transport_net_seam.h"
 #include "fakes/libc_seam.h"
 #undef send  // ncclIbRequest::send, not the socket call
 #include NET_IB_CAST_SCHEDULER_CC_PATH
 #include "fakes/libc_seam_undef.h"
-
-extern struct ncclIbvSymbols ibvSymbols;
+#include "fakes/transport_net_seam_undef.h"
 
 namespace {
 
@@ -58,10 +57,10 @@ class NetIbCastSchedulerMicrotest : public ::testing::Test {
   }
   void TearDown() override {
     ResetEnvFakes();
+    ResetIbvwrapFakes();
     ResetLibcFakes();
     ResetTransportStubs();
     ResetNetIbCastConnectFakes();
-    ResetNetIbCastCommonFakes();
     castGlobalQpSchedParms = {};
     stagedSchedParms = {ncclNumFuncs};
     IbCastQpSchedProxyPrevCollType = ncclNumFuncs;
@@ -744,54 +743,61 @@ TEST_F(NetIbCastSchedulerTxMicrotest, GetOptRecvCompletion_ReportsTheFlag) {
 
 class NetIbCastSchedulerGrhMicrotest : public NetIbCastSchedulerTxMicrotest {
  protected:
-  void TearDown() override {
-    ibvSymbols.ibv_internal_query_qp = savedQueryQp_;
-    NetIbCastSchedulerTxMicrotest::TearDown();
-  }
-  decltype(ibvSymbols.ibv_internal_query_qp) savedQueryQp_ = ibvSymbols.ibv_internal_query_qp;
-  ibv_qp qps_[2]{};
+  ibv_qp qps_[3]{};
 };
 
-// The second QP's query fails, so only the first reports the driver's is_global; a QP with no ibv_qp reports zeros.
+// is_global is what the driver reports, whatever the link layer: QP 11's driver programmed a GRH, QP 13's did not
+// and QP 12's query fails. A QP with no ibv_qp reports only its link layer; an empty slot reports zeros.
 TEST_F(NetIbCastSchedulerGrhMicrotest, GetGrhState_ReadsIsGlobalBackFromTheDriver) {
-  ncclIbCastGrhState* null = nullptr;
-  EXPECT_EQ(ncclIbCastGetGrhState(nullptr, null), ncclInvalidArgument);
+  auto out = std::make_unique<ncclIbCastGrhState>();
+  EXPECT_EQ(ncclIbCastGetGrhState(nullptr, nullptr), ncclInvalidArgument);
+  EXPECT_EQ(ncclIbCastGetGrhState(nullptr, out.get()), ncclInvalidArgument);
   EXPECT_EQ(ncclIbCastGetGrhState(comm_.get(), nullptr), ncclInvalidArgument);
-  base().nqps = 3;
+  base().nqps = 4;
   qps_[0].qp_num = 11;
   qps_[1].qp_num = 12;
+  qps_[2].qp_num = 13;
   base().qps[0].qp = &qps_[0];
-  base().qps[0].rtrAttr.linkLayer = IBV_LINK_LAYER_ETHERNET;
+  base().qps[0].rtrAttr.linkLayer = IBV_LINK_LAYER_INFINIBAND;
   base().qps[1].qp = &qps_[1];
-  base().qps[1].rtrAttr.linkLayer = IBV_LINK_LAYER_INFINIBAND;
+  base().qps[1].rtrAttr.linkLayer = IBV_LINK_LAYER_ETHERNET;
   base().qps[2].rtrAttr.linkLayer = IBV_LINK_LAYER_ETHERNET;
-  for (int i = 0; i < 3; i++) base().activeQps[i] = &base().qps[i];
-  ibvSymbols.ibv_internal_query_qp = [](ibv_qp* qp, ibv_qp_attr* attr, int mask, ibv_qp_init_attr*) {
+  base().qps[3].qp = &qps_[2];
+  base().qps[3].rtrAttr.linkLayer = IBV_LINK_LAYER_ETHERNET;
+  for (int i = 0; i < 4; i++) base().activeQps[i] = &base().qps[i];
+  base().activeQps[4] = &base().qps[0];  // past nqps: must not be reported
+  ScopedHook query(g_ibvQueryQp, [](ibv_qp* qp, ibv_qp_attr* attr, int mask, ibv_qp_init_attr*) {
     EXPECT_EQ(mask, IBV_QP_AV);
-    if (qp->qp_num == 12) return EIO;
-    attr->ah_attr.is_global = 1;
-    return 0;
-  };
-  auto out = std::make_unique<ncclIbCastGrhState>();
+    if (qp->qp_num == 12) return ncclSystemError;
+    attr->ah_attr.is_global = qp->qp_num == 11;
+    return ncclSuccess;
+  });
   out->queryOk[2] = true;
   ASSERT_EQ(ncclIbCastGetGrhState(comm_.get(), out.get()), ncclSuccess);
-  EXPECT_EQ(out->nqps, 3);
-  EXPECT_EQ(out->linkLayer[0], IBV_LINK_LAYER_ETHERNET);
+  EXPECT_EQ(out->nqps, 4);
+  EXPECT_EQ(out->linkLayer[0], IBV_LINK_LAYER_INFINIBAND);
   EXPECT_EQ(out->qpNum[0], 11u);
   EXPECT_EQ(out->isGlobal[0], 1);
   EXPECT_TRUE(out->queryOk[0]);
-  EXPECT_EQ(out->linkLayer[1], IBV_LINK_LAYER_INFINIBAND);
+  EXPECT_EQ(out->linkLayer[1], IBV_LINK_LAYER_ETHERNET);
   EXPECT_EQ(out->qpNum[1], 12u);
   EXPECT_FALSE(out->queryOk[1]);
   EXPECT_EQ(out->isGlobal[1], 0);
   EXPECT_EQ(out->linkLayer[2], IBV_LINK_LAYER_ETHERNET);
   EXPECT_EQ(out->qpNum[2], 0u);
   EXPECT_FALSE(out->queryOk[2]);
+  EXPECT_EQ(out->linkLayer[3], IBV_LINK_LAYER_ETHERNET);
+  EXPECT_EQ(out->qpNum[3], 13u);
+  EXPECT_EQ(out->isGlobal[3], 0);
+  EXPECT_TRUE(out->queryOk[3]);
+  EXPECT_EQ(out->qpNum[4], 0u);
 
   base().activeQps[0] = nullptr;
   ASSERT_EQ(ncclIbCastGetGrhState(comm_.get(), out.get()), ncclSuccess);
   EXPECT_EQ(out->linkLayer[0], 0);
   EXPECT_EQ(out->qpNum[0], 0u);
+  EXPECT_EQ(out->isGlobal[0], 0);
+  EXPECT_FALSE(out->queryOk[0]);
 }
 
 TEST_F(NetIbCastSchedulerGrhMicrotest, GetGrhState_ClampsNqps) {

@@ -19,12 +19,11 @@
 #include <new>
 #include <string>
 
-#include "../common/LogCapture.hpp"
-#include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../../../common/LogCapture.hpp"
+#include "../../../common/ProcessIsolatedTestRunner.hpp"
 #include "fakes/env_fakes.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
-#include "fakes/net_ib_cast_p2p_fakes.h"
 #include "fakes/net_ib_cast_qp_sharing_fakes.h"
 #include "fakes/transport_stubs.h"
 #include "net-ib-cast-test-common.h"
@@ -35,9 +34,15 @@
 static std::function<char*(const char*, char*)> g_initRealpath = [](const char*, char*) -> char* { return nullptr; };
 static char* InitTestRealpath(const char* path, char* resolved) { return g_initRealpath(path, resolved); }
 
+#include "fakes/net_ib_cast_qp_sharing_seam.h"
+#include "fakes/net_ib_cast_scheduler_seam.h"
+#include "fakes/transport_net_seam.h"
 #define realpath InitTestRealpath
 #include NET_IB_CAST_INIT_CC_PATH
 #undef realpath
+#include "fakes/transport_net_seam_undef.h"
+#include "fakes/net_ib_cast_scheduler_seam_undef.h"
+#include "fakes/net_ib_cast_qp_sharing_seam_undef.h"
 
 void NetIbCastResetGlobals() {
   netRefCount = 0;
@@ -78,7 +83,6 @@ class NetIbCastInitMicrotest : public ::testing::Test {
     ResetIonicdvwrapFakes();
     ResetSocketFakes();
     ResetNetIbCastConnectFakes();
-    ResetNetIbCastP2pFakes();
     ResetNetIbCastQpSharingFakes();
     ResetNetIbCastSchedulerFakes();
     ResetNetIbCastP2pResiliencyRecoveryFakes();

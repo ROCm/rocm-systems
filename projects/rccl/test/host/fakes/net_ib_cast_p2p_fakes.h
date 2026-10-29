@@ -4,9 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Fakes for the symbols defined by src/transport/net_ib_cast/p2p.cc: its
-// params through g_loadParam, IbCastReqTypeStr, IbCastArThreshold, and
-// fail-loud hooks for its functions.
+// Fail-loud hooks for the src/transport/net_ib_cast/p2p.cc entry points common.cc and gin.cc call. The binary also
+// compiles the real p2p.cc, so net_ib_cast_p2p_seam.h renames those calls to the micro_* trampolines below.
 
 #ifndef RCCL_TEST_HOST_NET_IB_CAST_P2P_FAKES_H_
 #define RCCL_TEST_HOST_NET_IB_CAST_P2P_FAKES_H_
@@ -15,12 +14,6 @@
 
 #include "p2p_cast.h"
 
-extern std::function<ncclResult_t(struct ncclIbSendComm* /*comm*/, int /*slot*/, int /*nqps*/, int /*startQpIndex*/,
-                                  bool /*wrrSched*/, bool /*useWriteOp*/)>
-    g_ibCastMultiSend;
-extern std::function<ncclResult_t(struct ncclIbRecvComm* /*comm*/, struct ncclIbRequest* /*req*/, int /*slot*/,
-                                  int /*n*/)>
-    g_ibCastPostFifo;
 extern std::function<void(struct ncclIbRequest* /*req*/, int /*devIndex*/)> g_ibCastAddEvent;
 
 extern std::function<ncclResult_t(struct ncclIbNetCommBase* /*base*/, struct ncclIbRequest** /*req*/)>
@@ -36,6 +29,16 @@ extern std::function<ncclResult_t(void* /*recvComm*/, int /*n*/, void** /*data*/
                                   void** /*request*/)>
     g_ibCastIflush;
 extern std::function<ncclResult_t(void* /*request*/, int* /*done*/, int* /*sizes*/)> g_ibCastTest;
+
+void micro_IbCastAddEvent(struct ncclIbRequest* req, int devIndex);
+ncclResult_t micro_IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
+ncclResult_t micro_IbCastFreeRequest(struct ncclIbRequest* r);
+ncclResult_t micro_IbCastIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
+                               void** request);
+ncclResult_t micro_IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles,
+                               void** phandles, void** request);
+ncclResult_t micro_IbCastIflush(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request);
+ncclResult_t micro_IbCastTest(void* request, int* done, int* sizes);
 
 void ResetNetIbCastP2pFakes();
 

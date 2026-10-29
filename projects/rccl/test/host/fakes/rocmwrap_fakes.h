@@ -31,6 +31,7 @@ struct CuMemExport {
   size_t size;
   unsigned long long flags;
   int fd;
+  int type;  // a hipMemRangeHandleType, which exists only alongside the export API
 };
 
 struct CuMemExportRecorder : std::vector<CuMemExport> {

@@ -44,6 +44,8 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTransportCollNetFree;
 // a steering choice; override it to exercise the AINIC arm.
 extern bool g_rcclUseAinicValue;
 extern std::function<bool()> g_useAinic;
+// Reached through transport_net_seam.h in a binary that also compiles the real net.cc.
+bool micro_rcclUseAinic();
 
 // ncclPxnDisable (src/graph/paths.cc:754). The default mirrors an initialized
 // communicator with PXN enabled; override for direct-selection tests.

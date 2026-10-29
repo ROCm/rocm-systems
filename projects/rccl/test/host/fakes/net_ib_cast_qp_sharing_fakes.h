@@ -4,14 +4,15 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// State owned by src/transport/net_ib_cast/qp_sharing.cc, for binaries that do not compile it.
-// IbCastQpSharingGlobalEnable itself is declared by qp_sharing.h and starts false, as in production.
-// IbCastValidateSharedQpPool only counts its calls.
+// A counting stand-in for qp_sharing.cc's IbCastValidateSharedQpPool, which init.cc calls at finalize. The binary
+// also compiles the real qp_sharing.cc, so net_ib_cast_qp_sharing_seam.h renames that call to the stand-in below.
 
 #ifndef RCCL_TEST_HOST_NET_IB_CAST_QP_SHARING_FAKES_H_
 #define RCCL_TEST_HOST_NET_IB_CAST_QP_SHARING_FAKES_H_
 
 extern int g_ibCastValidateSharedQpPoolCalls;
+
+void micro_IbCastValidateSharedQpPool();
 
 void ResetNetIbCastQpSharingFakes();
 

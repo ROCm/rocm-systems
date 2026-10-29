@@ -32,7 +32,6 @@
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
-#include "fakes/net_ib_cast_common_fakes.h"
 #include "fakes/net_ib_cast_connect_fakes.h"
 #include "fakes/proxy_fakes.h"
 #include "fakes/rccl_wrap_fakes.h"
@@ -46,12 +45,11 @@
 // Routes every NCCL_PARAM / RCCL_PARAM in net.cc through g_loadParam on each call.
 #include "fakes/param_redirect.h"
 
+#include "fakes/transport_net_ib_connect_net_seam.h"
+#include "fakes/transport_p2p_seam.h"
 #include NET_CC_PATH
-
-// init.cc data symbols. allocTracker is updated by the alloc.h calloc templates; a
-// non-null ncclGdrCopy selects net.cc's GDRCopy arms.
-struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
-gdr_t ncclGdrCopy = nullptr;
+#include "fakes/transport_p2p_seam_undef.h"
+#include "fakes/transport_net_ib_connect_net_seam_undef.h"
 
 namespace {
 
@@ -380,7 +378,6 @@ class NetMicrotestBase : public ::testing::Test {
     ResetProxyFakes();
     ResetRcclWrapFakes();
     ResetTopoStubs();
-    ResetNetIbCastCommonFakes();
     ResetNetIbCastConnectFakes();
     ResetTransportNetIbConnectNetFakes();
     ResetTransportNetIbFakes();

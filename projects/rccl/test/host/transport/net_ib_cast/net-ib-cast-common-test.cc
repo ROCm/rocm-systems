@@ -14,13 +14,15 @@
 #include <memory>
 #include <string>
 
-#include "../common/LogCapture.hpp"
+#include "../../../common/LogCapture.hpp"
 #include "fakes/net_ib_cast_p2p_resiliency_fakes.h"
 #include "fakes/transport_stubs.h"
 #include "net-ib-cast-test-common.h"
 #include "fakes/param_redirect.h"
 
+#include "fakes/net_ib_cast_p2p_seam.h"
 #include NET_IB_CAST_COMMON_CC_PATH
+#include "fakes/net_ib_cast_p2p_seam_undef.h"
 
 namespace {
 
@@ -34,7 +36,6 @@ class NetIbCastCommonMicrotest : public ::testing::Test {
     ResetIbvwrapFakes();
     ResetNetIbCastConnectFakes();
     ResetNetIbCastP2pResiliencyFakes();
-    ResetNetIbCastSchedulerFakes();
   }
 
   ParamScript params_;
@@ -253,7 +254,7 @@ TEST_F(NetIbCastCommonMicrotest, NetIbCast_PublishesTheCastEntryPoints) {
   EXPECT_STREQ(netIbCast.name, "IB-CAST");
   EXPECT_EQ(netIbCast.init, IbCastInit);
   EXPECT_EQ(netIbCast.regMr, IbCastRegMr);
-  EXPECT_EQ(netIbCast.isend, IbCastIsend);
+  EXPECT_EQ(netIbCast.isend, micro_IbCastIsend);  // IbCastIsend, as net_ib_cast_p2p_seam.h renames it
   EXPECT_EQ(netIbCast.getDeviceMr, nullptr);
   EXPECT_EQ(netIbCast.irecvConsumed, nullptr);
   EXPECT_EQ(netIbCast.makeVDevice, IbCastMakeVDevice);

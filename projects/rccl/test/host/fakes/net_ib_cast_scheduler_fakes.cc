@@ -9,13 +9,9 @@
 
 #include "net_ib_cast_scheduler_fakes.h"
 
-#include <cstring>
-
 #include "common_cast.h"
 #include "fail_loud.h"
 #include "signature-drift.h"
-
-struct ncclIbQpSchedParms castGlobalQpSchedParms;
 
 static bool DefaultRcclUseIbCastQpSched() { FailLoudUnfaked("net_ib_cast_scheduler_fakes", "rcclUseIbCastQpSched"); }
 std::function<bool()> g_rcclUseIbCastQpSched = DefaultRcclUseIbCastQpSched;
@@ -28,11 +24,10 @@ std::function<ncclResult_t(struct ncclIbQpSchedParms*)> g_ibCastQpSchedInitParms
 ASSERT_HOOK_MATCHES_PROD(g_rcclUseIbCastQpSched, rcclUseIbCastQpSched);
 ASSERT_HOOK_MATCHES_PROD(g_ibCastQpSchedInitParms, IbCastQpSchedInitParms);
 
-bool rcclUseIbCastQpSched() { return g_rcclUseIbCastQpSched(); }
-ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms* parms) { return g_ibCastQpSchedInitParms(parms); }
+bool micro_rcclUseIbCastQpSched() { return g_rcclUseIbCastQpSched(); }
+ncclResult_t micro_IbCastQpSchedInitParms(struct ncclIbQpSchedParms* parms) { return g_ibCastQpSchedInitParms(parms); }
 
 void ResetNetIbCastSchedulerFakes() {
-  memset(&castGlobalQpSchedParms, 0, sizeof(castGlobalQpSchedParms));
   g_rcclUseIbCastQpSched = DefaultRcclUseIbCastQpSched;
   g_ibCastQpSchedInitParms = DefaultIbCastQpSchedInitParms;
 }

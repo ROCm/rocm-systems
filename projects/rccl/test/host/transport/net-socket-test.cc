@@ -30,6 +30,12 @@
 
 #include <gtest/gtest.h>
 
+// Rename the definitions that the rma_socket tests' net_socket fakes also provide.
+#define ncclNetIfs NetSocketTestNetIfs
+#define ncclNetSocket NetSocketTestNetSocket
+#define ncclNetSocketCreateListener NetSocketTestCreateListener
+#define ncclNetSocketInitDevices NetSocketTestInitDevices
+
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/libc_fakes.h"

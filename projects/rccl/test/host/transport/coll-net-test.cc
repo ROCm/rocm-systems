@@ -23,8 +23,8 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "fakes/bootstrap_stubs.h"
 #include "fakes/channel_fakes.h"
-#include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/rocmwrap_fakes.h"
@@ -308,6 +308,7 @@ class CollNetMicrotestBase : public ::testing::Test {
     // memsets and syncs succeed, and every allocation is its own base address.
     g_hipAsyncOpsResult = hipSuccess;
     g_hipStreamCreateResult = hipSuccess;
+    g_hipDeviceGetPCIBusIdResult = hipSuccess;
     g_hipStreamSynchronize = [](hipStream_t) { return hipSuccess; };
     g_hipMemGetAddressRange = [](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
       *base = ptr;
@@ -349,7 +350,7 @@ class CollNetMicrotestBase : public ::testing::Test {
     ResetTopoStubs();
     ResetTransportStubs();
     ResetChannelFakes();
-    ResetDevRuntimeMicroFakes();
+    ResetBootstrapStubs();
   }
 };
 
@@ -3911,7 +3912,7 @@ class CollNetSetupCommMicrotest : public CollNetCommMicrotest {
     remote_[2][ncclSum][ncclFloat32] = 1 << 1;
     remote_[2][ncclMax][ncclInt32] = 1 << 0;
     remote_[3][ncclMin][ncclInt8] = 1 << 1;
-    g_devrBootstrapAllGather = [this](void* state, void* all, int size) {
+    g_bootstrapAllGather = [this](void* state, void* all, int size) {
       EXPECT_EQ(state, &bootstrap_);
       EXPECT_EQ(size, (int)sizeof(remote_[0]));
       for (int r = 1; r < kRanks; r++) memcpy(static_cast<char*>(all) + r * size, remote_[r], size);
@@ -4034,7 +4035,7 @@ TEST_F(CollNetSetupCommMicrotest, Setup_NotAHead_TakesMatrixFromOtherRanksClaims
   comm_.rank = 1;
   direct_.intra[2] = 0;  // the only head is rank 0
   remote_[0][ncclSum][ncclFloat32] = 1 << 1;
-  g_devrBootstrapAllGather = [this](void*, void* all, int size) {
+  g_bootstrapAllGather = [this](void*, void* all, int size) {
     for (int r = 0; r < kRanks; r++) {
       if (r == 1) {
         static const uint8_t none[4][ncclNumTypes] = {};
@@ -4076,7 +4077,7 @@ TEST_F(CollNetSetupCommMicrotest, Setup_DependencyFails_DisablesCollNetWithError
                      [&](ncclComm*, int) { return failing == 1 ? ncclSystemError : ncclSuccess; });
     ScopedHook rankMap(g_ncclTransportInitRankMap,
                        [&](ncclComm*, int, const int*) { return failing == 2 ? ncclSystemError : ncclSuccess; });
-    ScopedHook gather(g_devrBootstrapAllGather, [&](void*, void*, int) {
+    ScopedHook gather(g_bootstrapAllGather, [&](void*, void*, int) {
       return failing == 3 ? ncclSystemError : ncclSuccess;
     });
     net_.reduceSupportResult = failing == 4 ? ncclSystemError : ncclSuccess;
@@ -4114,7 +4115,7 @@ class CollNetShareCommMicrotest : public CollNetSetupCommMicrotest {
       return ncclSuccess;
     };
     // Each head reports where it sits among the parent's heads.
-    g_devrBootstrapAllGather = [this](void*, void* all, int size) {
+    g_bootstrapAllGather = [this](void*, void* all, int size) {
       struct Info {
         int headPosition, isMaster;
       };
@@ -4189,7 +4190,7 @@ TEST_F(CollNetShareCommMicrotest, ParentCannotShare_SetsUpOwnResources) {
     own(parent, share);
     return ncclSuccess;
   };
-  g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
   for (int variant = 0; variant < 3; variant++) {
     SCOPED_TRACE(variant);
     parent_.config.collnetEnable = variant != 0;
@@ -4207,12 +4208,12 @@ TEST_F(CollNetShareCommMicrotest, ParentCannotShare_SetsUpOwnResources) {
 }
 
 TEST_F(CollNetShareCommMicrotest, Share_DependencyFails_DisablesCollNetWithError) {
-  g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
   EXPECT_EQ(Setup(&parent_), ncclSystemError);
   EXPECT_EQ(comm_.config.collnetEnable, 0);
 
   ResetComm(&parentShared_);
-  g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
   g_initCollnetChannel = [](ncclComm*, int, ncclComm*, bool) { return ncclSystemError; };
   EXPECT_EQ(Setup(&parent_), ncclSystemError);
   EXPECT_EQ(comm_.config.collnetEnable, 0);
