@@ -102,6 +102,9 @@ extern int g_currentDevice;
 extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
 extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
 extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
+// Defaults to hipSuccess: the DDA alltoall TDM path raises its kernels' dynamic LDS limit through this.
+extern std::function<hipError_t(const void* /*func*/, hipFuncAttribute /*attr*/, int /*value*/)>
+    g_hipFuncSetAttribute;
 // Defaults to hipErrorInvalidValue with *canAccessPeer = 0, the fail-loud floor's behaviour.
 extern std::function<hipError_t(int* /*canAccessPeer*/, int /*dev1*/, int /*dev2*/)> g_hipDeviceCanAccessPeer;
 // Both default to hipErrorInvalidValue, the fail-loud floor.
