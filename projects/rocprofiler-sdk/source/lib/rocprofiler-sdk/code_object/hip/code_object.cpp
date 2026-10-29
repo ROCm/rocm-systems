@@ -39,6 +39,7 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdlib>
 #include <limits>
@@ -186,9 +187,20 @@ namespace
 {
 constexpr auto kernel_args_metadata_lookup           = ".args";
 constexpr auto kernel_arg_offset_metadata_lookup     = ".offset";
+constexpr auto kernel_arg_size_metadata_lookup       = ".size";
 constexpr auto kernel_arg_value_kind_metadata_lookup = ".value_kind";
 constexpr auto kernel_arg_segment_metadata_lookup    = ".kernarg_segment_size";
 constexpr auto hidden_arg_value_kind_prefix          = "hidden";
+constexpr auto global_buffer_arg_value_kind          = "global_buffer";
+constexpr auto global_buffer_static_arg_value_kind   = "global_buffer_static";
+constexpr auto by_value_arg_value_kind               = "by_value";
+
+// A by-value argument this small cannot be told apart from an integer or floating-point scalar, and
+// a scalar whose bits happen to look like an address must not be mistaken for one.
+constexpr uint64_t by_value_struct_min_size = 16;
+
+// The size of an argument holding an address.
+constexpr uint64_t pointer_arg_size = 8;
 
 // The value of a metadata key. COMGR renders numeric metadata as text, so this reads strings and
 // numbers alike; nullopt when the key is absent or does not hold text.
@@ -211,18 +223,23 @@ metadata_uint64(amd_comgr_metadata_node_t node, const char* key)
     const auto text = metadata_string(node, key);
     if(!text || text->empty()) return std::nullopt;
 
-    char*        end   = nullptr;
-    const auto   value = static_cast<uint64_t>(std::strtoull(text->c_str(), &end, 10));
+    char*      end   = nullptr;
+    const auto value = static_cast<uint64_t>(std::strtoull(text->c_str(), &end, 10));
     if(end == text->c_str() || *end != '\0') return std::nullopt;
     return value;
 }
 
-// The offset of the first hidden argument in a kernel's argument list, which is where the kernel's
-// own arguments end. nullopt when the kernel has no hidden arguments or its metadata predates the
-// fields that say where they begin.
-std::optional<uint64_t>
-first_hidden_arg_offset(amd_comgr_metadata_node_t kernel_node)
+// The ranges of one kernel's kernarg segment that can hold a pointer the kernel writes through:
+// its global_buffer arguments and the by-value arguments large enough to be a struct. When an
+// argument is not described well enough to tell, every byte the kernel declares itself (everything
+// before the hidden arguments the runtime appends) is a candidate. nullopt when the kernel has no
+// argument list to read.
+std::optional<std::vector<kernarg_region_t>>
+get_kernel_pointer_regions(amd_comgr_metadata_node_t kernel_node)
 {
+    const auto segment_size = metadata_uint64(kernel_node, kernel_arg_segment_metadata_lookup);
+    if(!segment_size || *segment_size > std::numeric_limits<uint32_t>::max()) return std::nullopt;
+
     auto args = amd_comgr_metadata_node_t{};
     if(amd_comgr_metadata_lookup(kernel_node, kernel_args_metadata_lookup, &args) !=
        AMD_COMGR_STATUS_SUCCESS)
@@ -233,29 +250,52 @@ first_hidden_arg_offset(amd_comgr_metadata_node_t kernel_node)
     if(amd_comgr_get_metadata_list_size(args, &num_args) != AMD_COMGR_STATUS_SUCCESS)
         return std::nullopt;
 
-    auto first = std::optional<uint64_t>{};
+    auto regions      = std::vector<kernarg_region_t>{};
+    auto hidden_start = *segment_size;
+    auto described    = true;
     for(size_t i = 0; i < num_args; i++)
     {
         auto arg = amd_comgr_metadata_node_t{};
         if(amd_comgr_index_list_metadata(args, i, &arg) != AMD_COMGR_STATUS_SUCCESS)
-            return std::nullopt;
+        {
+            described = false;
+            continue;
+        }
         auto arg_fini = common::scope_destructor{[arg]() { destroy_metadata(arg); }};
 
         const auto value_kind = metadata_string(arg, kernel_arg_value_kind_metadata_lookup);
-        if(!value_kind) return std::nullopt;
-        if(value_kind->rfind(hidden_arg_value_kind_prefix, 0) != 0) continue;
+        const auto offset     = metadata_uint64(arg, kernel_arg_offset_metadata_lookup);
+        const auto size       = metadata_uint64(arg, kernel_arg_size_metadata_lookup);
+        if(!value_kind || !offset || !size || *offset + *size > *segment_size)
+        {
+            described = false;
+            continue;
+        }
 
-        const auto offset = metadata_uint64(arg, kernel_arg_offset_metadata_lookup);
-        if(!offset) return std::nullopt;
-        if(!first || *offset < *first) first = offset;
+        if(value_kind->rfind(hidden_arg_value_kind_prefix, 0) == 0)
+            hidden_start = std::min(hidden_start, *offset);
+        else if(*value_kind == global_buffer_arg_value_kind ||
+                *value_kind == global_buffer_static_arg_value_kind)
+            regions.push_back(kernarg_region_t{static_cast<uint32_t>(*offset),
+                                               static_cast<uint32_t>(pointer_arg_size)});
+        else if(*value_kind == by_value_arg_value_kind)
+        {
+            if(*size >= by_value_struct_min_size)
+                regions.push_back(
+                    kernarg_region_t{static_cast<uint32_t>(*offset), static_cast<uint32_t>(*size)});
+        }
+        else
+            described = false;
     }
-    return first;
+
+    if(!described) return std::vector<kernarg_region_t>{{0u, static_cast<uint32_t>(hidden_start)}};
+    return regions;
 }
 }  // namespace
 
 // Everything this library derives from the amdhsa.kernels list of one code object, read in a
-// single pass: the kernel-symbol-to-device-function map, and where each kernel's own arguments end
-// in its kernarg segment.
+// single pass: the kernel-symbol-to-device-function map, and which kernarg bytes of each kernel can
+// hold a pointer.
 code_object_metadata_t
 get_metadata_from_kernels_node(amd_comgr_metadata_node_t kernels_metadata)
 {
@@ -300,19 +340,15 @@ get_metadata_from_kernels_node(amd_comgr_metadata_node_t kernels_metadata)
             metadata.kernel_symbol_device_map.emplace(kernel_symbol, kernel_meta_name);
         }
 
-        // The layout is recorded under every name the entry is known by: the loader reports the
-        // kernel descriptor ("<symbol>.kd") for newer code objects and the function itself for
-        // older ones, and the metadata carries both spellings.
-        const auto segment_size = metadata_uint64(kernel_node, kernel_arg_segment_metadata_lookup);
-        if(!segment_size || *segment_size > std::numeric_limits<size_t>::max()) continue;
-
-        const auto first_hidden = first_hidden_arg_offset(kernel_node);
-        const auto layout       = kernarg_layout_t{
-            first_hidden && *first_hidden <= *segment_size ? static_cast<size_t>(*first_hidden)
-                                                           : static_cast<size_t>(*segment_size),
-            static_cast<size_t>(*segment_size)};
-        if(!kernel_symbol.empty()) metadata.kernarg_layout_map.emplace(kernel_symbol, layout);
-        metadata.kernarg_layout_map.emplace(kernel_meta_name, layout);
+        // Recorded under every name the entry is known by: the loader reports the kernel
+        // descriptor ("<symbol>.kd") for newer code objects and the function itself for older
+        // ones, and the metadata carries both spellings.
+        if(auto regions = get_kernel_pointer_regions(kernel_node))
+        {
+            if(!kernel_symbol.empty())
+                metadata.kernarg_pointer_regions.emplace(kernel_symbol, *regions);
+            metadata.kernarg_pointer_regions.emplace(kernel_meta_name, std::move(*regions));
+        }
     }
 
     return metadata;

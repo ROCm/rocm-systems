@@ -397,6 +397,10 @@ run_untracked_saxpy(int n, bool fine_grained)
 }
 }  // namespace
 
+// Usage: kernel-replay [n_elems] [iters] [mode]
+//   mode "untracked" runs only the in-place saxpy over memory the snapshot does not track --
+//   host-pinned first, then fine-grained device memory -- so that one profile run yields both.
+//   Any other mode runs the kernels the other replay tests measure.
 int
 main(int argc, char** argv)
 {

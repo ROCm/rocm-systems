@@ -75,6 +75,13 @@ def pytest_addoption(parser):
         default=None,
         help="1-based launches of --selected-kernel, among those in the kernel trace, that the kernel filters must select",
     )
+    parser.addoption(
+        "--expected-pass-counts",
+        action="store",
+        default=None,
+        help="comma-separated number of passes per dispatch, in dispatch_id order, for runs "
+        "where some dispatches are not replayed and so carry fewer passes",
+    )
     parser.addoption("--n-elems", type=int, default=1048576)
     parser.addoption("--baseline-json", help="optional 1-pass baseline JSON for scaling")
     parser.addoption("--max-scaling-ratio", type=float, default=10.0)
@@ -114,6 +121,14 @@ def expected_passes(request):
 @pytest.fixture
 def expected_dispatch_count(request):
     return request.config.getoption("--expected-dispatch-count")
+
+
+@pytest.fixture
+def expected_pass_counts(request):
+    raw = request.config.getoption("--expected-pass-counts")
+    if raw is None:
+        return None
+    return [int(field) for field in raw.split(",") if field.strip() != ""]
 
 
 @pytest.fixture
