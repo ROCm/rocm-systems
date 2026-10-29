@@ -18,37 +18,48 @@
 
 namespace {
 
-// These are plain TEST()s with no TestBase, so the VERB() macro (which reads
-// TestBase::verbosity()) is unavailable; gate on the global verbosity instead.
-// VERBOSE_STANDARD == 1.
-bool isGlobalTestBaseVerbose() {
-  const bool verbose = GetTestVerbosity() >= TestBase::VERBOSE_STANDARD;
-  return verbose;
+// The helpers below call the API, print it the way the other amdsmi tests do
+// ("### func(desc)" header, then the returned status against `expected`), and
+// return the status so the caller can still assert on it. The caller's
+// file/line are captured by the default arguments.
+amdsmi_status_t StatusCodeToString(amdsmi_status_t code, const char** status_string,
+                                   amdsmi_status_t expected, std::string_view desc,
+                                   const char* file = __builtin_FILE(),
+                                   uint32_t line = __builtin_LINE()) {
+  DISPLAY_AMDSMI_API("amdsmi_status_code_to_string", desc, IsVerbose());
+  const amdsmi_status_t ret = amdsmi_status_code_to_string(code, status_string);
+  DISPLAY_AMDSMI_STATUS(IsVerbose(), file, line, ret, expected);
+  return ret;
+}
+
+amdsmi_status_t RsmiToAmdsmiStatus(rsmi_status_t rsmi_status, amdsmi_status_t expected,
+                                   std::string_view desc, const char* file = __builtin_FILE(),
+                                   uint32_t line = __builtin_LINE()) {
+  DISPLAY_AMDSMI_API("rsmi_to_amdsmi_status", desc, IsVerbose());
+  const amdsmi_status_t ret = amd::smi::rsmi_to_amdsmi_status(rsmi_status);
+  DISPLAY_AMDSMI_STATUS(IsVerbose(), file, line, ret, expected);
+  return ret;
 }
 
 TEST(SystemUnit, status_code_to_string__StatusCodeToStringRejectsNullOutPtr) {
-  DISPLAY_AMDSMI_API("amdsmi_status_code_to_string", "status_string=nullptr",
-                     isGlobalTestBaseVerbose());
-  const amdsmi_status_t ret = amdsmi_status_code_to_string(AMDSMI_STATUS_SUCCESS, nullptr);
-  DISPLAY_AMDSMI_STATUS(isGlobalTestBaseVerbose(), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+  const amdsmi_status_t ret = StatusCodeToString(AMDSMI_STATUS_SUCCESS, nullptr,
+                                                 AMDSMI_STATUS_INVAL, "status_string=nullptr");
   EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
 }
 
 TEST(SystemUnit, status_code_to_string__StatusCodeToStringValidOutPtr) {
   const char* msg = nullptr;
-  DISPLAY_AMDSMI_API("amdsmi_status_code_to_string", "status_string=&msg",
-                     isGlobalTestBaseVerbose());
-  const amdsmi_status_t ret = amdsmi_status_code_to_string(AMDSMI_STATUS_SUCCESS, &msg);
-  DISPLAY_AMDSMI_STATUS(isGlobalTestBaseVerbose(), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+  const amdsmi_status_t ret =
+      StatusCodeToString(AMDSMI_STATUS_SUCCESS, &msg, AMDSMI_STATUS_SUCCESS, "status_string=&msg");
   EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   EXPECT_NE(msg, nullptr);
 }
 
 #if ENABLE_ESMI_LIB
 TEST(SystemUnit, status_code_to_string__EsmiErrMsgRejectsNullOutPtr) {
-  DISPLAY_AMDSMI_API("amdsmi_get_esmi_err_msg", "status_string=nullptr", isGlobalTestBaseVerbose());
+  DISPLAY_AMDSMI_API("amdsmi_get_esmi_err_msg", "status_string=nullptr", IsVerbose());
   const amdsmi_status_t ret = amdsmi_get_esmi_err_msg(AMDSMI_STATUS_SUCCESS, nullptr);
-  DISPLAY_AMDSMI_STATUS(isGlobalTestBaseVerbose(), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_STATUS(IsVerbose(), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
   EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
 }
 #endif
@@ -197,13 +208,9 @@ TEST(SystemUnit, status_code_to_string__EveryStatusCodeResolvesToItsOwnName) {
   }
 
   for (const auto& [code, name] : all_status_codes) {
-    DISPLAY_AMDSMI_API("amdsmi_status_code_to_string", name + "=" + std::to_string(code),
-                       isGlobalTestBaseVerbose());
-
     const char* status_string = nullptr;
-    amdsmi_status_t ret = amdsmi_status_code_to_string(code, &status_string);
-    DISPLAY_AMDSMI_STATUS(isGlobalTestBaseVerbose(), __FILE__, __LINE__, ret,
-                          AMDSMI_STATUS_SUCCESS);
+    const amdsmi_status_t ret = StatusCodeToString(code, &status_string, AMDSMI_STATUS_SUCCESS,
+                                                   name + "=" + std::to_string(code));
 
     EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS)
         << name << " (" << code << ") did not resolve, this status is missing from "
@@ -211,7 +218,7 @@ TEST(SystemUnit, status_code_to_string__EveryStatusCodeResolvesToItsOwnName) {
     ASSERT_NE(status_string, nullptr) << name;
 
     const std::string description(status_string);
-    if (isGlobalTestBaseVerbose()) {
+    if (IsVerbose()) {
       std::cout << "\t>>> " << name << " (" << code << ") -> \"" << description << "\""
                 << std::endl;
     }
@@ -236,20 +243,16 @@ TEST(SystemUnit, status_code_to_string__KnownStatusCodesResolveToTheirOwnName) {
   };
 
   for (const auto& [code, name] : spot_checks) {
-    DISPLAY_AMDSMI_API("amdsmi_status_code_to_string",
-                       std::string(name) + "=" + std::to_string(code), isGlobalTestBaseVerbose());
-
     const char* status_string = nullptr;
-    amdsmi_status_t ret = amdsmi_status_code_to_string(code, &status_string);
-    DISPLAY_AMDSMI_STATUS(isGlobalTestBaseVerbose(), __FILE__, __LINE__, ret,
-                          AMDSMI_STATUS_SUCCESS);
+    const amdsmi_status_t ret = StatusCodeToString(code, &status_string, AMDSMI_STATUS_SUCCESS,
+                                                   std::string(name) + "=" + std::to_string(code));
 
     EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS)
         << name << " (" << code << ") did not resolve, this case is missing from "
         << "amdsmi_status_code_to_string(). Must return AMDSMI_STATUS_SUCCESS "
         << "for a valid status code.";
     ASSERT_NE(status_string, nullptr) << name;
-    if (isGlobalTestBaseVerbose()) {
+    if (IsVerbose()) {
       std::cout << "\t### " << name << " (" << code << ") -> \"" << status_string << "\""
                 << std::endl;
     }
@@ -267,10 +270,8 @@ TEST(SystemUnit, status_code_to_string__UndefinedStatusCodeYieldsUnknownError) {
   // 100 sits in an enum gap (above the highest normal code, below the two
   // high-value error codes).
   const auto undefined_code = static_cast<amdsmi_status_t>(100);
-  DISPLAY_AMDSMI_API("amdsmi_status_code_to_string", "status=100", isGlobalTestBaseVerbose());
-  const amdsmi_status_t ret = amdsmi_status_code_to_string(undefined_code, &status_string);
-  DISPLAY_AMDSMI_STATUS(isGlobalTestBaseVerbose(), __FILE__, __LINE__, ret,
-                        AMDSMI_STATUS_UNKNOWN_ERROR);
+  const amdsmi_status_t ret =
+      StatusCodeToString(undefined_code, &status_string, AMDSMI_STATUS_UNKNOWN_ERROR, "status=100");
   EXPECT_EQ(ret, AMDSMI_STATUS_UNKNOWN_ERROR);
   ASSERT_NE(status_string, nullptr);
   EXPECT_STRNE(status_string, "")
@@ -283,12 +284,21 @@ TEST(SystemUnit, status_code_to_string__UndefinedStatusCodeYieldsUnknownError) {
 TEST(SystemUnit, status_code_to_string__UnmappedLowerLevelStatusYieldsMapError) {
   // A value that is intentionally not present in amd::smi::rsmi_status_map.
   const auto unmapped_rsmi_status = static_cast<rsmi_status_t>(0x0BADF00D);
-  EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(unmapped_rsmi_status), AMDSMI_STATUS_MAP_ERROR)
+  amdsmi_status_t ret =
+      RsmiToAmdsmiStatus(unmapped_rsmi_status, AMDSMI_STATUS_MAP_ERROR, "rsmi_status=0x0BADF00D");
+  EXPECT_EQ(ret, AMDSMI_STATUS_MAP_ERROR)
       << "An unmapped rocm_smi status must translate to AMDSMI_STATUS_MAP_ERROR; "
       << "a new rsmi status is missing from amd::smi::rsmi_status_map.";
 
   // Sanity: known mappings must NOT produce MAP_ERROR.
-  EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_INVALID_ARGS), AMDSMI_STATUS_INVAL);
-  EXPECT_NE(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_NOT_SUPPORTED), AMDSMI_STATUS_MAP_ERROR);
+  ret = RsmiToAmdsmiStatus(RSMI_STATUS_SUCCESS, AMDSMI_STATUS_SUCCESS, "RSMI_STATUS_SUCCESS");
+  EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS);
+
+  ret =
+      RsmiToAmdsmiStatus(RSMI_STATUS_INVALID_ARGS, AMDSMI_STATUS_INVAL, "RSMI_STATUS_INVALID_ARGS");
+  EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
+
+  ret = RsmiToAmdsmiStatus(RSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_SUPPORTED,
+                           "RSMI_STATUS_NOT_SUPPORTED");
+  EXPECT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
 }
