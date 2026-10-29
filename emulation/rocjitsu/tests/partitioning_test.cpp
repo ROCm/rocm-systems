@@ -94,9 +94,11 @@ build_partitioned_topology(uint32_t num_threads, util::DiagnosticEmitter emit_er
 
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
+  if (loaded.wire_links(engine->topology(), emit_error).failed())
+    return util::Result::failure();
   bool partitioned = amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads);
-  engine->create();
+  if (engine->create(emit_error).failed())
+    return util::Result::failure();
 
   return PartitionedTopology{std::move(loaded), soc, memory, std::move(engine), partitioned};
 }
@@ -662,7 +664,7 @@ TEST(XcdPartitioningTest, ZeroPartitionsIsNoopWithoutManualPartitions) {
   auto *soc = loaded.soc();
   simdojo::Topology topology;
   topology.set_root(loaded.take_root());
-  loaded.wire_links(topology);
+  ASSERT_TRUE(loaded.wire_links(topology).succeeded());
 
   EXPECT_FALSE(amdgpu::partition_topology_by_xcds(topology, soc, 0));
   EXPECT_TRUE(topology.partitions().empty());
@@ -685,7 +687,7 @@ TEST(XcdPartitioningTest, SinglePartitionAssignsAllComponentsToZero) {
   auto *soc = loaded.soc();
   simdojo::Topology topology;
   topology.set_root(loaded.take_root());
-  loaded.wire_links(topology);
+  ASSERT_TRUE(loaded.wire_links(topology).succeeded());
 
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(topology, soc, 1));
   ASSERT_EQ(topology.partitions().size(), 1u);

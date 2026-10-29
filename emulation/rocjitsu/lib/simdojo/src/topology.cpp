@@ -7,7 +7,6 @@
 #include <cassert>
 #include <numeric>
 #include <random>
-#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -15,20 +14,25 @@ namespace simdojo {
 
 namespace {
 
-Component *resolve_comp(CompositeComponent *root, const std::string &path) {
+util::FailureOr<Component *> resolve_comp(CompositeComponent *root, const std::string &path,
+                                          util::DiagnosticEmitter emit_error) {
   Component *cur = root;
   size_t pos = 0;
   while (pos < path.size()) {
     auto dot = path.find('.', pos);
     auto seg = (dot == std::string::npos) ? path.substr(pos) : path.substr(pos, dot - pos);
     pos = (dot == std::string::npos) ? path.size() : dot + 1;
-    if (!cur->is_composite())
-      throw std::runtime_error("Path '" + path + "': '" + cur->name() + "' not composite");
+    if (!cur->is_composite()) {
+      emit_error.emit() << "Path '" << path << "': '" << cur->name() << "' not composite";
+      return util::Result::failure();
+    }
     auto *c = static_cast<CompositeComponent *>(cur);
     auto *ch = c->find_child(seg);
-    if (!ch)
-      throw std::runtime_error("Path '" + path + "': '" + seg + "' not found in '" + c->name() +
-                               "'");
+    if (!ch) {
+      emit_error.emit() << "Path '" << path << "': '" << seg << "' not found in '" << c->name()
+                        << "'";
+      return util::Result::failure();
+    }
     cur = ch;
   }
   return cur;
@@ -72,11 +76,17 @@ Port *find_or_create_port(Component *comp, const std::string &name) {
   return comp->add_port(std::make_unique<Port>(name, pid, comp, dir, proto));
 }
 
-Port *resolve_port_impl(CompositeComponent *root, const std::string &path) {
+util::FailureOr<Port *> resolve_port_impl(CompositeComponent *root, const std::string &path,
+                                          util::DiagnosticEmitter emit_error) {
   auto last = path.rfind('.');
-  if (last == std::string::npos)
-    throw std::runtime_error("Port path needs '.': " + path);
-  auto *comp = resolve_comp(root, path.substr(0, last));
+  if (last == std::string::npos) {
+    emit_error.emit() << "Port path needs '.': " << path;
+    return util::Result::failure();
+  }
+  auto maybe_comp = resolve_comp(root, path.substr(0, last), emit_error);
+  if (maybe_comp.failed())
+    return util::Result::failure();
+  auto *comp = maybe_comp.value();
   auto pn = path.substr(last + 1);
   for (auto &p : comp->ports())
     if (p->name() == pn)
@@ -98,9 +108,13 @@ void validate_link_ports([[maybe_unused]] Port *src, [[maybe_unused]] Port *dst)
 
 } // namespace
 
-ClockDomain *Topology::add_clock_domain(std::string name, uint64_t frequency_hz,
-                                        Tick phase_offset) {
-  auto domain = std::make_unique<ClockDomain>(std::move(name), frequency_hz, phase_offset);
+util::FailureOr<ClockDomain *> Topology::add_clock_domain(std::string name, uint64_t frequency_hz,
+                                                          Tick phase_offset,
+                                                          util::DiagnosticEmitter emit_error) {
+  auto maybe_domain = ClockDomain::create(std::move(name), frequency_hz, phase_offset, emit_error);
+  if (maybe_domain.failed())
+    return util::Result::failure();
+  auto domain = std::make_unique<ClockDomain>(std::move(maybe_domain.value()));
   ClockDomain *raw = domain.get();
   clock_domains_.push_back(std::move(domain));
   return raw;
@@ -164,25 +178,50 @@ uint32_t Topology::num_components() const {
              : 1;
 }
 
-Component *Topology::resolve_component(const std::string &path) const {
-  if (!root_)
-    throw std::runtime_error("resolve_component: topology has no root");
-  return resolve_comp(root_.get(), path);
+util::FailureOr<Component *> Topology::resolve_component(const std::string &path,
+                                                         util::DiagnosticEmitter emit_error) const {
+  if (!root_) {
+    emit_error.emit() << "resolve_component: topology has no root";
+    return util::Result::failure();
+  }
+  return resolve_comp(root_.get(), path, emit_error);
 }
 
-Port *Topology::resolve_port(const std::string &path) const {
-  if (!root_)
-    throw std::runtime_error("resolve_port: topology has no root");
-  return resolve_port_impl(root_.get(), path);
+util::FailureOr<Port *> Topology::resolve_port(const std::string &path,
+                                               util::DiagnosticEmitter emit_error) const {
+  if (!root_) {
+    emit_error.emit() << "resolve_port: topology has no root";
+    return util::Result::failure();
+  }
+  return resolve_port_impl(root_.get(), path, emit_error);
 }
 
-void Topology::wire_links(const std::vector<LinkSpec> &specs, ExecMode mode) {
-  for (auto &ls : specs) {
-    auto *sp = resolve_port_impl(root_.get(), ls.src);
-    auto *dp = resolve_port_impl(root_.get(), ls.dst);
-    auto *link = add_link(sp, dp, ls.latency, ls.weight);
+util::Result Topology::wire_links(const std::vector<LinkSpec> &specs, ExecMode mode,
+                                  util::DiagnosticEmitter emit_error) {
+  // Resolve every component and validate every path before creating ports or links.
+  if (!root_) {
+    emit_error.emit() << "wire_links: topology has no root";
+    return util::Result::failure();
+  }
+  for (const auto &ls : specs) {
+    for (const auto *path : {&ls.src, &ls.dst}) {
+      auto last = path->rfind('.');
+      if (last == std::string::npos) {
+        emit_error.emit() << "Port path needs '.': " << *path;
+        return util::Result::failure();
+      }
+      if (resolve_comp(root_.get(), path->substr(0, last), emit_error).failed())
+        return util::Result::failure();
+    }
+  }
+  for (const auto &ls : specs) {
+    auto sp = resolve_port_impl(root_.get(), ls.src, emit_error);
+    auto dp = resolve_port_impl(root_.get(), ls.dst, emit_error);
+    assert(sp.succeeded() && dp.succeeded() && "paths validated above");
+    auto *link = add_link(sp.value(), dp.value(), ls.latency, ls.weight);
     link->set_exec_mode(mode);
   }
+  return util::Result::success();
 }
 
 void Topology::dfs_visit(std::function<void(Component *, uint32_t)> visitor) const {
@@ -212,9 +251,12 @@ void Topology::dfs_visit(std::function<void(Component *, uint32_t)> visitor) con
   }
 }
 
-void Topology::partition_balanced(uint32_t num_partitions) {
-  if (num_partitions == 0)
-    throw std::invalid_argument("partition_balanced: num_partitions must be nonzero");
+util::Result Topology::partition_balanced(uint32_t num_partitions,
+                                          util::DiagnosticEmitter emit_error) {
+  if (num_partitions == 0) {
+    emit_error.emit() << "partition_balanced: num_partitions must be nonzero";
+    return util::Result::failure();
+  }
 
   auto components = collect_all_components();
   append_link_endpoint_owners(components);
@@ -231,7 +273,7 @@ void Topology::partition_balanced(uint32_t num_partitions) {
       part.internal_links.push_back(link.get());
     partitions_.clear();
     partitions_.push_back(std::move(part));
-    return;
+    return util::Result::success();
   }
 
   auto adj = AdjacencyGraph::build(components, links_);
@@ -241,12 +283,17 @@ void Topology::partition_balanced(uint32_t num_partitions) {
   partitions_ = partitioner.partition(adj);
 
   classify_links();
+  return util::Result::success();
 }
 
-void Topology::partition_manual(uint32_t num_partitions,
-                                std::function<PartitionID(Component *)> assigner) {
-  if (num_partitions == 0)
-    throw std::invalid_argument("partition_manual: num_partitions must be nonzero");
+util::Result Topology::partition_manual(uint32_t num_partitions,
+                                        std::function<PartitionID(Component *)> assigner,
+                                        util::DiagnosticEmitter emit_error) {
+  if (num_partitions == 0 || !assigner) {
+    emit_error.emit()
+        << "partition_manual: num_partitions must be nonzero and assigner must be set";
+    return util::Result::failure();
+  }
 
   auto components = collect_all_components();
   append_link_endpoint_owners(components);
@@ -255,8 +302,10 @@ void Topology::partition_manual(uint32_t num_partitions,
   assignments.reserve(components.size());
   for (auto *comp : components) {
     PartitionID pid = assigner(comp);
-    if (pid >= num_partitions)
-      throw std::invalid_argument("partition_manual: assigner returned out-of-range ID");
+    if (pid >= num_partitions) {
+      emit_error.emit() << "partition_manual: assigner returned out-of-range ID";
+      return util::Result::failure();
+    }
     assignments.push_back(pid);
   }
 
@@ -276,6 +325,7 @@ void Topology::partition_manual(uint32_t num_partitions,
 
   partitions_ = std::move(partitions);
   classify_links();
+  return util::Result::success();
 }
 
 void Topology::classify_links() {

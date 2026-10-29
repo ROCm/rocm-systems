@@ -172,8 +172,8 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
   soc->set_plugin_group(std::move(plugin_group));
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology()).succeeded());
+  ASSERT_TRUE(engine.create().succeeded());
 
   code_object.load_to_memory(memory, kCodeObjectBase);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)
@@ -350,8 +350,8 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
   ASSERT_NE(memory, nullptr);
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology()).succeeded());
+  ASSERT_TRUE(engine.create().succeeded());
 
   code_object.load_to_memory(memory, kCodeObjectBase);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)

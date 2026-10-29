@@ -104,9 +104,9 @@ struct KfdFanoutFixture {
     auto vm = std::make_unique<VirtualMachine>(std::move(soc_root));
     driver = vm->driver();
     engine->topology().set_root(std::move(vm));
-    loaded.wire_links(engine->topology());
+    ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
     soc->wire_backing(engine->topology());
-    engine->create();
+    ASSERT_TRUE(engine->create().succeeded());
     engine->register_as_primary();
   }
 

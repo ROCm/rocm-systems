@@ -255,8 +255,12 @@ int run_vfio_server_impl(const std::string &config_path,
 
   VirtualMachine *machine_ptr = nullptr;
   try {
-    machine_ptr =
-        assemble_virtual_machine_topology(loaded, engine.topology(), /*daemon_mode=*/false);
+    auto report_error = [](std::string_view message) { util::Logger::warn("vfu: ", message); };
+    auto machine = assemble_virtual_machine_topology(loaded, engine.topology(), false,
+                                                     util::DiagnosticEmitter(report_error));
+    if (machine.failed())
+      return 1;
+    machine_ptr = machine.value();
   } catch (const std::exception &error) {
     util::Logger::warn(std::format("vfu: cannot assemble the local node: {}", error.what()));
     return 1;
@@ -311,7 +315,9 @@ int run_vfio_server_impl(const std::string &config_path,
       if (!device->usable())
         return 1;
     }
-    engine.create();
+    auto report_error = [](std::string_view message) { util::Logger::warn("vfu: ", message); };
+    if (engine.create(util::DiagnosticEmitter(report_error)).failed())
+      return 1;
   } catch (const std::exception &error) {
     util::Logger::warn(std::format("vfu: cannot create the local GPU node: {}", error.what()));
     return 1;

@@ -116,11 +116,11 @@ struct KernelExecFixture {
     loaded.engine_config.num_threads = num_threads;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
+    ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
     if (num_threads > 1) {
       ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads));
     }
-    engine->create();
+    ASSERT_TRUE(engine->create().succeeded());
 
     Executable exec(kernel_path(kernel_name));
     ASSERT_TRUE(exec.is_valid());
@@ -371,8 +371,8 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
-  engine->create();
+  ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
+  ASSERT_TRUE(engine->create().succeeded());
 
   // Write a kernel descriptor + s_endpgm to GPU memory.
   using namespace rocjitsu::amdhsa;
@@ -424,10 +424,10 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   loaded.engine_config.num_threads = TOTAL_XCDS;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
+  ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
 
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, TOTAL_XCDS));
-  engine->create();
+  ASSERT_TRUE(engine->create().succeeded());
 
   using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};

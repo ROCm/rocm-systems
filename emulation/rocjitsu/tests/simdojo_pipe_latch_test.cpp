@@ -113,13 +113,20 @@ private:
 };
 
 std::vector<std::pair<uint64_t, int>> run_pipeline(int count, bool back_to_front) {
-  ClockDomain domain("clk", 1'000'000'000);
+  auto maybe_domain = ClockDomain::create("clk", 1'000'000'000);
+  EXPECT_TRUE(maybe_domain.succeeded());
+  if (maybe_domain.failed())
+    return {};
+  const auto &domain = maybe_domain.value();
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
   auto *pipeline = static_cast<ThreeStagePipeline *>(
       root->add_child(std::make_unique<ThreeStagePipeline>(domain, count, back_to_front)));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  const auto created = engine.create();
+  EXPECT_TRUE(created.succeeded());
+  if (created.failed())
+    return {};
   const ExitStatus exit = engine.run();
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
   return pipeline->arrivals;

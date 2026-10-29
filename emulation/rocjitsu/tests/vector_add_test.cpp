@@ -92,8 +92,8 @@ void run_vector_add(uint32_t dispatch_threads, VectorAddRunResult &result) {
   soc->set_dispatch_threads(dispatch_threads);
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
-  engine->create();
+  ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
+  ASSERT_TRUE(engine->create().succeeded());
 
   // Load code into GPU memory. Place .rodata (kernel descriptor) and .text (code)
   // at their virtual addresses relative to a base. The .kd symbol value matches
@@ -219,10 +219,10 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   loaded.engine_config.num_threads = TOTAL_XCDS;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
+  ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
 
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, TOTAL_XCDS));
-  engine->create();
+  ASSERT_TRUE(engine->create().succeeded());
 
   co->load_to_memory(memory, KD_ADDR);
   uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");
@@ -304,11 +304,11 @@ void run_fanout_golden_reference(uint32_t num_threads) {
   loaded.engine_config.num_threads = num_threads;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
+  ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
   if (num_threads > 1) {
     ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads));
   }
-  engine->create();
+  ASSERT_TRUE(engine->create().succeeded());
 
   co->load_to_memory(memory, KD_ADDR);
   uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");
@@ -388,8 +388,10 @@ util::FailureOr<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_sc
   loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
-  engine->create();
+  if (loaded.wire_links(engine->topology(), emit_error).failed())
+    return util::Result::failure();
+  if (engine->create(emit_error).failed())
+    return util::Result::failure();
 
   co->load_to_memory(memory, KD_ADDR);
   uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");
@@ -559,11 +561,11 @@ void run_fanout_signal_ordering(uint32_t num_threads) {
   loaded.engine_config.num_threads = num_threads;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
+  ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
   if (num_threads > 1) {
     ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads));
   }
-  engine->create();
+  ASSERT_TRUE(engine->create().succeeded());
 
   co->load_to_memory(memory, KD_ADDR);
   const uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");

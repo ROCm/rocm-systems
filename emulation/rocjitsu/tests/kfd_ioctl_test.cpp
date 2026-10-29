@@ -360,9 +360,15 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
   auto *driver = vm->driver();
 
   engine.topology().set_root(std::move(vm));
-  loaded.wire_links(engine.topology());
+  if (loaded.wire_links(engine.topology(), loaded_diagnostic.emitter()).failed()) {
+    ADD_FAILURE() << loaded_diagnostic.message();
+    return 0;
+  }
   soc->wire_backing(engine.topology());
-  engine.create();
+  if (engine.create(loaded_diagnostic.emitter()).failed()) {
+    ADD_FAILURE() << loaded_diagnostic.message();
+    return 0;
+  }
   engine.register_as_primary();
 
   driver->setup_topology(loaded.device, num_xcds);
@@ -423,9 +429,9 @@ protected:
     driver_ = vm->driver();
 
     engine_->topology().set_root(std::move(vm));
-    loaded_.wire_links(engine_->topology());
+    ASSERT_TRUE(loaded_.wire_links(engine_->topology()).succeeded());
     soc->wire_backing(engine_->topology());
-    engine_->create();
+    ASSERT_TRUE(engine_->create().succeeded());
     engine_->register_as_primary();
 
     if (publish_topology)

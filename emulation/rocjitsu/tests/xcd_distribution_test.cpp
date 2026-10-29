@@ -113,12 +113,12 @@ struct XcdDistributionFixture {
             : 1u;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
+    ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
     if (loaded.engine_config.num_threads > 1 &&
         !amdgpu::partition_topology_by_xcds(engine->topology(), soc,
                                             loaded.engine_config.num_threads))
       ADD_FAILURE() << "multi-threaded topology requires per-XCD partitioning";
-    engine->create();
+    ASSERT_TRUE(engine->create().succeeded());
 
     using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
@@ -149,8 +149,8 @@ struct Cdna5ScratchTopologyFixture {
     loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
+    ASSERT_TRUE(engine->create().succeeded());
 
     using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};

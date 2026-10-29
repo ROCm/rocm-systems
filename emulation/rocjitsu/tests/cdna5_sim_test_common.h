@@ -113,12 +113,12 @@ struct Gfx1250Sim {
 
   void initialize() {
     ASSERT_TRUE(load_valid_config(kGfx1250ConfigPath, loaded));
-    build();
+    ASSERT_NO_FATAL_FAILURE(build());
   }
 
   void initialize(const std::string &config_json) {
     ASSERT_TRUE(load_valid_config_from_string(config_json, loaded));
-    build();
+    ASSERT_NO_FATAL_FAILURE(build());
   }
 
   void build() {
@@ -130,8 +130,8 @@ struct Gfx1250Sim {
     loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
+    ASSERT_TRUE(engine->create().succeeded());
     // Capture every wavefront's final register state at halt. A wave frees its
     // registers at s_endpgm, so tests that run a kernel to completion read the
     // result from the snapshot rather than the (freed) slot.

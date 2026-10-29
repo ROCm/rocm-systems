@@ -94,8 +94,8 @@ public:
     mem_ = loaded_.memory();
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
     engine_->topology().set_root(loaded_.take_root());
-    loaded_.wire_links(engine_->topology());
-    engine_->create();
+    ASSERT_TRUE(loaded_.wire_links(engine_->topology()).succeeded());
+    ASSERT_TRUE(engine_->create().succeeded());
     plugin_group_ = make_halt_snapshot_group(&snapshot_plugin_);
     soc_->set_plugin_group(plugin_group_);
   }

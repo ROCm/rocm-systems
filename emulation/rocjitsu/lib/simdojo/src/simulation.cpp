@@ -9,7 +9,6 @@
 #include <cassert>
 #include <chrono>
 #include <exception>
-#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -36,19 +35,24 @@ SimulationEngine::~SimulationEngine() {
     shutdown();
 }
 
-void SimulationEngine::create() {
+util::Result SimulationEngine::create(util::DiagnosticEmitter emit_error) {
   assert(!created_ && "create() called twice without shutdown()");
-  if (config_.num_threads == 0)
-    throw std::invalid_argument("SimulationEngine requires at least one worker thread");
+  if (config_.num_threads == 0) {
+    emit_error.emit() << "SimulationEngine requires at least one worker thread";
+    return util::Result::failure();
+  }
 
   if (topology_.partitions().empty()) {
     if (config_.num_threads > 1) {
-      throw std::invalid_argument(
-          "multi-threaded SimulationEngine requires an explicit topology partition policy");
+      emit_error.emit()
+          << "multi-threaded SimulationEngine requires an explicit topology partition policy";
+      return util::Result::failure();
     }
-    topology_.partition_balanced(1);
+    if (topology_.partition_balanced(1, emit_error).failed())
+      return util::Result::failure();
   }
-  setup_partitions();
+  if (setup_partitions(emit_error).failed())
+    return util::Result::failure();
 
   done_.store(false, std::memory_order_release);
   startup_complete_.store(false, std::memory_order_release);
@@ -63,6 +67,7 @@ void SimulationEngine::create() {
 
   initialize_components();
   created_ = true;
+  return util::Result::success();
 }
 
 void SimulationEngine::shutdown() {
@@ -98,23 +103,26 @@ void SimulationEngine::shutdown() {
   report_component_failure(component_failure, "engine shutdown");
 }
 
-void SimulationEngine::setup_partitions() {
+util::Result SimulationEngine::setup_partitions(util::DiagnosticEmitter emit_error) {
   const uint32_t num_threads = config_.num_threads;
   if (topology_.partitions().size() != num_threads) {
-    throw std::invalid_argument(
-        "SimulationEngine topology partition count must match the worker thread count");
+    emit_error.emit()
+        << "SimulationEngine topology partition count must match the worker thread count";
+    return util::Result::failure();
   }
 
   // Validate cross-partition link constraints.
   for (auto &link : topology_.links()) {
     if (link->is_cross_partition()) {
       if (link->latency() == 0) {
-        throw std::invalid_argument("SimulationEngine cross-partition link " +
-                                    link_endpoints(*link) + " requires positive latency");
+        emit_error.emit() << "SimulationEngine cross-partition link " << link_endpoints(*link)
+                          << " requires positive latency";
+        return util::Result::failure();
       }
       if (dynamic_cast<QueuedLink *>(link.get()) != nullptr) {
-        throw std::invalid_argument("SimulationEngine QueuedLink " + link_endpoints(*link) +
-                                    " must not cross partition boundaries");
+        emit_error.emit() << "SimulationEngine QueuedLink " << link_endpoints(*link)
+                          << " must not cross partition boundaries";
+        return util::Result::failure();
       }
     }
   }
@@ -132,6 +140,7 @@ void SimulationEngine::setup_partitions() {
     for (auto *comp : part.components)
       comp->set_engine(this);
   }
+  return util::Result::success();
 }
 
 ExitStatus SimulationEngine::run() {

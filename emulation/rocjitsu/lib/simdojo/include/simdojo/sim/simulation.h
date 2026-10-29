@@ -114,8 +114,11 @@ private:
 ///   SimulationEngine::Config config{.num_threads = 4};
 ///   SimulationEngine engine(config);
 ///   engine.topology().set_root(std::move(my_model));
-///   engine.topology().partition_balanced(config.num_threads);
-///   engine.create(); // validates the partition policy and initializes components
+///   util::StringDiagnostic diagnostic;
+///   if (engine.topology().partition_balanced(config.num_threads, diagnostic.emitter()).failed())
+///     return; // report diagnostic.message()
+///   if (engine.create(diagnostic.emitter()).failed())
+///     return; // report diagnostic.message()
 ///   // (user enqueues work via CP)
 ///   auto exit = engine.run(); // starts up components, runs to completion
 /// @endcode
@@ -154,9 +157,10 @@ public:
   /// self-scheduling is deferred: the Clocked/Functional mixins enqueue their
   /// first event in startup() (invoked by the first run()/step() call), not
   /// here, so no events exist until execution begins.
-  /// @throws std::invalid_argument if the worker count, partition count, or
-  /// cross-partition link configuration is invalid.
-  void create();
+  /// @returns Failure with a diagnostic for invalid admission configuration. On
+  /// failure no component engine pointers are changed and is_created() remains false.
+  /// Allocations and component initialize callbacks can still throw.
+  util::Result create(util::DiagnosticEmitter emit_error = {});
 
   /// @brief Tear down engine state (shutdown components, join workers).
   ///
@@ -463,7 +467,7 @@ private:
   bool check_termination(Tick lbts);
 
   /// @brief Set up partition contexts, async queues, and engine pointers.
-  void setup_partitions();
+  util::Result setup_partitions(util::DiagnosticEmitter emit_error);
 
   /// @brief Wake the idle worker or quiescent barrier completion.
   ///

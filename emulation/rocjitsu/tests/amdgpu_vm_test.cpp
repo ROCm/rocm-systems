@@ -221,9 +221,9 @@ struct VmFixture {
     gpu_mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
+    ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
     if (create_engine)
-      engine->create();
+      ASSERT_TRUE(engine->create().succeeded());
   }
 
   amdgpu::Xcd *xcd(uint32_t idx = 0) { return soc_ptr->xcd(idx); }
@@ -5718,7 +5718,7 @@ TEST(CommandProcessorTest, PendingRetryDoesNotSurviveEngineShutdown) {
   ASSERT_TRUE(cp->schedule_retry_event_for_test());
 
   f.engine->shutdown();
-  f.engine->create();
+  ASSERT_TRUE(f.engine->create().succeeded());
   const uint64_t passes_before = cp->doorbell_handle_count_for_test();
   ASSERT_TRUE(cp->schedule_retry_event_for_test());
 
@@ -7726,7 +7726,7 @@ TEST(AqlDispatchTest, PoolFindsWavesAdmittedBeforeEngineAttachment) {
   ASSERT_NE(f.cu(1)->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/104,
                                  /*num_vgprs=*/256),
             nullptr);
-  f.engine->create();
+  ASSERT_TRUE(f.engine->create().succeeded());
   f.engine->schedule_event_now(f.cp()->doorbell_event());
   f.engine->run();
   EXPECT_TRUE(f.cu(1)->is_idle());
@@ -7764,8 +7764,8 @@ TEST(AqlDispatchTest, PoolContinuationLetsPeerCommandProcessorSatisfyPollingWave
   auto *memory = loaded.memory();
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology()).succeeded());
+  ASSERT_TRUE(engine.create().succeeded());
   soc_ptr->set_dispatch_threads(2);
 
   const uint32_t waiter_code[] = {
@@ -10427,9 +10427,9 @@ TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
         loaded.engine_config.max_ticks = 10000;
         auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
         engine->topology().set_root(loaded.take_root());
-        loaded.wire_links(engine->topology());
+        ASSERT_TRUE(loaded.wire_links(engine->topology()).succeeded());
         ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, partitions));
-        engine->create();
+        ASSERT_TRUE(engine->create().succeeded());
         for (uint32_t x = 0; x < soc->num_xcds(); ++x)
           for (auto *cu : soc->xcd(x)->command_processor()->compute_units()) {
             cu->set_functional_quantum(1);

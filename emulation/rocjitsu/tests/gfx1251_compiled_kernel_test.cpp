@@ -57,8 +57,8 @@ protected:
     ASSERT_NE(memory_, nullptr);
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine_->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine_->topology());
-    engine_->create();
+    ASSERT_TRUE(loaded.wire_links(engine_->topology()).succeeded());
+    ASSERT_TRUE(engine_->create().succeeded());
   }
 
   void load_compiled_kernel(const char *fixture_name, const char *kernel_name,
