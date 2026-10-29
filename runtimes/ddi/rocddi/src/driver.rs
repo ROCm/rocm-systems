@@ -43,12 +43,13 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::profiling::{
     ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, PcSamplingRequest,
+    SpmDestinationFailure, SpmDestinationReport,
 };
 use crate::device::gpu::queue::{QueueRequest, QueueScratch, QueueTransport};
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationInfo, DeviceAccess, HostRegistration, MemoryKind, VirtualAddressInfo,
-    VirtualMemoryInfo,
+    VirtualMemoryInfo, VirtualMemoryOptions,
 };
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, NativeNodeId, NodeKind, SourceKind, TopologySnapshot};
@@ -266,8 +267,7 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         device: &Self::DeviceState,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<Owned<Self::VirtualMemory>, Error>;
     /// Releases physical backing after its mappings are gone.
     fn free_virtual_memory(memory: &mut Self::VirtualMemory) -> Result<(), Error>;
@@ -296,6 +296,12 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         size: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<Self::VirtualHostMapping>, Error>;
+    /// Changes the protection of a live host map without replacing its owner.
+    /// An error leaves the previous permissions in force.
+    fn set_virtual_host_mapping_permissions(
+        mapping: &mut Self::VirtualHostMapping,
+        permissions: DeviceAccess,
+    ) -> Result<(), Error>;
     /// Unmaps one host range, retaining its owner if cleanup fails.
     fn free_virtual_host_mapping(mapping: &mut Self::VirtualHostMapping) -> Result<(), Error>;
 }
@@ -398,6 +404,8 @@ pub(crate) trait PcSamplingResource {
 /// Allocation, virtual memory, queue, and instrumentation capabilities are
 /// independent. A GPU backend need not implement them to expose these queries.
 pub(crate) trait GpuDriver: Driver {
+    /// Queries the process-wide XNACK mode without changing it.
+    fn xnack_enabled(&self, device: &Self::DeviceState) -> Result<bool, Error>;
     /// Sets the native VM's persisting L2 reservation in bytes.
     fn set_persisting_l2_cache_size(
         &self,
@@ -499,9 +507,7 @@ pub(crate) trait GpuInstrumentationOperations: GpuDriver {
         &self,
         device: &Self::DeviceState,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error>;
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure>;
 }

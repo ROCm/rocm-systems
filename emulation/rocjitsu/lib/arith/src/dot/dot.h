@@ -17,8 +17,8 @@
 
 // Adapted from rocjitsu ad2bb973ec4 shared/gfx12_dot.h (native FP8/BF8
 // extension dd63b040587). Empirical gfx1201 model, not a universal guarantee.
-// Only FP16 DOT4 with FP32 output is instantiated and tested here. The imported
-// BF16, packed-output, and FP8/BF8 paths are retained but not yet exercised.
+// Current callers exercise FP16/BF16 DOT4 with FP32 output; packed-output and
+// FP8/BF8 instantiations are retained from the model but not exercised here.
 namespace rocjitsu::arith {
 
 namespace gfx12_dot_detail {
@@ -213,12 +213,11 @@ inline uint32_t dot_bits(const std::array<Raw, N> &a, const std::array<Raw, N> &
   const Term c{acc_exp ? (acc & 0x7fffff) | 0x800000u : acc & 0x7fffff,
                int(std::max(acc_exp, 1u)) - 127 - 23, bool(acc >> 31)};
 
-  // Packed F16 floors C's alignment exponent at -14. A negative subnormal C
-  // contributes an arithmetic-floor unit if the grid is at or below -14,
-  // even when no magnitude bits survive. Coarser grids drop that tiny C.
-  const int grid =
-      std::max(product_grid, std::max(Packed && !is_bf16 ? -14 : -126, c.leading_exponent()) - 26);
-  int64_t total = align(c, grid, !(Packed && !is_bf16 && grid <= -14));
+  // A negative C contributes a floor unit at or below its alignment floor,
+  // even when all magnitude bits are discarded (gfx1201, rocjitsu #13691).
+  const int c_floor = Packed && !is_bf16 ? -14 : -126;
+  const int grid = std::max(product_grid, std::max(c_floor, c.leading_exponent()) - 26);
+  int64_t total = align(c, grid, grid > c_floor);
   constexpr int group_size = is_f8 ? 4 : 2;
   for (int i = 0; i < int(N); i += group_size) {
     int group_grid = kEmptyExponent;

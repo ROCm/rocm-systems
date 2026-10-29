@@ -14,12 +14,14 @@ from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_CALLS,
     FLUSH_NEAREST_F32_OPS,
     SDWA_ROUNDED_F16_OPS,
+    TRANS_F32_OPS,
 )
 
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
 from amdisa.codegen.execute import (
+    conversion,
     float_compare,
     float_fract,
     float_ldexp,
@@ -28,8 +30,8 @@ from amdisa.codegen.execute import (
     vop3_modifiers,
 )
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
-from amdisa.codegen.execute.fp8_formats import fp8_helper_name
-from amdisa.sema_derive import FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8
+from amdisa.sema_derive import CONVERSION_CALL, FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
 from amdisa.sema_ast import (
     ExecModel,
     SemaBlock,
@@ -140,7 +142,14 @@ class LoweringContext:
     mask_result_writer: str | None = None
     true16_dst_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
+    # Membership enables numeric F16 scalar-inline formatting. Each boolean
+    # selects its carrier half: False means low, True means high. An absent
+    # source keeps its raw carrier, as pseudo-scalar F16 transcendentals do.
+    scalar_f16_source_reads_high_half: dict[int, bool] = field(default_factory=dict)
     true16_vop3_opsel: str | None = None
+    # amdgpu::fp_format tag (F16 or F32) whose sign bit ABS/NEG modify in
+    # integer-typed source reads. None ignores them, as integer operations do.
+    source_modifier_format: str | None = None
     fp8_byte_select: str | None = None
     fp8_decode_e5m3_select: str | None = None
     arch_name: str = ''
@@ -152,6 +161,8 @@ class LoweringContext:
     flush_nearest_f32: bool = False
     # Instruction name, for errors raised while lowering its body.
     instruction_name: str = ''
+    # F32 TRANS: OMOD overflow ignores MODE rounding (TRANS_F32_OPS).
+    trans_f32: bool = False
     arithmetic_flush_output: str | None = None
     integer_saturation_dtype: str | None = None
 
@@ -233,6 +244,7 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
     )
     ctx.flush_nearest_f32 = block.instruction_name in FLUSH_NEAREST_F32_OPS
     ctx.instruction_name = block.instruction_name
+    ctx.trans_f32 = block.instruction_name in TRANS_F32_OPS
     body_lines = _lower_stmt(block.body, ctx)
 
     if ctx.exec_model == ExecModel.VECTOR:
@@ -1015,6 +1027,9 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
             if binding.bit_width == 64:
                 return f'amdgpu::RegisterAccess(wf).read_scalar64({name})'
             value = f'amdgpu::RegisterAccess(wf).read_scalar({name})'
+            if tag != 'D' and idx in ctx.scalar_f16_source_reads_high_half:
+                high = ', true' if ctx.scalar_f16_source_reads_high_half[idx] else ''
+                value = f'amdgpu::read_scalar_f16_carrier({name}, wf{high})'
             if tag != 'D' and idx in ctx.true16_src_selects:
                 select = ctx.true16_src_selects[idx]
                 return f'(({select}) != 0 ? ({value} >> 16) : {value})'
@@ -1150,9 +1165,17 @@ def _lower_dst_write(
     # Lower clamp(omod(minmax(...))) directly on destination bits, avoiding a
     # conversion to host float and back. Legacy vector F16 selection leaves
     # SDWA output modifiers to the store; scalar and *_NUM forms have no SDWA.
+    # Conversions also write bits; their stage object applies SDWA F16 OMOD.
     selection_node, output_fields = _unwrap_output_modifiers(rhs_node)
-    writes_bits = _is_float_minmax(selection_node)
-    if writes_bits:
+    writes_bits = _is_float_minmax(selection_node) or _is_conversion(selection_node)
+    if _is_conversion(selection_node):
+        rhs = _lower_conversion(
+            selection_node,
+            ctx,
+            output_fields if selection_node is not rhs_node else None,
+        )
+        needs_bitcast = 0
+    elif writes_bits:
         fields = output_fields if selection_node is not rhs_node else None
         if ctx.exec_model == ExecModel.VECTOR and selection_node.call_name in (
             f'{FLOAT_MINMAX_CALL}legacy_min',
@@ -1465,12 +1488,13 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f16_bf8': 'static_cast<uint32_t>(util::f32_to_f16_mode(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})), wf.fp16_ovfl()))',
     'cvt_f64_i32': 'std::bit_cast<uint64_t>(static_cast<double>(static_cast<int32_t>({0})))',
     'cvt_f64_u32': 'std::bit_cast<uint64_t>(static_cast<double>({0}))',
-    'cvt_i32_f64': '[&]() -> uint32_t {{ double s = std::bit_cast<double>(static_cast<uint64_t>({0}));'
+    # The decoded F64 source includes ABS/NEG.
+    'cvt_i32_f64': '[&]() -> uint32_t {{ double s = {0};'
     ' if (std::isnan(s)) return 0;'
     ' if (s >= 2147483648.0) return static_cast<uint32_t>(INT32_MAX);'
     ' if (s < -2147483648.0) return static_cast<uint32_t>(INT32_MIN);'
     ' return static_cast<uint32_t>(static_cast<int32_t>(s)); }}()',
-    'cvt_u32_f64': '[&]() -> uint32_t {{ double s = std::bit_cast<double>(static_cast<uint64_t>({0}));'
+    'cvt_u32_f64': '[&]() -> uint32_t {{ double s = {0};'
     ' if (std::isnan(s) || s < 0.0) return 0u;'
     ' if (s >= 4294967296.0) return UINT32_MAX;'
     ' return static_cast<uint32_t>(s); }}()',
@@ -1489,8 +1513,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (s < -32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s))); }}()',
     # These arguments are decoded floats, including source modifiers. Conversion
-    # rounds once with ties to even, independently of MODE.FP_ROUND. Unlike the
-    # packed forms, F16 sources are widened without MODE.FP_DENORM input flushing.
+    # rounds once with ties to even, independently of MODE.FP_ROUND. F16 sources
+    # are widened with MODE.FP_DENORM input flushing (unpacked NORM only).
     'cvt_norm_i16_f16': '[&]() -> uint32_t {{ float s = {0};'
     ' if (std::isnan(s)) return 0u;'
     ' double scaled = util::rndne_scalar(std::clamp(static_cast<double>(s) * 32767.0, -32767.0, 32767.0));'
@@ -1508,19 +1532,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f32_ubyte1': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 8) & 0xFFu))',
     'cvt_f32_ubyte2': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 16) & 0xFFu))',
     'cvt_f32_ubyte3': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 24) & 0xFFu))',
-    'cvt_rpi_i32_f32': '[&]() -> uint32_t {{ float s = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-    ' float r = std::floor(s);'
-    ' if (s - r >= 0.5f) r += 1.0f;'
-    ' if (std::isnan(r)) return 0u;'
-    ' if (r >= 2147483648.0f) return static_cast<uint32_t>(INT32_MAX);'
-    ' if (r < -2147483648.0f) return static_cast<uint32_t>(INT32_MIN);'
-    ' return static_cast<uint32_t>(static_cast<int32_t>(r)); }}()',
-    'cvt_flr_i32_f32': '[&]() -> uint32_t {{ float s = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-    ' float r = std::floor(s);'
-    ' if (std::isnan(r)) return 0u;'
-    ' if (r >= 2147483648.0f) return static_cast<uint32_t>(INT32_MAX);'
-    ' if (r < -2147483648.0f) return static_cast<uint32_t>(INT32_MIN);'
-    ' return static_cast<uint32_t>(static_cast<int32_t>(r)); }}()',
     'cvt': '{0}',
 }
 
@@ -1916,7 +1927,7 @@ def _takes_flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> bool:
         return True
     if ctx.exec_model != ExecModel.VECTOR:
         return False
-    if callee == 'cvt_f32_f16_valu':
+    if callee in ('cvt_f32_f16_valu', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'):
         return True
     return callee in F16_FLUSHED_SOURCE_CALLS and node.ty == SemaType.F16
 
@@ -2068,6 +2079,15 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             arg = f'(({arg} >> (({ctx.fp8_byte_select}) * 8u)) & 0xFFu)'
         fp8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::fp8_e4m3_to_f32')
         bf8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::bf8_e5m2_to_f32')
+        if callee in ('cvt_f32_fp8', 'cvt_f32_bf8') and uses_shared_fp8(ctx.arch_name):
+            decoded = conversion.decode_fp8_expr(callee[-3:], arg)
+            if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f32_fp8':
+                e5m3 = f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg}))'
+                return (
+                    f'(({ctx.fp8_decode_e5m3_select}) ? std::bit_cast<uint32_t>({e5m3}) : '
+                    f'{decoded})'
+                )
+            return decoded
         if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f32_fp8':
             return (
                 f'std::bit_cast<uint32_t>(({ctx.fp8_decode_e5m3_select}) ? '
@@ -2200,6 +2220,10 @@ def _input_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
     widened. Flushing keeps the sign, so it commutes with ABS/NEG. Return None
     when ``node`` is not a direct floating register read.
     """
+    if node.kind == SemaNodeKind.UMINUS:
+        # A negated source (SUB's subtrahend) is flushed like a NEG modifier.
+        source = _input_flushed_source(node.children[0], ctx)
+        return None if source is None else f'(-{source})'
     modifiers = None
     if node.kind == SemaNodeKind.CALL and node.call_name == 'apply_src_mod':
         if len(node.children) < 5:
@@ -2520,6 +2544,46 @@ def _ldexp_result(
     return float_ldexp.ldexp_expr(dtype, value, exponent, modifiers, output_policy)
 
 
+def _is_conversion(node: SemaNode) -> bool:
+    return node.kind == SemaNodeKind.CALL and (node.call_name or '').startswith(
+        CONVERSION_CALL
+    )
+
+
+def _lower_conversion(
+    node: SemaNode,
+    ctx: LoweringContext,
+    output_fields: tuple[str, str] | None,
+) -> str:
+    """Lower a conversion to destination bits through shared/conversion.h.
+
+    The stage object, resolved before the lane loop, applies the source's
+    ABS/NEG and the destination's OMOD/CLAMP. Without VOP3 modifiers, an F16
+    result takes the SDWA OMOD; see conversion.declaration.
+    """
+    dtype = (node.call_name or '').removeprefix(CONVERSION_CALL)
+    source = node.children[1]
+    abs_field = neg_field = '0u'
+    if source.kind == SemaNodeKind.CALL and source.call_name == 'apply_src_mod':
+        if source.children[4].lit_value == '1':
+            abs_field = 'inst_.abs'
+        if source.children[3].lit_value == '1':
+            neg_field = 'inst_.neg'
+        source = source.children[1]
+    while source.kind == SemaNodeKind.CAST:
+        source = source.children[0]
+    if source.kind != SemaNodeKind.INSTOPERAND:
+        raise ValueError(f'unexpected {node.call_name} source: {source}')
+    fields = None
+    if output_fields is not None or (abs_field, neg_field) != ('0u', '0u'):
+        fields = (abs_field, neg_field, *(output_fields or ('0u', '0u')))
+    declaration = conversion.declaration(dtype, fields)
+    if declaration not in ctx.body_preamble:
+        ctx.body_preamble.append(declaration)
+    # Register reads already have the unsigned type the stage object takes.
+    return f'{conversion.STAGES}({_lower_expr(source, ctx)})'
+
+
 def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower apply_src_mod through the shared ABS/NEG helper.
 
@@ -2541,8 +2605,15 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
 
     src_child = node.children[1]
     src_ty = src_child.ty
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    neg_field = 'inst_.neg' if has_neg else '0u'
     if src_ty and src_ty.base in ('I', 'U'):
-        return src_expr
+        if ctx.source_modifier_format is None:
+            return src_expr
+        return (
+            f'amdgpu::source_modifier::apply<amdgpu::fp_format::{ctx.source_modifier_format}>('
+            f'static_cast<uint32_t>({src_expr}), {src_idx}, {abs_field}, {neg_field})'
+        )
 
     is_64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_64 else 'float'
@@ -2558,8 +2629,6 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
         init = f'std::bit_cast<{fp_type}>({src_expr})'
     else:
         init = src_expr
-    abs_field = 'inst_.abs' if has_abs else '0u'
-    neg_field = 'inst_.neg' if has_neg else '0u'
     return (
         f'[&]() {{ {fp_type} sv = {init};'
         f' return amdgpu::source_modifier::apply_to_float(sv, {src_idx}, '
@@ -2620,20 +2689,18 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             else ctx
         ),
     )
+    # Raw-bit scaling: overflow rounds by MODE, except for TRANS results.
+    omod_round = '0' if ctx.trans_f32 else 'wf.fp_round_mode_f32()'
     if arithmetic_f32:
         # The arithmetic helper establishes MODE and restores the host state.
-        # Only active scaling needs a second environment, after the operation.
         return (
             f'[&]() {{ float v = {rhs};'
-            f' const uint32_t effective_omod = {omod_expr};'
-            ' if (effective_omod == 0) return v;'
-            f' {environment}'
-            ' return amdgpu::fp_mode::apply_omod_f32(v, effective_omod); }()'
+            f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}, {omod_round}); }}()'
         )
     if node.ty == SemaType.F32:
         return (
             f'[&]() {{ {environment}float v = {rhs};'
-            f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}); }}()'
+            f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}, {omod_round}); }}()'
         )
     return (
         f'[&]() {{ {environment}{fp_type} v = {rhs};'
@@ -2663,8 +2730,11 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
         else ''
     )
     if node.ty == SemaType.F32 and any(
-        child.kind == SemaNodeKind.FMA for child in node.children[1].walk()
+        child.kind in (SemaNodeKind.ADD, SemaNodeKind.MUL, SemaNodeKind.FMA)
+        for child in node.children[1].walk()
     ):
+        # The arithmetic helper scopes MODE itself; scope only CLAMP here, after
+        # the operand reads, so register-access callbacks keep the caller's FP state.
         return (
             f'[&]() {{ float v = {rhs};'
             f' if (inst_.clamp) {{ {environment}'

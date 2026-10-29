@@ -77,13 +77,7 @@ ncclTeam_t ncclTeamWorld(ncclComm_t comm) {
   return t;
 }
 
-ncclTeam_t ncclTeamRail(ncclComm_t) {
-  ncclTeam_t t{};
-  t.nRanks = 1;
-  t.rank = 0;
-  t.stride = 1;
-  return t;
-}
+// ncclTeamRail is in devcomm_fakes.cc.
 
 int ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank) {
   return comm->rank + (rank - team.rank) * team.stride;
@@ -511,7 +505,7 @@ TEST_F(GinHostTest, ProgressErrorSetsAsyncResultAndExits) {
     // whole binary's timeout. A worker plus waitUntil fails this case instead.
     JoinProgressThreads worker(gs);
     worker.spawn([gs] { ncclGinProgress(gs, 0); });
-    ASSERT_TRUE(waitUntil([&] { return gs->asyncResult == ncclSystemError; }))
+    ASSERT_TRUE(waitUntil([&] { return __atomic_load_n(&gs->asyncResult, __ATOMIC_ACQUIRE) == ncclSystemError; }))
         << "ginProgress error did not stop the worker";
   }
   EXPECT_EQ(ncclSystemError, gs->asyncResult);

@@ -1,5 +1,7 @@
 # Instruction coverage
 
-The two gfx12 Wave32 instructions support loose and empirical bit-exact numeric
-results with default controls. FP16 FMA status reporting is not yet implemented;
-mode 3 is rejected before outputs are changed. WMMA has no FP-status output.
+RDNA3 and RDNA4 FP16/BF16 WMMA with FP32 output and FP16/FP32 FMA support both
+wave sizes, loose and empirical exact arithmetic, instruction modifiers, and
+their documented guest FP controls. FP16 FMA reports status for the supported
+gfx12 policy; FP32 and gfx11 FMA status requests are unsupported. Compatibility
+resolves to each instruction’s inherited policy. SIMD implementations are not yet built.

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Scalar FP16 encoding conversions.
+// Scalar FP16 and BF16 encoding conversions.
 // Kept independent of util conversions: GPU rounding and special-value policies
 // can differ by architecture, and CPU SIMD implementations share these contracts.
 // Internal helpers; not part of the public C API.
@@ -14,6 +14,9 @@
 #include <stdint.h>
 
 namespace rocjitsu::arith {
+
+// Widen a BF16 encoding to FP32, retaining its sign, payload, and subnormal bits.
+inline float bf16_to_float(uint16_t bits) { return as_float(uint32_t(bits) << 16); }
 
 // Widen an FP16 encoding to FP32, including zeros, subnormals, infinities, and NaNs.
 inline float f16_to_float(uint16_t bits) {

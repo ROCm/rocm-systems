@@ -8,6 +8,7 @@
 #include "common/cpu.h"
 #include "common/floating_point.h"
 #include "common/registers.h"
+#include "common/semantics.h"
 #include "rj_arith/rj_arith.h"
 #include "wmma/helpers.h"
 
@@ -16,7 +17,6 @@
 #include <limits>
 #include <random>
 #include <stdint.h>
-#include <vector>
 
 namespace {
 
@@ -25,6 +25,9 @@ using Registers = rocjitsu::arith::test::Registers<33, 32>;
 // Check matrix results, operand aliases, and instruction-flag contracts across supported CPUs
 // and semantics.
 TEST(WmmaF32F16W32Gfx12, Arithmetic) {
+  rocjitsu::arith::test::expect_matrix_modifiers<false, 32, false>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12);
+
   Registers input;
 
   // Named engine with its standardized default seed and explicit mapping (no distributions).
@@ -56,8 +59,10 @@ TEST(WmmaF32F16W32Gfx12, Arithmetic) {
   // C starts at VGPR 8: C[row][col] maps to VGPR 8 + row % 8,
   // lane col + 16 * (row / 8). Set C[9][10] to a quiet NaN and
   // C[11][12] to +Inf, outside the NaN/Inf rows and columns of A and B.
-  input.v[8 + 9 % 8][10 + 16 * (9 / 8)] = rocjitsu::arith::test::kF32QuietNaNBits;
-  input.v[8 + 11 % 8][12 + 16 * (11 / 8)] = rocjitsu::arith::test::kF32PositiveInfinityBits;
+  rocjitsu::arith::test::wmma_gfx12_acc<32>(input.v + 8, 9, 10) =
+      rocjitsu::arith::test::kF32QuietNaNBits;
+  rocjitsu::arith::test::wmma_gfx12_acc<32>(input.v + 8, 11, 12) =
+      rocjitsu::arith::test::kF32PositiveInfinityBits;
   // Numeric goldens from the rocjitsu model, confirmed word-for-word on gfx1201.
   constexpr float factor_nan = std::bit_cast<float>(0xffc00a3dU);
   constexpr float accumulator_nan = std::bit_cast<float>(0x7fc12345U);
@@ -88,56 +93,16 @@ TEST(WmmaF32F16W32Gfx12, Arithmetic) {
   // clang-format on
 
   // Invalid requests must be rejected before operand access or output writes.
-  // Nonzero instruction modifiers are not implemented yet.
+  // This instruction supports the six NEG/ABS modifier bits, with no DPP.
   rocjitsu::arith::test::expect_matrix_invalid_flags(rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12,
-                                                     input, 16, 0, 4, 8, 0);
+                                                     input, 16, 0, 4, 8,
+                                                     rocjitsu::arith::test::kFloatingWmmaModifiers);
 
   // A=VGPRs 0..3, B=4..7, C=8..15; D spans eight registers. These cover
   // A/B overlap, partial A/B/C overlap, B/C overlap, C alias, and disjoint D.
-  const std::vector<uint64_t> cpu_levels = rocjitsu::arith::test::supported_cpu_levels();
-  for (uint64_t cpu : cpu_levels) {
-    for (uint64_t semantics :
-         {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
-          RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
-          RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
-      for (uint64_t fp_flags : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
-        for (int aliasing_offset : {0, 2, 4, 8, 16}) {
-          SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << aliasing_offset);
-          Registers r = input;
-          ASSERT_EQ(rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(cpu | semantics | fp_flags, 0,
-                                                               r.v + aliasing_offset, r.v, r.v + 4,
-                                                               r.v + 8),
-                    RJ_ARITH_SUCCESS);
-          for (int row = 0; row < 16; ++row) {
-            for (int col = 0; col < 16; ++col) {
-              float expected = golden[row][col];
-              uint32_t actual = r.v[aliasing_offset + row % 8][col + 16 * (row / 8)];
-              if (semantics == RJ_ARITH_SEMANTICS_LOOSE) {
-                rocjitsu::arith::test::expect_f32(actual, expected, semantics, /*atol=*/1e-5,
-                                                  /*rtol=*/1e-5);
-              } else {
-                EXPECT_EQ(actual, std::bit_cast<uint32_t>(expected));
-              }
-            }
-          }
-          r.expect_preserved(input, aliasing_offset, 8);
-        }
-      }
-    }
-  }
-}
-
-// Reject controls not implemented by this slice, before accessing operands.
-TEST(WmmaF32F16W32Gfx12, UnsupportedGuestControls) {
-  for (uint64_t flag :
-       {RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
-        RJ_ARITH_FP_IEEE_MODE, RJ_ARITH_FP_DX10_CLAMP_OFF, RJ_ARITH_FP_ROUND_UP,
-        RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16,
-        RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16}) {
-    EXPECT_EQ(
-        rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(flag, 0, nullptr, nullptr, nullptr, nullptr),
-        RJ_ARITH_ERROR_INVALID_FLAGS);
-  }
+  rocjitsu::arith::test::expect_wmma_f32_arithmetic</*Gfx11=*/false>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12, input, golden, {0, 2, 4, 8, 16},
+      {0, RJ_ARITH_FP16_OVFL});
 }
 
 } // namespace

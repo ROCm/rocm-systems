@@ -67,6 +67,8 @@ RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 // -1 = auto (enabled on gfx1250, disabled elsewhere); 0 = disabled; 1 = bypass CTAPolicy check.
 RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", -1);
+// Opt-in. Unlike CE AllReduce these do not follow the per-arch default.
+RCCL_PARAM(CeReduceScatter, "CE_REDUCESCATTER", 0);
 RCCL_PARAM(CeArMaxMsgBytes,    "CE_AR_2SHOT_MAX_BYTES",   -1);  // -1 = use ceArMax from arch table (2-shot)
 RCCL_PARAM(CeArStagingBytes,   "CE_AR_STAGING_BYTES",   -1);  // -1 = use NCCL_CE_AR_STAGING_BYTES default
 RCCL_PARAM(CeArRegMaxMsgBytes, "CE_AR_REG_MAX_MSG_BYTES", -1); // -1 = use ceArRegMax (registered)
@@ -226,6 +228,13 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
   info->algorithm = NCCL_ALGO_TREE;
 }
 
+// The remote GDR flush flag tuning was measured on gfx950 with 8 GPUs per node only. comm->ibGdrFlushFlag is the
+// same on every rank, so every rank makes the same choice.
+static bool rcclRemoteFlushTuned(struct ncclComm* comm) {
+  return comm->ibGdrFlushFlag && comm->nRanks == comm->nNodes * 8 &&
+         IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+}
+
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
   // Honor user input for protocol choice
   const bool userProtocolInput = rcclNcclProtoEnvIsSet();
@@ -302,6 +311,13 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
             }
           }
         }
+        // With RCCL_IB_GDR_FLUSH_FLAG_TUNE=1 (the scaled collective LL128 buffer, rcclScaleCollLl128BuffSize),
+        // ReduceScatter on gfx950 with 8 GPUs per node uses Ring/LL128 up to 7 MiB per rank: it beats Ring/Simple
+        // there on 2-16 nodes (+10% at 7 MiB); Ring/Simple wins from 8 MiB. With the default buffer Ring/LL128 needs
+        // a second loop there and loses.
+        if (info->func == ncclFuncReduceScatter && comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize &&
+            rcclRemoteFlushTuned(comm))
+          ll128Max = std::max<uint64_t>(ll128Max, 7 << 20);
         if (sizePerRank <= ll128Max && sizePerRank > ll128Min) {
           info->protocol = NCCL_PROTO_LL128;
         }
@@ -319,6 +335,103 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
       }
     }
   }
+}
+
+// RCCL_IB_GDR_FLUSH_FLAG_TUNE=1 turns on the gfx950 multi-node tuning below for communicators that use the remote
+// GDR flush flag with 8 GPUs per node on 2-8 or 16 nodes: a 4x collective LL128 buffer, the all_reduce switch
+// points and channel count, and reduce_scatter Ring/LL128 up to 7 MiB per rank.
+RCCL_PARAM(IbGdrFlushFlagTune, "IB_GDR_FLUSH_FLAG_TUNE", 0);
+static constexpr int kRemoteFlushLl128BuffScale = 4;
+static constexpr int kRemoteFlushArRingSimpleNchannels = 48;
+
+static bool rcclRemoteFlushTuneNodes(struct ncclComm* comm) {
+  return (comm->nNodes >= 2 && comm->nNodes <= 8) || comm->nNodes == 16;
+}
+
+// Ring all_reduce moves one LL128 chunk per channel per rank per loop, so data past chunk * nChannels * nRanks
+// needs a second loop at full ring latency and loses about a third of its bandwidth. A larger buffer lifts that
+// limit; send/recv keeps the default size (comm->p2pLl128BuffSize), since it allocates one buffer per network
+// peer and channel and would grow with the node count. Not applied when NCCL_LL128_BUFFSIZE is set.
+void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
+  if (rcclParamIbGdrFlushFlagTune() == 0 || !rcclRemoteFlushTuneNodes(comm) || !comm->topo->ll128Enabled ||
+      !rcclRemoteFlushTuned(comm))
+    return;
+  comm->buffSizes[NCCL_PROTO_LL128] = comm->p2pLl128BuffSize * kRemoteFlushLl128BuffScale;
+  INFO(NCCL_INIT, "LL128 buffer for collectives %d (x%d), for send/recv %d", comm->buffSizes[NCCL_PROTO_LL128],
+       kRemoteFlushLl128BuffScale, comm->p2pLl128BuffSize);
+}
+
+// Bytes per node that Ring/LL128 all_reduce moves in one loop.
+static size_t rcclRingLl128OneLoopPerNode(struct ncclComm* comm, int nChannels) {
+  const size_t chunk =
+    (size_t)(comm->buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS) / comm->ll128LineElems * comm->ll128DataElems;
+  return chunk * nChannels * (comm->nRanks / comm->nNodes);
+}
+
+extern int64_t ncclParamMinNchannels();
+extern int64_t ncclParamMaxNchannels();
+
+// gfx950 multi-node choices with the remote GDR flush flag, 8 GPUs per node, all choices measured.
+//
+// reduce_scatter (2-8 nodes): from 6 MB per rank, Simple beats LL128 (by 15-30% at 8 MB per rank), so LL128
+// stops there instead of at the 8 MB per rank of tuning_model_6; 7 MiB with the scaled LL128 buffer, also on
+// 16 nodes, where Ring/Simple wins at 8 MiB per rank.
+//
+// all_reduce, 2-8 nodes: Ring/LL128 from 16 MB per node (12 with RCCL_IB_GDR_FLUSH_FLAG_TUNE) to 32 MB per node,
+// Tree/Simple to 64 MB per node, then Ring/Simple, where the cost model goes from Ring/LL128 straight to
+// Ring/Simple a size late. With RCCL_IB_GDR_FLUSH_FLAG_TUNE, Ring/LL128 runs until it would need a second loop
+// (24.5 MiB per node with the default buffer, 98 MiB with x4), and Ring/Simple uses 48 channels up to 128 MB per
+// node.
+// all_reduce, 16 nodes (RCCL_IB_GDR_FLUSH_FLAG_TUNE): Tree/Simple beats Tree/LL128 from 8 MB per node; above 64 MB
+// per node the cost model already picks the fastest choice.
+//
+// Returns the channel count for the choice made, or 0 to keep RCCL's own.
+int rcclUpdateRemoteFlushAlgoProto(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
+                                   float (*table)[NCCL_NUM_PROTOCOLS]) {
+  static int userInput = -1;
+  if (userInput == -1) userInput = (ncclGetEnv("NCCL_ALGO") || ncclGetEnv("NCCL_PROTO")) ? 1 : 0;
+  if (userInput || comm->nNodes < 2 || !rcclRemoteFlushTuned(comm)) return 0;
+  const bool ll128Scaled = comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize;
+  if (info->func == ncclFuncReduceScatter) {
+    const size_t ll128MaxPerRank = (size_t)(ll128Scaled ? 7 : 6) << 20;
+    if ((comm->nNodes <= 8 || (ll128Scaled && comm->nNodes == 16)) && info->protocol == NCCL_PROTO_LL128 &&
+        info->algorithm < NCCL_NUM_ALGORITHMS &&
+        rcclGetSizePerRank(info->func, nBytes, comm->nRanks) > ll128MaxPerRank &&
+        table[info->algorithm][NCCL_PROTO_SIMPLE] >= 0.0)
+      info->protocol = NCCL_PROTO_SIMPLE;
+    return 0;
+  }
+  if (info->func != ncclFuncAllReduce) return 0;
+  const bool arTune = rcclParamIbGdrFlushFlagTune() != 0;
+  if (comm->nNodes > 8 && !(arTune && comm->nNodes == 16)) return 0;
+  if (info->algorithm != NCCL_ALGO_RING && info->algorithm != NCCL_ALGO_TREE) return 0;
+  const size_t perNode = nBytes / comm->nNodes;
+  int algorithm, protocol;
+  int nChannels = 0;
+  if (comm->nNodes == 16) {
+    if (perNode < (8 << 20) || perNode > (64 << 20)) return 0;
+    algorithm = NCCL_ALGO_TREE;
+    protocol = NCCL_PROTO_SIMPLE;
+  } else if (perNode >= (64 << 20)) {
+    algorithm = NCCL_ALGO_RING;
+    protocol = NCCL_PROTO_SIMPLE;
+    // A user channel count (NCCL_MIN/MAX_NCHANNELS) wins.
+    if (arTune && perNode < (128 << 20) && ncclParamMaxNchannels() <= 0 && ncclParamMinNchannels() <= 0)
+      nChannels = kRemoteFlushArRingSimpleNchannels;
+  } else if (perNode < (arTune ? (12 << 20) : (16 << 20))) {
+    return 0;
+  } else if (arTune ? perNode <= rcclRingLl128OneLoopPerNode(comm, comm->nChannels)
+                                     : perNode < (32 << 20)) {
+    algorithm = NCCL_ALGO_RING;
+    protocol = NCCL_PROTO_LL128;
+  } else {
+    algorithm = NCCL_ALGO_TREE;
+    protocol = NCCL_PROTO_SIMPLE;
+  }
+  if (table[algorithm][protocol] < 0.0) return 0; // unavailable, including NCCL_ALGO_PROTO_IGNORE
+  info->algorithm = algorithm;
+  info->protocol = protocol;
+  return nChannels > 0 ? nChannels : 0;
 }
 
 ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoString[], int nEntries, int& result) {
@@ -339,8 +452,7 @@ ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoStri
   return ncclInvalidUsage;
 }
 
-extern int64_t ncclParamMinNchannels();
-extern int64_t ncclParamMaxNchannels();
+extern int64_t ncclParamMultiSegmentRegister();
 extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
@@ -679,7 +791,7 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
   if (coll == ncclFuncReduceScatter) {
     struct rcclCollDecision decision;
     NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*query=*/true,
-                                      &decision));
+                                      &decision, /*graphCapturingHint=*/graphCapturing != 0));
     *algo = decision.algo;
     *protocol = decision.protocol;
     *maxChannels = decision.nMaxChannels;
@@ -721,9 +833,12 @@ static int symkHostRedOpToDev(ncclRedOp_t op) {
 // Fills (algo, protocol, maxChannels) for the symmetric kernel that would run
 // for these operands; returns false if symk is unavailable or no kernel is
 // picked. Single source shared by rcclSymKGetInfo and the query-mode symmetric
-// reporting in rcclSelectAllReduce/rcclSelectAllGather.
+// reporting in rcclSelectAllReduce/rcclSelectAllGather/rcclSelectReduceScatter.
+// algo is RCCL_SYMMETRIC_TDM when the pick is a Tensor Data Mover kernel, else
+// RCCL_SYMMETRIC. symAligned16B is ncclSymAligned16B for the operands; rcclSymKGetInfo
+// has no buffers and leaves it true.
 static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
-                          ncclRedOp_t op, int* algo, int* protocol, int* maxChannels) {
+                          ncclRedOp_t op, int* algo, int* protocol, int* maxChannels, bool symAligned16B = true) {
   // Symmetric kernels need symmetric-window support (cuMem). Without it the
   // windows are never registered symmetric and symk cannot run, so do not report
   // it -- rcclSymKGetInfo's caller then falls back to the actual backend.
@@ -751,12 +866,14 @@ static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count
   input.maxCTAs = comm->config.maxCTAs;
   input.CTAPolicy = comm->config.CTAPolicy;
   input.nvlsSupport = comm->nvlsSupport && (ncclNvlsSupported(devOp, dataType) || coll == ncclFuncAllGather);
+  input.symAligned16B = symAligned16B;
   struct ncclTuningResult_t bestTuning = NCCL_TUNING_RESULT_INIT;
   if (ncclTuningCompute(&input, &bestTuning) != ncclSuccess) return false;
   ncclSymkKernelId kernelId = (ncclSymkKernelId)bestTuning.symKernelId;
   if (kernelId == ncclSymkKernelId_Count) return false;
   *maxChannels = bestTuning.maxChannels;
-  *algo = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
+  *algo = rcclSymkKernelIdIsTma((int)kernelId) ? (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM
+                                                : (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
   *protocol = rcclSymkKernelIdIsLL((int)kernelId) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
   return true;
 }
@@ -805,6 +922,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
 #endif
     case rcclAddonAlgos_t::RCCL_SYMMETRIC:
       *algoName = "SYM";
+      break;
+    case rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM:
+      *algoName = "SymTDM";
       break;
     case rcclAddonAlgos_t::RCCL_CE_2SHOT:
       *algoName = "CE2";
@@ -1461,6 +1581,65 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
   return true;
 }
 
+bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op) {
+  // Re-read every call. A function-local static latches the first value and
+  // ignores the host-test param seam.
+  const int enabled = rcclParamCeReduceScatter();
+  if (!enabled) {
+    static bool warnedDisabled = false;
+    if (!warnedDisabled) {
+      warnedDisabled = true;
+      INFO(NCCL_INIT, "CE ReduceScatter not enabled. Set RCCL_CE_REDUCESCATTER=1 to enable.");
+    }
+    return false;
+  }
+
+  if (!comm->symmetricSupport) {
+    WARN("Skipping CE ReduceScatter: symmetric support is not enabled");
+    return false;
+  }
+  if (comm->nNodes != 1) {
+    WARN("Skipping CE ReduceScatter: nNodes is not 1");
+    return false;
+  }
+  if (recvcount == 0) {
+    WARN("Skipping CE ReduceScatter: recvcount is 0");
+    return false;
+  }
+
+  // No message-size cap: CE ReduceScatter pipelines through ceARTmpBuf slots, so
+  // large messages are chunked rather than rejected (unlike CE AllReduce 2-shot).
+
+  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) {
+    WARN("Skipping CE ReduceScatter: CTA policy is not ZERO");
+    return false;
+  }
+  if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) {
+    WARN("Skipping CE ReduceScatter: unsupported reduction operation");
+    return false;
+  }
+  if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
+    WARN("Skipping CE ReduceScatter: unsupported datatype: Float8");
+    return false;
+  }
+
+  // Staged CE addresses every peer by world rank via ncclDevrGetLsaRankPtr, so
+  // it needs the same runtime and single-LSA topology as CE AllReduce. Without
+  // this, NCCL_LSA_TEAM_SIZE < nRanks maps world ranks into the wrong LSA
+  // slots (or returns ncclInvalidArgument) after the reducer has already
+  // launched and is spinning on signals nobody writes.
+  if (!ncclCeImplemented(ncclFuncReduceScatter, ncclDevSum, datatype)) {
+    INFO(NCCL_TUNING, "Skipping CE ReduceScatter: CE is not supported by this driver");
+    return false;
+  }
+  if (!ncclDevrIsOneLsaTeam(comm)) {
+    INFO(NCCL_TUNING, "Skipping CE ReduceScatter: LSA team does not span the comm");
+    return false;
+  }
+
+  return true;
+}
+
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing) {
   if (ceCapturing) {
     if (!comm->ceColl.graphModeSeen) {
@@ -1762,8 +1941,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       return ncclSuccess;
     }
     int a, p, ch;
-    if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch)) {
-      decision->algo = RCCL_SYMMETRIC;
+    if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch,
+                      ncclSymAligned16B(ncclFuncAllReduce, comm->rank, sendbuff, recvbuff, sendWin, recvWin,
+                                        count * ncclTypeSize(datatype)))) {
+      decision->algo = a;
       decision->protocol = p;
       decision->nMaxChannels = ch;
       return ncclSuccess;
@@ -1993,8 +2174,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         return ncclSuccess;
       }
       int a, p, ch;
-      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
-        decision->algo = RCCL_SYMMETRIC;
+      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch,
+                        ncclSymAligned16B(ncclFuncAllGather, comm->rank, sendbuff, recvbuff, sendWin, recvWin,
+                                          sendcount * ncclTypeSize(datatype)))) {
+        decision->algo = a;
         decision->protocol = p;
         decision->nMaxChannels = ch;
         return ncclSuccess;
@@ -2019,7 +2202,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
 // ncclReduceScatter_impl(); the outcome for any given operands is identical.
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
-                                     struct rcclCollDecision* decision) {
+                                     struct rcclCollDecision* decision, bool graphCapturingHint) {
   memset(decision, 0, sizeof(*decision));
   decision->algo = NCCL_ALGO_RING;
   decision->protocol = NCCL_PROTO_SIMPLE;
@@ -2055,6 +2238,33 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
       INFO(NCCL_TUNING, "RS symk disqualified: totalBytes=%zu < rsSymMinR2=%zu", totalBytes, rsSymMinR2);
     if (!query && symkRequested && symSuppressedByMax)
       INFO(NCCL_TUNING, "RS symk disqualified: totalBytes=%zu > rsSymMaxR2=%zu", totalBytes, rsSymMaxR2);
+
+    // CE ReduceScatter shares the AllReduce graph latch. Live dispatch ticks the
+    // latch in ncclReduceScatter_impl before this call. The query path cannot
+    // see the stream, so graphCapturingHint supplies capture.
+    bool ceArGraphAllowed = rcclCeArGraphSafe(comm);
+    if (query && graphCapturingHint) ceArGraphAllowed = false;
+    decision->ceArGraphAllowed = ceArGraphAllowed;
+    const bool hasSysmemSegment =
+      ncclDevrWindowHasSysmemSegment(rsSendWin) || ncclDevrWindowHasSysmemSegment(rsRecvWin);
+    // CE ReduceScatter always stages through ceARTmpBuf, so user-buffer symmetric
+    // registration is not required (unlike CE AllReduce's registered-window path).
+    const bool ceReduceScatterAllowed =
+      ncclGroupDepth == 0 && ceArGraphAllowed && rcclUseCeReduceScatter(comm, recvcount, datatype, op);
+    if (!symEligible && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+      decision->algo = RCCL_CE_2SHOT;
+      decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
+      return ncclSuccess;
+    }
+    // ceReduceScatterAllowed does not look at ceARTmpBuf. The buffer is allocated
+    // by the CE launch, which the eager CE early-return never reaches. Hand this
+    // call to enqueue so CE init runs and ncclLaunchCeColl allocates staging.
+    // Otherwise DDA is suppressed below and the call stays on the ring kernel.
+    if (!symEligible && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf == NULL) {
+      decision->algo = RCCL_CE_REGISTERED;
+      decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
+      return ncclSuccess;
+    }
 
     // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
     // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
@@ -2119,15 +2329,29 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
       return ncclSuccess;
     }
 
-    // (5) Symmetric kernel. Live path dispatches symk via the downstream extraction.
+    // (5) CE ReduceScatter via enqueue when an earlier CE arm did not return
+    // (e.g. symEligible skipped the eager arms). Reuse ceReduceScatterAllowed so
+    // this arm keeps the same gates as rcclUseCeReduceScatter (nNodes==1,
+    // symmetricSupport, recvcount, op, datatype, CTA ZERO) instead of rebuilding
+    // a weaker subset. CE intentionally has priority over symk when both are
+    // eligible; symk remains the fallback when CE is not.
+    if (ceReduceScatterAllowed && !hasSysmemSegment) {
+      decision->algo = RCCL_CE_REGISTERED;
+      decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
+      return ncclSuccess;
+    }
+
+    // (6) Symmetric kernel. Live path dispatches symk via the downstream extraction.
     if (symEligible) {
       if (!query) {
         decision->algo = RCCL_SYMMETRIC;
         return ncclSuccess;
       }
       int a, p, ch;
-      if (rcclSymkQuery(comm, ncclFuncReduceScatter, recvcount, datatype, op, &a, &p, &ch)) {
-        decision->algo = RCCL_SYMMETRIC;
+      if (rcclSymkQuery(comm, ncclFuncReduceScatter, recvcount, datatype, op, &a, &p, &ch,
+                        ncclSymAligned16B(ncclFuncReduceScatter, comm->rank, sendbuff, recvbuff, rsSendWin,
+                                          rsRecvWin, recvcount * ncclTypeSize(datatype)))) {
+        decision->algo = a;
         decision->protocol = p;
         decision->nMaxChannels = ch;
         return ncclSuccess;
@@ -2463,6 +2687,37 @@ static ncclUnrollAvailability unrollAvailability(int unroll, char const* archNam
   return ncclUnrollUsable;
 }
 
+ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  if (regRecord->rcclNet.nSegments != 0) {
+    *numSegments = regRecord->rcclNet.nSegments;
+    return ncclSuccess;
+  }
+  // endAddr is page-rounded but hipMalloc reports its unrounded size; stop inside the last page.
+  const size_t walkSize = regRecord->endAddr - regRecord->begAddr - comm->regCache.pageSize + 1;
+  CUdeviceptr base = 0;
+  size_t baseSize = 0;
+  NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)regRecord->begAddr, walkSize, &base, &baseSize, numSegments));
+  regRecord->rcclNet.nSegments = *numSegments;
+  return ncclSuccess;
+}
+
+ncclResult_t rcclNetGraphRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  if (regRecord == NULL) return ncclSuccess;
+  ncclResult_t ret = rcclNetRegSegmentCount(comm, regRecord, numSegments);
+  if (ret != ncclSuccess || (*numSegments > 1 && !ncclParamMultiSegmentRegister())) {
+    (void)ncclCommGraphDeregister(comm, regRecord);
+  }
+  return ret;
+}
+
+void rcclNetRegCommit(struct ncclComm* comm, struct ncclReg* regRecord, int numSegments) {
+  // Reached only when every peer registered; a later-peer failure leaves allPeers unset.
+  if (!regRecord->rcclNet.allPeers) {
+    INFO(NCCL_REG, "rank %d - NET register regSize %ld numSegments %d", comm->rank,
+         (long)(regRecord->endAddr - regRecord->begAddr), numSegments);
+  }
+  regRecord->rcclNet.allPeers = true;
+}
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
   static int userChannelControlInput = RCCL_VALUE_UNSET;

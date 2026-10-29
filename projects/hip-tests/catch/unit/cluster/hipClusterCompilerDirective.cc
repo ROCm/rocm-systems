@@ -213,8 +213,7 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_CompilerDirective_Negative_OversizedCluster)
  * Test Description
  * ------------------------
  *  - Launches a kernel whose __cluster_dims__ has a zero in one axis and checks that the runtime
- *    rejects it with hipErrorInvalidConfiguration, as it does for a zero cluster dimension passed
- *    through hipLaunchAttributeClusterDimension.
+ *    rejects it with hipErrorInvalidClusterSize.
  *
  * Test source
  * ------------------------
@@ -244,14 +243,15 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_CompilerDirective_Negative_ZeroClusterDim) {
   HIP_CHECK(hipFree(dptr));
 
   INFO("Launch returned: " << hipGetErrorString(launch_status));
-  REQUIRE(launch_status == hipErrorInvalidConfiguration);
+  REQUIRE(launch_status == hipErrorInvalidClusterSize);
 }
 
 /**
  * Test Description
  * ------------------------
- *  - Adds a kernel whose __cluster_dims__ has a zero in one axis to a graph and checks that the
- *    rejection reaches the caller through hipGraphInstantiate or hipGraphLaunch.
+ *  - Adds a kernel whose __cluster_dims__ has a zero in one axis to a graph and checks that
+ *    hipErrorInvalidClusterSize reaches the caller through hipGraphAddKernelNode,
+ *    hipGraphInstantiate or hipGraphLaunch.
  *
  * Test source
  * ------------------------
@@ -282,15 +282,18 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_CompilerDirective_Negative_ZeroClusterDim_Gr
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &node_params));
+  const hipError_t add_kernel_node_status =
+      hipGraphAddKernelNode(&node, graph, nullptr, 0, &node_params);
 
-  // The kernel's command is built at instantiation or at first launch, depending on the
-  // graph execution path, so accept the rejection at either point.
+  // The kernel's command is built at node creation, at instantiation, or at first launch,
+  // depending on the graph execution path, so accept the rejection at any of those points.
   hipGraphExec_t graph_exec = nullptr;
-  const hipError_t instantiate_status =
-      hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0);
+  hipError_t instantiate_status = hipSuccess;
+  if (add_kernel_node_status == hipSuccess) {
+    instantiate_status = hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0);
+  }
   hipError_t launch_status = hipSuccess;
-  if (instantiate_status == hipSuccess) {
+  if (add_kernel_node_status == hipSuccess && instantiate_status == hipSuccess) {
     launch_status = hipGraphLaunch(graph_exec, nullptr);
     // Drain before freeing if the launch was wrongly accepted.
     if (launch_status == hipSuccess) {
@@ -303,11 +306,17 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_CompilerDirective_Negative_ZeroClusterDim_Gr
   // Clear the last error so the rejection doesn't leak into later tests.
   (void)hipGetLastError();
 
-  INFO("hipGraphInstantiate returned: " << hipGetErrorString(instantiate_status));
-  INFO("hipGraphLaunch returned: " << hipGetErrorString(launch_status));
-  const hipError_t status =
-      instantiate_status != hipSuccess ? instantiate_status : launch_status;
-  REQUIRE(status == hipErrorInvalidConfiguration);
+  const bool instantiate_attempted = add_kernel_node_status == hipSuccess;
+  const bool launch_attempted = instantiate_attempted && instantiate_status == hipSuccess;
+  INFO("hipGraphAddKernelNode returned: " << hipGetErrorString(add_kernel_node_status));
+  INFO("hipGraphInstantiate returned: "
+       << (instantiate_attempted ? hipGetErrorString(instantiate_status) : "not attempted"));
+  INFO("hipGraphLaunch returned: "
+       << (launch_attempted ? hipGetErrorString(launch_status) : "not attempted"));
+  const hipError_t status = add_kernel_node_status != hipSuccess
+      ? add_kernel_node_status
+      : (instantiate_status != hipSuccess ? instantiate_status : launch_status);
+  REQUIRE(status == hipErrorInvalidClusterSize);
 }
 
 /**
