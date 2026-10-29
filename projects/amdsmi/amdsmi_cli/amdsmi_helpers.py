@@ -389,6 +389,24 @@ class AMDSMIHelpers:
         except amdsmi_exception.AmdSmiLibraryException:
             return "N/A"
 
+    @staticmethod
+    def get_cuid_seed_state():
+        """Whether a node key is set, and its fingerprint."""
+        seed_dict = {"seed_provisioned": "N/A", "seed_fingerprint": "N/A"}
+        try:
+            seed_info = amdsmi_interface.amdsmi_get_cuid_seed_info()
+            seed_dict["seed_provisioned"] = seed_info["provisioned"]
+            seed_dict["seed_fingerprint"] = seed_info["fingerprint"]
+        except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as e:
+            if isinstance(e, amdsmi_exception.AmdSmiLibraryException) and (
+                e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM
+            ):
+                seed_dict["seed_provisioned"] = "N/A (requires root)"
+                seed_dict["seed_fingerprint"] = "N/A (requires root)"
+            logging.debug("Failed to get cuid seed info | %s", e)
+
+        return seed_dict
+
     def get_gpu_cuid_info(self, device_handle):
         """CUID presentation metadata."""
         result = {

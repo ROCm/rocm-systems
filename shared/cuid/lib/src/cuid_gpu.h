@@ -67,8 +67,11 @@ class CuidGpu : public CuidDevice {
   CuidGpu(const amdcuid_gpu_info& i);
   amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_GPU; }
   amdcuid_status_t get_primary_cuid(amdcuid_primary_id& id) const override;
+  amdcuid_status_t get_derived_cuid(amdcuid_derived_id& id,
+                                    cuid_hmac* hmac = nullptr) const override;
   bool key_gated_identity() const override { return true; }
-  // The temporary input of a whole GPU or of a partition.
+  // The temporary input of a whole GPU or of a partition, used where the
+  // driver publishes no cuid_derived for it.
   amdcuid_status_t get_temporary_input(CuidUtilities::AuxiliaryInput& input) const override;
 
   // The parent of the partition whose attributes are in `attr_dir`: the PCI

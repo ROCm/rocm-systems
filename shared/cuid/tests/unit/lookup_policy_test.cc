@@ -113,16 +113,18 @@ TEST(cuidtstUnprivileged, HandleByBdfRejectsAnythingButABdf) {
 // answerable where no key is at hand.
 TEST(cuidtstUnprivileged, TemporaryCuidNeedsNoKey) {
   bool temporary = true;
-  EXPECT_EQ(PrimaryOnlyDevice(false).is_temporary_cuid(&temporary), AMDCUID_STATUS_SUCCESS);
+  EXPECT_EQ(PrimaryOnlyDevice(false).is_temporary_cuid(&temporary, nullptr),
+            AMDCUID_STATUS_SUCCESS);
   EXPECT_FALSE(temporary);
   uint8_t machine_id[16];
   if (CuidUtilities::host_machine_id(machine_id) == AMDCUID_STATUS_SUCCESS) {
-    EXPECT_EQ(PrimaryOnlyDevice(true).is_temporary_cuid(&temporary), AMDCUID_STATUS_SUCCESS);
+    EXPECT_EQ(PrimaryOnlyDevice(true).is_temporary_cuid(&temporary, nullptr),
+              AMDCUID_STATUS_SUCCESS);
     EXPECT_TRUE(temporary);
   }
-  EXPECT_EQ(
-      PrimaryOnlyDevice(false, AMDCUID_STATUS_PERMISSION_DENIED).is_temporary_cuid(&temporary),
-      AMDCUID_STATUS_PERMISSION_DENIED);
+  EXPECT_EQ(PrimaryOnlyDevice(false, AMDCUID_STATUS_PERMISSION_DENIED)
+                .is_temporary_cuid(&temporary, nullptr),
+            AMDCUID_STATUS_PERMISSION_DENIED);
 }
 
 // derived_source() names the stage of the last successful derivation, and
@@ -328,10 +330,12 @@ TEST(cuidtstUnprivileged, NicLookupBySiblingInterfaceFindsTheFunction) {
   EXPECT_EQ(known, 1u);
 }
 
-// A property query answers from the handle's device alone: it does not
-// re-derive every other device. Compared against a cold
-// enumeration, and bounded outright, since a warm one can read almost nothing.
+// A property query answers from the handle's device alone and does not
+// re-derive every other device. Compared against a cold enumeration, and
+// bounded outright, since a warm one can read almost nothing. Root is left out:
+// its query also reads cuid_seed, once per amdgpu device while no key is set.
 TEST(cuidtstUnprivileged, PropertyQueryDoesNotReenumerate) {
+  if (geteuid() == 0) GTEST_SKIP() << "root reads cuid_seed on every query";
   if (ThreadReadCalls() < 0) GTEST_SKIP() << "no /proc/thread-self/io";
   const long long before = ThreadReadCalls();
   if (amdcuid_refresh() != AMDCUID_STATUS_SUCCESS)

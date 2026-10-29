@@ -125,8 +125,8 @@ follow all existing list fields, including those selected by `--enumeration`.
 Field | Meaning
 ---|---
 `cuid` | The CUID, or `N/A`; never contains a legacy UUID
-`source` | `LIBRARY` (every CUID in this release), `DRIVER`, or `UNKNOWN`, from the CUID API
-`temporary` | Whether the CUID is temporary: node-local, and changed by a new machine-id, a move to another slot or a compute-mode change, so not for an asset database. Boolean `true`/`false` in JSON, `True`/`False` in CSV, or the string `unknown`; unknown is not false. Every CUID in this release is temporary
+`source` | `DRIVER`, `LIBRARY`, or `UNKNOWN`, from the CUID API
+`temporary` | Whether the CUID is temporary: node-local, and changed by a new machine-id, a move to another slot or a compute-mode change, so not for an asset database. Boolean `true`/`false` in JSON, `True`/`False` in CSV, or the string `unknown`; unknown is not false. A permanent CUID has `temporary` false
 `cuid_metadata_status` | `available`, `partial`, `unsupported` (the library predates the call), `not_supported` (no CUID for this handle; the other CUID fields read `N/A`), `invalid_value`, or `amdsmi_error_<numeric status>`; preserves metadata failures even when an identifier remains available
 
 If the CUID info API fails, the CUID-only API is tried, so a metadata failure
@@ -203,10 +203,12 @@ the host's.
 On a GPU in SPX the handle reports the whole GPU's CUID. In DPX and above,
 on a partition-capable GPU such as an MI300-series GPU, each GPU handle is a
 compute partition and reports that partition's own CUID, never the whole
-GPU's. A partition whose UnitID cannot be determined, for example because KFD
-is not loaded, reads `N/A` with `cuid_metadata_status` `not_supported`.
+GPU's: the driver's where it publishes one, otherwise a temporary CUID. A
+partition whose UnitID cannot be determined, for example because KFD is not
+loaded, reads `N/A` with `cuid_metadata_status` `not_supported`.
 
-For every component on the node, not only GPUs, use
+To set the node key, use `amd-smi set --cuid-seed`. For every component on the
+node, not only GPUs, and the node key's state, use
 [`amd-smi node --cuid`](#cmd-node).
 
 ```shell-session
@@ -709,9 +711,9 @@ Set options for specified devices.
 
 ```shell-session
 ~$ amd-smi set --help
-usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
+usage: amd-smi set [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-f %]
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
-                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS] [-n WATTS]
+                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-u FILE] [-R STATUS] [-n WATTS]
                    [--cpu-pwr-limit PWR_LIMIT] [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT]]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
@@ -778,6 +780,16 @@ Set Arguments:
   -n, --node-power-limit WATTS                Set the node-level (NPM) power limit in watts.
                                                 This is a node-wide setting, not per-GPU.
                                                 Max node power limit: 6000 W
+  -u, --cuid-seed FILE                        Set the node key from FILE, which must hold exactly 32 bytes. Use - to
+                                              read it from standard input, for example
+                                              `head -c 32 /dev/urandom | amd-smi set --cuid-seed -`. The key is never
+                                              accepted as an argument value: an argument is readable in /proc by every
+                                              user on the machine and is written to shell history.
+                                              This replaces every CUID derived with the node key; primary and temporary
+                                              CUIDs are unchanged. It is an administrative invalidation, not a routine action.
+                                              amdgpu holds the key in memory until it is unloaded or the host reboots, and
+                                              stores it nowhere else; set it again after every boot. Fails without amdgpu.
+                                              Node-wide, so it cannot be combined with --gpu/-g, and it requires root.
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
@@ -832,6 +844,19 @@ Command Modifiers:
   --file FILE                                                    Saves output into a file on the provided path (stdout by default).
   --loglevel LEVEL                                               Set the logging level from the possible choices:
                                                                         DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+`amd-smi set --cuid-seed` writes the node key to amdgpu's `cuid_seed`, which
+keys every GPU and partition, and reports the key's state, not the key.
+Keep the key file readable only by root and set the key again after every boot
+or amdgpu reload. Hosts that should report the same derived CUIDs need the same
+key.
+
+```shell-session
+~$ sudo sh -c 'umask 077; head -c 32 /dev/urandom > /root/node.key'
+~$ sudo amd-smi set --cuid-seed /root/node.key
+    SEED_PROVISIONED: True
+    SEED_FINGERPRINT: XXXXXXXXXXXXXXXX
 ```
 
 (cmd-reset)=
@@ -1158,7 +1183,8 @@ Node arguments:
   -G, --gtt                     Displays GTT (shared GPU memory) size
   -T, --tray                    Displays compute tray type and accelerator count
   -Y, --cuid                    Lists the CUID of every component on the node: the platform, CPU
-                                packages, GPUs, NPUs and NICs. Every CUID is temporary.
+                                packages, GPUs and GPU partitions, NPUs and NICs, with the node key's state.
+                                Without root, CPU, NIC and platform CUIDs are temporary.
 
 Command Modifiers:
   --json                        Displays output in JSON format (human readable by default).
@@ -1206,45 +1232,55 @@ requested mode if it is absent from this set, distinct from
 `AMDSMI_STATUS_NOT_SUPPORTED`'s "NPM is disabled on this node" message.
 
 `amd-smi node --cuid` lists every component that has a CUID, whether or not
-amd-smi manages it: the platform, each CPU package, each AMD GPU, each AMD
-NPU, and each network PCI function, with or without a network interface. Components are named by type and position (`CPU 0`, `GPU 1`);
-`GPU n` here counts CUID components, not amd-smi GPU indexes, so match on
-`bdf`. Each has `cuid`, `component_type`, `source`, `temporary`, `bdf` and
-`device_path`. Every CUID is temporary (`TEMPORARY: True`), and each GPU
-partition in DPX and above is listed beside its GPU. Each NIC function has its
-own CUID; its UnitID is its PCI function number. `--csv` gives one row per
-component.
+amd-smi manages it: the platform, each CPU package, each AMD GPU or GPU
+partition, each AMD NPU, and each network PCI function, with or without a
+network interface. Each entry has `cuid`, `component_type`, `source`,
+`temporary`, `bdf` and `device_path`, beside the node key's `seed_provisioned`
+and `seed_fingerprint`. `--csv` gives one row per component.
+
+- Entries are named by type and position (`CPU 0`, `GPU 1`). `GPU n` counts
+  CUID components, not amd-smi GPU indexes, so match on `bdf`.
+- A GPU and each of its partitions in DPX and above are separate entries. A
+  partition's `bdf` is the address amd-smi uses for it, as `amd-smi list`
+  shows it, with the partition index in the function number. `device_path` is
+  the render node for the GPU and the `xcp` directory for a partition.
+- A NIC's UnitID is its PCI function number, so two functions of one card have
+  distinct CUIDs even where they report one serial number.
+- Run it as root: otherwise CPU, NIC and platform CUIDs are temporary
+  (`TEMPORARY: True`) and the key state is unavailable.
 
 ```shell-session
-~$ amd-smi node --cuid
+~$ sudo amd-smi node --cuid
 NODE:
     CUID:
+        SEED_PROVISIONED: True
+        SEED_FINGERPRINT: XXXXXXXXXXXXXXXX
         PLATFORM:
             CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
             COMPONENT_TYPE: PLATFORM
             SOURCE: LIBRARY
-            TEMPORARY: True
+            TEMPORARY: False
             BDF: N/A
             DEVICE_PATH: N/A
         CPU 0:
             CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
             COMPONENT_TYPE: CPU
             SOURCE: LIBRARY
-            TEMPORARY: True
+            TEMPORARY: False
             BDF: N/A
             DEVICE_PATH: /sys/devices/system/cpu/cpu0
         GPU 0:
             CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
             COMPONENT_TYPE: GPU
-            SOURCE: LIBRARY
-            TEMPORARY: True
+            SOURCE: DRIVER
+            TEMPORARY: False
             BDF: 0000:03:00.0
             DEVICE_PATH: /sys/class/drm/renderD129
         NIC 0:
             CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
             COMPONENT_TYPE: NIC
             SOURCE: LIBRARY
-            TEMPORARY: True
+            TEMPORARY: False
             BDF: 0000:69:00.0
             DEVICE_PATH: /sys/class/net/eno1
 ```

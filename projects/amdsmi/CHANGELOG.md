@@ -72,14 +72,16 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Adds `ppod_mask`, `vpod_mask`, and `station_mask`, reporting which fields the call actually read. A clear bit means the corresponding field holds its sentinel, which distinguishes "not published by the driver" from a real value that happens to equal the sentinel. The three words are carved from the existing `reserved` array, so `sizeof(amdsmi_fabric_info_v2_t)` is unchanged.
   - The Python `amdsmi_get_gpu_fabric_info()` requests the new layout automatically; its dictionary gains the three mask keys and is otherwise unchanged.
 
-- **Added Component Unified ID (CUID) reporting APIs**.  
-  - `amdsmi_get_gpu_cuid_info()` returns a device's CUID in the new `amdsmi_cuid_info_t`: `derived` holds the CUID, `primary` is reserved for a permanent CUID's PrimaryID, and the struct also gives the Component Type, the lookup stage that answered, and `auxiliary`, which is set for a temporary CUID (amd-smi shows it as `temporary`). Every CUID in this release is temporary, so `primary` is always empty, `source` is always `LIBRARY` and `auxiliary` is always 1. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
+- **Added Component Unified ID (CUID) reporting and node key APIs**.  
+  - `amdsmi_get_gpu_cuid_info()` returns a device's CUID in the new `amdsmi_cuid_info_t`: `derived` holds the CUID (its DerivedID when it has a permanent CUID, otherwise its temporary CUID), `primary` holds a permanent CUID's PrimaryID for root and is empty otherwise, and the struct also gives the Component Type, the lookup stage that answered, and `auxiliary`, which is set for a temporary CUID (amd-smi shows it as `temporary`). The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
   - `amdsmi_get_gpu_device_cuid()` now returns the device's CUID, the same value as `derived`.
+  - `amdsmi_set_cuid_seed()` sets the node key, and `amdsmi_get_cuid_seed_info()` reports whether it is set and its fingerprint, in the new `amdsmi_cuid_seed_info_t`. amdgpu holds the key in memory, set and read through its `cuid_seed`, until the module is unloaded or the host reboots; it is stored nowhere else. Without amdgpu, `amdsmi_set_cuid_seed()` returns `AMDSMI_STATUS_NOT_SUPPORTED`. The key itself is never returned.
   - `amdsmi_get_cuid_components()` lists every component on the node that has a CUID (platform, CPU packages, GPUs and their compute partitions, NPUs, one entry per NIC function; a NIC's UnitID is its PCI function number) in the new `amdsmi_cuid_component_t`, with its BDF and sysfs path. It needs no processor handle.
   - The entry points are exported whether or not the build links `libamdcuid`; without it they return `AMDSMI_STATUS_NOT_SUPPORTED`.
-  - Every CUID is a temporary CUID, built from the machine ID and world-readable device information, the same for every caller and on any kernel. A GPU handle in SPX reports the whole GPU's CUID; in DPX and above each handle reports its own partition's, with the partition's UnitID taken from the KFD topology, or from amdgpu's `cuid_unit_id` on a kernel that publishes it.
-  - CLI: `amd-smi static --cuid` reports the CUID block and `amd-smi node --cuid` lists every component's CUID. `--cuid` is opt-in. Each CUID is shown with its `component_type`, `source` and `temporary` flag.
+  - Without a node key every CUID is a temporary CUID, built from the machine ID and world-readable device information, the same for every caller and on any kernel. With an amdgpu that exposes `cuid_derived` and `cuid_seed`, and a node key set since amdgpu loaded, a GPU or partition reports the driver's permanent CUID, and root gets permanent CPU, NIC, NPU and platform CUIDs.
+  - A GPU handle in SPX reports the whole GPU's CUID; in DPX and above each handle reports its own partition's, never the whole GPU's. The partition's UnitID comes from amdgpu's `cuid_unit_id` or, on a kernel without it, from the KFD topology.
   - A temporary CUID needs a machine-id. Without a valid `/etc/machine-id` (or `/var/lib/dbus/machine-id` when `/etc/machine-id` does not exist) the CUID fields read `N/A` (`not_supported`). A container with its own machine-id gets its own CUIDs; bind-mount the host's `/etc/machine-id` read-only to get the host's.
+  - CLI: `amd-smi static --cuid` reports the CUID block and `amd-smi node --cuid` lists every component's CUID together with the node key's state (`seed_provisioned`, `seed_fingerprint`). `--cuid` is opt-in. Each CUID is shown with its `component_type`, `source` and `temporary` flag; amd-smi prints no primary CUID. `amd-smi set --cuid-seed <file|->` sets the node key (requires root).
   - `amd-smi list` adds `cuid`, `source`, `temporary` and `cuid_metadata_status`, and `-g` accepts a CUID as well as the legacy UUID. The existing `uuid`/`gpu_uuid` fields keep reporting the legacy UUID rather than switching to the CUID as 10.1 announced: a temporary CUID changes with the host's machine-id, so it has its own field.
   - Build: `BUILD_CUID` takes `AUTO` (default), `ON` or `OFF`. Without an installed `libamdcuid` package, the in-tree `shared/cuid` sources are built and absorbed into `libamd_smi`.
 
@@ -89,8 +91,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       CUID:
           CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
           COMPONENT_TYPE: GPU
-          SOURCE: LIBRARY
-          TEMPORARY: True
+          SOURCE: DRIVER
+          TEMPORARY: False
           CUID_METADATA_STATUS: available
   ```
 
