@@ -13,8 +13,7 @@ from typing import Any, Dict, Optional, Set, Tuple
 
 import config
 from argparser import (
-    CliHelpFormatter,
-    omniarg_parser,
+    build_parser,
     warn_deprecated_options,
 )
 from pc_sampling.pc_sampling_profile import (
@@ -270,17 +269,7 @@ class RocProfCompute:
         experimental_requested: bool = prelim_args.experimental
 
         # Build full parser with experimental knowledge
-        self.__parser = argparse.ArgumentParser(
-            description=(
-                "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
-            ),
-            prog="rocprof-compute",
-            allow_abbrev=False,
-            formatter_class=lambda prog: CliHelpFormatter(prog, max_help_position=30),
-            usage="rocprof-compute [mode] [options]",
-        )
-        omniarg_parser(
-            self.__parser,
+        self.__parser = build_parser(
             config.rocprof_compute_home,
             self.__supported_archs,
             self.__version,

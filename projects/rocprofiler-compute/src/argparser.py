@@ -154,6 +154,32 @@ def add_general_group(
     )
 
 
+def build_parser(
+    rocprof_compute_home: Path,
+    supported_archs: Dict[str, str],
+    rocprof_compute_version: Dict[str, Optional[str]],
+    experimental_enabled: bool = False,
+) -> argparse.ArgumentParser:
+    """Return the rocprof-compute command-line parser."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
+        ),
+        prog="rocprof-compute",
+        allow_abbrev=False,
+        formatter_class=lambda prog: CliHelpFormatter(prog, max_help_position=30),
+        usage="rocprof-compute [mode] [options]",
+    )
+    omniarg_parser(
+        parser,
+        rocprof_compute_home,
+        supported_archs,
+        rocprof_compute_version,
+        experimental_enabled,
+    )
+    return parser
+
+
 def omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
