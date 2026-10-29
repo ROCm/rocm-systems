@@ -321,6 +321,8 @@ TEST(Validator, RejectsNegativeInstructionSize) {
 TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
 
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  static_assert(nop.succeeded());
   auto valid_plan = [&] {
     TrampolinePlan p;
     p.arch = kArch;
@@ -329,9 +331,7 @@ TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
     p.trampoline_offset = 0x200;
     p.return_target = 0x104;
     p.original_words.assign(1, 0xDEADBEEFu);
-    constexpr util::FailureOr<uint32_t> maybe_s_nop_5 = build_s_nop(0, kArch);
-    static_assert(maybe_s_nop_5.succeeded());
-    p.before_items = {InlineAsmItem{{maybe_s_nop_5.value()}}};
+    p.before_items = {InlineAsmItem{{nop.value()}}};
     p.emit_original = true;
     return p;
   };
@@ -343,7 +343,7 @@ TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
   // Extra before-item.
   {
     auto plan = valid_plan();
-    plan.before_items.push_back(InlineAsmItem{{build_s_nop(0, kArch).value()}});
+    plan.before_items.push_back(InlineAsmItem{{nop.value()}});
     std::string err;
     EXPECT_FALSE(validate_inline_nop_plan(plan, &err)) << "extra before-item must be rejected";
     EXPECT_FALSE(err.empty());
@@ -364,7 +364,7 @@ TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
   // Any after-item at all.
   {
     auto plan = valid_plan();
-    plan.after_items.push_back(InlineAsmItem{{build_s_nop(0, kArch).value()}});
+    plan.after_items.push_back(InlineAsmItem{{nop.value()}});
     std::string err;
     EXPECT_FALSE(validate_inline_nop_plan(plan, &err)) << "non-empty after_items must be rejected";
     EXPECT_FALSE(err.empty());
@@ -2355,12 +2355,17 @@ constexpr std::array<uint32_t, 3> kGfx12ImageStoreV4V5V6{0xd3c18002u, 0x00001000
 // The store, then a return. With @p define_base the body first writes the
 // store's SGPR base pair, s[2:3].
 std::vector<uint32_t> gfx12_store_probe_body(bool define_base) {
+  constexpr util::FailureOr<uint32_t> mov =
+      build_s_mov_b64(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(mov.succeeded());
+  constexpr util::FailureOr<uint32_t> setpc =
+      build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(setpc.succeeded());
   std::vector<uint32_t> body;
   if (define_base)
-    body.push_back(
-        build_s_mov_b64(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4).value());
+    body.push_back(mov.value());
   body.insert(body.end(), kGfx12GlobalStoreV0V1S2.begin(), kGfx12GlobalStoreV0V1S2.end());
-  body.push_back(build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4).value());
+  body.push_back(setpc.value());
   return body;
 }
 
@@ -3017,8 +3022,8 @@ std::optional<uint16_t> patch_and_recover_storage(const std::vector<uint32_t> &p
 }
 
 // s_mov_b32 s<n>, 0. Inline constant 0 is scalar source code 128.
-uint32_t clobber_sgpr(uint16_t sgpr) {
-  return build_s_mov_b32(sgpr, 128, ROCJITSU_CODE_ARCH_CDNA4).value();
+util::FailureOr<uint32_t> clobber_sgpr(uint16_t sgpr) {
+  return build_s_mov_b32(sgpr, 128, ROCJITSU_CODE_ARCH_CDNA4);
 }
 
 } // namespace
@@ -3032,13 +3037,16 @@ TEST(InstrumentorEntryPrologue, StorageAvoidsWhatTheProbeBodyClobbers) {
   const auto baseline = patch_and_recover_storage({kProbeSetpcS30S31}, &err);
   ASSERT_TRUE(baseline.has_value()) << err;
   const uint16_t low = *baseline;
+  std::vector<uint32_t> clobbers;
+  for (uint16_t offset = 0; offset < 4; ++offset) {
+    util::FailureOr<uint32_t> clobber = clobber_sgpr(static_cast<uint16_t>(low + offset));
+    ASSERT_TRUE(clobber.succeeded());
+    clobbers.push_back(clobber.value());
+  }
+  clobbers.push_back(kProbeSetpcS30S31);
 
   // Clobber the run the planner just chose. It has to pick a different one.
-  const auto moved =
-      patch_and_recover_storage({clobber_sgpr(low), clobber_sgpr(static_cast<uint16_t>(low + 1)),
-                                 clobber_sgpr(static_cast<uint16_t>(low + 2)),
-                                 clobber_sgpr(static_cast<uint16_t>(low + 3)), kProbeSetpcS30S31},
-                                &err);
+  const auto moved = patch_and_recover_storage(clobbers, &err);
   ASSERT_TRUE(moved.has_value()) << err;
   EXPECT_NE(*moved, low);
   // Disjoint from the clobbered run, not merely shifted off its base.
@@ -3054,8 +3062,11 @@ TEST(InstrumentorEntryPrologue, StorageAvoidsWhatTheProbeBodyClobbers) {
 // overwrites between the prologue and the site.
 TEST(InstrumentorEntryPrologue, StorageExhaustedByProbeClobbersFailsClosed) {
   std::vector<uint32_t> body;
-  for (uint16_t sgpr = 3; sgpr < 32; sgpr += 4)
-    body.push_back(clobber_sgpr(sgpr));
+  for (uint16_t sgpr = 3; sgpr < 32; sgpr += 4) {
+    util::FailureOr<uint32_t> clobber = clobber_sgpr(sgpr);
+    ASSERT_TRUE(clobber.succeeded());
+    body.push_back(clobber.value());
+  }
   body.push_back(kProbeSetpcS30S31);
 
   std::string err;
@@ -3075,16 +3086,20 @@ TEST(InstrumentorEntryPrologue, StorageAvoidsAProbeThatDoesNotReadIt) {
   const auto baseline = patch_and_recover_storage({kProbeSetpcS30S31}, &err);
   ASSERT_TRUE(baseline.has_value()) << err;
   const uint16_t low = *baseline;
+  std::vector<uint32_t> clobbers;
+  for (uint16_t offset = 0; offset < 4; ++offset) {
+    util::FailureOr<uint32_t> clobber = clobber_sgpr(static_cast<uint16_t>(low + offset));
+    ASSERT_TRUE(clobber.succeeded());
+    clobbers.push_back(clobber.value());
+  }
+  clobbers.push_back(kProbeSetpcS30S31);
 
   // Three words, so the two probes get distinct sites.
   auto target = test::make_kernarg_kernel_elf({0xBF800000u, 0xBF800000u, 0xBF800000u},
                                               /*private_bytes=*/0, EF_AMDGPU_MACH_AMDGCN_GFX950,
                                               kTestKernargSize);
   auto reader = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
-  auto writer = make_gfx950_probe_elf(
-      "rj_test_writer", {clobber_sgpr(low), clobber_sgpr(static_cast<uint16_t>(low + 1)),
-                         clobber_sgpr(static_cast<uint16_t>(low + 2)),
-                         clobber_sgpr(static_cast<uint16_t>(low + 3)), kProbeSetpcS30S31});
+  auto writer = make_gfx950_probe_elf("rj_test_writer", clobbers);
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject reader_obj(reader.data(), reader.size());
   AmdGpuCodeObject writer_obj(writer.data(), writer.size());
@@ -3547,8 +3562,31 @@ class InstrProbeSpillBase : public ::testing::Test {
 protected:
   explicit InstrProbeSpillBase(SpillArch a) : a_(a) {}
   rj_code_arch_t arch() const { return a_.arch; }
-  uint32_t endpgm() const { return build_s_endpgm(a_.arch).value(); }
-  uint32_t setpc() const { return build_s_setpc_b64(/*s[30:31]=*/30, a_.arch).value(); }
+  void SetUp() override {
+    util::FailureOr<uint32_t> endpgm_word = build_s_endpgm(a_.arch);
+    ASSERT_TRUE(endpgm_word.succeeded());
+    endpgm_word_ = endpgm_word.value();
+    util::FailureOr<uint32_t> setpc_word = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    ASSERT_TRUE(setpc_word.succeeded());
+    setpc_word_ = setpc_word.value();
+    util::FailureOr<uint32_t> mov_b32_op = sop1_op_mov_b32(a_.arch);
+    ASSERT_TRUE(mov_b32_op.succeeded());
+    mov_b32_op_ = mov_b32_op.value();
+    util::FailureOr<uint32_t> mov_b64_op = sop1_op_mov_b64(a_.arch);
+    ASSERT_TRUE(mov_b64_op.succeeded());
+    mov_b64_op_ = mov_b64_op.value();
+    util::FailureOr<uint16_t> exec_lo = scalar_operand_exec_lo(a_.arch);
+    ASSERT_TRUE(exec_lo.succeeded());
+    exec_lo_ = exec_lo.value();
+    util::FailureOr<uint16_t> vcc_lo = scalar_operand_vcc_lo(a_.arch);
+    ASSERT_TRUE(vcc_lo.succeeded());
+    vcc_lo_ = vcc_lo.value();
+    util::FailureOr<uint16_t> m0 = scalar_operand_m0(a_.arch);
+    ASSERT_TRUE(m0.succeeded());
+    m0_ = m0.value();
+  }
+  uint32_t endpgm() const { return endpgm_word_; }
+  uint32_t setpc() const { return setpc_word_; }
 
   // Cave (trampoline body appended after the original text) plus the patched
   // kernel's private_segment_fixed_size.
@@ -3795,31 +3833,32 @@ protected:
   // exec, tmp (restore). On RDNA4 the save/restore stays wave64-shaped even on wave32
   // (width hardcoded to 2); EXEC_LO round-trips correctly.
   void expect_preserves_clobbered_exec() {
-    const uint32_t clobber =
-        build_s_mov_b32(scalar_operand_exec_lo(arch()).value(), /*inline 0=*/128, arch()).value();
+    util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(exec_lo_, /*inline 0=*/128, arch());
+    ASSERT_TRUE(maybe_clobber.succeeded());
+    const uint32_t clobber = maybe_clobber.value();
     const std::vector<uint32_t> cave = patch_probe_clobbering(clobber);
     ASSERT_FALSE(cave.empty());
-    expect_special_preserved(cave, sop1_op_mov_b64(arch()).value(),
-                             scalar_operand_exec_lo(arch()).value());
+    expect_special_preserved(cave, mov_b64_op_, exec_lo_);
   }
 
   // VCC is preserved the same way (64-bit pair).
   void expect_preserves_clobbered_vcc() {
-    const uint32_t clobber =
-        build_s_mov_b32(scalar_operand_vcc_lo(arch()).value(), /*inline 0=*/128, arch()).value();
+    util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(vcc_lo_, /*inline 0=*/128, arch());
+    ASSERT_TRUE(maybe_clobber.succeeded());
+    const uint32_t clobber = maybe_clobber.value();
     const std::vector<uint32_t> cave = patch_probe_clobbering(clobber);
     ASSERT_FALSE(cave.empty());
-    expect_special_preserved(cave, sop1_op_mov_b64(arch()).value(),
-                             scalar_operand_vcc_lo(arch()).value());
+    expect_special_preserved(cave, mov_b64_op_, vcc_lo_);
   }
 
   // M0 is preserved with a single 32-bit s_mov (m0 = 124 on CDNA4, 125 on RDNA4).
   void expect_preserves_clobbered_m0() {
-    const uint16_t m0 = scalar_operand_m0(arch()).value();
-    const std::vector<uint32_t> cave =
-        patch_probe_clobbering(build_s_mov_b32(m0, /*inline 0=*/128, arch()).value());
+    util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(m0_, /*inline 0=*/128, arch());
+    ASSERT_TRUE(maybe_clobber.succeeded());
+    const uint16_t m0 = m0_;
+    const std::vector<uint32_t> cave = patch_probe_clobbering(maybe_clobber.value());
     ASSERT_FALSE(cave.empty());
-    expect_special_preserved(cave, sop1_op_mov_b32(arch()).value(), m0);
+    expect_special_preserved(cave, mov_b32_op_, m0);
   }
 
   // EXEC and VCC are preserved unconditionally, even when the probe body touches
@@ -3827,12 +3866,12 @@ protected:
   // defs (v_cmp->VCC, v_cmpx->EXEC) would otherwise slip through; always saving both
   // closes that hole. Probe body here is a bare s_nop (no special-state operand).
   void expect_preserves_exec_and_vcc_unconditionally() {
-    const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, arch()).value());
+    util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch());
+    ASSERT_TRUE(maybe_nop.succeeded());
+    const std::vector<uint32_t> cave = patch_probe_clobbering(maybe_nop.value());
     ASSERT_FALSE(cave.empty());
-    expect_special_preserved(cave, sop1_op_mov_b64(arch()).value(),
-                             scalar_operand_exec_lo(arch()).value());
-    expect_special_preserved(cave, sop1_op_mov_b64(arch()).value(),
-                             scalar_operand_vcc_lo(arch()).value());
+    expect_special_preserved(cave, mov_b64_op_, exec_lo_);
+    expect_special_preserved(cave, mov_b64_op_, vcc_lo_);
   }
 
   // Every probe-call envelope -- including a no-spill site -- opens with a load drain
@@ -3840,7 +3879,9 @@ protected:
   // probe-issued asynchronous load cannot retire onto the saved/restored special
   // state. The probe body is a bare s_nop (no spill; special state still preserved).
   void expect_boundary_drains_at_no_spill_site() {
-    const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, arch()).value());
+    util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch());
+    ASSERT_TRUE(maybe_nop.succeeded());
+    const std::vector<uint32_t> cave = patch_probe_clobbering(maybe_nop.value());
     ASSERT_FALSE(cave.empty());
     const auto drain = build_wait_all_loads_complete(arch());
     size_t count = 0;
@@ -3856,9 +3897,11 @@ protected:
   // gfx11+ removed them (OPR_SDST_SGPR_MAX=105, so dst 102 is the plain SGPR s102), so
   // the clobber is inexpressible via s_mov on RDNA4 -- no RDNA4 analog.
   void expect_rejects_clobbered_flat_scratch() {
+    util::FailureOr<uint32_t> maybe_clobber =
+        build_s_mov_b32(/*flat_scratch_lo=*/102, /*inline 0=*/128, arch());
+    ASSERT_TRUE(maybe_clobber.succeeded());
     // FLAT_SCRATCH_LO is operand 102 on gfx9.
-    const uint32_t clobber =
-        build_s_mov_b32(/*flat_scratch_lo=*/102, /*inline 0=*/128, arch()).value();
+    const uint32_t clobber = maybe_clobber.value();
     expect_failure_containing(
         patch_expecting_result(kernel_elf({kMovV3V2, endpgm()}, /*private_bytes=*/0),
                                probe_elf({clobber, setpc()})),
@@ -3932,9 +3975,7 @@ protected:
   std::optional<WaitGap> m0_restore_gap(const std::vector<uint32_t> &cave,
                                         std::span<const uint32_t> anchor) {
     return wait_gap_before_anchor(cave, anchor, [&](std::span<const uint32_t> words) {
-      return words.size() == 1 &&
-             is_special_mov(words.front(), sop1_op_mov_b32(a_.arch).value(),
-                            scalar_operand_m0(a_.arch).value(), /*as_src=*/false);
+      return words.size() == 1 && is_special_mov(words.front(), mov_b32_op_, m0_, /*as_src=*/false);
     });
   }
 
@@ -3943,10 +3984,11 @@ protected:
   // v_readlane_b32, 2 of the 5 wait states the load needs. The envelope pads with
   // s_nop 2 and no further.
   void expect_sgpr_restore_padded_to_five() {
-    const Caved caved =
-        patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
-                    {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()).value(), setpc()},
-                    /*private_bytes=*/64);
+    util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
+    ASSERT_TRUE(maybe_clobber.succeeded());
+    const Caved caved = patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
+                                    {maybe_clobber.value(), setpc()},
+                                    /*private_bytes=*/64);
     const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
     ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
     EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
@@ -3957,11 +3999,10 @@ protected:
   // source by M0, and needs 1 wait state after the SALU write. Nothing follows the
   // M0 restore, so the envelope pads with s_nop 0. No register spills.
   void expect_m0_restore_padded_to_one() {
-    const Caved caved = patch_spill(
-        {kMovrelsS1S2, endpgm()},
-        {build_s_mov_b32(scalar_operand_m0(arch()).value(), /*inline 0=*/128, arch()).value(),
-         setpc()},
-        /*private_bytes=*/0);
+    util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(m0_, /*inline 0=*/128, arch());
+    ASSERT_TRUE(maybe_clobber.succeeded());
+    const Caved caved = patch_spill({kMovrelsS1S2, endpgm()}, {maybe_clobber.value(), setpc()},
+                                    /*private_bytes=*/0);
     const std::optional<WaitGap> gap = m0_restore_gap(caved.cave, std::span(&kMovrelsS1S2, 1));
     ASSERT_TRUE(gap) << "no s_mov_b32 restoring M0 before the anchor";
     EXPECT_EQ(gap->wait_states, 1u) << gap->trace;
@@ -3969,6 +4010,13 @@ protected:
   }
 
   SpillArch a_;
+  uint32_t endpgm_word_ = 0;
+  uint32_t setpc_word_ = 0;
+  uint32_t mov_b32_op_ = 0;
+  uint32_t mov_b64_op_ = 0;
+  uint16_t exec_lo_ = 0;
+  uint16_t vcc_lo_ = 0;
+  uint16_t m0_ = 0;
 };
 
 class Cdna3ProbeSpill : public InstrProbeSpillBase {
@@ -4011,21 +4059,21 @@ TEST_F(Rdna4ProbeSpill, SpillsLiveClobberedVgpr) {
 }
 
 TEST_F(Cdna3ProbeSpill, SpillsLiveClobberedSgpr) {
-  expect_sgpr_spill(
-      patch_spill({kMovV3S8, endpgm()},
-                  {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()).value(), setpc()}, 64));
+  util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
+  ASSERT_TRUE(maybe_clobber.succeeded());
+  expect_sgpr_spill(patch_spill({kMovV3S8, endpgm()}, {maybe_clobber.value(), setpc()}, 64));
 }
 
 TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedSgpr) {
-  expect_sgpr_spill(
-      patch_spill({kMovV3S8, endpgm()},
-                  {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()).value(), setpc()}, 64));
+  util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
+  ASSERT_TRUE(maybe_clobber.succeeded());
+  expect_sgpr_spill(patch_spill({kMovV3S8, endpgm()}, {maybe_clobber.value(), setpc()}, 64));
 }
 
 TEST_F(Rdna4ProbeSpill, SpillsLiveClobberedSgpr) {
-  expect_sgpr_spill(
-      patch_spill({kMovV3S8, endpgm()},
-                  {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()).value(), setpc()}, 64));
+  util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
+  ASSERT_TRUE(maybe_clobber.succeeded());
+  expect_sgpr_spill(patch_spill({kMovV3S8, endpgm()}, {maybe_clobber.value(), setpc()}, 64));
 }
 
 // A live+clobbered AccVGPR spills straight to scratch via the `acc` bit -- no bridge
@@ -4121,45 +4169,39 @@ TEST_F(Cdna3ProbeSpill, PreservesVccFromImplicitCompare) {
   const std::vector<uint32_t> cave =
       patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7D940080u);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(arch()).value(),
-                           scalar_operand_vcc_lo(arch()).value());
+  expect_special_preserved(cave, mov_b64_op_, vcc_lo_);
 }
 
 TEST_F(Cdna3ProbeSpill, PreservesExecFromImplicitCmpx) {
   const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7DB40080u);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(arch()).value(),
-                           scalar_operand_exec_lo(arch()).value());
+  expect_special_preserved(cave, mov_b64_op_, exec_lo_);
 }
 
 TEST_F(Cdna4ProbeSpill, PreservesVccFromImplicitCompare) {
   const std::vector<uint32_t> cave =
       patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7D940080u);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(arch()).value(),
-                           scalar_operand_vcc_lo(arch()).value());
+  expect_special_preserved(cave, mov_b64_op_, vcc_lo_);
 }
 
 TEST_F(Cdna4ProbeSpill, PreservesExecFromImplicitCmpx) {
   const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7DB40080u);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(arch()).value(),
-                           scalar_operand_exec_lo(arch()).value());
+  expect_special_preserved(cave, mov_b64_op_, exec_lo_);
 }
 
 TEST_F(Rdna4ProbeSpill, PreservesVccFromImplicitCompare) {
   const std::vector<uint32_t> cave =
       patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7C940080u);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(arch()).value(),
-                           scalar_operand_vcc_lo(arch()).value());
+  expect_special_preserved(cave, mov_b64_op_, vcc_lo_);
 }
 
 TEST_F(Rdna4ProbeSpill, PreservesExecFromImplicitCmpx) {
   const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7D940080u);
   ASSERT_FALSE(cave.empty());
-  expect_special_preserved(cave, sop1_op_mov_b64(arch()).value(),
-                           scalar_operand_exec_lo(arch()).value());
+  expect_special_preserved(cave, mov_b64_op_, exec_lo_);
 }
 
 TEST_F(Cdna3ProbeSpill, RejectsClobberedFlatScratch) { expect_rejects_clobbered_flat_scratch(); }
@@ -4181,10 +4223,11 @@ TEST_F(Cdna4ProbeSpill, M0RestorePadsToOneWaitState) { expect_m0_restore_padded_
 // offset, so one two-word scratch_load and its wait follow the readlane. With the
 // EXEC and VCC restores that is 4, and s_nop 0 supplies the fifth.
 TEST_F(Cdna4ProbeSpill, SgprRestoreCountsAReloadAsOneWaitState) {
-  const Caved caved = patch_spill(
-      {kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
-      {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()).value(), kMovV0Zero, setpc()},
-      /*private_bytes=*/64);
+  util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
+  ASSERT_TRUE(maybe_clobber.succeeded());
+  const Caved caved = patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
+                                  {maybe_clobber.value(), kMovV0Zero, setpc()},
+                                  /*private_bytes=*/64);
   const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
   ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
   EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
@@ -4195,10 +4238,11 @@ TEST_F(Cdna4ProbeSpill, SgprRestoreCountsAReloadAsOneWaitState) {
 // reads after the anchor, so one acc-bit scratch_load and its wait follow the
 // readlane, and s_nop 0 supplies the fifth wait state.
 TEST_F(Cdna4ProbeSpill, SgprRestoreCountsAnAccVgprReloadAsOneWaitState) {
+  util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
+  ASSERT_TRUE(maybe_clobber.succeeded());
   const Caved caved = patch_spill(
       {kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()},
-      {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()).value(), kAccWriteA0ZeroLo,
-       kAccWriteA0ZeroHi, setpc()},
+      {maybe_clobber.value(), kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()},
       /*private_bytes=*/64);
   const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
   ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
@@ -4209,9 +4253,10 @@ TEST_F(Cdna4ProbeSpill, SgprRestoreCountsAnAccVgprReloadAsOneWaitState) {
 // Two reloads (v0, and v2 which the guest reads after the anchor), their wait, and
 // the EXEC and VCC restores already supply all 5, so no s_nop is emitted.
 TEST_F(Cdna4ProbeSpill, SgprRestoreAfterTwoReloadsAddsNoNop) {
+  util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
+  ASSERT_TRUE(maybe_clobber.succeeded());
   const Caved caved = patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], kMovV3V2, endpgm()},
-                                  {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()).value(),
-                                   kMovV0Zero, kMovV2Zero, setpc()},
+                                  {maybe_clobber.value(), kMovV0Zero, kMovV2Zero, setpc()},
                                   /*private_bytes=*/64);
   const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
   ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
@@ -4223,12 +4268,13 @@ TEST_F(Cdna4ProbeSpill, SgprRestoreAfterTwoReloadsAddsNoNop) {
 // sum: the EXEC, VCC and M0 restores give the SGPR 3 of its 5, the M0 restore has
 // none of its 1, so s_nop 1.
 TEST_F(Cdna4ProbeSpill, SgprAndM0RestoresShareOneNop) {
-  const Caved caved = patch_spill(
-      {kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
-      {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()).value(),
-       build_s_mov_b32(scalar_operand_m0(arch()).value(), /*inline 0=*/128, arch()).value(),
-       setpc()},
-      /*private_bytes=*/64);
+  util::FailureOr<uint32_t> m0_clobber = build_s_mov_b32(m0_, /*inline 0=*/128, arch());
+  ASSERT_TRUE(m0_clobber.succeeded());
+  util::FailureOr<uint32_t> sgpr_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
+  ASSERT_TRUE(sgpr_clobber.succeeded());
+  const Caved caved = patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
+                                  {sgpr_clobber.value(), m0_clobber.value(), setpc()},
+                                  /*private_bytes=*/64);
   const std::optional<WaitGap> sgpr_gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
   ASSERT_TRUE(sgpr_gap) << "no v_readlane_b32 restoring s8 before the anchor";
   EXPECT_EQ(sgpr_gap->wait_states, 5u) << sgpr_gap->trace;
@@ -4245,9 +4291,9 @@ TEST_F(Cdna4ProbeSpill, SgprAndM0RestoresShareOneNop) {
 // sequence is hazard-free there. RDNA4 global loads are 12 bytes and cannot be
 // anchors, hence the VALU read.
 TEST_F(Rdna4ProbeSpill, SgprRestoreAddsNoNop) {
-  const Caved caved =
-      patch_spill({kMovV3S8, endpgm()},
-                  {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()).value(), setpc()}, 64);
+  util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
+  ASSERT_TRUE(maybe_clobber.succeeded());
+  const Caved caved = patch_spill({kMovV3S8, endpgm()}, {maybe_clobber.value(), setpc()}, 64);
   const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, std::span(&kMovV3S8, 1), 8);
   ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
   EXPECT_EQ(gap->nops, 0u) << gap->trace;

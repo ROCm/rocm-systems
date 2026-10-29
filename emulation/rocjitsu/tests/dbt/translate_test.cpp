@@ -3844,6 +3844,12 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
 }
 
 TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPrologue) {
+  constexpr util::FailureOr<uint32_t> kNopCdna4Result = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kNopCdna4Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kDelayAluRdna4Result =
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(kDelayAluRdna4Result.succeeded());
+
   constexpr uint64_t kSourceEntryBytes = 512;
   constexpr size_t kSourceEntryWord = kSourceEntryBytes / sizeof(uint32_t);
   constexpr size_t kSourcePreloadEntryWord =
@@ -3851,8 +3857,7 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
   constexpr uint16_t kScalarOperandTtmpBase = 108;
   constexpr uint16_t kTtmpRdna4GridX = 9;
 
-  std::vector<uint32_t> words(kSourcePreloadEntryWord + 1,
-                              build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4).value());
+  std::vector<uint32_t> words(kSourcePreloadEntryWord + 1, kNopCdna4Result.value());
   util::FailureOr<uint32_t> maybe_s_endpgm_6 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(maybe_s_endpgm_6.succeeded());
   words[0] = maybe_s_endpgm_6.value();
@@ -3901,8 +3906,7 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
       build_s_mov_b32(0, kScalarOperandTtmpBase + kTtmpRdna4GridX, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(maybe_s_mov_b32.succeeded());
   const uint32_t workgroup_id_x_prologue = maybe_s_mov_b32.value();
-  const uint32_t prologue_delay =
-      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value();
+  const uint32_t prologue_delay = kDelayAluRdna4Result.value();
   const auto expect_launch_stub = [&](size_t word_index, int16_t branch_offset) {
     EXPECT_EQ(target_words[word_index], workgroup_id_x_prologue)
         << "the synthesized kernarg-preload launch stub must materialize descriptor ABI SGPRs "
@@ -3915,8 +3919,8 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
     EXPECT_EQ(target_words[word_index + 2], maybe_s_branch_4.value())
         << "the synthesized launch stub branches only after the descriptor ABI prologue";
   };
-  expect_launch_stub(0, 64);
-  expect_launch_stub(kKernargPreloadSkipBytes / sizeof(uint32_t), 1);
+  ASSERT_NO_FATAL_FAILURE(expect_launch_stub(0, 64));
+  ASSERT_NO_FATAL_FAILURE(expect_launch_stub(kKernargPreloadSkipBytes / sizeof(uint32_t), 1));
 
   util::FailureOr<uint32_t> maybe_s_branch_5 = build_s_branch(0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(maybe_s_branch_5.succeeded());
@@ -4020,6 +4024,14 @@ TEST(InstructionBuilder, PatchPcrelBranchOffsetRejectsMisalignedDelta) {
 /// builder in s[10:11]: @p bypass_builder_delta decides whether its value lands
 /// on a relocatable block start or on an address DBT cannot move.
 std::vector<uint32_t> make_incomplete_indirect_consumer_body(uint32_t bypass_builder_delta) {
+  constexpr util::FailureOr<uint32_t> kNopCdna4Result = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kNopCdna4Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kBranchPlus5Cdna4Result =
+      build_s_branch(5, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kBranchPlus5Cdna4Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna4Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kEndpgmCdna4Result.succeeded());
+
   constexpr uint16_t kPcSreg = 8;
   constexpr uint16_t kBypassSreg = 10;
   constexpr uint32_t kLiteralOperand = 255;
@@ -4031,14 +4043,14 @@ std::vector<uint32_t> make_incomplete_indirect_consumer_body(uint32_t bypass_bui
       pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
       40,                                                  // 0x0c: target delta -> 0x30.
       pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
-      build_s_branch(5, ROCJITSU_CODE_ARCH_CDNA4).value(), // 0x14 -> consumer at 0x2c.
+      kBranchPlus5Cdna4Result.value(),                     // 0x14 -> consumer at 0x2c.
       pack_sop1(0x1c, kBypassSreg, 0),                     // 0x18: bypass-path s_getpc_b64.
       pack_sop2(0, kBypassSreg, kBypassSreg, kLiteralOperand),     // 0x1c: s_add_u32.
       bypass_builder_delta,                                        // 0x20.
       pack_sop2(4, kBypassSreg + 1, kBypassSreg + 1, kInlineInt0), // 0x24: s_addc_u32.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4).value(),            // 0x28: closes the chain.
+      kNopCdna4Result.value(),                                     // 0x28: closes the chain.
       pack_sop1(0x1d, 0, kPcSreg),                                 // 0x2c: joined consumer setpc.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value(),            // 0x30: builder target.
+      kEndpgmCdna4Result.value(),                                  // 0x30: builder target.
   };
 }
 
@@ -4178,10 +4190,10 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
     }
     EXPECT_EQ(found, 1u);
   };
-  expect_builder_targets_endpgm(kPcSreg);
+  ASSERT_NO_FATAL_FAILURE(expect_builder_targets_endpgm(kPcSreg));
   // The unconsumed builder must be relocated too: it is the producer whose
   // stale value the fail-closed path exists to prevent.
-  expect_builder_targets_endpgm(kBypassSreg);
+  ASSERT_NO_FATAL_FAILURE(expect_builder_targets_endpgm(kBypassSreg));
 
   EXPECT_NE(std::ranges::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
             target_words + word_count)
@@ -4243,6 +4255,9 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnNonContiguousBu
 }
 
 TEST(BinaryTranslatorE2E, IncompleteConsumerFailsClosedAtKernargPreloadFirmwareEntry) {
+  constexpr util::FailureOr<uint32_t> kNopCdna4Result = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kNopCdna4Result.succeeded());
+
   // The same incomplete-consumer body that translates when rooted at the ordinary
   // kernel entry (IncompleteIndirectConsumerTranslatesWhenScopeHasNoStalePcValues)
   // must instead fail closed when its scope root is the kernarg-preload firmware
@@ -4256,7 +4271,7 @@ TEST(BinaryTranslatorE2E, IncompleteConsumerFailsClosedAtKernargPreloadFirmwareE
   // Descriptor entry (word 0) is a trivial ordinary path. The incomplete-consumer
   // body is placed at the +256 preload firmware entry, so it is reachable only
   // from that root.
-  std::vector<uint32_t> words(kPreloadEntryWord, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4).value());
+  std::vector<uint32_t> words(kPreloadEntryWord, kNopCdna4Result.value());
   util::FailureOr<uint32_t> maybe_s_endpgm_8 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(maybe_s_endpgm_8.succeeded());
   words[0] = maybe_s_endpgm_8.value();
@@ -4330,16 +4345,29 @@ constexpr uint32_t kOversizedGroupSegmentBytes = 105600u;
 /// scope gains a sidecar variant and the two variants disagree about the helper they both emit.
 [[nodiscard]] std::vector<uint8_t>
 make_shared_address_taken_helper_image(bool oversized_kernel0_lds) {
+  constexpr util::FailureOr<uint32_t> kNopCdna4Result = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kNopCdna4Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna4Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kEndpgmCdna4Result.succeeded());
+
+  constexpr auto kernel0_call =
+      build_s_call_b64(kSharedHelperReturnSreg, 3, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kernel0_call.succeeded());
+  constexpr auto kernel1_call =
+      build_s_call_b64(kSharedHelperReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kernel1_call.succeeded());
+  constexpr auto helper_return =
+      build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(helper_return.succeeded());
   const std::vector<uint32_t> words = {
       // word 0: kernel 0 entry, calls the helper at word 4.
-      build_s_call_b64(kSharedHelperReturnSreg, 3, ROCJITSU_CODE_ARCH_CDNA4).value(),
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value(), // word 1
+      kernel0_call.value(),
+      kEndpgmCdna4Result.value(), // word 1
       // word 2: kernel 1 entry, calls the same helper.
-      build_s_call_b64(kSharedHelperReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA4).value(),
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value(), // word 3
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4).value(), // word 4: helper entry
-      build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA4)
-          .value(), // word 5: helper return
+      kernel1_call.value(),
+      kEndpgmCdna4Result.value(), // word 3
+      kNopCdna4Result.value(),    // word 4: helper entry
+      helper_return.value(),      // word 5: helper return
   };
 
   auto image = test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
@@ -4383,7 +4411,10 @@ translated_helper_entry_offsets(const AmdGpuCodeObject &object) {
   const Section &text = *object.text_sections().front();
   const auto *words = reinterpret_cast<const uint32_t *>(text.data());
   const size_t word_count = text.size() / sizeof(uint32_t);
-  const uint32_t ret = build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA3).value();
+  constexpr auto return_result =
+      build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA3);
+  static_assert(return_result.succeeded());
+  const uint32_t ret = return_result.value();
   for (size_t i = 1; i < word_count; ++i) {
     if (words[i] == ret)
       entries.push_back((i - 1) * sizeof(uint32_t));

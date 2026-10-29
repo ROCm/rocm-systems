@@ -132,8 +132,10 @@ inline void append(std::vector<uint32_t> &words,
 // every SGPR may have been read on entry to a called function, which a probe is.
 // 0xfffe is the value LLVM's amdgpu-wait-sgpr-hazards pass emits for it.
 inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
+  constexpr auto wait = build_sopp_encoding(ROCJITSU_CODE_ARCH_RDNA4, rdna4::kSWaitAluSopp, 0xfffe);
+  static_assert(wait.succeeded());
   if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    words.push_back(build_sopp_encoding(arch, rdna4::kSWaitAluSopp, 0xfffe).value());
+    words.push_back(wait.value());
 }
 
 } // namespace detail
@@ -187,8 +189,8 @@ inline void build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_typ
   words.push_back(build_v_readfirstlane_b32(kBase + 1, kArgBufferLo + 1, arch));
   words.push_back(build_v_readfirstlane_b32(kExec, kArgExecLo, arch));
   words.push_back(build_v_readfirstlane_b32(kExec + 1, kArgExecLo + 1, arch));
-  words.push_back(build_s_bcnt1_i32_b64(kCount, kExec, arch));
-  words.push_back(build_s_first_set_bit_b64(kWriter, kExec, arch));
+  ASSERT_NO_FATAL_FAILURE(detail::append(words, build_s_bcnt1_i32_b64(kCount, kExec, arch)));
+  ASSERT_NO_FATAL_FAILURE(detail::append(words, build_s_first_set_bit_b64(kWriter, kExec, arch)));
   ASSERT_NO_FATAL_FAILURE(detail::append(words, build_v_mov_b32_src(kZero, kInlineZero, arch)));
   // GFX9: a VMEM read of an SGPR a VALU wrote needs five wait states. The five
   // instructions after the base pair's last v_readfirstlane provide them before
@@ -201,14 +203,15 @@ inline void build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_typ
   words.push_back(build_v_readfirstlane_b32(kWritePtr + 1, kLoaded + 1, arch));
   // On RDNA4 each SALU write below is waited on before its SGPR is next read,
   // at the point LLVM places the wait.
-  words.push_back(
-      build_s_and_b32(kSlot, kWritePtr, scalar_positive_inline_u32(slot_count - 1), arch));
+  ASSERT_NO_FATAL_FAILURE(detail::append(
+      words, build_s_and_b32(kSlot, kWritePtr, scalar_positive_inline_u32(slot_count - 1), arch)));
   detail::append_salu_sgpr_write_wait(words, arch);
-  words.push_back(
-      build_s_lshl_b32(kSlot, kSlot, scalar_positive_inline_u32(detail::kRecordShift), arch)
-          .value());
+  ASSERT_NO_FATAL_FAILURE(detail::append(
+      words,
+      build_s_lshl_b32(kSlot, kSlot, scalar_positive_inline_u32(detail::kRecordShift), arch)));
   detail::append_salu_sgpr_write_wait(words, arch);
-  words.push_back(build_s_add_u32(kSlot, kSlot, kScalarSrcLiteral, arch).value());
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_s_add_u32(kSlot, kSlot, kScalarSrcLiteral, arch)));
   words.push_back(static_cast<uint32_t>(sizeof(RjLogBufferHeader)));
   detail::append_salu_sgpr_write_wait(words, arch);
   ASSERT_NO_FATAL_FAILURE(detail::append(words, build_v_mov_b32_src(kSlotV, kSlot, arch)));
@@ -265,17 +268,17 @@ inline void build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_typ
                                                  offsetof(RjLogRecord, valid), arch));
 
   // write_ptr + 1, after valid.
-  words.push_back(
-      build_s_add_u32(kWritePtr, kWritePtr, scalar_positive_inline_u32(1), arch).value());
-  words.push_back(
-      build_s_addc_u32(kWritePtr + 1, kWritePtr + 1, scalar_positive_inline_u32(0), arch).value());
+  ASSERT_NO_FATAL_FAILURE(detail::append(
+      words, build_s_add_u32(kWritePtr, kWritePtr, scalar_positive_inline_u32(1), arch)));
+  ASSERT_NO_FATAL_FAILURE(detail::append(
+      words, build_s_addc_u32(kWritePtr + 1, kWritePtr + 1, scalar_positive_inline_u32(0), arch)));
   detail::append_salu_sgpr_write_wait(words, arch);
   ASSERT_NO_FATAL_FAILURE(detail::append(words, build_v_mov_b32_src(kNextPtr, kWritePtr, arch)));
   ASSERT_NO_FATAL_FAILURE(
       detail::append(words, build_v_mov_b32_src(kNextPtr + 1, kWritePtr + 1, arch)));
   detail::append(words, build_global_store_dwordx2(kNextPtr, kZero, kBase, kWritePtrOffset, arch));
 
-  words.push_back(build_s_setpc_b64(kLink, arch).value());
+  ASSERT_NO_FATAL_FAILURE(detail::append(words, build_s_setpc_b64(kLink, arch)));
 }
 
 } // namespace test

@@ -5840,10 +5840,18 @@ TEST_P(WavefrontSlotTest, SparseSlotsExecuteAcrossRetirementWaitPauseAndReuse) {
   ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, kSlots));
   auto *cu = f.cu();
   constexpr uint64_t kCode = 0x1000;
+  util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(cu->arch());
+  ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_4 =
+      build_s_mov_b32(0, scalar_positive_inline_u32(2), cu->arch());
+  ASSERT_TRUE(maybe_s_mov_b32_4.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_5 =
+      build_s_mov_b32(0, scalar_positive_inline_u32(1), cu->arch());
+  ASSERT_TRUE(maybe_s_mov_b32_5.succeeded());
   const std::array code = {
-      build_s_mov_b32(0, scalar_positive_inline_u32(1), cu->arch()).value(),
-      build_s_mov_b32(0, scalar_positive_inline_u32(2), cu->arch()).value(),
-      build_s_endpgm(cu->arch()).value(),
+      maybe_s_mov_b32_5.value(),
+      maybe_s_mov_b32_4.value(),
+      maybe_s_endpgm_3.value(),
   };
   f.mem()->load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kCode);
 
@@ -5889,9 +5897,14 @@ TEST_P(WavefrontSlotTest, LowerBarrierWaiterResumesAfterSparseHigherSlotRetires)
   ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, kSlots));
   auto *cu = f.cu();
   constexpr uint64_t kCode = 0x1000;
+  util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(cu->arch());
+  ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_2 =
+      build_s_mov_b32(0, scalar_positive_inline_u32(7), cu->arch());
+  ASSERT_TRUE(maybe_s_mov_b32_2.succeeded());
   const std::array code = {
-      build_s_mov_b32(0, scalar_positive_inline_u32(7), cu->arch()).value(),
-      build_s_endpgm(cu->arch()).value(),
+      maybe_s_mov_b32_2.value(),
+      maybe_s_endpgm_1.value(),
   };
   f.mem()->load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kCode);
   auto *low = cu->dispatch_wf_at(0, 7, kCode, 104, 256, wave_size);

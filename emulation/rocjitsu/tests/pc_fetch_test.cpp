@@ -56,13 +56,20 @@ protected:
     map_page(kBranchPc, kBranchPhysicalPage);
     // s_setpc_b64 / s_set_pc_i64 s[4:5], or
     // s_swappc_b64 / s_swap_pc_i64 s[6:7], s[4:5].
-    memory.write32(kBranchPhysicalPage, GetParam().swap
-                                            ? build_s_swappc_b64(6, 4, GetParam().arch).value()
-                                            : build_s_setpc_b64(4, GetParam().arch).value());
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_3 = build_s_setpc_b64(4, GetParam().arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_3.succeeded());
+    util::FailureOr<uint32_t> maybe_s_swappc_b64_4 = build_s_swappc_b64(6, 4, GetParam().arch);
+    ASSERT_TRUE(maybe_s_swappc_b64_4.succeeded());
+    memory.write32(kBranchPhysicalPage,
+                   GetParam().swap ? maybe_s_swappc_b64_4.value() : maybe_s_setpc_b64_3.value());
     // s_mov_b32 s8, 42: execution proves the high target was actually fetched.
-    memory.write32(kTargetPhysicalPage,
-                   build_s_mov_b32(8, scalar_positive_inline_u32(42), GetParam().arch).value());
-    memory.write32(kTargetPhysicalPage + 4, build_s_endpgm(GetParam().arch).value());
+    util::FailureOr<uint32_t> maybe_s_mov_b32_2 =
+        build_s_mov_b32(8, scalar_positive_inline_u32(42), GetParam().arch);
+    ASSERT_TRUE(maybe_s_mov_b32_2.succeeded());
+    memory.write32(kTargetPhysicalPage, maybe_s_mov_b32_2.value());
+    util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(GetParam().arch);
+    ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
+    memory.write32(kTargetPhysicalPage + 4, maybe_s_endpgm_1.value());
   }
 
   void TearDown() override {

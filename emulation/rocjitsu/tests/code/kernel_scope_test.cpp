@@ -76,14 +76,23 @@ constexpr uint64_t kMidB = 0x14;
 constexpr uint64_t kTailB = 0x18;
 
 [[nodiscard]] std::vector<uint32_t> two_kernel_words() {
+  constexpr util::FailureOr<uint32_t> kBranch2Result = build_s_branch(2, kArch);
+  static_assert(kBranch2Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kNopResult = build_s_nop(0, kArch);
+  static_assert(kNopResult.succeeded());
+  constexpr util::FailureOr<uint32_t> kEndpgmResult = build_s_endpgm(kArch);
+  static_assert(kEndpgmResult.succeeded());
+  constexpr util::FailureOr<uint32_t> kBranch0Result = build_s_branch(0, kArch);
+  static_assert(kBranch0Result.succeeded());
+
   return {
-      build_s_cbranch_scc0(1),          // 0x00: -> A tail at 0x08.
-      build_s_branch(2, kArch).value(), // 0x04: -> B entry at 0x10.
-      build_s_nop(0, kArch).value(),    // 0x08: A tail, first of two instructions.
-      build_s_endpgm(kArch).value(),    // 0x0c.
-      build_s_cbranch_scc0(1),          // 0x10: -> B tail at 0x18.
-      build_s_branch(0, kArch).value(), // 0x14: -> B tail at 0x18.
-      build_s_endpgm(kArch).value(),    // 0x18.
+      build_s_cbranch_scc0(1), // 0x00: -> A tail at 0x08.
+      kBranch2Result.value(),  // 0x04: -> B entry at 0x10.
+      kNopResult.value(),      // 0x08: A tail, first of two instructions.
+      kEndpgmResult.value(),   // 0x0c.
+      build_s_cbranch_scc0(1), // 0x10: -> B tail at 0x18.
+      kBranch0Result.value(),  // 0x14: -> B tail at 0x18.
+      kEndpgmResult.value(),   // 0x18.
   };
 }
 

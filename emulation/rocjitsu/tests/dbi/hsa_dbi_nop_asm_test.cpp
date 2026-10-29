@@ -248,14 +248,18 @@ void HsaDbiNopAsmHardwareBase<Params>::run_trampoline_is_actually_executed_by_gp
   // s_nop 0. If this assertion fails, the orchestrator's trampoline layout
   // no longer starts with the placeholder we think it does, and the
   // sabotage premise ("we replaced the no-op with s_endpgm") would be a lie.
-  const uint32_t s_nop_0 = build_s_nop(0, Params.arch).value();
+  util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, Params.arch);
+  ASSERT_TRUE(maybe_s_nop_2.succeeded());
+  const uint32_t s_nop_0 = maybe_s_nop_2.value();
   uint32_t pre_overwrite = 0;
   std::memcpy(&pre_overwrite, sabotaged.data() + tramp0_file_off, sizeof(pre_overwrite));
   ASSERT_EQ(pre_overwrite, s_nop_0) << "Expected s_nop 0 (0x" << std::hex << s_nop_0
                                     << ") at start of the trampoline cave but found 0x"
                                     << pre_overwrite << " - trampoline body layout changed?";
 
-  const uint32_t s_endpgm_0 = build_s_endpgm(Params.arch).value();
+  util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(Params.arch);
+  ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
+  const uint32_t s_endpgm_0 = maybe_s_endpgm_1.value();
   std::memcpy(sabotaged.data() + tramp0_file_off, &s_endpgm_0, sizeof(s_endpgm_0));
 
   // Same inputs as the dispatch-equivalence test, so the golden matches.

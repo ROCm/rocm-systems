@@ -203,6 +203,10 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGridPayload) {
+  constexpr util::FailureOr<uint32_t> kDelayAluRdna4Result =
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(kDelayAluRdna4Result.succeeded());
+
   using namespace rocjitsu::amdhsa;
 
   Executable exec(kernel_path("vector_add"));
@@ -264,22 +268,20 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGri
       rocjitsu::build_s_lshr_b32(14, ttmp_base + 7, shift16, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(maybe_s_lshr_b32_2.succeeded());
   const std::vector<uint32_t> expected = {
-      maybe_s_mov_b32.value(),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
-      maybe_s_mov_b32_2.value(),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
-      maybe_s_lshl_b32.value(),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
-      maybe_s_lshr_b32.value(),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
-      maybe_s_lshr_b32_2.value(),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
+      maybe_s_mov_b32.value(),      kDelayAluRdna4Result.value(), maybe_s_mov_b32_2.value(),
+      kDelayAluRdna4Result.value(), maybe_s_lshl_b32.value(),     kDelayAluRdna4Result.value(),
+      maybe_s_lshr_b32.value(),     kDelayAluRdna4Result.value(), maybe_s_lshr_b32_2.value(),
+      kDelayAluRdna4Result.value(),
   };
   EXPECT_EQ(translated->prologue_words, expected)
       << "CDNA workgroup_id SGPRs must be rebuilt from RDNA4 TTMP9 and packed TTMP7";
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesXOnlyWorkgroupId) {
+  constexpr util::FailureOr<uint32_t> kDelayAluRdna4Result =
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(kDelayAluRdna4Result.succeeded());
+
   using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
@@ -303,7 +305,7 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesXOnlyWorkgroupId) {
   ASSERT_TRUE(maybe_s_mov_b32_3.succeeded());
   const std::vector<uint32_t> expected = {
       maybe_s_mov_b32_3.value(),
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value(),
+      kDelayAluRdna4Result.value(),
   };
   EXPECT_EQ(translated->prologue_words, expected);
 }

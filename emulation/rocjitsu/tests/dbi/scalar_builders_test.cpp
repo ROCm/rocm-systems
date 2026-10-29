@@ -23,22 +23,44 @@ namespace {
 TEST(ScalarBuilders, MatchLlvmOnCdna) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     EXPECT_EQ(build_v_readfirstlane_b32(4, 0, arch), 0x7e080500u);
-    EXPECT_EQ(build_s_bcnt1_i32_b64(8, 6, arch), 0xbe880d06u);
-    EXPECT_EQ(build_s_first_set_bit_b64(9, 6, arch), 0xbe891106u);
-    EXPECT_EQ(build_s_and_b32(12, 10, scalar_positive_inline_u32(3), arch), 0x860c830au);
-    EXPECT_EQ(build_s_cbranch_scc(/*scc1=*/false, 5, arch), 0xbf840005u);
-    EXPECT_EQ(build_s_cbranch_scc(/*scc1=*/true, -4, arch), 0xbf85fffcu);
+    util::FailureOr<uint32_t> maybe_s_bcnt1_i32_b64_10 = build_s_bcnt1_i32_b64(8, 6, arch);
+    ASSERT_TRUE(maybe_s_bcnt1_i32_b64_10.succeeded());
+    EXPECT_EQ(maybe_s_bcnt1_i32_b64_10.value(), 0xbe880d06u);
+    util::FailureOr<uint32_t> maybe_s_first_set_bit_b64_9 = build_s_first_set_bit_b64(9, 6, arch);
+    ASSERT_TRUE(maybe_s_first_set_bit_b64_9.succeeded());
+    EXPECT_EQ(maybe_s_first_set_bit_b64_9.value(), 0xbe891106u);
+    util::FailureOr<uint32_t> maybe_s_and_b32_8 =
+        build_s_and_b32(12, 10, scalar_positive_inline_u32(3), arch);
+    ASSERT_TRUE(maybe_s_and_b32_8.succeeded());
+    EXPECT_EQ(maybe_s_and_b32_8.value(), 0x860c830au);
+    util::FailureOr<uint32_t> maybe_s_cbranch_scc_7 = build_s_cbranch_scc(/*scc1=*/false, 5, arch);
+    ASSERT_TRUE(maybe_s_cbranch_scc_7.succeeded());
+    EXPECT_EQ(maybe_s_cbranch_scc_7.value(), 0xbf840005u);
+    util::FailureOr<uint32_t> maybe_s_cbranch_scc_6 = build_s_cbranch_scc(/*scc1=*/true, -4, arch);
+    ASSERT_TRUE(maybe_s_cbranch_scc_6.succeeded());
+    EXPECT_EQ(maybe_s_cbranch_scc_6.value(), 0xbf85fffcu);
   }
 }
 
 TEST(ScalarBuilders, MatchLlvmOnRdna4) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   EXPECT_EQ(build_v_readfirstlane_b32(4, 0, kArch), 0x7e080500u);
-  EXPECT_EQ(build_s_bcnt1_i32_b64(8, 6, kArch), 0xbe881906u);
-  EXPECT_EQ(build_s_first_set_bit_b64(9, 6, kArch), 0xbe890906u);
-  EXPECT_EQ(build_s_and_b32(12, 10, scalar_positive_inline_u32(3), kArch), 0x8b0c830au);
-  EXPECT_EQ(build_s_cbranch_scc(/*scc1=*/false, 5, kArch), 0xbfa10005u);
-  EXPECT_EQ(build_s_cbranch_scc(/*scc1=*/true, -4, kArch), 0xbfa2fffcu);
+  util::FailureOr<uint32_t> maybe_s_bcnt1_i32_b64_5 = build_s_bcnt1_i32_b64(8, 6, kArch);
+  ASSERT_TRUE(maybe_s_bcnt1_i32_b64_5.succeeded());
+  EXPECT_EQ(maybe_s_bcnt1_i32_b64_5.value(), 0xbe881906u);
+  util::FailureOr<uint32_t> maybe_s_first_set_bit_b64_4 = build_s_first_set_bit_b64(9, 6, kArch);
+  ASSERT_TRUE(maybe_s_first_set_bit_b64_4.succeeded());
+  EXPECT_EQ(maybe_s_first_set_bit_b64_4.value(), 0xbe890906u);
+  util::FailureOr<uint32_t> maybe_s_and_b32_3 =
+      build_s_and_b32(12, 10, scalar_positive_inline_u32(3), kArch);
+  ASSERT_TRUE(maybe_s_and_b32_3.succeeded());
+  EXPECT_EQ(maybe_s_and_b32_3.value(), 0x8b0c830au);
+  util::FailureOr<uint32_t> maybe_s_cbranch_scc_2 = build_s_cbranch_scc(/*scc1=*/false, 5, kArch);
+  ASSERT_TRUE(maybe_s_cbranch_scc_2.succeeded());
+  EXPECT_EQ(maybe_s_cbranch_scc_2.value(), 0xbfa10005u);
+  util::FailureOr<uint32_t> maybe_s_cbranch_scc_1 = build_s_cbranch_scc(/*scc1=*/true, -4, kArch);
+  ASSERT_TRUE(maybe_s_cbranch_scc_1.succeeded());
+  EXPECT_EQ(maybe_s_cbranch_scc_1.value(), 0xbfa2fffcu);
 }
 
 } // namespace

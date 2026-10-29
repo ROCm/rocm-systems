@@ -1628,6 +1628,14 @@ TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
 }
 
 TEST(CfgAnalysis, Gfx1250ZeroPaddingTerminatesFallthrough) {
+  constexpr util::FailureOr<uint32_t> kNopCdna5Result = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kNopCdna5Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kEndpgmCdna5Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kBackBranchCdna5Result =
+      build_s_branch(-1, ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kBackBranchCdna5Result.succeeded());
+
   struct Case {
     const char *name;
     std::vector<uint32_t> words;
@@ -1638,15 +1646,9 @@ TEST(CfgAnalysis, Gfx1250ZeroPaddingTerminatesFallthrough) {
       Case{"setup sequence followed by padding",
            {0xee174000u, 0x00040000u, 0, 0x7e000000u, 0xb9800641u, 1u, 0},
            true},
-      Case{"ordinary fallthrough into padding",
-           {build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5).value(), 0},
-           true},
-      Case{"architectural terminator followed by padding",
-           {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value(), 0},
-           false},
-      Case{"unconditional branch followed by padding",
-           {build_s_branch(-1, ROCJITSU_CODE_ARCH_CDNA5).value(), 0},
-           false},
+      Case{"ordinary fallthrough into padding", {kNopCdna5Result.value(), 0}, true},
+      Case{"architectural terminator followed by padding", {kEndpgmCdna5Result.value(), 0}, false},
+      Case{"unconditional branch followed by padding", {kBackBranchCdna5Result.value(), 0}, false},
   };
 
   for (const auto &test_case : cases) {
@@ -1662,11 +1664,14 @@ TEST(CfgAnalysis, Gfx1250ZeroPaddingTerminatesFallthrough) {
 }
 
 TEST(CfgAnalysis, Gfx1250ConditionalBranchKeepsTakenEdgeWhenPaddingTerminatesFallthrough) {
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kEndpgmCdna5Result.succeeded());
+
   constexpr uint32_t kSCbranchScc0PlusOne = 0xbfa10001u;
   std::vector<uint32_t> words = {
       kSCbranchScc0PlusOne, // 0x00 -> 0x08; fallthrough reaches padding at 0x04.
       0,
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value(),
+      kEndpgmCdna5Result.value(),
   };
   TestCodeObject co(std::move(words));
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
@@ -5383,6 +5388,9 @@ run_indirect_discovery_for_test(std::vector<uint32_t> words,
 }
 
 TEST(IndirectBranchDiscovery, ConcreteTargetControlsModeWriteLaneStashMapping) {
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kEndpgmCdna5Result.succeeded());
+
   constexpr auto set_dst_src0_bank_one =
       cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x41});
   constexpr uint16_t kModeBit25Hwreg = 1u | (25u << 6);
@@ -5403,9 +5411,9 @@ TEST(IndirectBranchDiscovery, ConcreteTargetControlsModeWriteLaneStashMapping) {
       0xD7600000u,
       0x0201012Cu, // 0x2c: v_readlane_b32 s0, physical v300, 0.
       0xD7600001u,
-      0x0201032Cu, // 0x34: v_readlane_b32 s1, physical v300, 1.
-      0xBE9E4900u, // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value(), // 0x40: target/continuation.
+      0x0201032Cu,                // 0x34: v_readlane_b32 s1, physical v300, 1.
+      0xBE9E4900u,                // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      kEndpgmCdna5Result.value(), // 0x40: target/continuation.
   };
 
   const auto gfx1250_fixups =
@@ -5423,6 +5431,9 @@ TEST(IndirectBranchDiscovery, ConcreteTargetControlsModeWriteLaneStashMapping) {
 }
 
 TEST(IndirectBranchDiscovery, InterveningLaneWriteConsumesSetregAdjacencyHazard) {
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kEndpgmCdna5Result.succeeded());
+
   constexpr auto setreg =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
   constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
@@ -5441,9 +5452,9 @@ TEST(IndirectBranchDiscovery, InterveningLaneWriteConsumesSetregAdjacencyHazard)
       0xD7600000u,
       0x0201012Cu, // 0x2c: s0 <- physical v300 lane 0, not the v44 stash.
       0xD7600001u,
-      0x0201032Cu,                                      // 0x34: s1 <- physical v300 lane 1.
-      0xBE9E4900u,                                      // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value(), // 0x40: would-be target.
+      0x0201032Cu,                // 0x34: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      kEndpgmCdna5Result.value(), // 0x40: would-be target.
   };
 
   const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
@@ -5452,6 +5463,9 @@ TEST(IndirectBranchDiscovery, InterveningLaneWriteConsumesSetregAdjacencyHazard)
 }
 
 TEST(IndirectBranchDiscovery, InterveningLaneReadConsumesSetregAdjacencyHazard) {
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kEndpgmCdna5Result.succeeded());
+
   constexpr auto setreg =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
   constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
@@ -5472,9 +5486,9 @@ TEST(IndirectBranchDiscovery, InterveningLaneReadConsumesSetregAdjacencyHazard) 
       0xD7600000u,
       0x0201012Cu, // 0x34: s0 <- physical v300 lane 0, not the v44 stash.
       0xD7600001u,
-      0x0201032Cu,                                      // 0x3c: s1 <- physical v300 lane 1.
-      0xBE9E4900u,                                      // 0x44: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value(), // 0x48: would-be target.
+      0x0201032Cu,                // 0x3c: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                // 0x44: s_swap_pc_i64 s[30:31], s[0:1].
+      kEndpgmCdna5Result.value(), // 0x48: would-be target.
   };
 
   const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
@@ -5483,6 +5497,9 @@ TEST(IndirectBranchDiscovery, InterveningLaneReadConsumesSetregAdjacencyHazard) 
 }
 
 TEST(IndirectBranchDiscovery, InterveningGetPcConsumesSetregAdjacencyHazard) {
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kEndpgmCdna5Result.succeeded());
+
   constexpr auto setreg =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
   constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
@@ -5503,9 +5520,9 @@ TEST(IndirectBranchDiscovery, InterveningGetPcConsumesSetregAdjacencyHazard) {
       0xD7600000u,
       0x0201012Cu, // 0x30: s0 <- physical v300 lane 0, not the v44 stash.
       0xD7600001u,
-      0x0201032Cu,                                      // 0x38: s1 <- physical v300 lane 1.
-      0xBE9E4900u,                                      // 0x40: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value(), // 0x44: would-be target.
+      0x0201032Cu,                // 0x38: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                // 0x40: s_swap_pc_i64 s[30:31], s[0:1].
+      kEndpgmCdna5Result.value(), // 0x44: would-be target.
   };
 
   const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
@@ -5513,6 +5530,9 @@ TEST(IndirectBranchDiscovery, InterveningGetPcConsumesSetregAdjacencyHazard) {
 }
 
 TEST(IndirectBranchDiscovery, InterveningPairUpdateConsumesSetregAdjacencyHazard) {
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kEndpgmCdna5Result.succeeded());
+
   constexpr auto setreg =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
   constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
@@ -5531,9 +5551,9 @@ TEST(IndirectBranchDiscovery, InterveningPairUpdateConsumesSetregAdjacencyHazard
       0xD7600000u,
       0x0201012Cu, // 0x2c: s0 <- physical v300 lane 0, not the v44 stash.
       0xD7600001u,
-      0x0201032Cu,                                      // 0x34: s1 <- physical v300 lane 1.
-      0xBE9E4900u,                                      // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value(), // 0x40: would-be target.
+      0x0201032Cu,                // 0x34: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      kEndpgmCdna5Result.value(), // 0x40: would-be target.
   };
 
   const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
@@ -5542,12 +5562,17 @@ TEST(IndirectBranchDiscovery, InterveningPairUpdateConsumesSetregAdjacencyHazard
 }
 
 TEST(IndirectBranchDiscovery, DirectCallConsumesSetregHazardBeforeCalleeEntry) {
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kEndpgmCdna5Result.succeeded());
+
   constexpr uint16_t kReturnSreg = 30;
   constexpr auto select_dst_src0_bank_one =
       cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x41});
   constexpr auto setreg =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
   constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  constexpr auto call = rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(call.succeeded());
   const std::vector<uint32_t> words = {
       select_dst_src0_bank_one[0], // 0x00: select physical v300 for write and read roles.
       0xBE804700u,                 // 0x04: s_get_pc_i64 s[0:1].
@@ -5559,16 +5584,16 @@ TEST(IndirectBranchDiscovery, DirectCallConsumesSetregHazardBeforeCalleeEntry) {
       0x02010201u, // 0x1c: v_writelane_b32 physical v300, s1, 1.
       setreg[0],
       0u, // 0x24: s_setreg_imm32_b32 MODE, 0; switches to bank zero and arms the hazard.
-      rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA5).value(),
+      call.value(),
       // 0x2c: direct call consumes the hazard and targets 0x34.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value(), // 0x30: continuation.
-      select_src0_bank_one[0],                          // 0x34: executes in the callee.
+      kEndpgmCdna5Result.value(), // 0x30: continuation.
+      select_src0_bank_one[0],    // 0x34: executes in the callee.
       0xD7600000u,
       0x0201012Cu, // 0x38: s0 <- the physical v300 stash.
       0xD7600001u,
-      0x0201032Cu,                                      // 0x40: s1 <- the physical v300 stash.
-      0xBE824900u,                                      // 0x48: s_swap_pc_i64 s[2:3], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value(), // 0x4c: target.
+      0x0201032Cu,                // 0x40: s1 <- the physical v300 stash.
+      0xBE824900u,                // 0x48: s_swap_pc_i64 s[2:3], s[0:1].
+      kEndpgmCdna5Result.value(), // 0x4c: target.
   };
 
   const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
