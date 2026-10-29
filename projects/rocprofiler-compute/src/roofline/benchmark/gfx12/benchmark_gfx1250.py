@@ -15,10 +15,10 @@ from . import benchmark_gfx12_base
 # Bench_gfx1250 Class
 # =============================================================================
 class Bench_gfx1250(benchmark_gfx12_base.Bench_gfx12):
-    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+    def __init__(self, device_id: int, cache_sizes: dict, gpu_arch: str) -> None:
         super().__init__(device_id, cache_sizes)
 
-        self.apply_roofline_spec("gfx1250")
+        self.apply_roofline_spec(gpu_arch)
 
         self.matrix_ops = {
             "F4": 65536,

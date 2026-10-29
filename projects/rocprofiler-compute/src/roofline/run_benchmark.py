@@ -49,7 +49,7 @@ def load_bench(device_id: int, cache_sizes: dict) -> object:
 
         # The device's exact LLVM target, e.g. "gfx942" from "gfx942:sramecc+:xnack-"
         gpu_arch = hipGetDeviceProperties(device_id).gcnArchName.split(":", 1)[0]
-        return bench_class(gpu_arch)(device_id, cache_sizes)
+        return bench_class(gpu_arch)(device_id, cache_sizes, gpu_arch)
     except Exception as e:
         # Propagate error so users do not attempt to use a non-existent bench instance
         raise RuntimeError(

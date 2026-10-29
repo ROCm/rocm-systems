@@ -16,10 +16,10 @@ from . import benchmark_gfx9_base
 # Bench_gfx90a Class
 # =============================================================================
 class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
-    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+    def __init__(self, device_id: int, cache_sizes: dict, gpu_arch: str) -> None:
         super().__init__(device_id, cache_sizes)
 
-        self.apply_roofline_spec("gfx90a")
+        self.apply_roofline_spec(gpu_arch)
 
         self.matrix_ops = {
             "F4": 0,

@@ -15,7 +15,7 @@ from . import benchmark_gfx11_base
 # Bench_gfx1150 Class
 # =============================================================================
 class Bench_gfx1150(benchmark_gfx11_base.Bench_gfx11):
-    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+    def __init__(self, device_id: int, cache_sizes: dict, gpu_arch: str) -> None:
         super().__init__(device_id, cache_sizes)
 
-        self.apply_roofline_spec("gfx1150")
+        self.apply_roofline_spec(gpu_arch)
