@@ -11,33 +11,23 @@ namespace profiler_hub
 namespace
 {
 
-enum class row_kind_t
-{
-    copy,
-    interval,
-    sample,
-    event,
-    event_child,
-};
-
 struct table_role_t
 {
     std::string_view prefix;
-    int              order;
     row_kind_t       kind;
 };
 
 // Longer prefixes come first so rocpd_pmc_event is not classified as rocpd_event.
 constexpr table_role_t k_roles[] = {
-    { "rocpd_pmc_event", 50, row_kind_t::event_child },
-    { "rocpd_kernel_dispatch", 20, row_kind_t::interval },
-    { "rocpd_memory_allocate", 20, row_kind_t::interval },
-    { "rocpd_memory_copy", 20, row_kind_t::interval },
-    { "rocpd_hip_event", 20, row_kind_t::interval },
-    { "rocpd_region", 20, row_kind_t::interval },
-    { "rocpd_sample", 30, row_kind_t::sample },
-    { "rocpd_event", 40, row_kind_t::event },
-    { "rocpd_arg", 50, row_kind_t::event_child },
+    { "rocpd_pmc_event", row_kind_t::event_child },
+    { "rocpd_kernel_dispatch", row_kind_t::interval },
+    { "rocpd_memory_allocate", row_kind_t::interval },
+    { "rocpd_memory_copy", row_kind_t::interval },
+    { "rocpd_hip_event", row_kind_t::interval },
+    { "rocpd_region", row_kind_t::interval },
+    { "rocpd_sample", row_kind_t::sample },
+    { "rocpd_event", row_kind_t::event },
+    { "rocpd_arg", row_kind_t::event_child },
 };
 
 bool
@@ -96,7 +86,7 @@ public:
         const table_role_t* role = role_of(table);
         if(role == nullptr)
         {
-            return trim_statement_t{ 10, full_copy(table) };
+            return trim_statement_t{ row_kind_t::copy, full_copy(table) };
         }
 
         const std::string quoted = quote_ident(table);
@@ -104,17 +94,17 @@ public:
         const std::string end    = std::to_string(window_end);
         switch(role->kind)
         {
-            case row_kind_t::copy: return trim_statement_t{ role->order, full_copy(table) };
+            case row_kind_t::copy: return trim_statement_t{ role->kind, full_copy(table) };
             case row_kind_t::interval:
                 return trim_statement_t{
-                    role->order,
+                    role->kind,
                     "INSERT INTO " + quoted + " SELECT * FROM oldDb." + quoted +
                         " WHERE \"start\" < " + end + " AND \"end\" > " + start };
             case row_kind_t::sample: return sample_statement(*role, table, tables, start, end);
             case row_kind_t::event: return event_statement(*role, table, tables);
             case row_kind_t::event_child: return child_statement(*role, table, tables);
         }
-        return trim_statement_t{ role->order, full_copy(table) };
+        return trim_statement_t{ role->kind, full_copy(table) };
     }
 
 private:
@@ -134,7 +124,7 @@ private:
             sql += " OR S.\"timestamp\" IN (SELECT \"start\" FROM " + quote_ident(region) +
                    ")";
         }
-        return trim_statement_t{ role.order, std::move(sql) };
+        return trim_statement_t{ role.kind, std::move(sql) };
     }
 
     static trim_statement_t event_statement(const table_role_t&                    role,
@@ -150,7 +140,7 @@ private:
             const std::string name = sibling(table, "rocpd_event", source);
             if(!name.empty() && tables.count(name) != 0) refs.push_back(name);
         }
-        if(refs.empty()) return trim_statement_t{ role.order, full_copy(table) };
+        if(refs.empty()) return trim_statement_t{ role.kind, full_copy(table) };
 
         const std::string quoted = quote_ident(table);
         std::string       sql    = "INSERT INTO " + quoted + " SELECT DISTINCT E.* FROM oldDb." +
@@ -160,7 +150,7 @@ private:
             if(index != 0) sql += " OR ";
             sql += "E.\"id\" IN (SELECT \"event_id\" FROM " + quote_ident(refs[index]) + ")";
         }
-        return trim_statement_t{ role.order, std::move(sql) };
+        return trim_statement_t{ role.kind, std::move(sql) };
     }
 
     static trim_statement_t child_statement(const table_role_t&                    role,
@@ -172,11 +162,11 @@ private:
             sibling(table, matched == nullptr ? "" : matched->prefix, "rocpd_event");
         if(event.empty() || tables.count(event) == 0)
         {
-            return trim_statement_t{ role.order, full_copy(table) };
+            return trim_statement_t{ role.kind, full_copy(table) };
         }
         const std::string quoted = quote_ident(table);
         return trim_statement_t{
-            role.order,
+            role.kind,
             "INSERT INTO " + quoted + " SELECT X.* FROM oldDb." + quoted +
                 " X WHERE X.\"event_id\" IN (SELECT \"id\" FROM " + quote_ident(event) + ")" };
     }

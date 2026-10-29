@@ -14,10 +14,21 @@
 namespace profiler_hub
 {
 
+/** Copy phase for one table. Enumerator order is the order the trimmer runs
+ *  the statements: a later phase reads rows an earlier phase already wrote. */
+enum class row_kind_t
+{
+    copy,
+    interval,
+    sample,
+    event,
+    event_child,
+};
+
 /** One INSERT for a table the generic trimmer has already created. */
 struct trim_statement_t
 {
-    int         order{};
+    row_kind_t  kind{ row_kind_t::copy };
     std::string sql;
 };
 

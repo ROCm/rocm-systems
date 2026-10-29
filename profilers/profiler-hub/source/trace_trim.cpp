@@ -35,7 +35,7 @@ struct master_row_t
 struct planned_copy_t
 {
     std::string name;
-    int         order{};
+    row_kind_t  kind{ row_kind_t::copy };
     std::string sql;
 };
 
@@ -203,11 +203,12 @@ trim_trace_file(const std::string&           source_path,
         trim_statement_t statement =
             trim_schema->statement_for(table.name, kept_tables, start_ts, end_ts);
         copies.push_back(
-            planned_copy_t{ table.name, statement.order, std::move(statement.sql) });
+            planned_copy_t{ table.name, statement.kind, std::move(statement.sql) });
     }
     std::sort(copies.begin(), copies.end(), [](const planned_copy_t& left,
                                                 const planned_copy_t& right) {
-        if(left.order != right.order) return left.order < right.order;
+        if(left.kind != right.kind)
+            return static_cast<int>(left.kind) < static_cast<int>(right.kind);
         return left.name < right.name;
     });
 
