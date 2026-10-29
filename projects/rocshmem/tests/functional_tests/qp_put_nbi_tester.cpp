@@ -35,12 +35,24 @@ using namespace rocshmem;
  * DEVICE TEST KERNEL
  *
  * One-way non-blocking put using QP internals directly.  Pipelines multiple
- * put_nbi_single calls and quiets only at batch boundaries.
+ * put_nbi_single calls and quiets only at batch boundaries.  With poll set,
+ * each quiet spins on the non-blocking poll_cq_once() instead, first
+ * on a target taken mid-batch and then on everything posted.
  *****************************************************************************/
+static __device__ void QpPutNbiQuiet(QueuePair &qp, bool poll) {
+  if (!poll) {
+    qp.quiet_single();
+    return;
+  }
+  uint64_t target = qp.cq_target();
+  while (!qp.poll_cq_once(target)) {
+  }
+}
+
 __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
                              long long int *end_time, char *source,
                              char *dest, size_t size, int batch,
-                             ShmemContextType ctx_type) {
+                             ShmemContextType ctx_type, bool poll) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
@@ -61,20 +73,30 @@ __global__ void QpPutNbiTest(int loop, int skip, long long int *start_time,
     __builtin_amdgcn_s_waitcnt(0);
 #endif
 
+    uint64_t mid_target = 0;
+
     for (int i = 0; i < loop + skip; i++) {
       int slot = (start_slot + i) % batch;
 
       if (slot == 0) {
-        qp.quiet_single();
+        // Poll the older target while the WQEs posted after it may still be in flight
+        if (poll && mid_target != 0) {
+          while (!qp.poll_cq_once(mid_target)) {
+          }
+        }
+        QpPutNbiQuiet(qp, poll);
         if (i == skip) {
           start_time[wg_id] = wall_clock64();
         }
       }
 
       qp.put_nbi_single(&dest[slot * size], source, size);
+      if (poll && slot == batch / 2) {
+        mid_target = qp.cq_target();
+      }
     }
 
-    qp.quiet_single();
+    QpPutNbiQuiet(qp, poll);
     end_time[wg_id] = wall_clock64();
   }
 
@@ -111,7 +133,7 @@ void QpPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 
   hipLaunchKernelGGL(QpPutNbiTest, gridSize, blockSize, shared_bytes, stream,
                      loop, args.skip, start_time, end_time, s_buf, r_buf, size,
-                     batch_size, _shmem_context);
+                     batch_size, _shmem_context, _type == QpPutNbiPollTestType);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
