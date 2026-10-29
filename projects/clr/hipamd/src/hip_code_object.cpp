@@ -696,9 +696,9 @@ void StatCO::ResetManagedVarDevicePtr() {
   bool released_any = false;
   for (auto& [_, managed_vars] : managedVars_) {
     for (auto& managed_var : managed_vars) {
-      // A cleared flag means the pointer is a plain host allocation that was
-      // never managed memory, so the purge cannot have freed it and
-      // FindDeferredManagedVar() still needs it.
+      // Flag clear means the slot still holds the host allocation it was
+      // registered with, which is not managed memory and which
+      // FindDeferredManagedVar() matches on.
       if (!managed_var->GetAllocFlag()) {
         continue;
       }
@@ -706,10 +706,8 @@ void StatCO::ResetManagedVarDevicePtr() {
       if (slot == nullptr || *slot == nullptr) {
         continue;
       }
-      // MemObjMap::Purge() only releases memory whose context owns a single
-      // device, so when more than one device is visible the allocation on
-      // hip::host_context outlives the reset and stays usable. Dropping it here
-      // would leak it and lose its contents.
+      // Still mapped, so something other than this device owns it and it stays
+      // usable. Clearing it would leak the allocation and lose its contents.
       if (amd::MemObjMap::FindMemObj(*slot) != nullptr) {
         continue;
       }
@@ -721,9 +719,9 @@ void StatCO::ResetManagedVarDevicePtr() {
   if (!released_any) {
     return;
   }
-  // Every device, not just the one being reset: a managed allocation lives on a
-  // single-device context, so it is invalid process-wide once that device goes.
-  // Release pairs with the acquire in InitManagedVarDevicePtr().
+  // Freed managed memory is unreachable from every device, not just the one it
+  // belonged to, so re-arm them all. Release pairs with the acquire in
+  // InitManagedVarDevicePtr().
   for (size_t i = 0; i < managedVarsDevicePtrInitializedSize_; ++i) {
     managedVarsDevicePtrInitialized_[i].store(false, std::memory_order_release);
   }
