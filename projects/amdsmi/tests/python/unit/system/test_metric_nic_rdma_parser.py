@@ -76,6 +76,7 @@ def _metric_parser():
     parser_self.helpers = _AinicOnlyHelpers()
     parser_self._guard_extended_requires_port = AMDSMIParser._guard_extended_requires_port
     parser_self._guard_nic_arguments_require_nic = AMDSMIParser._guard_nic_arguments_require_nic
+    parser_self._guard_nic_rejects_watch = AMDSMIParser._guard_nic_rejects_watch
     subparsers = argparse.ArgumentParser().add_subparsers()
     AMDSMIParser._add_metric_parser(parser_self, subparsers, lambda *args, **kwargs: None)
     parser = subparsers.choices["metric"]
@@ -150,6 +151,35 @@ class TestMetricNicArgumentValidation(unittest.TestCase):
 
     def test_a_negative_rdma_index_is_rejected(self):
         self._assert_rejected("--nic", "--rdma", "-2")
+
+
+class TestMetricNicWatchValidation(unittest.TestCase):
+    """The NIC path prints once, so a watch flag with ``--nic`` is a usage error, not a silent no-op."""
+
+    def setUp(self):
+        self.parser = _metric_parser()
+        # The stand-in does not register the watch arguments, so add the three the guard reads.
+        self.parser.add_argument("-w", "--watch", type=int, default=None)
+        self.parser.add_argument("-W", "--watch_time", type=int, default=None)
+        self.parser.add_argument("-i", "--iterations", type=int, default=None)
+
+    def _assert_rejected(self, *argv):
+        with mock.patch.object(self.parser, "exit", side_effect=SystemExit(2)):
+            with self.assertRaises(SystemExit):
+                self.parser.parse_known_args(list(argv))
+
+    def test_each_watch_flag_is_rejected_with_nic(self):
+        for flag in ("--watch", "--watch_time", "--iterations"):
+            with self.subTest(flag=flag):
+                self._assert_rejected("--nic", flag, "1")
+
+    def test_a_watch_flag_is_still_accepted_without_nic(self):
+        namespace, _ = self.parser.parse_known_args(["--watch", "1"])
+        self.assertEqual(namespace.watch, 1)
+
+    def test_nic_without_a_watch_flag_is_accepted(self):
+        namespace, _ = self.parser.parse_known_args(["--nic", "--port", "0"])
+        self.assertEqual(namespace.port, 0)
 
 
 class TestMetricNicSensorsParser(unittest.TestCase):

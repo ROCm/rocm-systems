@@ -1420,6 +1420,24 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         parser.parse_known_args = _intercept
 
+    @staticmethod
+    def _guard_nic_rejects_watch(parser):
+        """The NIC path prints once and never reaches the watch loop, so a watch flag with --nic
+        would be accepted and silently ignored; reject it at parse time."""
+        _original_parse_known_args = parser.parse_known_args
+
+        def _intercept(args=None, namespace=None):
+            namespace, extras = _original_parse_known_args(args, namespace)
+            is_watch_given = any(
+                getattr(namespace, dest, None) is not None
+                for dest in ("watch", "watch_time", "iterations")
+            )
+            if is_watch_given and (getattr(namespace, "nic", None) is not None):
+                parser.error("arguments --watch/--watch_time/--iterations: not allowed with --nic")
+            return namespace, extras
+
+        parser.parse_known_args = _intercept
+
     def _add_device_arguments(
         self, subcommand_parser: argparse.ArgumentParser, required=False, nic=False
     ):
@@ -2365,6 +2383,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
             self._guard_extended_requires_port(metric_parser)
             self._guard_nic_arguments_require_nic(metric_parser)
+            self._guard_nic_rejects_watch(metric_parser)
 
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)
