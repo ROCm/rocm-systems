@@ -9,8 +9,10 @@
 
 #include <cassert>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <map>
+#include <sstream>
 #include <string>
 
 #include "amd_smi/amdsmi.h"
@@ -149,6 +151,20 @@ std::string FindTestDataFile(const std::string& installed_subdir, const std::str
   return source_path;
 }
 void SetTestVerbosity(uint32_t verbosity) { sGlobalVerbosity = verbosity; }
+
+std::string ReadTextFile(const std::string& path) {
+  std::ifstream in(path);
+  std::stringstream text;
+  text << in.rdbuf();
+  return text.str();
+}
+
+std::string ReadFirstLine(const std::string& path) {
+  std::ifstream in(path);
+  std::string line;
+  std::getline(in, line);
+  return line;
+}
 
 uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list) {
   int a;
