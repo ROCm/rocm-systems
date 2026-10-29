@@ -87,6 +87,12 @@ static inline uint64_t LoadSyncValue(const uint64_t* sync_addr) {
   return rocr::atomic::Load(sync_addr, std::memory_order_acquire);
 }
 
+static constexpr uint32_t kPoisonFenceHiDword = 0xFFFFFFFFu;
+
+static inline bool IsFencePoisoned(const uint64_t* sync_addr) {
+  return sync_addr && (LoadSyncValue(sync_addr) >> 32) == kPoisonFenceHiDword;
+}
+
 hsa_status_t WDDMQueue::SwsInit(void) {
   if (!device->CreateSyncobj(&syncobj, &sync_addr)) return HSA_STATUS_ERROR;
 
@@ -215,7 +221,6 @@ void ComputeQueue::HandleError(hsa_status_t status) {
 
 void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
   constexpr int kStallTimeoutMs = 30000;
-  constexpr uint32_t kPoisonFenceHiDword = 0xFFFFFFFFu;
   uint64_t last_rptr = 0;
   uint64_t last_fence = 0;
   auto last_progress = std::chrono::steady_clock::now();
@@ -226,9 +231,7 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
     uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
     uint64_t current_fence = queue->sync_addr ? LoadSyncValue(queue->sync_addr) : 0;
 
-    // When the GPU resets after a fault, the driver sets the fence's top 32 bits to all ones
-    // (0xFFFFFFFF). normal fence just counts up so for fault we match the exact top 32 bits
-    if ((current_fence >> 32) == kPoisonFenceHiDword) {
+    if (IsFencePoisoned(queue->sync_addr)) {
       if (queue->thread_stop_.exchange(true)) return;
       pr_err("GPU memory fault detected: monitored fence poisoned (0x%" PRIx64
              ") rptr=%" PRIu64 " wptr=%" PRIu64 "\n",
@@ -1172,8 +1175,18 @@ hsa_status_t ComputeQueue::Process(void) {
     // and re-evaluating here can never name a value this queue has not
     // submitted yet.
     uint64_t reuse_fence = CmdbufFrameRing::NextFrameReuseFence(sync_point, frame_num);
+    if (IsFencePoisoned(sync_addr)) {
+      pending_signals_.clear();
+      HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+    }
     if (LoadSyncValue(sync_addr) < reuse_fence) {
       if (!device->CpuWait(&syncobj, &reuse_fence, 1, false)) return HSA_STATUS_ERROR;
+      if (IsFencePoisoned(sync_addr)) {
+        pending_signals_.clear();
+        HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+        return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+      }
     }
 
     ret = SwitchAql2PM4();
@@ -1191,12 +1204,22 @@ hsa_status_t ComputeQueue::Process(void) {
     // Without platform atomics the GPU cannot decrement signals itself, so the
     // AqlToPm4Thread does it on the CPU once the submission has retired.
     if (!platform_atomic_support_ && !pending_signals_.empty()) {
+      if (IsFencePoisoned(sync_addr)) {
+        pending_signals_.clear();
+        HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+        return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+      }
       if (LoadSyncValue(sync_addr) < sync_point) {
         if (!device->CpuWait(&syncobj, &sync_point, 1, false)) {
           pr_err("GPU fence wait failed (sync_addr=%" PRIu64 " expected=%" PRIu64 ")\n",
                  LoadSyncValue(sync_addr), sync_point);
           pending_signals_.clear();
           return HSA_STATUS_ERROR;
+        }
+        if (IsFencePoisoned(sync_addr)) {
+          pending_signals_.clear();
+          HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+          return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
         }
       }
       for (uint64_t* addr : pending_signals_)
