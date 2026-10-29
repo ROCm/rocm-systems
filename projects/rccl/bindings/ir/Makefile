@@ -25,7 +25,15 @@
 #     Example: cmake --build $(BUILDDIR) --target hipify_all
 #
 
-ifneq ($(EMIT_LLVM_IR), 0)
+##########################################################################
+# Shared configuration.
+#
+# Everything in this section is needed by BOTH the llvm_ir (EMIT_LLVM_IR)
+# and ltoir (NCCL_EMIT_LTO_IR) targets, so it must sit outside the
+# EMIT_LLVM_IR guard below. The two knobs are independent -- NCCL's own
+# bindings/ir/Makefile has no guard at all -- and `make NCCL_EMIT_LTO_IR=1`
+# with EMIT_LLVM_IR=0 has to work.
+##########################################################################
 
 ##### Source #####
 LLVM_SRC := nccl_device_wrapper__impl.h
@@ -58,10 +66,9 @@ BITCODE_LIB_ARCH ?= gfx950
 # RCCL device APIs are C++17.
 BITCODE_CXX_STD  ?= gnu++17
 
-##### Output files #####
-UNOPTIMIZED_BC := $(OBJDIR)/librccl_device.bc.unoptimized
-OPTIMIZED_BC   := $(OBJDIR)/librccl_device.bc.optimized
-LLVM_IR_FILE   := $(OBJDIR)/librccl_device.ll
+##### Final artifacts #####
+# Defined unconditionally so `clean` removes them whatever the knobs are
+# set to. The intermediates live under OBJDIR, which clean removes wholesale.
 FINAL_BC       := $(LIBDIR)/librccl_device.bc
 
 WRAPPER_HEADER := $(INCDIR)/nccl_device_wrapper.h
@@ -81,6 +88,34 @@ RCCL_INCLUDES := \
 
 ROCM_INCLUDES := \
 	-I$(ROCM_PATH)/include
+
+##### Preflight #####
+.PHONY: check_hipify
+check_hipify:
+	@if [ ! -d "$(HIPIFY_INC)" ]; then \
+		echo "ERROR: hipify staging directory not found: $(HIPIFY_INC)" >&2; \
+		echo "Run the RCCL CMake build first to populate it, e.g.:" >&2; \
+		echo "  cmake -B $(BUILDDIR) -DEMIT_LLVM_IR=ON $(RCCL_ROOT)" >&2; \
+		echo "  cmake --build $(BUILDDIR) --target hipify_all" >&2; \
+		exit 1; \
+	fi
+
+##### Public wrapper header (shared by both artifacts) #####
+$(WRAPPER_HEADER): nccl_device_wrapper.h
+	@mkdir -p $(INCDIR)
+	@echo "Copying nccl_device_wrapper.h -> $@"
+	cp -f $< $@
+
+##########################################################################
+# llvm_ir: librccl_device.bc
+##########################################################################
+
+ifneq ($(EMIT_LLVM_IR), 0)
+
+##### Output files #####
+UNOPTIMIZED_BC := $(OBJDIR)/librccl_device.bc.unoptimized
+OPTIMIZED_BC   := $(OBJDIR)/librccl_device.bc.optimized
+LLVM_IR_FILE   := $(OBJDIR)/librccl_device.ll
 
 ##### Compiler flags #####
 # HIP device-only compilation. --offload-device-only is the modern
@@ -120,23 +155,7 @@ RCCL_DEVICE_BC_PUBLIC_API := ncclGetPeerPointerTeam,ncclCoopAnyInitThread,ncclCo
 OPT_PASSES := --passes=internalize,inline,globaldce \
 	-internalize-public-api-list=$(RCCL_DEVICE_BC_PUBLIC_API)
 
-##### Preflight #####
-.PHONY: check_hipify
-check_hipify:
-	@if [ ! -d "$(HIPIFY_INC)" ]; then \
-		echo "ERROR: hipify staging directory not found: $(HIPIFY_INC)" >&2; \
-		echo "Run the RCCL CMake build first to populate it, e.g.:" >&2; \
-		echo "  cmake -B $(BUILDDIR) -DEMIT_LLVM_IR=ON $(RCCL_ROOT)" >&2; \
-		echo "  cmake --build $(BUILDDIR) --target hipify_all" >&2; \
-		exit 1; \
-	fi
-
 ##### Rules #####
-$(WRAPPER_HEADER): nccl_device_wrapper.h
-	@mkdir -p $(INCDIR)
-	@echo "Copying nccl_device_wrapper.h -> $@"
-	cp -f $< $@
-
 $(UNOPTIMIZED_BC): $(LLVM_SRC) $(WRAPPER_HEADER) util.h check_hipify
 	@mkdir -p $(OBJDIR)
 	@echo "Generating unoptimized LLVM bitcode for $(BITCODE_LIB_ARCH)..."
@@ -180,4 +199,4 @@ build: llvm_ir
 clean:
 	rm -rf $(OBJDIR) $(FINAL_BC) $(WRAPPER_HEADER)
 
-.PHONY: llvm_ir build clean check_hipify
+.PHONY: llvm_ir build clean
