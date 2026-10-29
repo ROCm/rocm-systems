@@ -156,5 +156,164 @@ def test_multipass_incompatible_options_fail_before_launch(
     assert not output_path.exists()
 
 
+@pytest.mark.parametrize(
+    "cli_output_args,expected_cli_file,expected_cli_directory",
+    [
+        ([], None, None),
+        (
+            ["--output-file", "cli", "--output-directory", "cli_out"],
+            "cli",
+            "cli_out",
+        ),
+    ],
+)
+def test_combined_cli_and_input_passes_keep_independent_output_settings(
+    rocprofv3,
+    tmp_path,
+    monkeypatch,
+    cli_output_args,
+    expected_cli_file,
+    expected_cli_directory,
+):
+    calls = []
+
+    def capture_run(app_args, args, **kwargs):
+        calls.append((list(app_args), rocprofv3.dotdict(dict(args)), dict(kwargs)))
+        return 0
+
+    monkeypatch.setattr(rocprofv3, "run", capture_run)
+    input_path = _write(
+        tmp_path,
+        "input.json",
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "pmc": ["SQ_WAVES"],
+                        "output_file": "job0",
+                        "output_directory": "job0_out",
+                    }
+                ]
+            },
+            separators=(",", ":"),
+        ),
+    )
+
+    result = rocprofv3.main(
+        [
+            "--pmc",
+            "GRBM_COUNT",
+            "-i",
+            input_path,
+            *cli_output_args,
+            "--output-format",
+            "csv",
+            "--",
+            "/bin/true",
+        ]
+    )
+
+    assert result == 0
+    assert len(calls) == 2
+
+    cli_app, cli_args, cli_kwargs = calls[0]
+    assert cli_app == ["/bin/true"]
+    assert cli_args.pmc == ["GRBM_COUNT"]
+    assert cli_args.output_file == expected_cli_file
+    assert cli_args.output_directory == expected_cli_directory
+    assert cli_args.output_format == ["csv"]
+    assert cli_kwargs == {"pass_id": 1, "use_execv": False}
+
+    input_app, input_args, input_kwargs = calls[1]
+    assert input_app == ["/bin/true"]
+    assert input_args.pmc == ["SQ_WAVES"]
+    assert input_args.output_file == "job0"
+    assert input_args.output_directory == "job0_out"
+    assert input_args.output_format == ["csv"]
+    assert input_kwargs == {"pass_id": 2, "use_execv": False}
+
+
+def test_combined_cli_output_settings_do_not_fill_input_job_defaults(
+    rocprofv3, tmp_path, monkeypatch
+):
+    calls = []
+
+    def capture_run(app_args, args, **kwargs):
+        calls.append(rocprofv3.dotdict(dict(args)))
+        return 0
+
+    monkeypatch.setattr(rocprofv3, "run", capture_run)
+    input_path = _write(
+        tmp_path,
+        "input.json",
+        json.dumps({"jobs": [{"pmc": ["SQ_WAVES"]}]}, separators=(",", ":")),
+    )
+
+    result = rocprofv3.main(
+        [
+            "--pmc",
+            "GRBM_COUNT",
+            "-i",
+            input_path,
+            "--output-file",
+            "cli",
+            "--output-directory",
+            "cli_out",
+            "--",
+            "/bin/true",
+        ]
+    )
+
+    assert result == 0
+    assert len(calls) == 2
+    assert calls[0].output_file == "cli"
+    assert calls[0].output_directory == "cli_out"
+    assert calls[1].output_file is None
+    assert calls[1].output_directory is None
+
+
+def test_configuration_conflict_is_reported_without_traceback(
+    rocprofv3, tmp_path, capsys
+):
+    input_path = _write(
+        tmp_path,
+        "input.json",
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "pmc": ["SQ_WAVES"],
+                        "output_format": ["json"],
+                    }
+                ]
+            },
+            separators=(",", ":"),
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        rocprofv3.cli_main(
+            [
+                "--pmc",
+                "GRBM_COUNT",
+                "-i",
+                input_path,
+                "--output-format",
+                "csv",
+                "--",
+                "/bin/true",
+            ]
+        )
+
+    output = capsys.readouterr()
+    assert exc_info.value.code == 1
+    assert output.out == ""
+    assert output.err == (
+        "[rocprofv3] Fatal error: Option 'output_format' has conflicting "
+        "values: ['csv'] vs ['json']\n"
+    )
+    assert "Traceback" not in output.err
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main(["-x", __file__] + sys.argv[1:]))

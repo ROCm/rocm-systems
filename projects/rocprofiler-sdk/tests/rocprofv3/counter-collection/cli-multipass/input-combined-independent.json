@@ -1,0 +1,11 @@
+{
+    "jobs": [
+        {
+            "pmc": [
+                "SQ_WAVES"
+            ],
+            "output_directory": "@_combined_input_output@",
+            "output_file": "input"
+        }
+    ]
+}
