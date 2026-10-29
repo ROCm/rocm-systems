@@ -4391,6 +4391,7 @@ struct BadWaitSignal {
 // The bad descriptor sits second, behind a valid one, so the per-descriptor loop must reach it.
 const BadWaitSignal kBadWaitSignals[] = {
     {0, false, {1, 0, 0, 0}, "ncclWaitSignal: invalid arguments"},
+    {-1, false, {1, 0, 0, 0}, "ncclWaitSignal: invalid arguments"},
     {2, true, {1, 0, 0, 0}, "ncclWaitSignal: invalid arguments"},
     {2, false, {0, 0, 0, 0}, "descriptor 1 has invalid opCnt 0"},
     {2, false, {1, 0, 3, 0}, "descriptor 1 has invalid sigIdx 3 (must be in [0, 3))"},
