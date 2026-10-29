@@ -59,7 +59,7 @@ size_t RegionMap::load(const std::string& archive_dir, const VerifiedFiles* veri
         size_t before = records_.size();
         std::vector<uint8_t> raw;
         while (true) {
-            const RecordStatus st = read_raw_record(f, raw, hp);
+            const RecordStatus st = read_raw_record(f, raw, nullptr, hp);
             if (st == RecordStatus::EndOfStream) break;
             if (st == RecordStatus::Torn) {
                 // A producer that died mid-write leaves exactly one partial
