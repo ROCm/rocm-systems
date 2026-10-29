@@ -7,7 +7,8 @@ Helpers for building a normalized PC sampling dataframe from a parsed
 ``rocprofiler-sdk-tool[0]`` dict.
 """
 
-from typing import Any, NamedTuple, Optional
+from collections import Counter
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -79,6 +80,21 @@ class CodeObjectRecord(NamedTuple):
     code_object_id: int
     load_base: Optional[int]
     instruction_lines: list[InstructionLineRecord]
+
+
+class SourceLineRecord(NamedTuple):
+    """The PC sampling counts of one source line.
+
+    The counts are aggregated over the instructions compiled from that source
+    line.
+    """
+
+    total_count: int
+    issue_count: Optional[int]
+    stall_count: Optional[int]
+    stall_reasons: Dict[str, int]
+    active_thread_percent: Optional[float]
+    wave_occupancy_percent: Optional[float]
 
 
 def detect_pc_sampling_method(tool_data: dict[str, Any]) -> Optional[str]:
@@ -313,6 +329,56 @@ def load_aggregated_pc_sampling(
             )
         )
     return records
+
+
+def aggregate_instruction_lines(
+    instruction_records: List[InstructionLineRecord],
+) -> SourceLineRecord:
+    """Aggregate the counts of the instruction lines of one source line.
+
+    Counts and stall reasons are summed. Each percentage is averaged, weighted
+    by the sample count of each instruction line. An instruction line without
+    the percentage adds no weight.
+    """
+    stall_reasons = Counter()
+    for instruction_record in instruction_records:
+        stall_reasons.update(instruction_record.stall_reasons)
+
+    return SourceLineRecord(
+        total_count=sum(record.total_count for record in instruction_records),
+        issue_count=_sum_known([record.issue_count for record in instruction_records]),
+        stall_count=_sum_known([record.stall_count for record in instruction_records]),
+        stall_reasons=dict(stall_reasons),
+        active_thread_percent=_sample_weighted_average(
+            instruction_records, lambda record: record.active_thread_percent
+        ),
+        wave_occupancy_percent=_sample_weighted_average(
+            instruction_records, lambda record: record.wave_occupancy_percent
+        ),
+    )
+
+
+def _sum_known(counts: List[Optional[int]]) -> Optional[int]:
+    """Return the sum of the known counts, or None when no count is known."""
+    known_counts = [count for count in counts if count is not None]
+    return sum(known_counts) if known_counts else None
+
+
+def _sample_weighted_average(
+    instruction_records: List[InstructionLineRecord],
+    percent_of: Callable[[InstructionLineRecord], Optional[float]],
+) -> Optional[float]:
+    """Average one percentage of instruction lines, weighted by sample count."""
+    weighted_percents = [
+        (percent_of(record), record.total_count)
+        for record in instruction_records
+        if percent_of(record) is not None
+    ]
+    if not weighted_percents:
+        return None
+    return sum(percent * count for percent, count in weighted_percents) / sum(
+        count for _, count in weighted_percents
+    )
 
 
 def _to_instruction_line_record(row: Any) -> InstructionLineRecord:  # noqa: ANN401

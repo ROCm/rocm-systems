@@ -213,6 +213,7 @@ compiled from beside it:
        per_kernel_pc_sampling/
            <workload_name>/<workload_sub_name>/
                source/<source path with the leading separator dropped>
+               source/<source path with the leading separator dropped>_pc_sampling.csv
                <short_name>_uuid_<kernel_uuid>/
                    isa_code_object_id_<code_object_id>_pid_<pid>.csv
 
@@ -271,6 +272,47 @@ still carries an ``Instruction type``.
 
 The ``Source`` column and the ``source/`` folder are populated only when the
 target app was built with debug info; see the :ref:`note <pc-sampling-note>`.
+
+.. _pc-sampling-per-source-line-csv:
+
+Per-source-line counts in CSV output
+====================================
+
+Beside each exported source file, ``--output-format csv`` writes
+``<source file name>_pc_sampling.csv``. It has one row for each line of that
+file, with the samples of every kernel and process that ran code compiled from
+that line:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Column
+     - Description
+   * - ``Source line number``
+     - Source line number in the source file.
+   * - ``Source line``
+     - Text of the line.
+   * - ``Total count``, ``Active count``, ``Stall count``, ``Stall <REASON>``
+     - Sums over the instructions compiled from this line.
+   * - ``Wave occupancy percent``, ``Active thread percent``
+     - Averages over the samples of those instructions.
+   * - ``ISA references``
+     - Rows of those instructions in the per-kernel ISA files, as
+       ``<kernel folder>/<ISA file>:<instruction line numbers>``, with one ISA
+       file per line of the cell.
+
+An instruction from inlined code counts in full toward every source line of its
+inline stack. For example, an instruction that reads ``blockDim.x`` counts toward
+both the HIP header lines that implement it and the application line that reads
+it.
+
+Some instructions have no source line number, shown as ``<file>:?`` in the
+per-kernel ISA files. A file with such instructions starts with an
+``Unattributable instructions`` row. Its ``Total count`` is the number of samples
+lost because those instructions have no source line number, and its
+``ISA references`` lists the instructions. Its other columns are empty. See the
+:ref:`note <pc-sampling-note>` for why the compiler leaves out the source line
+number.
 
 .. _pc-sampling-note:
 
