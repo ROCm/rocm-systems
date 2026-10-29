@@ -3,8 +3,9 @@
 
 import argparse
 import re
+from dataclasses import fields
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -714,19 +715,34 @@ def build_comparable_columns(time_unit: str) -> list[str]:
     return comparable_columns
 
 
-def correct_sys_info(mspec: MachineSpecs, specs_correction: list[str]) -> pd.DataFrame:
+def correct_sys_info(mspec: MachineSpecs, specs_correction: List[str]) -> pd.DataFrame:
+    """Apply name:value spec corrections to mspec and return the specs as a frame.
+
+    A value whose comma-separated pieces all name specs is the deprecated
+    comma-separated form and is split; any other comma is part of the value.
     """
-    Correct system spec items manually based on user-provided corrections.
-    """
-    # Parse key:value pairs
-    pairs: dict[str, str] = {}
-    for pair in specs_correction:
-        key, value = pair.split(":", 1)
-        pairs[key.strip()] = value.strip()
+    spec_names = {spec.name for spec in fields(mspec)}
+    pairs: Dict[str, str] = {}
+    for correction in specs_correction:
+        pieces = correction.split(",")
+        if len(pieces) > 1 and all(
+            ":" in piece and piece.split(":", 1)[0].strip() in spec_names
+            for piece in pieces
+        ):
+            console_warning(
+                "Comma-separated --specs-correction pairs are deprecated and will be "
+                "removed in a future release. Separate name:value pairs with spaces, "
+                "for example: --specs-correction num_xcd:4 cu_per_gpu:64"
+            )
+        else:
+            pieces = [correction]
+        for piece in pieces:
+            key, value = piece.split(":", 1)
+            pairs[key.strip()] = value.strip()
 
     # Apply corrections
     for key, value in pairs.items():
-        if hasattr(mspec, key):
+        if key in spec_names:
             setattr(mspec, key, value)
         else:
             console_error(
