@@ -127,6 +127,40 @@ get_agent_available_properties();
 const aqlprofile_agent_handle_t*
 get_aql_agent(rocprofiler_agent_id_t id);
 
+// Active CU bitmap of a GPU agent, one mask per (XCC, SE, SA) in un-folded
+// [xcc][se][sa] row-major order (the DRM AMDGPU_INFO_CU_BITMAP layout). Bit
+// set = active CU; a zero mask is a shader array with no WGP available. WGP w of a
+// shader array covers cu_bits_per_wgp bits starting at bit w * cu_bits_per_wgp.
+struct cu_bitmap
+{
+    uint32_t              num_xcc         = 0;
+    uint32_t              num_se          = 0;  // per XCC
+    uint32_t              num_sa          = 0;  // per SE
+    uint32_t              cu_bits_per_wgp = 2;  // 1 on gfx1250 (1 WGP = 1 CU)
+    std::vector<uint32_t> masks           = {};
+
+    uint32_t get_mask(uint32_t xcc, uint32_t se, uint32_t sa) const;
+    bool     is_wgp_active(uint32_t xcc, uint32_t se, uint32_t sa, uint32_t wgp) const;
+};
+
+// Returns the agent's CU bitmap, or nullptr if it is unavailable (non-GPU,
+// GFX < 11, no DRM render node, or the kernel reports no usable bitmap).
+// Queried once per agent: AMDGPU_INFO_CU_BITMAP first, then the legacy
+// 4x4 AMDGPU_INFO_DEV_INFO cu_bitmap as a fallback.
+const cu_bitmap*
+get_cu_bitmap(rocprofiler_agent_id_t id);
+
+// Un-fold the legacy drm_amdgpu_info_device.cu_bitmap[4][4] (XCC 0 only) of a
+// GFX11/GFX12 agent into a cu_bitmap. Those generations fold SEs 4-7 into SA
+// columns 2-3 (bitmap[se % 4][sa + (se / 4) * 2]). Returns std::nullopt for
+// other generations and for topologies where the fold loses data. Exposed for
+// unit testing.
+std::optional<cu_bitmap>
+unfold_legacy_cu_bitmap(const uint32_t (&bitmap)[4][4],
+                        uint32_t num_se,
+                        uint32_t num_sa,
+                        uint32_t gfx_target_version);
+
 void
 construct_agent_cache(::HsaApiTable* table);
 

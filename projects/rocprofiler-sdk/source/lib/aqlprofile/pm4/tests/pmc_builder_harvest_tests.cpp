@@ -3,12 +3,12 @@
 //
 // CPU-only unit tests for the GFX11 harvested-WGP path in GpuPmcBuilder
 // (PR #8229). These drive the real builder with a synthetic AgentInfo (no GPU)
-// to lock the emitter/reader stride invariant, the SE->SA-column fold, the
-// wgp_per_sa_ growth, harvest zero-fill placement, and the UB guards.
+// to lock the emitter/reader stride invariant, per-(SE, SA) bitmap indexing,
+// the wgp_per_sa_ growth, harvest zero-fill placement, and the UB guards.
 //
 // Platforms modeled: the harvest cases use the gfx1151 (Strix Halo) pattern
 // active WGPs {0,1,2,4} with WGP 3 fused off (from the field investigation); the
-// fold case uses Navi31 (6 SE), per the reviewer's request.
+// >4 SE case uses the Navi31 topology (6 SE).
 //
 // NOTE: no main() here on purpose. pmc_builder_tests.cpp already provides one
 // for this test executable; defining another would be a duplicate symbol.
@@ -42,11 +42,12 @@ namespace
 using Gfx11PmcBuilder =
     pm4_builder::GpuPmcBuilder<pm4_builder::Gfx11CmdBuilder, gfx11_cntx_prim, false>;
 
-// Build a synthetic GFX11 AgentInfo. gfxip must start with "gfx11" so the
-// builder can acquire a (sienna_cichlid fallback) IP offset table on a box with
-// no matching GPU. The concrete gfxip/name (e.g. "gfx1151" Strix Halo, "gfx1100"
-// Navi31) does not change the harvest logic - it is topology + cu_bitmap driven -
-// but naming the part keeps each test's intent clear.
+// Build a synthetic GFX11 AgentInfo whose cu_bitmap holds sa_bitmap_value for
+// every (SE, SA). gfxip must start with "gfx11" so the builder can acquire a
+// (sienna_cichlid fallback) IP offset table on a box with no matching GPU. The
+// concrete gfxip/name (e.g. "gfx1151" Strix Halo, "gfx1100" Navi31) does not
+// change the harvest logic - it is topology + cu_bitmap driven - but naming the
+// part keeps each test's intent clear.
 AgentInfo
 make_gfx11_agent(uint32_t    se_num,
                  uint32_t    sarrays_per_se,
@@ -63,12 +64,7 @@ make_gfx11_agent(uint32_t    se_num,
     info.shader_arrays_per_se = sarrays_per_se;
     info.cu_num               = cu_num;
 
-    // Uniformly seed the DRM cu_bitmap window covered by this topology.
-    constexpr uint32_t kSeLim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
-    constexpr uint32_t kSaLim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
-    for(uint32_t se = 0; se < kSeLim; ++se)
-        for(uint32_t sa = 0; sa < kSaLim; ++sa)
-            info.cu_bitmap.bits[se][sa] = sa_bitmap_value;
+    info.cu_bitmap.assign(se_num * sarrays_per_se, sa_bitmap_value);
     return info;
 }
 
@@ -94,7 +90,7 @@ constexpr uint32_t kSentinel = 0xDEADBEEFu;
 // Per-SA active-CU bitmap for a harvested gfx1151 (Strix Halo) SA - the exact
 // pattern from the field investigation: active WGPs {0,1,2,4}, WGP 3 fused off.
 //
-// Encoding: the DRM cu_bitmap packs 2 CU bits per WGP (both CUs of that WGP), so
+// Encoding: the CU bitmap packs 2 CU bits per WGP (both CUs of that WGP), so
 // WGP w occupies bits [2w, 2w+1]:
 //   WGP0 = 0x003, WGP1 = 0x00C, WGP2 = 0x030, WGP3 = 0x0C0, WGP4 = 0x300
 // Setting {0,1,2,4} and clearing 3:
@@ -213,26 +209,18 @@ TEST(PmcBuilderHarvestTest, ZeroFillPlacement)
     }
 }
 
-// Logical SEs beyond the bitmap's 4-SE dimension fold into higher SA columns,
-// mirroring the kernel gfx_v11_0_get_cu_info packing (validated on Navi31, 6 SE).
-TEST(PmcBuilderHarvestTest, FoldingNavi31)
+// Topologies beyond the legacy 4x4 DRM window (Navi31, 6 SE) are indexed
+// directly: every (SE, SA) has its own entry and SE4/SE5 are not folded.
+TEST(PmcBuilderHarvestTest, MoreThanFourShaderEnginesNavi31)
 {
     const uint32_t se_num = 6, sa_per_se = 2;
     AgentInfo      info = make_gfx11_agent(se_num, sa_per_se, /*cu_num=*/120, /*value=*/0x33Fu);
 
-    // Distinct single-WGP patterns for the folded SE4/SE5 raw slots ([0..1][2..3]).
-    info.cu_bitmap.bits[0][2] = 0x3u;   // WGP0 -> logical SE4, SA0
-    info.cu_bitmap.bits[0][3] = 0xCu;   // WGP1 -> logical SE4, SA1
-    info.cu_bitmap.bits[1][2] = 0x30u;  // WGP2 -> logical SE5, SA0
-    info.cu_bitmap.bits[1][3] = 0xC0u;  // WGP3 -> logical SE5, SA1
-    // Raw rows 2-3 cols 2-3 are only reachable by SE6/SE7 (absent here), so they
-    // must never be read. Seed them with a distinct WGP4 pattern: if the fold
-    // wrongly sourced SE4/SE5 from these rows, the probe below would see WGP4
-    // active instead of the expected single WGP.
-    info.cu_bitmap.bits[2][2] = 0x300u;
-    info.cu_bitmap.bits[2][3] = 0x300u;
-    info.cu_bitmap.bits[3][2] = 0x300u;
-    info.cu_bitmap.bits[3][3] = 0x300u;
+    // Distinct single-WGP patterns for SE4/SE5.
+    info.cu_bitmap[4 * sa_per_se + 0] = 0x3u;   // WGP0 -> SE4, SA0
+    info.cu_bitmap[4 * sa_per_se + 1] = 0xCu;   // WGP1 -> SE4, SA1
+    info.cu_bitmap[5 * sa_per_se + 0] = 0x30u;  // WGP2 -> SE5, SA0
+    info.cu_bitmap[5 * sa_per_se + 1] = 0xC0u;  // WGP3 -> SE5, SA1
 
     Gfx11PmcBuilder builder(&info);
     ASSERT_EQ(builder.GetNumWGPs(), 5);  // 0x33F on base SEs spans WGP0..4.
@@ -241,29 +229,28 @@ TEST(PmcBuilderHarvestTest, FoldingNavi31)
     const auto     at     = [&](uint32_t se, uint32_t sa) { return active[se * sa_per_se + sa]; };
     constexpr auto kBaseMask = 0x17u;  // 0x33F -> active WGPs {0,1,2,4}.
 
-    // Base SEs (0..3) read raw rows 0..3 cols 0..1 (still 0x33F).
     for(uint32_t se = 0; se < 4; ++se)
         for(uint32_t sa = 0; sa < sa_per_se; ++sa)
             EXPECT_EQ(at(se, sa), kBaseMask) << "SE " << se << " SA " << sa;
 
-    // Folded SE4/SE5 pick up the higher SA columns of raw rows 0/1 (single WGP
-    // each), proving the fold sources rows 0/1 - not the WGP4 sentinel rows.
     EXPECT_EQ(at(4, 0), 0x1u);  // WGP0
     EXPECT_EQ(at(4, 1), 0x2u);  // WGP1
     EXPECT_EQ(at(5, 0), 0x4u);  // WGP2
     EXPECT_EQ(at(5, 1), 0x8u);  // WGP3
 }
 
-// UB / boundary guards in build_sa_cu_mask(): no clz(0), no (1u << 32), and no
-// crash on degenerate topologies. Observed through the emitted read layout.
+// Bitmap semantics and UB / boundary guards in build_sa_cu_mask(): no clz(0),
+// no (1u << 32), and no crash on degenerate topologies. Observed through the
+// emitted read layout.
 TEST(PmcBuilderHarvestTest, UBGuards)
 {
     const uint32_t se_num = 2, sa_per_se = 2, sa_count = se_num * sa_per_se;
 
-    // (a) All-zero bitmap with cu_num > 0 -> synthesize a fully-active mask; no
-    //     WGP is zero-filled.
+    // (a) No bitmap with cu_num > 0 -> synthesize a fully-active mask; no WGP
+    //     is zero-filled.
     {
-        AgentInfo       info = make_gfx11_agent(se_num, sa_per_se, /*cu_num=*/32, /*value=*/0u);
+        AgentInfo info = make_gfx11_agent(se_num, sa_per_se, /*cu_num=*/32, /*value=*/0u);
+        info.cu_bitmap.clear();
         Gfx11PmcBuilder builder(&info);
         ASSERT_EQ(builder.GetNumWGPs(), 4);
         const auto     active   = read_active_wgp_masks(builder, se_num, sa_per_se);
@@ -272,10 +259,33 @@ TEST(PmcBuilderHarvestTest, UBGuards)
             EXPECT_EQ(active[block], all_wgps) << "block " << block;
     }
 
+    // (a2) A zero bitmap entry is an SA with no WGP available: every slot zero-filled.
+    {
+        AgentInfo info    = make_gfx11_agent(se_num, sa_per_se, /*cu_num=*/32, /*value=*/0xFFu);
+        info.cu_bitmap[1] = 0u;  // SE0, SA1
+        Gfx11PmcBuilder builder(&info);
+        ASSERT_EQ(builder.GetNumWGPs(), 4);
+        const auto active = read_active_wgp_masks(builder, se_num, sa_per_se);
+        for(uint32_t block = 0; block < sa_count; ++block)
+            EXPECT_EQ(active[block], block == 1 ? 0u : 0xFu) << "block " << block;
+    }
+
+    // (a3) A bitmap that does not match the topology is ignored (fully active).
+    {
+        AgentInfo info = make_gfx11_agent(se_num, sa_per_se, /*cu_num=*/32, /*value=*/0x33Fu);
+        info.cu_bitmap.pop_back();
+        Gfx11PmcBuilder builder(&info);
+        ASSERT_EQ(builder.GetNumWGPs(), 4);
+        const auto active = read_active_wgp_masks(builder, se_num, sa_per_se);
+        for(uint32_t block = 0; block < sa_count; ++block)
+            EXPECT_EQ(active[block], 0xFu) << "block " << block;
+    }
+
     // (b) wgp_per_sa_ spanning the full 32-bit window (>= 16 WGPs) -> synth mask
     //     ~0u (never 1u << 32); every WGP slot stays active.
     {
-        AgentInfo       info = make_gfx11_agent(se_num, sa_per_se, /*cu_num=*/128, /*value=*/0u);
+        AgentInfo info = make_gfx11_agent(se_num, sa_per_se, /*cu_num=*/128, /*value=*/0u);
+        info.cu_bitmap.clear();
         Gfx11PmcBuilder builder(&info);
         ASSERT_GE(builder.GetNumWGPs(), 16);
         const auto     active = read_active_wgp_masks(builder, se_num, sa_per_se);
@@ -285,12 +295,12 @@ TEST(PmcBuilderHarvestTest, UBGuards)
             EXPECT_EQ(active[block], all_wgps) << "block " << block;
     }
 
-    // (c) cu_num == 0 -> no clz(0), no crash; empty mask means every emitted slot
-    //     is zero-filled (no active WGP).
+    // (c) cu_num == 0 -> no clz(0), no crash; no WGP is emitted at all.
     {
-        AgentInfo       info = make_gfx11_agent(se_num, sa_per_se, /*cu_num=*/0, /*value=*/0u);
+        AgentInfo info = make_gfx11_agent(se_num, sa_per_se, /*cu_num=*/0, /*value=*/0u);
+        info.cu_bitmap.clear();
         Gfx11PmcBuilder builder(&info);
-        const auto      active = read_active_wgp_masks(builder, se_num, sa_per_se);
+        const auto active = read_active_wgp_masks(builder, se_num, sa_per_se);
         for(uint32_t block = 0; block < sa_count; ++block)
             EXPECT_EQ(active[block], 0u) << "block " << block;
     }

@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -31,7 +32,12 @@
 
 #include "lib/common/logging.hpp"
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
+#include <algorithm>
 #include <cstdint>
+#include <vector>
 
 using DispatchThreadTracer = rocprofiler::thread_trace::DispatchThreadTracer;
 using DeviceThreadTracer   = rocprofiler::thread_trace::DeviceThreadTracer;
@@ -39,6 +45,38 @@ using DeviceThreadTracer   = rocprofiler::thread_trace::DeviceThreadTracer;
 namespace
 {
 using parameter_pack = rocprofiler::thread_trace::thread_trace_parameter_pack;
+
+// SQTT traces WGP target_cu of shader array 0 (SA_SEL = 0) on every selected
+// shader engine. On GFX11+ a WGP that is not available never runs waves,
+// so those shader engines would silently produce no wave data.
+void
+warn_if_target_wgp_unavailable(const rocprofiler_agent_t& agent, const parameter_pack& pack)
+{
+    if(agent.gfx_target_version < 110000) return;
+
+    const auto* bitmap = rocprofiler::agent::get_cu_bitmap(agent.id);
+    if(bitmap == nullptr) return;
+
+    auto           unavailable_se = std::vector<uint32_t>{};
+    const uint32_t num_se       = std::min(bitmap->num_xcc * bitmap->num_se, 64u);
+    for(uint32_t se = 0; se < num_se; ++se)
+    {
+        if((pack.shader_engine_mask & (uint64_t{1} << se)) == 0) continue;
+        if(!bitmap->is_wgp_active(se / bitmap->num_se, se % bitmap->num_se, 0, pack.target_cu))
+            unavailable_se.emplace_back(se);
+    }
+
+    if(unavailable_se.empty()) return;
+
+    ROCP_WARNING << fmt::format(
+        "Thread trace target_cu={} on agent {} ({}) selects a WGP that is not available on "
+        "shader engine(s) [{}]; no wave data will be collected from them. Select an available "
+        "WGP with target_cu.",
+        pack.target_cu,
+        agent.node_id,
+        agent.name,
+        fmt::join(unavailable_se, ", "));
+}
 
 rocprofiler_status_t
 build_pack_from_array(parameter_pack&                             pack,
@@ -128,6 +166,8 @@ build_pack_from_array(parameter_pack&                             pack,
         }
     }
     if(!pack.are_params_valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    warn_if_target_wgp_unavailable(*agent, pack);
 
     return ROCPROFILER_STATUS_SUCCESS;
 }

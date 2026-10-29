@@ -6,7 +6,12 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+- Thread trace warns when `ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU` selects a WGP that is not available on any selected shader engine of a gfx11 or later agent.
+
 ### Changed
+
+- Per-WGP counters on gfx12 and later, including gfx1250, skip WGPs that are not available, as gfx11 does. Those WGPs report 0, and the WGP dimension covers the highest available WGP.
+- The active CU bitmap now comes from the `AMDGPU_INFO_CU_BITMAP` DRM query, which covers every XCC and has no 4-shader-engine limit. Kernels without the query fall back to the `AMDGPU_INFO_DEV_INFO` bitmap.
 
 ### Resolved issues
 
