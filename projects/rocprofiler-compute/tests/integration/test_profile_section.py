@@ -36,6 +36,11 @@ def test_block_filter(binary_handler_profile_rocprof_compute):
     assert counter_names.str.strip().ne("").all(), (
         "Block 3 produced empty counter names"
     )
+    # gfx115x and gfx1250 report this counter with the reduced _sum spelling.
+    assert counter_names.isin([
+        "SQC_TC_DATA_READ_REQ",
+        "SQC_TC_DATA_READ_REQ_sum",
+    ]).any(), "Block 3 did not collect the expected Memory Chart counter"
     counter_values = pd.to_numeric(counter_results["Counter_Value"], errors="coerce")
     assert counter_values.map(isfinite).all(), "Block 3 produced invalid counter values"
 
