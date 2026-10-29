@@ -1469,6 +1469,118 @@ TEST_F(GpuDeviceMes, RemoveSavesProgressAndReleasesQueuesWithoutResidentWaves) {
   }
 }
 
+TEST_F(GpuDeviceMes, RemoveRetriesUnsupportedLiveWorkAfterItDrainsWithoutAnotherDoorbell) {
+  constexpr uint64_t kKernel = kDefaultComputeRingGpu + 0x80;
+  constexpr uint64_t kContext = 0x20000;
+  constexpr uint64_t kContextPhysical = 0x300000;
+  constexpr uint32_t kContextSize = 0x20000;
+  constexpr uint32_t kControlStack = 0x1000;
+  constexpr uint64_t kSignal = 0x1f000;
+  constexpr uint64_t kSignalPhysical = 0x500000;
+  constexpr uint32_t kQueue = uint32_t{1} << 31;
+  configure_compute_unit(2);
+  command_processor_.startup();
+  for (const bool initially_paused : {false, true}) {
+    SCOPED_TRACE(initially_paused);
+    store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+    store_dword(kSchedulerMqdPhysical + 175 * 4, kControlStack);
+    store_dword(kSchedulerMqdPhysical + 177 * 4, kContextSize);
+    store_dword(kDefaultComputeSecondPagePhysical + 0xff8 -
+                    offsetof(amd_queue_t, write_dispatch_id) + offsetof(amd_queue_v2_t, caps),
+                AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM);
+    submit_default_compute_queue(true);
+    for (uint64_t offset = 0; offset < kContextSize; offset += 0x1000)
+      store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * sizeof(uint64_t),
+                       (kContextPhysical + offset) | kGfx12SystemLeafPteFlags);
+    store_vram_qword(kDefaultProcessPtb + (kKernel >> 12) * sizeof(uint64_t),
+                     kDefaultComputeRingPhysical | kGfx12SystemLeafPteFlags | (1u << 4));
+    store_vram_qword(kDefaultProcessPtb + (kSignal >> 12) * sizeof(uint64_t),
+                     kSignalPhysical | (kGfx12SystemLeafPteFlags & ~uint64_t{2}));
+    store_dword(kDefaultComputeRingPhysical + 0x80,
+                rocjitsu::cdna5::build_sopp(rocjitsu::cdna5::kSEndpgmSopp)[0]);
+    store_vram_qword(kSignalPhysical + 8, 1);
+    const auto address_space = soc_.mes_engine().process_address_space_for_test(3);
+    ASSERT_TRUE(address_space);
+    ASSERT_TRUE(soc_.gpu_vm().invalidate(*address_space));
+
+    // Normal execution supports this cluster; the checkpoint path does not.
+    // Retain an accepted dispatch before it issues any workgroups, matching the
+    // review reproducer without depending on unsupported cluster save layout.
+    rocjitsu::amdgpu::DispatchEntry entry{};
+    entry.kind = rocjitsu::amdgpu::DispatchPacketKind::Kernel;
+    entry.dispatch_id = 1;
+    entry.queue_id = kQueue;
+    entry.process_id = 3;
+    entry.address_space = *address_space;
+    entry.kernel_entry_pc = kKernel;
+    entry.wfs_per_workgroup = 1;
+    entry.sgprs_per_wf = 106;
+    entry.vgprs_per_wf = 64;
+    entry.kernel_wave_size = 32;
+    entry.workgroup_size_x = 32;
+    entry.workgroup_size_y = entry.workgroup_size_z = 1;
+    entry.grid_size_x = 64;
+    entry.grid_size_y = entry.grid_size_z = 1;
+    entry.grid_wgs_x = entry.cluster_size_x = 2;
+    entry.grid_wgs_y = entry.grid_wgs_z = 1;
+    entry.total_wgs = 2;
+    entry.group_segment_fixed_size = 256;
+    entry.completion_signal = kSignal;
+    command_processor_.accept_fanout_shard(std::move(entry));
+    command_processor_.drain_fanout_inbox_for_test();
+    command_processor_.set_queue_debug_suspended(kQueue, 3, initially_paused);
+    const uint64_t issued = command_processor_.dispatched_workgroups();
+    ASSERT_TRUE(command_processor_.has_dispatch_for_test(kQueue, 3, 1));
+
+    constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+    store_dword(kRemove, 0x00040031);
+    store_dword(kRemove + 4, kDefaultComputeDoorbell / sizeof(uint32_t));
+    store_qword(kRemove + 6 * 4, kApiStatusGpu);
+    store_qword(kRemove + 8 * 4, 2);
+    constexpr uint64_t kQuery = kRingPhysical + 128 * 4;
+    store_dword(kQuery, 0x000400b1); // QUERY_SCHEDULER_STATUS follows REMOVE.
+    store_qword(kQuery + 2 * 4, kRingFenceGpu);
+    store_qword(kQuery + 4 * 4, 3);
+    store_qword(kRingFencePhysical, 0);
+    auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+    ring_doorbell(0x60, doorbell);
+    EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+    EXPECT_EQ(command_processor_.queue_debug_suspended_for_test(kQueue, 3), initially_paused);
+    EXPECT_TRUE(command_processor_.has_dispatch_for_test(kQueue, 3, 1));
+
+    if (initially_paused) {
+      for (unsigned step = 0; step < 4; ++step) {
+        command_processor_.step();
+        device_.drain_doorbell_inbox_for_test();
+      }
+      EXPECT_TRUE(command_processor_.queue_debug_suspended_for_test(kQueue, 3));
+      EXPECT_EQ(command_processor_.dispatched_workgroups(), issued);
+      EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+      // The original pause is caller-owned. Explicitly resume it before
+      // expecting work to drain, without submitting another MES doorbell.
+      command_processor_.set_queue_debug_suspended(kQueue, 3, false);
+    }
+    for (unsigned step = 0; step < 16; ++step) {
+      command_processor_.step();
+      compute_unit_->step();
+      device_.drain_doorbell_inbox_for_test();
+    }
+    EXPECT_EQ(command_processor_.dispatched_workgroups() - issued, 2u);
+    EXPECT_EQ(vram_dword_at(kSignalPhysical + 8), 0u);
+    EXPECT_FALSE(command_processor_.has_dispatch_for_test(kQueue, 3, 1));
+    EXPECT_FALSE(compute_unit_->has_active_wfs());
+    EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 2u)
+        << "REMOVE must retry after accepted work drains, without another guest doorbell";
+    EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 3u);
+    EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 192u);
+    EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
+    EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+    device_.reset(simdojo::ResetKind::FunctionLevel);
+    configure_gart();
+  }
+  command_processor_.shutdown();
+}
+
 TEST_F(GpuDeviceMes, FailedRemoveRestoresPriorSuspensionAndPreservesUnfinishedWork) {
   constexpr uint64_t kContext = 0x20000;
   constexpr uint64_t kContextPhysical = 0x300000;

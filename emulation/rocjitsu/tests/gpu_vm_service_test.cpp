@@ -2531,7 +2531,8 @@ TEST(GpuVmService, AqlContextRestoresProgressAfterDestroyingTheOriginalBinding) 
     state.scratch_reclaim.begin(state.entries.back().dispatch_id);
   });
   std::vector<uint8_t> context;
-  ASSERT_EQ(cp.save_queue_context(request.identity, context), VmAccessOutcome::Complete);
+  ASSERT_EQ(cp.save_queue_context(request.identity, context),
+            QueueContextSaveOutcome{VmAccessOutcome::Complete});
   ASSERT_FALSE(context.empty());
   ASSERT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
   ASSERT_FALSE(cp.has_registered_queues());
@@ -2634,7 +2635,8 @@ TEST(GpuVmService, AqlContextGroupsMustReferenceRetainedDispatches) {
     // wire offsets. An unrelated retained dispatch makes the group an orphan;
     // an empty dispatch list remains valid for directly constructed test waves.
     std::vector<uint8_t> context;
-    ASSERT_EQ(cp.save_queue_context(request.identity, context), VmAccessOutcome::Complete);
+    ASSERT_EQ(cp.save_queue_context(request.identity, context),
+              QueueContextSaveOutcome{VmAccessOutcome::Complete});
     cp.release_queue_context(request.identity);
     ASSERT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
     ASSERT_FALSE(cu->has_active_wfs());
@@ -2679,7 +2681,8 @@ TEST(GpuVmService, AqlContextRejectsTruncationAndDifferentRingsBeforeChangingSta
   ASSERT_TRUE(queue);
   cp.set_queue_debug_suspended(1, 7, true);
   std::vector<uint8_t> context;
-  ASSERT_EQ(cp.save_queue_context(request.identity, context), VmAccessOutcome::Complete);
+  ASSERT_EQ(cp.save_queue_context(request.identity, context),
+            QueueContextSaveOutcome{VmAccessOutcome::Complete});
   ASSERT_TRUE(queues.unregister_queue(queue, QueueCloseMode::ForceCancel));
   queue = queues.register_queue(request);
   ASSERT_TRUE(queue);

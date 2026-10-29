@@ -370,7 +370,8 @@ TEST(CommandProcessorTest, RestoreScratchConflictReleasesEarlierReservationsBefo
             (std::pair{1u, amdgpu::VmAccessOutcome::Complete}));
   ASSERT_EQ(f.cp()->suspend_queue_context(identity), amdgpu::VmAccessOutcome::Complete);
   std::vector<uint8_t> context;
-  ASSERT_EQ(f.cp()->save_queue_context(identity, context), amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(f.cp()->save_queue_context(identity, context),
+            amdgpu::QueueContextSaveOutcome{amdgpu::VmAccessOutcome::Complete});
   f.cp()->release_queue_context(identity);
   ASSERT_FALSE(f.cu()->has_active_wfs());
 

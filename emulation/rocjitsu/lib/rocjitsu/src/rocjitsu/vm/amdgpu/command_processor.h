@@ -33,6 +33,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
+#include "rocjitsu/vm/amdgpu/queue_context_save.h"
 #include "rocjitsu/vm/amdgpu/scratch_reservations.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
@@ -217,10 +218,11 @@ public:
   /// leases are encoded. Wave/register state is saved separately through CWSR.
   /// The caller must quiesce waves and their memory accesses first. Host-owned
   /// PM4 submissions, cross-XCD state, workgroup clusters, WGP LDS and GWS waits
-  /// are unsupported and return Faulted; their context models remain future work.
+  /// are unsupported. Unsupported live dispatch/wave state requires draining;
+  /// unsupported queue ownership or host submissions return Faulted.
   /// Unavailable requires an outstanding publication to finish before retrying.
-  [[nodiscard]] VmAccessOutcome save_queue_context(const QueueIdentity &identity,
-                                                   std::vector<uint8_t> &context);
+  [[nodiscard]] QueueContextSaveOutcome save_queue_context(const QueueIdentity &identity,
+                                                           std::vector<uint8_t> &context);
   /// @brief Rebuild progress and resident resources in a new suspended binding.
   /// @details Validates before mutation; leaves admission suspended. The caller
   /// must restore the queue's waves before making the queue runnable.

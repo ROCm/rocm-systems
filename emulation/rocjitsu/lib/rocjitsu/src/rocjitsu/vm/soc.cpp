@@ -346,7 +346,7 @@ amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &id
   }
   std::vector<uint8_t> queue_context;
   const auto saved = mes_queue_owner_->save_queue_context(identity, queue_context);
-  if (saved != VmAccessOutcome::Complete)
+  if (saved != amdgpu::QueueContextSaveOutcome{VmAccessOutcome::Complete})
     return {.outcome = saved};
   std::array<uint32_t, 2> debug_region{};
   const auto read = access->read(address + amdgpu::cwsr_debug_fields_offset(),

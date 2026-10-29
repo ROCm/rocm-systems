@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
+#include "rocjitsu/vm/amdgpu/queue_context_save.h"
 #include "rocjitsu/vm/amdgpu/trap_handler_config.h"
 
 #include <algorithm>
@@ -41,7 +42,7 @@ struct ComputeQueueBindingPlan {
 /// Complete. A queue without resident waves may still save CP execution state
 /// after the public wave image, so it can report a nonempty save.
 struct QueueContextSaveResult {
-  VmAccessOutcome outcome = VmAccessOutcome::Faulted;
+  QueueContextSaveOutcome outcome = VmAccessOutcome::Faulted;
   uint32_t control_stack_offset = 0;
   uint32_t wave_state_offset = 0;
 };
@@ -61,10 +62,12 @@ public:
   /// MQD offsets. Unavailable leaves the operation pending: retry with the same
   /// identity and area, without acknowledging REMOVE. Until release_context(),
   /// cancel_context_save() can undo the save's suspension without discarding work.
+  /// Unsupported requires cancellation before retrying so accepted
+  /// work can finish; any pause that predates the save must remain in effect.
   [[nodiscard]] virtual QueueContextSaveResult save_context(const QueueIdentity &identity,
                                                             uint64_t address, uint32_t area_size,
                                                             uint32_t control_stack_size) = 0;
-  /// @brief Restore the pre-save suspension state after a terminal save or MQD failure.
+  /// @brief Restore the pre-save suspension state when draining or after a save/MQD failure.
   /// @details Preserve unfinished work and any pre-existing pause. No-op if no
   /// save is pending. Partial save-area/MQD writes are not rolled back; REMOVE
   /// remains unacknowledged and a later attempt must publish a fresh snapshot.

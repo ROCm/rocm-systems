@@ -728,16 +728,23 @@ VmAccessOutcome MesEngine::remove_queue(uint64_t doorbell_offset, const GpuVmAcc
                                  .process_id = queue->process_id,
                                  .queue_id = queue->queue_id};
     const auto fail_save = [&](VmAccessOutcome outcome) {
-      // Unsupported saves roll back like other terminal failures. Only
-      // Unavailable retains the save's suspension for a later attempt.
+      // Access retries retain the save's suspension; terminal failures undo it.
       if (outcome != VmAccessOutcome::Unavailable)
         compute_bindings_.cancel_context_save(identity);
       return outcome;
     };
     const QueueContextSaveResult saved = compute_bindings_.save_context(
         identity, queue->context_save_address, queue->context_save_size, queue->control_stack_size);
-    if (saved.outcome != VmAccessOutcome::Complete)
-      return fail_save(saved.outcome);
+    if (std::holds_alternative<Unsupported>(saved.outcome)) {
+      // This state cannot be checkpointed, but accepted work can still finish.
+      // Undo only our pause and retain REMOVE's automatic retry, including when
+      // an earlier caller-owned pause prevents progress until explicitly resumed.
+      compute_bindings_.cancel_context_save(identity);
+      return VmAccessOutcome::Unavailable;
+    }
+    const auto outcome = std::get<VmAccessOutcome>(saved.outcome);
+    if (outcome != VmAccessOutcome::Complete)
+      return fail_save(outcome);
     // KFD derives its user header from these two firmware-updated MQD fields.
     for (const auto &[field, value] :
          {std::pair{kMqdControlStackOffsetDword, saved.control_stack_offset},

@@ -277,8 +277,8 @@ void CommandProcessor::cancel_queue_context_save(const QueueIdentity &identity) 
   set_queue_debug_suspended(identity.queue_id, identity.process_id, suspension.debug_suspended);
 }
 
-VmAccessOutcome CommandProcessor::save_queue_context(const QueueIdentity &identity,
-                                                     std::vector<uint8_t> &context) {
+QueueContextSaveOutcome CommandProcessor::save_queue_context(const QueueIdentity &identity,
+                                                             std::vector<uint8_t> &context) {
   std::unique_lock structure_lock(queue_structure_mutex_);
   std::lock_guard lock(hw_queue_mutex_);
   auto *queue = find_compute_queue(identity.queue_id, identity.process_id);
@@ -294,7 +294,7 @@ VmAccessOutcome CommandProcessor::save_queue_context(const QueueIdentity &identi
     return VmAccessOutcome::Unavailable;
   for (const auto &entry : queue->entries) {
     if (!supported_dispatch(entry))
-      return VmAccessOutcome::Faulted;
+      return Unsupported{};
     if (entry.completion_publication.phase != CompletionPublicationPhase::ExecutionEnd &&
         entry.completion_publication.phase != CompletionPublicationPhase::Complete)
       return VmAccessOutcome::Unavailable;
@@ -324,7 +324,7 @@ VmAccessOutcome CommandProcessor::save_queue_context(const QueueIdentity &identi
   }
   QueueContext saved;
   for (auto *cu : cus_) {
-    const auto status = cu->with_wave_state_locked([&] {
+    const auto status = cu->with_wave_state_locked([&]() -> QueueContextSaveOutcome {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
         if (!wave || wave->is_halted() || wave->process_id() != identity.process_id ||
@@ -335,7 +335,7 @@ VmAccessOutcome CommandProcessor::save_queue_context(const QueueIdentity &identi
           return VmAccessOutcome::Unavailable;
         if (wave->state() == WfState::GWS_WAIT || wave->cluster_size() != 1 ||
             &wave->lds() != &cu->lds())
-          return VmAccessOutcome::Faulted;
+          return Unsupported{};
         auto group = std::ranges::find_if(saved.groups, [&](const auto &g) {
           return g.dispatch == wave->dispatch_id() && g.wg == wave->wg_id();
         });
@@ -390,7 +390,7 @@ VmAccessOutcome CommandProcessor::save_queue_context(const QueueIdentity &identi
       }
       return VmAccessOutcome::Complete;
     });
-    if (status != VmAccessOutcome::Complete)
+    if (status != QueueContextSaveOutcome{VmAccessOutcome::Complete})
       return status;
   }
   writer(saved.groups.size(), saved.waves.size());
