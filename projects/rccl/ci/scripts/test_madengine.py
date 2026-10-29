@@ -818,6 +818,11 @@ exit 0
 """
 
 
+def _raise_on_term(signum, frame):  # noqa: ARG001 - signal handler signature
+    """Make SIGTERM unwind the stack the way SIGINT already does."""
+    raise KeyboardInterrupt(f"signal {signum}")
+
+
 def run_ab_in_one_allocation(
     phases: list[tuple[str, Path]],
     work_dir: Path,
@@ -907,10 +912,16 @@ def run_ab_in_one_allocation(
     # Own process group: killing salloc alone leaves run_phases.sh and its
     # madengine/srun children running on the allocation.
     proc = subprocess.Popen(cmd, cwd=work_dir, env=env, start_new_session=True)
-    try:
-        proc.wait(timeout=timeout_minutes * 60)
-    except subprocess.TimeoutExpired:
-        log.error("Allocation timed out after %d minutes", timeout_minutes)
+
+    def release_allocation(reason: str) -> None:
+        """Give the nodes back: cancel the job, then kill the whole group.
+
+        The group is in a session of its own, so nothing the caller is killed
+        by reaches it. Whatever ends this function has to do it explicitly or
+        the allocation keeps the nodes until its own --time expires -- four
+        exclusive ones for five hours, in the 405B case.
+        """
+        log.error("Releasing the allocation: %s", reason)
         try:
             granted_job = alloc_info.read_text().split()[0]
         except (OSError, IndexError):
@@ -920,8 +931,27 @@ def run_ab_in_one_allocation(
                 subprocess.run(["scancel", granted_job], timeout=60)
             except (OSError, subprocess.SubprocessError) as exc:
                 log.warning("scancel %s failed: %s", granted_job, exc)
-        os.killpg(proc.pid, signal.SIGKILL)
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         proc.wait()
+
+    # Actions cancels a run with SIGINT and escalates to SIGTERM. SIGINT
+    # already arrives as KeyboardInterrupt, but SIGTERM ends the interpreter
+    # without unwinding, so neither `except` nor `finally` would run: turn it
+    # into the same exception. SIGKILL, which follows, cannot be caught at
+    # all -- the allocation's own --time is the only backstop left for it.
+    previous_term = signal.signal(signal.SIGTERM, _raise_on_term)
+    try:
+        proc.wait(timeout=timeout_minutes * 60)
+    except subprocess.TimeoutExpired:
+        release_allocation(f"timed out after {timeout_minutes} minutes")
+    except BaseException:
+        release_allocation("the driver was interrupted")
+        raise
+    finally:
+        signal.signal(signal.SIGTERM, previous_term)
 
     exit_codes = {}
     for phase, run_dir in phases:
