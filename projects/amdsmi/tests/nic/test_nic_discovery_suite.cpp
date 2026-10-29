@@ -89,6 +89,15 @@ static void make_fake_netdev(const fs::path& root, const std::string& iface, con
   fs::create_symlink(fs::path("../../../bus/pci/devices") / bdf, net_dev / "device");
 }
 
+// Adds a second netdev whose device link resolves to a PCI function make_fake_netdev already
+// built, the way a physical function and its switchdev representors share one function.
+static void make_fake_netdev_alias(const fs::path& root, const std::string& iface,
+                                   const std::string& bdf) {
+  fs::path net_dev = root / "sys/class/net" / iface;
+  fs::create_directories(net_dev);
+  fs::create_symlink(fs::path("../../../bus/pci/devices") / bdf, net_dev / "device");
+}
+
 // Builds root/sys/bus/pci/devices/<bdf> advertising <vendor_hex>/<device_hex>
 // with no netdev and no downstream port -- models a fwctl-only card.
 static void make_fake_pci_device(const fs::path& root, const std::string& bdf,
@@ -417,6 +426,36 @@ int main() {
   } else {
     check("bng_en NIC bdf correct", false);
     check("bng_en NIC vendor is Broadcom", false);
+  }
+
+  // ---- Broadcom: several netdevs on one PCI function are one NIC with several ports ----
+  const std::string shared_bdf = "0000:e1:00.0";
+  fs::path shared_root = make_tmp_root();
+  TmpRootGuard_t shared_root_guard(shared_root);
+  make_fake_netdev(shared_root, "pf0vf1", shared_bdf, "0x14e4", "0x1750", "bnxt_en");
+  make_fake_netdev_alias(shared_root, "bnxt0", shared_bdf);
+  make_fake_netdev_alias(shared_root, "pf0vf0", shared_bdf);
+
+  SmiNicSubsystemBroadcom shared_disc;
+  shared_disc.discover((shared_root / "sys/bus/pci/devices").string(),
+                       (shared_root / "sys/class/net").string(), nullptr);
+  const auto& shared_nics = shared_disc.get_nics();
+  check("broadcom netdevs sharing a function are one NIC", shared_nics.size() == 1);
+  if (shared_nics.size() == 1) {
+    check("shared-function NIC bdf correct", shared_nics[0]->bdf() == shared_bdf);
+    check("shared-function NIC keeps every netdev as a port", shared_nics[0]->nic_ports_num() == 3);
+    check("shared-function NIC is named after the first netdev by name",
+          shared_nics[0]->interface() == "bnxt0");
+    if (shared_nics[0]->nic_ports_num() == 3) {
+      const auto& shared_ports = shared_nics[0]->nic_ports();
+      check("shared-function ports follow netdev name order",
+            (shared_ports[0].interface() == "bnxt0") && (shared_ports[1].interface() == "pf0vf0") &&
+                (shared_ports[2].interface() == "pf0vf1"));
+    }
+  } else {
+    check("shared-function NIC bdf correct", false);
+    check("shared-function NIC keeps every netdev as a port", false);
+    check("shared-function NIC is named after the first netdev by name", false);
   }
 
   // ---- Broadcom Rdma positive: an aux-driver symlink whose resolved target
