@@ -27,11 +27,12 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/target_registry.h"
-#include "util/except.h"
+#include "util/diagnostic.h"
 #include "util/result.h"
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstring>
 #include <optional>
 #include <span>
@@ -185,9 +186,13 @@ bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
   case ROCJITSU_CODE_ARCH_CDNA5:
     return false;
-  default:
-    throw util::UnimplementedInst("unified VGPR allocation for target architecture");
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_INVALID:
+    break;
   }
+  assert(false && "unified VGPR allocation for an unadmitted architecture");
+  return false;
 }
 
 // How one kernel's VGPR allocation divides into an ordinary prefix and an

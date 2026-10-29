@@ -619,7 +619,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // write) and again immediately after the call returns (before any restoration).
   std::vector<uint32_t> boundary_drain = build_wait_all_loads_complete(plan.arch);
   if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
-    boundary_drain.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc));
+    boundary_drain.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc).value());
 
   std::vector<uint32_t> env;
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
@@ -720,7 +720,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   }
 
   if (needs_rdna4_save_guard(plan.arch, plan.special_state_saves, plan.register_saves))
-    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe));
+    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
 
   // Capture guest operands before constants or scalar-sourced arguments can
   // overwrite them. The order implements a parallel assignment, including cycles.
@@ -890,7 +890,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // The probe may have VALU-read this pair. Its new getpc value must be ready
   // before either scalar add reads it, independently of boundary waits.
   if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
-    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe));
+    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
   const uint64_t va_after_getpc =
       plan.trampoline_offset + static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
   const uint64_t delta = static_cast<uint64_t>(static_cast<int64_t>(plan.probe_target_offset) -
@@ -902,7 +902,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Both halves are now written; complete them before the indirect call reads
   // the address. Neither add reads the other half's newly written value.
   if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
-    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe));
+    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
 
   // The call: writes the return PC into the cc-derived link pair, jumps to the
   // materialized target. The probe returns here via s_setpc_b64 of the same pair.
@@ -974,7 +974,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     env.push_back(build_s_nop(static_cast<uint16_t>(owed_wait_states - 1), plan.arch));
   const size_t restore_drain_words = plan.arch == ROCJITSU_CODE_ARCH_RDNA4 ? 1 : 0;
   if (restore_drain_words)
-    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc));
+    env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc).value());
 
   // Plan/emit drift guard: the planner committed to this many envelope words and
   // the orchestrator sized the layout around it. A mismatch means the two

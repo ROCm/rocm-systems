@@ -1455,13 +1455,15 @@ TEST(TrampolineBuilderEmit, Rdna4GuardsTargetWritesAndPreservesGetpcRelativeAddr
       std::ranges::find(words, build_s_getpc_b64(plan.target_pair_base, plan.arch));
   ASSERT_NE(getpc, words.end());
   ASSERT_GE(words.end() - getpc, 8);
-  const uint32_t guard = build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe);
-  EXPECT_EQ(getpc[1], guard);
+  const util::FailureOr<uint32_t> guard =
+      build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe);
+  ASSERT_TRUE(guard.succeeded());
+  EXPECT_EQ(getpc[1], guard.value());
   EXPECT_EQ(getpc[2],
             build_s_add_u32(plan.target_pair_base, plan.target_pair_base, 0xff, plan.arch));
   EXPECT_EQ(getpc[4], build_s_addc_u32(plan.target_pair_base + 1, plan.target_pair_base + 1, 0xff,
                                        plan.arch));
-  EXPECT_EQ(getpc[6], guard);
+  EXPECT_EQ(getpc[6], guard.value());
   EXPECT_EQ(getpc[7], build_s_swappc_b64(plan.link_pair_base, plan.target_pair_base, plan.arch));
   const uint64_t pc = plan.trampoline_offset + 4 * (getpc - words.begin() + 1);
   const uint64_t delta = uint64_t{getpc[3]} | (uint64_t{getpc[5]} << 32);
@@ -1501,9 +1503,11 @@ TEST(TrampolineBuilderEmit, Rdna4GuardsScalarSavesBeforeArgumentReads) {
     ASSERT_NE(save, words.end());
     ASSERT_NE(read, words.end());
     ASSERT_LT(save, read);
-    const uint32_t guard = build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe);
-    EXPECT_NE(std::find(save + 1, read, guard), read);
-    EXPECT_EQ(std::ranges::count(words, guard), 3);
+    const util::FailureOr<uint32_t> guard =
+        build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe);
+    ASSERT_TRUE(guard.succeeded());
+    EXPECT_NE(std::find(save + 1, read, guard.value()), read);
+    EXPECT_EQ(std::ranges::count(words, guard.value()), 3);
     TrampolinePlan cdna = plan;
     cdna.arch = ROCJITSU_CODE_ARCH_CDNA4;
     ASSERT_TRUE(TrampolineBuilder::plan_probe_call(cdna, arg_abi(2), make_sgpr_set({8}),
@@ -1519,20 +1523,22 @@ TEST(TrampolineBuilderEmit, Rdna4OrdersScalarStateAcrossTheCallAndGuestResume) {
   const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
   ASSERT_TRUE(bytes) << error;
   const std::vector<uint32_t> &words = bytes->trampoline_words;
-  const uint32_t wait = build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc);
+  const util::FailureOr<uint32_t> wait =
+      build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc);
+  ASSERT_TRUE(wait.succeeded());
   const size_t loads = build_wait_all_loads_complete(plan.arch).size();
   ASSERT_GT(words.size(), loads);
-  EXPECT_EQ(words[loads], wait);
+  EXPECT_EQ(words[loads], wait.value());
   const std::vector<uint32_t>::const_iterator call =
       std::ranges::find(words, build_s_swappc_b64(30, plan.target_pair_base, plan.arch));
   ASSERT_NE(call, words.end());
   ASSERT_LT(call + loads + 1, words.end());
-  EXPECT_EQ(*(call + loads + 1), wait);
+  EXPECT_EQ(*(call + loads + 1), wait.value());
   const std::vector<uint32_t>::const_iterator original =
       std::ranges::find(words, plan.original_words.front());
   ASSERT_NE(original, words.end());
   ASSERT_NE(original, words.begin());
-  EXPECT_EQ(*(original - 1), wait);
+  EXPECT_EQ(*(original - 1), wait.value());
 }
 
 } // namespace
