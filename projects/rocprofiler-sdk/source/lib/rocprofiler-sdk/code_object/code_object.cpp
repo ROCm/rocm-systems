@@ -664,7 +664,13 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
     CHECK_NOTNULL(get_kernel_object_map())
         ->wlock(
             [](kernel_object_map_t& object_map, uint64_t _kern_obj, kernel_locator_t locator) {
-                object_map[_kern_obj] = locator;
+                // A later code object in the same executable enumerates every agent symbol, so this
+                // assignment runs again for kernels registered by an earlier image. Keep the
+                // pointer ranges already read from that image: the population step after this
+                // callback only fills ranges for the image just loaded.
+                if(const auto existing = object_map.find(_kern_obj); existing != object_map.end())
+                    locator.pointer_regions = existing->second.pointer_regions;
+                object_map[_kern_obj] = std::move(locator);
             },
             data.kernel_object,
             kernel_locator_t{
