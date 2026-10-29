@@ -220,18 +220,7 @@ testing::AssertionResult resolve_valid_execution_threads(
   return testing::AssertionSuccess();
 }
 
-testing::AssertionResult
-resolve_valid_execution_threads(config::ExecutionThreadAllocation &output,
-                                const config::ExecutionThreadSettings &settings,
-                                uint32_t host_threads) {
-  util::StringDiagnostic diagnostic;
-  util::FailureOr<config::ExecutionThreadAllocation> result =
-      settings.resolve(host_threads, diagnostic.emitter());
-  if (result.failed())
-    return testing::AssertionFailure() << diagnostic.message();
-  output = std::move(result).value();
-  return testing::AssertionSuccess();
-}
+using test::resolve_valid_execution_threads;
 
 TEST(ExecutionThreadBudgetTest, SelectsLargestFittingGranule) {
   struct Case {

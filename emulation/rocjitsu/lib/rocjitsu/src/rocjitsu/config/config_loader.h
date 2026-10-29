@@ -76,7 +76,7 @@ struct ExecutionThreadAllocation {
 /// after topology clamps and explicit overrides; later entries break ties.
 /// Explicit knobs may exceed the budget. With no fitting entry, unspecified knobs use
 /// serial defaults. Clocked mode only allocates engine partitions. Invalid helper
-/// requests or functional allocation entries emit a diagnostic and return failure.
+/// requests or allocation-table entries in functional mode emit a diagnostic and return failure.
 /// Allocation exceptions propagate.
 util::FailureOr<ExecutionThreadAllocation>
 resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_threads,
