@@ -917,6 +917,19 @@ TEST_F(GinHostCustomStrideMicrotest, RejectsStrideGreaterThanRail) {
   EXPECT_EQ(0, devComm_.ginContextStride);
 }
 
+// ncclDevCommCreate reports this rejection as ncclInternalError. The helper
+// returns ncclInvalidUsage, and ncclGinDevCommSetup returns ncclInternalError
+// after that backend fails. numActiveBackends is 1 so the stride check runs;
+// with no backends the same code comes back without reaching it.
+TEST_F(GinHostCustomStrideMicrotest, OverRailStride_PublicSetupReturnsInternalError) {
+  sr_->ginState.numActiveBackends = 1;
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/8);
+
+  EXPECT_EQ(ncclInternalError, ncclGinDevCommSetup(comm_.get(), &reqs, &devComm_, /*deviceCodeVersion=*/0));
+  EXPECT_EQ(0, captured_.calls);
+  EXPECT_EQ(0, devComm_.ginContextStride);
+}
+
 TEST_F(GinHostCustomStrideMicrotest, RejectsStrideNotMultipleOfConnectedStride) {
   sr_->ginState.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
   comm_->contiguousRanksPerHost = 2;
