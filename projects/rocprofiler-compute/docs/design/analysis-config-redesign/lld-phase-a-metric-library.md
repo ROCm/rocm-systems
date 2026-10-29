@@ -60,7 +60,8 @@ returns its columns. The validator checks, for every arch:
   of exactly one metric, or is listed in `CEILINGS_WITHOUT_METRIC` (the VALU integer
   rates `I8Ops`, `I32Ops` and `I64Ops`, and `MALLBw`, which analyze skips: no row shows
   them as a peak), or in `ARCH_CEILINGS_WITHOUT_METRIC` for the rates one arch's roofline
-  combines or does not show (the gfx950 F4 and F6 MFMA rates);
+  combines or does not show (the gfx950 F4 and F6 MFMA rates, the gfx115x F16 and BF16
+  VALU rates, the gfx1250 VALU rates, whose rows show theoretical peaks);
 - no metric names a ceiling the arch does not measure.
 
 So a new ceiling, or a new arch, fails validation until a metric claims each ceiling.
@@ -501,7 +502,10 @@ measures, and SQ instruction counters (`SQ_*INST*`) are `compute`. An arithmetic
 intensity combines SQ FLOPs with one memory level's bytes, and takes the category of that
 level (`l2.ai`). Memory categories use the names the docs and panels use (`l2`, `vl1d`,
 `sl1d`, `l1i`) rather than block names (`tcc`, `tcp`, `sqc`), which change between
-families.
+families. The RDNA bases use RDNA block names for the hardware CDNA has no category for
+(`gl0`, `gl1`, `gl2`, `gcea`, `wgp`, ...), and keep the CDNA id, and so the CDNA file, for
+a concept both families share (`l2.bw`, `wave.occupancy`, `lds.util`); units both
+families have keep the CDNA names (`l1i`, `sl1d`, `lds`, `compute`, `wave`, `dispatch`).
 
 **Choosing ids.** When rows, tables or archs show what may be one metric:
 
@@ -533,16 +537,17 @@ flowchart TD
 - Two ids with the same formula on one arch are one metric: the validator rejects them,
   and they are merged into one id (each panel's label becomes a view label in Phase B).
   The exceptions are listed in `SHARED_FORMULA_IDS`: the same counters bounded by a
-  different measured ceiling (gfx950 counts MXF8 matrix work in the F8 counter, so
-  `compute.mfma_flops_mxf8` shares the formula of `compute.mfma_flops_f8`); a row whose
-  label names the listed id shows that id.
+  different measured ceiling (gfx950 and gfx1250 count MXF8 matrix work in the F8
+  counter, so `compute.mfma_flops_mxf8` shares the formula of `compute.mfma_flops_f8`,
+  and `compute.wmma_flops_mxfp8` that of `compute.wmma_flops_fp8`); a row whose label
+  names the listed id shows that id.
 
 The same holds across archs: a formula has one id on every arch. An arch reuses the id
-that the first arch to show the quantity gave it (gfx950 keeps gfx942's
-`fabric.hbm_rd`), and the validator rejects a formula with two ids. The exceptions are
-listed in `SPLIT_FORMULA_IDS`: on gfx940 and gfx941 one label shows two formulas, so the
-second one has its own id there (`vl1d.cache_bw_128b`), while gfx942 and gfx950 show
-only that formula, as `vl1d.cache_bw`.
+that the first arch to show the quantity gave it (gfx1250 uses gfx115x's `gl1.util`, and
+gfx950 keeps gfx942's `fabric.hbm_rd`), and the validator rejects a formula with two
+ids. The exceptions are listed in `SPLIT_FORMULA_IDS`: on gfx940 and gfx941 one label
+shows two formulas, so the second one has its own id there (`vl1d.cache_bw_128b`), while
+gfx942 and gfx950 show only that formula, as `vl1d.cache_bw`.
 
 | Category | Hardware | File | Example IDs |
 |---|---|---|---|
@@ -560,6 +565,17 @@ only that formula, as `vl1d.cache_bw`.
 | `td` | TD (data return) | `td.yaml` | `td.busy`, `td.spi_stall` |
 | `vl1d` | TCP (with TA inputs, e.g. coalescing: AMD defines the vL1D as TA + TC + TD) | `vl1d.yaml` | `vl1d.cache_bw`, `vl1d.l2_rd_bw`, `vl1d.ai` |
 | `wave` | SQ wave state: occupancy, wave cycles and their wait/active breakdown, save/restore | `wave.yaml` | `wave.occupancy`, `wave.cycles`, `wave.issue_wait_cycles` |
+| `gl0` | RDNA GL0 vector cache (TCP on gfx115x) | `gl0.yaml` | `gl0.hit_rate`, `gl0.gl1_rd_bw` |
+| `gl1` | RDNA GL1 cache | `gl1.yaml` | `gl1.hit_rate`, `gl1.gl2_bw` |
+| `gl2` | RDNA GL2 cache, apart from the concepts shared with `l2` | `gl2.yaml` | `gl2.hit_rate`, `gl2.fabric_rd_bw` |
+| `gcea` | gfx115x Graphics Core Efficiency Arbiter (DRAM interface) | `gcea.yaml` | `gcea.dram_rd_bw` |
+| `wgp` | RDNA workgroup processor | `wgp.yaml` | `wgp.util` |
+| `glarb` | gfx1250 GL1-GL2 arbiter (GLARBA, GLARBC) | `glarb.yaml` | `glarb.glarbc_util` |
+| `ea` | gfx1250 Efficiency Arbiter (HBM and remote memory interface) | `ea.yaml` | `ea.dram_rd_bw` |
+| `ch` | gfx1250 Central Hub (CHA, CHC) | `ch.yaml` | `ch.chc_util` |
+| `utcl1` | gfx1250 L1 address translation cache | `utcl1.yaml` | `utcl1.lookup_hit_rate` |
+| `txa` | gfx1250 texture addresser (TX_VCA counters) | `txa.yaml` | `txa.req_bus_util` |
+| `txd` | gfx1250 texture data (TX_VCD counters) | `txd.yaml` | `txd.util` |
 
 ### Metric names
 
@@ -574,6 +590,8 @@ panel that shows it:
 - A per-channel metric ends with `per Channel`.
 - It is in title case; short words (`and`, `by`, `of`, `on`, `over`, `per`, `to`,
   `under`, `vs`) stay lowercase.
+- An RDNA metric starts with RDNA's block word (`GL0`, `GL1`, `GL2`, `GCEA`, `CHC`, `EA`,
+  `TXA`, `WGP`, `Dcache`, `ICache`); an id both families share keeps its CDNA name.
 - A metric that shows one raw counter is named after the counter (`TCC_BUSY`).
 - A metric shown only by panel 3000 (memory bandwidth analysis) keeps that model's block
   words (`EA` for the L2-Fabric interface, `L1 Cache` and `TCP` for the vL1D, `TD -`,
