@@ -72,16 +72,17 @@ flowchart LR
     PC["perfmon_coalesce()<br/>(soc_base.py)"]
     PMC["pmc_perf_*.yaml<br/>(one per hardware pass)"]
 
-    YAML -->|raw text| DC
-    DC -->|concatenated YAML text| ECV
+    YAML -->|metric expressions| DC
+    DC -->|expressions| ECV
     ECV -->|counter set| PC
     PC --> PMC
 ```
 
-`detect_counters()` reads YAML files as raw text (or filters to specific sections
-via `-b` / `--set`), runs `extract_counters_and_variables()` to regex-extract HW
-counter names, and passes the set to `perfmon_coalesce()` which bins counters into
-per-pass files respecting IP-block limits.
+`detect_counters()` takes the metric expressions of the panel YAMLs (all of them, or the
+sections `-b` / `--set` select), runs `extract_counters_and_variables()` to extract the
+HW counter names, and passes the set to `perfmon_coalesce()`, which bins counters into
+per-pass files respecting IP-block limits. Comments, descriptions and labels add no
+counters.
 
 
 ## Target pipeline
@@ -130,8 +131,8 @@ flowchart LR
     PC --> PMC
 ```
 
-`detect_counters()` calls `MetricLibrary.get_counters_for_metrics()` instead of
-regex-scanning raw YAML text. The counter set reaches the same `perfmon_coalesce()`
+`detect_counters()` calls `MetricLibrary.get_counters_for_metrics()` instead of reading
+the panel YAMLs' expressions. The counter set reaches the same `perfmon_coalesce()`
 path.
 
 
