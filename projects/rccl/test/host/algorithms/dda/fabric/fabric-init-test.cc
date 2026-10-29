@@ -71,6 +71,18 @@ constexpr int kCuCount = 40;
 constexpr int64_t kScratchBytes = 64 * 1024;
 char kGfx1250[] = "gfx1250";
 
+// ncclCuMemAlloc zeros a new VMM buffer with hipMemsetAsync before it is tracked.
+// Fabric init zeros that scratch again; this fails the second fill.
+void FailFabricScratchZeroing() {
+  int seen = 0;
+  FailWhen(
+      g_hipMemsetAsync,
+      [seen](void*, int, size_t bytes, hipStream_t) mutable {
+        return bytes == static_cast<size_t>(kScratchBytes) && ++seen == 2;
+      },
+      hipErrorInvalidValue);
+}
+
 TEST(HostAllocLedgerMicrotest, UntrackedCopyAndFree_AreRefusedAndCounted) {
   HostAllocLedger ledger;
   int src = 1;
@@ -393,16 +405,45 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_PeerTablesHoldOwnScratch
 }
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_ZeroesScratchAndEpochCells) {
+  // Zero-fill is hipMemsetAsync on a private stream. The ledger only records
+  // synchronous hipMemset, which the barrier still uses for its flag buffer.
+  struct AsyncMemset {
+    void* dst;
+    int value;
+    size_t bytes;
+    hipStream_t stream;
+  };
+  std::vector<AsyncMemset> asyncMemsets;
+  auto emulatedMemset = g_hipMemsetAsync;
+  ScopedHook memsetAsync(g_hipMemsetAsync,
+                         [&asyncMemsets, emulatedMemset](void* dst, int value, size_t bytes, hipStream_t stream) {
+                           asyncMemsets.push_back({dst, value, bytes, stream});
+                           return emulatedMemset(dst, value, bytes, stream);
+                         });
+  std::vector<hipStream_t> synced;
+  auto emulatedSync = g_hipStreamSynchronize;
+  ScopedHook sync(g_hipStreamSynchronize, [&synced, emulatedSync](hipStream_t stream) {
+    synced.push_back(stream);
+    return emulatedSync(stream);
+  });
+
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
-  const HipVmmLedger::Memset* scratch = ledger_.MemsetOf(comm_->ddaScratch);
+  const AsyncMemset* scratch = nullptr;
+  const AsyncMemset* epoch = nullptr;
+  for (const AsyncMemset& m : asyncMemsets) {
+    if (m.dst == comm_->ddaScratch) scratch = &m;
+    if (m.dst == comm_->ddaLLEpochDev) epoch = &m;
+  }
   ASSERT_NE(scratch, nullptr) << "scratch never zeroed";
   EXPECT_EQ(scratch->value, 0);
   EXPECT_EQ(scratch->bytes, static_cast<size_t>(kScratchBytes));
-  const HipVmmLedger::Memset* epoch = ledger_.MemsetOf(comm_->ddaLLEpochDev);
   ASSERT_NE(epoch, nullptr) << "epoch cells never zeroed";
   EXPECT_EQ(epoch->value, 0);
   EXPECT_EQ(epoch->bytes, static_cast<size_t>(comm_->ddaLLEpochLen) * sizeof(uint32_t));
+  ASSERT_NE(scratch->stream, nullptr);
+  EXPECT_EQ(epoch->stream, scratch->stream);
+  EXPECT_NE(std::find(synced.begin(), synced.end(), scratch->stream), synced.end());
 }
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_BarrierUsesCommGeometry) {
@@ -444,9 +485,7 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_FailsWithManager_UntracksScratchFro
   manager_ = std::make_unique<ncclMemManager>();
   comm_->memManager = manager_.get();
   MemManagerSpy spy;
-  FailWhen(
-      g_hipMemset, [](void*, int, size_t bytes) { return bytes == static_cast<size_t>(kScratchBytes); },
-      hipErrorInvalidValue);
+  FailFabricScratchZeroing();
 
   EXPECT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
@@ -511,7 +550,9 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_PublishesLocalCapForThePeers) {
   int published = -1;
   auto homogeneous = g_bootstrapAllGather;
   ScopedHook gather(g_bootstrapAllGather, [&published, homogeneous](void* state, void* allData, int size) {
-    if (size == static_cast<int>(sizeof(int))) published = static_cast<int*>(allData)[kRank];
+    // The block cap is the first sizeof(int) exchange. A later one carries each
+    // rank's LL-buffer ready flag, which is 0 or 1, not the cap.
+    if (published < 0 && size == static_cast<int>(sizeof(int))) published = static_cast<int*>(allData)[kRank];
     return homogeneous(state, allData, size);
   });
   SetMicroEnv("RCCL_DDA_FABRIC_MAXBLOCKS", "7");
@@ -634,13 +675,7 @@ INSTANTIATE_TEST_SUITE_P(
                           unsigned long long) { return size < static_cast<size_t>(kScratchBytes); },
                        hipErrorOutOfMemory);
                  }},
-        FailCase{"ScratchZeroing",
-                 [] {
-                   FailWhen(
-                       g_hipMemset,
-                       [](void*, int, size_t bytes) { return bytes == static_cast<size_t>(kScratchBytes); },
-                       hipErrorInvalidValue);
-                 }},
+        FailCase{"ScratchZeroing", [] { FailFabricScratchZeroing(); }},
         FailCase{"EpochAlloc",
                  [] {
                    FailWhen(
@@ -649,7 +684,8 @@ INSTANTIATE_TEST_SUITE_P(
         FailCase{"EpochZeroing",
                  [] {
                    FailWhen(
-                       g_hipMemset, [](void*, int, size_t bytes) { return bytes == kEpochBytes; },
+                       g_hipMemsetAsync,
+                       [](void*, int, size_t bytes, hipStream_t) { return bytes == kEpochBytes; },
                        hipErrorInvalidValue);
                  }}),
     ParamName<FailCase>);
