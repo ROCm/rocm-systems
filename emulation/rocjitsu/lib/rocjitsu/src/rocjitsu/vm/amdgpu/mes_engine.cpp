@@ -213,7 +213,10 @@ bool MesEngine::attach_frontend(std::string diagnostic_name,
   diagnostic_name_ = std::move(diagnostic_name);
   sdma_queue_binding_factory_ = std::move(sdma_queue_binding_factory);
   interrupt_sink_ = std::move(interrupt_sink);
-  trap_interrupt_sink_ = std::move(trap_interrupt_sink);
+  {
+    const std::unique_lock lock(trap_state_mutex_);
+    trap_interrupt_sink_ = std::move(trap_interrupt_sink);
+  }
   callbacks_ = std::move(callbacks);
   frontend_attached_ = true;
   return true;
@@ -233,13 +236,14 @@ bool MesEngine::detach_frontend() {
     orphaned_address_spaces_.push_back(address_space.handle);
   }
   address_spaces_.clear();
+  InterruptSink retired_sink;
   {
     const std::unique_lock lock(trap_state_mutex_);
     debug_enabled_contexts_.clear();
+    retired_sink = std::move(trap_interrupt_sink_);
   }
   sdma_queue_binding_factory_ = nullptr;
   interrupt_sink_ = {};
-  trap_interrupt_sink_ = {};
   callbacks_ = {};
   diagnostic_name_ = "MES";
   frontend_attached_ = false;
@@ -247,9 +251,14 @@ bool MesEngine::detach_frontend() {
 }
 
 bool MesEngine::deliver_trap_interrupt(uint32_t process_id, uint32_t data) const {
-  if (!trap_interrupt_sink_)
+  InterruptSink sink;
+  {
+    const std::shared_lock lock(trap_state_mutex_);
+    sink = trap_interrupt_sink_;
+  }
+  if (!sink)
     return false;
-  trap_interrupt_sink_.deliver(process_id, data);
+  sink.deliver(process_id, data);
   return true;
 }
 

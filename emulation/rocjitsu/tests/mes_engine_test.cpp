@@ -398,6 +398,39 @@ TEST_F(MesEngineStateTest, AddRemoveAndDetachFollowCommittedQueueState) {
   EXPECT_TRUE(engine_.detach_frontend());
 }
 
+TEST_F(MesEngineStateTest, TrapInterruptDeliveryCanOverlapFrontendChanges) {
+  ASSERT_TRUE(engine_.detach_frontend());
+  uint32_t delivered = 0;
+  uint32_t accepted = 0;
+  rocjitsu::amdgpu::InterruptSubscription subscription([&](uint32_t process_id, uint32_t data) {
+    EXPECT_EQ(process_id, 7u);
+    EXPECT_EQ(data, 0x1234u);
+    ++delivered;
+  });
+  ASSERT_TRUE(engine_.attach_frontend("test", sdma_factory_, {}, {}, subscription.sink()));
+
+  constexpr uint32_t kRounds = 32;
+  std::barrier round_boundary(2);
+  std::jthread reader([&] {
+    for (uint32_t round = 0; round < kRounds; ++round) {
+      round_boundary.arrive_and_wait();
+      for (uint32_t delivery = 0; delivery < 64; ++delivery)
+        accepted += engine_.deliver_trap_interrupt(7, 0x1234);
+      round_boundary.arrive_and_wait();
+    }
+  });
+  for (uint32_t round = 0; round < kRounds; ++round) {
+    round_boundary.arrive_and_wait();
+    EXPECT_TRUE(engine_.detach_frontend());
+    EXPECT_TRUE(engine_.attach_frontend("test", sdma_factory_, {}, {}, subscription.sink()));
+    round_boundary.arrive_and_wait();
+  }
+  reader.join();
+  EXPECT_EQ(delivered, accepted);
+  EXPECT_TRUE(engine_.deliver_trap_interrupt(7, 0x1234));
+  EXPECT_EQ(delivered, accepted + 1);
+}
+
 TEST_F(MesEngineStateTest, ShaderDebuggerConfigurationSelectsTheProcessTrapHandler) {
   constexpr uint64_t kTrapHandler = 0x20000;
   constexpr uint64_t kTrapMemory = 0x30000;

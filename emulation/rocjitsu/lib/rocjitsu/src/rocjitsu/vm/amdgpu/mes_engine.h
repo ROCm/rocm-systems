@@ -175,8 +175,8 @@ private:
 /// retry journals, and firmware-free MES control execution. A PCI or legacy
 /// frontend supplies only physical-memory access, register callbacks, and
 /// interrupt/SDMA adapters. No MMIO register layout or PCI transport type is
-/// visible here. Frontends serialize control operations; CU trap lookups may
-/// run concurrently with them.
+/// visible here. Frontends serialize control operations; CU trap lookups and
+/// interrupt delivery may run concurrently with them.
 class MesEngine {
 public:
   /// @brief Construct the semantic engine over shared VM and queue services.
@@ -340,7 +340,7 @@ private:
   GpuQueueRegistry &queue_registry_;
   ComputeQueueBindingProvider &compute_bindings_;
   // Synchronize CU trap readers with owner-side mutations of mapped queues,
-  // and process debug state. Never hold this lock across
+  // process debug state and the trap interrupt sink. Never hold this lock across
   // queue/provider operations or frontend callbacks: they can wait for a CU
   // whose trap lookup needs the shared lock. Owner-only reads need no lock,
   // since CU callbacks return copies and never mutate the MES containers.
