@@ -39,6 +39,35 @@ class CronConsistencyTest(unittest.TestCase):
         self.assertEqual(crons, {resolve.WEEKDAY_NIGHTLY_CRON, resolve.SATURDAY_CRON})
 
 
+class BaselinePinWiringTest(unittest.TestCase):
+    """The PR workflow must reach the action's ``require_baseline_sha`` input.
+
+    GitHub only warns about an input the action does not declare, so a
+    misspelt name would silently turn the requirement off.
+    """
+
+    WORKFLOWS = Path(__file__).resolve().parents[2] / "workflows"
+    ACTION = (
+        Path(__file__).resolve().parents[2]
+        / "actions"
+        / "rccl-resolve-coco-run"
+        / "action.yml"
+    )
+
+    def test_the_action_declares_the_input_and_defaults_it_off(self):
+        text = self.ACTION.read_text(encoding="utf-8")
+        self.assertRegex(
+            text,
+            r"(?m)^  require_baseline_sha:\n(?:    .*\n)*?    default: 'false'\n",
+        )
+        self.assertIn("REQUIRE_BASELINE_SHA: ${{ inputs.require_baseline_sha }}", text)
+
+    def test_the_pr_workflow_requires_the_pin(self):
+        """Only PR runs pin the baseline, so only this workflow needs to require it."""
+        text = (self.WORKFLOWS / "rccl-coco-pr.yml").read_text(encoding="utf-8")
+        self.assertRegex(text, r"(?m)^\s+require_baseline_sha: 'true'$")
+
+
 class ScheduleToModeTest(unittest.TestCase):
     def test_weekday_cron_is_nightly(self):
         self.assertEqual(
