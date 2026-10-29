@@ -190,11 +190,11 @@ ISA-parameterized helpers for encoding common instructions (`s_branch`, `s_nop`,
 
 Multi-word, generation-specific encoders for the spill bracket, split out from the scalar helpers because their prefixes/opcodes move by ISA and they return variable-length word lists. Not shared with DBT (which emits scratch through its own target-specific path):
 
-- `build_scratch_store_dword` / `build_scratch_load_dword` — per-lane scratch store/load. CDNA3/CDNA4 use the gfx9 FLAT `seg=SCRATCH` encoding (2 words, 13-bit signed offset, `lds`=0); RDNA4 uses the dedicated VSCRATCH encoding (3 words, 24-bit offset, `sve`=0). Both take an `acc` flag that, on CDNA, sets the FLAT `acc` bit to address the AccVGPR file directly (RDNA throws — no acc file).
+- `build_scratch_store_dword` / `build_scratch_load_dword` — per-lane scratch store/load. CDNA3/CDNA4 use the gfx9 FLAT `seg=SCRATCH` encoding (2 words, 13-bit signed offset, `lds`=0); RDNA4 uses the dedicated VSCRATCH encoding (3 words, 24-bit offset, `sve`=0). Both take an `acc` flag that, on CDNA, sets the FLAT `acc` bit to address the AccVGPR file directly (RDNA returns failure — no acc file).
 - `build_v_writelane_b32` / `build_v_readlane_b32` — the SGPR↔VGPR lane bridge (VOP3; CDNA prefix `0x34`, RDNA `0x35`).
 - `build_wait_loads_complete` / `build_wait_stores_complete` — the async-access fences. CDNA uses a unified `s_waitcnt`; RDNA4 splits into `s_wait_loadcnt` (loads on LOADCNT) and `s_wait_storecnt` (stores on STORECNT). `build_wait_all_loads_complete` is the boundary drain used by `emit_probe_call`.
 
-An unmodeled arch throws `UnimplementedInst`. The hard arch gates on spilling are these five builders, `max_scratch_offset_bytes`, and — in the orchestrator — `arch_has_accvgpr` (AccVGPR spills require an AGPR file) and `arch_has_unified_vgpr_allocation` (which selects the descriptor's ACCUM_OFFSET split used to size the AccVGPR window).
+These builders return `FailureOr` for unsupported architectures or register files and emit diagnostics through an optional `DiagnosticEmitter`. `emit_probe_call` propagates failure as `std::nullopt` with spill-bracket or boundary-drain context in `error_out`. The hard arch gates on spilling are these builders, `max_scratch_offset_bytes`, and — in the orchestrator — `arch_has_accvgpr` (AccVGPR spills require an AGPR file) and `arch_has_unified_vgpr_allocation` (which selects the descriptor's ACCUM_OFFSET split used to size the AccVGPR window).
 
 ### Vector Builders (`code/builders/vector_builders.h`) [DBI-only]
 
