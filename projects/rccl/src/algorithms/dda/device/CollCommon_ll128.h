@@ -182,8 +182,9 @@ __device__ __forceinline__ void ddaLL128LoadAtomic16B(const uint64_t* src, uint6
     v4i v;
     uint64_t w[2];
   } u;
-  u.v = __builtin_amdgcn_cooperative_atomic_load_8x16B(
-    (v4i_gptr)src, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
+  // See rcclIdentity in rccl_ptr.h.
+  u.v = rcclIdentity(__builtin_amdgcn_cooperative_atomic_load_8x16B(
+    (v4i_gptr)src, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE));
   lo = u.w[0];
   hi = u.w[1];
 #else

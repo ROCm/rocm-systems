@@ -117,6 +117,7 @@ option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 T
 option(ENABLE_TDM_PRIM_LL128                   "Build the experimental gfx1250 TDM LL128 user-buffer path" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
+option(REPORT_COOPERATIVE_ATOMICS              "Print whether gfx1250 cooperative atomics are selected" OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
 option(SQTT_ENABLED                            "Enable SQTT instrumentation"                   OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)

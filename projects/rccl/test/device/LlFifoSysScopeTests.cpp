@@ -13,9 +13,20 @@
 //                                macro is 1 on gfx1250 (default build), 0 elsewhere
 //   FifoLineSysScopeRoundtrip  — b128 store+load intrinsic sanity check (1 GPU);
 //                                mirrors prims_ll storeLL/loadLLLineB128 shape
+//   Gfx1250SelectsCooperative  — device-side guard check (1 GPU); verifies the
+//                                LL128 FIFO uses the cooperative 8x16B builtins
+//                                on gfx1250 (default build), and not elsewhere
+//   CooperativeLineRoundtrip   — cooperative 8x16B store+load sanity check
+//                                (1 GPU); mirrors load128Fifo/store128Fifo
 //   SiblingBroadcastSlotReuse  — 64 Ring broadcasts (LL and LL128) on a sibling
 //                                pair; the only behavioral test of the fix,
 //                                requires gfx1250 DPX siblings (same PCI bus)
+
+// rccl-UnitTestsFixtures defines DWORDX4_INTRINSICS_FORCE_OFF for the gfx942
+// b128 fault (test/CMakeLists.txt), which also disables the cooperative
+// builtins. Every kernel here uses b128 or cooperative atomics only on gfx1250,
+// so restore the library's default selection before rccl_ptr.h is seen.
+#undef DWORDX4_INTRINSICS_FORCE_OFF
 
 #include "DeviceTestBase.hpp"
 
@@ -79,6 +90,62 @@ __global__ void kernelFifoLineRoundtrip(TestLLLine* line, uint32_t data, uint32_
           ? 1
           : 0;
 #endif
+}
+
+// Writes RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS to out[0] and the expected value to out[1].
+__global__ void kernelCooperativeEnabled(int* out, bool isGfx1250Device) {
+  out[0] = RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS;
+#if defined(COOPERATIVE_ATOMIC_INTRINSICS_FORCE_OFF)
+  out[1] = 0;  // builtins disabled at build time
+#else
+  out[1] = isGfx1250Device ? 1 : 0;
+#endif
+}
+
+constexpr int kCoopLanes = 64;  // whole waves: every lane of each 8-lane group participates
+
+// Sanity check for the cooperative 8x16B builtins used by load128Fifo/store128Fifo
+// (same reason as kernelFifoLineRoundtrip for not calling them directly). Lane i
+// owns 16 bytes at lines[2*i], so each 8-lane group covers one 128-byte line.
+__global__ void kernelCooperativeLineRoundtrip(uint64_t* lines, int* ok) {
+  const uint32_t i = threadIdx.x;
+  const uint64_t lo = 0xA5A5A5A500000000ull | i;
+  const uint64_t hi = ((uint64_t)(i + 9) << 32) | 0x5A5A5A5Au;
+  uint64_t* line = lines + 2 * i;
+  rcclB128 u;
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+  u.u64[0] = lo;
+  u.u64[1] = hi;
+  __builtin_amdgcn_cooperative_atomic_store_8x16B(
+    (v4i_gptr)line, u.vi, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
+  u.vi = rcclIdentity(__builtin_amdgcn_cooperative_atomic_load_8x16B(
+    (v4i_gptr)line, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE));
+#else
+  line[0] = lo;
+  line[1] = hi;
+  u.u64[0] = line[0];
+  u.u64[1] = line[1];
+#endif
+  ok[i] = (u.u64[0] == lo && u.u64[1] == hi) ? 1 : 0;
+}
+
+// Reloads the lines written by kernelCooperativeLineRoundtrip and masks them.
+// Guards rcclIdentity: before ROCm 10.2, this expression on the raw builtin
+// result crashes instruction selection. It only does so when the mask is the
+// load's sole use, hence a separate kernel.
+constexpr uint64_t kCoopMasked = 0xA5 + 0x5A5A;
+__global__ void kernelCooperativeLineMask(const uint64_t* lines, uint64_t* masked) {
+  const uint32_t i = threadIdx.x;
+  const uint64_t* line = lines + 2 * i;
+  rcclB128 u;
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+  u.vi = rcclIdentity(__builtin_amdgcn_cooperative_atomic_load_8x16B(
+    (v4i_gptr)line, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE));
+#else
+  u.u64[0] = line[0];
+  u.u64[1] = line[1];
+#endif
+  masked[i] = ((u.u64[0] >> 40) & 0xff) + ((u.u64[1] & 0xffff0000ull) >> 16);
 }
 
 bool isGfx1250(int device)
@@ -221,6 +288,36 @@ TEST_F(LlFifoSysScopeDeviceTest, FifoLineSysScopeRoundtrip)
   kernelFifoLineRoundtrip<<<1, 1>>>(d_line.ptr, kData, kFlag, d_ok.ptr);
   syncAndCheck();
   EXPECT_EQ(d_ok.download(), 1);
+}
+
+TEST_F(LlFifoSysScopeDeviceTest, Gfx1250SelectsCooperative)
+{
+  DeviceBuffer<int> d_out(2);
+  const bool gfx1250 = isGfx1250(0);
+  kernelCooperativeEnabled<<<1, 1>>>(d_out.ptr, gfx1250);
+  syncAndCheck();
+  const std::vector<int> h = d_out.copyTo();
+  EXPECT_EQ(h[0], h[1]) << "RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS mismatch: got " << h[0]
+                        << ", expected " << h[1] << " (gfx1250=" << gfx1250 << ")";
+}
+
+TEST_F(LlFifoSysScopeDeviceTest, CooperativeLineRoundtrip)
+{
+  DeviceBuffer<uint64_t> d_lines(2 * kCoopLanes);
+  DeviceBuffer<int> d_ok(kCoopLanes);
+  DeviceBuffer<uint64_t> d_masked(kCoopLanes);
+  d_lines.zero();
+  d_ok.zero();
+  d_masked.zero();
+  kernelCooperativeLineRoundtrip<<<1, kCoopLanes>>>(d_lines.ptr, d_ok.ptr);
+  kernelCooperativeLineMask<<<1, kCoopLanes>>>(d_lines.ptr, d_masked.ptr);
+  syncAndCheck();
+  const std::vector<int> ok = d_ok.copyTo();
+  const std::vector<uint64_t> masked = d_masked.copyTo();
+  for (int i = 0; i < kCoopLanes; ++i) {
+    EXPECT_EQ(ok[i], 1) << "lane " << i;
+    EXPECT_EQ(masked[i], kCoopMasked) << "lane " << i;
+  }
 }
 
 TEST(LlFifoSysScope, SiblingBroadcastSlotReuse_LL)
