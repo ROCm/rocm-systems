@@ -218,21 +218,6 @@ pub(crate) unsafe fn portable_export_dmabuf(
     SUCCESS
 }
 
-/// Finds a registered host range covering the requested bytes.
-pub(super) fn registered_range(
-    host: usize,
-    size: usize,
-    page: usize,
-) -> Option<(usize, usize, usize)> {
-    host.checked_add(size)?;
-    let page_offset = host & (page - 1);
-    let extent = page_offset
-        .checked_add(size)?
-        .checked_add(page - 1)
-        .map(|extent| extent & !(page - 1))?;
-    Some((host - page_offset, extent, page_offset))
-}
-
 /// # Safety
 /// `host_ptr` must cover `size` live host bytes through successful unlock,
 /// `agents` must contain `num_agents` readable handles when non-null, and
@@ -325,12 +310,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
     let host_base = host_ptr as usize;
     let (allocation, device_base) =
         if let Some((&first_index, peer_indexes)) = gpu_indexes.split_first() {
-            let Some((registered_base, native_size, page_offset)) =
-                registered_range(host_base, size, runtime.host_page_size)
-            else {
-                return INVALID_ARGUMENT;
-            };
-            let allocation = {
+            let (allocation, page_offset) = {
                 let first = &runtime.gpus[first_index].device;
                 let peers: Vec<_> = peer_indexes
                     .iter()
@@ -340,11 +320,11 @@ pub(crate) unsafe fn memory_lock_to_pool(
                 // cover until unlock succeeds; ambiguous native failures keep
                 // the registration backing caller-owned through teardown.
                 match unsafe {
-                    first.register_host_with_peers(
+                    first.register_host_range_with_peers(
                         &peers,
-                        registered_base,
+                        host_base,
                         cpu_pool_mapping_policy(pool, flags & ALLOC_UNCACHED),
-                        native_size as u64,
+                        size as u64,
                         runtime.host_page_size as u64,
                         DeviceAccess::READ | DeviceAccess::WRITE,
                     )
@@ -354,7 +334,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
                 }
             };
             let Some(device_base) =
-                (allocation.info().device_address as usize).checked_add(page_offset)
+                (allocation.info().device_address as usize).checked_add(page_offset as usize)
             else {
                 return OUT_OF_RESOURCES;
             };

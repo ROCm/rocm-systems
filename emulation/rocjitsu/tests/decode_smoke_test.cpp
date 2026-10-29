@@ -728,7 +728,7 @@ TEST(DecoderSmokeTest, ImageAtomicsSeparatePayloadFromOptionalReturn) {
               EXPECT_NE(decoded.value()->disassemble().find("[v20, v21]"), std::string::npos)
                   << decoded.value()->disassemble();
             }
-            InstDefUse def_use(*decoded.value());
+            InstDefUse def_use(*decoded.value(), 64);
             for (unsigned word = 0; word < 5; ++word) {
               const RegisterRef reg{RegClass::VGPR, static_cast<uint16_t>(8 + word), 1};
               EXPECT_EQ(def_use.uses.contains(reg), word < payload_words);
@@ -1332,7 +1332,7 @@ TEST(Rdna35MimgDecodeTest, FixedFormWidthsDriveDefUse) {
     EXPECT_EQ(inst->dst_operand(0)->size_bits(), 128);
     EXPECT_EQ(inst->src_operand(0)->size_bits(), test.vaddr_words * 32);
 
-    InstDefUse def_use(*inst);
+    InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, test.vdata_base, 4}));
     EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, test.vaddr_base, test.vaddr_words}));
     EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, test.srsrc_base, test.srsrc_words}));
@@ -1904,7 +1904,7 @@ TEST(Rdna3DecodeTest, GlobalFlatAllOnesSaddrIsNull) {
     EXPECT_EQ(fieldless_srcs, 1);
   }
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 0x7F, 1}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 0x7F, 2}));
@@ -2585,7 +2585,7 @@ TEST(CdnaSmemDecodeTest, SgprOffsetFormExposesOffsetRegister) {
       ASSERT_NE(inst, nullptr) << arch;
       EXPECT_EQ(inst->disassemble(), tc.text) << arch;
 
-      InstDefUse def_use(*inst);
+      InstDefUse def_use(*inst, 64);
       EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 5, 1})) << arch << " " << tc.text;
     }
   }
@@ -2604,7 +2604,7 @@ TEST(Cdna3DecodeTest, DsRead2st64AccDestinationUsesAccumulatorRegisterClass) {
   EXPECT_EQ(inst->mnemonic(), "ds_read2st64_b32");
   EXPECT_EQ(inst->disassemble(), "ds_read2st64_b32 acc[62:63], v243 offset0:70 offset1:71");
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 62, 2}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 62, 2}));
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 243, 1}));
@@ -2686,7 +2686,7 @@ TEST(Cdna3DecodeTest, MfmaAccCdUsesAccumulatorRegisterClassForCAndD) {
   EXPECT_EQ(inst->disassemble(),
             "v_mfma_f32_32x32x8_bf16 acc[136:151], acc[84:85], acc[82:83], acc[136:151]");
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 136, 16}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 136, 16}));
   EXPECT_TRUE(def_use.uses.contains({RegClass::ACC_VGPR, 84, 2}));
@@ -2714,7 +2714,7 @@ TEST(Cdna3DecodeTest, MfmaAccBitsSelectIndependentMultiplicandBanks) {
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x8_bf16");
 
-    InstDefUse def_use(*inst);
+    InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains({tc.src0_class, 84, 2})) << inst->disassemble();
     EXPECT_TRUE(def_use.uses.contains({tc.src1_class, 82, 2})) << inst->disassemble();
   }
@@ -2851,7 +2851,7 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
       }
     EXPECT_EQ(fieldless_srcs, 1);
   }
-  InstDefUse saddr_def_use(*saddr_inst);
+  InstDefUse saddr_def_use(*saddr_inst, 64);
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 1}));
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
@@ -2860,7 +2860,7 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "flat_load_b64");
   EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
-  InstDefUse vector_only_def_use(*vector_only_inst);
+  InstDefUse vector_only_def_use(*vector_only_inst, 64);
   EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 2}));
@@ -2899,7 +2899,7 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
       }
     EXPECT_EQ(fieldless_srcs, 1);
   }
-  InstDefUse saddr_def_use(*saddr_inst);
+  InstDefUse saddr_def_use(*saddr_inst, 64);
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 2}));
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
@@ -2908,7 +2908,7 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "global_load_b64");
   EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
-  InstDefUse vector_only_def_use(*vector_only_inst);
+  InstDefUse vector_only_def_use(*vector_only_inst, 64);
   EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 10, 2}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 2}));
@@ -2928,7 +2928,7 @@ TEST(Gfx1250DecodeTest, GlobalStoreUsesScalarOffsetVaddrWidth) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "global_store_b64");
   EXPECT_EQ(inst->disassemble(), "global_store_b64 v10, v[2:3], s[6:7]");
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 10, 2}));
 }
@@ -2950,7 +2950,7 @@ TEST(Gfx1250DecodeTest, Vop3CompareWritesSingleScalarMaskRegister) {
   EXPECT_NE(disasm.find("s2"), std::string::npos) << disasm;
   EXPECT_EQ(disasm.find("s[2:3]"), std::string::npos) << disasm;
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::SGPR, 2, 1}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::SGPR, 3, 1}));
 }
@@ -2968,7 +2968,7 @@ TEST(Cdna4DecodeTest, MfmaF8f6f4DecodesStandaloneVop3pSuffix) {
   EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
   EXPECT_EQ(inst->size(), sizeof(words));
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 36, 4}));
 }
 
@@ -2995,7 +2995,7 @@ TEST(Cdna4DecodeTest, MfmaF8f6f4SourceWidthsFollowFormatSelectors) {
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
 
-    InstDefUse def_use(*inst);
+    InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 0, register_count}));
     EXPECT_FALSE(
         def_use.uses.contains({RegClass::VGPR, 0, static_cast<uint8_t>(register_count + 1)}));
