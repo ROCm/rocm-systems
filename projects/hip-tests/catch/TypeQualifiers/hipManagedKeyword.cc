@@ -17,6 +17,7 @@ __managed__ float m_B[N];
 __managed__ int m_X = 0;
 __managed__ int m_pa_before = 0;
 __managed__ int m_pa_after = 0;
+__managed__ int m_reset = 0;
 
 static __global__ void managed_add(size_t size) {
   size_t i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -28,6 +29,8 @@ static __global__ void managed_add(size_t size) {
 static __global__ void managed_inc() { atomicAdd(&m_X, 1.0f); }
 
 static __global__ void managed_touch(int* p) { (void)*p; }
+
+static __global__ void managed_assign(int value) { m_reset = value; }
 
 HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
   int numDevices = 0;
@@ -98,4 +101,38 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel) {
   REQUIRE(attrs.hostPointer != nullptr);
   REQUIRE(attrs.devicePointer != nullptr);
   REQUIRE(attrs.hostPointer == attrs.devicePointer);
+}
+
+// hipDeviceReset() frees the allocation behind every __managed__ global, so
+// unless the runtime re-arms their lazy allocation the next launch keeps using
+// the freed address and the host read after it faults. Declared last on purpose:
+// the reset invalidates the managed globals the cases above rely on.
+HIP_TEST_CASE(Unit_hipManagedKeyword_AfterDeviceReset) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+
+  // The backing allocation is created lazily on first launch, so this is what
+  // gives the reset below something to free.
+  managed_assign<<<1, 1>>>(42);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(m_reset == 42);
+
+  HIP_CHECK(hipDeviceReset());
+
+  // With more than one device visible the allocation sits on a context spanning
+  // all of them, so the reset cannot free it and the contents must survive.
+  // Reading before any launch also checks that the pointer was left alone.
+  if (numDevices > 1) {
+    REQUIRE(m_reset == 42);
+  }
+
+  // Device and host access both have to work again. On a single device the
+  // pre-reset contents are gone, so only the newly written value is checked.
+  managed_assign<<<1, 1>>>(7);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(m_reset == 7);
 }
