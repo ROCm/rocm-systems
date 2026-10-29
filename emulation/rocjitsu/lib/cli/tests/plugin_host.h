@@ -13,7 +13,8 @@ load_plugin(const char *path, rocjitsu::cli::Command &root, util::DiagnosticEmit
   if (!handle)
     return diagnostic.emit() << "cannot load plugin '" << path << "': " << dlerror();
   std::shared_ptr<void> library(handle, [](void *p) { dlclose(p); });
-  auto entry = reinterpret_cast<RegisterPluginEntry>(dlsym(handle, "register_cli_plugin"));
+  RegisterPluginEntry entry =
+      reinterpret_cast<RegisterPluginEntry>(dlsym(handle, "register_cli_plugin"));
   if (!entry)
     return diagnostic.emit() << "missing register_cli_plugin: " << dlerror();
   RegisterPlugin registration = entry();
@@ -23,7 +24,7 @@ load_plugin(const char *path, rocjitsu::cli::Command &root, util::DiagnosticEmit
   PluginHost host{
       &library,
       [](void *context, rocjitsu::cli::Flag *flag) {
-        auto pin = *static_cast<std::shared_ptr<void> *>(context);
+        std::shared_ptr<void> pin = *static_cast<std::shared_ptr<void> *>(context);
         return std::shared_ptr<rocjitsu::cli::Flag>(
             flag, [pin = std::move(pin)](rocjitsu::cli::Flag *value) { delete value; });
       },

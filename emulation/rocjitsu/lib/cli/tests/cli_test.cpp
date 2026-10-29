@@ -30,29 +30,32 @@ protected:
 TEST_F(CliTest, TypedAndStringUpdatesShareOneValueAndAliases) {
   auto count = std::make_shared<Int64Flag>(FlagInfo{"--count", {"-c", "--limit"}, "Count"}, 64);
   ASSERT_TRUE(root.add_flag(count, diagnostic.emitter()).succeeded());
-  EXPECT_EQ(root.find_flag("-c"), root.find_flag("--count"));
+  std::shared_ptr<Flag> short_count = root.find_flag("-c");
+  std::shared_ptr<Flag> long_count = root.find_flag("--count");
+  EXPECT_EQ(short_count, long_count);
   EXPECT_EQ(root.flags().size(), 1u);
   EXPECT_EQ(root.flags()[0]->info().aliases.size(), 2u);
   ASSERT_TRUE(run({"-c", "128", "input"}).succeeded());
   EXPECT_EQ(count->value(), 128);
   ASSERT_TRUE(count->set_value(-42).succeeded());
-  EXPECT_EQ(root.find_flag("--limit")->format_value(), "-42");
-  ASSERT_TRUE(root.find_flag("--limit")->parse_and_set("256", diagnostic.emitter()).succeeded());
+  std::shared_ptr<Flag> limit = root.find_flag("--limit");
+  EXPECT_EQ(limit->format_value(), "-42");
+  ASSERT_TRUE(limit->parse_and_set("256", diagnostic.emitter()).succeeded());
   EXPECT_EQ(count->value(), 256);
-  EXPECT_TRUE(root.find_flag("--limit")->parse_and_set("bad", diagnostic.emitter()).failed());
+  EXPECT_TRUE(limit->parse_and_set("bad", diagnostic.emitter()).failed());
   EXPECT_NE(diagnostic.message().find("--count"), std::string::npos);
 }
 
 TEST_F(CliTest, NestedScopesPositionalsAndSeparators) {
   auto global = std::make_shared<BoolFlag>(FlagInfo{"--verbose", {}, "Verbose", ValueMode::Switch});
   ASSERT_TRUE(root.add_flag(global, diagnostic.emitter()).succeeded());
-  auto inspect = root.add_command("inspect", diagnostic.emitter());
+  FailureOr<Command *> inspect = root.add_command("inspect", diagnostic.emitter());
   ASSERT_TRUE(inspect.succeeded());
-  auto code = inspect.value()->add_command("code", diagnostic.emitter());
+  FailureOr<Command *> code = inspect.value()->add_command("code", diagnostic.emitter());
   ASSERT_TRUE(code.succeeded());
   auto limit = std::make_shared<Int64Flag>(FlagInfo{"--limit", {"-l"}, "Limit"});
   ASSERT_TRUE(code.value()->add_flag(limit, diagnostic.emitter()).succeeded());
-  auto result =
+  FailureOr<ParsedArguments> result =
       run({"--verbose", "inspect", "code", "first", "-l=-7", "second", "--", "--help", ""});
   ASSERT_TRUE(result.succeeded()) << diagnostic.message();
   EXPECT_EQ(result.value().command, code.value());
@@ -65,8 +68,8 @@ TEST_F(CliTest, NestedScopesPositionalsAndSeparators) {
 }
 
 TEST_F(CliTest, SameSpellingInDifferentCommands) {
-  auto a = root.add_command("a", diagnostic.emitter());
-  auto b = root.add_command("b", diagnostic.emitter());
+  FailureOr<Command *> a = root.add_command("a", diagnostic.emitter());
+  FailureOr<Command *> b = root.add_command("b", diagnostic.emitter());
   ASSERT_TRUE(a.succeeded() && b.succeeded());
   auto left = std::make_shared<Int64Flag>(FlagInfo{"--x", {}, ""});
   auto right = std::make_shared<Int64Flag>(FlagInfo{"--x", {}, ""});
@@ -82,7 +85,7 @@ TEST_F(CliTest, SameSpellingInDifferentCommands) {
 
 TEST_F(CliTest, SharedFlagUsesLastAssignmentAcrossScopes) {
   auto value = std::make_shared<Int64Flag>(FlagInfo{"--count", {"-c"}, "Count"});
-  auto child = root.add_command("child", diagnostic.emitter());
+  FailureOr<Command *> child = root.add_command("child", diagnostic.emitter());
   ASSERT_TRUE(child.succeeded());
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(child.value()->add_flag(value, diagnostic.emitter()).succeeded());
@@ -100,7 +103,8 @@ TEST_F(CliTest, RegisteringSameAddressIsANoopButSameNameIsAnError) {
   ASSERT_EQ(root.groups().size(), 1u);
   EXPECT_EQ(root.groups()[0].description, "Counts");
   EXPECT_EQ(root.flags(), (std::vector<std::shared_ptr<Flag>>{value}));
-  EXPECT_EQ(root.find_flag("-c"), value);
+  std::shared_ptr<Flag> alias = root.find_flag("-c");
+  EXPECT_EQ(alias, value);
   EXPECT_EQ(value->value(), 7);
   auto duplicate = std::make_shared<Int64Flag>(FlagInfo{"--count", {}, "Different flag"});
   EXPECT_TRUE(root.add_flag(duplicate, diagnostic.emitter()).failed());
@@ -114,7 +118,7 @@ TEST_F(CliTest, HelpSectionsPreserveOrderAndDoNotIntroduceScope) {
       FlagInfo{"--count", {"-c"}, "Number of items", ValueMode::Required, "N"});
   auto output = std::make_shared<StringFlag>(
       FlagInfo{"--output", {"-o"}, "Output file", ValueMode::Required, "PATH"});
-  auto child = root.add_command("child", diagnostic.emitter());
+  FailureOr<Command *> child = root.add_command("child", diagnostic.emitter());
   ASSERT_TRUE(child.succeeded());
   ASSERT_TRUE(root.add_flag(help, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(root.add_flags("Processing", {count, output}, diagnostic.emitter()).succeeded());
@@ -125,7 +129,7 @@ TEST_F(CliTest, HelpSectionsPreserveOrderAndDoNotIntroduceScope) {
                                "  --output, -o PATH\n      Output file\n"
                                "\nCommands:\n  child\n");
   EXPECT_EQ(format_help(*child.value()), "Usage: tool child [options] [--] [arguments...]\n");
-  auto result = run({"-c=3", "-o=out.txt", "child", "input"});
+  FailureOr<ParsedArguments> result = run({"-c=3", "-o=out.txt", "child", "input"});
   ASSERT_TRUE(result.succeeded());
   EXPECT_EQ(result.value().positional, (std::vector<std::string>{"input"}));
   EXPECT_EQ(count->value(), 3);
@@ -134,13 +138,14 @@ TEST_F(CliTest, HelpSectionsPreserveOrderAndDoNotIntroduceScope) {
 
 TEST_F(CliTest, HelpUsesCustomOrEmptyPositionalUsage) {
   root.set_positional_usage("INPUT...");
-  auto launch = root.add_command("launch", diagnostic.emitter(), PositionalMode::AfterSeparator);
+  FailureOr<Command *> launch =
+      root.add_command("launch", diagnostic.emitter(), PositionalMode::AfterSeparator);
   ASSERT_TRUE(launch.succeeded());
   launch.value()->set_positional_usage("APP [ARGS...]");
   auto config =
       std::make_shared<StringFlag>(FlagInfo{"--config", {}, "Config", ValueMode::Required, "PATH"});
   ASSERT_TRUE(launch.value()->add_flag(config, diagnostic.emitter()).succeeded());
-  auto status = root.add_command("status", diagnostic.emitter());
+  FailureOr<Command *> status = root.add_command("status", diagnostic.emitter());
   ASSERT_TRUE(status.succeeded());
   status.value()->set_positional_usage("");
   EXPECT_EQ(format_help(root), "Usage: tool [options] <command> [--] INPUT...\n"
@@ -247,11 +252,11 @@ TEST_F(CliTest, ValueGrammarAndOwnedStrings) {
   EXPECT_TRUE(toggle->value());
   EXPECT_TRUE(run({"--text", "--"}).failed());
   EXPECT_TRUE(run({"--text"}).failed());
-  for (std::string_view value : {"1", "yes", "y", "true", "t", "on"}) {
+  for (std::string_view value : {"1", "yes", "YeS", "y", "true", "t", "on", "oN"}) {
     ASSERT_TRUE(toggle->parse_and_set(value, diagnostic.emitter()).succeeded()) << value;
     EXPECT_TRUE(toggle->value()) << value;
   }
-  for (std::string_view value : {"0", "no", "n", "false", "f", "off"}) {
+  for (std::string_view value : {"0", "no", "No", "n", "false", "f", "off", "OFF"}) {
     ASSERT_TRUE(toggle->parse_and_set(value, diagnostic.emitter()).succeeded()) << value;
     EXPECT_FALSE(toggle->value()) << value;
   }
@@ -281,22 +286,23 @@ TEST_F(CliTest, FailureStopsImmediatelyWithoutRollback) {
 
 TEST_F(CliTest, CommandSelectionDoesNotExecuteAndSeparatorStopsSelection) {
   ASSERT_TRUE(root.add_command("child", diagnostic.emitter()).succeeded());
-  auto empty = run({});
+  FailureOr<ParsedArguments> empty = run({});
   ASSERT_TRUE(empty.succeeded());
   EXPECT_EQ(empty.value().command, &root);
   EXPECT_TRUE(run({"unknown"}).failed());
-  auto result = run({"--", "child", "--whatever"});
+  FailureOr<ParsedArguments> result = run({"--", "child", "--whatever"});
   ASSERT_TRUE(result.succeeded());
   EXPECT_EQ(result.value().command, &root);
   EXPECT_EQ(result.value().positional, (std::vector<std::string>{"child", "--whatever"}));
 }
 
 TEST_F(CliTest, NestedCommandCanRequireSeparatorBeforePositionals) {
-  auto launch = root.add_command("launch", diagnostic.emitter(), PositionalMode::AfterSeparator);
+  FailureOr<Command *> launch =
+      root.add_command("launch", diagnostic.emitter(), PositionalMode::AfterSeparator);
   ASSERT_TRUE(launch.succeeded());
   EXPECT_TRUE(run({"launch", "application"}).failed());
   EXPECT_NE(diagnostic.message().find("tool launch: expected --"), std::string::npos);
-  auto result = run({"launch", "--", "application", "--flag"});
+  FailureOr<ParsedArguments> result = run({"launch", "--", "application", "--flag"});
   ASSERT_TRUE(result.succeeded()) << diagnostic.message();
   EXPECT_EQ(result.value().command, launch.value());
   EXPECT_TRUE(result.value().saw_separator);
@@ -312,14 +318,14 @@ TEST(CliValues, LauncherRequiresSeparatorAndOwnsForwardedArguments) {
   EXPECT_TRUE(parse(command, bare, diagnostic.emitter()).failed());
   EXPECT_NE(diagnostic.message().find("expected --"), std::string::npos);
   const std::array<std::string_view, 1> empty_separator{"--"};
-  auto empty = parse(command, empty_separator, diagnostic.emitter());
+  FailureOr<ParsedArguments> empty = parse(command, empty_separator, diagnostic.emitter());
   ASSERT_TRUE(empty.succeeded());
   EXPECT_TRUE(empty.value().saw_separator);
   EXPECT_TRUE(empty.value().positional.empty());
   std::string name = "application";
   const std::array<std::string_view, 7> args{"--config", "file.json", "--", name,
                                              "--config", "",          "--"};
-  auto result = parse(command, args, diagnostic.emitter());
+  FailureOr<ParsedArguments> result = parse(command, args, diagnostic.emitter());
   ASSERT_TRUE(result.succeeded());
   name.assign("changed");
   EXPECT_EQ(result.value().positional,
@@ -329,7 +335,7 @@ TEST(CliValues, LauncherRequiresSeparatorAndOwnsForwardedArguments) {
 
 TEST_F(CliTest, RegistrationSealsButValuesRemainWritable) {
   auto value = std::make_shared<Int64Flag>(FlagInfo{"--x", {}, ""});
-  auto child = root.add_command("child", diagnostic.emitter());
+  FailureOr<Command *> child = root.add_command("child", diagnostic.emitter());
   ASSERT_TRUE(child.succeeded());
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(run({}).succeeded());
@@ -337,7 +343,8 @@ TEST_F(CliTest, RegistrationSealsButValuesRemainWritable) {
       root.add_flag(std::make_shared<Int64Flag>(FlagInfo{"--y", {}, ""}), diagnostic.emitter())
           .failed());
   EXPECT_TRUE(child.value()->add_command("late", diagnostic.emitter()).failed());
-  EXPECT_TRUE(root.find_flag("--x")->parse_and_set("7", diagnostic.emitter()).succeeded());
+  std::shared_ptr<Flag> registered = root.find_flag("--x");
+  EXPECT_TRUE(registered->parse_and_set("7", diagnostic.emitter()).succeeded());
   EXPECT_EQ(value->value(), 7);
 }
 
@@ -349,7 +356,7 @@ TEST_F(CliTest, IndependentInstancesAndLifetime) {
     ASSERT_TRUE(other.add_flag(value, diagnostic.emitter()).succeeded());
     value.reset();
     ASSERT_FALSE(weak.expired());
-    auto retained = other.find_flag("--x");
+    std::shared_ptr<Flag> retained = other.find_flag("--x");
     ASSERT_TRUE(retained->parse_and_set("9", diagnostic.emitter()).succeeded());
     EXPECT_EQ(root.find_flag("--x"), nullptr);
   }
@@ -365,13 +372,14 @@ TEST_F(CliTest, IndependentInstancesAndLifetime) {
 TEST_F(CliTest, MetadataAndHelpRemainStableWhileRegistering) {
   auto value = std::make_shared<Int64Flag>(FlagInfo{"--count", {"-c"}, "Item count"});
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
-  auto first = root.find_flag("--count");
+  std::shared_ptr<Flag> first = root.find_flag("--count");
   for (int i = 0; i < 100; ++i)
     ASSERT_TRUE(
         root.add_flag(std::make_shared<Int64Flag>(FlagInfo{"--x" + std::to_string(i), {}, ""}),
                       diagnostic.emitter())
             .succeeded());
-  EXPECT_EQ(root.find_flag("-c"), first);
+  std::shared_ptr<Flag> alias = root.find_flag("-c");
+  EXPECT_EQ(alias, first);
   EXPECT_NE(format_help(root).find("--count, -c VALUE"), std::string::npos);
   EXPECT_NE(format_help(root).find("Item count"), std::string::npos);
   static_assert(!std::is_copy_constructible_v<Command>);
@@ -448,7 +456,8 @@ TEST_F(CliTest, CustomValidationSharesTypedAndStringPath) {
   auto value = std::make_shared<PositiveFlag>(FlagInfo{"--positive", {}, ""});
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
   EXPECT_TRUE(value->set_value(0, diagnostic.emitter()).failed());
-  EXPECT_TRUE(root.find_flag("--positive")->parse_and_set("0", diagnostic.emitter()).failed());
+  std::shared_ptr<Flag> positive = root.find_flag("--positive");
+  EXPECT_TRUE(positive->parse_and_set("0", diagnostic.emitter()).failed());
   EXPECT_TRUE(run({"--positive=0"}).failed());
   EXPECT_EQ(diagnostic.message(), "tool: --positive: must be positive");
   ASSERT_TRUE(run({"--positive=42"}).succeeded());
@@ -525,7 +534,7 @@ TEST(CliValues, DeterministicRoundTripsAndMalformedArguments) {
                                                "42"};
     bool emitted = false;
     auto sink = [&](std::string_view message) { emitted = !message.empty(); };
-    auto parsed = parse(command, args, DiagnosticEmitter(sink));
+    FailureOr<ParsedArguments> parsed = parse(command, args, DiagnosticEmitter(sink));
     if (parsed.failed())
       EXPECT_TRUE(emitted);
     else

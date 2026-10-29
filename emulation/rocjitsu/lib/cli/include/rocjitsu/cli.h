@@ -49,6 +49,11 @@ public:
   Flag &operator=(const Flag &) = delete;
   const FlagInfo &info() const { return info_; }
   virtual std::string format_value() const = 0;
+  /// @brief Whether this flag type can consume the implicit "true" from ValueMode::Switch.
+  ///
+  /// Custom flags that intentionally parse switch values can keep the default.
+  /// Value-only flags override this to reject invalid tool definitions at registration time.
+  virtual bool allows_switch_mode() const { return true; }
   util::Result parse_and_set(std::string_view text, util::DiagnosticEmitter diagnostic);
 
 protected:
@@ -66,6 +71,10 @@ util::FailureOr<int64_t> parse_int(std::string_view text, util::DiagnosticEmitte
 /// @brief Parse an unsigned decimal integer for custom flags.
 util::FailureOr<uint64_t> parse_uint(std::string_view text, util::DiagnosticEmitter diagnostic);
 
+/// @brief Boolean flag accepting common case-insensitive textual boolean values.
+///
+/// Textual updates accept 1/yes/y/true/t/on and 0/no/n/false/f/off, ignoring case.
+/// A bare switch flag passes the same parser the implied value "true".
 class BoolFlag final : public Flag {
 public:
   explicit BoolFlag(FlagInfo info, bool initial = false) : Flag(std::move(info)), value_(initial) {}
@@ -84,6 +93,7 @@ public:
   int64_t value() const { return value_; }
   util::Result set_value(int64_t value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
+  bool allows_switch_mode() const override { return false; }
 
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
@@ -97,6 +107,7 @@ public:
   uint64_t value() const { return value_; }
   util::Result set_value(uint64_t value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
+  bool allows_switch_mode() const override { return false; }
 
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
@@ -110,6 +121,7 @@ public:
   const std::string &value() const { return value_; }
   util::Result set_value(std::string value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
+  bool allows_switch_mode() const override { return false; }
 
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;

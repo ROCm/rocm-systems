@@ -37,11 +37,6 @@ bool equals_ignore_case(std::string_view lhs, std::string_view rhs) {
   return lhs.size() == rhs.size() && std::ranges::equal(lhs, rhs, {}, lower, lower);
 }
 
-bool is_value_only_builtin(const Flag &flag) {
-  return dynamic_cast<const Int64Flag *>(&flag) || dynamic_cast<const UInt64Flag *>(&flag) ||
-         dynamic_cast<const StringFlag *>(&flag);
-}
-
 template <typename T>
 FailureOr<T> parse_integer(std::string_view text, DiagnosticEmitter diagnostic,
                            std::string_view kind) {
@@ -166,9 +161,9 @@ Result Command::add_flags(std::string description, std::vector<std::shared_ptr<F
     if (!flag)
       return diagnostic.emit() << path() << ": null flag";
     const auto &info = flag->info();
-    if (info.value_mode == ValueMode::Switch && is_value_only_builtin(*flag))
+    if (info.value_mode == ValueMode::Switch && !flag->allows_switch_mode())
       return diagnostic.emit() << path() << ": " << info.name
-                               << " cannot use switch mode with this built-in flag type";
+                               << " cannot use switch mode with this flag type";
     if (find_flag(info.name).get() == flag.get() || !objects.insert(flag.get()).second)
       continue;
     additions.push_back(flag);
@@ -190,7 +185,7 @@ Result Command::add_flags(std::string description, std::vector<std::shared_ptr<F
   // Consecutive ungrouped additions share an Options section. Named batches
   // always start a section; preserve registration order, even across plugins.
   if (description.empty() && !groups_.empty() && groups_.back().description.empty()) {
-    auto &entries = groups_.back().flags;
+    std::vector<std::shared_ptr<Flag>> &entries = groups_.back().flags;
     entries.insert(entries.end(), additions.begin(), additions.end());
   } else {
     groups_.push_back({std::move(description), std::move(additions)});
@@ -311,7 +306,7 @@ std::string format_help(const Command &command) {
     out << "\n" << (group.description.empty() ? "Options" : group.description) << ":\n";
     for (const auto &flag : group.flags) {
       out << "  " << flag->info().name;
-      for (const auto &alias : flag->info().aliases)
+      for (const std::string &alias : flag->info().aliases)
         out << ", " << alias;
       if (flag->info().value_mode == ValueMode::Required)
         out << ' '
