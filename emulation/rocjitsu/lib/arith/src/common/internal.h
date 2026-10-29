@@ -7,13 +7,13 @@
 #ifndef RJ_ARITH_INTERNAL_H_
 #define RJ_ARITH_INTERNAL_H_
 
+#include "common/bits.h"
 #include "rj_arith/rj_arith.h"
 
-#include <bit>
 #include <stdint.h>
 #include <type_traits>
 
-namespace rocjitsu::arith {
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // Floating matrix arithmetic uses its fixed model, ignoring guest rounding,
 // denormal and IEEE controls. gfx11 additionally ignores its DX10 control.
@@ -44,10 +44,10 @@ template <int Lanes>
 using ExecMask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
 
 // Reinterpret FP32 bits as float without conversion or aliasing violations.
-inline float as_float(uint32_t v) { return std::bit_cast<float>(v); }
+inline float as_float(uint32_t v) { return rocjitsu::arith::bit_cast<float>(v); }
 
 // Return the FP32 bit pattern without numeric conversion.
-inline uint32_t as_bits(float f) { return std::bit_cast<uint32_t>(f); }
+inline uint32_t as_bits(float f) { return rocjitsu::arith::bit_cast<uint32_t>(f); }
 
 // Resolve the legacy rocjitsu policy selected by this entry point's wrapper.
 // Explicit semantics are never reinterpreted.
@@ -55,6 +55,11 @@ inline uint64_t resolve_compatibility(uint64_t flags, uint64_t semantics) {
   return (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY
              ? (flags & ~RJ_ARITH_SEMANTICS_MASK) | semantics
              : flags;
+}
+
+// Test the caller-selected CPU level, ignoring semantics and fine-grained feature bits.
+inline bool cpu_level_at_least(uint64_t flags, uint64_t level) {
+  return (flags & RJ_ARITH_CPU_MASK) >= level;
 }
 
 // These queries operate on resolved semantics; validation rejects reserved values.
@@ -92,16 +97,6 @@ inline int validate(uint64_t flags, uint64_t unsupported_instruction_flags,
   return RJ_ARITH_SUCCESS;
 }
 
-// Snapshot of CPUID and XCR0 for deterministic OS-state/feature decoder tests.
-struct CpuState {
-  uint32_t leaf1_ecx = 0, leaf7_ebx = 0, leaf7_ecx = 0, leaf71_eax = 0, ext1_ecx = 0;
-  uint64_t xcr0 = 0;
-};
-
-// Return the highest supported CPU level from captured CPUID/XCR0 state; performs no host
-// queries.
-uint64_t decode_cpu(const CpuState &s);
-
-} // namespace rocjitsu::arith
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
 
 #endif
