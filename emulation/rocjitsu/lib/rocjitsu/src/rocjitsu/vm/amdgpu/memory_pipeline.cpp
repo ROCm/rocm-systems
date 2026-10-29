@@ -1319,6 +1319,9 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   // instruction before global or LDS side effects rather than narrowing a
   // DDS address into another workgroup's LDS allocation.
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
+  // Address-formation violations must precede all transport and LDS side effects.
+  if (d.memviol_lane_mask & request_lanes)
+    return VmAccessOutcome::ApertureViolation;
   if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Unsupported;
   const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
@@ -1446,6 +1449,9 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   d.wf_size = wf.wf_size();
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   // Uniform shared-aperture FLAT must reject unsupported DDS too.
+  // Address-formation violations must precede all transport and LDS side effects.
+  if (d.memviol_lane_mask & request_lanes)
+    return VmAccessOutcome::ApertureViolation;
   if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Unsupported;
   if (rejects_misaligned_lds_atomic(d, wf, request_lanes))

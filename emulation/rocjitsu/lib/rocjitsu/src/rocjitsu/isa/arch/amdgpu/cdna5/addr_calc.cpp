@@ -155,6 +155,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
       const auto translated =
           amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane);
       if (translated.private_address) {
+        if (d.atomic_op != amdgpu::AtomicOp::NONE && d.elem_size == sizeof(uint64_t))
+          d.memviol_lane_mask |= uint64_t{1} << lane;
         addr = translated.value;
         d.scratch_swizzle = true;
         d.requires_scratch_backing = true;

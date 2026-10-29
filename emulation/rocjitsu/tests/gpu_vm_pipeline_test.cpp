@@ -727,6 +727,51 @@ TEST(GpuVmPipeline, ScalarMemviolPrecedesDebuggerTranslationProbe) {
   }
 }
 
+TEST(GpuVmPipeline, PrivateAtomicMemviolPrecedesDebuggerTranslationProbe) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(
+      context.initialize(/*legacy_cache_compatible=*/false, /*xcnt_checks=*/true));
+  ASSERT_NE(context.wf, nullptr);
+  constexpr uint64_t code = 0x1000;
+  constexpr uint64_t scratch_base = 0x8000;
+  const auto words = cdna5::build_vflat(cdna5::kFlatAtomicAddU64Vflat,
+                                        {.saddr = 124, .vdst = 8, .th = 1, .vsrc = 4});
+  context.external->store(code, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+  context.wf->set_scratch_base(scratch_base);
+  context.wf->set_scratch_lane_size(128);
+  context.wf->set_exec(3);
+  context.wf->pc = code;
+  const uint32_t vb = context.wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    const uint64_t address = lane == 0 ? 0x20000 : scratch_base + 32 + (uint64_t{1} << 52);
+    context.cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
+    context.cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+    context.cu->write_vgpr(vb + 4, lane, 1);
+    context.cu->write_vgpr(vb + 5, lane, 0);
+    context.cu->write_vgpr(vb + 8, lane, 0xdeadbeef);
+  }
+  context.cu->set_debug_active(true);
+  uint32_t faults = 0;
+  context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &wave, uint64_t, bool,
+                                               uint64_t issue_pc, amdgpu::VmAccessOutcome outcome) {
+    ++faults;
+    EXPECT_EQ(outcome, amdgpu::VmAccessOutcome::ApertureViolation);
+    EXPECT_EQ(issue_pc, code);
+    EXPECT_EQ(wave.pc, code + sizeof(words));
+    wave.set_fatal_exception_pending(true);
+    wave.set_debug_suspended(true);
+    return true;
+  });
+  context.cu->step();
+  EXPECT_EQ(faults, 1u);
+  EXPECT_TRUE(context.reported_faults.empty());
+  EXPECT_TRUE(context.wf->wait_counters().empty());
+  EXPECT_EQ(context.external->write_calls, 0u);
+  EXPECT_EQ(context.external->atomic_load_calls, 0u);
+  for (uint32_t lane = 0; lane < 2; ++lane)
+    EXPECT_EQ(context.cu->read_vgpr(vb + 8, lane), 0xdeadbeefu);
+}
+
 TEST(GpuVmPipeline, ScratchWithoutBackingIsATerminalFault) {
   for (const auto kind :
        {amdgpu::VmAccessKind::Read, amdgpu::VmAccessKind::Write, amdgpu::VmAccessKind::Atomic}) {

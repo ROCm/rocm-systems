@@ -45,6 +45,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
@@ -1101,6 +1103,122 @@ TEST(Rdna4MemoryExecutionHarness, MisalignedLdsAtomicsRejectBeforeAnyLaneCommits
 
 TEST(Gfx1250MemoryExecutionHarness, MisalignedLdsAtomicsRejectBeforeAnyLaneCommits) {
   check_lds_atomic_alignment<cdna5::Isa>(ROCJITSU_CODE_ARCH_CDNA5);
+}
+
+// RDNA3/3.5/4 and CDNA5 forbid private FLAT atomic64 independently of
+// the backing layout. An ordinary global lane must not commit first.
+template <typename Isa, typename Encode>
+void check_private_flat_atomic_width(rj_code_arch_t arch, Encode encode) {
+  for (const bool wide : {false, true}) {
+    for (const bool returns : {false, true}) {
+      for (const bool mixed : {false, true}) {
+        for (const bool private_active : {false, true}) {
+          SCOPED_TRACE(testing::Message() << "wide=" << wide << " returns=" << returns << " mixed="
+                                          << mixed << " private_active=" << private_active);
+          amdgpu::GpuMemory memory("private_atomic");
+          amdgpu::L2Cache cache("private_atomic_cache");
+          amdgpu::ComputeUnitCore::Config config{};
+          config.arch = arch;
+          config.num_wf_slots = 1;
+          config.sgprs_per_wf = 128;
+          config.vgprs_per_wf = 256;
+          config.lds_size_kb = 64;
+          MemoryTestCu<Isa> cu("private_atomic", config, &memory, &cache);
+          constexpr uint64_t shared_base = uint64_t{1} << 48;
+          constexpr uint64_t private_base = uint64_t{2} << 48;
+          constexpr uint64_t scratch_base = 0x8000;
+          constexpr uint32_t offset = 32;
+          cu.set_apertures(shared_base, shared_base + UINT32_MAX, private_base,
+                           private_base + UINT32_MAX);
+          auto *wave = cu.dispatch_wf(0, 0, 128, 256, 32);
+          ASSERT_NE(wave, nullptr);
+          wave->set_exec((mixed ? 1 : 0) | (private_active ? 2 : 0));
+          wave->set_scratch_base(scratch_base);
+          wave->set_scratch_lane_size(128);
+          const bool cdna5 = arch == ROCJITSU_CODE_ARCH_CDNA5;
+          const uint64_t private_address =
+              cdna5 ? scratch_base + offset + (uint64_t{1} << 52) : private_base + offset;
+          const uint64_t backing =
+              cdna5 ? scratch_base + (offset / 4) * 32 * 4 + 4 : scratch_base + 128 + offset;
+          constexpr uint64_t initial = 0x1234567800000010ull;
+          memory.write64(0x2000, initial);
+          memory.write64(backing, initial);
+          const uint32_t vb = wave->vgpr_alloc().base;
+          for (uint32_t lane = 0; lane < 2; ++lane) {
+            const uint64_t address = lane == 0 ? 0x2000 : private_address;
+            cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
+            cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+            cu.write_vgpr(vb + 4, lane, 1);
+            cu.write_vgpr(vb + 5, lane, 0);
+            cu.write_vgpr(vb + 8, lane, 0xdeadbeef);
+            cu.write_vgpr(vb + 9, lane, 0xdeadbeef);
+          }
+          const auto words = encode(wide, returns);
+          auto decoder = Decoder::create(arch);
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
+          const bool fault = wide && private_active;
+          EXPECT_EQ(inst->data_as<amdgpu::VectorMemState>()->memviol_lane_mask, fault ? 2u : 0u);
+          EXPECT_EQ(cu.route_memory_inst(inst.release(), *wave),
+                    fault ? amdgpu::VmAccessOutcome::ApertureViolation
+                          : amdgpu::VmAccessOutcome::Complete);
+          cu.flush_all();
+          EXPECT_EQ(memory.read64(0x2000), initial + (!fault && mixed ? 1 : 0));
+          EXPECT_EQ(memory.read64(backing), initial + (!fault && private_active ? 1 : 0));
+          for (uint32_t lane = 0; lane < 2; ++lane) {
+            const bool completed = !fault && returns && (lane == 0 ? mixed : private_active);
+            EXPECT_EQ(cu.read_vgpr(vb + 8, lane), completed ? 0x10u : 0xdeadbeefu);
+            EXPECT_EQ(cu.read_vgpr(vb + 9, lane), completed && wide ? 0x12345678u : 0xdeadbeefu);
+          }
+          EXPECT_TRUE(wave->wait_counters().empty());
+          wave->halt();
+        }
+      }
+    }
+  }
+}
+
+TEST(Rdna3MemoryExecutionHarness, PrivateFlatAtomic64RaisesApertureViolation) {
+  check_private_flat_atomic_width<rdna3::Isa>(
+      ROCJITSU_CODE_ARCH_RDNA3, [](bool wide, bool returns) {
+        std::array<uint32_t, 3> words{};
+        std::ranges::copy(
+            rdna3::build_flat(
+                wide ? rdna3::kFlatAtomicAddU64Flat : rdna3::kFlatAtomicAddU32Flat,
+                {.glc = uint8_t(returns), .seg = 0, .addr = 0, .data = 4, .saddr = 127, .vdst = 8}),
+            words.begin());
+        return words;
+      });
+}
+
+TEST(Rdna3_5MemoryExecutionHarness, PrivateFlatAtomic64RaisesApertureViolation) {
+  check_private_flat_atomic_width<rdna3_5::Isa>(
+      ROCJITSU_CODE_ARCH_RDNA3_5, [](bool wide, bool returns) {
+        std::array<uint32_t, 3> words{};
+        std::ranges::copy(
+            rdna3_5::build_flat(
+                wide ? rdna3_5::kFlatAtomicAddU64Flat : rdna3_5::kFlatAtomicAddU32Flat,
+                {.glc = uint8_t(returns), .seg = 0, .addr = 0, .data = 4, .saddr = 127, .vdst = 8}),
+            words.begin());
+        return words;
+      });
+}
+
+TEST(Rdna4MemoryExecutionHarness, PrivateFlatAtomic64RaisesApertureViolation) {
+  check_private_flat_atomic_width<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4, [](bool wide,
+                                                                           bool returns) {
+    return rdna4::build_vflat(wide ? rdna4::kFlatAtomicAddU64Vflat : rdna4::kFlatAtomicAddU32Vflat,
+                              {.saddr = 124, .vdst = 8, .th = uint8_t(returns), .vsrc = 4});
+  });
+}
+
+TEST(Gfx1250MemoryExecutionHarness, PrivateFlatAtomic64RaisesApertureViolation) {
+  check_private_flat_atomic_width<cdna5::Isa>(ROCJITSU_CODE_ARCH_CDNA5, [](bool wide,
+                                                                           bool returns) {
+    return cdna5::build_vflat(wide ? cdna5::kFlatAtomicAddU64Vflat : cdna5::kFlatAtomicAddU32Vflat,
+                              {.saddr = 124, .vdst = 8, .th = uint8_t(returns), .vsrc = 4});
+  });
 }
 
 TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAllocations) {

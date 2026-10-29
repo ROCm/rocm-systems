@@ -190,6 +190,8 @@ public:
   /// FLAT counter participation selected from the resolved requesting lanes.
   /// Unset before routing; decoded metadata continues to describe all domains.
   std::optional<MemoryIssueInfo> routed_issue_info;
+  /// Address formation raised MEMVIOL for these lanes; reject before memory access.
+  uint64_t memviol_lane_mask = 0;
   // Routing normalizes ordinary LDS lanes in per_lane_addr once, including
   // mixed FLAT requests. CDNA5 DDS has no backing implementation and faults before
   // either pipeline accesses memory. Original aperture addresses live only in

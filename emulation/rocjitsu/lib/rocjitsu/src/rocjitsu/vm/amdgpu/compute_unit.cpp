@@ -2308,10 +2308,12 @@ template <bool EnableAsync>
       // atomic whose decoder left elem_size unset would fault on every lane of
       // a perfectly mapped buffer.
       dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_elems * d.elem_size);
-      dbg_addrs.reserve(d.wf_size);
-      for (uint32_t lane = 0; lane < d.wf_size; ++lane)
-        if (d.lane_mask & (1ULL << lane))
-          dbg_addrs.push_back(d.per_lane_addr[lane]);
+      if ((d.memviol_lane_mask & transpose_request_lane_mask(d, active->wf_size())) == 0) {
+        dbg_addrs.reserve(d.wf_size);
+        for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+          if (d.lane_mask & (1ULL << lane))
+            dbg_addrs.push_back(d.per_lane_addr[lane]);
+      }
     }
   }
   // One predicate for the whole access, used both to decide that this
