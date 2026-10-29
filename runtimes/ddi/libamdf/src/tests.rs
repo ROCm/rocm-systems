@@ -137,6 +137,58 @@ fn parameters() -> amdf_instance_create_info_t {
 }
 
 #[test]
+fn busy_instance_does_not_affect_an_independent_instance() {
+    let mut create = parameters();
+    create.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
+    let mut first = std::ptr::null_mut();
+    let mut second = std::ptr::null_mut();
+    // SAFETY: Each input and output remains live for its call; destruction is
+    // serialized and the reservation is released before its parent instance.
+    unsafe {
+        assert_eq!(instance::create(&raw const create, &raw mut first), 0);
+        assert_eq!(instance::create(&raw const create, &raw mut second), 0);
+        assert_ne!(first, second);
+
+        let mut caps = amdf_memory_reservation_capabilities_t {
+            r#type: AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES,
+            structure_size: size_of::<amdf_memory_reservation_capabilities_t>() as u32,
+            ..Default::default()
+        };
+        assert_eq!(reservation::host_capabilities(first, &raw mut caps), 0);
+        let access = amdf_memory_reservation_access_t {
+            address_domain_ordinal: AMDF_ADDRESS_DOMAIN_ORDINAL_NONE,
+            access: AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+            ..Default::default()
+        };
+        let reservation_create = amdf_memory_reservation_create_info_t {
+            r#type: AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
+            structure_size: size_of::<amdf_memory_reservation_create_info_t>() as u32,
+            byte_length: caps.reservation_granularity,
+            access_count: 1,
+            accesses: &raw const access,
+            ..Default::default()
+        };
+        let mut owner = std::ptr::null_mut();
+        assert_eq!(
+            reservation::create(first, &raw const reservation_create, &raw mut owner),
+            0
+        );
+        assert_eq!(instance::destroy(first), support::BUSY);
+
+        let mut scope = std::ptr::null_mut();
+        let mut count = 0;
+        assert_eq!(
+            memory::instance_scopes(second, 1, &raw mut scope, &raw mut count),
+            0
+        );
+        assert!(!scope.is_null());
+        assert_eq!(instance::destroy(second), 0);
+        assert_eq!(reservation::destroy(owner), 0);
+        assert_eq!(instance::destroy(first), 0);
+    }
+}
+
+#[test]
 fn larger_records_keep_their_tail_and_unknown_extensions_are_rejected() {
     #[repr(C)]
     struct Extended {
