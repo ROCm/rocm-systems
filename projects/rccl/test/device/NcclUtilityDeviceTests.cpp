@@ -539,8 +539,8 @@ TEST_F(NcclUtilityDeviceTest, LoadConstLdgScalars) {
 
 // ---------------------------------------------------------------------------
 // ncclCoopWarpSpan::sync, the software barrier on AMD: two 2-warp spans with distinct warp0 and id in one CTA.
-// Every round one warp per span is delayed, then both must see each other's write. The spans run one after the
-// other, so a barrier that waits on the whole CTA fails too.
+// Every round one warp per span is delayed, then both must see each other's write. Span 1 starts halfway through
+// span 0, so a barrier that waits on the whole CTA, or one barrier slot shared by both spans, fails too.
 // ---------------------------------------------------------------------------
 
 constexpr int kNumSpans = 2;
@@ -566,8 +566,9 @@ __global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone) {
   volatile int* vslot = slot;
   volatile int* vdone = &span0Done;
   int bad = 0;
-  // Span 1 starts only after span 0 has finished all its rounds. That only happens if span 0's sync()
-  // waits for span 0 alone, so a CTA-wide barrier times out here and counts as a mismatch.
+  // Span 1 starts once span 0 is halfway through. Span 0 only gets there if its sync() waits for span 0 alone,
+  // so a CTA-wide barrier times out here and counts as a mismatch. The second half runs both spans at once,
+  // so spans that share one barrier slot fail too.
   if (spanId == 1) {
     const uint64_t t0 = wall_clock64();
     while (*vdone == 0 && wall_clock64() - t0 < kSpanStartWaitTicks) {}
@@ -584,10 +585,10 @@ __global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone) {
     if (lane == 0 && vslot[w ^ 1] != r) ++bad;
     span.sync();
     ++rounds;
-  }
-  if (spanId == 0 && lane == 0) {
-    __threadfence_block();
-    *vdone = 1;
+    if (spanId == 0 && r == kSpanRounds / 2 && lane == 0) {
+      __threadfence_block();
+      *vdone = 1;
+    }
   }
   if (lane == 0) {
     atomicAdd(&mismatches[spanId], bad);
