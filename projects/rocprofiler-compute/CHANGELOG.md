@@ -103,6 +103,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed the analysis database values from `analyze --output-format db` and `csv` so they match the terminal calculation.
+  * `Percent of Peak` rows are stored for every metric flagged for it that has a value and a peak column. Before this fix, no database stored them.
+  * The gfx950 MFMA F6F4 and gfx1250 WMMA F6F4 and WMMA FP64 peak metrics are filled from `roofline.csv`. They were NULL before. Every `roofline.csv` column is now a peak, and a missing or invalid `roofline.csv` leaves the peaks NULL with one warning.
+  * `--specs-correction` values no longer blank the metrics that use system variables.
+  * A `Percent of Peak` that cannot be calculated is stored as NULL, not left out.
+  * A non-numeric required `sysinfo.csv` value is treated as missing. The terminal path warns and uses 0; it used to stop with a `ValueError`. The database path stores NULL.
+  * `analyze` halts before it writes the database when a counter-backed workload reports zero GPU activity (`GRBM_GUI_ACTIVE == 0`), as the terminal output already did.
+
 * Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. `--list-stats` now only prints its listing.
 
 * Fixed `--torch-trace` errors in models that use lazy layers such as `nn.LazyLinear`.

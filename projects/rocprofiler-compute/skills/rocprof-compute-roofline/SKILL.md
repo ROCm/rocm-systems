@@ -103,6 +103,7 @@ run writes it as `analysis.db` in the run folder whose path it prints last.
 | Profiled with `--no-roof` | re-profile without it |
 | Architecture has no microbenchmark support | use Speed-of-Light and the `rocprof-compute-memory` skill instead |
 | `roofline.csv` absent from the workload directory | the benchmark did not complete; check the profile log |
+| `roofline.csv` fails validation (analyze warns with the error) | the benchmark output is incomplete or corrupt; re-profile to regenerate it |
 
 The concepts behind the ceilings are in the
 [performance model](../../docs/conceptual/performance-model.rst).

@@ -75,6 +75,12 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.common import EVAL_BUILTINS, ValuDualIssueDetector
+from utils.metrics.evaluation_pipeline import (
+    check_gui_active_counter,
+    create_empirical_peaks_dict,
+    is_pct_of_peak_flagged,
+    type_sys_vars,
+)
 from utils.metrics.expression import transform_expression
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
@@ -82,11 +88,7 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
     to_noise_clamp,
 )
-from utils.mi_gpu_spec import mi_gpu_specs, roofline_column
-from utils.roofline_calc import (
-    SUPPORTED_DATATYPES,
-    OpsSupport,
-)
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
@@ -331,6 +333,7 @@ class db_analysis(OmniAnalyze_Base):
         super().pre_processing()
 
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
+        self._typed_sys_info_per_workload = self.calc_typed_sys_info()
         self._pc_sampling_tool_data_per_workload = (
             {path: load_pc_sampling_results(path) for path in self._runs}
             if self.pc_sampling_collected()
@@ -338,6 +341,9 @@ class db_analysis(OmniAnalyze_Base):
         )
         self._pmc_df_per_workload = self.calc_pmc_df_data()
         self._pmc_df_per_workload = self.apply_pmc_filters()
+        # Same guard as the CLI, on the filtered counters, before anything is written.
+        for workload_path, pmc_df in self._pmc_df_per_workload.items():
+            check_gui_active_counter(self._runs[workload_path].sys_info.iloc[0], pmc_df)
         self._dispatch_data_per_workload = self.calc_dispatch_data(
             self._pc_sampling_tool_data_per_workload
         )
@@ -651,6 +657,11 @@ class db_analysis(OmniAnalyze_Base):
         return pmc_df_per_workload
 
     def calc_roofline_ceilings(self) -> dict[str, dict[str, Any]]:
+        """Read every validated roofline.csv column as an empirical peak.
+
+        Peaks come from the first row. A workload with no entry gets NULL peaks
+        in calc_expressions, so an unsupported or invalid roofline.csv only warns.
+        """
         roofline_ceilings_per_workload: dict[str, dict[str, Any]] = {}
 
         for workload_path in self._runs.keys():
@@ -660,37 +671,38 @@ class db_analysis(OmniAnalyze_Base):
             if gpu_arch not in ROOFLINE_SUPPORTED:
                 console_warning(f"Roofline not supported for {gpu_arch}.")
                 continue
-            if not (Path(workload_path) / "roofline.csv").exists():
-                console_warning(f"Roofline ceilings not found for {workload_path}.")
-                continue
-            is_roofline_valid, roofline_error = validate_roofline_csv(workload_path)
-            if not is_roofline_valid:
+            is_valid, error_message = validate_roofline_csv(workload_path)
+            if not is_valid:
                 console_warning(
-                    f"Skipping roofline ceilings for {workload_path}: {roofline_error}"
+                    f"Roofline peaks are NULL for {workload_path}: {error_message}"
                 )
                 continue
 
-            roofline_dict = (
-                pd.read_csv(f"{workload_path}/roofline.csv").iloc[0].to_dict()
-            )
-            keys: list[str] = []
-
-            matrix_ops_type = mi_gpu_specs.get_roofline_matrix_type(gpu_arch)
-
-            for mem_level in mi_gpu_specs.get_roofline_bandwidth(gpu_arch):
-                keys.append(roofline_column(mem_level, "bandwidth"))
-            for dtype, support in SUPPORTED_DATATYPES[gpu_arch].items():
-                if OpsSupport.VALU in support:
-                    keys.append(roofline_column(dtype, "valu"))
-                if OpsSupport.MATRIX in support:
-                    keys.append(roofline_column(dtype, matrix_ops_type))
-            roofline_ceilings_per_workload[workload_path] = {
-                key: roofline_dict[key] for key in keys if key in roofline_dict
-            }
+            roofline_df = pd.read_csv(Path(workload_path) / "roofline.csv")
+            # Keep the roofline.csv column names, as the benchmark data stores them.
+            roofline_ceilings_per_workload[workload_path] = roofline_df.iloc[
+                0
+            ].to_dict()
 
         if roofline_ceilings_per_workload:
             console_debug("Collected roofline ceilings")
         return roofline_ceilings_per_workload
+
+    def calc_typed_sys_info(self) -> dict[str, dict[str, Any]]:
+        """Type each workload's sys.info before evaluation (FR-14).
+
+        This runs once per workload, so each missing-value warning prints once.
+        """
+        typed_sys_info_per_workload: dict[str, dict[str, Any]] = {}
+
+        for workload_path in self._runs.keys():
+            raw_sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
+            typed_sys_info_per_workload[workload_path] = {
+                **raw_sys_info,
+                **type_sys_vars(raw_sys_info, missing_as_null=True),
+            }
+
+        return typed_sys_info_per_workload
 
     def add_pc_sampling_data(
         self,
@@ -1229,11 +1241,17 @@ class db_analysis(OmniAnalyze_Base):
             expression_template = self._metric_expression_data_per_workload[
                 workload_path
             ]
-            sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
-            for key, value in self._roofline_ceilings_per_workload.get(
+            # Every known peak starts NULL, so a peak the file lacks, or a file
+            # that is missing or invalid, evaluates to NULL without a KeyError.
+            empirical_peaks = create_empirical_peaks_dict(pd.DataFrame(), prefix="")
+            for column, peak in self._roofline_ceilings_per_workload.get(
                 workload_path, {}
             ).items():
-                sys_info[f"{key}_empirical_peak"] = value
+                empirical_peaks[f"{column}_empirical_peak"] = peak
+            sys_info = {
+                **self._typed_sys_info_per_workload[workload_path],
+                **empirical_peaks,
+            }
 
             metrics_info = self._metrics_info_data_per_workload.get(
                 workload_path, pd.DataFrame(columns=["pct_of_peak", "metric_id"])
@@ -1312,7 +1330,11 @@ class db_analysis(OmniAnalyze_Base):
         pct_of_peak_metric_ids: set[str],
         values_df: pd.DataFrame,
     ) -> list[dict]:
-        """Return new Percent of Peak rows for pct_of_peak-enabled metrics."""
+        """Return new Percent of Peak rows for pct_of_peak-enabled metrics.
+
+        A flagged metric with both a value and a peak row always gets a row. When
+        the percentage cannot be calculated, its value is NULL, not 0 (FR-15).
+        """
         candidates = values_df[
             values_df["metric_id"].isin(pct_of_peak_metric_ids)
             & values_df["value_name"].isin([
@@ -1325,20 +1347,17 @@ class db_analysis(OmniAnalyze_Base):
         new_rows = []
         for _metric_id, grp in candidates.groupby("metric_id"):
             vals = grp.set_index("value_name")["value"]
-            val = next(
-                (vals.get(col) for col in VALUE_COL_PREFERENCE if col in vals.index),
-                None,
+            value_col = next(
+                (col for col in VALUE_COL_PREFERENCE if col in vals.index), None
             )
-            peak = next(
-                (vals.get(col) for col in PEAK_COL_PREFERENCE if col in vals.index),
-                None,
+            peak_col = next(
+                (col for col in PEAK_COL_PREFERENCE if col in vals.index), None
             )
-            pct = calc_pct_of_peak(val, peak)
-            if pct is None:
+            if value_col is None or peak_col is None:
                 continue
             base = grp.iloc[0].to_dict()
             base["value_name"] = "Percent of Peak"
-            base["value"] = pct
+            base["value"] = calc_pct_of_peak(vals.get(value_col), vals.get(peak_col))
             new_rows.append(base)
         return new_rows
 
@@ -1392,7 +1411,7 @@ class db_analysis(OmniAnalyze_Base):
                     metric_id=metric_id,
                     description=row.get("Description"),
                     unit=row.get("Unit"),
-                    pct_of_peak=row.get("Percent of Peak") is True,
+                    pct_of_peak=is_pct_of_peak_flagged(row.get("Percent of Peak")),
                     table_name=table_name,
                     sub_table_name=sub_table_name,
                 )
@@ -1538,7 +1557,7 @@ class db_analysis(OmniAnalyze_Base):
 
         for workload_path in self._pmc_df_per_workload.keys():
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
-            sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
+            sys_info = self._typed_sys_info_per_workload[workload_path]
             gfx_arch = sys_info["gpu_arch"]
             roofline_data_df = self._arch_configs[gfx_arch].dfs.get(402)
 

@@ -56,6 +56,20 @@ class TestAggregation:
         """to_max returns the largest value among its scalar arguments."""
         assert to_max(7, 3, 9, 1) == 9, "to_max should return the largest value"
 
+    @pytest.mark.parametrize(
+        "args", [(np.nan, 5), (80000, np.nan)], ids=["first", "second"]
+    )
+    def test_to_min_with_nan_argument_returns_nan(self, args):
+        """A NaN scalar argument makes to_min NaN, not the other argument."""
+        assert np.isnan(to_min(*args))
+
+    @pytest.mark.parametrize(
+        "args", [(np.nan, 5), (80000, np.nan)], ids=["first", "second"]
+    )
+    def test_to_max_with_nan_argument_returns_nan(self, args):
+        """A NaN scalar argument makes to_max NaN, not the other argument."""
+        assert np.isnan(to_max(*args))
+
     def test_to_median_returns_nan_for_none(self):
         """to_median returns np.nan when the input is None."""
         assert np.isnan(to_median(None)), "to_median should return np.nan for None"

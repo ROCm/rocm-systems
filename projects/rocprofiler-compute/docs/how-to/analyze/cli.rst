@@ -652,6 +652,12 @@ Roofline HTML plots are generated during analyze mode. Profile mode creates
 ``roofline.csv`` containing microbenchmark data, and analyze mode uses this
 data to produce interactive HTML roofline charts.
 
+Analyze validates ``roofline.csv`` on every run. Each column of the file becomes
+an empirical peak, read from its first row, that metrics such as Percent of Peak
+use. If the file is missing or invalid, analyze skips the roofline and every
+peak is unavailable (``N/A`` in the terminal output, NULL in the analysis
+database).
+
 .. note::
    Matrix multiplication performance data will vary depending on which architecture is profiled:
 
