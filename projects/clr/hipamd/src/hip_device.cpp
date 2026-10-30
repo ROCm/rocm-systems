@@ -823,11 +823,17 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
-  deviceProps.gpuDirectRDMASupported = (info.dmabufSupported_ && info.largeBar_) ? 1 : 0;
   // Set option if we have a HDP register
   deviceProps.gpuDirectRDMAFlushWritesOptions =
       hip::ihipRdmaFlushWritesOptions(info.hdpMemFlushCntl);
   deviceProps.gpuDirectRDMAWritesOrdering = hip::ihipRdmaWritesOrdering();
+  // RDMA is only usable if an inbound write can be made visible, either by native ordering or
+  // by a flush.
+  const bool rdmaVisibilityPath =
+      (deviceProps.gpuDirectRDMAWritesOrdering != hipGPUDirectRDMAWritesOrderingNone) ||
+      (deviceProps.gpuDirectRDMAFlushWritesOptions != 0);
+  deviceProps.gpuDirectRDMASupported =
+      (info.dmabufSupported_ && info.largeBar_ && rdmaVisibilityPath) ? 1 : 0;
   // The LUID is a Windows/DXGI adapter concept; the backend reports a zero LUID
   // and zero node mask on platforms without a WDDM adapter.
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[0]) = info.luidLowPart_;
