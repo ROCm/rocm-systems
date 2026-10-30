@@ -55,4 +55,17 @@ inline __m256 prepare_omod_f32(__m256 value, uint32_t instruction_flags) {
   return value;
 }
 
+// Prepare FP64 arithmetic results for a nonzero OMOD.
+inline __m256d prepare_omod_f64(__m256d value, uint32_t instruction_flags) {
+  auto magnitude = _mm256_and_si256(_mm256_castpd_si256(value), _mm256_set1_epi64x(INT64_MAX));
+  auto tiny = _mm256_cmpgt_epi64(_mm256_set1_epi64x(INT64_C(0x0010000000000000)), magnitude);
+  value = _mm256_andnot_pd(_mm256_castsi256_pd(tiny), value);
+  if ((instruction_flags & RJ_ARITH_ALU_OMOD_HALF) == RJ_ARITH_ALU_OMOD_HALF) {
+    auto underflow = _mm256_cmpgt_epi64(_mm256_set1_epi64x(INT64_C(0x0020000000000000)), magnitude);
+    auto sign = _mm256_and_pd(value, _mm256_castsi256_pd(_mm256_set1_epi64x(INT64_MIN)));
+    value = _mm256_blendv_pd(value, sign, _mm256_castsi256_pd(underflow));
+  }
+  return value;
+}
+
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
