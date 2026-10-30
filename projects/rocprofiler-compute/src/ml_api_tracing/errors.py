@@ -1,7 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from typing import Optional
+"""ML API trace analysis errors and fatal-error classification."""
+
+from typing import List, Optional
 
 import pandas as pd
 
@@ -10,7 +12,7 @@ _UNMATCHED_KERNEL_NAME_PREVIEW = 10
 
 def _format_unmatched_kernel_message(unmatched_rows: pd.DataFrame) -> str:
     count = len(unmatched_rows)
-    names: list[str] = []
+    names: List[str] = []
     if "Kernel_Name" in unmatched_rows.columns:
         names = list(
             dict.fromkeys(str(value) for value in unmatched_rows["Kernel_Name"])
@@ -193,3 +195,12 @@ class MarkerNotNestedError(MlApiTraceError):
             f"Operator_Name={operator_name} Thread_Id={thread_id} "
             f"Start_Timestamp={start_timestamp}"
         )
+
+
+# The tuple uses class objects, so it must follow their definitions.
+FATAL_ML_API_TRACE_ERRORS = (
+    KernelSequenceLengthMismatchError,
+    MarkerNotNestedError,
+    OverlappingMarkerRangeError,
+    PassMarkerMismatchError,
+)

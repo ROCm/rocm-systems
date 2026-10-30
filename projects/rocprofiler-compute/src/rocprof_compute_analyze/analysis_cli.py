@@ -9,6 +9,7 @@ from typing import Optional
 import pandas as pd
 
 from membw_analysis.engine import run_membw_analysis
+from ml_api_tracing.models import CallTreeForest, CallTreeNode
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
@@ -16,7 +17,6 @@ from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
-    CallTreeNode,
     build_operator_summary,
     copy_matched_operator_subtree,
     filter_forest_by_backends,
@@ -70,7 +70,7 @@ def parse_operator_patterns(
 
 
 def _collect_glob_matched_nodes(
-    forest: dict[str, list[CallTreeNode]],
+    forest: CallTreeForest,
     framewise_patterns: dict[str, list[str]],
 ) -> list[CallTreeNode]:
     """Return nodes whose backend matches and whose path or name glob-matches."""

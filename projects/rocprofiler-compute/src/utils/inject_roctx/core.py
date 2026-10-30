@@ -13,6 +13,8 @@ from importlib.machinery import PathFinder
 from pathlib import Path
 from typing import Callable
 
+from ml_api_tracing.marker_format import compose_marker
+
 
 def _missing_range_push(_label: str) -> None:
     raise RuntimeError(
@@ -119,31 +121,6 @@ def resolve_user_caller_location() -> str:
             return f"{Path(fn_path).name}:{frame.f_lineno}"
         frame = frame.f_back
     return "n/a"
-
-
-def encode_marker_name(name: str) -> str:
-    return name.replace("%", "%25").replace("/", "%2F")
-
-
-def compose_marker(
-    marker: str,
-    context: str,
-    backend: str = "",
-    args: str = "n/a",
-    seqNr: str = "n/a",
-    tid: str = "n/a",
-    ftid: str = "n/a",
-    ltid: str = "n/a",
-    scope: str = "n/a",
-) -> str:
-    full = (
-        f"{encode_marker_name(marker)}:{context}"
-        f"|seqNr={seqNr}|tid={tid}|ftid={ftid}|ltid={ltid}"
-        f"|scope={scope}|args={args}"
-    )
-    if backend:
-        full = f"{full}|{backend}"
-    return full
 
 
 def _push_scope(

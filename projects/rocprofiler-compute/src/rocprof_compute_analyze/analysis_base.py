@@ -12,9 +12,9 @@ from typing import Any, Optional, TextIO
 
 import pandas as pd
 
+from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,

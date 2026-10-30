@@ -84,8 +84,9 @@ cell unchanged.
 
 The wire syntax and storage contract are detailed in the
 [low-level design](lld-torch-trace-collector.md). The collector does not
-translate stacked labels. A stacked Function first token (`:#` or `@`)
-makes analyze exit during parse.
+translate stacked labels. A regex match for `:#\d+@` in the first
+`|`-separated Function token identifies legacy stacked wire and makes analyze
+exit during parse.
 
 ## Analysis path
 
@@ -99,9 +100,10 @@ printed. Integrity failures abort analyze, so no tree is printed. Plain
 analyze without those flags does not join and does not report those
 warnings.
 
-Collapsed GPU time and kernel lists come from pass 0 (collapse, not fold).
-Printed identical sibling fold is display-only and does not mutate the forest.
-Operator flags confine the forest by backend, then glob on that view.
+When combining profiling passes, analysis keeps GPU time and kernel lists
+from pass 0. Grouping identical sibling calls changes only the display and
+leaves the input call trees unchanged. Operator filters first select the
+requested backends, then apply wildcard patterns to the resulting call trees.
 
 Adjacent ranges (`A.end == B.start`) are siblings. Analysis also uses the
 launcher id and interval containment to attach worker ranges to the

@@ -544,6 +544,13 @@ add_test(
 )
 
 add_test(
+    NAME test_schema
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_schema.xml ${COV_OPTION}
+        tests/unit/utils/test_schema.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_utils_profile
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_utils_profile.xml
@@ -608,6 +615,46 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest
         --junitxml=tests/test_rocprofv3_avail_interface.xml ${COV_OPTION}
         tests/unit/utils/test_rocprofv3_avail_interface.py ${WORKING_DIR_OPTION}
+)
+
+# ML API tracing unit tests
+
+add_test(
+    NAME test_ml_api_tracing_models
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ml_api_tracing_models.xml
+        ${COV_OPTION} tests/unit/ml_api_tracing/test_models.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_analysis_models
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_analysis_models.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/test_analysis_models.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_marker_format
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_marker_format.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/test_marker_format.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_constants
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_constants.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/test_constants.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_errors
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_ml_api_tracing_errors.xml
+        ${COV_OPTION} tests/unit/ml_api_tracing/test_errors.py ${WORKING_DIR_OPTION}
 )
 
 # Memory chart tests — no GPU required
@@ -1114,6 +1161,12 @@ if(${ENABLE_COVERAGE})
         test_mi_gpu_spec
         test_utils_common
         test_utils_analysis
+        test_schema
+        test_ml_api_tracing_models
+        test_ml_api_tracing_analysis_models
+        test_ml_api_tracing_marker_format
+        test_ml_api_tracing_constants
+        test_ml_api_tracing_errors
         test_utils_profile
         test_common
         test_amdsmi_interface
@@ -1276,6 +1329,12 @@ install(
 # src/membw_analysis
 install(
     DIRECTORY src/membw_analysis
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
+install(
+    DIRECTORY src/ml_api_tracing
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE

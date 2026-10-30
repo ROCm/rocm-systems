@@ -26,13 +26,13 @@ from membw_analysis.summary import (
 from memory_chart.loader import Layouts, is_memory_chart_panel
 from memory_chart.render import format_mem_chart_heading, plot_mem_chart
 from memory_chart.units import panel_units
+from ml_api_tracing.models import CallTreeForest, CallTreeNode
 from utils import parser, schema
 from utils.logger import console_log, console_warning
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     ARGS_DISPLAY_MAX_VARIANTS,
     NS_TO_MS,
-    CallTreeNode,
     build_operator_summary,
     fold_identical_sibling_subtrees,
     format_operator_args,
@@ -311,7 +311,7 @@ def is_roofline_shown(
 
 def list_ml_operators(
     workload_path: str,
-    call_trees: dict[str, list[CallTreeNode]],
+    call_trees: CallTreeForest,
     framework_labels: list[str],
 ) -> None:
     """Display operators as a call tree sorted by GPU kernel duration.
@@ -493,7 +493,7 @@ def print_wrapped_kernel_line(
             print(f"{continuation}{chunk}")
 
 
-def show_call_tree(call_trees: dict[str, list[CallTreeNode]]) -> None:
+def show_call_tree(call_trees: CallTreeForest) -> None:
     """Print top-level marker nodes sorted by total GPU duration.
 
     Identical sibling subtrees are folded. The input forest is not mutated.
