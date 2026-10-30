@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vinterp.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_interp_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -18,27 +19,71 @@ namespace rocjitsu {
 namespace rdna3 {
 
 void VInterpP10F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      (uint64_t(inst_.wait_exp) << RJ_ARITH_INTERP_WAIT_EXP_SHIFT);
+  amdgpu::arith::execute_interp<false, false>(
+      wf, rj_arith_v_interp_p10_f32_w32, rj_arith_v_interp_p10_f32_w64, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, src2);
 }
 
 void VInterpP2F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      (uint64_t(inst_.wait_exp) << RJ_ARITH_INTERP_WAIT_EXP_SHIFT);
+  amdgpu::arith::execute_interp<true, false>(
+      wf, rj_arith_v_interp_p2_f32_w32, rj_arith_v_interp_p2_f32_w64, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, src2);
 }
 
 void VInterpP10F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      (uint64_t(inst_.wait_exp) << RJ_ARITH_INTERP_WAIT_EXP_SHIFT) |
+      ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((inst_.op_sel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
+  amdgpu::arith::execute_interp<false, true>(
+      wf, rj_arith_v_interp_p10_f16_f32_w32, rj_arith_v_interp_p10_f16_f32_w64,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2);
 }
 
 void VInterpP2F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      (uint64_t(inst_.wait_exp) << RJ_ARITH_INTERP_WAIT_EXP_SHIFT) |
+      ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((inst_.op_sel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  amdgpu::arith::execute_interp<true, true>(
+      wf, rj_arith_v_interp_p2_f16_f32_w32, rj_arith_v_interp_p2_f16_f32_w64,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2);
 }
 
 void VInterpP10RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      (uint64_t(inst_.wait_exp) << RJ_ARITH_INTERP_WAIT_EXP_SHIFT) |
+      ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((inst_.op_sel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u);
+  amdgpu::arith::execute_interp<false, true>(
+      wf, rj_arith_v_interp_p10_rtz_f16_f32_w32, rj_arith_v_interp_p10_rtz_f16_f32_w64,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2);
 }
 
 void VInterpP2RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  const uint64_t modifiers =
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |
+      (uint64_t(inst_.wait_exp) << RJ_ARITH_INTERP_WAIT_EXP_SHIFT) |
+      ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((inst_.op_sel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);
+  amdgpu::arith::execute_interp<true, true>(
+      wf, rj_arith_v_interp_p2_rtz_f16_f32_w32, rj_arith_v_interp_p2_rtz_f16_f32_w64,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2);
 }
 
 } // namespace rdna3

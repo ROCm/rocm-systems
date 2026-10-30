@@ -6792,6 +6792,7 @@ class CodeGenerator:
             gen_conversion16,
             gen_packed_conversion,
             gen_normalized,
+            gen_cube,
             gen_float_unary32,
             gen_float_unary64,
             gen_float64_word,
@@ -6803,6 +6804,7 @@ class CodeGenerator:
             gen_float_fma32,
             gen_float_fma16,
             gen_float_ternary_selection,
+            gen_mullit,
             gen_packed_fma16,
             gen_mixed_fma,
             gen_packed_binary16,
@@ -6832,6 +6834,7 @@ class CodeGenerator:
                 gen_fp8_widen,
                 gen_bit_pack,
                 gen_byte_nibble_conversion,
+                gen_cube,
                 gen_float_unary32,
                 gen_float_unary64,
                 gen_float_binary64,
@@ -6839,6 +6842,7 @@ class CodeGenerator:
                 gen_float64_word,
                 gen_float_binary16,
                 gen_float_binary32,
+                gen_mullit,
                 gen_float_ternary_selection,
                 gen_float_fma16,
                 gen_float_fma32,
@@ -8319,6 +8323,12 @@ class CodeGenerator:
         if cls in ('image_atomic', 'image_sample', 'image_query', 'image_bvh'):
             L.append('  (void)wf; // Image pipeline not yet implemented.')
             return '\n'.join(L)
+
+        from amdisa.codegen.execute.rj_arith_interp import gen_interp
+
+        rj_arith_interp = gen_interp(ctx)
+        if rj_arith_interp is not None:
+            return RjArithBody(rj_arith_interp)
 
         # ── Graphics-only stubs (no-ops in compute simulation) ───────────
         if cls == 'export':
@@ -14680,7 +14690,17 @@ class CodeGenerator:
                             False,
                         )
                     )
+                from amdisa.codegen.execute.rj_arith_interp import INTERP_NAMES
 
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in INTERP_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_interp_exec.h',
+                            False,
+                        )
+                    )
                 from amdisa.codegen.execute.rj_arith_division import DIVISION_NAMES
 
                 if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(

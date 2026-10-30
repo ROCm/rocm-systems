@@ -775,6 +775,43 @@ def test_fp64_binary_arithmetic_adapter(arch):
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_cube_reuses_ternary_adapter_and_guest_policies(arch):
+    from amdisa.codegen.execute.rj_arith_float import CUBE_NAMES, gen_cube
+
+    for name in CUBE_NAMES:
+        body = gen_cube(context(arch, name, ['dst'], ['x', 'y', 'z'], is_vop3=True))
+        arch_suffix = '_gfx12' if arch == 'rdna4' else ''
+        api = 'rj_arith_' + name.lower()
+        assert api + '_w64' + arch_suffix in body
+        assert 'execute_ternary32' in body
+        assert 'arithmetic_flags()' in body
+        assert 'fp_round_mode_f32()' in body
+        assert 'RJ_ARITH_FP_IEEE_MODE' in body
+        assert ('RJ_ARITH_FP_DX10_CLAMP_OFF' in body) == (arch == 'rdna3')
+        assert 'arithmetic_reports_fp_status' not in body
+        for modifier in (
+            'ABS_A',
+            'ABS_B',
+            'ABS_C',
+            'NEG_A',
+            'NEG_B',
+            'NEG_C',
+            'OMOD_2',
+            'CLAMP',
+        ):
+            assert 'RJ_ARITH_ALU_' + modifier in body
+        assert (
+            gen_cube(context('cdna4', name, ['dst'], ['x', 'y', 'z'], is_vop3=True))
+            is None
+        )
+        assert gen_cube(context(arch, name, ['dst'], ['x', 'y'], is_vop3=True)) is None
+        assert (
+            gen_cube(context(arch, name, ['dst'], ['x', 'y', 'z'], is_vop3=False))
+            is None
+        )
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 def test_byte_conversion_policy_and_selected_read_byte(arch):
     from amdisa.codegen.execute.rj_arith_float import gen_byte_nibble_conversion
 
