@@ -2205,6 +2205,25 @@ class Device : public RuntimeObject {
   }
 
   /**
+   * Write host data into a device global, blocking until the write has finished
+   * and without enqueuing on any queue an application feeds.
+   *
+   * Fills externally-initialized globals whose value is only known once the executable is
+   * on the device, such as the pointer a __managed__ variable is dereferenced through.
+   * Callers run on the kernel launch path  where a copy on the null stream would be
+   * host-blocking and would wait for work the application queued earlier, deadlocking
+   * whenever that work is gated on something the host only does after the launch returns.
+   *
+   * @param dst Memory object wrapping the global, as returned by createGlobalVarObj
+   * @param offset Byte offset within the global
+   * @param size Number of bytes to write
+   * @param src Host source buffer
+   * @return False if the write failed.
+   */
+  [[nodiscard]] virtual bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                               const void* src) const = 0;
+
+  /**
    * Recovers the location and size of a VMM allocation.
    *
    * @param amd_mem_obj physical memory object of the allocation
