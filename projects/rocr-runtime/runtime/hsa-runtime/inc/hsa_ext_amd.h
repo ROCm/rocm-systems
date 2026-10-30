@@ -4612,7 +4612,9 @@ hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
  * @param[in] ptr Pointer to the allocation being exported.
  *
  * @param[in] size Size in bytes to export following @p ptr.  The entire range
- * being exported must be contained within a single allocation.
+ * being exported must be contained within a single allocation.  For memory
+ * mapped with ::hsa_amd_vmem_map, it must be contained within a single mapping,
+ * and the dma-buf references the memory handle backing that mapping.
  *
  * @param[out] dmabuf Pointer to a dma-buf file descriptor holding a reference to the
  * allocation.  Contents will not be altered in the event of failure.
@@ -4660,7 +4662,9 @@ hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* d
  * @param[in] ptr Pointer to the allocation being exported.
  *
  * @param[in] size Size in bytes to export following @p ptr.  The entire range
- * being exported must be contained within a single allocation.
+ * being exported must be contained within a single allocation.  For memory
+ * mapped with ::hsa_amd_vmem_map, it must be contained within a single mapping,
+ * and the dma-buf references the memory handle backing that mapping.
  *
  * @param[out] dmabuf Pointer to a dma-buf file descriptor holding a reference to the
  * allocation.  Contents will not be altered in the event of failure.

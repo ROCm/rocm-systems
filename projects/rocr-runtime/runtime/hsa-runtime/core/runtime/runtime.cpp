@@ -4331,6 +4331,45 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
       }
     }
   }
+
+  // Memory mapped with hsa_amd_vmem_map lives in mapped_handle_map_, not allocation_map_. Export
+  // the memory handle backing the mapping; as for other allocations, the range must lie within it.
+  auto mapped = mapped_handle_map_.upper_bound(ptr);
+  if (mapped != mapped_handle_map_.begin()) {
+    mapped--;
+    const MappedHandle& mappedHandle = mapped->second;
+    const uintptr_t start = uintptr_t(ptr) - uintptr_t(mapped->first);
+    if ((mapped->first <= ptr) && (start < mappedHandle.size) &&
+        (start + size <= mappedHandle.size)) {
+      MemoryHandle* memHandle = mappedHandle.mem_handle;
+      // An imported handle belongs to the exporting process, as for
+      // hsa_amd_vmem_export_shareable_handle.
+      if (memHandle->imported) return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+      if (memHandle->agentOwner()->device_type() != Agent::kAmdGpuDevice) {
+        return HSA_STATUS_ERROR_INVALID_AGENT;
+      }
+      auto* owner = static_cast<AMD::GpuAgent*>(memHandle->agentOwner());
+      if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE && !owner->is_xgmi_cpu_gpu() &&
+          !owner->LargeBarEnabled()) {
+        return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+      }
+
+      int fd = -1;
+      hsa_status_t err = owner->driver().ExportMemoryHandle(*owner, memHandle->driver_handle,
+                                                            ShareType::DMABUF_FD, &fd);
+      if (err != HSA_STATUS_SUCCESS) return err;
+      // The driver hands back the handle's own fd while one is open; the caller closes the
+      // returned fd, so give it a reference of its own.
+      if (fd == memHandle->driver_handle.dmabuf_fd) {
+        fd = os::DmaBufDup(fd);
+        if (fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      }
+
+      *dmabuf = fd;
+      *offset = mappedHandle.offset + start;
+      return HSA_STATUS_SUCCESS;
+    }
+  }
   return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 }
 
