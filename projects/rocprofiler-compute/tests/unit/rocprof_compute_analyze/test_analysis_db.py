@@ -4930,6 +4930,13 @@ def test_pre_processing_halts_on_idle_gpu_before_any_write(
         patch_stack.enter_context(
             patch.object(
                 db_analysis,
+                "calc_kernel_rankings",
+                return_value={workload_path: []},
+            )
+        )
+        patch_stack.enter_context(
+            patch.object(
+                db_analysis,
                 "calc_pmc_df_data",
                 return_value={workload_path: pmc_df},
             )
@@ -4972,6 +4979,31 @@ def test_pre_processing_halts_on_idle_gpu_before_any_write(
             analyzer.pre_processing()
             error_mock.assert_not_called()
             dispatch_mock.assert_called_once()
+
+
+def test_kernel_rankings_keep_every_kernel_so_k_ids_index_the_ranking():
+    """Before -k, the ranking lists every kernel, so -k id i names ranking[i]."""
+    workload_path = "/fake/workload"
+    pmc_df = pd.DataFrame({
+        "Kernel_Name": ["scale", "vecCopy", "vecCopy", "fill"],
+        "GPU_ID": ["0", "0", "0", "0"],
+        "Dispatch_ID": [0, 1, 2, 3],
+        "Start_Timestamp": [0, 0, 100, 0],
+        "End_Timestamp": [50, 200, 400, 300],
+    })
+    workload = schema.Workload(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    workload.filter_kernel_ids = [1]
+    analyzer = db_analysis(
+        make_analyze_args(output_name=None, output_format="database"), {}
+    )
+    analyzer._runs = {workload_path: workload}
+    analyzer._pmc_df_per_workload = {workload_path: pmc_df}
+
+    rankings = analyzer.calc_kernel_rankings({})
+
+    assert rankings == {workload_path: ["vecCopy", "fill", "scale"]}
+    selected = filter_dispatch_frame(pmc_df, None, [1], None)
+    assert set(selected["Kernel_Name"]) == {rankings[workload_path][1]}
 
 
 def test_peak_absent_from_a_valid_roofline_is_null_without_failure_warning(
