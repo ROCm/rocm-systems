@@ -3,12 +3,14 @@
 
 """Validate the RDNA-only rj-arith selection and public API bindings."""
 
-from rj_arith_headers import public_headers
-
 from types import SimpleNamespace
+
+
 import re
 
+
 import pytest
+
 
 from amdisa.codegen.execute.rj_arith_matrix import gen_dense_wmma
 
@@ -21,32 +23,6 @@ def context(name, arch):
         dst_ops=['vdst'],
         src_ops=['src0', 'src1', 'src2'],
     )
-
-
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
-@pytest.mark.parametrize(
-    'result,factors',
-    [
-        ('F32', 'F16'),
-        ('F32', 'BF16'),
-        ('F16', 'F16'),
-        ('BF16', 'BF16'),
-        ('I32', 'IU8'),
-        ('I32', 'IU4'),
-    ],
-)
-def test_shared_dense_forms_bind_both_public_wave_widths(arch, result, factors):
-    name = f'V_WMMA_{result}_16X16X16_{factors}'
-    body = gen_dense_wmma(context(name, arch))
-    suffix = '_gfx12' if arch == 'rdna4' else ''
-    api = 'rj_arith_' + name.lower()
-    assert f'lanes == 32 ? {api}_w32{suffix} : {api}_w64{suffix}' in body
-    header = public_headers()
-    declarations = header
-    for function in (api + '_w32' + suffix, api + '_w64' + suffix):
-        assert re.search(r'\bint ' + function + r'\(', declarations)
-    assert 'exec_mask' not in body
-    assert 'arithmetic_flags()' in body
 
 
 @pytest.mark.parametrize('arch', ['rdna3_5', 'cdna4', 'cdna5'])

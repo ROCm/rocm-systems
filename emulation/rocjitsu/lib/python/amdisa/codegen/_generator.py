@@ -6688,6 +6688,47 @@ class CodeGenerator:
         has_abs = profile.has_abs_modifier(inst.enc_name)
         self._enc_name = enc_name
 
+        from amdisa.codegen.execute.rj_arith_float import (
+            gen_float_fma64,
+            gen_float_fma32,
+            gen_float_fma16,
+            gen_packed_fma16,
+            gen_mixed_fma,
+        )
+
+        if result_writer is None:
+            rj_arith_body = (
+                gen_packed_fma16(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                    self._op_sel_hi_2_expr(inst.enc_name),
+                )
+                or gen_mixed_fma(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                    self._op_sel_hi_2_expr(inst.enc_name),
+                )
+                or gen_float_fma64(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_fma16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_fma32(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+            )
+            if rj_arith_body is not None:
+                return rj_arith_body
+
         # Try SemaAST pipeline for validated classes.
         from amdisa.sema_derive import derive_sema_block
         from amdisa.codegen.execute.sema_lower import (
@@ -13934,6 +13975,17 @@ class CodeGenerator:
                         _portable_probe = self._can_force_shared_simd_probe(
                             inst, enc.enc_name
                         )
+                        # rj-arith owns SIMD selection for migrated instructions. Never
+                        # run a legacy arithmetic probe ahead of the rj-arith body.
+                        from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
+
+                        _rj_arith_arithmetic = self.isa_spec.arch_name in (
+                            'rdna3',
+                            'rdna4',
+                        ) and (inst.name in FLOAT_NAMES and _mask_result_writer is None)
+                        if _rj_arith_arithmetic:
+                            can_share = False
+                            _portable_probe = False
                         if not body_throws and (can_share or _portable_probe):
                             self._shared_execute_candidates[
                                 (inst.mnemonic, enc.enc_name)
@@ -13989,6 +14041,13 @@ class CodeGenerator:
                             _coverage_probe
                             or _local_true16_probe
                             or _renamed_vop3p_probe
+                        )
+                        if _rj_arith_arithmetic:
+                            _local_simd_probe = None
+                        _rj_arith_error_guard = (
+                            '  if (wf.instruction_execution_failed())\n    return;\n'
+                            if _rj_arith_arithmetic
+                            else ''
                         )
                         _local_simd_probe_body = ''
                         _local_simd_probe, _local_scalar_body = share_stages(
@@ -14158,6 +14217,7 @@ class CodeGenerator:
                                     f'{_local_simd_probe_body}'
                                     f'{_local_execute_body}\n'
                                     f'{_dpp_observation_restore}'
+                                    f'{_rj_arith_error_guard}'
                                     f'{_dpp_cleanup}'
                                     f'{_sdwa_postamble}}}'
                                 )
@@ -14511,6 +14571,16 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/lds_direct.h', False)
                     )
+
+                from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in FLOAT_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+
                 has_matrix_exec = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
@@ -14518,15 +14588,19 @@ class CodeGenerator:
                     for i in all_insts
                 )
                 requires_compute_unit = any(
-                    self.semantics
-                    and (s := self.semantics.instructions.get(i.name))
-                    and s.semantic_class
-                    in (
-                        'scalar_shader_cycles',
-                        'scalar_sendmsg_rtn',
-                        'vector_cvt_scale',
+                    (
+                        self.semantics
+                        and (s := self.semantics.instructions.get(i.name))
+                        and (
+                            s.semantic_class
+                            in (
+                                'scalar_shader_cycles',
+                                'scalar_sendmsg_rtn',
+                                'vector_cvt_scale',
+                            )
+                        )
+                        for i in all_insts
                     )
-                    for i in all_insts
                 )
                 if requires_compute_unit:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))

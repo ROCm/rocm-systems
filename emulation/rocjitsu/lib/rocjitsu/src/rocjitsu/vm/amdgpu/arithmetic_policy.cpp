@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rj_arith/rj_arith.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "util/simd.h"
 
 #include <stdexcept>
@@ -58,5 +59,17 @@ const char *arithmetic_semantics_name(ArithmeticSemantics semantics) {
 ArithmeticExecution::ArithmeticExecution(ArithmeticPolicy policy)
     : flags_((util::force_scalar() ? RJ_ARITH_CPU_BASELINE : detected_cpu_flags) |
              (static_cast<uint64_t>(policy.semantics) << 16)) {}
+
+bool ArithmeticExecution::reports_fp_status() const {
+  // Compatibility may produce status. rj-arith alone resolves the instruction policy;
+  // the bridge commits any causes returned (zero when the selected mode omits it).
+  const auto semantics = flags_ & RJ_ARITH_SEMANTICS_MASK;
+  return semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+         semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+}
+
+bool InstructionComputeUnitView::arithmetic_reports_fp_status() const {
+  return raw_cu().arithmetic_.reports_fp_status();
+}
 
 } // namespace rocjitsu::amdgpu
