@@ -1,21 +1,15 @@
 name: RCCL cluster CI
 
-# Runs the RCCL suites via rccl-suite.yml, each on the cluster it needs (device-api
-# on ruby, gin on tw). Each leg is self-contained: it provisions the ROCm floor from
-# TheRock CI artifacts, builds rocSHMEM/RCCL/rccl-tests from the PR sources, and runs.
-# ROCm tracks TheRock automatically (latest main run); pass artifact_run_id to pin one.
+# Manual dispatch only. device-api, ext-plugins, and
+# GIN stay defined here until coco is shown to cover them; delete this workflow
+# after that check.
 #
-# Nightly and on demand, not PR-triggered. rccl-coco-pr.yml covers RCCL and
-# rccl-tests PRs; these suites rejoin it once the device-api tests are restored
-# there. Until then, changes under projects/rocshmem are covered only by this
-# nightly, not by any PR check.
+# To restore the nightly: add `schedule: - cron: '47 12 * * 1-5'` under `on:`
+# (clear of rccl-coco-scheduled.yml at 03:47 UTC and rccl-ainic-tw-gfx950-runner.yml
+# at 02:00 UTC). Leave gin-build-gate at `if: false` until GIN gating is turned
+# back on (AICOMRCCL-1478).
 
 on:
-  schedule:
-    # Weekday nightly, offset from rccl-coco-scheduled.yml's 03:47 nightly and from
-    # rccl-ainic-tw-gfx950-runner.yml's 02:00 so the three do not contend for
-    # the ruby and tw runners. The longest leg here is 5h.
-    - cron: '47 12 * * 1-5'
   workflow_dispatch:
     inputs:
       artifact_run_id:
