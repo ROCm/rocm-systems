@@ -186,3 +186,20 @@ if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/common/baseline_linkage.cmake
     )
 endif()
+
+# Related comparison predicates share a binary; every entry point has its own test.
+foreach(
+    family
+    IN
+    ITEMS
+        constant
+        integer_equality
+        integer_ordering
+        class
+        float_equality
+        float_ordered
+        float_unordered
+)
+    set(target "rj_arith_compare_${family}_test")
+    rj_arith_add_test(${target} compare/${family}_test.cpp)
+endforeach()
