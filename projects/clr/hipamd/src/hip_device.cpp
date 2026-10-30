@@ -149,6 +149,10 @@ void Device::Reset() {
   auto* dev = devices()[0];
   dev->ClearHostcallMemories();
   amd::MemObjMap::Purge(dev);
+  // Has to run before anything allocates again: it tells a freed managed pointer
+  // from a live one by looking the address up in MemObjMap, and a new allocation
+  // could reuse that address.
+  PlatformState::Instance().StatCO().ResetManagedVarDevicePtr();
   Create();
 }
 

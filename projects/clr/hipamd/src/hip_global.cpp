@@ -270,8 +270,9 @@ hipError_t Var::AllocateManagedVarPtr() {
   void** pointer = static_cast<void**>(managedVarPtr_);
   // check if it is deffered allocation
   if (!allocFlag_) {
-    // Allocate managed memory for this var
-    const bool use_host_ptr = true;
+    // Allocate managed memory for this var, mapping the host allocation already
+    // in the slot if there is one and allocating host memory otherwise.
+    const bool use_host_ptr = (*pointer != nullptr);
     IHIP_RETURN_ONFAIL(ihipMallocManaged(pointer, size_, align_, use_host_ptr));
     allocFlag_ = true;
   }
