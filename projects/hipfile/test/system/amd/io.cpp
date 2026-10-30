@@ -271,4 +271,78 @@ TEST_F(HipFileIoHipInit, spawnedThreadWriteRunsWithoutSegfault)
     ASSERT_EQ(io_size, res);
 }
 
+// hipAmdFileRead/hipAmdFileWrite record their failures as the thread's last
+// HIP error. These tests use the default backends (fastpath with fallback).
+struct HipFileIoLastError : public testing::Test {
+
+    Tmpfile tmpfile;
+    size_t  io_size;
+    void   *device_buffer;
+
+    HipFileIoLastError() : tmpfile{test_env.ais_capable_dir}, io_size{1_MiB}, device_buffer{nullptr}
+    {
+    }
+
+    void SetUp() override
+    {
+        Context<Configuration>::get()->fastpath(true);
+        Context<Configuration>::get()->fallback(true);
+
+        ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(io_size)));
+        ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, io_size));
+        (void)hipGetLastError();
+    }
+
+    void TearDown() override
+    {
+        ASSERT_EQ(hipSuccess, hipFree(device_buffer));
+    }
+
+    hipFileHandle_t registerFd(int fd)
+    {
+        hipFileDescr_t descr{};
+        descr.type      = hipFileHandleTypeOpaqueFD;
+        descr.handle.fd = fd;
+
+        hipFileHandle_t handle{nullptr};
+        EXPECT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&handle, &descr));
+        return handle;
+    }
+};
+
+// Whether the fastpath succeeds or falls back (e.g. no AIS ioctl), a
+// successful sync I/O must not leave an error behind.
+TEST_F(HipFileIoLastError, successfulSyncIoLeavesNoHipError)
+{
+    hipFileHandle_t handle{registerFd(tmpfile.fd)};
+
+    ASSERT_EQ(io_size, hipFileWrite(handle, device_buffer, io_size, 0, 0));
+    EXPECT_EQ(hipSuccess, hipPeekAtLastError());
+    ASSERT_EQ(io_size, hipFileRead(handle, device_buffer, io_size, 0, 0));
+    EXPECT_EQ(hipSuccess, hipPeekAtLastError());
+
+    hipFileHandleDeregister(handle);
+}
+
+// A fastpath failure that is not eligible for fallback (writing through a
+// read-only fd) is retrievable with hipPeekAtLastError().
+TEST_F(HipFileIoLastError, failedSyncIoRecordsHipError)
+{
+    int fd{open(("/proc/self/fd/" + std::to_string(tmpfile.fd)).c_str(), O_RDONLY)};
+    ASSERT_NE(-1, fd);
+    hipFileHandle_t handle{registerFd(fd)};
+
+    enforceFastpathGate(handle, device_buffer);
+    if (!IsSkipped() && !HasFatalFailure()) {
+        (void)hipGetLastError();
+        EXPECT_EQ(-1, hipFileWrite(handle, device_buffer, io_size, 0, 0));
+        EXPECT_EQ(EBADF, errno);
+        EXPECT_EQ(hipErrorUnknown, hipPeekAtLastError());
+        (void)hipGetLastError();
+    }
+
+    hipFileHandleDeregister(handle);
+    close(fd);
+}
+
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

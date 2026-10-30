@@ -501,10 +501,11 @@ struct FastpathIoParam : public FastpathTestBase, public TestWithParam<IoType> {
 
     // Setup expectations on the mocks called to validate IO arguments and
     // the mocks called up to, but not including, hipAmdFileRead/hipAmdFileWrite
-    void expect_io()
+    void expect_io(hipError_t last_error = hipSuccess)
     {
         expect_validate();
         EXPECT_CALL(mhip, hipInit);
+        EXPECT_CALL(mhip, hipPeekAtLastError).WillOnce(Return(last_error));
     }
 
     // Setup expectations on the mocks called to validate IO arguments
@@ -522,6 +523,7 @@ struct FastpathIoParam : public FastpathTestBase, public TestWithParam<IoType> {
     {
         expect_validate(fd, bufptr, buflen);
         EXPECT_CALL(mhip, hipInit);
+        EXPECT_CALL(mhip, hipPeekAtLastError).WillOnce(Return(hipSuccess));
     }
 };
 
@@ -699,6 +701,7 @@ TEST_P(FastpathIoParam, IoDoesNotMaskSystemError)
     switch (GetParam()) {
         case IoType::Read:
             EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(system_error(ENODEV, generic_category())));
+            EXPECT_CALL(mhip, hipGetLastError);
             break;
         case IoType::Write:
             EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Throw(system_error(EINVAL, generic_category())));
@@ -794,6 +797,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENODEV)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
+    EXPECT_CALL(mhip, hipGetLastError);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -822,6 +826,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleEREMOTEIO)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
+    EXPECT_CALL(mhip, hipGetLastError);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -852,6 +857,37 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENOTTY)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
+    EXPECT_CALL(mhip, hipGetLastError);
+    EXPECT_CALL(mstats, error).Times(1);
+
+    switch (GetParam()) {
+        case IoType::Read:
+            EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(std::system_error(ENOTTY, generic_category())));
+            break;
+        case IoType::Write:
+            EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Throw(std::system_error(ENOTTY, generic_category())));
+            break;
+        default:
+            FAIL() << "Invalid IoType";
+    }
+
+    EXPECT_CALL(*m_fallback, io).WillOnce(Return(DEFAULT_IO_SIZE));
+    EXPECT_CALL(*m_fallback, score).WillOnce(Return(SCORE_ACCEPT));
+
+    ssize_t nbytes =
+        backend->io(GetParam(), mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET);
+    ASSERT_EQ(nbytes, DEFAULT_IO_SIZE);
+}
+
+// A HIP error that was pending before the AIS call can't be restored, so it
+// must not be cleared when falling back.
+TEST_P(FastpathIoParam, IoFallbackKeepsPendingHipError)
+{
+    auto backend    = std::make_shared<Fastpath>();
+    auto m_fallback = std::make_shared<StrictMock<MBackend>>();
+    backend->register_fallback_backend(m_fallback);
+
+    expect_io(hipErrorInvalidValue);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -884,6 +920,7 @@ TEST_P(FastpathIoParam, FallbackRejectsIoRequest)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
+    EXPECT_CALL(mhip, hipGetLastError);
     EXPECT_CALL(*m_fallback, score).WillOnce(Return(SCORE_REJECT));
     EXPECT_CALL(mstats, error).Times(1);
 
