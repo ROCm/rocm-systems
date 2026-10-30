@@ -8,6 +8,7 @@
 * `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one.
 * Added a batch API example, `batch-roundtrip`.
 * Added reference documentation for the Stats API.
+* Added a documentation page listing frameworks and applications that use hipFile, including LMCache, fastsafetensors, rocAL, PyTorch, fio, and IOR.
 
 ### Changed
 

@@ -108,11 +108,13 @@ test_categories:
       - "Fp8Validation.*"
       - "Fp8Verifiable.*"
       - "Teardown.*"
+      - "GraphCaptureStreamOrdering.*"
       - "Register.*"
       - "Recorder.*"
       - "ProxyTraceTestFixture.*"
       - "CollTraceUtilsTest.*"
       - "GinPluginInitFail.*"
+      - "CpuAffinity.*"
     exclude_windows:
       - "*"
     labels:
