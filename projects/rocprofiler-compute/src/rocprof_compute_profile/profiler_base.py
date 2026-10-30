@@ -232,7 +232,6 @@ class RocProfCompute_Base:
         if getattr(args, "trace_ml_api", None) is not None:
             args.trace_ml_api = list(frameworks)
         selected_frameworks = set(frameworks)
-        self._selected_frameworks: set[str] = selected_frameworks
         self._ml_api_trace_enabled: bool = bool(frameworks)
         if frameworks and is_only_pc_sampling(args.filter_blocks):
             console_error(

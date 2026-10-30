@@ -194,7 +194,7 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
 # sanitize() rejects ML API tracing flags for PC-sampling-only runs
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "filter_blocks, trace_flags, expect_error, expected_frameworks",
+    "filter_blocks, trace_flags, expect_error, expected_trace_ml_api",
     [
         pytest.param(
             ["21"],
@@ -207,20 +207,20 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
             ["2", "21"],
             {"trace_ml_api": ["torch"], "pc_sampling": True, "experimental": True},
             False,
-            {"torch"},
+            ["torch"],
             id="mixed_trace_ml_api_preserved",
         ),
         pytest.param(
             ["21"],
             {"pc_sampling": True, "experimental": True},
             False,
-            set(),
+            None,
             id="pc_only_no_trace_flag",
         ),
     ],
 )
 def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
-    tmp_path, filter_blocks, trace_flags, expect_error, expected_frameworks
+    tmp_path, filter_blocks, trace_flags, expect_error, expected_trace_ml_api
 ):
     """ML API tracing flags are rejected for PC-sampling-only runs and retained when a
     counter block is also requested."""
@@ -232,7 +232,7 @@ def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
             profiler.sanitize()
     else:
         profiler.sanitize()
-        assert profiler._selected_frameworks == expected_frameworks
+        assert args.trace_ml_api == expected_trace_ml_api
 
 
 # ---------------------------------------------------------------------------
@@ -1248,7 +1248,7 @@ def test_sanitize_trace_ml_api_injects_torch_and_triton(tmp_path):
     both = _make_sanitize_args(remaining, trace_ml_api=["torch", "triton"])
     profiler = RocProfCompute_Base(both, profiler_mode="rocprofiler-sdk", soc=None)
     profiler.sanitize()
-    assert profiler._selected_frameworks == {"torch", "triton"}
+    assert both.trace_ml_api == ["torch", "triton"]
     assert "--frameworks torch triton --" in both.remaining
 
 
