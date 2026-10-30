@@ -294,13 +294,16 @@ and file-size limits reach these I/O checks and incomplete-file cleanup,
 regardless of the caller's signal dispositions.
 
 Diagnostics go to stderr. Discovery, selection and mutation failures preserve
-the library's typed error as `code=NAME offset=N` before the explanatory message.
+the library's typed error as `code=NAME` before the explanatory message.
 The code names are `BadIdentity`, `UnsupportedTarget`, `UnsupportedForm`,
 `AmbiguousSelection`, `IncompleteSelection`, `InvalidParameters`,
 `ValidationFailure`, `NoCandidates` and `OrdinalOutOfRange`. Runners can classify
 these errors without matching the English message; argument/read diagnostics
-have no typed library code. An invalid `--exact` coordinate reports
-`code=InvalidParameters` with the requested `.text` offset and never falls back.
+have no typed library code. Library error offsets do not encode whether a
+location is present, so those diagnostic prefixes omit the numeric field.
+An invalid `--exact` request has an explicitly known coordinate and reports
+`code=InvalidParameters offset=N`, including when the requested `.text` byte
+coordinate is zero. Such requests never fall back to an ordinal.
 
 Successful mutation prints the kind, concrete target, exact coordinate,
 logical/member counts and output byte count to stdout. It also prints each
