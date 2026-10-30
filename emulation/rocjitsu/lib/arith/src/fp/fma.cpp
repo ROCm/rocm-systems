@@ -6,11 +6,11 @@
 
 #include "common/alu.h"
 #include "common/internal.h"
+#include "common/simd.h"
 #include "fp/fma_scalar.h"
 #include "register/dpp.h"
 #include "rj_arith/rj_arith.h"
 
-#include <cmath>
 #include <stdint.h>
 
 namespace {
@@ -22,6 +22,21 @@ template <bool Rdna3>
                                 uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, const uint32_t *const *c) {
 
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::fma_exact_x86_64_v4(flags, exec_mask, instruction_flags, d[0], a[0], b[0],
+                                         c[0], Rdna3);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3) &&
+      !(flags & RJ_ARITH_FP_ROUND_MASK)) {
+    rocjitsu::arith::fma_exact_x86_64_v3(flags, exec_mask, instruction_flags, d[0], a[0], b[0],
+                                         c[0], Rdna3);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
     result[lane] = rocjitsu::arith::fma_instruction_value(a[0][lane], b[0][lane], c[0][lane], flags,
@@ -48,6 +63,23 @@ int fma(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
     return fma_exact<Rdna3>(flags, exec_mask, instruction_flags, d, a, b, c);
   }
 
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+
+    rocjitsu::arith::fma_x86_64_v4(flags, exec_mask, instruction_flags, d[0], a[0], b[0], c[0]);
+
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+
+    rocjitsu::arith::fma_x86_64_v3(flags, exec_mask, instruction_flags, d[0], a[0], b[0], c[0]);
+
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
     float x = rocjitsu::arith::as_float(
@@ -57,7 +89,7 @@ int fma(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
     float z = rocjitsu::arith::as_float(
         rocjitsu::arith::alu_input_bits(c[0][lane], instruction_flags >> 2, flags));
 
-    float value = std::fma(x, y, z);
+    float value = __builtin_fmaf(x, y, z);
     if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
       value = rocjitsu::arith::flush_denorm_f32(value);
     }
@@ -88,7 +120,8 @@ int fma_with_dpp(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
   }
   if (instruction_flags >> 32) {
     return rocjitsu::arith::execute_dpp(
-        exec_mask, instruction_flags, a, [&](uint32_t selected, const uint32_t *const *source) {
+        flags, exec_mask, instruction_flags, a,
+        [&](uint32_t selected, const uint32_t *const *source) {
           return fma_with_dpp<Rdna3>(flags, selected, uint32_t(instruction_flags), d, source, b, c);
         });
   }
