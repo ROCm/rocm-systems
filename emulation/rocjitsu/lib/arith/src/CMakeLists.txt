@@ -10,6 +10,11 @@ add_library(
     common/cpu.cpp
     common/cpu_decode.cpp
     fp/scalar_repair.cpp
+    dot/scalar_repair.cpp
+    compare/class.cpp
+    compare/constant_compare.cpp
+    compare/float_compare.cpp
+    compare/integer_compare.cpp
     dot/dot.cpp
     dot/fp8_dot.cpp
     dot/half_dot.cpp
@@ -29,7 +34,6 @@ add_library(
     fp/minmax.cpp
     fp/mixed_fma.cpp
     fp/packed_fma.cpp
-    dot/scalar_repair.cpp
     math/half_trig.cpp
     math/half_unary.cpp
     math/rcp_iflag.cpp

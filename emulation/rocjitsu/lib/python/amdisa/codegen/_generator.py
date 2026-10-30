@@ -6694,6 +6694,30 @@ class CodeGenerator:
         has_abs = profile.has_abs_modifier(inst.enc_name)
         self._enc_name = enc_name
 
+        from amdisa.codegen.execute.rj_arith_compare import (
+            gen_integer_compare,
+            gen_float_compare,
+            gen_class_compare,
+        )
+
+        rj_arith_compare = gen_integer_compare(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_compare is not None:
+            return rj_arith_compare
+
+        rj_arith_compare = gen_float_compare(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_compare is not None:
+            return rj_arith_compare
+
+        rj_arith_compare = gen_class_compare(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_compare is not None:
+            return rj_arith_compare
+
         from amdisa.codegen.execute.rj_arith_vector import gen_integer_dot
 
         from amdisa.codegen.execute.rj_arith_division import gen_division
@@ -14062,12 +14086,17 @@ class CodeGenerator:
                             DIVISION_NAMES,
                         )
                         from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
+                        from amdisa.codegen.execute.rj_arith_compare import (
+                            COMPARE_NAMES,
+                            FLOAT_COMPARISONS,
+                        )
 
                         _rj_arith_arithmetic = self.isa_spec.arch_name in (
                             'rdna3',
                             'rdna4',
                         ) and (
                             inst.name in DIVISION_NAMES
+                            or inst.name in COMPARE_NAMES
                             or inst.name in INTEGER_DOT_NAMES
                             or (
                                 inst.name in FLOAT_NAMES and _mask_result_writer is None
@@ -14076,6 +14105,18 @@ class CodeGenerator:
                         if _rj_arith_arithmetic:
                             can_share = False
                             _portable_probe = False
+                            if inst.name in FLOAT_COMPARISONS:
+                                _ordinary_result_commit_setup += (
+                                    '  const uint64_t exec_mask = wf.exec();\n'
+                                )
+                                _result_commit_setup += (
+                                    '  uint64_t exec_mask = wf.exec();\n'
+                                )
+                                if _has_dpp_encoding:
+                                    _result_commit_setup += (
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
+                                        '    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;\n'
+                                    )
                         if not body_throws and (can_share or _portable_probe):
                             self._shared_execute_candidates[
                                 (inst.mnemonic, enc.enc_name)
@@ -14660,6 +14701,17 @@ class CodeGenerator:
                 if enc.enc_name.upper() in ('ENC_LDSDIR', 'ENC_VDSDIR'):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/lds_direct.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_compare import COMPARE_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in COMPARE_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h',
+                            False,
+                        )
                     )
 
                 from amdisa.codegen.execute.rj_arith_division import DIVISION_NAMES

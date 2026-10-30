@@ -340,9 +340,9 @@ does not select direct-CU groups; their WGP IDs still follow CU child order.
 ### CPU arithmetic policy
 
 This policy currently applies to dense and sparse WMMA, fused floating-point arithmetic,
-basic floating-point arithmetic and selection, division, dot products and math
-functions. Other instructions retain their existing implementations while integration
-proceeds by instruction family.
+basic floating-point arithmetic and selection, division, dot products, math functions
+and comparisons. Other instructions retain their existing implementations while
+integration proceeds by instruction family.
 
 The optional top-level `arithmetic` object selects one semantics mode for
 RDNA3/RDNA4 instructions executed through rj-arith:
@@ -392,8 +392,8 @@ SCC, EXEC and explicit register writes remain required in every mode. Matrix
 instructions have no FP status output.
 
 These controls cover RDNA3/RDNA4 dense and sparse WMMA, fused floating-point arithmetic,
-basic floating-point arithmetic and selection, division, dot products and math
-functions.
+basic floating-point arithmetic and selection, division, dot products, math functions
+and comparisons.
 Other GPU architectures retain their existing implementations. Decoding, register
 addressing, memory operations, scheduling, HWREG access and trap delivery remain
 rocjitsu responsibilities.
