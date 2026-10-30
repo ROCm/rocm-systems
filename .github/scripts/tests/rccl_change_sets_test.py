@@ -179,6 +179,8 @@ class CoverageWorkflowTest(unittest.TestCase):
             ("success", "true", "success skipped skipped", False),
             ("success", "", "success skipped skipped", False),
             ("failure", "", "failure skipped skipped", False),
+            # Detection wrote its output, then a later step failed.
+            ("failure", "false", "failure skipped skipped", False),
             ("cancelled", "", "cancelled skipped skipped", False),
         ]
         for changes, rccl, results, passes in cases:
