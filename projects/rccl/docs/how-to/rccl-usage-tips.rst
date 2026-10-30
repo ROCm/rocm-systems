@@ -559,8 +559,10 @@ support. VMM is available only when all of the following conditions are met:
   limited to gfx1250; on other architectures set ``1`` explicitly.
 - The HIP/ROCm runtime provides the cuMem VMM APIs: ROCm 7.12 or later, or a
   ROCm 7.0.x build that includes the cuMem backport.
-- The Linux kernel is version 6.8 or later.
-- The GPU and driver report VMM support.
+- The GPU and driver report VMM support, and the kernel can export cuMem
+  allocations as DMA-BUF.
+
+Linux kernel 6.8 or later is recommended for performance but is not required.
 
 Without VMM support, ``ncclCommSuspend`` and ``ncclCommResume`` still succeed,
 but they can't release the physical GPU memory, so the operation is

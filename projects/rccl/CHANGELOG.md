@@ -5,14 +5,17 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ## RCCL 2.32.3 for ROCm 10.3.0 (Unreleased)
 
 ### Added
+* `ncclGinFlushTimeout` and `ncclGinWaitTimeout` support on the rocSHMEM GDA and Anvil SDMA GIN backends, along with `ncclGinFlushAsync` and `ncclGinWait` on rocSHMEM GDA. Flush and wait on both backends also return when the communicator is aborted, except blocking flush on Anvil SDMA.
 
 ### Changed
+* On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.
 * gfx1250 in-place `ncclAlltoAll` and `ncclAlltoAllConfig` (`sendbuff == recvbuff`) no longer fall back to per-peer Send/Recv, which returned wrong data in place. A call that the DDA fabric LL / LL128 paths do not take now runs CE-Scratch when it fits the DDA fabric scratch, and otherwise returns `ncclInvalidUsage` with a warning. This includes calls above the scratch, under graph capture, with window-registered buffers, with `NCCL_ENQUEUE_REARCH_ENABLE`, and every call on communicators without a DDA fabric scratch (children of `ncclCommSplit`, `ncclCommShrink` and `ncclCommGrow`, `NCCL_MNNVL_ENABLE=0`, multi-clique communicators, `RCCL_DDA_ENABLE=0`). `RCCL_FORCE_CE=0` now also turns off the in-place CE-Scratch route, so those calls return `ncclInvalidUsage`. On gfx1250 fabric communicators, a CE-Scratch AllToAll also zeroes the staged scratch and adds one Copy Engine barrier after the copy-back. Other architectures are unchanged.
 
 ### Removed
 
 ### Resolved issues
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
+* Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
 
 ### Known issues
 

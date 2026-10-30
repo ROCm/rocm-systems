@@ -6,10 +6,10 @@
 
 #include "common/float_formats.h"
 #include "common/internal.h"
+#include "common/simd.h"
 #include "dot/gfx11_dot2.h"
 #include "rj_arith/rj_arith.h"
 
-#include <cmath>
 #include <stdint.h>
 
 namespace {
@@ -24,6 +24,18 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
           rocjitsu::arith::kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    if (rocjitsu::arith::is_exact(flags)) {
+      rocjitsu::arith::wmma_exact_x86_64_v3<Bf16, Lanes, true>(uint32_t(instruction_flags), d, a, b,
+                                                               c);
+    } else {
+      rocjitsu::arith::wmma_f32_x86_64_v3<Bf16, Lanes, true>(uint32_t(instruction_flags), d, a, b,
+                                                             c);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   // gfx11 layouts replicate A/B in each 16-lane group and interleave output
   // rows across groups (rocjitsu shared/mma_exec.h).
   constexpr int Groups = Lanes / 16, Registers = 256 / Lanes;
@@ -54,7 +66,7 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
         } else {
           for (int half = 0; half < 2; ++half) {
             uint16_t x = uint16_t(av >> (16 * half)), y = uint16_t(bv >> (16 * half));
-            loose = std::fma(
+            loose = __builtin_fmaf(
                 Bf16 ? rocjitsu::arith::bf16_to_float(x) : rocjitsu::arith::f16_to_float(x),
                 Bf16 ? rocjitsu::arith::bf16_to_float(y) : rocjitsu::arith::f16_to_float(y), loose);
           }

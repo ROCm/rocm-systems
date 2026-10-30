@@ -7,12 +7,13 @@
 #pragma once
 
 #include "common/alu.h"
+#include "common/bits.h"
 #include "fp/fma_integer.h"
 #include "rj_arith/rj_arith.h"
 
 #include <stdint.h>
 
-namespace rocjitsu::arith {
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // Round a finite round-to-odd FP64 intermediate to FP32 using guest MODE.
 // Flushing tests tininess after significand rounding, before exponent packing.
@@ -114,4 +115,4 @@ inline uint32_t fma_value_f32(uint32_t a, uint32_t b, uint32_t c, uint64_t flags
   return value;
 }
 
-} // namespace rocjitsu::arith
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
