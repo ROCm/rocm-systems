@@ -219,6 +219,7 @@ function(rccl_define_micro_source_lists)
     rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
     gin-plugin-init-test.cc
+    rma-plugin-init-test.cc              # src/plugin/rma.cc ncclRmaPluginInit leak fix (AICOMRCCL-3322)
     rma-test.cc
     rma-ce-test.cc
     ras-test.cc
@@ -1657,6 +1658,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
     # add_file_unique() renames this one. Re-check after any source-list reorder.
     RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc"
+    # Per the note above, plugin/rma.cc comes first and so keeps its own name.
+    RMA_PLUGIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma.cc"
     # rma_ce.cc has no basename collision, so it keeps its own name.
     RMA_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc"
     GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
@@ -2269,6 +2272,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRocmwrap
   SOURCES ${TEST_MICRO_ROCMWRAP_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    ${_MICRO_DMABUF_EXPORT_DEF}
     ROCMWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/rocmwrap.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rocmwrap.yaml")
 
