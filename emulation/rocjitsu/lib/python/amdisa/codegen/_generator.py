@@ -6688,6 +6688,14 @@ class CodeGenerator:
         has_abs = profile.has_abs_modifier(inst.enc_name)
         self._enc_name = enc_name
 
+        from amdisa.codegen.execute.rj_arith_division import gen_division
+
+        rj_arith_division = gen_division(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_division is not None:
+            return rj_arith_division
+
         from amdisa.codegen.execute.rj_arith_float import (
             gen_float_unary32,
             gen_float_unary64,
@@ -14018,12 +14026,20 @@ class CodeGenerator:
                         )
                         # rj-arith owns SIMD selection for migrated instructions. Never
                         # run a legacy arithmetic probe ahead of the rj-arith body.
+                        from amdisa.codegen.execute.rj_arith_division import (
+                            DIVISION_NAMES,
+                        )
                         from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
 
                         _rj_arith_arithmetic = self.isa_spec.arch_name in (
                             'rdna3',
                             'rdna4',
-                        ) and (inst.name in FLOAT_NAMES and _mask_result_writer is None)
+                        ) and (
+                            inst.name in DIVISION_NAMES
+                            or (
+                                inst.name in FLOAT_NAMES and _mask_result_writer is None
+                            )
+                        )
                         if _rj_arith_arithmetic:
                             can_share = False
                             _portable_probe = False
@@ -14611,6 +14627,18 @@ class CodeGenerator:
                 if enc.enc_name.upper() in ('ENC_LDSDIR', 'ENC_VDSDIR'):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/lds_direct.h', False)
+                    )
+
+                from amdisa.codegen.execute.rj_arith_division import DIVISION_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in DIVISION_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_division_exec.h',
+                            False,
+                        )
                     )
 
                 from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
