@@ -22,6 +22,27 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 
 Run ``rocprof-compute analyze -h`` for more details.
 
+Debug options
+=============
+
+Use ``--debug`` to enable diagnostic options rather than regular analysis settings.
+Run ``rocprof-compute analyze --debug --help`` to show these options.
+Multiple debug flags can be combined:
+
+.. code-block:: shell
+
+   rocprof-compute analyze -p workloads/vcopy/MI200/ --debug --debug-table-view --debug-single-metric
+
+* ``--debug-table-view``: Print plain tables instead of the views specified by ``cli_style``.
+* ``--debug-single-metric``: Show metric evaluation and memory chart diagnostics.
+  Combine it with ``--block`` to
+  isolate a metric, for example ``--block 2.1.0 --debug --debug-single-metric``.
+* ``--debug-verify-deps``: Check analyze-mode Python dependencies, then exit without
+  analyzing a workload; no ``--path`` is required.
+
+The ``--debug-*`` flags require ``--debug``; their order does not matter.
+The enabling flag alone does not turn on metric diagnostics.
+
 .. _cli-walkthrough:
 
 Walkthrough
@@ -503,11 +524,13 @@ More analysis options
 
 **TTY output view (plain tables)**
 
-Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and the per-kernel Roofline layout are shown as tables). Additional ``--view`` values may be added in future releases.
+Use ``--debug --debug-table-view`` to force plain tabular output for all sections
+and ignore ``cli_style`` from the analysis YAML (for example, memory charts and
+the per-kernel Roofline layout are shown as tables).
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --view table
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --debug --debug-table-view
 
 **Show System Speed-of-Light and CS_Busy blocks only**
 

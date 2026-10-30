@@ -27,6 +27,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Analyze diagnostics now require `--debug`. Replace `-g` with `--debug --debug-single-metric`, `--view table` with `--debug --debug-table-view`, and `--verify-deps` with `--debug --debug-verify-deps`. Run `rocprof-compute analyze --debug --help` to list diagnostic options; `--debug` alone does not enable them.
+
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
 
 * The PyTorch and Triton operator call trees now show each operator's arguments. `--torch-operator` and `--triton-operator` can now be used together.

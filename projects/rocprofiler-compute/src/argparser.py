@@ -4,13 +4,48 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Sequence
 
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
 
-class ExperimentalAction(argparse.Action):
+class _DelegatingAction(argparse.Action):
+    """Store argument values using a standard argparse action."""
+
+    def __init__(
+        self,
+        option_strings: Sequence[str],
+        help: str,
+        base_action: str,
+        **kwargs: Any,
+    ) -> None:
+        action_map = {
+            "store": argparse._StoreAction.__call__,
+            "store_const": argparse._StoreConstAction.__call__,
+            "store_true": argparse._StoreTrueAction.__call__,
+            "store_false": argparse._StoreFalseAction.__call__,
+            "append": argparse._AppendAction.__call__,
+            "append_const": argparse._AppendConstAction.__call__,
+            "count": argparse._CountAction.__call__,
+            "extend": argparse._ExtendAction.__call__,
+        }
+        if base_action not in action_map:
+            raise ValueError(f"Unsupported base_action: {base_action}")
+        self._base_action_call = action_map[base_action]
+        super().__init__(option_strings=option_strings, help=help, **kwargs)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: Optional[str] = None,
+    ) -> None:
+        self._base_action_call(self, parser, namespace, values, option_string)
+
+
+class ExperimentalAction(_DelegatingAction):
     """
     Custom action that enforces experimental feature gating.
     - Suppresses help text when experimental mode is disabled
@@ -47,25 +82,9 @@ class ExperimentalAction(argparse.Action):
         super().__init__(
             option_strings=option_strings,
             help=help,
+            base_action=base_action,
             **kwargs,
         )
-
-        # Map of action types to their __call__ methods
-        action_map = {
-            "store": argparse._StoreAction.__call__,
-            "store_const": argparse._StoreConstAction.__call__,
-            "store_true": argparse._StoreTrueAction.__call__,
-            "store_false": argparse._StoreFalseAction.__call__,
-            "append": argparse._AppendAction.__call__,
-            "append_const": argparse._AppendConstAction.__call__,
-            "count": argparse._CountAction.__call__,
-            "extend": argparse._ExtendAction.__call__,
-        }
-
-        if base_action not in action_map:
-            raise ValueError(f"Unsupported base_action: {base_action}")
-
-        self._base_action_call = action_map[base_action]
 
     def __call__(
         self,
@@ -85,7 +104,38 @@ class ExperimentalAction(argparse.Action):
             f"{self.feature_label} is experimental and may change in future releases."
         )
 
-        self._base_action_call(self, parser, namespace, values, option_string)
+        super().__call__(parser, namespace, values, option_string)
+
+
+class DebugAction(_DelegatingAction):
+    """Gate diagnostic options and delegate their argument storage."""
+
+    def __init__(
+        self,
+        option_strings: Sequence[str],
+        help: str,
+        base_action: str,
+        debug_enabled: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        self.debug_enabled = debug_enabled
+        super().__init__(
+            option_strings=option_strings,
+            help=help if debug_enabled else argparse.SUPPRESS,
+            base_action=base_action,
+            **kwargs,
+        )
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: Optional[str] = None,
+    ) -> None:
+        if not self.debug_enabled:
+            parser.error(f"{option_string} requires --debug.")
+        super().__call__(parser, namespace, values, option_string)
 
 
 def validate_block(value: str) -> str:
@@ -197,6 +247,7 @@ def omniarg_parser(
     supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Optional[str]],
     experimental_enabled: bool = False,
+    debug_enabled: bool = False,
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)
@@ -653,6 +704,7 @@ Examples:
     )
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
+    analyze_debug_group = analyze_parser.add_argument_group("Debug Options")
 
     analyze_group.add_argument(
         "-p",
@@ -663,12 +715,6 @@ Examples:
         nargs="+",
         action="append",
         help="\t\tSpecify the raw data root dirs or desired results directory.",
-    )
-    analyze_group.add_argument(
-        "--verify-deps",
-        dest="verify_deps",
-        action="store_true",
-        help="\t\tCheck the Python dependencies analyze mode needs, then exit.",
     )
     analyze_group.add_argument(
         "--list-stats",
@@ -930,21 +976,42 @@ Examples:
             "\t\tuse the option --include-cols Description."
         ),
     )
-    analyze_advanced_group.add_argument(
-        "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
+    analyze_debug_group.add_argument(
+        "--debug",
+        action="store_true",
+        help="\t\tEnable diagnostic options; use --debug --help to list them.",
     )
-    analyze_advanced_group.add_argument(
-        "--view",
+    analyze_debug_group.add_argument(
+        "--debug-table-view",
         dest="view",
-        metavar="NAME",
-        choices=["table"],  # future: e.g. "bar" for additional TTY views
+        action=DebugAction,
+        base_action="store_const",
+        debug_enabled=debug_enabled,
+        nargs=0,
+        const="table",
         default=None,
-        help=(
-            "\t\tTTY output view. "
-            "table: force plain tables and ignore cli_style from YAML "
-            "(e.g. mem_chart, per-kernel Roofline layout as tables). "
-            "Additional views may be added in future releases."
-        ),
+        help="\t\tForce plain tables and ignore cli_style from YAML.",
+    )
+    analyze_debug_group.add_argument(
+        "--debug-single-metric",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        nargs=0,
+        const=True,
+        default=False,
+        help="\t\tShow metric evaluation and memory chart diagnostics.",
+    )
+    analyze_debug_group.add_argument(
+        "--debug-verify-deps",
+        dest="verify_deps",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        nargs=0,
+        const=True,
+        default=False,
+        help="\t\tCheck analyze dependencies, then exit.",
     )
     analyze_advanced_group.add_argument(
         "--specs-correction",

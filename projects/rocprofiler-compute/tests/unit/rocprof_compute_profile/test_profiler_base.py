@@ -605,6 +605,10 @@ def _make_rpc_args(
         remaining=["--", "./myapp"],
         list_stats=list_stats,
         output_format=output_format,
+        debug=False,
+        debug_single_metric=False,
+        verify_deps=False,
+        view=None,
         torch_operator=None,
         triton_operator=None,
         list_torch_operators=False,
@@ -761,6 +765,74 @@ def test_handle_analyze_args_list_stats_output_format(output_format, expect_erro
             instance.handle_analyze_args()
     else:
         instance.handle_analyze_args()
+
+
+@pytest.mark.parametrize(
+    "argv, diagnostics",
+    [
+        (["analyze"], False),
+        (["analyze", "--debug"], False),
+        (
+            [
+                "analyze",
+                "--debug",
+                "--debug-single-metric",
+                "--debug-table-view",
+                "--debug-verify-deps",
+            ],
+            True,
+        ),
+        (
+            [
+                "analyze",
+                "--debug-single-metric",
+                "--debug-table-view",
+                "--debug-verify-deps",
+                "--debug",
+            ],
+            True,
+        ),
+        (["profile", "--", "./app", "--debug"], False),
+    ],
+)
+def test_parse_args_debug_gate(argv, diagnostics, parse_cli_args):
+    args = parse_cli_args(argv)
+    assert getattr(args, "debug_single_metric", False) is diagnostics
+    assert getattr(args, "verify_deps", False) is diagnostics
+    assert getattr(args, "view", None) == ("table" if diagnostics else None)
+    if args.mode == "profile":
+        assert args.remaining == ["--", "./app", "--debug"]
+
+
+@pytest.mark.parametrize(
+    "argv, gate",
+    [
+        (["analyze", "--debug-single-metric"], "--debug"),
+        (
+            ["analyze", "--experimental", "--debug-single-metric"],
+            "requires --debug",
+        ),
+        (["analyze", "--debug", "--torch-operator", "all"], "--experimental"),
+    ],
+)
+def test_parse_args_debug_gates_are_independent(argv, gate, parse_cli_args, capsys):
+    with pytest.raises(SystemExit) as exc:
+        parse_cli_args(argv)
+    assert exc.value.code == 2
+    assert gate in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--exp", "analyze"],
+        ["--experimental", "analyze"],
+        ["analyze", "--experimental"],
+    ],
+)
+def test_parse_args_experimental_abbreviation(argv, parse_cli_args):
+    args = parse_cli_args([*argv, "--torch-operator", "all"])
+    assert args.torch_operator == ["all"]
 
 
 # ---------------------------------------------------------------------------

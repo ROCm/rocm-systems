@@ -34,7 +34,9 @@ def help_text(home, argv, capsys):
         description="CLI",
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    omniarg_parser(parser, home, SUPPORTED_ARCHS, VERSION)
+    omniarg_parser(
+        parser, home, SUPPORTED_ARCHS, VERSION, debug_enabled="--debug" in argv
+    )
     with pytest.raises(SystemExit):
         parser.parse_args([*argv, "--help"])
     return capsys.readouterr().out
@@ -165,8 +167,73 @@ def test_profile_kernel_iteration_range():
     assert args.kernel_iteration_range == ["1", "3:5"]
 
 
-# =============================================================================
-# analyze --verify-deps
+@pytest.mark.parametrize(
+    "selectors",
+    [
+        [],
+        ["single-metric"],
+        ["verify-deps"],
+        ["table-view", "single-metric", "verify-deps"],
+    ],
+)
+def test_analyze_debug_options(selectors, parse_cli_args):
+    flags = [f"--debug-{selector}" for selector in selectors]
+    argv = ["analyze", "--debug", *flags] if selectors else ["analyze"]
+    args = parse_cli_args(argv)
+    assert args.debug_single_metric == ("single-metric" in selectors)
+    assert args.verify_deps == ("verify-deps" in selectors)
+    assert args.view == ("table" if "table-view" in selectors else None)
+
+
+@pytest.mark.parametrize("option", ["table-view", "single-metric", "verify-deps"])
+def test_analyze_debug_options_require_gate(option, capsys, parse_cli_args):
+    with pytest.raises(SystemExit) as exc:
+        parse_cli_args(["analyze", f"--debug-{option}"])
+    assert exc.value.code == 2
+    assert f"--debug-{option} requires --debug" in capsys.readouterr().err
+
+
+def test_analyze_debug_gate_alone(parse_cli_args):
+    args = parse_cli_args(["analyze", "--debug"])
+    assert args.debug is True
+    assert args.debug_single_metric is False
+    assert args.verify_deps is False
+    assert args.view is None
+
+
+def test_analyze_debug_help(capsys, parse_cli_args):
+    with pytest.raises(SystemExit) as exc:
+        parse_cli_args(["analyze", "--help"])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "--debug-single-metric" not in output
+    with pytest.raises(SystemExit) as exc:
+        parse_cli_args(["analyze", "--debug", "--help"])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    debug_help = output.split("Debug Options:", 1)[1].split("Roofline Options:", 1)[0]
+    for option in [
+        "--debug",
+        "--debug-table-view",
+        "--debug-single-metric",
+        "--debug-verify-deps",
+    ]:
+        assert option in debug_help
+    assert "--specs-correction" not in debug_help
+    assert "--normal-unit" not in debug_help
+    assert "--output-format" not in debug_help
+
+
+@pytest.mark.parametrize("gate_first", [False, True])
+def test_analyze_debug_option_order_and_repetition(gate_first, parse_cli_args):
+    flags = ["--debug-single-metric", "--debug-single-metric", "--debug-verify-deps"]
+    argv = ["--debug", *flags] if gate_first else [*flags, "--debug"]
+    args = parse_cli_args(["analyze", *argv])
+    assert args.debug_single_metric is True
+    assert args.verify_deps is True
+
+
+# analyze --debug-verify-deps
 # =============================================================================
 
 
@@ -174,9 +241,9 @@ def test_analyze_verify_deps_defaults_off():
     assert build_args(["analyze", "-p", "/tmp/workload"]).verify_deps is False
 
 
-def test_analyze_verify_deps_needs_no_workload():
+def test_analyze_verify_deps_needs_no_workload(parse_cli_args):
     """The flag is a standalone environment check, so -p stays optional."""
-    assert build_args(["analyze", "--verify-deps"]).verify_deps is True
+    assert parse_cli_args(["analyze", "--debug", "--debug-verify-deps"]).verify_deps
 
 
 def test_pc_sampling_analyze_options():
