@@ -1143,8 +1143,15 @@ void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 
   lane_mask &= ~out_of_bounds;
   if (d.atomic_op != AtomicOp::NONE)
     execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask);
-  else if (d.is_load)
+  else if (d.is_load && (d.transpose != 0 || d.lds_dst))
+    // Transposes move bytes across lanes and LDS destinations forward them, so
+    // inactive lanes keep their zero-filled response bytes.
     lds.vector_load(addresses.data(), lane_mask, d.elem_size, d.num_elems, response_data.data());
+  else if (d.is_load)
+    // Writeback reads active lanes only: the response buffer spans the wave and
+    // addresses is a value-initialized per-lane array.
+    lds.vector_load_span(addresses.data(), lane_mask, d.elem_size, d.num_elems,
+                         response_data.data());
   else
     lds.vector_store(addresses.data(), lane_mask, d.elem_size, d.num_elems, store_data.data());
   if (d.is_load || d.atomic_op != AtomicOp::NONE) {

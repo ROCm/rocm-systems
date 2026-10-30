@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <random>
 #include <utility>
@@ -235,6 +236,113 @@ TEST(LdsTest, DescendingLanesAtCapacityKeepPerElementBounds) {
   std::fill(expected_load.begin() + 8, expected_load.begin() + 16, 0);
   std::fill(expected_load.begin() + 48, expected_load.end(), 0xCC);
   EXPECT_EQ(loaded, expected_load);
+}
+
+// vector_load_span() and vector_load32() may write inactive lanes, but every
+// active lane must hold vector_load()'s bytes: whole contiguous waves,
+// independent 16-lane segments, b64 rows where lane l + 16 reads 8 bytes after
+// lane l, broadcast and scattered lanes, at the capacity and the lazy backing,
+// and with offsets that wrap 2^32.
+TEST(LdsTest, SpanLoadsMatchVectorLoadOnActiveLanes) {
+  constexpr std::array<std::pair<uint32_t, uint32_t>, 8> kShapes{
+      {{1, 1}, {2, 1}, {4, 1}, {8, 1}, {4, 2}, {4, 3}, {4, 4}, {8, 2}}};
+  std::mt19937_64 rng(0x5ba7c0de);
+  for (int iteration = 0; iteration < 20000; ++iteration) {
+    const auto [elem_size, num_elems] = kShapes[rng() % kShapes.size()];
+    const uint32_t stride = elem_size * num_elems;
+    Lds lds(4);
+    const uint32_t cap = static_cast<uint32_t>(lds.size_bytes());
+    // Back a random prefix (possibly none) with random bytes.
+    std::vector<uint8_t> initial(rng() % 4 == 0 ? 0 : rng() % (cap + 1));
+    for (auto &b : initial)
+      b = static_cast<uint8_t>(rng());
+    if (!initial.empty())
+      lds.write(0u, initial.data(), static_cast<uint32_t>(initial.size()));
+    const uint32_t backed = static_cast<uint32_t>(lds.materialized_size_bytes());
+    const uint32_t edges[] = {0, backed, cap, cap / 2};
+    const auto near_edge = [&] {
+      return edges[rng() % 4] - static_cast<uint32_t>(rng() % (80 * stride)) +
+             static_cast<uint32_t>(rng() % 24);
+    };
+    std::array<uint32_t, 64> target{};
+    switch (rng() % 5) {
+    case 0: { // one contiguous wave
+      const uint32_t base = near_edge();
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        target[lane] = base + lane * stride;
+      break;
+    }
+    case 1: // independent 16-lane segments
+      for (uint32_t segment = 0; segment < 64; segment += 16) {
+        const uint32_t base = rng() % 3 ? near_edge() : static_cast<uint32_t>(rng());
+        for (uint32_t lane = 0; lane < 16; ++lane)
+          target[segment + lane] = base + lane * stride;
+      }
+      break;
+    case 2: // b64-style rows: lane l + 16 reads 8 bytes after lane l, mostly backed
+      for (uint32_t lane = 0; lane < 16; ++lane) {
+        const bool inside = backed >= 16 && rng() % 64 != 0;
+        target[lane] = inside ? static_cast<uint32_t>(rng() % (backed - 15)) : near_edge();
+        target[lane + 16] = target[lane] + 8;
+        target[lane + 32] = near_edge();
+        target[lane + 48] = target[lane + 32] + 8;
+      }
+      break;
+    case 3: { // broadcast
+      const uint32_t base = near_edge();
+      target.fill(base);
+      break;
+    }
+    default: // scattered
+      for (auto &address : target)
+        address = rng() % 8 ? near_edge() : static_cast<uint32_t>(rng());
+      break;
+    }
+    uint64_t mask = rng();
+    switch (rng() % 7) {
+    case 6:
+      mask = 0xFFFF'FFFFull;
+      break; // a 32-lane span, where b64 rows pair up
+    case 0:
+      mask = ~uint64_t{0};
+      break;
+    case 1:
+      mask = 0xFFFF'FFFFull;
+      break;
+    case 2:
+      mask = 0xFFFF'FFFF'FFFFull;
+      break;
+    case 3:
+      mask = uint64_t{1} << (rng() % 64);
+      break;
+    case 4:
+      mask &= rng() & rng();
+      break;
+    default:
+      break;
+    }
+    const uint32_t offsets[] = {0, 37, 0xFFFF'FFF0u};
+    const uint32_t offset = offsets[rng() % 3];
+    std::array<uint32_t, 64> lanes{};
+    std::array<uint64_t, 64> addrs{};
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      lanes[lane] = target[lane] - offset;
+      addrs[lane] = target[lane];
+    }
+    std::vector<uint8_t> expected(64 * stride, 0xCC), span(64 * stride, 0x5A),
+        native(64 * stride, 0xA5);
+    lds.vector_load(addrs.data(), mask, elem_size, num_elems, expected.data());
+    lds.vector_load_span(addrs.data(), mask, elem_size, num_elems, span.data());
+    lds.vector_load32(lanes.data(), offset, mask, elem_size, num_elems, native.data());
+    for (uint64_t active = mask; active; active &= active - 1) {
+      const uint32_t at = static_cast<uint32_t>(std::countr_zero(active)) * stride;
+      ASSERT_TRUE(std::equal(span.begin() + at, span.begin() + at + stride, expected.begin() + at))
+          << "vector_load_span iteration " << iteration << " lane " << at / stride;
+      ASSERT_TRUE(
+          std::equal(native.begin() + at, native.begin() + at + stride, expected.begin() + at))
+          << "vector_load32 iteration " << iteration << " lane " << at / stride;
+    }
+  }
 }
 
 // Compare the block-copy path with per-element semantics across contiguous,

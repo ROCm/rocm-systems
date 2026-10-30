@@ -6,6 +6,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/amdgpu/coalesced_lane_runs.h"
+#include "rocjitsu/vm/amdgpu/lds_access_patterns.h"
 #include "simdojo/components/memory_interface.h"
 
 #include <algorithm>
@@ -174,6 +175,32 @@ public:
       return true;
     };
     for_each_lane_ordered_run(addrs, lane_mask, 64, stride, load_run);
+  }
+
+  /// @brief vector_load() for callers that never read inactive lanes' bytes.
+  /// @details Active lanes get exactly vector_load()'s bytes; inactive lanes'
+  /// bytes in @p dst are unspecified. Reads the address of every lane of the
+  /// span (lanes 0-31, or 0-63 when a lane above 31 is active), which must be
+  /// initialized, and @p dst must hold the span. Kernels: lds_access_patterns.h.
+  void vector_load_span(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                        uint32_t num_elems, uint8_t *dst) const {
+    lds_patterns::load({data_.data(), data_.size()}, addrs, lane_mask, elem_size, num_elems, dst,
+                       [&](const uint64_t *exact, uint64_t lanes) {
+                         load_lanes(exact, lanes, elem_size, num_elems, dst);
+                       });
+  }
+
+  /// @brief vector_load_span() from 32-bit lane values plus a common offset:
+  /// lane l reads at (lanes[l] + offset) mod 2^32.
+  /// @details Reads every lane value of the span (the highest active lane
+  /// rounded up to a multiple of 16), which must be initialized, and @p dst
+  /// must hold the span.
+  void vector_load32(const uint32_t *lanes, uint32_t offset, uint64_t lane_mask, uint32_t elem_size,
+                     uint32_t num_elems, uint8_t *dst) const {
+    lds_patterns::load32({data_.data(), data_.size()}, lanes, offset, lane_mask, elem_size,
+                         num_elems, dst, [&](const uint64_t *exact, uint64_t slow_lanes) {
+                           load_lanes(exact, slow_lanes, elem_size, num_elems, dst);
+                         });
   }
 
   /// @brief Per-lane vector store to LDS. OOB writes are dropped.
