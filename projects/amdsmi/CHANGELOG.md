@@ -171,8 +171,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed GPU metrics returning no data on integrated GPUs**.  
-  - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
+- **Fixed GPU metrics returning no data on integrated GPUs (ROCM-29548)**.  
+  - `lookup_header_flag_version()` in `rocm_smi_gpu_metrics.cc` now routes APU gpu_metrics tables to the `kApuMetricV24` reader, so `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` no longer fail on APUs such as gfx1103.
 
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
