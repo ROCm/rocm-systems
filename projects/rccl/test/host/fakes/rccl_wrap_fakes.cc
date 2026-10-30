@@ -354,7 +354,6 @@ ncclResult_t rcclAlltoAllInPlaceGuard(const ncclComm* comm, const void* sendbuff
   return g_rcclAlltoAllInPlaceGuard(comm, sendbuff, recvbuff, totalBytes);
 }
 
-
 void ResetRcclWrapFakes() {
   g_rcclParamDdaLL = 1;
   g_rcclParamDdaLL128 = kDdaThresholdUnset;
