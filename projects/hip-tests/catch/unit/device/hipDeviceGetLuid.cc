@@ -8,6 +8,14 @@
 #include <cstring>
 
 static constexpr size_t LUID_LEN = 8;
+static constexpr unsigned int kSentinel = 0xdeadbeefU;
+
+// Only Windows always has an adapter; elsewhere it depends on the backend (WSL has one).
+#if defined(_WIN32)
+static constexpr bool kLuidAlwaysSupported = true;
+#else
+static constexpr bool kLuidAlwaysSupported = false;
+#endif
 
 /**
  * @addtogroup hipDeviceGetLuid hipDeviceGetLuid
@@ -21,9 +29,9 @@ static constexpr size_t LUID_LEN = 8;
  * Test Description
  * ------------------------
  *  - Query the LUID for each available device.
- *  - The LUID is a Windows/DXGI adapter concept. On Windows the call succeeds;
- *    on other platforms it returns `hipErrorNotSupported` without writing the
- *    output parameters.
+ *  - Where an adapter backs the device (Windows, or Linux under WSL) the call
+ *    succeeds and writes a non-zero LUID and node mask; otherwise it returns
+ *    `hipErrorNotSupported` without touching the output parameters.
  * Test source
  * ------------------------
  *  - unit/device/hipDeviceGetLuid.cc
@@ -37,32 +45,31 @@ HIP_TEST_CASE(Unit_hipDeviceGetLuid_Positive) {
   HIP_CHECK(hipDeviceGet(&device, deviceId));
 
   char luid[LUID_LEN] = {0};
-  unsigned int deviceNodeMask = 0;
-#if defined(_WIN32)
-  HIP_CHECK(hipDeviceGetLuid(luid, &deviceNodeMask, device));
-  // A valid adapter LUID is never all-zero and the node mask has at least one
-  // bit set, so verify the outputs were actually written.
+  unsigned int deviceNodeMask = kSentinel;
+  const hipError_t err = hipDeviceGetLuid(luid, &deviceNodeMask, device);
+
   char zeroLuid[LUID_LEN] = {0};
-  REQUIRE(memcmp(luid, zeroLuid, LUID_LEN) != 0);
-  REQUIRE(deviceNodeMask != 0);
-#else
-  const unsigned int kSentinel = 0xdeadbeefU;
-  deviceNodeMask = kSentinel;
-  REQUIRE(hipDeviceGetLuid(luid, &deviceNodeMask, device) == hipErrorNotSupported);
-  // Outputs must be left untouched on the unsupported path.
-  char zero[LUID_LEN] = {0};
-  REQUIRE(memcmp(luid, zero, LUID_LEN) == 0);
-  REQUIRE(deviceNodeMask == kSentinel);
-#endif
+  if (err == hipSuccess) {
+    // A valid adapter LUID is never all-zero and the node mask has at least one
+    // bit set, so verify the outputs were actually written.
+    REQUIRE(memcmp(luid, zeroLuid, LUID_LEN) != 0);
+    REQUIRE(deviceNodeMask != 0);
+  } else {
+    // Windows must never land here.
+    REQUIRE_FALSE(kLuidAlwaysSupported);
+    REQUIRE(err == hipErrorNotSupported);
+    // Outputs must be left untouched on the unsupported path.
+    REQUIRE(memcmp(luid, zeroLuid, LUID_LEN) == 0);
+    REQUIRE(deviceNodeMask == kSentinel);
+  }
 }
 
 /**
  * Test Description
  * ------------------------
- *  - On Windows, verify that the LUID and device node mask returned by
- *    hipDeviceGetLuid match the values reported by hipGetDeviceProperties.
- *  - On other platforms, verify the API reports `hipErrorNotSupported` and that
- *    hipGetDeviceProperties reports an all-zero LUID and zero node mask.
+ *  - Verify hipDeviceGetLuid and hipGetDeviceProperties agree for every device:
+ *    on success the LUID and node mask must match; on `hipErrorNotSupported`
+ *    the properties must report an all-zero LUID and zero node mask.
  * Test source
  * ------------------------
  *  - unit/device/hipDeviceGetLuid.cc
@@ -79,22 +86,25 @@ HIP_TEST_CASE(Unit_hipDeviceGetLuid_VerifyLuidFrm_hipGetDeviceProperties) {
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, dev));
 
-    char luid[LUID_LEN] = {0};
-    unsigned int deviceNodeMask = 0;
-
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, dev));
 
-#if defined(_WIN32)
-    HIP_CHECK(hipDeviceGetLuid(luid, &deviceNodeMask, device));
-    REQUIRE(memcmp(luid, prop.luid, LUID_LEN) == 0);
-    REQUIRE(deviceNodeMask == prop.luidDeviceNodeMask);
-#else
-    REQUIRE(hipDeviceGetLuid(luid, &deviceNodeMask, device) == hipErrorNotSupported);
-    char zero[LUID_LEN] = {0};
-    REQUIRE(memcmp(prop.luid, zero, LUID_LEN) == 0);
-    REQUIRE(prop.luidDeviceNodeMask == 0);
-#endif
+    char luid[LUID_LEN] = {0};
+    unsigned int deviceNodeMask = kSentinel;
+    const hipError_t err = hipDeviceGetLuid(luid, &deviceNodeMask, device);
+
+    if (err == hipSuccess) {
+      REQUIRE(memcmp(luid, prop.luid, LUID_LEN) == 0);
+      REQUIRE(deviceNodeMask == prop.luidDeviceNodeMask);
+    } else {
+      // Windows must never land here.
+      REQUIRE_FALSE(kLuidAlwaysSupported);
+      REQUIRE(err == hipErrorNotSupported);
+      // Properties must not report a LUID either.
+      char zero[LUID_LEN] = {0};
+      REQUIRE(memcmp(prop.luid, zero, LUID_LEN) == 0);
+      REQUIRE(prop.luidDeviceNodeMask == 0);
+    }
   }
 }
 
