@@ -11,7 +11,7 @@ from contextlib import ExitStack
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from unittest.mock import MagicMock, patch
 
 import common
@@ -22,7 +22,6 @@ from sqlalchemy import text
 
 from argparser import omniarg_parser
 from membw_analysis.engine import run_membw_analysis
-from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
 from memory_chart.loader import Layouts
 from pc_sampling import (
     per_kernel_isa_export,
@@ -49,6 +48,7 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+from utils.tty import _render_membw_guidance
 
 ISA_WORKLOAD_NAME = "vector_copy"
 ISA_WORKLOAD_SUB_NAME = "run"
@@ -698,67 +698,6 @@ def make_membw_workload_values(
                     "value": avg_by_metric_name[metric_name],
                 })
     return pd.DataFrame(rows, columns=["metric_id", "value_name", "value"])
-
-
-def rebuild_membw_node(node_row, children_by_parent) -> BottleneckNode:
-    """Rebuild one tree node, and its subtree, from its stored rows."""
-    return BottleneckNode(
-        id=node_row.node_id,
-        label=node_row.label,
-        level=node_row.level,
-        state=node_row.state,
-        supporting=tuple(
-            SupportingMetric(
-                key=metric_row.metric_key,
-                value=metric_row.value,
-                unit=metric_row.unit,
-                display=metric_row.display,
-            )
-            for metric_row in node_row.supporting_metrics
-        ),
-        children=tuple(
-            rebuild_membw_node(child_row, children_by_parent)
-            for child_row in children_by_parent.get(node_row.membw_node_uuid, [])
-        ),
-        guidance_id=node_row.guidance_id,
-    )
-
-
-def rebuild_membw_result(session, workload) -> MemBwAnalysisResult:
-    """Rebuild a workload's membw result from the analysis rows alone."""
-    analysis_row = (
-        session
-        .query(orm.MembwAnalysis)
-        .filter_by(workload_id=workload.workload_id)
-        .one()
-    )
-    node_rows = (
-        session
-        .query(orm.MembwNode)
-        .filter_by(membw_analysis_uuid=analysis_row.membw_analysis_uuid)
-        .order_by(orm.MembwNode.node_order)
-        .all()
-    )
-    children_by_parent: Dict[Optional[int], List[orm.MembwNode]] = {}
-    for node_row in node_rows:
-        children_by_parent.setdefault(node_row.parent_node_uuid, []).append(node_row)
-    block_rows = (
-        session
-        .query(orm.MembwGuidanceBlock)
-        .filter_by(membw_analysis_uuid=analysis_row.membw_analysis_uuid)
-        .order_by(orm.MembwGuidanceBlock.block_order)
-        .all()
-    )
-    return MemBwAnalysisResult(
-        arch=analysis_row.arch,
-        availability=analysis_row.availability,
-        availability_reason=analysis_row.availability_reason,
-        nodes=tuple(
-            rebuild_membw_node(root_row, children_by_parent)
-            for root_row in children_by_parent.get(None, [])
-        ),
-        guidance_blocks=tuple(block_row.text for block_row in block_rows),
-    )
 
 
 def make_membw_analyzer(workload_path, gpu_arch, membw_analysis):
@@ -5273,7 +5212,7 @@ def test_membw_analysis_rows_rebuild_the_result_they_came_from(
     avg_by_metric_name,
     expected_availability,
 ):
-    """The stored rows rebuild the membw result they were written from, unchanged."""
+    """The stored rows rebuild the membw result, and it renders the same guidance."""
     arch_dfs = make_membw_arch_dfs()
     result = run_membw_analysis(
         membw_metric_tables(
@@ -5288,7 +5227,66 @@ def test_membw_analysis_rows_rebuild_the_result_they_came_from(
     db_analysis.add_membw_analysis(workload, result)
     db_session.commit()
 
-    assert rebuild_membw_result(db_session, workload) == result
+    rebuilt = db_analysis.load_membw_analysis(workload)
+
+    assert rebuilt == result
+    for chart_width in (0, 100):
+        assert _render_membw_guidance(
+            rebuilt, chart_width=chart_width
+        ) == _render_membw_guidance(result, chart_width=chart_width)
+
+
+def test_load_membw_analysis_orders_siblings_by_node_order(db_session):
+    """Sibling nodes come back in node_order, even when rows were stored out of it."""
+    arch_dfs = make_membw_arch_dfs()
+    result = run_membw_analysis(
+        membw_metric_tables(
+            arch_dfs,
+            make_membw_workload_values(MEMBW_UTCL1_HBM_AVG, arch_dfs),
+        ),
+        "gfx950",
+    )
+    workload = orm.Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    db_analysis.add_membw_analysis(workload, result)
+    db_session.commit()
+
+    # The children relationship is read in insertion order, so swapping two
+    # children's node_order only shows up if the loader sorts them.
+    parent_row = next(
+        node
+        for node in workload.membw_analysis.nodes
+        if node.parent is None and len(node.children) >= 2
+    )
+    first_row, second_row = sorted(
+        parent_row.children, key=lambda node: node.node_order
+    )[:2]
+    first_id, second_id = first_row.node_id, second_row.node_id
+    # Swap through a free value so the unique (analysis, node_order) constraint
+    # is never broken.
+    first_order, second_order = first_row.node_order, second_row.node_order
+    first_row.node_order = 10_000
+    db_session.flush()
+    second_row.node_order = first_order
+    db_session.flush()
+    first_row.node_order = second_order
+    db_session.commit()
+
+    rebuilt = db_analysis.load_membw_analysis(workload)
+
+    loaded_parent = next(
+        node for node in rebuilt.nodes if node.id == parent_row.node_id
+    )
+    assert [child.id for child in loaded_parent.children][:2] == [second_id, first_id]
+
+
+def test_load_membw_analysis_returns_none_without_membw_rows(db_session):
+    """A workload that was not profiled with block 30 has no membw result."""
+    workload = orm.Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    db_session.commit()
+
+    assert db_analysis.load_membw_analysis(workload) is None
 
 
 def test_calc_membw_analysis_skips_a_workload_without_block_30_values(tmp_path):
