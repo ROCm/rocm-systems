@@ -571,7 +571,7 @@ def _make_rpc_args(
     experimental=False,
     mode="profile",
     list_stats=False,
-    output_format="stdout",
+    output_format=None,
 ) -> argparse.Namespace:
     """Build a minimal Namespace for sanitize() unit tests."""
     return argparse.Namespace(
@@ -749,18 +749,21 @@ def test_sanitize_membw_analysis_injects_block_30(
 
 
 @pytest.mark.parametrize(
-    "output_format, expect_error",
-    [("stdout", False), ("txt", False), ("csv", True), ("db", True)],
+    "output_format, expect_warning",
+    [(None, False), ("stdout", True), ("txt", True), ("csv", True), ("db", True)],
 )
-def test_handle_analyze_args_list_stats_output_format(output_format, expect_error):
-    """--list-stats is rejected with csv and db output."""
+def test_handle_analyze_args_warns_on_deprecated_output_format(
+    output_format, expect_warning, monkeypatch
+):
+    """--output-format still parses but warns that it no longer has an effect."""
+    mock_warning = common.patch_console(monkeypatch, "rocprof_compute_base", "warning")[
+        "warning"
+    ]
     args = _make_rpc_args(mode="analyze", list_stats=True, output_format=output_format)
-    instance = _make_rpc_with_args(args)
-    if expect_error:
-        with pytest.raises(SystemExit):
-            instance.handle_analyze_args()
-    else:
-        instance.handle_analyze_args()
+
+    _make_rpc_with_args(args).handle_analyze_args()
+
+    assert mock_warning.called == expect_warning
 
 
 # ---------------------------------------------------------------------------

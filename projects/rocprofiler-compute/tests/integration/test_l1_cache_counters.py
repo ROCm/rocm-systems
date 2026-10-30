@@ -59,8 +59,8 @@ def test_L1_cache_counters(
             workload_dir,
             "-b",
             "16.3",
-            "--output-format",
-            "csv",
+            "--output-directory",
+            ".",
             "--output-name",
             workload_dir_output,
         ])

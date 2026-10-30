@@ -70,8 +70,8 @@ Profile preserves each pass's raw marker and counter CSVs with the
 
 List when you need the operator names from this run; filtering does not
 require a prior list. Do not pass `--list-*-operators` and `--*-operator`
-on the same command; listing ignores the filter. These flags require
-`--output-format stdout` (the default):
+on the same command; listing ignores the filter. The operator tree is printed
+only to the terminal:
 
 ```bash
 rocprof-compute analyze \
@@ -125,4 +125,4 @@ rocprof-compute does not support ROCTx-range-based profiling control, such as
 starting, stopping, or resuming collection at a user-authored ROCTx range.
 User-defined ranges in the marker CSV are labeled `user`. If the user wants
 ROCTx start/stop control, say so plainly and offer kernel filtering with
-`-k` or dispatch filtering with `-d` instead.
+`-k` or dispatch filtering with `--kernel-iteration-range` instead.

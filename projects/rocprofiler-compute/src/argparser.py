@@ -634,7 +634,7 @@ rocprof-compute analyze --path <workload_path> [analyze options]
 -----------------------------------------------------------------------------------
 Examples:
 \trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
-\trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
+\trocprof-compute analyze -p workloads/mixbench/mi200/ --kernel-iteration-range 12 34
 -----------------------------------------------------------------------------------
         """,
         prog="tool",
@@ -675,7 +675,7 @@ Examples:
         action="store_true",
         help=(
             "\t\tList all detected kernels and kernel dispatches.\n"
-            "\t\tCannot be used with --output-format csv or db.\n"
+            "\t\tPrints only; creates no run folder.\n"
             "\t\tWith --torch-operator or --triton-operator, lists only the\n"
             "\t\tkernels and dispatches of the matching operators."
         ),
@@ -699,8 +699,8 @@ Examples:
         help=(
             "\t\tList PyTorch operators as a unified call tree with kernel "
             "launch stats.\n"
-            "\t\tRequires --output-format stdout. Operator filters given with it "
-            "are ignored."
+            "\t\tPrints only; creates no run folder. Operator filters given\n"
+            "\t\twith it are ignored."
         ),
     )
     analyze_group.add_argument(
@@ -726,7 +726,7 @@ Examples:
             "\t\t\tMultiple patterns (space or comma-separated):\n"
             "\t\t\t  --torch-operator *relu*,*/aten::addmm\n"
             "\t\t\tWith -k, use the kernel ids shown in the operator tree.\n"
-            "\t\t\tRequires --output-format stdout.\n"
+            "\t\t\tThe run writes report.txt but no analysis.db or CSV files.\n"
             "\t\t\t(Default: **)"
         ),
     )
@@ -743,8 +743,8 @@ Examples:
         help=(
             "\t\tList Triton kernels as a unified call tree with kernel launch "
             "stats.\n"
-            "\t\tRequires --output-format stdout. Operator filters given with it "
-            "are ignored."
+            "\t\tPrints only; creates no run folder. Operator filters given\n"
+            "\t\twith it are ignored."
         ),
     )
     analyze_group.add_argument(
@@ -768,7 +768,7 @@ Examples:
             "\t\t\tMultiple patterns (space or comma-separated):\n"
             "\t\t\t  --triton-operator *matmul*,*rmsnorm_kernel*\n"
             "\t\t\tWith -k, use the kernel ids shown in the operator tree.\n"
-            "\t\t\tRequires --output-format stdout.\n"
+            "\t\t\tThe run writes report.txt but no analysis.db or CSV files.\n"
             "\t\t\t(Default: **)"
         ),
     )
@@ -787,8 +787,7 @@ Examples:
         ),
     )
     analyze_group.add_argument(
-        "-d",
-        "--dispatch",
+        "--kernel-iteration-range",
         dest="gpu_dispatch_id",
         metavar="",
         nargs="+",
@@ -812,35 +811,41 @@ Examples:
         help="\t\tSpecify GPU id(s) for filtering.",
     )
     analyze_group.add_argument(
-        "--output-format",
+        "-d",
+        "--output-directory",
         metavar="",
-        dest="output_format",
-        choices=["stdout", "txt", "csv", "db"],
-        default="stdout",
+        type=str,
+        dest="output_directory",
+        default=None,
         help=(
-            "\t\tFormat of the analysis output. One of: stdout, txt, csv, db.\n"
-            "\t\t  stdout - print report to the terminal (no file/folder created).\n"
-            "\t\t  txt    - write report to <name>.txt; disables terminal output.\n"
-            "\t\t  csv    - write one CSV per analysis view into a folder <name>/.\n"
-            "\t\t           Requires profiles collected in rocpd format. "
-            "Disables terminal output.\n"
-            "\t\t  db     - write a SQLite database <name>.db (see analysis\n"
-            "\t\t           database schema in the docs). Requires profiles\n"
-            "\t\t           collected in rocpd format.\n"
-            "\t\t           Disables terminal output.\n"
-            "\t\tDefault <name> is rocprof_compute_<uuid>; override with"
-            " --output-name.\n"
-            "\t\tDefault format is stdout.\n"
+            "\t\tSpecify the directory to create the run folder in.\n"
+            "\t\tMissing parent directories are created. The path is taken\n"
+            "\t\tliterally.\n"
+            "\t\t(Default: current working directory)"
         ),
     )
     analyze_group.add_argument(
+        "-o",
         "--output-name",
         metavar="",
         dest="output_name",
         help=(
-            "\t\tOverride the default output file name rocprof_compute_<uuid> "
-            "with the specified name.\n"
-            "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
+            "\t\tSpecify the run folder name. Only letters, digits, _ and -\n"
+            "\t\tare allowed, and the folder must not exist yet.\n"
+            "\t\t(Default: rocprof_compute_analyze_<YYYYMMDD_HHMMSS>)"
+        ),
+    )
+    analyze_group.add_argument(
+        "--output-format",
+        metavar="",
+        dest="output_format",
+        choices=["stdout", "txt", "csv", "db"],
+        default=None,
+        help=(
+            "\t\t(DEPRECATED) Has no effect. Every analyze run writes\n"
+            "\t\treport.txt, analysis.db and the CSV files into the run\n"
+            "\t\tfolder.\n"
+            "\t\tValues: stdout, txt, csv, db."
         ),
     )
     analyze_group.add_argument(

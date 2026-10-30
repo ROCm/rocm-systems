@@ -45,10 +45,10 @@
       "prompt": "export the annotated disassembly with sample counts from my pc sampling workload",
       "sample": "vmem.hip",
       "expected_behavior": [
-        "uses --output-format csv or db",
+        "runs analyze and reads the run folder it prints",
         "notes that the per-kernel disassembly is written under per_kernel_pc_sampling"
       ],
-      "logs_contain": ["--output-format"]
+      "logs_contain": ["per_kernel_pc_sampling"]
     },
     {
       "id": "pcs-host-trap-stall-reason",

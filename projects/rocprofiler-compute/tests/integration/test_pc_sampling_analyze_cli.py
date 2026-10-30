@@ -106,17 +106,14 @@ def test_pc_sampling_analyze_sorting_type(
 
 def test_pc_sampling_analyze_database_output(
     binary_handler_analyze_rocprof_compute,
-    monkeypatch,
+    tmp_path,
 ) -> None:
     """Preserve sampled rows, ISA attribution, and dispatches in database output."""
     workload_dir = Path(
         integration_common.setup_workload_dir(PC_SAMPLING_WORKLOAD)
     ).resolve()
-    db_name = "pc_sampling_db_test"
-    db_path = workload_dir / f"{db_name}.db"
-    # --output-name rejects path separators, so run from inside the workload
-    # dir to keep the db there; clean_output_dir then removes it with the dir.
-    monkeypatch.chdir(workload_dir)
+    run_folder = tmp_path / "pc_sampling_db_test"
+    db_path = run_folder / "analysis.db"
     try:
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
@@ -124,10 +121,10 @@ def test_pc_sampling_analyze_database_output(
             str(workload_dir),
             "--block",
             "21",
-            "--output-format",
-            "db",
+            "--output-directory",
+            str(tmp_path),
             "--output-name",
-            db_name,
+            run_folder.name,
         ])
         assert code == 0
         assert db_path.is_file()
@@ -287,14 +284,13 @@ def test_pc_sampling_analyze_database_output(
 
 def test_pc_sampling_analyze_csv_output(
     binary_handler_analyze_rocprof_compute,
-    monkeypatch,
+    tmp_path,
 ) -> None:
     """Preserve PC sampling totals and dispatch counts in CSV output."""
     workload_dir = Path(
         integration_common.setup_workload_dir(PC_SAMPLING_WORKLOAD)
     ).resolve()
-    csv_name = "pc_sampling_csv_test"
-    monkeypatch.chdir(workload_dir)
+    csv_dir = tmp_path / "pc_sampling_csv_test"
     try:
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
@@ -302,14 +298,13 @@ def test_pc_sampling_analyze_csv_output(
             str(workload_dir),
             "--block",
             "21",
-            "--output-format",
-            "csv",
+            "--output-directory",
+            str(tmp_path),
             "--output-name",
-            csv_name,
+            csv_dir.name,
         ])
         assert code == 0
 
-        csv_dir = workload_dir / csv_name
         summary_csv = csv_dir / "pc_sampling_summary.csv"
         assert summary_csv.is_file()
         csv_pc_sampling = pd.read_csv(summary_csv)
