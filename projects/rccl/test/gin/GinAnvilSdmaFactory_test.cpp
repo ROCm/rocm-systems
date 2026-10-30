@@ -232,8 +232,7 @@ TEST_F(GinAnvilSdmaFactoryTest, Getters_NullHandle) {
 }
 
 // F10: multi-channel loopback (exercises channel stride + multi-queue setup).
-// Multi-rank (cross-device) SDMA queue creation requires peer access setup
-// that only works within RCCL's full init path; tested via alltoall_perf -D3.
+// Multi-rank and cross-device creation are covered by Create_MultiRankTable.
 TEST_F(GinAnvilSdmaFactoryTest, Create_MultiChannel) {
   if (gin_anvil_sdma_probe() <= 0) {
     GTEST_SKIP() << "Anvil SDMA probe failed";
@@ -304,18 +303,9 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable) {
   int ndev = 0;
   if (hipGetDeviceCount(&ndev) != hipSuccess || ndev < 2) return;
 
-  auto devPerRank = [](void* ctx, void* buf, size_t) -> int {
-    const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
-    auto* devs = static_cast<int*>(buf);
-    for (int i = 0; i < nRanks; ++i) {
-      if (devs[i] < 0) devs[i] = i;
-    }
-    return 0;
-  };
+  // The factory enables peer access itself, so a failed cross-device create is a failure, not a skip.
   CreateOut out2{};
-  if (tryCreate(2, 0, 0, devPerRank, 1, &out2) != 0) {
-    GTEST_SKIP() << "cross-device SDMA create unavailable (peer access setup)";
-  }
+  ASSERT_EQ(tryCreate(2, 0, 0, mockAllgatherFillDevices, 1, &out2), 0);
   std::vector<void*> t2 = readTable(out2, 2);
   EXPECT_NE(t2[0], nullptr);
   EXPECT_NE(t2[1], nullptr);
@@ -328,7 +318,7 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable) {
   if (ndev < 3) return;
   constexpr int kChannels = 2;
   CreateOut out3{};
-  ASSERT_EQ(tryCreate(3, 0, 0, devPerRank, kChannels, &out3), 0);
+  ASSERT_EQ(tryCreate(3, 0, 0, mockAllgatherFillDevices, kChannels, &out3), 0);
   std::vector<void*> t3 = readTable(out3, 3 * kChannels);
   for (int pe = 0; pe < 3; ++pe) {
     for (int c = 0; c < kChannels; ++c) {
