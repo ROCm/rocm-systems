@@ -7,6 +7,7 @@
 #include "parser/env_parser.hpp"
 #include "parser/help.hpp"
 #include "parser/preset_parser.hpp"
+#include "parser/schema.hpp"
 #include "parser/value_provider.hpp"
 
 #include <cstdint>
@@ -51,11 +52,16 @@ public:
     void set_preset_lookup(preset_lookup_t lookup);
 
     /**
-     * Load a schema and install the built-in value providers.
-     * An empty path uses get_default_schema().
-     * @return false, leaving any previously loaded schema in place, when loading fails.
+     * Install the built-in catalog and the built-in value providers.
+     * @return false, leaving any previously loaded schema in place, when setup fails.
      */
-    [[nodiscard]] bool initialize(std::string_view schema_path = {});
+    [[nodiscard]] bool initialize();
+
+    /**
+     * Install this catalog and the built-in value providers.
+     * @return false, leaving any previously loaded schema in place, when setup fails.
+     */
+    [[nodiscard]] bool initialize(schema catalog);
 
     [[nodiscard]] const std::string& failure() const noexcept { return m_failure; }
 
