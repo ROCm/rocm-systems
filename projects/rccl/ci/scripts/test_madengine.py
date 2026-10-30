@@ -1261,11 +1261,17 @@ def previous_comparison(
     scale: str,
     precision: str,
 ) -> dict | None:
-    """The latest earlier candidate row with a usable ratio for this workload.
+    """The latest earlier passing run's candidate row for this workload.
 
     Called before this run appends its own rows, so the latest match is the
     previous run's. Same workload, scale and precision only: a ratio depends
     on all three.
+
+    Only runs whose own verdict was a pass count. A failed run's ratio would
+    otherwise become the reference: a regression that failed one night would
+    pass the next, and a run whose candidate never loaded the CI RCCL would
+    set it to about 1.0. Rows written before the verdict was recorded have
+    none and are skipped for the same reason.
     """
     try:
         with open(results_dir / PERF_DATASTORE) as f:
@@ -1283,6 +1289,7 @@ def previous_comparison(
             and row.get("workload") == workload_name
             and row.get("scale") == scale
             and row.get("precision") == precision
+            and row.get("verdict") == "pass"
             and isinstance(row.get("ratio"), (int, float))
             and _usable_metric(float(row["ratio"]))
         ):
@@ -1714,6 +1721,10 @@ def main() -> None:
         # run_id names this test run; these name the RCCL binary it tested.
         "artifact_run_id": os.environ.get("ARTIFACT_RUN_ID", ""),
         "rccl_md5": rccl_fingerprint["md5"],
+        # The run's own gate verdict, final by now: it covers the phase exit
+        # codes, RCCL verification and both regression checks. A later run
+        # takes only a passing one as its reference.
+        "verdict": "pass" if exit_code == 0 else "fail",
     }
     phase_images = {
         BASELINE: workload_config["base_image"],
