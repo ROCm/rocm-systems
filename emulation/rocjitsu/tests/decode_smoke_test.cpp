@@ -1279,7 +1279,7 @@ TEST(RdnaMimgDecodeTest, BvhWidthsAndDependenciesIgnoreDimSizing) {
           ASSERT_EQ(inst->num_src_operands(), 2);
           EXPECT_EQ(inst->src_operand(0)->size_bits(), vaddr_words * 32);
 
-          InstDefUse def_use(*inst);
+          InstDefUse def_use(*inst, 64);
           EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 9, vaddr_words}));
           EXPECT_FALSE(
               def_use.uses.contains({RegClass::VGPR, static_cast<uint16_t>(9 + vaddr_words), 1}));

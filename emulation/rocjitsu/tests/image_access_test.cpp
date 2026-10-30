@@ -782,7 +782,7 @@ protected:
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
 
-    const InstDefUse def_use(*inst);
+    const InstDefUse def_use(*inst, wf_->wf_size());
     EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 2, 1}));
     EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 6, 1}));
     EXPECT_FALSE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 3, 1}));
@@ -835,7 +835,7 @@ TEST_P(RdnaDecodedImageAccessTest, DecodedLoadAndStorePrintNoncontiguousCoordina
       expected += " dmask:0x1 dim:SQ_RSRC_IMG_2D unorm";
     EXPECT_EQ(inst->disassemble(), expected);
 
-    const InstDefUse def_use(*inst);
+    const InstDefUse def_use(*inst, wf_->wf_size());
     EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 2, 1}));
     EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 6, 1}));
     EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 3, 1}));
@@ -1072,7 +1072,7 @@ TEST_P(RdnaDecodedImageAccessTest, D16LoadPreservesAndReadsOnlyThePartialDestina
       const uint32_t components = std::popcount(dmask);
       const uint32_t registers = d16 ? (components + 1) / 2 : components;
       const bool preserves_last = d16 && (components & 1u);
-      const InstDefUse def_use(*inst);
+      const InstDefUse def_use(*inst, wf_->wf_size());
       EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 8, static_cast<uint8_t>(registers)}));
       for (uint32_t offset = 0; offset < registers; ++offset) {
         const bool expected_use = preserves_last && offset == components / 2;
@@ -1114,7 +1114,7 @@ TEST_P(RdnaDecodedImageAccessTest, TfeLoadReportsUnimplementedBeforeProducingDat
   ASSERT_TRUE(decoded.succeeded());
   std::unique_ptr<Instruction> inst = std::move(decoded).value();
   ASSERT_NE(inst, nullptr);
-  const InstDefUse def_use(*inst);
+  const InstDefUse def_use(*inst, wf_->wf_size());
   EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 8, 2}));
 
   EXPECT_TRUE(cu_->execute_instruction(inst.get(), *wf_).failed());
@@ -1168,7 +1168,7 @@ TEST_P(RdnaDecodedImageAccessTest, TwoDimensionalArrayDimUsesTwoDimensionalResou
         ASSERT_TRUE(decoded.succeeded());
         std::unique_ptr<Instruction> inst = std::move(decoded).value();
         ASSERT_NE(inst, nullptr);
-        const InstDefUse def_use(*inst);
+        const InstDefUse def_use(*inst, wf_->wf_size());
         EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 2, 1}));
         if (!a16) {
           EXPECT_TRUE(def_use.uses.contains(
