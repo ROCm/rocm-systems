@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -108,6 +110,15 @@ TEST(WaitcheckTarget, DependencyWaitExpressionsUseTheTargetMnemonic) {
               "s_wait_alu depctr_va_vdst(2)");
     EXPECT_EQ(wait_expression(WaitCounterKind::VmVsrc, 1, arch).value(),
               "s_wait_alu depctr_vm_vsrc(1)");
+  }
+}
+
+TEST(WaitcheckTarget, Cdna5RejectsDirectAndParameterLdsInstructions) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  for (auto opcode : {rdna4::kDsDirectLoadVdsdir, rdna4::kDsParamLoadVdsdir}) {
+    const auto words = rdna4::build_vdsdir(opcode, {.vdst = 2});
+    util::StringDiagnostic error;
+    EXPECT_TRUE(decoder->decode_window(words, 0, error.emitter()).failed());
   }
 }
 
@@ -639,6 +650,16 @@ TEST(WaitcheckTarget, LegacyExportAndMessagesContributeEvents) {
     EXPECT_EQ(messages[0].counter, WaitCounterKind::Ds);
     EXPECT_EQ(messages[0].kind, WaitEventKind::SqMessage);
     EXPECT_EQ(messages[0].registers, TrackedRegisterSource::None);
+  }
+}
+
+TEST(WaitcheckTarget, FlatAndOrdinaryStoresUseTheSameHardwareCompletionEvent) {
+  for (auto model : {WaitcntModel::LegacyVscnt, WaitcntModel::SplitGfx12}) {
+    const auto ordinary = Target::normalized_hardware_event_kind(WaitCounterKind::Store,
+                                                                 WaitEventKind::VmemStore, model);
+    for (auto kind : {WaitEventKind::FlatStore, WaitEventKind::GlobalWb})
+      EXPECT_EQ(Target::normalized_hardware_event_kind(WaitCounterKind::Store, kind, model),
+                ordinary);
   }
 }
 

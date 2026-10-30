@@ -10,6 +10,23 @@
 
 namespace rocjitsu::waitcheck_detail {
 
+namespace {
+bool flat_has_other_pending_counters(const PendingState &state, WaitEventKind kind,
+                                     WaitCounterKind waited_counter) {
+  if (kind != WaitEventKind::FlatLoad && kind != WaitEventKind::FlatStore)
+    return false;
+  // Static FLAT routing is unknown. Completing one route does not prove that
+  // the other route has consumed its VGPR sources. Include counter-only facets,
+  // which can exist solely in the per-kind summaries (notably stores).
+  for (auto counter : {WaitCounterKind::Load, WaitCounterKind::Store, WaitCounterKind::Ds}) {
+    if (counter != waited_counter &&
+        WaitcheckStateOps::counter_has_event_kind(state, counter, kind))
+      return true;
+  }
+  return false;
+}
+} // namespace
+
 uint32_t VgprMsbState::for_role(amdgpu::VgprMsbRole role) const {
   switch (role) {
   case amdgpu::VgprMsbRole::Src0:
@@ -348,7 +365,10 @@ void WaitcheckStateOps::apply_implied_vm_vsrc_wait(PendingState &state, WaitCoun
                                                    uint32_t count) {
   apply_filtered_vm_vsrc_wait(
       state,
-      [&](const PendingEvent &event) { return vm_vsrc_event_implied_by_wait(event.kind, counter); },
+      [&](const PendingEvent &event) {
+        return vm_vsrc_event_implied_by_wait(event.kind, counter) &&
+               !flat_has_other_pending_counters(state, event.kind, counter);
+      },
       count);
 }
 
@@ -446,6 +466,12 @@ bool WaitcheckStateOps::counter_has_event_kind(const PendingState &state, WaitCo
 bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingState &state,
                                                                WaitCounterKind counter,
                                                                rj_code_arch_t arch) {
+  // Unlike runtime requests, a static FLAT store has no proven VMEM route.
+  // Its possible Store position cannot establish partial retirement, including
+  // for an older ordinary store when the FLAT request might use only LDS.
+  if (counter == WaitCounterKind::Store &&
+      counter_has_event_kind(state, counter, WaitEventKind::FlatStore))
+    return true;
   if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA2 &&
        arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
       (counter != WaitCounterKind::Load && counter != WaitCounterKind::Ds)) {
@@ -537,10 +563,11 @@ util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCount
       const uint8_t age =
           state.pending_event_ages[counter_index(counter)].values[static_cast<size_t>(source.kind)];
       return vm_vsrc_event_implied_by_wait(source.kind, counter) && age != kNoPendingEventAge &&
-             age >= count;
+             age >= count && !flat_has_other_pending_counters(state, source.kind, counter);
     };
     retire_events(state, sources, [&](const PendingEvent &source) {
-      if (!vm_vsrc_event_implied_by_wait(source.kind, counter))
+      if (!vm_vsrc_event_implied_by_wait(source.kind, counter) ||
+          flat_has_other_pending_counters(state, source.kind, counter))
         return false;
       // The primary kind's newest request being complete proves the entire
       // kind complete, including operations with no materialized primary facet.
