@@ -46,6 +46,8 @@ def test_pc_sampling_analyze_basic(
     captured = capsys.readouterr()
     assert "0.1 Top Kernels" in captured.out
     assert "0.2 Dispatch List" in captured.out
+    # The terminal names the PC-sampling summary among the artifacts written.
+    assert "pc-sampling-summary.csv" in captured.out.split("Artifacts written", 1)[1]
 
     common.clean_output_dir(True, workload_dir)
 

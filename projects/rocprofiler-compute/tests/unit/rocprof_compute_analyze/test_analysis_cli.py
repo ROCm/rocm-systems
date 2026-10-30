@@ -534,12 +534,13 @@ def test_write_outputs_writes_only_the_root_report_for_one_workload(
         "rocprof_compute_analyze.analysis_cli.tty.print_roofline_html_path",
         lambda _runs, _output: None,
     )
+    make_workload_folders(tmp_path, ["/w1"])
 
     inst.write_outputs(tmp_path)
 
     # The terminal view is printed to stdout, so only the root report is a file.
     assert report_names == [str(tmp_path / "report.txt"), sys.stdout.name]
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["report.txt"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["1-w1", "report.txt"]
 
 
 def test_write_outputs_saves_each_traced_workloads_ml_api_trace(monkeypatch, tmp_path):

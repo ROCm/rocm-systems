@@ -22,6 +22,7 @@ MEM_LEVELS_WORKLOAD = (
 )
 
 PANEL_HEADING = re.compile(r"^(\d+)\. ", re.MULTILINE)
+ARTIFACTS_HEADING = "Artifacts written"
 
 
 def copy_workload(tmp_path):
@@ -45,10 +46,16 @@ def panel_numbers(text):
 
 
 def terminal_panels(captured_output):
-    """Return the printed panels, from the first heading up to the run folder line."""
+    """Return the printed panels, from the first heading up to the artifact list."""
     text = strip_ansi(captured_output)
     start = text.index("0. Top Stats")
-    return text[start : text.rindex(RUN_FOLDER_PREFIX)]
+    return text[start : text.index(ARTIFACTS_HEADING)]
+
+
+def artifacts_section(captured_output):
+    """Return the terminal lines from the artifact list to the run folder line."""
+    text = strip_ansi(captured_output)
+    return text[text.index(ARTIFACTS_HEADING) : text.rindex(RUN_FOLDER_PREFIX)]
 
 
 def run_into(analyze, workload_path, run_folder, *options):
@@ -380,6 +387,87 @@ def test_block_metric_id_prints_only_that_row(
     assert "7.1.5" in terminal
     assert "7.1.4" not in terminal
     assert "7.1.4" in (run_folder / "report.txt").read_text(encoding="utf-8")
+
+
+@pytest.mark.misc
+def test_terminal_lists_artifacts_after_the_panels_and_ends_with_run_folder(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys
+):
+    """The artifact groups follow speed-of-light; the run folder is the last line."""
+    workload_path = copy_workload(tmp_path)
+    run_folder = tmp_path / "runs" / "run1"
+
+    code = run_into(binary_handler_analyze_rocprof_compute, workload_path, run_folder)
+
+    assert code == 0
+    output = capsys.readouterr().out
+    text = strip_ansi(output)
+    assert (
+        text.index("2. System Speed-of-Light")
+        < text.index(ARTIFACTS_HEADING)
+        < text.rindex(RUN_FOLDER_PREFIX)
+    )
+    artifacts = artifacts_section(output)
+    for name in ("analysis.db", "report.txt"):
+        assert f"  {name}\n" in artifacts
+    assert "  1-MI300X_A1/\n" in artifacts
+    for name in ("kernels.csv", "dispatches.csv", "metrics-summary.csv"):
+        assert name in artifacts
+    assert "1 kernel folder" in artifacts
+    assert "Workload folders of the -p paths" not in artifacts
+    assert last_output_line(output).endswith(f"Run folder: {run_folder.resolve()}")
+
+
+@pytest.mark.misc
+def test_comparison_terminal_maps_each_p_path_to_its_workload_folder(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys
+):
+    """A comparison maps each -p path to its workload folder before the run folder."""
+    first_path = copy_workload(tmp_path)
+    second_path = tmp_path / "vcopy" / "MI200"
+    shutil.copytree(VCOPY_WORKLOAD.parent / "MI200", second_path)
+    run_folder = tmp_path / "runs" / "compare"
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(first_path),
+        "--path",
+        str(second_path),
+        "--output-directory",
+        str(run_folder.parent),
+        "--output-name",
+        run_folder.name,
+    ])
+
+    assert code == 0
+    output = capsys.readouterr().out
+    text = strip_ansi(output)
+    mapping = text.index("Workload folders of the -p paths")
+    assert text.index(ARTIFACTS_HEADING) < mapping < text.rindex(RUN_FOLDER_PREFIX)
+    assert f"  -p {first_path.resolve()} -> 1-MI300X_A1/\n" in text
+    assert f"  -p {second_path.resolve()} -> 2-MI200/\n" in text
+    assert last_output_line(output).endswith(f"Run folder: {run_folder.resolve()}")
+
+
+@pytest.mark.misc
+def test_block_run_still_ends_with_the_run_folder(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys
+):
+    """With -b the artifact list still follows the selected panels and the run folder
+    stays the last line."""
+    workload_path = copy_workload(tmp_path)
+    run_folder = tmp_path / "runs" / "run1"
+
+    code = run_into(
+        binary_handler_analyze_rocprof_compute, workload_path, run_folder, "-b", "7"
+    )
+
+    assert code == 0
+    output = capsys.readouterr().out
+    assert panel_numbers(output) == {0, 1, 2, 7}
+    assert "  analysis.db\n" in artifacts_section(output)
+    assert last_output_line(output).endswith(f"Run folder: {run_folder.resolve()}")
 
 
 @pytest.mark.misc

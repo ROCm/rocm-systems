@@ -492,6 +492,8 @@ def test_torch_operator_addmm_selects_kernels(
     assert (run_folder / "analysis.db").is_file()
     assert (run_folder / "report.txt").is_file()
     assert list(run_folder.glob("*/ml-api-trace.csv"))
+    # The terminal lists the trace among the artifacts written, before the run folder.
+    assert "ml-api-trace.csv" in out.split("Artifacts written", 1)[1]
     # The workload folder has the same layout as any other run: one folder per
     # kernel, named as kernels.csv names it, and each holds its metrics.
     (workload_folder,) = run_folder.glob("1-*")

@@ -112,7 +112,8 @@ disassembly with sample counts on each instruction line, and
 `kernel-NNN-<name>-pc-sampling-src.csv`, the sample counts of each source line.
 `kernels.csv` maps each folder to its kernel. `analysis.db` in the same folder
 stores the same content. The terminal shows the top stats, system info, and
-Speed-of-Light; the full report, PC sampling included, is `report.txt` in the
+Speed-of-Light, then lists the artifacts written; the last line is the folder's
+absolute path. The full report, PC sampling included, is `report.txt` in the
 same folder.
 
 Start with the `-pc-sampling-src.csv` of the hottest kernel to find the hottest

@@ -227,6 +227,9 @@ and writes all of the following into it:
    * - ``<n>-<workload>/ml-api-trace.csv``
      - Joined ML API marker and counter rows, written for each workload profiled with ``--torch-trace``, ``--triton-trace`` or ``--ml-api-trace``.
 
+The terminal ends by listing these artifacts and the run folder, whose absolute path is the last
+line printed. With several ``-p`` paths it also maps each ``-p`` path to its workload folder.
+
 Choose the parent directory of the run folder with ``-d``/``--output-directory`` and its name with
 ``-o``/``--output-name``. See :ref:`analysis-output-format` for details. Analyze only reads the
 workload directory, so it can be read-only. ``--output-format`` is deprecated and has no effect: analyze warns and ignores its value.

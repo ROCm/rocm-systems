@@ -918,7 +918,9 @@ def test_list_torch_operators_no_trace_data(
 
 
 @pytest.mark.misc
-def test_analyze_per_kernel_export(binary_handler_analyze_rocprof_compute, tmp_path):
+def test_analyze_per_kernel_export(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys
+):
     """Each sampled kernel's ISA and source sit in its folder beside analysis.db."""
     workload_path = setup_pc_sampling_source_workload(tmp_path).resolve()
     output_path = (tmp_path / "runs" / "pc_sampling_source").resolve()
@@ -936,6 +938,9 @@ def test_analyze_per_kernel_export(binary_handler_analyze_rocprof_compute, tmp_p
     ])
 
     assert code == 0
+    # The named run folder is the last line the terminal prints.
+    last_line = capsys.readouterr().out.strip().splitlines()[-1]
+    assert last_line.endswith(f"Run folder: {output_path}")
     assert (output_path / "analysis.db").is_file()
     assert (output_path / "report.txt").is_file()
     assert not (output_path / "per_kernel_pc_sampling").exists()

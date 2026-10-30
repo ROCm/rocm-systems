@@ -224,11 +224,12 @@ settings without stating that those differ.
 ## 8. Save a report
 
 Every analyze run prints the top stats, system info, Speed-of-Light, and any
-`-b` blocks, and saves the full report. It creates a new run
-folder holding `report.txt`, `analysis.db`, and one folder per workload with
-its CSV files, HTML plots and one folder per kernel. With several `-p` paths,
-each workload folder also gets a `report.txt` for that workload alone. The last
-line gives the folder's absolute path. `-d/--output-directory` sets the
+`-b` blocks, then lists the artifacts it wrote. It saves the full report in a
+new run folder holding `report.txt`, `analysis.db`, and one folder per workload
+with its CSV files, HTML plots and one folder per kernel. With several `-p` paths,
+each workload folder also gets a `report.txt` for that workload alone, and the
+terminal maps each `-p` path to its workload folder. The last line gives the
+folder's absolute path. `-d/--output-directory` sets the
 parent directory, and `-o/--output-name` sets the folder name. An existing
 `-o` folder is an error, so pick a new name for each run. The `analysis.db` and
 the CSV files keep every metric the profile collected, whatever `-b` selects.

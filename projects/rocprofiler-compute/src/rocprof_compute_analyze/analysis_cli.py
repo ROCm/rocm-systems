@@ -16,6 +16,7 @@ from rocprof_compute_analyze.output_location import (
     REPORT_FILE_NAME,
     workload_folder_name,
 )
+from rocprof_compute_analyze.terminal_summary import print_terminal_summary
 from utils import file_io, parser, schema, tty
 from utils.file_io import load_pc_sampling_results
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
@@ -186,6 +187,7 @@ class cli_analysis(OmniAnalyze_Base):
             terminal_selection=self._terminal_selection,
         )
         tty.print_roofline_html_path(self._report_runs, sys.stdout)
+        print_terminal_summary(run_folder, self._workload_paths(), sys.stdout)
 
     def set_report_runs(
         self,

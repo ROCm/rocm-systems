@@ -71,6 +71,7 @@ def roofline_html_path(run_folder: Path, workload_dir: str) -> Path:
 def test_analyze_generates_roofline_html(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """
     Analyze generates roofline HTML from existing workload data.
@@ -85,6 +86,9 @@ def test_analyze_generates_roofline_html(
             binary_handler_analyze_rocprof_compute, workload_dir, run_folder
         )
         assert code == 0
+        # The terminal lists the roofline HTML among the artifacts written.
+        terminal = capsys.readouterr().out
+        assert "roofline-gpu-0.html" in terminal.split("Artifacts written", 1)[1]
 
         html_path = roofline_html_path(run_folder, workload_dir)
         assert html_path.is_file()

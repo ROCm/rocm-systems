@@ -35,6 +35,8 @@ Walkthrough
 
    The terminal always shows the top stats, the system information and the System
    Speed-of-Light section. ``-b`` adds the given blocks, tables or metrics after them.
+   After them the terminal lists the artifacts written and ends with the run folder path
+   (see the run folder section below).
    ``report.txt`` in the run folder always holds every profiled block; ``-b`` does not change
    it or the analysis database. The analysis database and the CSV files keep every profiled
    metric too, whatever ``-b`` selects.
@@ -817,7 +819,22 @@ source files are written only for kernels that have PC samples; see :ref:`pc-sam
 
 The terminal shows the top stats, the system information and the System Speed-of-Light section,
 followed by any blocks selected with ``-b``. It also names the roofline HTML file when one is saved.
-The last line printed is the absolute path of the run folder.
+Then it lists the artifacts written: ``analysis.db`` and ``report.txt`` at the root, and for each
+workload folder its files and the number of kernel folders it holds. With several ``-p`` paths, it
+also maps each ``-p`` path to its workload folder, as ``<n>-<workload>/``. The last line printed is
+the absolute path of the run folder.
+
+.. code-block:: text
+
+   --------------------------------------------------------------------------------
+   Artifacts written
+     analysis.db
+     report.txt
+     1-vcopy/
+       dispatches.csv, kernels.csv, memory-chart-gpu-0.html, metrics-summary.csv
+       1 kernel folder
+
+      INFO [analysis] Run folder: /home/user/rocprof_compute_analyze_20261030_152641
 
 Use these analyze mode options to choose where the run folder goes:
 
