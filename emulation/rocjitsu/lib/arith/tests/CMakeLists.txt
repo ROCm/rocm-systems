@@ -126,6 +126,23 @@ foreach(
     rj_arith_add_test(${target} fp/${mnemonic}_test.cpp)
 endforeach()
 
+# Related comparison predicates share a binary; every entry point has its own test.
+foreach(
+    family
+    IN
+    ITEMS
+        constant
+        integer_equality
+        integer_ordering
+        class
+        float_equality
+        float_ordered
+        float_unordered
+)
+    set(target "rj_arith_compare_${family}_test")
+    rj_arith_add_test(${target} compare/${family}_test.cpp)
+endforeach()
+
 # Dot-product formats retain family-specific arithmetic and status expectations.
 foreach(family IN ITEMS integer fp8 half dot2)
     set(target "rj_arith_dot_${family}_test")

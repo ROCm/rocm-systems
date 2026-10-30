@@ -27,6 +27,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_sparse_exec.h"
@@ -2532,6 +2533,286 @@ TEST(ArithBridgeTest, UnobservedMatrixWritesPreserveAliasesAndRejectedOutputs) {
         EXPECT_EQ(fixture.cu->read_vgpr(destination + reg, lane),
                   sparse ? 0x41880000u : 0x41800000u);
   }
+}
+
+TEST(ArithBridgeTest, IntegerCompareUsesHalfSelectorsAndClearsInactiveMaskBits) {
+  for (uint32_t lanes : {32u, 64u}) {
+    for (uint64_t cpu : {RJ_ARITH_CPU_BASELINE, rj_arith_init_cpu_flags()}) {
+      BridgeFixture fixture(false, lanes);
+      rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256);
+      rdna4::Operand b(32, rdna4::OperandType::OPR_SRC_VGPR, 257);
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
+        fixture.cu->write_vgpr(fixture.base(), lane, 0x00020001);
+        fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x00010002);
+      }
+      const uint64_t active = lanes == 32 ? 0x80000005ULL : 0x8000000100000005ULL;
+      for (uint64_t exec_mask : {uint64_t{0}, active}) {
+        fixture.wave->set_exec(exec_mask);
+        for (uint64_t mode :
+             {uint64_t{0}, uint64_t(RJ_ARITH_ALU_HIGH_A), uint64_t(RJ_ARITH_ALU_HIGH_B),
+              uint64_t(RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B)}) {
+          fixture.recorder->reads.clear();
+          uint64_t result = ~0ULL;
+          arith::execute_compare<16>(*fixture.wave, rj_arith_v_cmp_eq_i16_w32,
+                                     rj_arith_v_cmp_eq_i16_w64, cpu, mode, a, b, false,
+                                     [&](uint64_t value) { result = value; });
+          ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+          const bool equal = mode == RJ_ARITH_ALU_HIGH_A || mode == RJ_ARITH_ALU_HIGH_B;
+          EXPECT_EQ(result, equal ? exec_mask : 0);
+          EXPECT_EQ(fixture.recorder->reads.size(), exec_mask ? 2u : 0u);
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, IntegerCompareReadsPackedVopcHighHalf) {
+  BridgeFixture fixture(false);
+  fixture.wave->set_exec(5);
+  // True16 encoding bit 7 selects the high half of v0; v1 uses its low half.
+  rdna4::Operand a(16, rdna4::OperandType::OPR_SRC, 256 + 128, true);
+  rdna4::Operand b(16, rdna4::OperandType::OPR_VGPR, 1, true);
+  fixture.cu->write_vgpr(fixture.base(), 0, 0x00070003);
+  fixture.cu->write_vgpr(fixture.base(), 2, 0x00080003);
+  fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x00090007);
+  fixture.cu->write_vgpr(fixture.base() + 1, 2, 0x00090007);
+  uint64_t result = 0;
+  arith::execute_compare<16>(*fixture.wave, rj_arith_v_cmp_eq_i16_w32, rj_arith_v_cmp_eq_i16_w64,
+                             RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0, a, b, false,
+                             [&](uint64_t value) { result = value; });
+  ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+  EXPECT_EQ(result, 1u);
+  ASSERT_EQ(fixture.recorder->reads.size(), 4u);
+  for (const auto &read : fixture.recorder->reads) {
+    EXPECT_EQ(read.bytes, read.reg == fixture.base() ? 0xcu : 0x3u);
+    EXPECT_EQ(read.lanes & ~5ULL, 0u);
+  }
+}
+
+TEST(ArithBridgeTest, IntegerCompare64ReadsBothWordsAndSnapshotsAliasedSgprInput) {
+  for (uint32_t lanes : {32u, 64u}) {
+    BridgeFixture fixture(false, lanes);
+    const auto sgpr = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(sgpr, 7);
+    fixture.cu->write_sgpr(sgpr + 1, 1);
+    for (uint32_t lane = 0; lane < lanes; ++lane) {
+      fixture.cu->write_vgpr(fixture.base(), lane, 7);
+      fixture.cu->write_vgpr(fixture.base() + 1, lane, lane & 1 ? 2 : 1);
+    }
+    rdna4::Operand a(64, rdna4::OperandType::OPR_SRC, 0);
+    rdna4::Operand b(64, rdna4::OperandType::OPR_SRC_VGPR, 256);
+    const uint64_t exec_mask = lanes == 32 ? 0x80000005ULL : 0x8000000100000005ULL;
+    fixture.wave->set_exec(exec_mask);
+    fixture.recorder->scalar_reads.clear();
+    arith::execute_compare<64>(*fixture.wave, rj_arith_v_cmp_eq_u64_w32, rj_arith_v_cmp_eq_u64_w64,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0, a, b, false,
+                               [&](uint64_t result) {
+                                 RegisterAccess registers(*fixture.wave);
+                                 registers.write_sgpr(sgpr, uint32_t(result));
+                                 if (lanes == 64)
+                                   registers.write_sgpr(sgpr + 1, uint32_t(result >> 32));
+                               });
+    ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+    EXPECT_EQ(fixture.recorder->scalar_reads, (std::vector<uint32_t>{sgpr, sgpr + 1}));
+    ASSERT_EQ(fixture.recorder->reads.size(), 2u);
+    EXPECT_EQ(fixture.recorder->reads[0].reg, fixture.base());
+    EXPECT_EQ(fixture.recorder->reads[1].reg, fixture.base() + 1);
+    EXPECT_EQ(fixture.cu->read_sgpr(sgpr), 5u);
+    EXPECT_EQ(fixture.cu->read_sgpr(sgpr + 1), 1u);
+  }
+}
+
+TEST(ArithBridgeTest, ConstantCompareSkipsSourceReadsAndRejectedCallsDoNotCommit) {
+  BridgeFixture fixture(false, 64);
+  fixture.wave->set_exec(0x8000000100000005ULL);
+  rdna4::Operand a(64, rdna4::OperandType::OPR_SRC_VGPR, 256);
+  uint64_t result = 0;
+  arith::execute_compare<64>(*fixture.wave, rj_arith_v_cmp_t_u64_w32, rj_arith_v_cmp_t_u64_w64, 0,
+                             0, a, a, true, [&](uint64_t value) { result = value; });
+  EXPECT_EQ(result, fixture.wave->exec());
+  EXPECT_TRUE(fixture.recorder->reads.empty());
+  bool committed = false;
+  arith::execute_compare<64>(*fixture.wave, rj_arith_v_cmp_eq_u64_w32, rj_arith_v_cmp_eq_u64_w64,
+                             1ULL << 63, 0, a, a, false, [&](uint64_t) { committed = true; });
+  EXPECT_TRUE(fixture.wave->instruction_execution_failed());
+  EXPECT_FALSE(committed);
+}
+
+TEST(ArithBridgeTest, ClassCompare64ReadsOneClassMaskWordAtTheAllocationBoundary) {
+  for (uint32_t lanes : {32u, 64u}) {
+    BridgeFixture fixture(false, lanes);
+    const uint64_t exec_mask = lanes == 64 ? (1ULL << 32) | 5 : 5;
+    fixture.wave->set_exec(exec_mask);
+    fixture.cu->write_vgpr(fixture.base(), 0, 1);
+    fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x7ff80000); // Quiet NaN.
+    fixture.cu->write_vgpr(fixture.base(), 2, 0);
+    fixture.cu->write_vgpr(fixture.base() + 1, 2, 0x80000000); // Negative zero.
+    if (lanes == 64) {
+      fixture.cu->write_vgpr(fixture.base(), 32, 0);
+      fixture.cu->write_vgpr(fixture.base() + 1, 32, 0x7ff00000); // Positive infinity.
+    }
+    for (uint32_t lane = 0; lane < lanes; ++lane)
+      fixture.cu->write_vgpr(fixture.base() + 255, lane,
+                             RJ_ARITH_CLASS_QNAN | RJ_ARITH_CLASS_NEG_ZERO);
+    rdna4::Operand a(64, rdna4::OperandType::OPR_SRC_VGPR, 256);
+    rdna4::Operand b(32, rdna4::OperandType::OPR_SRC_VGPR, 511);
+    for (uint64_t cpu : {RJ_ARITH_CPU_BASELINE, rj_arith_init_cpu_flags()}) {
+      fixture.recorder->reads.clear();
+      uint64_t result = ~0ULL;
+      arith::execute_compare<64, 32>(*fixture.wave, rj_arith_v_cmp_class_f64_w32,
+                                     rj_arith_v_cmp_class_f64_w64,
+                                     cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0,
+                                     a, b, false, [&](uint64_t value) { result = value; });
+      ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+      EXPECT_EQ(result, 5u);
+      ASSERT_EQ(fixture.recorder->reads.size(), 3u);
+      EXPECT_EQ(fixture.recorder->reads[2].reg, fixture.base() + 255);
+      EXPECT_EQ(fixture.recorder->reads[2].lanes, exec_mask);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, ClassCompareUsesRawHalfClassesAndIndependentHalfSelectors) {
+  BridgeFixture fixture(false);
+  fixture.wave->set_exec(1);
+  fixture.wave->set_mode_raw(0); // Classification must not flush subnormals.
+  fixture.cu->write_vgpr(fixture.base(), 0, 0x80013c00); // High half: negative subnormal.
+  fixture.cu->write_vgpr(fixture.base() + 1, 0, RJ_ARITH_CLASS_NEG_SUBNORMAL << 16);
+  rdna4::Operand a(16, rdna4::OperandType::OPR_SRC, 256);
+  rdna4::Operand b(16, rdna4::OperandType::OPR_SRC, 257);
+  for (uint64_t mode :
+       {uint64_t(RJ_ARITH_ALU_HIGH_A), uint64_t(RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B),
+        uint64_t(RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_ABS_A)}) {
+    uint64_t result = ~0ULL;
+    arith::execute_compare<16, 32>(*fixture.wave, rj_arith_v_cmp_class_f16_w32,
+                                   rj_arith_v_cmp_class_f16_w64,
+                                   fixture.wave->cu().arithmetic_flags(), mode, a, b, false,
+                                   [&](uint64_t value) { result = value; });
+    ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+    EXPECT_EQ(result, mode == (RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B) ? 1u : 0u);
+  }
+}
+
+TEST(ArithBridgeTest, FloatCompareReportsRepeatedCausesAndPreservesUnrelatedState) {
+  for (uint32_t lanes : {32u, 64u}) {
+    BridgeFixture fixture(false, lanes, parse_arithmetic_policy("bit_exact_empirical"));
+    fixture.wave->set_exec(5);
+    fixture.wave->set_mode_raw(0xf0);
+    fixture.wave->set_trapsts(0x80000001u);
+    rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256);
+    rdna4::Operand b(32, rdna4::OperandType::OPR_SRC_VGPR, 257);
+    fixture.cu->write_vgpr(fixture.base(), 0, 0x7f800001); // Signaling NaN.
+    fixture.cu->write_vgpr(fixture.base(), 1, 1);          // Inactive subnormal.
+    fixture.cu->write_vgpr(fixture.base(), 2, 0x3f800000);
+    for (uint32_t lane = 0; lane < lanes; ++lane)
+      fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x3f800000);
+    for (int repeat = 0; repeat < 2; ++repeat) {
+      fixture.wave->clear_pending_alu_causes();
+      uint64_t result = ~0ULL;
+      arith::execute_float_compare<32>(*fixture.wave, rj_arith_v_cmp_eq_f32_w32_gfx12,
+                                       rj_arith_v_cmp_eq_f32_w64_gfx12,
+                                       fixture.wave->cu().arithmetic_flags(), 0, a, b, false,
+                                       fixture.wave->cu().arithmetic_reports_fp_status(),
+                                       [&](uint64_t value) { result = value; });
+      ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+      EXPECT_EQ(result, 4u);
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000001u);
+      EXPECT_EQ(fixture.wave->pending_alu_causes(), RJ_ARITH_EXCEPTION_INVALID);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, FloatCompareHonorsGuestDenormalsAndExplicitLoosePolicy) {
+  for (bool loose : {false, true})
+    for (bool flush : {false, true}) {
+      BridgeFixture fixture(false, 32,
+                            parse_arithmetic_policy(loose ? "loose" : "bit_exact_empirical"));
+      fixture.wave->set_exec(1);
+      fixture.wave->set_mode_raw(flush ? 0 : 0xf0);
+      fixture.wave->set_trapsts(0x80000000u);
+      fixture.cu->write_vgpr(fixture.base(), 0, 1);
+      rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256);
+      rdna4::Operand b(32, rdna4::OperandType::OPR_SRC, 128); // Inline zero.
+      uint64_t result = ~0ULL;
+      arith::execute_float_compare<32>(*fixture.wave, rj_arith_v_cmp_eq_f32_w32_gfx12,
+                                       rj_arith_v_cmp_eq_f32_w64_gfx12,
+                                       fixture.wave->cu().arithmetic_flags(), 0, a, b, false,
+                                       fixture.wave->cu().arithmetic_reports_fp_status(),
+                                       [&](uint64_t value) { result = value; });
+      ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+      EXPECT_EQ(result, flush ? 1u : 0u);
+      const uint32_t causes = !loose && !flush ? RJ_ARITH_EXCEPTION_INPUT_DENORM : 0;
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000u | causes);
+      EXPECT_EQ(fixture.wave->pending_alu_causes(), causes);
+    }
+}
+
+TEST(ArithBridgeTest, FloatCompareHalfSelectorAndInlineFloatKeepTheirFormat) {
+  BridgeFixture fixture(false);
+  fixture.wave->set_exec(1);
+  fixture.wave->set_mode_raw(0xf0);
+  fixture.cu->write_vgpr(fixture.base(), 0, 0x3c008000);
+  rdna4::Operand a(16, rdna4::OperandType::OPR_SRC, 256);
+  rdna4::Operand b(16, rdna4::OperandType::OPR_SRC, 242); // Inline half 1.0.
+  for (uint64_t mode :
+       {uint64_t(RJ_ARITH_ALU_HIGH_A), uint64_t(RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_NEG_A)}) {
+    uint64_t result = ~0ULL;
+    arith::execute_float_compare<16>(*fixture.wave, rj_arith_v_cmp_eq_f16_w32_gfx12,
+                                     rj_arith_v_cmp_eq_f16_w64_gfx12,
+                                     fixture.wave->cu().arithmetic_flags(), mode, a, b, false,
+                                     false, [&](uint64_t value) { result = value; });
+    ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+    EXPECT_EQ(result, mode & RJ_ARITH_ALU_NEG_A ? 0u : 1u);
+  }
+}
+
+TEST(ArithBridgeTest, FloatCompareDppFilteredLanesCannotRaiseExceptions) {
+  BridgeFixture fixture(false, 32, parse_arithmetic_policy("bit_exact_empirical"));
+  fixture.wave->set_exec((1u << 0) | (1u << 16) | (1u << 17));
+  fixture.wave->set_mode_raw(0xf0);
+  fixture.cu->write_vgpr(fixture.base(), 0, 0x7f800001); // Disabled row.
+  fixture.cu->write_vgpr(fixture.base(), 16, 0x3f800000);
+  fixture.cu->write_vgpr(fixture.base() + 1, 16, 0x7f800001); // Invalid DPP source lane.
+  fixture.cu->write_vgpr(fixture.base() + 1, 17, 0x3f800000);
+  rdna4::VopcVopDpp16MachineInst raw{};
+  raw.src0 = SRC_DPP;
+  raw.vsrc0 = 0;
+  raw.vsrc1 = 1;
+  raw.dpp_ctrl = dpp::ROW_SHR1;
+  raw.fi = 1;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xf;
+  raw.row_mask = 2;
+  rdna4::VCmpEqF32Vopc instruction(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+  instruction.execute_impl(*fixture.wave);
+  ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+  EXPECT_EQ(fixture.wave->vcc(), 1u << 17);
+  EXPECT_EQ(fixture.wave->trapsts(), 0u);
+  EXPECT_EQ(fixture.wave->pending_alu_causes(), 0u);
+}
+
+TEST(ArithBridgeTest, RejectedFloatCompareDppDoesNotChangeExecOrExceptionState) {
+  BridgeFixture fixture(true, 32, parse_arithmetic_policy("bit_exact_empirical"));
+  constexpr uint64_t old_exec = 0xa5a55a5affff005bULL;
+  fixture.wave->set_exec_raw(old_exec);
+  fixture.wave->set_vcc_raw(0x123456789abcdef0ULL);
+  fixture.wave->set_trapsts(0x80000001u);
+  rdna3::VopcVopDpp16MachineInst raw{};
+  raw.src0 = SRC_DPP;
+  raw.vsrc0 = 0;
+  raw.vsrc1 = 1;
+  raw.dpp_ctrl = dpp::ROW_SHR1;
+  raw.fi = 1;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xf;
+  raw.row_mask = 0xf;
+  rdna3::VCmpxEqF32Vopc instruction(reinterpret_cast<const rdna3::MachineInst *>(&raw));
+  instruction.execute_impl(*fixture.wave);
+  EXPECT_TRUE(fixture.wave->instruction_execution_failed());
+  EXPECT_EQ(fixture.wave->exec_raw(), old_exec);
+  EXPECT_EQ(fixture.wave->vcc(), 0x123456789abcdef0ULL);
+  EXPECT_EQ(fixture.wave->trapsts(), 0x80000001u);
+  EXPECT_EQ(fixture.wave->pending_alu_causes(), 0u);
 }
 
 const uint64_t exact = RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
