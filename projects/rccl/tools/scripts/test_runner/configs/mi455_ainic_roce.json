@@ -1576,6 +1576,11 @@
           "test_filter": "AllReduce.UserBufferRegistration"
         },
         {
+          "name": "AllReduce.SymmetricTmaLdPrefetch",
+          "description": "AllReduce_RSxTmaLD_AGxTmaST forced on symmetric windows at 5 and 11 deep chunks per rank and block, so warps run past one deep-loop iteration and prefetch their next tile; checks the logged kernel, block count, every sum and a guard (gfx1250)",
+          "test_filter": "AllReduce.SymmetricTmaLdPrefetch"
+        },
+        {
           "name": "AllReduce.ManagedMemUserBufferRegistration",
           "description": "AllReduce managed mem user buffer",
           "test_filter": "AllReduce.ManagedMemUserBufferRegistration"
@@ -1774,6 +1779,11 @@
           "name": "AllGather.SymmetricInPlaceSlices",
           "description": "AllGather in-place on symmetric windows, 16 B aligned and unaligned per-rank slices",
           "test_filter": "AllGather.SymmetricInPlaceSlices"
+        },
+        {
+          "name": "AllGather.SymmetricTmaStSkewedHead",
+          "description": "AllGather_TmaST forced on symmetric windows with send and recv skewed by 16-240 B, out of place at all and odd rank counts and in place; checks the logged kernel, block count and every rank window (gfx1250)",
+          "test_filter": "AllGather.SymmetricTmaStSkewedHead"
         },
         {
           "name": "AllGather.ManagedMem",
@@ -5906,6 +5916,15 @@
           "name": "GIN_ReduceScatter_Symmetric",
           "description": "Symmetric-memory ReduceScatter (RailA2A_LsaLD) sum + avg; requires >=2 ranks/node across >=2 nodes",
           "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric*"
+        },
+        {
+          "name": "GIN_ReduceScatter_RailA2AChunkRemainder",
+          "description": "Symmetric ReduceScatter (RailA2A_LsaLD) over several 2048-float chunks ending in a partial chunk, one CTA, two rounds with fresh data and recv guards",
+          "test_filter": "GinMPIDeviceTests.ReduceScatter_RailA2AChunkRemainder",
+          "env_variables": {
+            "NCCL_SYM_RS_GIN_CHUNK_SIZE": "4096",
+            "NCCL_SYM_CTAS": "1"
+          }
         }
       ]
     },

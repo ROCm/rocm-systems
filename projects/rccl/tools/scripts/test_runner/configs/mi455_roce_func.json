@@ -5182,6 +5182,15 @@
           "name": "GIN_ReduceScatter_Symmetric",
           "description": "Symmetric-memory ReduceScatter (RailA2A_LsaLD) sum + avg; requires >=2 ranks/node across >=2 nodes",
           "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric*"
+        },
+        {
+          "name": "GIN_ReduceScatter_RailA2AChunkRemainder",
+          "description": "Symmetric ReduceScatter (RailA2A_LsaLD) over several 2048-float chunks ending in a partial chunk, one CTA, two rounds with fresh data and recv guards",
+          "test_filter": "GinMPIDeviceTests.ReduceScatter_RailA2AChunkRemainder",
+          "env_variables": {
+            "NCCL_SYM_RS_GIN_CHUNK_SIZE": "4096",
+            "NCCL_SYM_CTAS": "1"
+          }
         }
       ]
     },

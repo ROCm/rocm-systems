@@ -22,6 +22,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <regex>
 #include <string>
 #include <sys/syscall.h>
@@ -2487,6 +2488,160 @@ TEST_F(GraphStreamOrderingConfigMPITest, DisabledOrderingGraphCaptureSmoke)
         // rank cannot leave the others waiting in the next iteration's collective asserts.
         EXPECT_NEAR(result, expected, 1e-3f) << "graph " << i;
         ASSERT_MPI_TRUE(result >= expected - 1e-3f && result <= expected + 1e-3f);
+    }
+}
+
+// Direct ReduceScatter (gfx950, 2-16 nodes, PXN on) splits recvcount across the grid with a remainder.
+class DirectReduceScatterMPITest : public MPITestBase
+{};
+
+namespace
+{
+// The grid comes from the tuner: kDrsSweep consecutive counts hit remainder == grid - 1 for any
+// grid up to kDrsSweep; 8191 does for powers of two, 27719 for grids 2-12.
+constexpr size_t   kDrsSweep      = 64;
+constexpr size_t   kDrsExtra[]    = {8191, 27719};
+constexpr size_t   kDrsGuard      = 256;
+constexpr size_t   kDrsMinBytes   = 131072; // 2-node window in rcclUseReduceScatterDirect
+constexpr size_t   kDrsMaxBytes   = 2097152;
+constexpr uint32_t kDrsSentinel   = 0xA5A5A5A5u;
+constexpr int      kDrsMaxRanks   = 128;
+
+// j indexes the full send buffer, so each rank, destination slice and element is distinct.
+int32_t drsSumValue(int rank, int /*nRanks*/, size_t j)
+{
+    return static_cast<int32_t>((j * 131 + static_cast<size_t>(rank) * 7919) % 1000003);
+}
+
+// The rank that holds the minimum rotates with j.
+float drsMinValue(int rank, int nRanks, size_t j)
+{
+    return static_cast<float>((j * 37 % 4093) * kDrsMaxRanks + (rank + j) % nRanks);
+}
+} // namespace
+
+TEST_F(DirectReduceScatterMPITest, NonGridMultipleCountsMatchHostReference)
+{
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, kNoProcessLimit, kNoPowerOfTwoRequired, /*min_nodes=*/2);
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm   = getActiveCommunicator();
+    int        rank   = -1;
+    int        nRanks = 0;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(comm, &rank));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(comm, &nRanks));
+
+    const char* algoEnv    = getenv("NCCL_ALGO");
+    const char* disableEnv = getenv("RCCL_DIRECT_REDUCE_SCATTER_DISABLE");
+    const int   nNodes     = comm->nNodes;
+    const char* why        = nullptr;
+    if(comm->archName == nullptr || strstr(comm->archName, "gfx950") == nullptr)
+        why = "Direct ReduceScatter runs only on gfx950";
+    else if(nNodes != 2 && nNodes != 4 && nNodes != 8 && nNodes != 16)
+        why = "Direct ReduceScatter needs 2, 4, 8 or 16 nodes";
+    else if(algoEnv != nullptr && algoEnv[0] != '\0')
+        why = "NCCL_ALGO bypasses the RCCL algorithm selector";
+    else if(disableEnv != nullptr && atoi(disableEnv) != 0)
+        why = "RCCL_DIRECT_REDUCE_SCATTER_DISABLE is set";
+    else if(nRanks > kDrsMaxRanks)
+        why = "reference values assume at most 128 ranks";
+    const std::string skip = mpiCoordinatedSkipReason(why != nullptr, why);
+    if(!skip.empty())
+    {
+        GTEST_SKIP() << skip;
+    }
+
+    const size_t        rowBytes = sizeof(float) * nRanks;
+    const size_t        first    = (kDrsMinBytes + rowBytes - 1) / rowBytes;
+    std::vector<size_t> counts;
+    for(size_t c = first; c < first + kDrsSweep; ++c)
+        counts.push_back(c);
+    for(size_t c : kDrsExtra)
+        if(c > counts.back())
+            counts.push_back(c);
+    while(!counts.empty() && counts.back() * rowBytes > kDrsMaxBytes)
+        counts.pop_back();
+    ASSERT_MPI_TRUE(counts.size() > kDrsSweep / 2);
+    const size_t maxCount = counts.back();
+
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, maxCount * nRanks * sizeof(float)));
+    auto sendGuard = makeDeviceBufferAutoGuard(sendBuf);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, (maxCount + kDrsGuard) * sizeof(float)));
+    auto recvGuard = makeDeviceBufferAutoGuard(recvBuf);
+
+    // The selector resolves the per-comm PXN setting, so query once before reading it.
+    int algo = -1, proto = -1, maxChannels = -1;
+    ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncReduceScatter, counts.front(), ncclInt32, ncclSum,
+                                                   sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &proto,
+                                                   &maxChannels));
+    const std::string pxnSkip
+        = mpiCoordinatedSkipReason(comm->pxnDisable != 0, "Direct ReduceScatter needs PXN; set NCCL_PXN_DISABLE=0");
+    if(!pxnSkip.empty())
+    {
+        GTEST_SKIP() << pxnSkip;
+    }
+
+    auto runCase = [&](auto tag, ncclDataType_t dt, ncclRedOp_t op, size_t count, auto valueFn) {
+        using T = decltype(tag);
+        static_assert(sizeof(T) == sizeof(uint32_t), "sentinel is 32-bit");
+
+        std::vector<T> hostSend(count * nRanks);
+        for(size_t j = 0; j < hostSend.size(); ++j)
+            hostSend[j] = valueFn(rank, nRanks, j);
+        ASSERT_MPI_EQ(hipSuccess,
+                      hipMemcpy(sendBuf, hostSend.data(), hostSend.size() * sizeof(T), hipMemcpyHostToDevice));
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0xA5, (count + kDrsGuard) * sizeof(T)));
+
+        ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncReduceScatter, count, dt, op, sendBuf, recvBuf,
+                                                       /*graphCapturing=*/0, &algo, &proto, &maxChannels));
+        EXPECT_EQ(static_cast<int>(RCCL_DIRECT_REDUCESCATTER), algo) << "count " << count << " op " << op;
+        ASSERT_MPI_EQ(static_cast<int>(RCCL_DIRECT_REDUCESCATTER), algo);
+
+        ASSERT_MPI_EQ(ncclSuccess, ncclReduceScatter(sendBuf, recvBuf, count, dt, op, comm, getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        std::vector<T> hostRecv(count + kDrsGuard);
+        ASSERT_MPI_EQ(hipSuccess,
+                      hipMemcpy(hostRecv.data(), recvBuf, hostRecv.size() * sizeof(T), hipMemcpyDeviceToHost));
+
+        size_t bad = 0;
+        for(size_t i = 0; i < count; ++i)
+        {
+            const size_t j      = static_cast<size_t>(rank) * count + i;
+            T            expect = valueFn(0, nRanks, j);
+            for(int r = 1; r < nRanks; ++r)
+            {
+                const T v = valueFn(r, nRanks, j);
+                expect    = (op == ncclSum) ? static_cast<T>(expect + v) : (v < expect ? v : expect);
+            }
+            if(hostRecv[i] != expect && bad++ == 0)
+            {
+                ADD_FAILURE() << "count " << count << " op " << op << " elem " << i << ": got " << hostRecv[i]
+                              << " want " << expect;
+            }
+        }
+        size_t guardBad = 0;
+        for(size_t i = count; i < hostRecv.size(); ++i)
+        {
+            uint32_t bits;
+            memcpy(&bits, &hostRecv[i], sizeof(bits));
+            guardBad += (bits != kDrsSentinel);
+        }
+        EXPECT_EQ(0u, bad) << "count " << count << " op " << op << ": wrong elements";
+        EXPECT_EQ(0u, guardBad) << "count " << count << " op " << op << ": write past recvcount";
+        ASSERT_MPI_TRUE(bad == 0 && guardBad == 0);
+    };
+
+    for(size_t count : counts)
+    {
+        runCase(int32_t{}, ncclInt32, ncclSum, count, drsSumValue);
+        if(HasFatalFailure() || IsSkipped())
+            return;
+        runCase(float{}, ncclFloat32, ncclMin, count, drsMinValue);
+        if(HasFatalFailure() || IsSkipped())
+            return;
     }
 }
 
