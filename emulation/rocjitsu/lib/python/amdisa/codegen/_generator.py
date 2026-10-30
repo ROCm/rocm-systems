@@ -1482,6 +1482,17 @@ class CodeGenerator:
         )
 
     @staticmethod
+    def _encoded_source_operands(inst: Instruction) -> list[Operand]:
+        # Read/write destinations such as V_FMAC's accumulator are semantic
+        # inputs, but they are not the encoded src0/src1 fields modified by
+        # DPP or SDWA.
+        return [
+            op
+            for op in inst.operands
+            if op.is_input and not op.is_output and not op.fieldless
+        ]
+
+    @staticmethod
     def _semantic_source_operands(
         inst: Instruction, src_operands: list[Operand]
     ) -> list[Operand]:
@@ -1501,6 +1512,19 @@ class CodeGenerator:
         ordered_names = {op.name for op in ordered}
         ordered.extend(op for op in src_operands if op.name not in ordered_names)
         return ordered
+
+    @staticmethod
+    def _semantic_stages_src0(sem: InstructionSemantics | None) -> bool:
+        """Whether MOVREL builds and stages rel_src from the semantic source.
+
+        These operations must skip ordinary source staging because their
+        semantic source can differ from the encoded source used there.
+        """
+        return (
+            sem is not None
+            and sem.semantic_class == 'vector_movrel'
+            and sem.operation in ('src', 'srcdst', 'srcdst2')
+        )
 
     @classmethod
     def _execute_operand_participates(cls, opnd: Operand) -> bool:
@@ -1712,7 +1736,7 @@ class CodeGenerator:
         )
 
     def _instruction_supports_dpp8(self, inst: Instruction, enc_name: str) -> bool:
-        return self._dpp_opcode_rule(
+        supported = self._dpp_opcode_rule(
             inst, enc_name
         ) is DppOpcodeRule.ALLOW and self.isa_spec.profile.supports_dpp_opcode(
             enc_name,
@@ -1721,6 +1745,12 @@ class CodeGenerator:
                 inst, enc_name, 'dpp8'
             ),
         )
+        if supported:
+            sources = self._encoded_source_operands(inst)
+            assert (
+                not sources or sources[0].size <= 32
+            ), f'{inst.name}: DPP8 requires a source no wider than 32 bits'
+        return supported
 
     def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
         has_modifier_encoding = self._instruction_supports_modifier_encoding(
@@ -2517,7 +2547,6 @@ class CodeGenerator:
         vopd3_header_decls = '\n'
         vopd3_model_helpers = ''
         vopd3_f64_helpers = ''
-        vopd3_execute_slot_cases = ''
         vopd3_constructor_branch = ''
         vopd3_constructor_close = ''
         vopd3_validation_branch = ''
@@ -2533,7 +2562,9 @@ class CodeGenerator:
                 if (!(exec & (1ULL << lane)))
                   continue;
                 uint32_t x_result = execute_slot(x_, wf, lane);
+                if (wf.instruction_execution_failed()) return;
                 uint32_t y_result = execute_slot(y_, wf, lane);
+                if (wf.instruction_execution_failed()) return;
                 amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result);
                 amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result);
               }
@@ -2594,19 +2625,12 @@ class CodeGenerator:
                 return std::bit_cast<uint64_t>(result);
               }
               default:
-                throw util::UnimplementedInst(op_name(slot.op));
+                wf.report_instruction_execution_error(
+                    amdgpu::InstructionExecutionError::UnimplementedInstruction);
+                return 0;
               }
             }
             ''')
-            vopd3_execute_slot_cases = cpp_block('''
-            @VOPD_FLOAT64_CASES@
-                throw util::UnimplementedInst(
-                    std::string(op_name(slot.op)) +
-                    " (VOPD F64 execution requires 64-bit VGPR pair support)");
-            ''')
-            vopd3_execute_slot_cases = vopd3_execute_slot_cases.replace(
-                '@VOPD_FLOAT64_CASES@', vopd_float64_case_labels
-            )
             vopd3_constructor_branch = cpp_block('''
               if ((word0_ >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
                 format_ = Format::Vopd3;
@@ -2706,9 +2730,13 @@ class CodeGenerator:
                 bool x64 = is_float64_op(x_.op);
                 bool y64 = is_float64_op(y_.op);
                 uint64_t x_result64 = x64 ? execute_slot64(x_, wf, lane) : 0;
+                if (wf.instruction_execution_failed()) return;
                 uint64_t y_result64 = y64 ? execute_slot64(y_, wf, lane) : 0;
+                if (wf.instruction_execution_failed()) return;
                 uint32_t x_result32 = x64 ? 0 : execute_slot(x_, wf, lane);
+                if (wf.instruction_execution_failed()) return;
                 uint32_t y_result32 = y64 ? 0 : execute_slot(y_, wf, lane);
+                if (wf.instruction_execution_failed()) return;
                 if (x64)
                   amdgpu::RegisterAccess(wf).write_lane64(*x_.dst, lane, x_result64);
                 else
@@ -2723,12 +2751,8 @@ class CodeGenerator:
             f'  if (amdgpu::try_execute_vopd_simd<{str(has_vopd3).lower()}>(x_, y_, wf)) return;\n'
             + execute_impl_body
         )
-        vopd_execute_slot_cases = join_cases(
-            vopd_execute_slot_cases, vopd3_execute_slot_cases
-        )
         vopd_impl_includes = textwrap.dedent('''\
             #include "@GENERATED_ARCH@/vopd.h"
-            #include "util/except.h"
             #include "rocjitsu/vm/amdgpu/wavefront.h"
             #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
             #include <algorithm>
@@ -2741,7 +2765,6 @@ class CodeGenerator:
             vopd_impl_includes = textwrap.dedent('''\
                 #include "@GENERATED_ARCH@/vopd.h"
                 #include "@GENERATED_ARCH@/execution_backend.h"
-                #include "util/except.h"
                 #include <format>
                 #include <string>
                 ''')
@@ -2886,7 +2909,9 @@ class CodeGenerator:
               switch (slot.op) {
             @VOPD_EXECUTE_SLOT_CASES@
               default:
-                throw util::UnimplementedInst(op_name(slot.op));
+                wf.report_instruction_execution_error(
+                    amdgpu::InstructionExecutionError::UnimplementedInstruction);
+                return 0;
               }
             }
             ''')
@@ -3276,7 +3301,6 @@ class CodeGenerator:
                 '// AUTO-GENERATED by the amdisa codegen pipeline. DO NOT EDIT.\n'
                 '// See lib/python/amdisa/README.md for regeneration instructions.\n\n'
                 f'#include "{self.config.generated_include(self.generated_dir_name, "vopd.h")}"\n'
-                '#include "util/except.h"\n'
                 '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"\n'
                 '#include "rocjitsu/vm/amdgpu/register_access.h"\n'
                 '#include "rocjitsu/vm/amdgpu/wavefront.h"\n'
@@ -7149,6 +7173,12 @@ class CodeGenerator:
             ),
             result_writer=result_writer,
         )
+        if ctx.supports_dpp8 and self._semantic_stages_src0(sem):
+            # MOVREL builds rel_src from the semantic src[0], which can differ
+            # from the encoded source selected for ordinary DPP staging.
+            assert (
+                src_operands[0].size <= 32
+            ), f'{inst.name}: DPP8 requires a source no wider than 32 bits'
         handler = DISPATCH.get(cls)
         if handler is not None:
             return handler(ctx)
@@ -13389,15 +13419,7 @@ class CodeGenerator:
                             # permute path below therefore addresses the real
                             # sources by name and never replaces an architectural
                             # src_operands_[] entry.
-                            _src_input_ops = [
-                                o
-                                for o in inst.operands
-                                # Read/write destinations such as V_FMAC's
-                                # accumulator are semantic inputs, but they are
-                                # not the encoded src0/src1 fields modified by
-                                # DPP or SDWA.
-                                if o.is_input and not o.is_output and not o.fieldless
-                            ]
+                            _src_input_ops = self._encoded_source_operands(inst)
                             _src0_name = (
                                 _src_input_ops[0].name if _src_input_ops else None
                             )
@@ -13590,11 +13612,7 @@ class CodeGenerator:
                                 _reads_all_outputs
                                 and (_supports_dpp_encoding or _supports_dpp8)
                             ), f'{inst.name}: reads-all-output semantics do not support DPP/DPP8'
-                            _semantic_stages_src0 = (
-                                sem is not None
-                                and sem.semantic_class == 'vector_movrel'
-                                and sem.operation in ('src', 'srcdst', 'srcdst2')
-                            )
+                            _semantic_stages_src0 = self._semantic_stages_src0(sem)
                             if (
                                 not _reads_all_outputs
                                 and not _semantic_stages_src0
