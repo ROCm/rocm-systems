@@ -31,6 +31,9 @@ using nccl_dda_detail::DdaFabricBarrierState;
 using nccl_dda_detail::DdaFabricMaxBlocksOverride;
 
 RCCL_PARAM(DdaFabricBufferSizeForScratch, "DDA_FABRIC_BUFFER_SIZE", -1);
+// RCCL_DDA_A2A_PUSH_PEER_EPOCH: 1 (default) uses epoch flags for the peer-major vector and TDM alltoall pushes, 0 the
+// one-token CAS flags (see FabricGpuBarrier::signalWaitPeer / postPeer / waitPeer). Must be the same on every rank.
+RCCL_PARAM(DdaA2APushPeerEpoch, "DDA_A2A_PUSH_PEER_EPOCH", 1);
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
   if (comm == nullptr) {
@@ -183,6 +186,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     }
     barrierState->resources = std::move(barrierPair.first);
     barrierState->barrierHost = barrierPair.second;
+    barrierState->barrierHost.setEpochFlags(rcclParamDdaA2APushPeerEpoch() != 0);
   }
 
   // Zero the scratch once so the first epoch (>= 1) across all LL operations

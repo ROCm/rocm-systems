@@ -505,6 +505,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/dda-coll-seams.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1884,6 +1885,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaColl
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
 target_compile_options(rccl-UnitTestsMicroDdaColl PRIVATE
   "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
+# dda_alltoall_fabric.cu.cpp pulls in alltoall_dda_fabric_tdm.h, which includes "tdm/tdmCopy.h".
+target_include_directories(rccl-UnitTestsMicroDdaColl PRIVATE
+  ${RCCL_HOST_HIPIFY_DIR}/src/device)
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroRmaProxy

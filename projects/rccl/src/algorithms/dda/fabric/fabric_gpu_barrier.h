@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "nccl_device.h"
 #include "algorithms/dda/device/dda_kernel_params.h"
 #include "algorithms/dda/device/device_buffer.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
@@ -115,6 +116,158 @@ public:
     }
   }
 
+  // Waits until every store this wave has issued has completed, so a system-scope store has reached its
+  // destination.
+  __device__ __forceinline__ void orderDestWrites() {
+#if defined(__gfx1250__)
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0" ::: "memory");
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
+#else
+    __threadfence_system();
+#endif
+  }
+
+  // Two-rank form of syncOnSameBlockIdx<true, true>: posts this rank's flag into dstRank's slot for block dstBlock
+  // and waits for srcRank's flag in this rank's slot for this block. A flag slot holds one token, consumed by its
+  // wait, so every post must be matched by exactly one wait within the same kernel.
+  __device__ __forceinline__ void signalWaitPeer(int dstRank, int srcRank, int dstBlock) {
+    // Every wave drains its own stores, then the block syncs so thread 0 only posts once all of them are done.
+    orderDestWrites();
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock), params_);
+      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, blockIdx.x), params_);
+    }
+    __syncthreads();
+  }
+
+  // The two halves of signalWaitPeer, for pipelined callers that post several pieces. A flag slot holds one token and
+  // a post waits until the previous token has been consumed, so every post must be matched by exactly one wait on
+  // the receiving rank within the same kernel.
+  __device__ __forceinline__ void postPeer(int dstRank, int dstBlock) {
+    orderDestWrites();
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      putFlag<std::memory_order_release>(peerFlags_[dstRank] + getFlagIdx(selfRank_, dstBlock), params_);
+    }
+  }
+  // srcBlock: the block of rank srcRank whose token is consumed (a drain block waits for the push block it serves).
+  __device__ __forceinline__ void waitPeer(int srcRank, int srcBlock) {
+    if (threadIdx.x == 0) {
+      waitFlag<std::memory_order_acquire>(peerFlags_[selfRank_] + getFlagIdx(srcRank, srcBlock), params_);
+    }
+    __syncthreads();
+  }
+  __device__ __forceinline__ void waitPeer(int srcRank) { waitPeer(srcRank, static_cast<int>(blockIdx.x)); }
+
+  // Epoch flags of the peer-major push alltoall (own region; the toggle flags are untouched): a post stores a growing
+  // value and never waits, a wait polls for at least a value, so every wave can poll one slot. A block's launch uses
+  // epoch .. epoch + pieces + 1 (entry posts epoch, piece p posts epoch + 2 + p); epoch is the block's cell, advanced by
+  // epochEnd, so it survives CUDA graph replays. Scratch accesses are system-scope: no fence besides orderDestWrites().
+  __device__ __forceinline__ FlagType epochBegin() const { return epochCell()[blockIdx.x] + 1; }
+
+  // Must be called by every thread of the block after its last use of the epoch flags. Every launch advances all the
+  // cells (cell e is written by block e % gridDim.x), so the cells stay equal across block indices, which a drain block
+  // needs: it waits on flags posted by other block indices.
+  __device__ __forceinline__ void epochEnd(FlagType epoch, unsigned pieces) {
+    __syncthreads();
+    const FlagType next = epoch + pieces + 1;
+    for (int e = static_cast<int>(blockIdx.x + threadIdx.x * gridDim.x); e < nBlocks_;
+         e += static_cast<int>(blockDim.x * gridDim.x)) {
+      epochCell()[e] = next;
+    }
+  }
+
+  // Entry handshake: posts epoch to rank `to` and waits for rank `from` to post at least epoch.
+  __device__ __forceinline__ void epochSignalWait(int to, int from, FlagType epoch) {
+    orderDestWrites();
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      __scoped_atomic_store_n(peerFlags_[to] + getEpochFlagIdx(selfRank_, blockIdx.x), epoch, __ATOMIC_RELEASE,
+                              __MEMORY_SCOPE_SYSTEM);
+      const FlagType* flag = epochFlagFrom(from);
+      int spins = 0;
+      while (static_cast<int32_t>(__scoped_atomic_load_n(flag, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - epoch) < 0) {
+        if (params_.abortSpinTick(spins)) break;
+      }
+    }
+    __syncthreads();
+  }
+
+  // Posts value to rank `to` once every store of the block has completed.
+  __device__ __forceinline__ void epochPost(int to, FlagType value) {
+    orderDestWrites();
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+      __scoped_atomic_store_n(peerFlags_[to] + getEpochFlagIdx(selfRank_, blockIdx.x), value, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_SYSTEM);
+    }
+  }
+  // Piece `piece` of a launch is posted as epoch + 2 + piece. Every thread calls epochWaitPiece and polls the slot
+  // itself (`ready` is epochFlagFrom(source)), so a wave continues as soon as the piece is there, with no block-wide sync.
+  __device__ __forceinline__ void epochPostPiece(int to, FlagType epoch, unsigned piece) {
+    epochPost(to, epoch + 2 + piece);
+  }
+
+  __device__ __forceinline__ void epochWaitPiece(const FlagType* ready, FlagType epoch, unsigned piece) {
+    if (threadIdx.x == 0) {
+      const FlagType want = epoch + 2 + piece;
+      int spins = 0;
+      while (static_cast<int32_t>(__scoped_atomic_load_n(ready, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - want) < 0) {
+        if (params_.abortSpinTick(spins)) break;
+      }
+      cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
+    }
+    __syncthreads();
+  }
+
+  // The slot rank `from` posts to from this block index, in this rank's buffer. Every wave polls it.
+  __device__ __forceinline__ const FlagType* epochFlagFrom(int from) const {
+    return epochFlagFrom(from, static_cast<int>(blockIdx.x));
+  }
+  // The slot rank `from` posts to from its block `fromBlock`.
+  __device__ __forceinline__ const FlagType* epochFlagFrom(int from, int fromBlock) const {
+    return peerFlags_[selfRank_] + getEpochFlagIdx(from, fromBlock);
+  }
+
+  // ---- The flag calls of the peer-major pushes ----------------------------------------------------------------------
+  // Two schemes behind the same three calls, chosen on the host with setEpochFlags (RCCL_DDA_A2A_PUSH_PEER_EPOCH):
+  //   epoch (default): monotonic epoch flags, a post never waits (epochSignalWait / epochPostPiece / epochWaitPiece);
+  //   CAS: one-token flags, a post waits until the previous token was consumed (signalWaitPeer / postPeer / waitPeer).
+  // All ranks must use the same scheme. The kernels still bracket the launch with epochBegin / epochEnd; in the CAS
+  // scheme those only touch the epoch cell and are harmless.
+  __host__ void setEpochFlags(bool on) { useEpoch_ = on; }
+
+  // Entry handshake of block b: posts to rank `to` and waits for rank `from`.
+  __device__ __forceinline__ void signalWait(int to, int from, FlagType epoch) {
+    if (useEpoch_) {
+      epochSignalWait(to, from, epoch);
+    } else {
+      signalWaitPeer(to, from, static_cast<int>(blockIdx.x));
+    }
+  }
+  // Posts piece `piece` to rank `to` once every store of the block has completed.
+  __device__ __forceinline__ void postPeer(int to, FlagType epoch, unsigned piece) {
+    if (useEpoch_) {
+      epochPostPiece(to, epoch, piece);
+    } else {
+      postPeer(to, static_cast<int>(blockIdx.x));
+    }
+  }
+  // Waits until rank `from` has posted piece `piece` to this block.
+  __device__ __forceinline__ void waitPeer(int from, FlagType epoch, unsigned piece) {
+    waitPeer(from, epoch, piece, static_cast<int>(blockIdx.x));
+  }
+  // fromBlock: the block of rank from that posted (a drain block passes the push block it serves).
+  __device__ __forceinline__ void waitPeer(int from, FlagType epoch, unsigned piece, int fromBlock) {
+    if (useEpoch_) {
+      epochWaitPiece(epochFlagFrom(from, fromBlock), epoch, piece);
+    } else {
+      waitPeer(from, fromBlock);
+    }
+  }
 private:
   int nBlocks_{-1};
   int selfRank_{-1};
@@ -123,12 +276,21 @@ private:
   DdaKernelParams params_{};
   // Sticky for the rest of the kernel and uniform across the signaling lanes; see IpcGpuBarrier::aborted_.
   bool aborted_{false};
+  bool useEpoch_{true};
 
   __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags, DdaKernelParams params)
     : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags), params_(params) {}
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * nRanks_ + rank;
+  }
+
+  // Buffer layout: [0, n * b) toggle flags, [n * b, 2 * n * b) epoch flags, then b epoch cells (n ranks, b blocks).
+  __device__ inline int getEpochFlagIdx(int rank, int block) const {
+    return nBlocks_ * nRanks_ + block * nRanks_ + rank;
+  }
+  __device__ inline FlagType* epochCell() const {
+    return peerFlags_[selfRank_] + 2 * nBlocks_ * nRanks_;
   }
 };
 
