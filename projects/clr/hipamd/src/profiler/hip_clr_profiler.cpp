@@ -2616,7 +2616,22 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
 // Called from each *Layer wrapper — mirrors reference GetActiveRecord().
 // Allocates a record slot, writes slot index into correlation_id TLS so the
 // GPU command that follows inherits it, stamps start_ns, returns the record.
+//
+// With profiling off it returns a scratch record of the calling thread and
+// changes nothing else. A tool slot that chains to a wrapper outlives the
+// disable that removes the other wrappers, and its calls must not be recorded.
 hipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
+  if (!IsProfilingActive()) {
+    struct Scratch {
+      hipApiRecordExt rec{};
+      ~Scratch() { FreeRecordResources(&rec); }
+    };
+    static thread_local Scratch scratch;
+    FreeRecordResources(&scratch.rec);  // a kernel argument blob from the last call
+    std::memset(&scratch.rec, 0, sizeof(scratch.rec));
+    return &scratch.rec;
+  }
+
   size_t slot = g_rec_counter.fetch_add(1, std::memory_order_relaxed);
   size_t idx  = slot / kChunkSize;
 

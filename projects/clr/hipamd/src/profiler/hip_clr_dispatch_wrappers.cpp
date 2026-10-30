@@ -13,10 +13,12 @@
 #include "hip/amd_detail/hip_api_trace.hpp"
 #include "hip_clr_profiler.hpp"
 #include "rocclr/os/os.hpp"
+#include "../hip_dispatch_slot.hpp"
 #include "../hip_global.hpp"
 #include "../hip_graph_internal.hpp"
 
 #include <atomic>
+#include <mutex>
 #include <vector>
 
 static inline uint64_t NowNs() { return amd::Os::timeNanos(); }
@@ -57,6 +59,8 @@ static HipCompilerDispatchTable g_compiler_next{};
 static HipCompilerDispatchTable g_compiler_wrapper_tbl{};
 // Idempotency guard — true while compiler wrappers are installed.
 static std::atomic<bool> g_compiler_wrapped{false};
+// Guards the one-time build of g_compiler_next and g_compiler_wrapper_tbl.
+static std::once_flag g_compiler_built;
 
 // __hipPushCallConfiguration — called by the compiler for every <<<>>> launch.
 // Saves grid/block in TLS so hipLaunchByPtrLayer can stamp them on its record.
@@ -1518,8 +1522,11 @@ static HipCopyKindExt GraphMemcpyKindToExt(hipMemcpyKind kind,
 // Called after a successful hipGraphInstantiate* — pGraphExec is already set.
 // Uses internal C++ graph APIs directly to avoid calling public HIP functions
 // from within a wrapper (which would clobber hipGetLastError and risk reentrancy).
+// Nothing is stored while the wrappers are out: a tool slot can keep an
+// instantiate wrapper reachable after Remove put back hipGraphExecDestroy,
+// whose wrapper would erase the entry.
 static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
-  if (!exec || !graph) return;
+  if (!exec || !graph || !g_wrapped.load()) return;
   auto* g = reinterpret_cast<hip::Graph*>(graph);
   if (!hip::Graph::isGraphValid(g)) return;
   const auto& nodes = g->GetNodes();
@@ -6111,32 +6118,36 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   g_wrapper_tbl.hipLibraryGetGlobal_fn = hipLibraryGetGlobalLayer;
   g_wrapper_tbl.hipLibraryGetManaged_fn = hipLibraryGetManagedLayer;
   g_wrapper_tbl.hipExtMemcpyBatchAsync_fn = hipExtMemcpyBatchAsyncLayer;
-  // g_wrapper_tbl is fully written before any Install call copies it in.
+  // g_wrapper_tbl is fully written before any Install call stores its slots.
 }
 
+// A tool that chained to a wrapper while the profiler was on keeps its slot
+// across later enables and disables.
 void HipProfilerInstallWrappersExt(HipDispatchTable* tbl) {
   if (g_wrapped.exchange(true)) return;
-  // x86-64 guarantees 8-byte aligned stores are atomic, so individual pointer
-  // reads by concurrent HIP callers are never torn — each thread sees either
-  // the old function pointer or the new one, never a half-written value.
-  std::memcpy(tbl, &g_wrapper_tbl, sizeof(HipDispatchTable));
+  hip::ReplaceDispatchSlots(tbl, g_next, g_wrapper_tbl);
 }
 
 void HipProfilerRemoveWrappersExt(HipDispatchTable* tbl) {
   if (!g_wrapped.exchange(false)) return;
-  std::memcpy(tbl, &g_next, sizeof(HipDispatchTable));
+  hip::ReplaceDispatchSlots(tbl, g_wrapper_tbl, g_next);
 }
 
 void HipProfilerInstallCompilerWrappersExt(HipCompilerDispatchTable* tbl) {
   if (g_compiler_wrapped.exchange(true)) return;
-  g_compiler_next = *tbl;
-  g_compiler_wrapper_tbl = g_compiler_next;
-  g_compiler_wrapper_tbl.__hipPushCallConfiguration_fn = __hipPushCallConfigurationLayer;
-  g_compiler_wrapper_tbl.__hipPopCallConfiguration_fn  = __hipPopCallConfigurationLayer;
-  std::memcpy(tbl, &g_compiler_wrapper_tbl, sizeof(HipCompilerDispatchTable));
+  // Snapshot once, as for the runtime table. A slot that Remove left to another
+  // component may chain to these wrappers, and a fresh snapshot would make the
+  // wrappers call it back in a loop.
+  std::call_once(g_compiler_built, [tbl] {
+    g_compiler_next = *tbl;
+    g_compiler_wrapper_tbl = g_compiler_next;
+    g_compiler_wrapper_tbl.__hipPushCallConfiguration_fn = __hipPushCallConfigurationLayer;
+    g_compiler_wrapper_tbl.__hipPopCallConfiguration_fn  = __hipPopCallConfigurationLayer;
+  });
+  hip::ReplaceDispatchSlots(tbl, g_compiler_next, g_compiler_wrapper_tbl);
 }
 
 void HipProfilerRemoveCompilerWrappersExt(HipCompilerDispatchTable* tbl) {
   if (!g_compiler_wrapped.exchange(false)) return;
-  std::memcpy(tbl, &g_compiler_next, sizeof(HipCompilerDispatchTable));
+  hip::ReplaceDispatchSlots(tbl, g_compiler_wrapper_tbl, g_compiler_next);
 }
