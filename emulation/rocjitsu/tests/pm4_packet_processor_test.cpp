@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -533,8 +534,8 @@ TEST_P(Pm4AdmissionTest, FaultsWithoutRetirementOrSuccessCompletion) {
   EXPECT_NO_THROW(EXPECT_EQ(service(), Pm4TestStatus::Faulted));
   // A faulted queue must neither replay its packet nor repeat the diagnostic.
   EXPECT_NO_THROW(service());
-  const auto diagnostic = testing::internal::GetCapturedStderr();
-  const auto reason_offset = diagnostic.find(packet.reason);
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string::size_type reason_offset = diagnostic.find(packet.reason);
   EXPECT_NE(reason_offset, std::string::npos) << diagnostic;
   if (reason_offset != std::string::npos) {
     EXPECT_EQ(diagnostic.find(packet.reason, reason_offset + 1), std::string::npos) << diagnostic;
@@ -571,7 +572,7 @@ class Pm4EffectFailureTest : public Pm4PacketProcessorTest,
 
 TEST_P(Pm4EffectFailureTest, StopsBeforeDependentEffectsAndRetirement) {
   const auto &packet = GetParam();
-  auto words = packet.words;
+  std::vector<uint32_t> words = packet.words;
   words.insert(words.end(), {0xc0033700u, 5u << 8, kOutput + 4, 0u, 99u});
   submit(words, true);
   memory->store<uint32_t>(kOutput, 0x12345678);
@@ -584,9 +585,9 @@ TEST_P(Pm4EffectFailureTest, StopsBeforeDependentEffectsAndRetirement) {
   testing::internal::CaptureStderr();
   EXPECT_EQ(service(), Pm4TestStatus::Faulted);
   service();
-  const auto diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
   const std::string reason = std::string("PM4 queue failed: ") + packet.reason;
-  const auto reason_offset = diagnostic.find(reason);
+  const std::string::size_type reason_offset = diagnostic.find(reason);
   EXPECT_NE(reason_offset, std::string::npos) << diagnostic;
   if (reason_offset != std::string::npos) {
     EXPECT_EQ(diagnostic.find(reason, reason_offset + 1), std::string::npos) << diagnostic;
@@ -645,7 +646,7 @@ TEST_F(Pm4PacketProcessorTest, FaultedHeaderFetchDoesNotExecuteOrRetire) {
 TEST_F(Pm4PacketProcessorTest, FaultedPayloadFetchDoesNotDispatchOrAdvance) {
   const std::array words{0xc0031500u, 2u, 3u, 4u, 1u};
   submit(words, true);
-  auto &ib = queue.commands.submissions.front().buffers.front();
+  Pm4IndirectBuffer &ib = queue.commands.submissions.front().buffers.front();
   ib.ring_base = 0x3ffc;
   memory->store<uint32_t>(ib.ring_base, words[0]);
   EXPECT_EQ(service(), Pm4TestStatus::Faulted);

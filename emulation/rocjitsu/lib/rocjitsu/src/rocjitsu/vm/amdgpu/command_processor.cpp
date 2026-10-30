@@ -3213,6 +3213,12 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
     return util::Result::success();
   if (cus_.empty())
     return emit_error.emit() << "PM4 dispatch requires a compute unit";
+  // Waves tag L2 lines with process_id; scoped PM4 maintenance uses the VMID.
+  // Reject mismatched identities before admitting work whose writes it could skip.
+  const std::optional<AddressSpaceInfo> address_space =
+      gpu_vm_ ? gpu_vm_->lookup(queue.address_space) : std::nullopt;
+  if (!address_space || address_space->vmid != queue.process_id)
+    return emit_error.emit() << "PM4 dispatch process ID does not match address-space VMID";
   const bool thread_dimensions = initiator & (1u << 5);
   const auto arch = cus_[0]->config().arch;
   const uint32_t rsrc1 = regs[kPm4ComputePgmRsrc1], rsrc2 = regs[kPm4ComputePgmRsrc2];

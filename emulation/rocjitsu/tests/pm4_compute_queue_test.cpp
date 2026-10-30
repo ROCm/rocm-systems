@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/soc.h"
@@ -20,10 +21,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <future>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -69,8 +72,8 @@ public:
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
     if (unavailable_read_ && address == *unavailable_read_)
       return {.outcome = VmAccessOutcome::Unavailable};
-    if ((width != 4 && width != 8) || address % width != 0 || address > bytes_.size() ||
-        width > bytes_.size() - address) {
+    if ((width != 2 && width != 4 && width != 8) || address % width != 0 ||
+        address > bytes_.size() || width > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Malformed};
     }
     uint64_t value = 0;
@@ -387,6 +390,10 @@ public:
     if (on_completed)
       on_completed();
   }
+  void onAmdgpuWavefrontDispatched(Wavefront &wave) override {
+    wave_process_ids.push_back(wave.process_id());
+  }
+  std::vector<uint32_t> wave_process_ids;
   std::function<void()> on_processed;
   std::function<void()> on_completed;
   uint32_t processed = 0;
@@ -409,12 +416,12 @@ protected:
   void inject_flush_failure() {
     std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
     dirty.fill(0xab);
-    ASSERT_EQ(l2->writeback_line(kDirtyLine, dirty.data(), Mtype::RW, 1),
+    ASSERT_EQ(l2->writeback_line(kDirtyLine, dirty.data(), Mtype::RW, kProcessId),
               VmAccessOutcome::Complete);
     memory->fail_write(kDirtyLine, VmAccessOutcome::Faulted);
   }
 
-  void submit_dispatch(bool begun) {
+  void submit_dispatch(bool begun, uint32_t process_id = kProcessId, bool native = false) {
     // SET_SH_REG sets 1x1x1 threads and the program address; dispatch then
     // precedes a register callback that must not execute after either flush gate.
     const std::array words{0xc0037600u,
@@ -436,20 +443,33 @@ protected:
     memory->store<uint32_t>(0x2000, 0xbf810000u); // s_endpgm
     for (size_t i = 0; i < words.size(); ++i)
       memory->store<uint32_t>(kRing + i * 4, words[i]);
-    ASSERT_TRUE(cp->register_drm_queue(
-        {.address_space = address_space,
-         .queue_id = 1,
-         .packet_callbacks = {.write_uconfig_register = [&](uint64_t, uint32_t) {
-           ++successors;
-           return Pm4RegisterWriteStatus::Complete;
-         }}}));
+    ComputeQueueConfig queue{
+        .address_space = address_space,
+        .process_id = process_id,
+        .queue_id = 1,
+        .ring_base_va = kRing,
+        .ring_size = words.size() * sizeof(uint32_t),
+        .read_ptr_va = kReadPointer,
+        .packet_format = QueuePacketFormat::Pm4,
+        .packet_callbacks = {.write_uconfig_register = [&](uint64_t, uint32_t) {
+          ++successors;
+          return Pm4RegisterWriteStatus::Complete;
+        }}};
+    if (native) {
+      const uint64_t registration = cp->register_queue(std::move(queue));
+      ASSERT_NE(registration, 0u);
+      ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, words.size()),
+                QueueSubmissionStatus::Accepted);
+      return;
+    }
+    ASSERT_TRUE(cp->register_drm_queue(std::move(queue)));
     Pm4Submission submission;
     submission.buffers.push_back({.address = kRing, .dwords = words.size()});
     submission.complete = [&](bool success) {
-      EXPECT_FALSE(success);
+      EXPECT_EQ(success, expected_success);
       ++completions;
     };
-    ASSERT_TRUE(cp->submit_pm4(1, 0, std::move(submission)));
+    ASSERT_TRUE(cp->submit_pm4(1, process_id, std::move(submission)));
   }
 
   void expect_cancelled() {
@@ -461,6 +481,8 @@ protected:
     EXPECT_EQ(completions, 1u);
   }
 
+  static constexpr uint32_t kProcessId = 1;
+  bool expected_success = false;
   static constexpr uint64_t kDirtyLine = 0x1000;
   Pm4FlushPlugin *plugin = nullptr;
   uint32_t completions = 0, successors = 0;
@@ -486,6 +508,7 @@ TEST_F(Pm4DispatchFlushTest, AqlVendorIbFlushFailurePreventsWritesCompletionAndS
   memory->store<uint64_t>(kWritePointer, 2);
   memory->store<uint64_t>(kDoorbell, 2);
   ASSERT_NE(cp->register_queue({.address_space = address_space,
+                                .process_id = kProcessId,
                                 .queue_id = 1,
                                 .ring_base_va = kRing,
                                 .ring_size = 2 * kAqlPacketBytes,
@@ -495,10 +518,13 @@ TEST_F(Pm4DispatchFlushTest, AqlVendorIbFlushFailurePreventsWritesCompletionAndS
                                 .doorbell_mode = QueueDoorbellMode::VmPolled}),
             0u);
   ASSERT_NO_FATAL_FAILURE(inject_flush_failure());
+  testing::internal::CaptureStderr();
   engine->schedule_event_now(cp->doorbell_event());
-  for (unsigned step = 0; step < 100 && !cp->queue_faulted_for_test(1, 0); ++step)
+  for (unsigned step = 0; step < 100 && !cp->queue_faulted_for_test(1, kProcessId); ++step)
     EXPECT_NO_THROW(service());
-  EXPECT_TRUE(cp->queue_faulted_for_test(1, 0));
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("PM4 cache flush failed"), std::string::npos) << diagnostic;
+  EXPECT_TRUE(cp->queue_faulted_for_test(1, kProcessId));
   EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
   EXPECT_EQ(memory->load<uint32_t>(kSuccessorOutput), 0u);
   EXPECT_EQ(memory->load<uint64_t>(kSignal + 8), 1u);
@@ -527,6 +553,56 @@ TEST_F(Pm4DispatchFlushTest, RetirementFlushFailureEndsCompletedDispatch) {
   EXPECT_EQ(plugin->processed, 1u);
   ASSERT_EQ(plugin->begins.size(), 1u);
   EXPECT_EQ(plugin->ends, plugin->begins);
+}
+
+TEST_F(Pm4DispatchFlushTest, RetirementPublishesDirtyLineUnderWaveProcessId) {
+  expected_success = true;
+  plugin->on_completed = [&] {
+    ASSERT_EQ(plugin->wave_process_ids.size(), 1u);
+    std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+    dirty.fill(0xab);
+    ASSERT_EQ(
+        l2->writeback_line(kDirtyLine, dirty.data(), Mtype::RW, plugin->wave_process_ids.front()),
+        VmAccessOutcome::Complete);
+    EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0u);
+  };
+  ASSERT_NO_FATAL_FAILURE(submit_dispatch(true));
+  for (uint32_t i = 0; i < 100 && !completions; ++i)
+    service();
+  EXPECT_EQ(completions, 1u);
+  EXPECT_EQ(successors, 1u);
+  ASSERT_EQ(plugin->begins.size(), 1u);
+  EXPECT_EQ(plugin->ends, plugin->begins);
+  EXPECT_EQ(plugin->wave_process_ids, std::vector<uint32_t>{kProcessId});
+  EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0xababababu);
+}
+
+TEST_F(Pm4DispatchFlushTest, MismatchedProcessIdFaultsBeforeDispatch) {
+  ASSERT_NO_FATAL_FAILURE(submit_dispatch(true, 0));
+  testing::internal::CaptureStderr();
+  expect_cancelled();
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("PM4 dispatch process ID does not match address-space VMID"),
+            std::string::npos)
+      << diagnostic;
+  EXPECT_EQ(plugin->processed, 0u);
+  EXPECT_TRUE(plugin->wave_process_ids.empty());
+}
+
+TEST_F(Pm4DispatchFlushTest, NativeMismatchedProcessIdFaultsBeforeDispatch) {
+  ASSERT_NO_FATAL_FAILURE(submit_dispatch(true, 0, true));
+  testing::internal::CaptureStderr();
+  for (uint32_t i = 0; i < 100 && !cp->queue_faulted_for_test(1, 0); ++i)
+    service();
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("PM4 dispatch process ID does not match address-space VMID"),
+            std::string::npos)
+      << diagnostic;
+  EXPECT_TRUE(cp->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(plugin->processed, 0u);
+  EXPECT_TRUE(plugin->wave_process_ids.empty());
+  EXPECT_EQ(successors, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 8u);
 }
 
 TEST_F(Pm4ComputeQueueTest, ForeignFlushFailureDoesNotBlockFreshQueues) {
