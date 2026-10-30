@@ -387,6 +387,7 @@ add_executable(
     gpu_vm_translation_test.cpp
     legacy_page_table_cache_test.cpp
     config_test.cpp
+    rj_arith_bridge_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     gfx1251_compiled_kernel_test.cpp
