@@ -65,6 +65,10 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/minmax_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_fma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/packed_fma_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/cube_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp16_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp32_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/mullit_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_x86_64_v3.cpp
@@ -98,6 +102,9 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/ldexp_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_fma_exact_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/cube_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp32_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/mullit_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_integer_x86_64_v4.cpp

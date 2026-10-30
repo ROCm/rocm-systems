@@ -5,6 +5,7 @@
 
 from . import ExecuteContext
 from .rj_arith_names import wave_api
+from .rj_arith_graphics import CUBE_NAMES
 
 # Exponent extraction has no arithmetic exception classifier.
 
@@ -185,7 +186,8 @@ TERNARY_SELECTION_RDNA4 = {
 }
 
 FLOAT_NAMES = (
-    BINARY_F16
+    CUBE_NAMES
+    | BINARY_F16
     | BINARY_F32
     | BINARY_F64['rdna3']
     | BINARY_F64['rdna4']
@@ -211,7 +213,7 @@ FLOAT_NAMES = (
     | UNARY_F16
     | UNARY_F32
     | UNARY_F64
-    | {'V_LDEXP_F64', 'V_FMA_F64'}
+    | {'V_MULLIT_F32', 'V_LDEXP_F64', 'V_FMA_F64'}
 )
 
 
