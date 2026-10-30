@@ -21,7 +21,7 @@ namespace rocjitsu::arith {
 // rounding requires AVX512 instruction-local rounding or the scalar path.
 void fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                          uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c,
-                         bool rdna3) {
+                         bool dx9_zero, bool rdna3) {
   uint32_t result[32];
   for (int lane = 0; lane < 32; lane += 8) {
     const uint32_t *inputs[] = {a, b, c};
@@ -43,7 +43,12 @@ void fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instructio
       }
       values[operand] = _mm256_castsi256_ps(x);
     }
-
+    if (dx9_zero) {
+      auto zeros = _mm256_or_ps(_mm256_cmp_ps(values[0], _mm256_setzero_ps(), _CMP_EQ_OQ),
+                                _mm256_cmp_ps(values[1], _mm256_setzero_ps(), _CMP_EQ_OQ));
+      values[0] = _mm256_blendv_ps(values[0], _mm256_setzero_ps(), zeros);
+      values[1] = _mm256_blendv_ps(values[1], _mm256_set1_ps(1), zeros);
+    }
     auto value = _mm256_fmadd_ps(values[0], values[1], values[2]);
     auto mag = _mm256_and_si256(_mm256_castps_si256(value), _mm256_set1_epi32(INT32_MAX));
     bad =
@@ -65,7 +70,7 @@ void fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instructio
       for (int i = 0; i < 8; ++i) {
         if ((repair >> i) & 1) {
           result[lane + i] = repair_fma_f32(a[lane + i], b[lane + i], c[lane + i], flags,
-                                            instruction_flags, rdna3);
+                                            instruction_flags, rdna3, dx9_zero);
         }
       }
     }
