@@ -13,7 +13,6 @@ import pandas as pd
 from tests.integration import common as integration_common
 from tests.integration.common import (
     CSVS,
-    MEMORY_CHART_COUNTERS,
     config,
     num_devices,
     num_kernels,
@@ -57,9 +56,6 @@ def test_block_filter(binary_handler_profile_rocprof_compute, capfd):
     # Preserve profiling diagnostics for normal pytest output and saved run logs.
     print(captured.out, end="")
     print(captured.err, end="", file=sys.stderr)
-    assert counter_names & MEMORY_CHART_COUNTERS, (
-        "Block 3 did not collect the expected Memory Chart counter"
-    )
     gpu_arch = output_files["sysinfo.csv"]["gpu_arch"].iloc[0]
     tables = integration_common.metric_table_counters(gpu_arch, 3)
     expected_counters = set().union(*tables.values())

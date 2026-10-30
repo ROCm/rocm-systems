@@ -36,7 +36,8 @@ def test_kernel(binary_handler_profile_rocprof_compute):
 
     counters = integration_common.read_counter_results(workload_dir)
     kernel_names = common.normalize_kernel_names(set(counters["Kernel_Name"]))
-    assert any("global_write" in name for name in kernel_names), kernel_names
-    assert not any("global_read" in name for name in kernel_names), kernel_names
+    assert kernel_names and all("global_write" in name for name in kernel_names), (
+        kernel_names
+    )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
