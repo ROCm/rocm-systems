@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 name: Changed files
 description: Select work from a complete Git diff, without API or trigger path limits.
 

@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 name: Scoped Formatting
 # Identify the exact PR comparison, including retargets with an unchanged head.
 run-name: >-
@@ -16,12 +19,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  # Metadata edits get an isolated group and cannot cancel validation.
+  group: ${{ github.workflow }}-${{ github.event.action == 'edited' && !github.event.changes.base && format('metadata-{0}', github.run_id) || github.event.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   pre-commit:
-    name: ${{ matrix.check-name }}
+    # Skipped metadata jobs have a separate name, preserving required results.
+    if: github.event.action != 'edited' || github.event.changes.base
+    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'metadata-only / pre-commit' || matrix.check-name }}
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.timeout-minutes || 15 }}
     strategy:
@@ -33,6 +39,7 @@ jobs:
             check-name: pre-commit / runtimes
             timeout-minutes: 10
             include: '^(runtimes/|\.pre-commit-config\.yaml\Z)'
+            sparse-checkout: runtimes
 
           - scope: rocjitsu
             # The base-branch PR bot still requires this name during rollout.
@@ -48,12 +55,14 @@ jobs:
             include: '^shared/cuid/'
             exclude: '(\.(md|rst|rtf)\Z|(^|/)\.readthedocs\.yaml\Z|^shared/cuid/docs/)'
             config: shared/cuid/.pre-commit-config.yaml
+            sparse-checkout: shared/cuid
 
           - scope: rocprofiler-compute
             check-name: pre-commit / rocprofiler-compute
             include: '^projects/rocprofiler-compute/'
             exclude: '(\.(md|rst|rtf)\Z|(^|/)\.(readthedocs|markdownlint-ci2|spellcheck\.local)\.yaml\Z|(^|/)\.wordlist\.txt\Z|^docs/|^projects/[^/]+/docs/)'
             config: projects/rocprofiler-compute/.pre-commit-config.yaml
+            sparse-checkout: projects/rocprofiler-compute
             submodules: recursive
     steps:
       # Every scope inspects the complete diff, on every target branch.

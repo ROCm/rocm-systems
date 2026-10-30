@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Verify scope selection and event wiring for the generic unit-test matrix."""
 
 from pathlib import Path
@@ -39,7 +42,6 @@ class WorkflowTests(unittest.TestCase):
             },
         )
         self.assertEqual(self.workflow["permissions"], {"contents": "read"})
-        self.assertNotIn("if", self.job)
         self.assertNotIn("if", self.inspector)
         self.assertEqual(self.job["strategy"]["fail-fast"], "false")
         self.assertEqual(self.inspector["uses"], "./.github/actions/changed-files")

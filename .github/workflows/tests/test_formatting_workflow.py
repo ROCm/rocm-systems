@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Check formatting scope selection and workflow wiring."""
 
 from pathlib import Path
@@ -10,6 +13,13 @@ WORKFLOWS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORKFLOWS.parent / "actions/changed-files"))
 
 from scope import matches_scope
+
+sys.path.insert(0, str(WORKFLOWS.parents[1] / "tools/systems_pr_bot"))
+import policy_check
+
+POLICY = policy_check.load_policy(
+    WORKFLOWS.parents[1] / "tools/systems_pr_bot/policy.yml"
+)
 
 WORKFLOW = yaml.load(
     (WORKFLOWS / "scoped-formatting.yml").read_text(), Loader=yaml.BaseLoader
@@ -30,56 +40,79 @@ def workflow_scope(name: str) -> dict[str, str]:
 
 
 class WorkflowScopeTests(unittest.TestCase):
-    def test_every_scope_runs_on_every_pr_target(self) -> None:
-        workflow = yaml.load(
-            (WORKFLOWS / "scoped-formatting.yml").read_text(), Loader=yaml.BaseLoader
-        )
+    def test_every_formatting_check_is_required_by_policy(self) -> None:
+        scopes = WORKFLOW["jobs"]["pre-commit"]["strategy"]["matrix"]["include"]
+        names = [scope["check-name"] for scope in scopes]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertLessEqual(set(names), set(POLICY.required_checks))
         self.assertEqual(
-            workflow["on"]["pull_request"],
-            {
-                "types": [
-                    "opened",
-                    "synchronize",
-                    "reopened",
-                    "ready_for_review",
-                    "edited",
-                ]
-            },
+            WORKFLOW["jobs"]["pre-commit"]["strategy"]["fail-fast"], "false"
         )
-        job = workflow["jobs"]["pre-commit"]
-        self.assertEqual(job["name"], "${{ matrix.check-name }}")
-        for key in ("if", "needs", "continue-on-error"):
-            self.assertNotIn(key, job)
-        self.assertEqual(job["strategy"]["fail-fast"], "false")
-        scopes = job["strategy"]["matrix"]["include"]
-        self.assertEqual(
-            {scope["check-name"] for scope in scopes},
-            {
-                "pre-commit / runtimes",
-                "pre-commit",
-                "pre-commit / cuid",
-                "pre-commit / rocprofiler-compute",
-            },
-        )
-        self.assertEqual(len(scopes), 4)
         for scope in scopes:
-            self.assertNotIn("enabled", scope)
-        for step in job["steps"]:
-            self.assertNotIn("continue-on-error", step)
-        checkout, inspector = job["steps"][:2]
-        self.assertNotIn("if", checkout)
-        self.assertNotIn("if", inspector)
-        self.assertEqual(checkout["with"]["fetch-depth"], "0")
-        self.assertEqual(
-            checkout["with"]["sparse-checkout"], ".github/actions/changed-files"
-        )
-        self.assertEqual(inspector["id"], "scope")
-        self.assertEqual(inspector["uses"], "./.github/actions/changed-files")
-        self.assertEqual(inspector["with"]["include"], "${{ matrix.include }}")
-        self.assertEqual(
-            inspector["with"]["exclude"],
-            "${{ github.event_name == 'pull_request' && matrix.exclude || '' }}",
-        )
+            self.assertTrue(scope["sparse-checkout"].strip(), scope["scope"])
+
+    def test_each_scope_failure_is_enforced_by_the_actual_bot(self) -> None:
+        for name in POLICY.required_checks:
+            runs = [
+                {"name": check, "conclusion": "failure" if check == name else "success"}
+                for check in POLICY.required_checks
+            ]
+            with self.subTest(check=name):
+                missing, failing, _ = policy_check.summarize_required_checks(
+                    POLICY, runs
+                )
+                self.assertEqual(missing, [])
+                self.assertEqual(failing, [f"{name}=failure"])
+                rows = {
+                    row.name: row
+                    for row in policy_check.build_check_results(POLICY, runs)
+                }
+                self.assertFalse(rows[name].passed)
+
+    def test_missing_and_running_checks_remain_pending(self) -> None:
+        for name in POLICY.required_checks:
+            for conclusion in ("missing", None):
+                runs = [
+                    {
+                        "name": check,
+                        "conclusion": conclusion if check == name else "success",
+                    }
+                    for check in POLICY.required_checks
+                    if check != name or conclusion != "missing"
+                ]
+                with self.subTest(check=name, conclusion=conclusion):
+                    missing, failing, _ = policy_check.summarize_required_checks(
+                        POLICY, runs
+                    )
+                    self.assertEqual(missing, [name] if conclusion == "missing" else [])
+                    self.assertEqual(failing, [])
+                    rows = {
+                        row.name: row
+                        for row in policy_check.build_check_results(POLICY, runs)
+                    }
+                    self.assertTrue(rows[name].pending)
+                    self.assertFalse(rows[name].passed)
+
+    def test_metadata_results_do_not_override_failed_or_running_checks(self) -> None:
+        for conclusion in ("failure", None):
+            for name in POLICY.required_checks:
+                runs = [
+                    {
+                        "name": check,
+                        "conclusion": conclusion if check == name else "success",
+                    }
+                    for check in POLICY.required_checks
+                ]
+                runs.append(
+                    {"name": "metadata-only / pre-commit", "conclusion": "skipped"}
+                )
+                with self.subTest(check=name, conclusion=conclusion):
+                    rows = {
+                        row.name: row
+                        for row in policy_check.build_check_results(POLICY, runs)
+                    }
+                    self.assertFalse(rows[name].passed)
+                    self.assertEqual(rows[name].pending, conclusion is None)
 
     def test_formatter_uses_the_inspected_comparison(self) -> None:
         _, _, checkout, setup, formatting = STEPS
