@@ -156,11 +156,9 @@ previous interpreter; instruction contracts document such exceptions.
 Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
-The migrated families are dense and sparse WMMA, fused floating-point arithmetic, basic
-floating-point arithmetic and selection, division, dot products, math functions,
-comparisons, integer arithmetic, conversions, register and lane routing, graphics
-operations, scalar arithmetic and dual-issue arithmetic. Other handlers retain their
-existing implementations.
+
+
+
 
 ### Guest FP controls
 
@@ -261,9 +259,7 @@ sanitizers provide broader validation; ordinary tests need no GPU.
 Each `*_test.cpp` builds as a separate executable, with individual GTest cases
 exposed to CTest. Public headers are compiled independently as C23 and C++17.
 
-## Benchmarking (planned)
-
-No benchmark executable is built at this stage. The following describes its intended interface.
+## Benchmarking
 
 ### Workloads and reported results
 
