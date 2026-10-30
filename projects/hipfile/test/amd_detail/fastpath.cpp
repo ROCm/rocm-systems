@@ -859,6 +859,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENOTTY)
     expect_io();
     EXPECT_CALL(mhip, hipGetLastError);
     EXPECT_CALL(mstats, error).Times(1);
+    EXPECT_CALL(mcfg, markAisUnsupported).Times(1);
 
     switch (GetParam()) {
         case IoType::Read:
@@ -889,6 +890,7 @@ TEST_P(FastpathIoParam, IoFallbackKeepsPendingHipError)
 
     expect_io(hipErrorInvalidValue);
     EXPECT_CALL(mstats, error).Times(1);
+    EXPECT_CALL(mcfg, markAisUnsupported).Times(1);
 
     switch (GetParam()) {
         case IoType::Read:
@@ -903,6 +905,26 @@ TEST_P(FastpathIoParam, IoFallbackKeepsPendingHipError)
 
     EXPECT_CALL(*m_fallback, io).WillOnce(Return(DEFAULT_IO_SIZE));
     EXPECT_CALL(*m_fallback, score).WillOnce(Return(SCORE_ACCEPT));
+
+    ssize_t nbytes =
+        backend->io(GetParam(), mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET);
+    ASSERT_EQ(nbytes, DEFAULT_IO_SIZE);
+}
+
+// Another thread can disable the fastpath between score() and io().
+TEST_P(FastpathIoParam, IoFallsBackIfFastpathDisabledAfterScore)
+{
+    auto backend    = std::make_shared<Fastpath>();
+    auto m_fallback = std::make_shared<StrictMock<MBackend>>();
+    backend->register_fallback_backend(m_fallback);
+
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).build();
+    ASSERT_EQ(backend->score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
+              SCORE_ACCEPT);
+
+    EXPECT_CALL(mcfg, fastpath()).WillOnce(Return(false));
+    EXPECT_CALL(*m_fallback, score).WillOnce(Return(SCORE_ACCEPT));
+    EXPECT_CALL(*m_fallback, io).WillOnce(Return(DEFAULT_IO_SIZE));
 
     ssize_t nbytes =
         backend->io(GetParam(), mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET);
