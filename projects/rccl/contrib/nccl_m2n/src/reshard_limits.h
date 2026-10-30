@@ -111,7 +111,7 @@ inline constexpr size_t CTRL_FIELD_CURSOR_HEAD = 40;
 inline constexpr size_t CTRL_FIELD_PIPE_READY = 48;
 inline constexpr size_t CTRL_FIELD_PIPE_READY_SHADOW = 56;
 
-inline constexpr int MAX_STAGING_BUFFER_ENTRIES = 16;
+inline constexpr int MAX_STAGING_BUFFER_ENTRIES = 128;
 
 /* Placement classifiers — operate on the int placement value stored
  * in ncclDistTensor_t::placements[i] (NCCL_RESHARD_REPLICATE or
