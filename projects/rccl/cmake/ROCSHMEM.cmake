@@ -86,6 +86,33 @@ function(add_rocshmem_targets)
         endif()
     endif()
 
+    # GIN-only: the gate matters solely for the copied GIN headers (which no longer
+    # ship constmem.hpp). An ENABLE_ROCSHMEM build compiles librocshmem itself and
+    # does not use the copied headers, so it must not be blocked by a pre-gate source.
+    set(_rocshmem_config_in "${ROCSHMEM_SOURCE_DIR}/cmake/rocshmem_config.h.in")
+    if(ENABLE_ROCSHMEM_GIN AND EXISTS "${_rocshmem_config_in}")
+        file(STRINGS "${_rocshmem_config_in}" _constmem_gate REGEX "cmakedefine[ \t]+USE_CONSTMEM")
+        if(NOT _constmem_gate)
+            message(FATAL_ERROR
+                "rocSHMEM source at ${ROCSHMEM_SOURCE_DIR} predates the USE_CONSTMEM "
+                "gate (cmake/rocshmem_config.h.in lacks '#cmakedefine USE_CONSTMEM'). "
+                "rccl's GIN build no longer copies constmem.hpp and requires the gate. "
+                "Bump ROCSHMEM_MONO_HASH (cmake/ROCSHMEM.cmake:27) to a commit that "
+                "includes it, or point -DROCSHMEM_SOURCE_DIR at such a tree.")
+        endif()
+    endif()
+
+    # Acquiring the rocSHMEM *library* (pre-built find or build-from-source) is
+    # only for ENABLE_ROCSHMEM, which links librocshmem.a into librccl.so. A GIN
+    # build needs nothing from that library: its host code is compiled in from
+    # ROCSHMEM_SOURCE_DIR (set above) and routed through rccl's own shims, and its
+    # device code is header-only (no rocshmem device bitcode). So GIN skips both
+    # paths below — no find_package, no ExternalProject, no librocshmem build.
+    if(NOT ENABLE_ROCSHMEM)
+        set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" CACHE INTERNAL "rocSHMEM source directory")
+        return()
+    endif()
+
     # -----------------------------------------------------------------
     # Path 1: Pre-built rocSHMEM installation (ROCSHMEM_INSTALL_DIR)
     # -----------------------------------------------------------------
@@ -116,11 +143,8 @@ function(add_rocshmem_targets)
 
     # -----------------------------------------------------------------
     # Path 2: Build from source when no pre-built install is available.
-    # Both ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN need the built headers
-    # (rocshmem_config.h) and device bitcode; ENABLE_ROCSHMEM additionally
-    # links librocshmem.a into librccl.so.
     # -----------------------------------------------------------------
-    if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
+    if(ENABLE_ROCSHMEM)
         set(_rccl_root           "${CMAKE_SOURCE_DIR}")
         set(ROCSHMEM_INSTALL_DIR "${_rccl_root}/ext/rocshmem")
         # Convert cmake list separators for shell command safety.
@@ -129,11 +153,6 @@ function(add_rocshmem_targets)
         # cmake converts commas back to semicolons.
         string(REPLACE ";" " " _rocshmem_cmake_opts "${ROCSHMEM_CMAKE_OPTIONS}")
         string(REPLACE ";" "," _rocshmem_gpu_targets "${GPU_TARGETS}")
-        # SDMA only needed for --rocshmem-gin (GIN SDMA plugin)
-        set(_rocshmem_sdma_opt "")
-        if(ENABLE_ROCSHMEM_GIN)
-            set(_rocshmem_sdma_opt "-DUSE_SDMA=ON")
-        endif()
         # librocshmem.a is linked into librccl.so, so without this an ASAN
         # build gets an uninstrumented rocSHMEM inside an instrumented library.
         set(_rocshmem_asan_opt "")
@@ -163,7 +182,7 @@ function(add_rocshmem_targets)
             CONFIGURE_COMMAND   ""
             BUILD_COMMAND
                 ${CMAKE_COMMAND} -E make_directory build
-                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts} "
+                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts} "
             INSTALL_COMMAND ""
         )
 
@@ -172,7 +191,7 @@ function(add_rocshmem_targets)
         # so the other config tree overwriting librocshmem.a invalidates it too.
         set(_rocshmem_opts_stamp "${ROCSHMEM_INSTALL_DIR}/rccl_build_options.txt")
         file(GENERATE OUTPUT "${_rocshmem_opts_stamp}"
-             CONTENT "${CMAKE_BUILD_TYPE} ${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts}\n")
+             CONTENT "${CMAKE_BUILD_TYPE} ${_rocshmem_gpu_targets} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts}\n")
         ExternalProject_Add_StepDependencies(rocshmem_ext build "${_rocshmem_opts_stamp}")
 
         set(ROCSHMEM_INSTALL_DIR "${ROCSHMEM_INSTALL_DIR}"          PARENT_SCOPE)
@@ -199,8 +218,24 @@ function(copy_files FILE_LIST_VAR SRC_DIR DST_DIR OUTPUT_LIST_VAR)
       OUTPUT "${dst_file}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_file_dir}"
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${src_file}" "${dst_file}"
-      # Qualify log.hpp include to prevent shadowing by consumer headers.
-      COMMAND sed -i "s|#include \"log\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/log.hpp\"|g" "${dst_file}"
+      # Re-root the rocSHMEM headers' own includes to the nccl_device/ base so the
+      # device-API path resolves from -I<prefix>/include alone (same convention as
+      # the other GIN backends), needing no extra -I<prefix>/.../rocshmem_gda on a
+      # consumer. These headers are copied verbatim and assume rocshmem_gda/ as the
+      # include root; rewrite the rooted families (rocshmem/, gda/, containers/,
+      # and the top-level *.hpp) while leaving relative-to-self includes
+      # (queue_pair_mux.hpp, queue_pair/...) alone. Each rule anchors on the
+      # #include token, so re-running on an already-rewritten file is a no-op.
+      COMMAND sed -i
+        -e "s|#include \"log\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/log.hpp\"|g"
+        -e "s|#include \"rocshmem/rocshmem_config\\.h\"|#include \"nccl_device/gin/rocshmem_gda/gda_config.h\"|g"
+        -e "s|#include \"gda/|#include \"nccl_device/gin/rocshmem_gda/gda/|g"
+        -e "s|#include \"containers/|#include \"nccl_device/gin/rocshmem_gda/containers/|g"
+        -e "s|#include \"bit\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/bit.hpp\"|g"
+        -e "s|#include \"constants\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/constants.hpp\"|g"
+        -e "s|#include \"gda_enums\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/gda/gda_enums.hpp\"|g"
+        -e "s|#include \"util\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/util.hpp\"|g"
+        "${dst_file}"
       DEPENDS "${src_file}"
       COMMENT "Copying ${src_file} -> ${dst_file}"
       VERBATIM

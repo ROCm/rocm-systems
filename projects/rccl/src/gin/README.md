@@ -18,11 +18,9 @@ The upstream GIN framework also provides a host-side IB proxy backend
 Building with `--rocshmem-gin` requires the
 [rocm-systems](https://github.com/ROCm/rocm-systems) mono-repo, which
 provides both `projects/rccl` and `projects/rocshmem` in a single tree.
-`install.sh` auto-detects the sibling rocshmem project and builds it from
-source via ExternalProject.  The device linker pipeline needs access to
-intermediate build artifacts (per-arch `.bc` files under
-`projects/rocshmem/build/bitcode/`) that are not part of the installed
-package, so a pre-built rocSHMEM install is not sufficient.
+`install.sh` auto-detects the sibling rocshmem project. It uses the rocSHMEM
+**source** (headers and a small set of provider/SDMA `.cpp` files that rccl
+compiles in itself) — it does **not** build or link the rocSHMEM library.
 
 RCCL provides two rocSHMEM integration modes (mutually exclusive):
 
@@ -31,16 +29,17 @@ cd projects/rccl
 ./install.sh --rocshmem-gin --amdgpu_targets=gfx950
 ```
 
-**`--rocshmem-gin`** builds rocSHMEM from source for headers, device bitcode,
-and host libraries.  `librocshmem.a` is **not** linked into `librccl.so`.
-GIN device symbols (QueuePair) are resolved via per-arch bitcode injection
-in the device linker pipeline.  GIN host plugin symbols are left unresolved
-in `librccl.so` (`--allow-shlib-undefined`) and resolved at runtime from
-the executable, which links `librocshmem.a` and exports symbols via
-`-rdynamic`.
+**`--rocshmem-gin`** produces a self-contained `librccl.so`: the GIN host code
+it needs is compiled directly into the library (the GDA factory and mlx5
+provider from `projects/rocshmem/src`, routed through rccl's own IB-verbs
+shim), and the GIN device code is header-only. So `librocshmem.a` is neither
+built nor linked, `librccl.so` leaves no rocSHMEM host symbol unresolved, and
+nothing downstream needs to link rocSHMEM — a plain `dlopen("librccl.so")`
+(e.g. from Python) just works.
 
-**`--rocshmem`** (separate feature) links `librocshmem.a` into `librccl.so`
-for the alltoall\_wg offload path.  Does not enable GIN plugins.
+**`--rocshmem`** (separate feature) is the only mode that builds and links
+`librocshmem.a` into `librccl.so`, for the alltoall\_wg offload path. Does not
+enable GIN plugins.
 
 ## Running
 
@@ -109,25 +108,27 @@ NCCL 2.31 inserted EFA GDA at value 5, so AMD backends shifted:
 
 Scripts and jobs that still set `NCCL_GIN_TYPE=6` now select rocSHMEM GDA, not Anvil SDMA.
 
-## Known limitations
+## Device-side provider dispatch
 
-- **GDA on symmetric kernels**: the `__constant__` device memory
-  (`constmem`, `logd_constants`) used by QueuePair is zero-initialized via
-  stub definitions in `gin_rocshmem_constmem.hip`.  This is sufficient for
-  SDMA (which does not read constmem) but GDA dispatch on symmetric kernels
-  (e.g. `reduce_scatter_gin_*`) is not functional until a proper
-  `hipMemcpyToSymbol` init path is added to librccl.so.
-- **GDA on AlltoAllPivot**: works via the specialized kernel path (per-arch
-  bitcode injection via `--rocshmem-bitcode`).
+The rccl build copies `queue_pair_mux.hpp` with an override so QueuePair device
+dispatch reads the GDA provider from the **QueuePair instance** (a per-QP member)
+rather than rocSHMEM's `__constant__ constmem.gda_provider`. This removes all
+`__constant__`/`__device__` globals from rccl's GIN device path, so a consumer
+kernel that includes the GIN headers inherits no hidden device state and needs no
+`hipMemcpyToSymbol` init (matching how the PROXY/GDAKI backends pass device state
+through the GPU context). The old zero-initialized `constmem` stub and its
+device-bitcode injection are gone.
 
 ## Writing tests that use the GIN device API
 
-Test executables that compile GIN device templates (e.g. `alltoall.cu`
-with `ENABLE_ROCSHMEM_GIN`) must link `roc::rocshmem` and use
-`-fgpu-rdc --hip-link -rdynamic`.  The `roc::rocshmem` target brings in
-`hip::device` which provides `--offload-arch` flags automatically.
-The `-rdynamic` flag exports host symbols so that `librccl.so` can resolve
-GIN plugin functions from the executable at runtime.
+Test executables consume GIN entirely through `roc::rccl` — they need no
+rocSHMEM `find_package`, no `roc::rocshmem` link, no `--whole-archive`, and no
+`-rdynamic`, because `librccl.so` is self-contained. The GIN device backends
+self-detect from the installed headers (`__has_include` of the GDA/SDMA device
+entry headers), so no `-DENABLE_ROCSHMEM_GIN` define is needed on the consumer
+either; a backend's device templates expand only if the test instantiates it.
+The GIN device API is header-only (inline), so the test's own kernels compile
+as ordinary whole-program device code — no `-fgpu-rdc`/`--hip-link` required.
 
 ## Source layout
 
@@ -138,6 +139,6 @@ GIN plugin functions from the executable at runtime.
 | `gin_plugin_rocshmem_gda.cc` | rocSHMEM GDA plugin vtable (`NCCL_GIN_TYPE=6`) |
 | `gin_plugin_anvil_sdma.cc` | Anvil SDMA plugin vtable (`NCCL_GIN_TYPE=7`) |
 | `gin_rocshmem_gda_factory.cc` | QueuePair creation, MR registration, topology discovery |
-| `gin_rocshmem_constmem.hip` | Stub `__constant__` definitions for device bitcode linking |
+| `gin_rocshmem_gda_ibv_shim.cc` | rccl-native IB verbs backend for the factory |
 | `gin_anvil_ipc_table_host.cc` | IPC table management for SDMA |
 | `gin_anvil_conn_check_device.cc` | LSA signal connectivity self-test kernels (device-linked) |

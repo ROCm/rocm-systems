@@ -20,7 +20,10 @@
 #include "bootstrap.h"
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
 #include "gin/gin_rocshmem_gda_factory.h"
+#include "common_cast.h"  // IbCastInitDevices/IbCastDevs/IbCastGetPhysProperties
 #include <hip/hip_runtime.h>
+#include <mutex>
+#include <string.h>
 
 // RCCL env-var parameters for traffic class (defined in transport/net_ib/)
 extern int64_t ncclParamGinIbTc();
@@ -97,10 +100,44 @@ static int ginGdaBootstrapAllgather(void* ctx, void* buf, size_t perRankSize) {
 // Vtable implementations
 ///////////////////////////////////////////////////////////////////////////////
 
+// Maps each logical GIN device index to its physical IB-CAST device index.
+#define GIN_GDA_MAX_DEVS MAX_IB_DEVS
+static std::mutex ginGdaDevTableMutex;
+static int ginGdaPhysDevIndex[GIN_GDA_MAX_DEVS];
+static int ginGdaNDevs = -1;  // -1 = not yet built
+
+// Match GIN-capable NIC names (from the factory) to their IB-CAST device index.
+// Idempotent: builds only on first call. Returns the device count.
+static int ginRocshmemGdaBuildDevTable() {
+  std::lock_guard<std::mutex> lock(ginGdaDevTableMutex);
+  if (ginGdaNDevs != -1) return ginGdaNDevs;
+
+  int n = 0;
+  char ginNames[GIN_GDA_MAX_DEVS][MAXNAMESIZE];
+  int nGin = rocshmem_gin_list_devices(&ginNames[0][0], GIN_GDA_MAX_DEVS, MAXNAMESIZE);
+  if (nGin > GIN_GDA_MAX_DEVS) nGin = GIN_GDA_MAX_DEVS;
+  for (int g = 0; g < nGin && n < GIN_GDA_MAX_DEVS; g++) {
+    for (int d = 0; d < IbCastNDevs; d++) {
+      if (strncmp(ginNames[g], IbCastDevs[d].devName, MAXNAMESIZE) == 0) {
+        ginGdaPhysDevIndex[n++] = d;
+        break;
+      }
+    }
+  }
+  ginGdaNDevs = n;
+  return n;
+}
+
 static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   const char* gin_type = getenv("NCCL_GIN_TYPE");
   if (!gin_type || atoi(gin_type) != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) return ncclInternalError;
   if (rocshmem_gin_probe_devices() <= 0) return ncclInternalError;
+  // Populate the IB-CAST device table, then build the GIN-capable subset.
+  if (IbCastInitDevices(logFunction, nullptr) != ncclSuccess) return ncclInternalError;
+  if (ginRocshmemGdaBuildDevTable() <= 0) {
+    IbCastFinalizeDevices();  // balance the ref before bailing
+    return ncclInternalError;
+  }
   // Allocate init context; bootstrap filled by ncclGinRocshmemSetInitContext
   struct ginRocshmemInitCtx* ictx = new ginRocshmemInitCtx{};
   *ctx = ictx;
@@ -108,7 +145,8 @@ static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLog
 }
 
 static ncclResult_t ginRocshmemGdaDevices(int* ndev) {
-  *ndev = 1;
+  std::lock_guard<std::mutex> lock(ginGdaDevTableMutex);
+  *ndev = ginGdaNDevs;
   return ncclSuccess;
 }
 
@@ -122,15 +160,25 @@ static ncclResult_t ginRocshmemGdaGetGinProperties(ncclGinProperties_t* ginProps
 }
 
 static ncclResult_t ginRocshmemGdaGetProperties(int dev, ncclNetProperties_v12_t* props) {
-  memset(props, 0, sizeof(*props));
-  props->name = const_cast<char*>("rocshmem-gda");
-  props->pciPath = nullptr;
-  props->guid = 0;
+  int physDev;
+  {
+    std::lock_guard<std::mutex> lock(ginGdaDevTableMutex);
+    if (dev < 0 || dev >= ginGdaNDevs) {
+      WARN("GIN rocshmem-gda: requested properties for NIC %d, only %d GIN NICs enumerated", dev, ginGdaNDevs);
+      return ncclInvalidUsage;
+    }
+    physDev = ginGdaPhysDevIndex[dev];
+  }
+  // Report the real per-NIC name + pciPath + topology rail/plane ids from the
+  // IB-CAST table so the topology places one GIN node per NIC near its GPU.
+  NCCLCHECK(IbCastGetPhysProperties(physDev, props));
   props->ptrSupport = NCCL_PTR_CUDA;
   props->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA;
   props->netDeviceVersion = NCCL_GIN_ROCSHMEM_VERSION;
   props->maxP2pBytes = 1ULL << 30;
   props->maxCollBytes = 1ULL << 30;
+  props->vProps.ndevs = 1;
+  props->vProps.devs[0] = dev;
   return ncclSuccess;
 }
 
@@ -163,17 +211,31 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
     trafficClass = cctx->comm->config.trafficClass;
   }
 
+  // Use the device gin_host selected for THIS connection (listen's dev, one per
+  // ginComm so multiple local NICs each get their own QP set). The GIN node's
+  // net.dev is this backend's own device index, so resolve the NIC name through
+  // our getProperties, not comm->ncclNet (a separate dev space).
+  const char* preferredNic = nullptr;
+  char preferredNicName[128] = {0};
+  {
+    int ginDev = listenComm ? ((ginRocshmemGdaListenCtx*)listenComm)->dev : -1;
+    ncclNetProperties_t props;
+    if (ginDev >= 0 && ginRocshmemGdaGetProperties(ginDev, &props) == ncclSuccess && props.name != nullptr) {
+      snprintf(preferredNicName, sizeof(preferredNicName), "%s", props.name);
+      preferredNic = preferredNicName;
+      INFO(NCCL_INIT, "GIN rocshmem-gda: comm rank %d GIN NIC: %s (ginDev %d)",
+           cctx->comm->rank, preferredNicName, ginDev);
+    }
+  }
+
   // Create QPs during connect (like GDAKI creates IB connections in connect)
   int rc = rocshmem_gin_create_qps(nranks, rank, ginGdaBootstrapAllgather, cctx->comm->bootstrap, trafficClass,
-                                   &cctx->qpSet, &cctx->gpu_qp_ptrs);
+                                   preferredNic, &cctx->qpSet, &cctx->gpu_qp_ptrs);
   if (rc != 0) {
     WARN("GIN rocshmem-gda: failed to create QPs");
     delete cctx;
     return ncclSystemError;
   }
-
-  // Initialize rocshmem __constant__ device memory
-  rocshmem_gin_init_constmem(rocshmem_gin_get_provider(cctx->qpSet), rank);
 
   INFO(NCCL_INIT, "GIN rocshmem-gda: QPs created (%d ranks, tc=%d)", nranks, trafficClass);
   *collComm = cctx;
@@ -196,6 +258,9 @@ static ncclResult_t ginRocshmemGdaCloseColl(void* collComm) {
 
 static ncclResult_t ginRocshmemGdaFinalize(void* ctx) {
   delete (ginRocshmemInitCtx*)ctx;
+  // Balance the IbCastInitDevices ref taken in init (refcounted; the shared IB-CAST
+  // device table survives while the transport still holds a ref).
+  IbCastFinalizeDevices();
   return ncclSuccess;
 }
 

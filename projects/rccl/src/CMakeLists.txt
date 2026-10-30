@@ -265,12 +265,6 @@ set(SRC_FILES
   include/nccl_device/coop.h
   include/nccl_device/core.h
   include/nccl_device/gin.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
   include/nccl_device/gin/gdaki/gin_gdaki.h
   include/nccl_device/gin/gdaki/gin_gdaki_device_host_common.h
   include/nccl_device/gin/gin_device_api.h
@@ -278,8 +272,8 @@ set(SRC_FILES
   include/nccl_device/gin/gin_device_host_common.h
   include/nccl_device/gin/proxy/gin_proxy.h
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
-  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
-  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
+  # rocshmem GDA + Anvil SDMA device headers are GIN-only: appended in the
+  # ENABLE_ROCSHMEM_GIN block below, not shipped by a non-GIN build.
   include/nccl_device/gin_barrier.h
   include/nccl_device/host.h
   include/nccl_device/impl/barrier__funcs.h
@@ -635,6 +629,7 @@ if(ENABLE_ROCSHMEM_GIN)
   list(APPEND SRC_FILES
     src/gin/gin_plugin_rocshmem_gda.cc
     src/gin/gin_rocshmem_gda_factory.cc
+    src/gin/gin_rocshmem_gda_ibv_shim.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_sdma_factory.cc
     src/gin/gin_anvil_ipc_table_host.cc
@@ -644,11 +639,25 @@ if(ENABLE_ROCSHMEM_GIN)
   )
   # GIN shim headers: in SRC_FILES so hipify copies them to the build tree.
   list(APPEND SRC_FILES
+    src/include/gin/gin_rocshmem_gda_ibv_shim.h
+    src/include/gin/gin_rocshmem_gda_host_utils.h
+    src/include/gin/gin_rocshmem_gda_debug_ibv.h
     src/include/nccl_device/gin/rocshmem_gda/log.hpp
     src/include/nccl_device/gin/rocshmem_gda/util.hpp
     src/include/nccl_device/gin/rocshmem_gda/containers/free_list.hpp
     src/include/nccl_device/gin/rocshmem_gda/gda/ibv_core.hpp
-    src/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_common.hpp
+    # rocshmem GDA + Anvil SDMA device entry/support headers: GIN-only, so they
+    # are hipified + installed solely in this build. gin_device_api.h reaches them
+    # only under #if NCCL_GIN_{ROCSHMEM_GDA,ANVIL_SDMA}_ENABLE, which self-detect
+    # the headers' presence via __has_include (gin_device_common.h).
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h
+    src/include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
+    src/include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
+    src/include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
   )
   # anvil.cpp is compiled from rocshmem source via target_sources after
   # add_library (bypasses SRC_FILES/hipify). See block after add_library.
@@ -742,6 +751,23 @@ add_custom_command(
 )
 list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
 list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
+
+# GIN backend availability for consumers (see rccl_gin_config.h.in). Generated
+# into the hipify include tree (not hipified) so the hipified gin headers resolve
+# it with no extra -I and copy_nccl_device_headers stages + installs it.
+if (ENABLE_ROCSHMEM_GIN)
+  set(NCCL_GIN_ROCSHMEM_GDA_AVAILABLE 1)
+  set(NCCL_GIN_ANVIL_SDMA_AVAILABLE 1)
+else()
+  set(NCCL_GIN_ROCSHMEM_GDA_AVAILABLE 0)
+  set(NCCL_GIN_ANVIL_SDMA_AVAILABLE 0)
+endif()
+set(RCCL_GIN_CONFIG_DST "${HIPIFY_DIR}/src/include/nccl_device/gin/rccl_gin_config.h")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/gin/rccl_gin_config.h.in"
+  "${RCCL_GIN_CONFIG_DST}"
+  @ONLY)
+list(APPEND NCCL_DEVICE_HIP_FILES ${RCCL_GIN_CONFIG_DST})
 
 # proxy_trace headers are not produced by hipify-perl; copy from src so the
 # hipify include tree matches (unit tests search hipify paths before src/include).
@@ -1094,10 +1120,10 @@ endif()
 # ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
 #   via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
 # ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
-#   resolved via per-arch bitcode in the device linker pipeline +
-#   -mlink-builtin-bitcode for symmetric kernels.  Host symbols left unresolved
-#   (--allow-shlib-undefined), resolved at runtime from the executable.
-#   Does not enable alltoall_wg offload.
+#   resolved via per-arch bitcode in the device linker pipeline.  Host code is
+#   self-contained: the rocshmem host code GIN needs is compiled directly into
+#   librccl.so, so no host symbol is left unresolved.  Does not enable
+#   alltoall_wg offload.
 if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
   # Ensure rocSHMEM is fully built/installed before compiling rccl
@@ -1105,56 +1131,83 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
     add_dependencies(rccl rocshmem_ext)
   endif()
 
-  if (ROCSHMEM_INCLUDE_DIR)
-    target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
-  endif()
-
-  # GDA factory (gin_rocshmem_gda_factory.cc) directly includes rocshmem
-  # host headers (ibv_wrapper, topology, envvar, debug_gda) that are not
-  # yet shimmed or copied. These paths will be removed when GDA host
-  # dependencies are severed (like SDMA was).
-  if (ROCSHMEM_SOURCE_DIR)
-    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
-    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
-    if (ROCSHMEM_BUILD_DIR)
-      target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
-    else()
-      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
+  # The rocshmem *source/install* include dirs are ONLY for ENABLE_ROCSHMEM:
+  # its device collectives (AlltoAllGda) compile against rocshmem directly
+  # (<rocshmem/rocshmem.hpp> etc.).
+  if (ENABLE_ROCSHMEM)
+    if (ROCSHMEM_INCLUDE_DIR)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+    endif()
+    if (ROCSHMEM_SOURCE_DIR)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
+      if (ROCSHMEM_BUILD_DIR)
+        target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
+      else()
+        target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
+      endif()
     endif()
   endif()
 endif()
 
 if (ENABLE_ROCSHMEM_GIN)
-  # Ensure we see our copied headers before rocSHMEM's
+  # The rccl-owned copied GIN header tree — the ONLY rocshmem header root on a GIN
+  # build's include path. The rocshmem source tree is intentionally NOT added:
+  # exposing it would let a stray include resolve an unshimmed rocshmem host
+  # header instead of rccl's copy. The GIN TUs and the copied headers' internal
+  # (bare) includes resolve from here.
   target_include_directories(rccl BEFORE PRIVATE ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda)
-
-  # Need to add the GIN GDA directory to the public interface:
-  # internal rocSHMEM headers assume that the source directory is in the include search path
   target_include_directories(rccl BEFORE INTERFACE
     $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/rocshmem_gda>
   )
 
   # Add target for copying the rocSHMEM headers
   add_custom_target(copy_rocshmem_headers)
   add_dependencies(rccl copy_rocshmem_headers)
 
-  if (ROCSHMEM_INCLUDE_DIR)
-    # Copy rocSHMEM public include headers (primarily rocshmem_config.h) into RCCL
-    set(ROCSHMEM_INCLUDE_HEADERS rocshmem/rocshmem_config.h)
-    copy_files(
-      ROCSHMEM_INCLUDE_HEADERS
-      "${ROCSHMEM_INCLUDE_DIR}"
-      "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda"
-      GIN_GDA_ROCSHMEM_INCLUDE_HEADERS
-    )
-    add_custom_target(copy_rocshmem_include_headers DEPENDS ${GIN_GDA_ROCSHMEM_INCLUDE_HEADERS})
-    # Ensure rocSHMEM is fully built/installed before copying installed headers
-    if (TARGET rocshmem_ext)
-      add_dependencies(copy_rocshmem_include_headers rocshmem_ext)
+  # rccl-owned gda_config.h (from gda_config.h.in) replaces rocSHMEM's generated
+  # config, so the GIN header path needs no rocSHMEM build. Flags are fixed by
+  # rccl's design (all providers + GDA_MUX on, USE_CONSTMEM off); BUILD_DEBUG_DEVICE
+  # tracks Debug builds (set below).
+  set(GDA_IONIC ON)
+  set(GDA_BNXT  ON)
+  set(GDA_MLX5  ON)
+  # GDA_MUX must be ON whenever >1 provider is enabled.
+  set(_gda_provider_count 0)
+  foreach(_p GDA_IONIC GDA_BNXT GDA_MLX5)
+    if(${_p})
+      math(EXPR _gda_provider_count "${_gda_provider_count} + 1")
     endif()
-    add_dependencies(copy_rocshmem_headers copy_rocshmem_include_headers)
+  endforeach()
+  if(_gda_provider_count GREATER 1)
+    set(GDA_MUX ON)
+  else()
+    set(GDA_MUX OFF)
   endif()
+  # BUILD_DEBUG_DEVICE: enable the device-side GIN debug printf in Debug builds
+  # (install.sh --debug sets CMAKE_BUILD_TYPE=Debug). Emits constmem-free device
+  # printf from the provider QP headers via the LOGD shim. USE_CONSTMEM stays off.
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(BUILD_DEBUG_DEVICE ON)
+  endif()
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/gin/rocshmem_gda/gda_config.h.in"
+    "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/gda_config.h"
+    @ONLY)
+  # ibvcore.h is transitively included from the GIN-GDA device headers; copy it
+  # under rocshmem_gda/ so that nccl_device/-rooted include resolves for both the
+  # build tree and an installed consumer, with no extra -I.
+  add_custom_command(
+    OUTPUT "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/ibvcore.h"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${HIPIFY_DIR}/src/include/ibvcore.h"
+            "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/ibvcore.h"
+    DEPENDS "${HIPIFY_DIR}/src/include/ibvcore.h"
+    VERBATIM)
+  add_custom_target(copy_rocshmem_include_headers
+    DEPENDS "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/gda_config.h"
+            "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/ibvcore.h")
+  add_dependencies(copy_rocshmem_headers copy_rocshmem_include_headers)
 
   if (ROCSHMEM_SOURCE_DIR)
     # Copy rocSHMEM QueuePair device headers into RCCL
@@ -1189,8 +1242,9 @@ if (ENABLE_ROCSHMEM_GIN)
       gda/endian.hpp
       gda/gda_enums.hpp
       bit.hpp
-      constmem.hpp
       constants.hpp
+      # NOTE: constmem.hpp intentionally NOT copied — the rccl mux override reads
+      # the provider from the QueuePair instance, so no copied header references it.
     )
     copy_files(
       ROCSHMEM_SOURCE_HEADERS
@@ -1237,6 +1291,9 @@ if (ENABLE_ROCSHMEM_GIN)
     set_source_files_properties("${_GIN_SDMA_DIR}/anvil.cpp" PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
     # src/gin/ so host log.hpp wins over the device shim for anvil.cpp.
     target_include_directories(rccl BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gin")
+    # so anvil's #include "sdma/anvil.hpp" resolves from the rccl-copied tree,
+    # not the rocshmem source (deliberately off the GIN include path).
+    target_include_directories(rccl PRIVATE "${PROJECT_BINARY_DIR}/gin")
 
     # Copy SDMA device headers next to gin_anvil_sdma.h so "sdma/anvil_device.hpp"
     # resolves during build (same layout as the install tree).
@@ -1254,6 +1311,46 @@ if (ENABLE_ROCSHMEM_GIN)
     endforeach()
     add_custom_target(copy_sdma_device_headers DEPENDS ${_SDMA_DEV_OUTPUTS})
     add_dependencies(copy_rocshmem_headers copy_sdma_device_headers)
+
+    # Compile rocSHMEM's mlx5 provider (provider_gda_mlx5.cpp) into librccl.so.
+    # It is the only provider with out-of-line QP construction (ionic/bnxt are
+    # header-only + dlsym'd), and the last rocshmem host-symbol dependency on the
+    # GIN device path. A build-time sed rewrites its includes and ibv calls to
+    # rccl's own shims; the result follows rccl's target-wide visibility.
+    set(_GIN_MLX5_DIR "${PROJECT_BINARY_DIR}/gin/mlx5")
+    add_custom_command(
+      OUTPUT "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_GIN_MLX5_DIR}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ROCSHMEM_SOURCE_DIR}/src/gda/mlx5/provider_gda_mlx5.cpp"
+        "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      # Redirect the two rocshmem includes: ibv_wrapper.hpp (the extern IBVWrapper
+      # ibv link dep) -> rccl's verbs shim; util.hpp -> the private host-utils
+      # header. util.hpp is used ONLY for the CHECK_* abort macros, which must not
+      # live in rccl's INSTALLED util.hpp (a public device header) or their generic
+      # names would pollute consumer TUs.
+      COMMAND sed -i
+        "s|#include \"gda/ibv_wrapper\\.hpp\"|#include \"gin/gin_rocshmem_gda_ibv_shim.h\"|g;s|#include \"util\\.hpp\"|#include \"gin/gin_rocshmem_gda_host_utils.h\"|g"
+        "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      # dmabuf probe: rccl's gin_ibv_is_dmabuf_supported takes a PD, but the
+      # rocshmem original's did not. Thread qp.pd (in scope at the create_qp call)
+      # down into mlx5_umem_reg, and give the probe that PD arg.
+      COMMAND sed -i
+        "s|struct ibv_context \\*ctx, void\\* addr, size_t size) {|struct ibv_context *ctx, struct ibv_pd* pd, void* addr, size_t size) {|;s|mlx5_umem_reg(mlx5dv, qp.ctx, umem_buffer|mlx5_umem_reg(mlx5dv, qp.ctx, qp.pd, umem_buffer|;s|ibv\\.is_dmabuf_supported()|ibv.is_dmabuf_supported(pd)|"
+        "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      # Route every remaining ibv.<method>( call to the matching gin_ibv_<method>(
+      # shim entry point (create_ah, destroy_ah, flow_label_to_udp_sport,
+      # is_dmabuf_supported). \bibv\. is unambiguous here — the only matches are
+      # these verbs calls.
+      COMMAND sed -i "s|\\bibv\\.|gin_ibv_|g"
+        "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      DEPENDS "${ROCSHMEM_SOURCE_DIR}/src/gda/mlx5/provider_gda_mlx5.cpp"
+      COMMENT "Copying + shimming provider_gda_mlx5.cpp -> ${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp"
+      VERBATIM)
+    add_custom_target(copy_rocshmem_mlx5_provider
+      DEPENDS "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp")
+    add_dependencies(copy_rocshmem_headers copy_rocshmem_mlx5_provider)
+    target_sources(rccl PRIVATE "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp")
   endif()
 
   # Add rule to install ibvcore.h so that it can be found by ibv_core.hpp
@@ -1652,9 +1749,17 @@ endif()
 # install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
-  # Resolve to a full path: nothing on the link line supplies ${ROCM_PATH}/lib, so a bare
-  # -lhsakmt would have no search path to resolve against.
+  # libhsakmt is a static archive. We link it as a plain library (not via
+  # find_package(hsakmt) because the hsakmt-config.cmake is broken on many rocm
+  # releases).
+  # Used two ways below: ENABLE_ROCSHMEM links it alongside librocshmem.a (it's a
+  # dependency of librocshmem.a); ENABLE_ROCSHMEM_GIN links it for anvil.cpp's
+  # direct hsaKmt* calls. The symbols are absorbed into librccl.so so the
+  # dependency does not propagate, and its drm/numa deps resolve at load time
+  # via librccl's existing libhsa-runtime64 dependency.
   find_library(HSAKMT_LIBRARY NAMES hsakmt
+    # Resolve to a full path: nothing on the link line supplies ${ROCM_PATH}/lib, so a bare
+    # -lhsakmt would have no search path to resolve against.
     HINTS "${ROCM_PATH}"
     PATH_SUFFIXES lib lib64)
   if(NOT HSAKMT_LIBRARY)
@@ -1675,54 +1780,11 @@ if(ENABLE_ROCSHMEM)
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 elseif(ENABLE_ROCSHMEM_GIN)
-  # GIN device templates (Put/Flush/etc.) reference rocshmem device symbols.
-  # With the device linker (default), per-arch .bc files are injected directly
-  # into the per-arch device link step via DeviceLinker.cmake.
-  #
-  # Seed rocshmem host symbols needed by GDA into librccl.so.  SDMA factory
-  # symbols are compiled in directly (gin_anvil_sdma_factory.cc) and no longer
-  # need pulling from librocshmem.a.
-  set(_gin_rocshmem_syms
-    _ZN8rocshmem3ibvE)
-  set(_gin_rocshmem_undefine "")
-  foreach(_sym ${_gin_rocshmem_syms})
-    list(APPEND _gin_rocshmem_undefine -u ${_sym})
-  endforeach()
-
-  set(_gin_rocshmem_object "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_host.o")
-  set(_gin_rocshmem_archive_name "librocshmem_gin_host.a")
-  set(_gin_rocshmem_archive "${CMAKE_CURRENT_BINARY_DIR}/${_gin_rocshmem_archive_name}")
-  if(TARGET rocshmem_static)
-    set(_gin_rocshmem_depends rocshmem_static)
-  else()
-    set(_gin_rocshmem_depends ${ROCSHMEM_LIBRARY})
-  endif()
-
-  add_custom_command(
-    OUTPUT  ${_gin_rocshmem_object}
-    COMMAND ${CMAKE_LINKER} -r ${_gin_rocshmem_undefine} ${ROCSHMEM_LIBRARY} -o ${_gin_rocshmem_object}
-    DEPENDS ${_gin_rocshmem_depends}
-    COMMENT "Extracting GIN host objects from librocshmem.a"
-    VERBATIM)
-
-  # An app linking rocshmem under -rdynamic would interpose our globals, so both
-  # modules would run destructors over one object and double free at exit.
-  # --exclude-libs keeps our copies local. It needs an archive, hence the wrapper.
-  add_custom_command(
-    OUTPUT  ${_gin_rocshmem_archive}
-    COMMAND ${CMAKE_COMMAND} -E rm -f ${_gin_rocshmem_archive}
-    COMMAND ${CMAKE_AR} rcs ${_gin_rocshmem_archive} ${_gin_rocshmem_object}
-    DEPENDS ${_gin_rocshmem_object}
-    COMMENT "Packaging GIN host objects into ${_gin_rocshmem_archive_name}"
-    VERBATIM)
-  add_custom_target(gin_rocshmem_host_objects DEPENDS ${_gin_rocshmem_archive})
-
-  add_dependencies(rccl gin_rocshmem_host_objects)
-  target_link_libraries(rccl PRIVATE ${_gin_rocshmem_archive})
-  target_link_options(rccl PRIVATE "LINKER:--exclude-libs,${_gin_rocshmem_archive_name}")
-  # anvil.cpp calls hsaKmt* directly. hsa-runtime64 is already linked above.
+  # GIN is self-contained: all rocshmem host code it needs is compiled directly
+  # into librccl.so (SDMA and the GDA factory + mlx5 provider via src/gin).
+  # Only real dependency: anvil.cpp calls hsaKmt* directly (see the HSAKMT_LIBRARY
+  # detection above) so it must be added to librccl.so.
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
-  target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 
 ## Set RCCL link options
