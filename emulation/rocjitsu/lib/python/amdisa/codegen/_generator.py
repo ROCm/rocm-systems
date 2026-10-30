@@ -6777,14 +6777,20 @@ class CodeGenerator:
             gen_mullit,
             gen_packed_fma16,
             gen_mixed_fma,
+            gen_pseudo_scalar,
             gen_packed_binary16,
             gen_float_dot32,
             gen_half_dot,
         )
+        from amdisa.codegen.execute.rj_arith_scalar import gen_scalar
 
         if result_writer is None:
             rj_arith_body = (
-                gen_integer_dot(
+                gen_scalar(self.isa_spec.arch_name, inst.name, dst_ops, src_ops)
+                or gen_pseudo_scalar(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_integer_dot(
                     self.isa_spec.arch_name,
                     inst.name,
                     dst_ops,
@@ -14188,6 +14194,7 @@ class CodeGenerator:
                             DIVISION_NAMES,
                         )
                         from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
+                        from amdisa.codegen.execute.rj_arith_scalar import SCALAR_NAMES
                         from amdisa.codegen.execute.rj_arith_compare import (
                             COMPARE_NAMES,
                             FLOAT_COMPARISONS,
@@ -14200,17 +14207,18 @@ class CodeGenerator:
                             inst.name in DS_NAMES
                             or inst.name in LANE_NAMES
                             or inst.name in DIVISION_NAMES
-                            or (inst.name in COMPARE_NAMES)
-                            or (inst.name in CARRY32_NAMES)
-                            or (inst.name in WIDE_INTEGER_NAMES)
-                            or (inst.name in INTEGER16_NAMES)
-                            or (inst.name in WIDENING_INTEGER_NAMES)
-                            or (inst.name in PACKED_INTEGER_NAMES)
-                            or (inst.name in INTEGER_DOT_NAMES)
+                            or inst.name in COMPARE_NAMES
+                            or inst.name in CARRY32_NAMES
+                            or inst.name in WIDE_INTEGER_NAMES
+                            or inst.name in INTEGER16_NAMES
+                            or inst.name in WIDENING_INTEGER_NAMES
+                            or inst.name in PACKED_INTEGER_NAMES
+                            or inst.name in INTEGER_DOT_NAMES
                             or (
                                 (
                                     inst.name in VECTOR32_NAMES
                                     or inst.name in FLOAT_NAMES
+                                    or inst.name in SCALAR_NAMES
                                 )
                                 and _mask_result_writer is None
                             )
@@ -14881,7 +14889,14 @@ class CodeGenerator:
                     PACKED_INTEGER_NAMES,
                     INTEGER_DOT_NAMES,
                 )
+                from amdisa.codegen.execute.rj_arith_scalar import SCALAR_NAMES
 
+                has_rj_arith_scalar = self.isa_spec.arch_name in (
+                    'rdna3',
+                    'rdna4',
+                ) and any(i.name in SCALAR_NAMES for i in all_insts)
+                if has_rj_arith_scalar:
+                    cpp_includes.append(('rj_arith/rj_arith.h', False))
                 if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
                     i.name in VECTOR32_NAMES
                     or i.name in CARRY32_NAMES
@@ -14904,20 +14919,16 @@ class CodeGenerator:
                     and s.semantic_class == 'mfma'
                     for i in all_insts
                 )
-                requires_compute_unit = any(
-                    (
-                        self.semantics
-                        and (s := self.semantics.instructions.get(i.name))
-                        and (
-                            s.semantic_class
-                            in (
-                                'scalar_shader_cycles',
-                                'scalar_sendmsg_rtn',
-                                'vector_cvt_scale',
-                            )
-                        )
-                        for i in all_insts
+                requires_compute_unit = has_rj_arith_scalar or any(
+                    self.semantics
+                    and (s := self.semantics.instructions.get(i.name))
+                    and s.semantic_class
+                    in (
+                        'scalar_shader_cycles',
+                        'scalar_sendmsg_rtn',
+                        'vector_cvt_scale',
                     )
+                    for i in all_insts
                 )
                 if requires_compute_unit:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))

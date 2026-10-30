@@ -1042,3 +1042,38 @@ def test_mixed_fma_formats_abs_partial_outputs_and_routing(arch):
         assert 'try_execute_' not in body and 'amdgpu::execute_v_' not in body
         checked += 1
     assert checked == 6
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna5'])
+def test_pseudo_scalar_routing_and_semantics(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        PSEUDO_SCALAR_NAMES,
+        gen_pseudo_scalar,
+    )
+
+    for name in PSEUDO_SCALAR_NAMES:
+        body = gen_pseudo_scalar(arch, name, ['d'], ['a'], True)
+        if arch != 'rdna4':
+            assert body is None
+            continue
+        assert 'execute_pseudo_scalar' in body
+        assert 'rj_arith_' + name.lower() in body
+        assert 'arithmetic_flags()' in body
+        assert 'arithmetic_reports_fp_status()' in body
+        assert 'wave64' not in body and 'exec_mask' not in body
+        assert 'OPSEL' not in body and 'HIGH_A' not in body
+        assert gen_pseudo_scalar(arch, name, ['d'], ['a'], False) is None
+    if arch == 'rdna4':
+        root = (
+            Path(__file__).resolve().parents[3]
+            / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        )
+        source = (root / arch / 'vop3_exec.cpp').read_text()
+        bodies = re.findall(
+            r'void VS(?:Exp|Log|Rcp|Rsq|Sqrt)F(?:16|32)Vop3::execute_impl\([^)]*\)\s*\{([^}]+)\}',
+            source,
+        )
+        assert len(bodies) == 10
+        for body in bodies:
+            assert 'execute_pseudo_scalar' in body
+            assert 'transcendental::' not in body and 'amdgpu::execute_v_' not in body

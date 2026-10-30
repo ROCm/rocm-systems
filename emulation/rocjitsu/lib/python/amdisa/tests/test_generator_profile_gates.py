@@ -890,13 +890,18 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
                         f'{inst.name}/{inst.enc_name}: generated body writes '
                         f'SCC={body_writes_scc}, MR ISA writes SCC={mrisa_writes_scc}'
                     )
-                if (
-                    sem.semantic_class == 'scalar_addk'
-                    and 'signed_add_overflows' not in body
-                ):
-                    mismatches.append(
-                        f'{inst.name}/{inst.enc_name}: ADDK does not use signed overflow'
+                if sem.semantic_class == 'scalar_addk':
+                    # RDNA3/4 delegate signed overflow to the corresponding rj-arith
+                    # ADDK API; other architectures still emit the local helper.
+                    overflow = (
+                        f'rj_arith_{inst.name.lower()}('
+                        if isa_name in ('rdna3', 'rdna4')
+                        else 'signed_add_overflows'
                     )
+                    if overflow not in body:
+                        mismatches.append(
+                            f'{inst.name}/{inst.enc_name}: ADDK does not use signed overflow'
+                        )
 
     assert checked > 0, f'{isa_name}: no instruction SCC contracts checked'
     assert checked_exclusions == expected_exclusions.get(isa_name, set())
@@ -3883,7 +3888,12 @@ def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
                 assert f'.read_scalar({operand.name})' in body, name
         if not numeric_sources:
             assert 'read_scalar_f16_carrier' not in body, name
-        assert ('>> 16' in body) or not high, name
+        if high:
+            if arch_name == 'rdna4':
+                # The rj-arith entry point selects the high half of the carrier.
+                assert 'rj_arith_s_cvt_hi_f32_f16(' in body
+            else:
+                assert '>> 16' in body, name
 
 
 @pytest.mark.parametrize('arch_name', ['rdna3', 'rdna4', 'cdna4', 'cdna5'])
@@ -4116,16 +4126,41 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
             assert 'vop3_opsel' not in body
             assert 'read_vop3_true16_src' not in body
             assert '>> 16' not in body
-            # The source half is flushed under MODE before it is widened.
-            flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
-            assert flush in body
-            assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in body
             assert 'read_scalar_f16_carrier' not in body
-            assert body.index('util::f16_to_f32(') < body.index(flush)
-            assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
-            assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
-            assert 'wf.fp_round_mode_f16_f64()' in body
-            assert 'wf.fp_denorm_mode_f16_f64()' in body
+            if generated_root == rdna4_generated_root:
+                # RDNA4 now delegates the same scalar/low-half contract to rj-arith.
+                operation = (
+                    class_name.removeprefix('VS').removesuffix('F16Vop3').lower()
+                )
+                assert f'rj_arith_v_s_{operation}_f16' in body
+                assert 'amdgpu::arith::execute_pseudo_scalar(' in body
+                assert 'src0, true,' in body
+                bridge = (
+                    generated_root.parents[1] / 'shared/rj_arith_float_exec.h'
+                ).read_text()
+                begin = bridge.index('inline void execute_pseudo_scalar(')
+                end = bridge.index('// Translate guest denormal', begin)
+                adapter = bridge[begin:end]
+                assert 'wave.exec()' not in adapter
+                assert 'registers.read_scalar(source)' in adapter
+                assert 'registers.write_scalar(destination, result)' in adapter
+                assert 'wave.fp_denorm_mode_f16_f64()' in adapter
+                assert 'fp_round_mode' not in adapter  # ISA ignores guest rounding.
+                rj_arith = (
+                    generated_root.parents[7] / 'arith/src/scalar/pseudo_scalar.cpp'
+                ).read_text()
+                assert 'uint16_t(raw)' in rj_arith
+                assert 'raw &= 65535' in rj_arith
+            else:
+                # The source half is flushed under MODE before it is widened.
+                flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
+                assert flush in body
+                assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in body
+                assert body.index('util::f16_to_f32(') < body.index(flush)
+                assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
+                assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
+                assert 'wf.fp_round_mode_f16_f64()' in body
+                assert 'wf.fp_denorm_mode_f16_f64()' in body
 
             constructor = _generated_constructor_body(constructor_source, class_name)
             assert 'vop3_opsel' not in constructor
