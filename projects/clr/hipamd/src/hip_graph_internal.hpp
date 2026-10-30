@@ -7,9 +7,13 @@
 #pragma once
 #include <algorithm>
 #include <atomic>
+#include <deque>
 #include <queue>
 #include <stack>
 #include <iostream>
+#include <limits>
+#include <map>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <shared_mutex>
@@ -187,14 +191,24 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   //! Allocate kernel arg pool on device for the given size.
   bool AllocGraphKernargPool(size_t pool_size, amd::Device* device);
 
-  // Allocate kernel args from current chunck for given size and alignment.
-  // If kernel arg pool is full allocate new chunck and alloc kern args from new pool.
+  // Allocate kernel args from a reclaimed slot or the current chunk,
+  // adding a new chunk when it is full.
   address AllocKernArg(size_t size, size_t alignment, int devId) override;
+
+  //! Reclaim a slot replaced by a node update.
+  void RetireKernArg(address addr, size_t size, int devId) override;
+
+  //! Bracket every launch; LaunchCompleted takes the epoch LaunchSubmitted returned.
+  uint64_t LaunchSubmitted();
+  void LaunchCompleted(uint64_t epoch);
 
   // Do HDP flush/When HDP flush register is invalid fallback to Readback
   void ReadBackOrFlush();
 
  private:
+  address AllocKernArgLocked(size_t size, size_t alignment, amd::Device* device);
+  void ReclaimRetiredLocked();
+
   struct KernelArgPoolGraph {
     KernelArgPoolGraph(address base_addr, size_t size)
         : kernarg_pool_addr_(base_addr), kernarg_pool_size_(size), kernarg_pool_offset_(0) {}
@@ -206,6 +220,20 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   std::unordered_map<amd::Device*, std::vector<KernelArgPoolGraph>>
       kernarg_graph_;  //! Vector of allocated kernarg pool per device
   using KernelArgImpl = device::Settings::KernelArgImpl;
+
+  using SlotKey = std::pair<amd::Device*, size_t>;  //! (device, capacity)
+  struct RetiredSlot {
+    SlotKey key;
+    address addr;
+    uint64_t epoch;  //! Last launch submitted when the slot was retired
+  };
+  std::mutex slot_lock_;  //! Guards the members below
+  std::deque<RetiredSlot> retired_;             //! Ordered by epoch
+  std::multimap<SlotKey, address> free_slots_;
+  //! Full capacity of reused slots larger than requested
+  std::unordered_map<address, size_t> slot_capacity_;
+  std::set<uint64_t> in_flight_;  //! Epochs of launches not yet completed
+  uint64_t last_epoch_ = 0;
 };
 
 //! Per-GraphExecBase pool of HW event sets.
@@ -1178,6 +1206,7 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   }
   //! Recycle HW event signals borrowed for a launch. No-op on classic path.
   virtual void RecycleLaunchSignals(amd::Device* device, std::vector<void*>& signal_set) {}
+  virtual void KernargLaunchCompleted(uint64_t epoch) {}
 
  protected:
   uint64_t flags_ = 0;
@@ -1253,6 +1282,12 @@ class GraphExecSegmented : public GraphExecBase {
       signalManager_->ReleaseSet(device, signal_set);
     }
   }
+  void KernargLaunchCompleted(uint64_t epoch) override {
+    if (kernArgManager_ != nullptr) {
+      kernArgManager_->LaunchCompleted(epoch);
+    }
+  }
+
   // Kernel arg manager is for the entire graph.
   // Child graph also shares the same kernel arg manager object. some apps have 100's of
   // child graph nodes and each child graph has only one node.
