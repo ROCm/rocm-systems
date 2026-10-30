@@ -103,6 +103,12 @@ class DiffTest(unittest.TestCase):
         grown = edit(old, "a : 4; uint32_t reserved : 28;", "a : 5; uint32_t reserved : 27;")
         self.assertEqual(self.paths(grown, old_text=old), ["types/amdsmi_f_t/fields/a"])
 
+    def test_carving_a_bitfield_from_a_reserved_array_passes(self):
+        new = edit(
+            BASE, "uint32_t reserved[8];", "uint32_t f : 1; uint32_t r : 31; uint32_t reserved[7];"
+        )
+        self.assertEqual(self.paths(new), [])
+
     def test_carve_that_grows_struct_is_a_break(self):
         new = edit(BASE, "uint32_t reserved[8];", "uint32_t mask; uint32_t reserved[8];")
         self.assertIn("types/amdsmi_info_t/size", self.paths(new))
@@ -260,6 +266,28 @@ class EnumRuleTest(unittest.TestCase):
         paths, _ = self.check(edit(self.ENUM, "E_A = 0,", "E_A = 3, E_N = 0,"))
         self.assertEqual(
             paths, ["types/amdsmi_e_t/enumerators/E_A", "types/amdsmi_e_t/enumerators/E_N"]
+        )
+
+    def test_aliased_and_count_end_markers_may_grow(self):
+        for old, new in (
+            ("X_A = 0, X_B = 1, X_LAST = X_B", "X_A = 0, X_B = 1, X_C = 2, X_LAST = X_C"),
+            ("X_A, X_B, X_COUNT", "X_A, X_B, X_C, X_COUNT"),
+        ):
+            enum = PRELUDE + "typedef enum { %s } amdsmi_x_t;\n"
+            paths = abi_gate.diff(
+                abi_gate.snapshot_text(enum % old), abi_gate.snapshot_text(enum % new)
+            )
+            self.assertEqual(paths, [], old)
+
+    def test_an_inner_range_bound_may_not_grow(self):
+        old = edit(self.ENUM, "E_B = 1,", "E_B = 1, E_B_LAST = 1,")
+        new = edit(self.ENUM, "E_B = 1,", "E_B = 1, E_B2 = 2, E_B_LAST = 2,")
+        self.assertEqual(
+            [
+                abi_gate.path_str(b.path)
+                for b in abi_gate.diff(abi_gate.snapshot_text(old), abi_gate.snapshot_text(new))
+            ],
+            ["types/amdsmi_e_t/enumerators/E_B_LAST"],
         )
 
     def test_only_the_highest_end_marker_may_grow(self):
