@@ -250,10 +250,40 @@ class BannerLogsTest(unittest.TestCase):
             output = run_dir / "slurm_output"
             output.mkdir()
             (output / "madengine-x_42_node_0.out").write_text("exact\n")
+            in_allocation = (
+                output
+                / "madengine-model_with_parts_42_20261030123456_a1b2c3_node_10.out"
+            )
+            in_allocation.write_text("exact in-allocation\n")
             (output / "madengine-x_99_node_0.out").write_text("other job\n")
+            rejected = (
+                "madengine-x_142_node_0.out",
+                "madengine-x_420_20261030123456_a1b2c3_node_0.out",
+                "madengine-x_42_2026103012345_a1b2c3_node_0.out",
+                "madengine-x_42_202610301234567_a1b2c3_node_0.out",
+                "madengine-x_42_20261030123456_a1b2c_node_0.out",
+                "madengine-x_42_20261030123456_a1b2c3f_node_0.out",
+                "madengine-x_42_20261030123456_A1B2C3_node_0.out",
+                "madengine-x_42_20261030123456_a1b2c3_node_x.out",
+                "madengine-x_42_20261030123456_a1b2c3_node_-1.out",
+                "madengine-x_42_20261030123456_a1b2c3_node_0.out.extra",
+                "other-x_42_20261030123456_a1b2c3_node_0.out",
+            )
+            for name in rejected:
+                (output / name).write_text("reject\n")
+            (output / "madengine-link_42_node_1.out").symlink_to(in_allocation)
+            nested = output / "nested"
+            nested.mkdir()
+            (
+                nested / "madengine-x_42_20261030123456_a1b2c3_node_2.out"
+            ).write_text("unrelated nested file\n")
+
             self.assertEqual(
-                [p.name for p in tm.rccl_banner_logs(run_dir, "42")],
-                ["madengine-x_42_node_0.out"],
+                {p.name for p in tm.rccl_banner_logs(run_dir, "42")},
+                {
+                    "madengine-x_42_node_0.out",
+                    "madengine-model_with_parts_42_20261030123456_a1b2c3_node_10.out",
+                },
             )
 
 

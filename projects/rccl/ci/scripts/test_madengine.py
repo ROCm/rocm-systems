@@ -1002,15 +1002,26 @@ def rccl_banner_logs(work_dir: Path, slurm_job_id: str = "") -> list[Path]:
     )
     if server_logs:
         return server_logs
-    node_out_pattern = (
-        f"*_{slurm_job_id}_node_*.out" if re.fullmatch(r"[1-9][0-9]*", slurm_job_id)
-        else "*node_*.out" if not slurm_job_id
-        else ""
-    )
-    if not node_out_pattern:
+    if re.fullmatch(r"[1-9][0-9]*", slurm_job_id):
+        # Pinned madengine adds a per-run discriminator inside an existing
+        # allocation: <job>_<YYYYmmddHHMMSS>_<6 lowercase hex>. Runs that own
+        # their sbatch keep the legacy bare job ID. Anchor the whole basename
+        # so adjacent/substring job IDs and malformed discriminators cannot
+        # satisfy provenance verification.
+        node_out_name = re.compile(
+            rf"^madengine-.+_{re.escape(slurm_job_id)}"
+            r"(?:_[0-9]{14}_[0-9a-f]{6})?_node_[0-9]+\.out$"
+        )
+        node_outs = (
+            path for path in log_dir.glob("*.out")
+            if node_out_name.fullmatch(path.name)
+        )
+    elif not slurm_job_id:
+        node_outs = log_dir.glob("*node_*.out")
+    else:
         return []
     return sorted(
-        p for p in log_dir.glob(node_out_pattern)
+        p for p in node_outs
         if p.is_file() and not p.is_symlink()
     )
 
