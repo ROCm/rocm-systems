@@ -1523,6 +1523,7 @@ TEST_F(GpuDeviceMes, RemoveRetriesUnsupportedLiveWorkAfterItDrainsWithoutAnother
     entry.grid_size_y = entry.grid_size_z = 1;
     entry.grid_wgs_x = entry.cluster_size_x = 2;
     entry.grid_wgs_y = entry.grid_wgs_z = 1;
+    entry.cluster_count_x = entry.cluster_count_y = entry.cluster_count_z = 1;
     entry.total_wgs = 2;
     entry.group_segment_fixed_size = 256;
     entry.completion_signal = kSignal;
