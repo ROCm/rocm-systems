@@ -4,11 +4,14 @@
 """Sparse matrix bindings and metadata-selector normalization."""
 
 from rj_arith_headers import public_headers
-
 from types import SimpleNamespace
+
+
 import re
 
+
 import pytest
+
 
 from amdisa.codegen.execute.rj_arith_sparse_matrix import gen_sparse_wmma
 

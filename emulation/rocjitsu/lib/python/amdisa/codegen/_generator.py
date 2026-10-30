@@ -6694,6 +6694,61 @@ class CodeGenerator:
         has_abs = profile.has_abs_modifier(inst.enc_name)
         self._enc_name = enc_name
 
+        # Shared context for instruction-body selection.
+        from amdisa.codegen.execute import ExecuteContext, DISPATCH
+
+        ctx = ExecuteContext(
+            inst=inst,
+            sem=sem,
+            dst_ops=dst_ops,
+            src_ops=src_ops,
+            profile=profile,
+            enc_name=enc_name,
+            is_vop3=is_vop3,
+            has_abs=has_abs,
+            opsel_exprs=self._vop3p_opsel_exprs(),
+            op_sel_hi_2_expr=self._op_sel_hi_2_expr(inst.enc_name),
+            arch_name=self.isa_spec.arch_name.lower(),
+            enc_field_names=getattr(self, '_current_inst_fields', set()),
+            encoding_map=self.isa_spec.encoding_map,
+            supports_dpp=(
+                cls == 'vector_movrel'
+                and inst.available_encodings is not None
+                and self._instruction_supports_dpp(inst, enc_name)
+            ),
+            supports_dpp8=(
+                cls == 'vector_movrel'
+                and inst.available_encodings is not None
+                and self._instruction_supports_dpp8(inst, enc_name)
+            ),
+            supports_sdwa=(
+                cls == 'vector_movrel'
+                and inst.available_encodings is not None
+                and self._instruction_supports_sdwa(inst, enc_name)
+            ),
+            result_writer=result_writer,
+        )
+        from amdisa.codegen.execute.rj_arith_float import (
+            RjArithBody,
+            gen_float_fma64,
+            gen_float_fma32,
+            gen_float_fma16,
+            gen_packed_fma16,
+            gen_mixed_fma,
+        )
+
+        if result_writer is None:
+            for handler in (
+                gen_packed_fma16,
+                gen_mixed_fma,
+                gen_float_fma64,
+                gen_float_fma16,
+                gen_float_fma32,
+            ):
+                rj_arith_body = handler(ctx)
+                if rj_arith_body is not None:
+                    return RjArithBody(rj_arith_body)
+
         # Try SemaAST pipeline for validated classes.
         from amdisa.sema_derive import derive_sema_block
         from amdisa.codegen.execute.sema_lower import (
@@ -7145,40 +7200,6 @@ class CodeGenerator:
                     body = '  // SOP1 scalar conversions preserve SCC.\n' + body
                 return body
 
-        # Try the registry (covers all extracted gen_ functions).
-        from amdisa.codegen.execute import ExecuteContext, DISPATCH
-
-        ctx = ExecuteContext(
-            inst=inst,
-            sem=sem,
-            dst_ops=dst_ops,
-            src_ops=src_ops,
-            profile=profile,
-            enc_name=enc_name,
-            is_vop3=is_vop3,
-            has_abs=has_abs,
-            opsel_exprs=self._vop3p_opsel_exprs(),
-            op_sel_hi_2_expr=self._op_sel_hi_2_expr(inst.enc_name),
-            arch_name=self.isa_spec.arch_name.lower(),
-            enc_field_names=getattr(self, '_current_inst_fields', set()),
-            encoding_map=self.isa_spec.encoding_map,
-            supports_dpp=(
-                cls == 'vector_movrel'
-                and inst.available_encodings is not None
-                and self._instruction_supports_dpp(inst, enc_name)
-            ),
-            supports_dpp8=(
-                cls == 'vector_movrel'
-                and inst.available_encodings is not None
-                and self._instruction_supports_dpp8(inst, enc_name)
-            ),
-            supports_sdwa=(
-                cls == 'vector_movrel'
-                and inst.available_encodings is not None
-                and self._instruction_supports_sdwa(inst, enc_name)
-            ),
-            result_writer=result_writer,
-        )
         if ctx.supports_dpp8 and self._semantic_stages_src0(sem):
             # MOVREL builds rel_src from the semantic src[0], which can differ
             # from the encoded source selected for ordinary DPP staging.
@@ -13327,6 +13348,9 @@ class CodeGenerator:
                             enc.enc_name,
                             result_writer=_mask_result_writer,
                         )
+                        from amdisa.codegen.execute.rj_arith_float import RjArithBody
+
+                        _rj_arith_arithmetic = isinstance(body, RjArithBody)
                         body_true16_vop3 = self._true16_vop3_info(
                             inst, sem, enc.enc_name
                         ).body_uses_true16
@@ -13940,6 +13964,11 @@ class CodeGenerator:
                         _portable_probe = self._can_force_shared_simd_probe(
                             inst, enc.enc_name
                         )
+                        # rj-arith owns SIMD selection for migrated instructions. Never
+                        # run a legacy arithmetic probe ahead of the rj-arith body.
+                        if _rj_arith_arithmetic:
+                            can_share = False
+                            _portable_probe = False
                         if not body_throws and (can_share or _portable_probe):
                             self._shared_execute_candidates[
                                 (inst.mnemonic, enc.enc_name)
@@ -13996,6 +14025,8 @@ class CodeGenerator:
                             or _local_true16_probe
                             or _renamed_vop3p_probe
                         )
+                        if _rj_arith_arithmetic:
+                            _local_simd_probe = None
                         _local_simd_probe_body = ''
                         _local_simd_probe, _local_scalar_body = share_stages(
                             _local_simd_probe, _local_body
@@ -14517,6 +14548,16 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/lds_direct.h', False)
                     )
+
+                from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in FLOAT_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+
                 has_matrix_exec = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
@@ -14524,15 +14565,19 @@ class CodeGenerator:
                     for i in all_insts
                 )
                 requires_compute_unit = any(
-                    self.semantics
-                    and (s := self.semantics.instructions.get(i.name))
-                    and s.semantic_class
-                    in (
-                        'scalar_shader_cycles',
-                        'scalar_sendmsg_rtn',
-                        'vector_cvt_scale',
+                    (
+                        self.semantics
+                        and (s := self.semantics.instructions.get(i.name))
+                        and (
+                            s.semantic_class
+                            in (
+                                'scalar_shader_cycles',
+                                'scalar_sendmsg_rtn',
+                                'vector_cvt_scale',
+                            )
+                        )
+                        for i in all_insts
                     )
-                    for i in all_insts
                 )
                 if requires_compute_unit:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))

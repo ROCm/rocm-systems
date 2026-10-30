@@ -284,8 +284,8 @@ int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 // Supports ALU ABS/NEG on present sources, OMOD and CLAMP, with loose semantics.
 // Mode 2 returns UNSUPPORTED_SEMANTICS; mode 3 returns UNSUPPORTED_FP_STATUS.
 // Compatibility resolves to Loose; dropping status alone does not enable exact FP64 arithmetic.
-// Nonzero RJ_ARITH_FP_ROUND_* flags are rejected with INVALID_FLAGS, including
-// in Loose and Compatibility. Rejection preserves all outputs.
+// Guest RJ_ARITH_FP_ROUND_* controls finite arithmetic and output scaling in
+// Loose and Compatibility without changing host floating-point controls.
 // Host nearest-even rounding and enabled denormals are required. Whole VGPR
 // aliases may cross operand halves; sources are read before destination writes.
 // FMA uses APIs without _gfx12 for RDNA3 and _gfx12 variants for RDNA4.

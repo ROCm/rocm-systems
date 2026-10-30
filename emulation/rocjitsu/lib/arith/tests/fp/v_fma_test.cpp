@@ -14,6 +14,7 @@
 #include "fp/half_fma_test.h"
 #include "fp/reference.h"
 #include "rj_arith/rj_arith.h"
+#include <bit>
 #include <gtest/gtest.h>
 #include <stdint.h>
 #include <type_traits>
@@ -685,6 +686,51 @@ TEST(FpFmaF16, LooseTinyResults) {
                        sample.instruction_flags, r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
                   RJ_ARITH_SUCCESS);
         EXPECT_EQ(r.v[3][0] & 0xffffU, sample.expected);
+      }
+    }
+  }
+}
+
+// Exact literal witnesses for guest rounding, independent of host rounding controls.
+TEST(FpFmaF64, GuestRounding) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    double a, b, c;
+    uint64_t expected[4];
+  } cases[] = {
+      {1,
+       0x1p-53,
+       1,
+       {0x3ff0000000000000ULL, 0x3ff0000000000001ULL, 0x3ff0000000000000ULL,
+        0x3ff0000000000000ULL}},
+      {-1,
+       0x1p-53,
+       -1,
+       {0xbff0000000000000ULL, 0xbff0000000000000ULL, 0xbff0000000000001ULL,
+        0xbff0000000000000ULL}},
+      {1, 1, -1, {0, 0, 0x8000000000000000ULL, 0}},
+      {0x1p-1074, 0.5, 0, {0, 1, 0, 0}},
+      {0x1.fffffffffffffp1023,
+       2,
+       0,
+       {0x7ff0000000000000ULL, 0x7ff0000000000000ULL, 0x7fefffffffffffffULL,
+        0x7fefffffffffffffULL}},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (unsigned rounding = 0; rounding < 4; ++rounding) {
+      for (const auto &sample : cases) {
+        Registers<8, 32> r;
+        const double inputs[] = {sample.a, sample.b, sample.c};
+        for (int operand = 0; operand < 3; ++operand) {
+          const uint64_t bits = std::bit_cast<uint64_t>(inputs[operand]);
+          r.v[2 * operand][31] = uint32_t(bits);
+          r.v[2 * operand + 1][31] = uint32_t(bits >> 32);
+        }
+        ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx12(
+                      cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(rounding) << 24),
+                      0x80000000U, 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(uint64_t(r.v[6][31]) | (uint64_t(r.v[7][31]) << 32), sample.expected[rounding]);
       }
     }
   }

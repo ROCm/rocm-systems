@@ -150,7 +150,9 @@ the resolved mode determines both numerical behavior and FP status reporting.
 Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
-Dense and sparse WMMA use this policy; other handlers retain their existing implementations.
+Dense and sparse WMMA and VOP2/VOP3/VOP3P fused floating-point arithmetic use
+this policy; VOPD remains unmigrated.
+Other handlers retain their existing implementations.
 
 ### Guest FP controls
 
