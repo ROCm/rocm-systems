@@ -1538,22 +1538,16 @@ def test_filter_dispatch_frame_accepts_a_threshold_with_a_leading_space():
     assert filtered_df["Dispatch_ID"].tolist() == [3, 4, 5]
 
 
-def test_pc_sampling_dispatch_data_keeps_gpu_and_dispatch_narrowing(monkeypatch):
+def test_pc_sampling_dispatch_data_keeps_gpu_and_dispatch_narrowing():
     """A PC-sampling-only run keeps the --gpu-id and --kernel-iteration-range narrowing.
 
     The trace is narrowed the same way as a counter frame, so only dispatch 2 on
     GPU 0 remains.
     """
-    trace = make_gpu_split_dispatch_frame().rename(
-        columns={"Dispatch_ID": "Dispatch_Id"}
-    )
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_db.process_pc_sampling_kernel_traces",
-        lambda _tool_data_records: trace,
-    )
+    trace = make_gpu_split_dispatch_frame()
     workload = schema.Workload(filter_gpu_ids=["0"], filter_dispatch_ids=["2"])
 
-    dispatch_df = db_analysis._build_pc_sampling_dispatch_data([], workload)
+    dispatch_df = db_analysis._build_pc_sampling_dispatch_data(trace, workload)
 
     assert dispatch_df["dispatch_id"].tolist() == [2]
     assert dispatch_df["kernel_name"].tolist() == ["a"]
@@ -1721,6 +1715,8 @@ def test_run_analysis_stores_the_pct_inputs_for_a_kernel_filtered_workload(
         filter_kernel_ids=[0],
     )
 
+    analyzer._roofline_ceiling_rows_per_workload = {}
+    analyzer._membw_result_per_workload = {}
     run_analysis_with_materialized_views(analyzer)
 
     stored_workload = db_session.query(orm.Workload).one()
@@ -1734,7 +1730,6 @@ def test_run_analysis_stores_the_pct_inputs_for_a_kernel_filtered_workload(
     assert [row[0] for row in rows] == ["kernel_b"]
     kernel_top_df, _ = create_df_kernel_top_stats(
         df_in=raw_pmc,
-        raw_data_dir=str(tmp_path),
         filter_gpu_ids=["0"],
         filter_dispatch_ids=None,
         time_unit="ns",
@@ -4966,6 +4961,13 @@ def test_pre_processing_halts_on_idle_gpu_before_any_write(
         )
         patch_stack.enter_context(
             patch.object(db_analysis, "calc_roofline_ceilings", return_value={})
+        )
+        patch_stack.enter_context(
+            patch.object(
+                db_analysis,
+                "calc_workload_total_durations",
+                return_value={workload_path: None},
+            )
         )
         patch_stack.enter_context(
             patch.object(

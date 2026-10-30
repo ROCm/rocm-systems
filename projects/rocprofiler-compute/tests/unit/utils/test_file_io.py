@@ -252,14 +252,11 @@ def test_dispatch_bound_without_a_number_is_an_error() -> None:
 
 
 @pytest.mark.parametrize("filter_gpu_ids", [None, ["0"]])
-def test_top_stats_percent_is_kernel_total_over_workload_total(
-    tmp_path, filter_gpu_ids
-) -> None:
+def test_top_stats_percent_is_kernel_total_over_workload_total(filter_gpu_ids) -> None:
     """Percent equals each kernel's total duration over the workload total."""
     raw_pmc = _raw_pmc()
     kernel_top_df, _ = create_df_kernel_top_stats(
         df_in=raw_pmc,
-        raw_data_dir=str(tmp_path),
         filter_gpu_ids=filter_gpu_ids,
         filter_dispatch_ids=None,
         time_unit="ns",
