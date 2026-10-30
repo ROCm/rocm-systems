@@ -18,6 +18,15 @@ class ImageLoadMimg : public Mimg {
 public:
   ImageLoadMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = {inst_.vaddr,
+                                   inst_.nsa ? raw_words_[2] & 0xffu : inst_.vaddr + 1u,
+                                   inst_.nsa ? (raw_words_[2] >> 8) & 0xffu : inst_.vaddr + 2u};
+    modifiers.image_a16 = inst_.a16;
+    constexpr uint8_t kDimCoordinateCounts[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = std::min<uint8_t>(3, kDimCoordinateCounts[inst_.dim]);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -72,6 +81,15 @@ class ImageStoreMimg : public Mimg {
 public:
   ImageStoreMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = {inst_.vaddr,
+                                   inst_.nsa ? raw_words_[2] & 0xffu : inst_.vaddr + 1u,
+                                   inst_.nsa ? (raw_words_[2] >> 8) & 0xffu : inst_.vaddr + 2u};
+    modifiers.image_a16 = inst_.a16;
+    constexpr uint8_t kDimCoordinateCounts[] = {1, 2, 3, 3, 2, 3, 3, 4};
+    modifiers.image_coordinate_count = std::min<uint8_t>(3, kDimCoordinateCounts[inst_.dim]);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;

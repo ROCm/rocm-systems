@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx9_image_access.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -27,13 +27,15 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
-                                        {.dmask = inst_.dmask,
-                                         .a16 = bool(inst_.a16),
-                                         .d16 = bool(inst_.d16),
-                                         .lwe = bool(inst_.lwe),
-                                         .da = bool(inst_.da),
-                                         .unorm = bool(inst_.unorm)})
+  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4,
+                                   {inst_.vaddr, inst_.vaddr + 1u, inst_.vaddr + 2u},
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .unsupported = false})
           .failed()) {
     return;
   }
@@ -41,28 +43,33 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  // Other image loads are not implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageLoadPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  // Other image loads are not implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageLoadPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  // Other image loads are not implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageLoadMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  // Other image loads are not implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageLoadMipPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  // Other image loads are not implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -70,13 +77,15 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
-                                        {.dmask = inst_.dmask,
-                                         .a16 = bool(inst_.a16),
-                                         .d16 = bool(inst_.d16),
-                                         .lwe = bool(inst_.lwe),
-                                         .da = bool(inst_.da),
-                                         .unorm = bool(inst_.unorm)})
+  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4,
+                                   {inst_.vaddr, inst_.vaddr + 1u, inst_.vaddr + 2u},
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .unsupported = false})
           .failed()) {
     return;
   }
@@ -86,18 +95,21 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+  // Other image stores are not implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageStorePckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+  // Other image stores are not implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageStoreMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+  // Other image stores are not implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGetResinfoMimg::execute_impl(amdgpu::Wavefront &wf) {

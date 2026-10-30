@@ -18,6 +18,12 @@ class ImageLoadMimg : public Mimg {
 public:
   ImageLoadMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = {inst_.vaddr, inst_.vaddr + 1u, inst_.vaddr + 2u};
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = 3;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -72,6 +78,12 @@ class ImageStoreMimg : public Mimg {
 public:
   ImageStoreMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = {inst_.vaddr, inst_.vaddr + 1u, inst_.vaddr + 2u};
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = 3;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;

@@ -2896,10 +2896,10 @@ int SimulatedKfd::get_tile_config_ioctl(void *arg) {
   args->num_tile_configs = tile_write_count;
   args->num_macro_tile_configs = macro_write_count;
   const uint32_t ordinal = gpu_ordinal(args->gpu_id);
-  args->gb_addr_config =
-      ordinal < gpu_infos_.size()
-          ? kmd::gb_addr_config_for_gfx_target_version(gpu_infos_[ordinal].gfx_target_version)
-          : kmd::gb_addr_config_for_arch(gpu->soc->arch());
+  const std::optional<uint32_t> version =
+      ordinal < gpu_infos_.size() ? std::optional<uint32_t>{gpu_infos_[ordinal].gfx_target_version}
+                                  : std::nullopt;
+  args->gb_addr_config = kmd::image_gb_addr_config(gpu->soc->arch(), version);
   args->num_banks = 0;
   args->num_ranks = 0;
   return 0;
