@@ -37,6 +37,14 @@ def test_space_profile_tokens_save_known_backends():
     assert resolve_profile_selection(["torch", "triton"]) == ["torch", "triton"]
 
 
+def test_profile_selection_rejects_user():
+    with pytest.raises(
+        ValueError, match="user is not a --trace-ml-api value"
+    ) as excinfo:
+        resolve_profile_selection(["user"])
+    assert "included with every --trace-ml-api run" in str(excinfo.value)
+
+
 def test_double_colon_stays_in_the_operator_pattern():
     assert resolve_operator_patterns(["torch:*/aten::addmm"]) == {
         "torch": ["*/aten::addmm"]
