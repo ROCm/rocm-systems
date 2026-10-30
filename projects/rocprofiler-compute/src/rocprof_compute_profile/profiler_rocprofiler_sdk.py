@@ -12,6 +12,8 @@ from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
+    is_library_missing_in_target,
+    resolve_attach_tool_library,
     resolve_rocm_library_path,
 )
 from utils.utils_profile import pc_sampling_unit
@@ -90,8 +92,26 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             # In attach mode, tools are provided using ROCPROF_ATTACH_TOOL_LIBRARY
             # instead of LD_PRELOAD.
             # Build attach tool list (only our tools, not user's LD_PRELOAD)
-            attach_tools = [args.rocprofiler_sdk_tool_path]
+            sdk_attach_tool = resolve_attach_tool_library(
+                args.attach_pid, args.rocprofiler_sdk_tool_path
+            )
+            if sdk_attach_tool is None:
+                console_error(
+                    f"Tool library '{args.rocprofiler_sdk_tool_path}' does not "
+                    f"exist in the mount namespace of process {args.attach_pid}, "
+                    "and no librocprofiler-sdk-tool.so was found in its ROCm "
+                    "installation."
+                )
+                raise RuntimeError("console_error returned without exiting")
+            attach_tools = [sdk_attach_tool]
             if native_tool_path:
+                if is_library_missing_in_target(args.attach_pid, native_tool_path):
+                    console_error(
+                        f"Native tool library '{native_tool_path}' does not exist "
+                        "in the mount namespace of process "
+                        f"{args.attach_pid}."
+                    )
+                    raise RuntimeError("console_error returned without exiting")
                 attach_tools.append(native_tool_path)
             options.update({
                 "ROCPROF_ATTACH_TOOL_LIBRARY": ":".join(attach_tools),

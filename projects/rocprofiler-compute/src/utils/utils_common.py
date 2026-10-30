@@ -10,6 +10,7 @@ import os
 import re
 import select
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -42,6 +43,8 @@ NATIVE_COUNTERS_PREFIX = "counters"
 NATIVE_DISPATCH_PREFIX = "dispatch"
 NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
 NATIVE_AGENTS_PREFIX = "agents"
+PROCFS_ROOT = Path("/proc")
+_MAX_TARGET_SYMLINKS = 40
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
@@ -202,6 +205,273 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
     resolved = versioned_candidates[0][1]
     console_debug(f"Resolved library (versioned): {library_path} -> {resolved}")
     return resolved
+
+
+def is_library_missing_in_target(pid: Union[int, str], library_path: str) -> bool:
+    """Return whether a library is confirmed absent from a target's mount view."""
+    if not Path(library_path).is_absolute():
+        return False
+
+    # Only reject a path proven absent. Restricted procfs access, or a symlink
+    # walk that cannot be completed, must not hide a library the target can see.
+    status, mode, _resolved = _lookup_in_target_root(_target_root(pid), library_path)
+    if status == "missing":
+        return True
+    if status != "present" or mode is None:
+        return False
+    return not stat.S_ISREG(mode)
+
+
+def find_loaded_library_directories(
+    pid: Union[int, str], library_name: str
+) -> list[str]:
+    """Return mapped library directories as seen by the target process."""
+    maps_path = PROCFS_ROOT / _pid_component(pid) / "maps"
+    directories: list[str] = []
+    try:
+        with maps_path.open(encoding="utf-8", errors="replace") as maps_file:
+            for line in maps_file:
+                directory = _mapped_library_directory(line, library_name)
+                if directory is None or directory in directories:
+                    continue
+                directories.append(directory)
+    except OSError:
+        return []
+    return directories
+
+
+def find_loaded_library_directory(
+    pid: Union[int, str], library_name: str
+) -> Optional[str]:
+    """Find the first mapped library directory as seen by the target process."""
+    directories = find_loaded_library_directories(pid, library_name)
+    if not directories:
+        return None
+    return directories[0]
+
+
+def find_target_library_from_loaded_library(
+    pid: Union[int, str],
+    library_name: str,
+    loaded_library_name: str,
+) -> Optional[str]:
+    """Find a target library relative to another library mapped by the target."""
+    for loaded_directory in find_loaded_library_directories(pid, loaded_library_name):
+        target_library = _target_visible_library(pid, library_name, loaded_directory)
+        if target_library is not None:
+            return target_library
+    return None
+
+
+def _mapped_library_directory(maps_line: str, library_name: str) -> Optional[str]:
+    path_start = maps_line.find("/")
+    if path_start < 0:
+        return None
+    mapped_path = maps_line[path_start:].rstrip("\n")
+    if mapped_path.endswith(" (deleted)"):
+        return None
+    mapped_library = Path(mapped_path)
+    if not mapped_library.name.startswith(library_name):
+        return None
+    return str(mapped_library.parent)
+
+
+def _target_visible_library(
+    pid: Union[int, str], library_name: str, loaded_directory: str
+) -> Optional[str]:
+    target_root = _target_root(pid)
+    target_directory = Path(loaded_directory)
+    candidate_paths = (
+        target_directory / "rocprofiler-sdk" / library_name,
+        target_directory / library_name,
+    )
+    for candidate_path in candidate_paths:
+        visible_library = _regular_library_in_target(target_root, str(candidate_path))
+        if visible_library is not None:
+            return visible_library
+    return None
+
+
+def _regular_library_in_target(target_root: Path, absolute_path: str) -> Optional[str]:
+    """Return a target-visible library path, including a versioned fallback."""
+    status, mode, _resolved = _lookup_in_target_root(target_root, absolute_path)
+    if status == "present" and mode is not None and stat.S_ISREG(mode):
+        return absolute_path
+    if status != "missing":
+        return None
+
+    parent = Path(absolute_path).parent
+    names = _directory_names_in_target(target_root, str(parent))
+    if not names:
+        return None
+    selected = _highest_versioned_name(Path(absolute_path).name, names)
+    if selected is None:
+        return None
+    versioned_path = str(parent / selected)
+    status, mode, _resolved = _lookup_in_target_root(target_root, versioned_path)
+    if status == "present" and mode is not None and stat.S_ISREG(mode):
+        return versioned_path
+    return None
+
+
+def _directory_names_in_target(
+    target_root: Path, absolute_directory: str
+) -> Optional[list[str]]:
+    """List one directory inside the target, or None when the walk is blocked."""
+    status, mode, resolved = _lookup_in_target_root(target_root, absolute_directory)
+    if status == "indeterminate":
+        return None
+    if (
+        status != "present"
+        or mode is None
+        or resolved is None
+        or not stat.S_ISDIR(mode)
+    ):
+        return []
+    try:
+        return [entry.name for entry in resolved.iterdir()]
+    except OSError as error:
+        if error.errno in (errno.ENOENT, errno.ENOTDIR):
+            return []
+        return None
+
+
+def _highest_versioned_name(library_name: str, names: list[str]) -> Optional[str]:
+    """Pick the highest numeric libname.so.N sibling."""
+    prefix = f"{library_name}."
+    version_tuples: list[tuple[list[int], str]] = []
+    for name in names:
+        if not name.startswith(prefix):
+            continue
+        suffix = name[len(library_name) :]
+        if not suffix.startswith("."):
+            continue
+        parts = suffix.split(".")[1:]
+        if not parts or not all(part.isdigit() for part in parts):
+            continue
+        version_tuples.append(([int(part) for part in parts], name))
+    if not version_tuples:
+        return None
+
+    max_version_len = max(len(version_parts) for version_parts, _name in version_tuples)
+    best_name = version_tuples[0][1]
+    best_numeric = -1
+    for version_parts, name in version_tuples:
+        numeric = version_to_numeric(version_parts, max_version_len)
+        if numeric > best_numeric:
+            best_numeric = numeric
+            best_name = name
+    return best_name
+
+
+def _lookup_in_target_root(
+    target_root: Path, absolute_path: str
+) -> tuple[str, Optional[int], Optional[Path]]:
+    """Resolve an absolute path without leaving the target root.
+
+    /proc/<pid>/root changes the starting directory, but an absolute symlink
+    is still followed from the host root. This walk restarts those links at
+    the target root, keeps relative links in their directory, and refuses to
+    climb above the target root.
+    """
+    if not absolute_path.startswith("/"):
+        return "indeterminate", None, None
+
+    current = target_root
+    current_mode: Optional[int] = None
+    remaining = _path_components(absolute_path)
+    followed_links = 0
+    while remaining:
+        component = remaining.pop(0)
+        if component in ("", "."):
+            continue
+        if component == "..":
+            if current != target_root:
+                current = current.parent
+                current_mode = None
+            continue
+        candidate = current / component
+        try:
+            info = os.lstat(candidate)
+        except OSError as error:
+            if error.errno in (errno.ENOENT, errno.ENOTDIR):
+                return "missing", None, None
+            return "indeterminate", None, None
+        if stat.S_ISLNK(info.st_mode):
+            followed_links += 1
+            if followed_links > _MAX_TARGET_SYMLINKS:
+                return "indeterminate", None, None
+            try:
+                link_text = os.readlink(candidate)
+            except OSError as error:
+                if error.errno in (errno.ENOENT, errno.ENOTDIR):
+                    return "missing", None, None
+                return "indeterminate", None, None
+            if link_text.startswith("/"):
+                current = target_root
+                current_mode = None
+            remaining = _path_components(link_text) + remaining
+            continue
+        if remaining and not stat.S_ISDIR(info.st_mode):
+            return "missing", None, None
+        current = candidate
+        current_mode = info.st_mode
+
+    if current_mode is None:
+        try:
+            current_mode = os.lstat(current).st_mode
+        except OSError as error:
+            if error.errno in (errno.ENOENT, errno.ENOTDIR):
+                return "missing", None, None
+            return "indeterminate", None, None
+        if stat.S_ISLNK(current_mode):
+            return "indeterminate", None, None
+    return "present", current_mode, current
+
+
+def _path_components(path_text: str) -> list[str]:
+    return [part for part in Path(path_text).parts if part not in ("/", "")]
+
+
+def resolve_attach_tool_library(
+    pid: Union[int, str], configured_library_path: str
+) -> Optional[str]:
+    """Resolve the SDK tool library to a path visible to the attach target."""
+    if not is_library_missing_in_target(pid, configured_library_path):
+        return configured_library_path
+
+    target_library = find_target_library_from_loaded_library(
+        pid,
+        _unversioned_library_name(configured_library_path),
+        "librocprofiler-register.so",
+    )
+    if target_library is not None:
+        console_debug(f"Resolved live attach tool from process {pid}: {target_library}")
+    return target_library
+
+
+def _target_root(pid: Union[int, str]) -> Path:
+    return PROCFS_ROOT / _pid_component(pid) / "root"
+
+
+def _unversioned_library_name(library_path: str) -> str:
+    library_name = Path(library_path).name
+    shared_object_suffix = ".so"
+    suffix_position = library_name.find(shared_object_suffix)
+    if suffix_position < 0:
+        return library_name
+    suffix_end = suffix_position + len(shared_object_suffix)
+    return library_name[:suffix_end]
+
+
+def _pid_component(pid: Union[int, str]) -> str:
+    pid_string = str(pid)
+    is_ascii_integer = pid_string and all(
+        "0" <= character <= "9" for character in pid_string
+    )
+    if not is_ascii_integer or int(pid_string) <= 0:
+        raise ValueError(f"Invalid process id: {pid!r}")
+    return pid_string
 
 
 def is_tcc_channel_counter(counter: str) -> bool:
