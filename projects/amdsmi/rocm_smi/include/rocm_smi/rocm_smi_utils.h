@@ -64,7 +64,6 @@ rsmi_status_t GetDevBinaryBlob(amd::smi::DevInfoTypes type, uint32_t dv_ind, std
                                void* p_binary_data);
 rsmi_status_t ErrnoToRsmiStatus(int err);
 int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max_pwm);
-int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm);
 rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value);
 [[nodiscard]] rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err);
 std::string getRSMIStatusString(rsmi_status_t ret, bool fullStatus = true);

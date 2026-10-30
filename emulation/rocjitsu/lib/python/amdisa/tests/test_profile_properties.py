@@ -394,7 +394,14 @@ def test_dpp_control_range_capabilities(profile, wave, row_bcast, row_xmask):
         (Rdna3Profile(), 'ENC_VOP3P', 'V_WMMA_F32_16X16X16_F16', DppOpcodeRule.FORBID),
         (Rdna3Profile(), 'ENC_VOP3P', 'V_FMA_MIX_F32', DppOpcodeRule.ALLOW),
         (Rdna3Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.ALLOW),
-        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_BF16', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8_BF8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_BF8_FP8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8_FP8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_BF8_BF8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_I32_IU8', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT8_U32_U4', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP3', 'V_MUL_LO_U32', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP1', 'V_NOP', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP1', 'V_PIPEFLUSH', DppOpcodeRule.ALLOW),
@@ -1483,3 +1490,25 @@ def test_vskip_vector_encodings(profile, supported, encoding):
 @pytest.mark.parametrize('encoding', ['ENC_SOP1', 'ENC_SOPC', 'ENC_SOPP', 'ENC_SMEM'])
 def test_vskip_does_not_suppress_scalar_encodings(encoding):
     assert not CdnaProfile().vskip_affected_encoding(encoding)
+
+
+@pytest.mark.parametrize(
+    ('profile', 'preserves_half', 'bf16_f32_carrier'),
+    [
+        (Cdna1Profile(), False, False),
+        (Cdna2Profile(), False, False),
+        (CdnaProfile(), False, False),
+        (Cdna4Profile(), False, False),
+        (Rdna1Profile(), True, False),
+        (Rdna2Profile(), True, False),
+        (Rdna3Profile(), False, False),
+        (Rdna3_5Profile(), False, False),
+        (Rdna4Profile(), False, False),
+        (Cdna5Profile(), False, True),
+    ],
+)
+def test_valu16_destination_and_bf16_inline_policies(
+    profile, preserves_half, bf16_f32_carrier
+):
+    assert profile.valu16_preserves_unwritten_half is preserves_half
+    assert profile.bf16_inline_uses_f32_carrier is bf16_f32_carrier

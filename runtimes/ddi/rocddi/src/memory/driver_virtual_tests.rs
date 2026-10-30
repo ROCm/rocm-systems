@@ -4,7 +4,9 @@
 //! Driver-independent virtual-memory ownership and interval tests.
 
 use super::*;
-use crate::driver::{AddressSpaceInfo, CachedInfo, Driver, VirtualMemoryOperations};
+use crate::driver::{
+    AddressSpaceInfo, CachedInfo, Driver, DriverInstanceId, VirtualMemoryOperations,
+};
 use crate::memory::storage::{Owned, Shared};
 use crate::session::DriverContextLifetime;
 use crate::topology::Endpoint;
@@ -77,8 +79,8 @@ struct Mapping {
 impl Driver for FakeDriver {
     type DeviceState = State;
 
-    fn driver_instance(&self) -> u64 {
-        1
+    fn driver_instance(&self) -> DriverInstanceId {
+        DriverInstanceId::TEST
     }
 
     fn context_lifetime(&self) -> DriverContextLifetime {
@@ -143,14 +145,14 @@ impl VirtualMemoryOperations for FakeDriver {
         _device: &State,
         _kind: MemoryKind,
         size: u64,
-        _pinned: bool,
-        _uncached: bool,
+        _options: VirtualMemoryOptions,
     ) -> Result<Owned<Backing>, Error> {
         Ok(Owned::new(Backing {
             info: VirtualMemoryInfo {
                 size,
                 mapping_granularity: 0x1000,
                 physical_backing_id: [1, 2],
+                placement: None,
             },
             drops: self.drops.clone(),
         })?)
@@ -187,6 +189,13 @@ impl VirtualMemoryOperations for FakeDriver {
         Ok(Owned::new(Mapping { fail_once: true })?)
     }
 
+    fn set_virtual_host_mapping_permissions(
+        _mapping: &mut Mapping,
+        _permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn free_virtual_host_mapping(mapping: &mut Mapping) -> Result<(), Error> {
         if mapping.fail_once {
             mapping.fail_once = false;
@@ -215,8 +224,12 @@ fn owners(
         Shared::new(HostIntervals::new())?,
         Shared::new(DeviceIntervals::new())?,
     );
-    let backing =
-        driver.create_virtual_memory(&State(1), MemoryKind::System, 0x4000, false, false)?;
+    let backing = driver.create_virtual_memory(
+        &State(1),
+        MemoryKind::System,
+        0x4000,
+        VirtualMemoryOptions::default(),
+    )?;
     let memory = DriverVirtualMemory::new(driver.clone(), Shared::new(backing)?);
     Ok((address, memory))
 }

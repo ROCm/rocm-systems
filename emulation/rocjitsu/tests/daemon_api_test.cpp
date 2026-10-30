@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/rocjitsu.h"
 
@@ -12,6 +14,7 @@
 #include <gtest/gtest.h>
 #include <iterator>
 #include <string>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -189,6 +192,154 @@ TEST(DaemonApi, RejectsInvalidArguments) {
   EXPECT_EQ(daemon, nullptr);
   EXPECT_EQ(rj_daemon_status(nullptr), RJ_DAEMON_STATUS_STOPPED);
   EXPECT_EQ(rj_daemon_stop(nullptr), ROCJITSU_STATUS_SUCCESS);
+}
+
+TEST(DaemonApi, HandshakePublishesEachSelectedRenderMinor) {
+  constexpr const char *json = R"({
+    "vm":{"arch":"cdna5","gpu":{"device":{
+      "gpu_id":1250,"gfx_target_version":120500,"unique_id":1250,
+      "num_sdma_engines":0}}},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu[0:4]","type":"compute_unit"}]}]}]}},
+    "system":{"nodes":[{"id":"tray7","gpus":[
+      {"id":"g5","gpu_id":505,"unique_id":3005,
+       "location_id":1024,"drm_render_minor":129},
+      {"id":"g9","gpu_id":909,"unique_id":3009,
+       "location_id":1280,"drm_render_minor":130}]}]},
+    "local_node":"tray7"
+  })";
+  TempDirectory directory;
+  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  TestDaemon daemon(json, socket.c_str());
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+
+  const int connection = connect_to(socket);
+  ASSERT_GE(connection, 0);
+  RemoteDriver client(connection);
+  const int kfd_fd = client.open();
+  ASSERT_GE(kfd_fd, 0);
+  EXPECT_FALSE(client.handles_drm_render_minor(128));
+  EXPECT_TRUE(client.handles_drm_render_minor(129));
+  EXPECT_TRUE(client.handles_drm_render_minor(130));
+  const auto *first = client.gpu_info_for_render_minor(129);
+  const auto *second = client.gpu_info_for_render_minor(130);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(first->gpu_id, 505u);
+  EXPECT_EQ(second->gpu_id, 909u);
+  EXPECT_EQ(client.gpu_info_for_render_minor(128), nullptr);
+  EXPECT_EQ(client.close(), 0);
+  close(kfd_fd);
+}
+
+TEST(DaemonApi, LegacyOneGpuHandshakeKeepsRenderMinorCompatibility) {
+  std::string json = daemon_json();
+  const std::string configured = "\"drm_render_minor\": 128";
+  const auto position = json.find(configured);
+  ASSERT_NE(position, std::string::npos);
+  json.replace(position, configured.size(), "\"drm_render_minor\": 129");
+
+  TempDirectory directory;
+  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  TestDaemon daemon(json.c_str(), socket.c_str());
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+  const int connection = connect_to(socket);
+  ASSERT_GE(connection, 0);
+  RemoteDriver client(connection);
+  const int kfd_fd = client.open();
+  ASSERT_GE(kfd_fd, 0);
+  EXPECT_TRUE(client.handles_drm_render_minor(128));
+  EXPECT_TRUE(client.handles_drm_render_minor(129));
+  ASSERT_NE(client.gpu_info_for_render_minor(128), nullptr);
+  EXPECT_EQ(client.gpu_info_for_render_minor(128)->drm_render_minor, 129u);
+  EXPECT_EQ(client.close(), 0);
+  close(kfd_fd);
+}
+
+TEST(DaemonApi, RemoteUserptrUsesCpuAddressIndependentOfGpuVa) {
+  TempDirectory directory;
+  const auto socket_path = directory.path() / "daemon.sock";
+  TestDaemon daemon(socket_path);
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+  const int connection = connect_to(socket_path);
+  ASSERT_GE(connection, 0);
+  RemoteDriver client(connection);
+  const int kfd_fd = client.open();
+  ASSERT_GE(kfd_fd, 0);
+  const auto *gpu = client.gpu_info_for_render_minor(128);
+  ASSERT_NE(gpu, nullptr);
+
+  constexpr size_t kPage = KfdProcess::kPageSize;
+  void *cpu = ::mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(cpu, MAP_FAILED);
+  *static_cast<uint32_t *>(cpu) = 0x12345678;
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = 0x500000000ULL;
+  alloc.size = kPage;
+  alloc.gpu_id = gpu->gpu_id;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  EXPECT_EQ(client.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), -EINVAL);
+  alloc.mmap_offset = reinterpret_cast<uint64_t>(cpu);
+  ASSERT_NE(alloc.va_addr, alloc.mmap_offset);
+  ASSERT_EQ(client.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+
+  void *view = client.mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                           static_cast<off_t>(alloc.mmap_offset));
+  ASSERT_NE(view, MAP_FAILED);
+  EXPECT_EQ(*static_cast<uint32_t *>(view), 0x12345678u);
+  *static_cast<uint32_t *>(cpu) = 0x87654321;
+  EXPECT_EQ(*static_cast<uint32_t *>(view), 0x87654321u);
+
+  kfd_ioctl_free_memory_of_gpu_args freed{};
+  freed.handle = alloc.handle;
+  EXPECT_EQ(client.ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), 0);
+  EXPECT_EQ(::munmap(view, kPage), 0);
+  EXPECT_EQ(::munmap(cpu, kPage), 0);
+  EXPECT_EQ(client.close(), 0);
+  close(kfd_fd);
+}
+
+TEST(DaemonApi, OneGpuManifestHandshakeMatchesOnlySelectedRenderMinor) {
+  constexpr const char *json = R"({
+    "vm":{"arch":"cdna5","gpu":{"device":{
+      "gpu_id":1250,"gfx_target_version":120500,"unique_id":1250,
+      "num_sdma_engines":0}}},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu[0:4]","type":"compute_unit"}]}]}]}},
+    "system":{"nodes":[{"id":"tray7","gpus":[
+      {"id":"g5","gpu_id":505,"unique_id":3005,
+       "location_id":1024,"drm_render_minor":129}]}]},
+    "local_node":"tray7"
+  })";
+  TempDirectory directory;
+  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  TestDaemon daemon(json, socket.c_str());
+  ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
+
+  const int connection = connect_to(socket);
+  ASSERT_GE(connection, 0);
+  RemoteDriver client(connection);
+  const int kfd_fd = client.open();
+  ASSERT_GE(kfd_fd, 0);
+  EXPECT_FALSE(client.handles_drm_render_minor(128));
+  EXPECT_TRUE(client.handles_drm_render_minor(129));
+  EXPECT_EQ(client.gpu_info_for_render_minor(128), nullptr);
+  const auto *gpu = client.gpu_info_for_render_minor(129);
+  ASSERT_NE(gpu, nullptr);
+  EXPECT_EQ(gpu->gpu_id, 505u);
+  EXPECT_EQ(gpu->drm_render_minor, 129u);
+  EXPECT_EQ(client.close(), 0);
+  close(kfd_fd);
 }
 
 TEST(DaemonApi, RejectsInvalidJsonAndLongSocketPath) {
@@ -406,7 +557,8 @@ TEST(DaemonApi, AcceptsValidGetVersionIoctlPayload) {
   ASSERT_EQ(response.payload_bytes, sizeof(arguments));
   ASSERT_TRUE(rpc_recv_exact(client, &arguments, sizeof(arguments)));
   EXPECT_EQ(arguments.major_version, KFD_IOCTL_MAJOR_VERSION);
-  EXPECT_EQ(arguments.minor_version, KFD_IOCTL_MINOR_VERSION);
+  // Metadata-ring queues from KFD 1.19 are not implemented by the simulator.
+  EXPECT_EQ(arguments.minor_version, 18u);
   EXPECT_EQ(daemon.status(), RJ_DAEMON_STATUS_RUNNING);
   close_session(client, 3);
 }

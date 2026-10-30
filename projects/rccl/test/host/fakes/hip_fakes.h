@@ -66,6 +66,19 @@ extern std::function<hipError_t(void* /*data*/,
                                 hipDeviceptr_t /*ptr*/)>
     g_hipPointerGetAttribute;
 
+// g_hipPointerGetAttribute recipes. The pointer is `type` memory and, where HIP asks, legacy-IPC capable or not;
+// other attributes succeed untouched.
+inline auto ForceMemoryType(hipMemoryType type, bool legacyIpcCapable = false) {
+    return [=](void* data, hipPointer_attribute attribute, hipDeviceptr_t) -> hipError_t {
+        if (data && attribute == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) *static_cast<hipMemoryType*>(data) = type;
+        if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE)
+            *static_cast<int*>(data) = legacyIpcCapable ? 1 : 0;
+        return hipSuccess;
+    };
+}
+// Legacy-IPC-capable device memory.
+inline auto ForceLegacyIpcCapable() { return ForceMemoryType(hipMemoryTypeDevice, /*legacyIpcCapable=*/true); }
+
 // Device model + inventory seams. Defaults succeed with plausible values.
 extern std::function<hipError_t(int* /*version*/)> g_hipRuntimeGetVersion;
 extern std::function<hipError_t(int* /*version*/)> g_hipDriverGetVersion;
@@ -109,6 +122,8 @@ extern hipError_t g_hipDeviceGetPCIBusIdResult;
 // device index (drives busIdToCudaDev's per-device resolution).
 extern std::function<hipError_t(char* /*pciBusId*/, int /*len*/, int /*device*/)>
     g_hipDeviceGetPCIBusId;
+// Backs hipDeviceGetByPCIBusId. The default fails, as for a BDF this process cannot see.
+extern std::function<hipError_t(int* /*device*/, const char* /*pciBusId*/)> g_hipDeviceGetByPCIBusId;
 extern hipError_t g_hipEventCreateResult;
 extern hipError_t g_hipMemPoolResult;
 extern hipError_t g_hipStreamCreateResult;
@@ -120,9 +135,11 @@ extern int g_hipMemoryPoolsSupported;     // hipDeviceAttributeMemoryPoolsSuppor
 // A call count alone cannot tell one device copy's operands from another's, so record them per call.
 extern int g_hipMemcpyAsyncCalls;
 struct HipMemcpyAsyncRecord {
-    void*       dst;
-    const void* src;
-    size_t      bytes;
+    void*         dst;
+    const void*   src;
+    size_t        bytes;
+    hipMemcpyKind kind;
+    hipStream_t   stream;
 };
 extern std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 
@@ -170,12 +187,32 @@ extern std::function<hipError_t(void* /*dst*/, const void* /*src*/, size_t /*byt
     g_hipMemcpyAsync;
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, hipStream_t /*stream*/)>
     g_hipMemsetAsync;
+// Synchronous memset. The default really writes (std::memset) and returns
+// hipSuccess -- the allocation seams hand out std::malloc'd host memory, so a
+// buffer production zeroes is genuinely zero when a test reads it back.
+extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
+// The DMA-BUF export, where CMake's hipMemGetHandleForAddressRange probe found it (rocmwrap.h's
+// NCCL_CUMEM_DMABUF_EXPORT_PROBE). The default fails with hipErrorInvalidValue.
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*ptr*/, size_t /*size*/,
+                                hipMemRangeHandleType /*type*/, unsigned long long /*flags*/)>
+    g_hipMemGetHandleForAddressRange;
+#endif
 
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamDestroy;
 extern std::function<hipError_t(hipStreamCaptureMode* /*mode*/)> g_hipThreadExchangeStreamCaptureMode;
 extern std::function<hipError_t(void)> g_hipGetLastError;
+// hipExtLaunchKernel (what hipExtLaunchKernelGGL calls). The default aborts: an unhooked launch is a broken test.
+extern std::function<hipError_t(const void* /*function*/, dim3 /*grid*/, dim3 /*block*/, void** /*args*/,
+                                size_t /*sharedMemBytes*/, hipStream_t /*stream*/, hipEvent_t /*startEvent*/,
+                                hipEvent_t /*stopEvent*/, int /*flags*/)>
+    g_hipExtLaunchKernel;
+// The <<<>>> launch path. Same fail-loud default as g_hipExtLaunchKernel.
+extern std::function<hipError_t(const void* /*fn*/, dim3 /*grid*/, dim3 /*block*/, void** /*args*/,
+                                size_t /*shmem*/, hipStream_t /*stream*/)>
+    g_hipLaunchKernel;
 
 // Event-record seam. The default delegates to g_hipAsyncOpsResult so the CE
 // proxy-progress tests keep the existing behaviour, but exposing it as a hook

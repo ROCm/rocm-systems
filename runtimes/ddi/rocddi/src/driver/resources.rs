@@ -9,10 +9,11 @@
 //! generic ownership and rollback algorithms remain shared.
 
 #[cfg(test)]
-use super::test_driver::{TestAllocation, TestDriver};
+use super::test_driver::{TestAllocation, TestDriver, TestQueue};
 use super::{
-    AllocationOperations, DeviceDriverState, GpuDriver, GpuDriverRef, KfdAllocation, KfdDriver,
-    KfdKernelQueue, KfdQueue, VirtualMemoryOperations,
+    AllocationOperations, DeviceDriverState, GpuDriverRef, GpuInstrumentationOperations,
+    GpuKernelQueueOperations, GpuUserQueueOperations, KfdAllocation, KfdDriver, KfdKernelQueue,
+    KfdPcSampling, KfdQueue, VirtualMemoryOperations,
 };
 use crate::Error;
 #[cfg(test)]
@@ -21,6 +22,7 @@ use crate::device::Device;
 use crate::device::gpu::kernel_queue::{
     DriverKernelQueue, KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
 };
+use crate::device::gpu::profiling::{DriverPcSampling, PcSamplingRequest};
 use crate::device::gpu::queue::{
     DriverQueue, QueuePriority, QueueRequest, QueueScratch, QueueTransport,
 };
@@ -29,7 +31,7 @@ use crate::memory::{
     Allocation, AllocationInfo, DeviceAccess, DriverAllocation, DriverVirtualAddress,
     DriverVirtualDeviceMapping, DriverVirtualHostMapping, DriverVirtualMemory, HostRegistration,
     MemoryKind, VirtualAddressInfo, VirtualMapRequest, VirtualMemory, VirtualMemoryInfo,
-    set_device_access_for,
+    VirtualMemoryOptions, set_device_access_for,
 };
 
 #[cfg(test)]
@@ -42,6 +44,7 @@ fn unsupported_memory<T>() -> Result<T, Error> {
 
 /// Driver-selected owner of a virtual-address reservation.
 pub(crate) enum VirtualAddressState {
+    /// Reservation owned by the Linux KFD backend.
     LinuxKfd(DriverVirtualAddress<KfdDriver>),
 }
 
@@ -94,6 +97,7 @@ impl DeviceDriverState {
 
 /// Driver-selected owner of detached physical backing.
 pub(crate) enum VirtualMemoryState {
+    /// Physical backing owned by the Linux KFD backend.
     LinuxKfd(DriverVirtualMemory<KfdDriver>),
 }
 
@@ -144,6 +148,7 @@ impl VirtualMemoryState {
 
 /// Driver-selected owner of one device virtual-memory mapping.
 pub(crate) enum VirtualDeviceMappingState {
+    /// Device mapping owned by the Linux KFD backend.
     LinuxKfd(DriverVirtualDeviceMapping<KfdDriver>),
 }
 
@@ -157,10 +162,17 @@ impl VirtualDeviceMappingState {
 
 /// Driver-selected owner of one host virtual-memory mapping.
 pub(crate) enum VirtualHostMappingState {
+    /// Host mapping owned by the Linux KFD backend.
     LinuxKfd(DriverVirtualHostMapping<KfdDriver>),
 }
 
 impl VirtualHostMappingState {
+    pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(mapping) => mapping.set_permissions(permissions),
+        }
+    }
+
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(mapping) => mapping.free(),
@@ -170,7 +182,9 @@ impl VirtualHostMappingState {
 
 /// Driver-selected owner of device-accessible backing.
 pub(crate) enum AllocationState {
+    /// Allocation owned by the Linux KFD backend.
     LinuxKfd(DriverAllocation<KfdDriver>),
+    /// Allocation owned by a unit-test backend.
     #[cfg(test)]
     Test(DriverAllocation<TestDriver>),
 }
@@ -223,6 +237,32 @@ impl AllocationState {
         }
     }
 
+    pub(crate) fn host_alias_source_offset(&self) -> Option<u64> {
+        match self {
+            Self::LinuxKfd(allocation) => allocation.driver_state().host_alias_source_offset(),
+            #[cfg(test)]
+            Self::Test(_) => None,
+        }
+    }
+
+    pub(crate) fn set_host_alias_identity(&self, identity: [u64; 2]) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(allocation) => {
+                allocation.driver_state().set_host_alias_identity(identity)
+            }
+            #[cfg(test)]
+            Self::Test(_) => unsupported_memory(),
+        }
+    }
+
+    pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
+        match self {
+            Self::LinuxKfd(allocation) => allocation.driver_state().remaining_backing_byte_length(),
+            #[cfg(test)]
+            Self::Test(_) => 0,
+        }
+    }
+
     pub(crate) fn check(&self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(allocation) => allocation.check(),
@@ -248,20 +288,31 @@ impl AllocationState {
         }
     }
 
+    pub(crate) fn shares_driver_instance(&self, device: &DeviceDriverState) -> bool {
+        match (self, device) {
+            (Self::LinuxKfd(allocation), DeviceDriverState::LinuxKfd { driver, .. }) => {
+                allocation.shares_driver_instance(driver)
+            }
+            #[cfg(test)]
+            (Self::Test(allocation), DeviceDriverState::Test { driver, .. }) => {
+                allocation.shares_driver_instance(driver)
+            }
+            #[cfg(test)]
+            _ => false,
+        }
+    }
+
     pub(crate) fn set_device_access(
         &mut self,
-        driver_instance: u64,
         origin: &Device,
         devices: &[&Device],
     ) -> Result<(), Error> {
         match self {
-            Self::LinuxKfd(allocation) => set_device_access_for::<KfdDriver, _>(
-                allocation,
-                driver_instance,
-                origin,
-                devices,
-                |device| device.driver_state.linux_kfd().ok().map(|(_, state)| state),
-            ),
+            Self::LinuxKfd(allocation) => {
+                set_device_access_for::<KfdDriver, _>(allocation, origin, devices, |device| {
+                    device.driver_state.linux_kfd().ok()
+                })
+            }
             #[cfg(test)]
             Self::Test(_) => unsupported_memory(),
         }
@@ -301,20 +352,18 @@ impl AllocationState {
 impl DeviceDriverState {
     pub(crate) fn allocate_owned(
         &self,
-        driver_instance: u64,
         kind: MemoryKind,
         size: u64,
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
         match self {
-            Self::LinuxKfd { driver, state } => Ok(Allocation::new(
-                AllocationState::from_linux_kfd(
+            Self::LinuxKfd { driver, state } => {
+                Ok(Allocation::new(AllocationState::from_linux_kfd(
                     driver,
                     driver.allocate_owned(state, &[], kind, size, alignment, permissions)?,
-                ),
-                driver_instance,
-            )),
+                )))
+            }
             #[cfg(test)]
             Self::Test { .. } => unsupported_memory(),
         }
@@ -325,26 +374,21 @@ impl DeviceDriverState {
     #[allow(unsafe_code)]
     pub(crate) unsafe fn register_host(
         &self,
-        driver_instance: u64,
         request: HostRegistration,
     ) -> Result<Allocation, Error> {
         match self {
             Self::LinuxKfd { driver, state } => {
                 // SAFETY: The caller preserves the page cover across native use.
                 let inner = unsafe { driver.register_host(state, &[], request)? };
-                Ok(Allocation::new(
-                    AllocationState::from_linux_kfd(driver, inner),
-                    driver_instance,
-                ))
+                Ok(Allocation::new(AllocationState::from_linux_kfd(
+                    driver, inner,
+                )))
             }
             #[cfg(test)]
             Self::Test { driver, state } => {
                 // SAFETY: The caller preserves the complete page cover.
                 let inner = unsafe { driver.register_host(state, &[], request)? };
-                Ok(Allocation::new(
-                    AllocationState::from_test(driver, inner),
-                    driver_instance,
-                ))
+                Ok(Allocation::new(AllocationState::from_test(driver, inner)))
             }
         }
     }
@@ -353,13 +397,12 @@ impl DeviceDriverState {
         &self,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<VirtualMemory, Error> {
         match self {
             Self::LinuxKfd { driver, state } => {
                 let owner = Shared::try_new_uninit()?;
-                let inner = driver.create_virtual_memory(state, kind, size, pinned, uncached)?;
+                let inner = driver.create_virtual_memory(state, kind, size, options)?;
                 Ok(VirtualMemory::new(VirtualMemoryState::from_linux_kfd(
                     DriverVirtualMemory::new(driver.clone(), owner.write(inner)),
                 )))
@@ -420,10 +463,9 @@ impl DeviceDriverState {
                     alignment,
                     permissions,
                 )?;
-                Ok(Allocation::new(
-                    AllocationState::from_linux_kfd(driver, inner),
-                    origin.endpoint.driver_instance,
-                ))
+                Ok(Allocation::new(AllocationState::from_linux_kfd(
+                    driver, inner,
+                )))
             }
             #[cfg(test)]
             Self::Test { .. } => unsupported_memory(),
@@ -446,10 +488,9 @@ impl DeviceDriverState {
                 })?;
                 // SAFETY: The caller preserves the page cover across native use.
                 let inner = unsafe { driver.register_host(state, states.as_slice(), request)? };
-                Ok(Allocation::new(
-                    AllocationState::from_linux_kfd(driver, inner),
-                    origin.endpoint.driver_instance,
-                ))
+                Ok(Allocation::new(AllocationState::from_linux_kfd(
+                    driver, inner,
+                )))
             }
             #[cfg(test)]
             Self::Test { driver, state } => {
@@ -458,57 +499,62 @@ impl DeviceDriverState {
                 })?;
                 // SAFETY: The caller preserves the complete page cover.
                 let inner = unsafe { driver.register_host(state, states.as_slice(), request)? };
-                Ok(Allocation::new(
-                    AllocationState::from_test(driver, inner),
-                    origin.endpoint.driver_instance,
-                ))
+                Ok(Allocation::new(AllocationState::from_test(driver, inner)))
             }
         }
     }
 }
 
 impl GpuDriverRef<'_> {
-    pub(crate) fn allocate_queue_scratch(
-        &self,
-        driver_instance: u64,
-        size: u64,
-    ) -> Result<Allocation, Error> {
+    pub(crate) fn allocate_queue_scratch(&self, size: u64) -> Result<Allocation, Error> {
         match self {
-            Self::LinuxKfd { driver, state } => Ok(Allocation::new(
-                AllocationState::from_linux_kfd(
+            Self::LinuxKfd { driver, state } => {
+                Ok(Allocation::new(AllocationState::from_linux_kfd(
                     driver,
                     driver.allocate_queue_scratch(state, size)?,
-                ),
-                driver_instance,
-            )),
+                )))
+            }
+            #[cfg(test)]
+            Self::Test { .. } => Err(super::instance::unsupported_test_gpu()),
         }
     }
 
-    pub(crate) fn map_mmio_remap(&self, driver_instance: u64) -> Result<Allocation, Error> {
+    pub(crate) fn map_mmio_remap(&self) -> Result<Allocation, Error> {
         match self {
             Self::LinuxKfd { driver, state } => Ok(Allocation::new(
                 AllocationState::from_linux_kfd(driver, driver.map_mmio_remap(state)?),
-                driver_instance,
             )),
+            #[cfg(test)]
+            Self::Test { .. } => Err(super::instance::unsupported_test_gpu()),
         }
     }
 }
 
 /// Driver-selected owner of a user-mode GPU queue.
 pub(crate) enum QueueState {
+    /// Direct queue owned by the Linux KFD backend.
     LinuxKfd(DriverQueue<KfdDriver, KfdQueue>),
+    /// Numeric-only transport owned by the test GPU backend.
+    #[cfg(test)]
+    Test(DriverQueue<TestDriver, TestQueue>),
 }
 
 impl QueueState {
     pub(crate) fn info(&self) -> QueueTransport {
         match self {
             Self::LinuxKfd(queue) => queue.info(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.info(),
         }
     }
 
     pub(crate) fn map_device(&self, device: &Device) -> Result<QueueTransport, Error> {
         match (self, &device.driver_state) {
             (Self::LinuxKfd(queue), DeviceDriverState::LinuxKfd { driver, state }) => {
+                queue.map_device(driver, state)
+            }
+            #[cfg(test)]
+            (Self::Test(queue), DeviceDriverState::Test { driver, state }) => {
                 queue.map_device(driver, state)
             }
             #[cfg(test)]
@@ -522,24 +568,32 @@ impl QueueState {
     pub(crate) fn progress(&self) -> Result<(u64, u64), Error> {
         match self {
             Self::LinuxKfd(queue) => queue.progress(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.progress(),
         }
     }
 
     pub(crate) fn inactivate(&mut self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(queue) => queue.inactivate(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.inactivate(),
         }
     }
 
     pub(crate) fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(queue) => queue.set_priority(priority),
+            #[cfg(test)]
+            Self::Test(queue) => queue.set_priority(priority),
         }
     }
 
     pub(crate) fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(queue) => queue.set_cu_mask(mask),
+            #[cfg(test)]
+            Self::Test(queue) => queue.set_cu_mask(mask),
         }
     }
 
@@ -550,12 +604,17 @@ impl QueueState {
         match self {
             // SAFETY: The caller preserves the stopped queue and backing.
             Self::LinuxKfd(queue) => unsafe { queue.set_scratch(scratch) },
+            #[cfg(test)]
+            // SAFETY: The caller preserves the stopped queue and backing.
+            Self::Test(queue) => unsafe { queue.set_scratch(scratch) },
         }
     }
 
     pub(crate) fn check(&self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd(queue) => queue.check(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.check(),
         }
     }
 
@@ -566,13 +625,66 @@ impl QueueState {
         match self {
             // SAFETY: The caller has retired all queue reachability.
             Self::LinuxKfd(queue) => unsafe { queue.destroy() },
+            #[cfg(test)]
+            // SAFETY: The caller has retired all queue reachability.
+            Self::Test(queue) => unsafe { queue.destroy() },
+        }
+    }
+
+    /// # Safety
+    /// The caller has retired producers and transport mappings. The callback
+    /// releases external dependencies only after native queue retirement.
+    #[allow(unsafe_code)]
+    pub(crate) unsafe fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(),
+    ) -> Result<(), Error> {
+        match self {
+            // SAFETY: The caller preserves both retirement obligations.
+            Self::LinuxKfd(queue) => unsafe { queue.destroy_with_retained_transport(callback) },
+            #[cfg(test)]
+            // SAFETY: The caller preserves both retirement obligations.
+            Self::Test(queue) => unsafe { queue.destroy_with_retained_transport(callback) },
         }
     }
 }
 
 /// Driver-selected owner of a kernel-mediated GPU queue.
 pub(crate) enum KernelQueueState {
+    /// Driver-mediated queue owned by the Linux KFD backend.
     LinuxKfd(DriverKernelQueue<KfdDriver, KfdKernelQueue>),
+}
+
+/// Driver-selected owner of one native PC sampling registration.
+pub(crate) enum PcSamplingState {
+    /// Registration owned by the Linux KFD backend.
+    LinuxKfd(DriverPcSampling<KfdDriver, KfdPcSampling>),
+}
+
+impl PcSamplingState {
+    pub(crate) fn start(&mut self) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(session) => session.start(),
+        }
+    }
+
+    pub(crate) fn stop(&mut self) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(session) => session.stop(),
+        }
+    }
+
+    pub(crate) fn destroy(&mut self) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(session) => session.destroy(),
+        }
+    }
+
+    pub(crate) fn relinquish_adopted(&mut self) -> Result<(), Error> {
+        match self {
+            Self::LinuxKfd(session) => session.relinquish_adopted(),
+        }
+    }
 }
 
 impl KernelQueueState {
@@ -630,7 +742,17 @@ impl GpuDriverRef<'_> {
                 Ok(QueueState::LinuxKfd(DriverQueue::new(
                     (*driver).clone(),
                     inner,
-                )))
+                    desc,
+                )?))
+            }
+            #[cfg(test)]
+            Self::Test { driver, state } => {
+                let inner = driver.create_user_queue(state, desc)?;
+                Ok(QueueState::Test(DriverQueue::new(
+                    (*driver).clone(),
+                    inner,
+                    desc,
+                )?))
             }
         }
     }
@@ -647,6 +769,26 @@ impl GpuDriverRef<'_> {
                     inner,
                 )))
             }
+            #[cfg(test)]
+            Self::Test { .. } => Err(super::instance::unsupported_test_gpu()),
+        }
+    }
+
+    pub(crate) fn create_pc_sampling(
+        &self,
+        request: PcSamplingRequest,
+        existing_trace_id: Option<std::num::NonZeroU32>,
+    ) -> Result<PcSamplingState, Error> {
+        match self {
+            Self::LinuxKfd { driver, state } => {
+                let inner = driver.create_pc_sampling(state, request, existing_trace_id)?;
+                Ok(PcSamplingState::LinuxKfd(DriverPcSampling::new(
+                    (*driver).clone(),
+                    inner,
+                )))
+            }
+            #[cfg(test)]
+            Self::Test { .. } => Err(super::instance::unsupported_test_gpu()),
         }
     }
 }

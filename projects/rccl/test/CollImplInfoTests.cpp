@@ -39,8 +39,10 @@
 
 #include "StandaloneUtils.hpp"
 #include "common/CeAllReduceTestHelpers.hpp"  // isCeRuntimeDriverSupported
+#include "common/IsolatedChildSkip.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "common/SymmetricBufferHelpers.hpp"  // RCCLTestHelpers::SymBuf (RAII deregister+free)
+#include "common/SymmetricKernelLog.hpp"
 #include "rccl_common.h"  // rcclGetCollImplInfo, rcclSymKGetInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
 #include "sym_kernels.h"  // ncclSymkMaxBlocks
 
@@ -79,18 +81,6 @@ namespace RcclUnitTesting
       std::stringstream ss;
       ss << f.rdbuf();
       return ss.str();
-    }
-
-    // Returns the whitespace-delimited token that follows `key` in `line`, or "".
-    std::string TokenAfter(const std::string& line, const std::string& key)
-    {
-      size_t p = line.find(key);
-      if (p == std::string::npos) return "";
-      p += key.size();
-      while (p < line.size() && isspace((unsigned char)line[p])) p++;
-      size_t e = p;
-      while (e < line.size() && !isspace((unsigned char)line[e])) e++;
-      return line.substr(p, e - p);
     }
 
     // Names as produced by rcclGetProtocolName / ncclProtoToString.
@@ -134,15 +124,21 @@ namespace RcclUnitTesting
           addon = {true, "CE", false, "", false, 0};
         }
 
-        // Live SYM is scheduled in enqueue: "<Func> [Symmetric]: ... Kernel AllGather_LL nchannels N"
-        if (line.find(func + " [Symmetric]:") != std::string::npos)
+        // Live SYM is scheduled in enqueue: "<Func> [Symmetric]: ... Kernel AllGather_LL nchannels N".
+        // Tensor Data Mover kernels (AllGather_TmaST, ...) are reported as SymTDM.
+        const std::string symKernel = SymmetricKernelOnLine(line, func);
+        if (!symKernel.empty())
         {
-          std::string kernel = TokenAfter(line, "Kernel ");
-          std::string proto;
-          if (kernel.find("LL128") != std::string::npos) proto = "LL128";
-          else if (kernel.find("LL") != std::string::npos) proto = "LL";
-          else if (!kernel.empty()) proto = "SIMPLE";
-          addon = {true, "SYM", !proto.empty(), proto, false, 0};
+          std::string proto = "SIMPLE";
+          if (symKernel.find("LL128") != std::string::npos)
+          {
+            proto = "LL128";
+          }
+          else if (symKernel.find("LL") != std::string::npos)
+          {
+            proto = "LL";
+          }
+          addon = {true, IsTdmSymmetricKernel(symKernel) ? "SymTDM" : "SYM", true, proto, false, 0};
         }
 
         if (func == "AllGather")
@@ -287,14 +283,7 @@ namespace RcclUnitTesting
     // Skips here, or hands the reason to the parent when it asked for one via kSkipFileEnv.
     void SkipSweep(const std::string& reason)
     {
-      const char* path = getenv(kSkipFileEnv);
-      if (path == nullptr)
-      {
-        GTEST_SKIP() << reason;
-      }
-      std::ofstream out(path);
-      out << reason;
-      EXPECT_TRUE(out.good()) << "cannot hand the skip to the parent via " << path << ": " << reason;
+      SkipOrHandToParent(kSkipFileEnv, reason);
     }
 
     // Why CE-registered AllReduce can never be selected on these comms, or "" when it can.
@@ -302,7 +291,7 @@ namespace RcclUnitTesting
     {
       for (ncclComm_t c : comms)
       {
-        // ncclCeAvailable needs symmetric memory, so cuMem; NCCL_CUMEM_ENABLE=1 still yields off on e.g. kernels < 6.8.
+        // ncclCeAvailable needs symmetric memory, so cuMem; NCCL_CUMEM_ENABLE=1 still yields off when the cuMem runtime check fails.
         if (!c->symmetricSupport)
         {
           return "no symmetric memory (cuMem unavailable on this host), so CE AllReduce is never selected";
@@ -377,7 +366,8 @@ namespace RcclUnitTesting
       if (mode.checkSymk) symk = QuerySymk(comms[0], coll, count, dt, ncclSum);
       NCCLCHECK(ncclGroupEnd());
 
-      if (sawSym && sel.algoName == "SYM") *sawSym = true;
+      const bool selIsSym = IsSymmetricAlgoName(sel.algoName);
+      if (sawSym && selIsSym) *sawSym = true;
       if (nCe && sel.algoName == "CE")
       {
         (*nCe)++;
@@ -411,18 +401,18 @@ namespace RcclUnitTesting
           // equal the log -- and must never claim SYM.
           EXPECT_EQ(symk.algoName, sel.algoName)
             << "symk-reported algo != logged-selected algo\nLOG:\n" << log;
-          EXPECT_NE(symk.algoName, "SYM")
+          EXPECT_FALSE(IsSymmetricAlgoName(symk.algoName))
             << "symk reported SYM with cuMem disabled\nLOG:\n" << log;
         }
-        else if (sel.algoName == "SYM")
+        else if (selIsSym)
         {
           // Registered sweep, symmetric actually dispatched: the symk reporter must
-          // agree it is SYM. (At non-SYM sizes the dispatch may run a
+          // agree, SYM vs SymTDM included. (At non-SYM sizes the dispatch may run a
           // registration-dependent backend like CE that rcclSymKGetInfo's null-buffer
           // fallback cannot observe, so only the SYM case is asserted here; rep above
           // -- queried with the real registered buffers -- covers the rest.)
-          EXPECT_EQ(symk.algoName, "SYM")
-            << "symk did not report SYM though dispatch ran SYM\nLOG:\n" << log;
+          EXPECT_EQ(symk.algoName, sel.algoName)
+            << "symk did not report " << sel.algoName << " though dispatch ran it\nLOG:\n" << log;
 
           // Symmetric block count: at least 1 because the model rejects a zero count, at most
           // ncclSymkMaxBlocks. Device independent, since the model clamps to that constant and to
@@ -526,46 +516,11 @@ namespace RcclUnitTesting
 
       if (mode.registerSym)
       {
-        symSend.resize(nRanks);
-        symRecv.resize(nRanks);
-
-        // cuMem-backed allocation is local per rank -- do it before the group.
-        bool allocOk = true;
-        for (int i = 0; i < nRanks && allocOk; i++)
-        {
-          HIPCALL(hipSetDevice(i));
-          symSend[i].comm = comms[i];
-          symRecv[i].comm = comms[i];
-          if (ncclMemAlloc(&symSend[i].ptr, sendBytes) != ncclSuccess ||
-              ncclMemAlloc(&symRecv[i].ptr, recvBytes) != ncclSuccess)
-            allocOk = false;
-        }
-
-        // Symmetric-window registration is a COLLECTIVE op: every rank must register
-        // inside a single group, else the first rank blocks forever waiting on peers
-        // (in-process multi-GPU). Mirrors tryRegisterInputWindows in DeviceApiTests.
-        // In-group calls defer, so the real status is ncclGroupEnd()'s.
-        ncclResult_t regRes = allocOk ? ncclSuccess : ncclInternalError;
-        if (allocOk)
-        {
-          std::vector<ncclResult_t> rr(2 * nRanks, ncclSuccess);
-          NCCLCHECK(ncclGroupStart());
-          for (int i = 0; i < nRanks; i++)
-          {
-            HIPCALL(hipSetDevice(i));
-            if (!mode.ceAllReduce)
-            {
-              rr[2 * i] = ncclCommWindowRegister(comms[i], symSend[i].ptr, sendBytes,
-                                                 &symSend[i].win, NCCL_WIN_COLL_SYMMETRIC);
-            }
-            rr[2 * i + 1] = ncclCommWindowRegister(comms[i], symRecv[i].ptr, recvBytes,
-                                                   &symRecv[i].win, NCCL_WIN_COLL_SYMMETRIC);
-          }
-          ncclResult_t ge = ncclGroupEnd();
-          for (ncclResult_t r : rr)
-            if (r != ncclSuccess) { regRes = r; break; }
-          if (regRes == ncclSuccess) regRes = ge;
-        }
+        // CE AllReduce registers only the receive buffers, so symk cannot claim it.
+        ncclResult_t regRes =
+          RCCLTestHelpers::ncclSymBufAllocPerRank(comms, sendBytes, symSend, !mode.ceAllReduce);
+        if (regRes == ncclSuccess)
+          regRes = RCCLTestHelpers::ncclSymBufAllocPerRank(comms, recvBytes, symRecv);
 
         if (regRes != ncclSuccess)
         {
@@ -745,9 +700,7 @@ namespace RcclUnitTesting
       mode.ceAllReduce = true;
       RunSweep("AllReduce", ncclFuncAllReduce, (size_t)1 << 20, (size_t)64 << 20, mode);
     }).withEnvironment({{kSkipFileEnv, skipFile}, {"NCCL_CUMEM_ENABLE", "1"}}).withTimeout(std::chrono::seconds(180)));
-    std::string reason;
-    std::getline(std::ifstream(skipFile), reason);
-    remove(skipFile.c_str());
+    const std::string reason = TakeHandedSkip(skipFile);
     if (!reason.empty())
     {
       GTEST_SKIP() << reason;
