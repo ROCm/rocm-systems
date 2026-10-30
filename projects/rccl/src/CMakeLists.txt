@@ -92,6 +92,7 @@ set(SRC_FILES
   device/tdm/syncPolicy.h
   device/tdm/tdmCopy.h
   device/tdm/tdmReduce.h
+  device/uniform.h
   algorithms/dda/device/device_buffer.cc
   diagnostics.cc
   diagnostics.h
