@@ -297,7 +297,14 @@ void SvmMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_poo
   // ringdoor bell
   hsa_signal_store_relaxed(queue->doorbell_signal, index);
   // wait for the signal and reset it for future use
-  ASSERT_TRUE(WaitForSvmCompletion(signal))
+  const bool completed = WaitForSvmCompletion(signal);
+  if (!completed) {
+    hsa_queue_inactivate(queue);
+    hsa_queue_destroy(queue);
+    hsa_signal_destroy(signal);
+    hsa_amd_memory_pool_free(kernArgs);
+  }
+  ASSERT_TRUE(completed)
       << "timed out waiting for SVM operation to complete";
 
   // compare device and host side results
