@@ -44,23 +44,32 @@ protected:
     return bytes.succeeded() ? std::vector<uint8_t>(bytes.value().begin(), bytes.value().end())
                              : std::vector<uint8_t>{};
   }
+  enum class StreamFailure { None, FullDevice, ClosedPipe };
   struct InvokeOptions {
     bool limit_write = false;
-    bool fail_stdout = false;
-    bool fail_stderr = false;
+    StreamFailure stdout_failure = StreamFailure::None;
+    StreamFailure stderr_failure = StreamFailure::None;
   };
+  static int open_capture(const std::filesystem::path &path, StreamFailure failure) {
+    if (failure == StreamFailure::ClosedPipe) {
+      int descriptors[2] = {};
+      if (pipe(descriptors) != 0)
+        return -1;
+      close(descriptors[0]);
+      return descriptors[1];
+    }
+    return failure == StreamFailure::FullDevice
+               ? open("/dev/full", O_WRONLY)
+               : open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  }
   int invoke(std::vector<std::string> arguments, InvokeOptions options) {
     arguments.insert(arguments.begin(), RJ_CODE_MUTATE_PATH);
     std::vector<char *> pointers;
     for (std::string &argument : arguments)
       pointers.push_back(argument.data());
     pointers.push_back(nullptr);
-    const int out = options.fail_stdout
-                        ? open("/dev/full", O_WRONLY)
-                        : open((root_ / "stdout").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    const int err = options.fail_stderr
-                        ? open("/dev/full", O_WRONLY)
-                        : open((root_ / "stderr").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    const int out = open_capture(root_ / "stdout", options.stdout_failure);
+    const int err = open_capture(root_ / "stderr", options.stderr_failure);
     EXPECT_GE(out, 0);
     EXPECT_GE(err, 0);
     const pid_t child = fork();
@@ -69,10 +78,13 @@ protected:
         _exit(126);
       close(out);
       close(err);
+      // Exercise the executable's signal policy, independent of the test runner.
+      if (std::signal(SIGPIPE, SIG_DFL) == SIG_ERR || std::signal(SIGXFSZ, SIG_DFL) == SIG_ERR)
+        _exit(126);
       if (options.limit_write) {
-        std::signal(SIGXFSZ, SIG_IGN);
+        const rlimit core_limit = {.rlim_cur = 0, .rlim_max = 0};
         const rlimit limit = {.rlim_cur = 512, .rlim_max = 512};
-        if (setrlimit(RLIMIT_FSIZE, &limit) != 0)
+        if (setrlimit(RLIMIT_CORE, &core_limit) != 0 || setrlimit(RLIMIT_FSIZE, &limit) != 0)
           _exit(126);
       }
       execv(pointers.front(), pointers.data());
@@ -85,13 +97,17 @@ protected:
     int status = 0;
     if (waitpid(child, &status, 0) != child)
       return -1;
-    const std::vector<uint8_t> out_bytes =
-        options.fail_stdout ? std::vector<uint8_t>{} : read(root_ / "stdout");
-    const std::vector<uint8_t> err_bytes =
-        options.fail_stderr ? std::vector<uint8_t>{} : read(root_ / "stderr");
+    const std::vector<uint8_t> out_bytes = options.stdout_failure == StreamFailure::None
+                                               ? read(root_ / "stdout")
+                                               : std::vector<uint8_t>{};
+    const std::vector<uint8_t> err_bytes = options.stderr_failure == StreamFailure::None
+                                               ? read(root_ / "stderr")
+                                               : std::vector<uint8_t>{};
     stdout_.assign(out_bytes.begin(), out_bytes.end());
     stderr_.assign(err_bytes.begin(), err_bytes.end());
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    if (WIFEXITED(status))
+      return WEXITSTATUS(status);
+    return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
   }
   int invoke(std::vector<std::string> arguments) { return invoke(std::move(arguments), {}); }
   std::vector<std::string> args(std::vector<std::string> extra = {}) {
@@ -251,6 +267,7 @@ TEST_F(FaultMutationCli, SelectionAndMalformedInputsFailWithoutPublication) {
               std::string::npos)
         << stderr_;
     EXPECT_NE(stderr_.find("code=InvalidParameters"), std::string::npos) << stderr_;
+    EXPECT_NE(stderr_.find("offset=" + std::to_string(offset) + ' '), std::string::npos) << stderr_;
     EXPECT_EQ(stderr_.find("BadIdentity"), std::string::npos) << stderr_;
   }
   expect_rejected({"--input", input_.string(), "--kernel", "test", "--output", output_.string()});
@@ -325,7 +342,7 @@ TEST_F(FaultMutationCli, FailedStdoutReturnsOutputIoError) {
            {"--input", input_.string(), "--kernel", "test_kernel", "--list"},
            args()}) {
     SCOPED_TRACE(::testing::PrintToString(arguments));
-    EXPECT_EQ(invoke(arguments, {.fail_stdout = true}), 3) << stderr_;
+    EXPECT_EQ(invoke(arguments, {.stdout_failure = StreamFailure::FullDevice}), 3) << stderr_;
     EXPECT_NE(stderr_.find("cannot write/flush stdout"), std::string::npos) << stderr_;
   }
   // The complete file survives a later failure to report the mutation summary.
@@ -343,9 +360,33 @@ TEST_F(FaultMutationCli, FailedAssumptionOutputDoesNotReportSuccess) {
   const std::vector<uint8_t> image =
       test::make_barrier_elf_for_target(row, test::make_barrier_words(row));
   write(input_, image);
-  EXPECT_EQ(invoke(args(), {.fail_stderr = true}), 3);
+  EXPECT_EQ(invoke(args(), {.stderr_failure = StreamFailure::FullDevice}), 3);
   EXPECT_TRUE(stdout_.empty());
   EXPECT_EQ(read(output_).size(), image.size());
+  EXPECT_EQ(read(input_), image);
+}
+
+TEST_F(FaultMutationCli, ClosedOutputPipesReturnOutputIoError) {
+  const test::DropTargetRow &row = test::kDropRows[4];
+  const std::vector<uint8_t> image =
+      test::make_barrier_elf_for_target(row, test::make_barrier_words(row));
+  write(input_, image);
+  for (const std::vector<std::string> &arguments : std::vector<std::vector<std::string>>{
+           {"--help"},
+           {"--capabilities"},
+           {"--input", input_.string(), "--kernel", "test_kernel", "--list"},
+           args()}) {
+    SCOPED_TRACE(::testing::PrintToString(arguments));
+    EXPECT_EQ(invoke(arguments, {.stdout_failure = StreamFailure::ClosedPipe}), 3) << stderr_;
+    EXPECT_NE(stderr_.find("cannot write/flush stdout"), std::string::npos) << stderr_;
+  }
+  // A summary failure preserves the same complete mutant as an assumption failure.
+  const std::vector<uint8_t> mutant = read(output_);
+  ASSERT_EQ(mutant.size(), image.size());
+  std::filesystem::remove(output_);
+  EXPECT_EQ(invoke(args(), {.stderr_failure = StreamFailure::ClosedPipe}), 3);
+  EXPECT_TRUE(stdout_.empty());
+  EXPECT_EQ(read(output_), mutant);
   EXPECT_EQ(read(input_), image);
 }
 
