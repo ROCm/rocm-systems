@@ -5158,6 +5158,19 @@
           "name": "GIN_AllGather_Symmetric",
           "description": "Symmetric-memory multi-node AllGather (RailRing_LsaST): GIN ring over the rail team + LSA store broadcast; requires >=2 ranks/node across >=2 nodes",
           "test_filter": "GinMPIDeviceTests.AllGather_Symmetric*"
+        },
+        {
+          "name": "GIN_AllGather_RailRing_MultiChunk",
+          "description": "RailRing_LsaST AllGather of 787459 floats per rank on one CTA: rotated chunk start, wrap at the end of the block and a 4108-byte final chunk, two varied runs per placement",
+          "test_filter": "GinMPIDeviceTests.AllGather_RailRing_MultiChunk",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "1"
+          }
+        },
+        {
+          "name": "GIN_AllGather_RailRing_ByteTail",
+          "description": "RailRing_LsaST AllGather on uint8 counts 17/1021/4101/12301, out of place and in place: the LSA broadcast's misaligned byte head and 1-byte tail must land exactly on every peer",
+          "test_filter": "GinMPIDeviceTests.AllGather_RailRing_ByteTail"
         }
       ]
     },
