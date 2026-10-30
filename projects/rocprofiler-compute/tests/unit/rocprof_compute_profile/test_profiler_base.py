@@ -744,6 +744,23 @@ def test_handle_analyze_args_list_stats_output_format(output_format, expect_erro
         instance.handle_analyze_args()
 
 
+def test_handle_analyze_args_listing_skips_operator_parse(monkeypatch):
+    """--list-operators ignores --operator, including an unknown prefix."""
+    args = _make_rpc_args(mode="analyze")
+    args.list_operators = ["torch"]
+    args.operator = ["unknown:*"]
+    warnings = []
+    monkeypatch.setattr(
+        "rocprof_compute_base.console_warning",
+        lambda *argv: warnings.append(argv),
+    )
+    instance = _make_rpc_with_args(args)
+    instance.handle_analyze_args()
+    assert args.list_operators == ["torch"]
+    assert args.operator_patterns is None
+    assert "ignored" in warnings[-1][1]
+
+
 # ---------------------------------------------------------------------------
 # pre_processing(): memory-bandwidth configuration persistence
 # ---------------------------------------------------------------------------

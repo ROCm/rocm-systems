@@ -310,14 +310,17 @@ class RocProfCompute:
             args.list_operators = resolve_list_selectors(
                 getattr(args, "list_operators", None)
             )
-            args.operator_patterns = resolve_operator_patterns(
-                getattr(args, "operator", None)
-            )
+            if args.list_operators is not None:
+                args.operator_patterns = None
+            else:
+                args.operator_patterns = resolve_operator_patterns(
+                    getattr(args, "operator", None)
+                )
         except ValueError as error:
             console_error("ml api trace", str(error))
 
         operator_filter = getattr(args, "operator", None) is not None
-        operator_listing = getattr(args, "list_operators", None) is not None
+        operator_listing = args.list_operators is not None
 
         if operator_filter or operator_listing:
             if args.output_format != "stdout":

@@ -64,15 +64,20 @@ def test_empty_operator_flag_is_unscoped_double_star():
 
 
 def test_operator_rejects_unknown_prefix():
-    with pytest.raises(ValueError, match="jax") as excinfo:
-        resolve_operator_patterns(["jax:*foo*"])
+    with pytest.raises(ValueError, match="not_a_backend") as excinfo:
+        resolve_operator_patterns(["not_a_backend:*foo*"])
     assert "Values:" in str(excinfo.value)
     with pytest.raises(ValueError, match="all_supported_backends"):
         resolve_operator_patterns(["all_supported_backends:*relu*"])
     with pytest.raises(ValueError, match="toch"):
-        resolve_operator_patterns(["toch:*relu*", "torch:*relu*"])
-    with pytest.raises(ValueError, match="jax"):
-        resolve_operator_patterns(["torch:*relu*", "jax:*foo*"])
+        resolve_operator_patterns(["toch:*relu*", "triton:*rms*"])
+    with pytest.raises(ValueError, match="not_a_backend"):
+        resolve_operator_patterns([
+            "torch:*relu*",
+            "triton:*matmul*",
+            "user:*UserDefined*",
+            "not_a_backend:*foo*",
+        ])
 
 
 def test_comma_joined_profile_token_is_unknown():
