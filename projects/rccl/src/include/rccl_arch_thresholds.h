@@ -117,6 +117,15 @@ struct rcclArchThresholds {
   int ddaVmmMinBlocks;
   int ddaVmmMaxBlocks;
 
+  // DDA LL128 AllGather block size and block cap, each applied to totals inside its inclusive
+  // byte window. 0 keeps 512 threads and the init block cap.
+  int ddaAgLL128Threads;
+  size_t ddaAgLL128ThreadsMinBytes;
+  size_t ddaAgLL128ThreadsMaxBytes;
+  int ddaAgLL128MaxBlocks;
+  size_t ddaAgLL128MaxBlocksMinBytes;
+  size_t ddaAgLL128MaxBlocksMaxBytes;
+
   // Ring / Tree crossovers that replace the tuning model's ranges on single-node
   // comms (nNodes == 1). Sizes are per rank as rcclGetSizePerRank() reports them
   // (AllReduce: the whole message, hence nRanks x the entry). 0 = keep the
