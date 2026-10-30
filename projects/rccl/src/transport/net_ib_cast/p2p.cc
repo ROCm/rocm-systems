@@ -21,6 +21,8 @@ int64_t IbCastArThreshold = 8192;
 // Default -2: BY_INDEX. 0=BY_INDEX, 1=BY_ID, 2=BY_ORDER (software CTS; CTS offload forces BY_ORDER).
 NCCL_PARAM(IbCastReceiverSideMatchingScheme, "IB_RECEIVER_SIDE_MATCHING_SCHEME", -2);
 RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, "GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
+// 1 = post the scratchpad RDMA_WRITE and the flush RDMA_READ as one linked ibv_post_send.
+RCCL_PARAM(IbCastGdrFlushSinglePost, "GDR_FLUSH_SINGLE_POST", 0);
 
 const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut"};
 
@@ -780,6 +782,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
        comm->base.qpSharing.isPrimary, comm->base.vProps.ndevs);
 
   // We don't know which devIndex the recv was on, so we flush on all devices
+  const bool singlePost = rcclParamIbCastGdrFlushSinglePost() != 0;
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     struct ibv_send_wr wr;
     // RCCL: fence the RO=1 bulk data through an RO=0 scratchpad - RDMA_WRITE a
@@ -794,8 +797,12 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       wr.wr_id = IbCastEncodeCommId(wr.wr_id, comm->base.qpSharing.netIbCommId);
     }
 
+    // With RCCL_GDR_FLUSH_SINGLE_POST=1 the unsignaled write is linked ahead of the
+    // signaled read: the RC send queue still executes them in order, and the proxy
+    // rings one doorbell per flush instead of two.
+    struct ibv_send_wr writeWr;
+    struct ibv_send_wr* postWr = &wr;
     if (useGpuFlushMem) {
-      struct ibv_send_wr writeWr;
       memset(&writeWr, 0, sizeof(writeWr));
       writeWr.wr_id = wr.wr_id;
       writeWr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
@@ -804,8 +811,13 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.num_sge = 1;
       writeWr.opcode = IBV_WR_RDMA_WRITE;
       writeWr.send_flags = 0;
-      struct ibv_send_wr* badWriteWr;
-      NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr));
+      if (singlePost) {
+        writeWr.next = &wr;
+        postWr = &writeWr;
+      } else {
+        struct ibv_send_wr* badWriteWr;
+        NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr));
+      }
 
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
@@ -824,7 +836,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     struct ibv_send_wr* bad_wr;
     INFO(NCCL_NET, "NET/IB: %s: posting flush dev=%d qpn=%u wr_id=0x%lx",
          __func__, i, comm->devs[i].gpuFlush.qp.qp->qp_num, wr.wr_id);
-    NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr));
+    NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, postWr, &bad_wr));
     TIME_STOP(4);
 
     IbCastAddEvent(req, i);
