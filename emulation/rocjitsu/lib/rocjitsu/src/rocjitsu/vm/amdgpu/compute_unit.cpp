@@ -298,22 +298,22 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
   }
 
   std::unique_ptr<ComputeUnitCore> compute_unit;
-  if (with_compute_unit_isa(
-          config.arch,
-          [&]<GpuIsa Isa>() {
-            switch (exec_mode) {
-            case simdojo::ExecMode::FUNCTIONAL:
-              compute_unit = create_functional_cu<Isa>(std::move(name), config, memory, l2);
-              break;
-            case simdojo::ExecMode::CLOCKED:
-              compute_unit = std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, Isa>>(
-                  std::move(name), config, memory, l2);
-              break;
-            }
-            return util::Result::success();
-          },
-          emit_error)
-          .failed())
+  const util::Result result = with_compute_unit_isa(
+      config.arch,
+      [&]<GpuIsa Isa>() {
+        switch (exec_mode) {
+        case simdojo::ExecMode::FUNCTIONAL:
+          compute_unit = create_functional_cu<Isa>(std::move(name), config, memory, l2);
+          break;
+        case simdojo::ExecMode::CLOCKED:
+          compute_unit = std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, Isa>>(
+              std::move(name), config, memory, l2);
+          break;
+        }
+        return util::Result::success();
+      },
+      emit_error);
+  if (result.failed())
     return nullptr;
   return compute_unit;
 }
