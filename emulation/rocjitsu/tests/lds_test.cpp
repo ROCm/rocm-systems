@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_store_plans.h"
 #include "rocjitsu/vm/amdgpu/lds_writeback.h"
 
 #include <gtest/gtest.h>
@@ -542,6 +543,155 @@ TEST(LdsTest, WritebacksMatchThePerLaneReference) {
       .elem_size = 1, .num_elems = 1, .sign_extend = true, .d16_hi = true}>(rng);
   check_write_back_format<wb::DstFormat{.elem_size = 2, .num_elems = 1, .d16_lo = true}>(rng);
   check_write_back_format<wb::DstFormat{.elem_size = 2, .num_elems = 1, .d16_hi = true}>(rng);
+}
+
+namespace st = rocjitsu::amdgpu::lds_store;
+
+/// The plain-store writers against Lds::vector_store, the run walk they
+/// replace, for one format and wave size: the whole LDS (every byte, and the
+/// materialized size) must match after every store.
+template <st::StoreFormat F, uint32_t Wave> void check_store_format(std::mt19937_64 &rng) {
+  constexpr uint32_t kWidth = st::kWidth<F>;
+  constexpr uint32_t kRows = kWidth < 4 ? 1 : kWidth / 4;
+  for (int iteration = 0; iteration < 600; ++iteration) {
+    Lds reference(64), writers(64);
+    const uint32_t cap = static_cast<uint32_t>(reference.size_bytes());
+    // Fully materialized, materialized to 8 KiB, or empty (growth from
+    // nothing); backing grows in 4 KiB granules.
+    const uint32_t materialized[] = {cap, 8192, 0};
+    const uint32_t backed = materialized[rng() % 3];
+    std::vector<uint8_t> initial(backed);
+    for (auto &b : initial)
+      b = static_cast<uint8_t>(rng());
+    if (backed) {
+      reference.write(0u, initial.data(), backed);
+      writers.write(0u, initial.data(), backed);
+    }
+    const uint32_t edges[] = {0, backed, cap, cap / 2};
+    const auto near_edge = [&] {
+      return edges[rng() % 4] - static_cast<uint32_t>(rng() % (80 * kWidth)) +
+             static_cast<uint32_t>(rng() % 24);
+    };
+    std::array<uint32_t, 64> target{};
+    switch (rng() % 6) {
+    case 0: // broadcast
+      target.fill(near_edge());
+      break;
+    case 1: { // one run
+      const uint32_t base = near_edge();
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        target[lane] = base + lane * kWidth;
+      break;
+    }
+    case 2: // 16-lane runs at independent bases
+      for (uint32_t group = 0; group < 64; group += 16) {
+        const uint32_t base = rng() % 3 ? near_edge() : static_cast<uint32_t>(rng());
+        for (uint32_t lane = 0; lane < 16; ++lane)
+          target[group + lane] = base + lane * kWidth;
+      }
+      break;
+    case 3: { // overlapping
+      const uint32_t pivot = near_edge();
+      for (auto &address : target)
+        address = pivot + static_cast<uint32_t>(rng() % 48);
+      break;
+    }
+    case 4: // near the capacity and materialized edges
+      for (auto &address : target)
+        address = near_edge();
+      break;
+    default: // anywhere
+      for (auto &address : target)
+        address = static_cast<uint32_t>(rng());
+      break;
+    }
+    uint64_t exec = 0;
+    switch (rng() % 9) {
+    case 0:
+      exec = ~uint64_t{0};
+      break;
+    case 1:
+      exec = 0xFFFF'FFFFull;
+      break;
+    case 2:
+      exec = 0xFFFF'FFFF'FFFFull;
+      break;
+    case 3:
+      exec = 0xFFFFull;
+      break;
+    case 4:
+      exec = uint64_t{1} << (rng() % 64);
+      break;
+    case 5:
+      exec = 0;
+      break;
+    case 6: // a full wave with one hole
+      exec = ~(uint64_t{1} << (rng() % 64));
+      break;
+    case 7: // two lanes
+      exec = (uint64_t{1} << (rng() % 64)) | (uint64_t{1} << (rng() % 64));
+      break;
+    default:
+      exec = rng();
+      break;
+    }
+    if (Wave == 32)
+      exec &= 0xFFFF'FFFFull;
+    const uint32_t offsets[] = {0, 37, 0xFFFF'FFF0u};
+    const uint32_t offset = offsets[rng() % 3];
+    std::array<uint32_t, 64> addr{};
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      addr[lane] = target[lane] - offset;
+    std::array<std::array<uint32_t, 64>, kRows> rows{};
+    for (auto &row : rows)
+      for (auto &value : row)
+        value = static_cast<uint32_t>(rng());
+
+    // Reference: lane-major payload and 64-bit addresses through the run walk.
+    std::vector<uint8_t> payload(64 * kWidth);
+    std::array<uint64_t, 64> addrs{};
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      addrs[lane] = static_cast<uint32_t>(addr[lane] + offset);
+      if (kWidth >= 4) {
+        for (uint32_t i = 0; i < kRows; ++i)
+          std::memcpy(&payload[lane * kWidth + 4 * i], &rows[i][lane], 4);
+      } else {
+        const uint32_t value = F.d16_hi ? rows[0][lane] >> 16 : rows[0][lane];
+        std::memcpy(&payload[lane * kWidth], &value, kWidth);
+      }
+    }
+    reference.vector_store(addrs.data(), exec, F.elem_size, F.num_elems, payload.data());
+
+    st::StoreRequest request{.addr = addr.data(), .data = {}, .exec = exec, .offset = offset};
+    for (uint32_t i = 0; i < kRows; ++i)
+      request.data[i] = rows[i].data();
+    st::store<F, Wave>(writers, request);
+
+    ASSERT_EQ(writers.materialized_size_bytes(), reference.materialized_size_bytes())
+        << "width " << kWidth << " wave" << Wave << " iteration " << iteration;
+    std::vector<uint8_t> got(cap), want(cap);
+    std::as_const(writers).read(0u, got.data(), cap);
+    std::as_const(reference).read(0u, want.data(), cap);
+    ASSERT_EQ(got, want) << "width " << kWidth << " wave" << Wave << " iteration " << iteration;
+  }
+}
+
+template <st::StoreFormat F> void check_store_format(std::mt19937_64 &rng) {
+  check_store_format<F, 32>(rng);
+  check_store_format<F, 64>(rng);
+}
+
+// Every plain DS-store format the generator emits.
+TEST(LdsTest, PlainStoresMatchVectorStore) {
+  std::mt19937_64 rng(0x570fe5);
+  check_store_format<st::StoreFormat{.elem_size = 4, .num_elems = 1}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 8, .num_elems = 1}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 4, .num_elems = 3}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 4, .num_elems = 4}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 1, .num_elems = 1}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 1, .num_elems = 1, .d16_hi = true}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 2, .num_elems = 1}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 2, .num_elems = 1, .d16_hi = true}>(rng);
 }
 
 } // namespace
