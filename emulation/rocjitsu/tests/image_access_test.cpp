@@ -837,6 +837,9 @@ TEST_P(RdnaDecodedImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
                                      .vdata = 8,
                                      .srsrc = 2,
                                      .nsa_word = 6};
+  // TODO(https://github.com/ROCm/rocm-systems/issues/14684): The encoding-base
+  // fallback prints a contiguous VADDR tuple rather than the exact NSA selectors.
+  // Repair its disassembly together with the corresponding dependency metadata.
   struct Case {
     uint16_t opcode;
     const char *disassembly;
