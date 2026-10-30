@@ -180,6 +180,12 @@ public:
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
 
+  /// @brief Return the physical XCC rank, or nullopt before topology assignment.
+  /// @details This is the rank from set_xcd_topology(), independent of scratch overrides.
+  std::optional<uint32_t> xcc_id() const {
+    return xcd_peers_.empty() ? std::nullopt : std::optional<uint32_t>(xcd_rank_);
+  }
+
   [[nodiscard]] uint64_t register_pm4_queue(Pm4QueueConfig config);
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_pm4_queue_registration(uint64_t registration_id) noexcept;
@@ -238,7 +244,14 @@ public:
   void accept_fanout_shard(DispatchEntry shard);
   [[nodiscard]] bool update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
                                   uint32_t ring_size, uint32_t queue_percentage);
-  /// @brief Reconfigure only the queue incarnation identified by @p registration_id.
+  /// @brief Reconfigure a queue incarnation and propagate its state to fanout replicas.
+  /// @details A fanout owner must be called without any CP queue mutex already held:
+  /// peer propagation acquires peer locks after releasing the owner's mutation lock.
+  /// Busy reflects entries/publications on the ring owner; replicas never access
+  /// packet slots or publish its consumer pointer.
+  [[nodiscard]] QueueReconfigureStatus
+  reconfigure_queue_registration(uint64_t registration_id, const QueueReconfigureRequest &request);
+  /// @brief Compatibility update returning true for Applied or Disabled.
   [[nodiscard]] bool update_queue_registration(uint64_t registration_id, uint64_t ring_base_va,
                                                uint32_t ring_size, uint32_t queue_percentage);
   void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended,
@@ -622,6 +635,9 @@ private:
                                                          uint64_t packet_index,
                                                          bool alternate) const;
 
+  /// @brief Invalidate the admitted AQL slot before publishing its consumer cursor.
+  [[nodiscard]] VmAccessOutcome retire_aql_packet(ComputeQueueRecord &queue,
+                                                  const DispatchEntry &entry);
   /// @brief Hold retirement until ROCr acknowledges a use-once scratch reclaim.
   [[nodiscard]] VmAccessOutcome gate_dispatch_retirement(ComputeQueueRecord &queue,
                                                          const DispatchEntry &entry);

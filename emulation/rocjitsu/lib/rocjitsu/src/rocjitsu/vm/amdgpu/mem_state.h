@@ -56,6 +56,7 @@ struct TranslatedMemoryRequest {
   uint64_t address = 0;
   uint32_t data_offset = 0;
   uint32_t size = 0;
+  uint64_t reordered_lane_mask = 0;
 };
 
 /// @brief Retry state retained by a prepared translated memory instruction.
@@ -68,6 +69,7 @@ class TranslatedMemoryProgress {
 public:
   std::optional<GpuVmAccess> access;
   std::vector<TranslatedMemoryRequest> requests;
+  std::vector<uint8_t> reordered_data;
   std::size_t request_index = 0;
   std::size_t completed_bytes = 0;
   uint32_t atomic_lane = 0;
@@ -84,6 +86,8 @@ public:
   /// Architectural destination resolved and range-checked at issue time.
   ScalarRegisterRange dst_register;
   uint32_t num_dwords = 0;
+  /// Bytes per element. An atomic is one element of elem_size bytes, returned as
+  /// num_dwords dwords.
   uint32_t elem_size = 4;
   bool sign_extend = false;
   /// Loads and returning atomics write response_data to dst_register.
@@ -190,6 +194,10 @@ public:
   // the routed observation's callback snapshot.
   uint64_t flat_local_lane_mask = 0;
   uint64_t flat_dds_lane_mask = 0;
+  // Captured during routing after RDNA4 U17 address math, before the workgroup
+  // LDS base is added. Keep addresses intact for routed observations and retries.
+  uint64_t flat_local_oob_lane_mask = 0;
+  std::optional<uint64_t> flat_local_allocation_end;
   bool non_temporal = false;
   // Keep this outside Mtype: cluster loads force only the request-side vector
   // L1 lookup to miss, while mtype must still preserve the instruction/PTE

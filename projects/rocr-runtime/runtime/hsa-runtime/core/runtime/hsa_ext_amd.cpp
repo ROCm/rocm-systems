@@ -574,7 +574,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
     core::Agent* src_agent = core::Agent::Convert(op.src_agent);
     IS_VALID(src_agent);
 
-    if (op.type > HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST) {
+    if (op.type > HSA_AMD_MEMORY_COPY_OP_RECT) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
@@ -712,6 +712,26 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       }
       break;
+    case HSA_AMD_MEMORY_COPY_OP_RECT:
+      if (op.num_entries == 0 || op.rect_src == nullptr || op.rect_dst == nullptr ||
+          op.range_list == nullptr || op.dst_agent_list == nullptr || op.reserved0 != 0) {
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
+      for (uint32_t index = 0; index < op.num_entries; ++index) {
+        IS_BAD_PTR(op.rect_src[index].pitched_ptr.base);
+        IS_BAD_PTR(op.rect_dst[index].pitched_ptr.base);
+        core::Agent* entry_dst_agent = core::Agent::Convert(op.dst_agent_list[index]);
+        IS_VALID(entry_dst_agent);
+        if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice &&
+            entry_dst_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+          return HSA_STATUS_ERROR_INVALID_AGENT;
+        }
+        const hsa_dim3_t& range = op.range_list[index];
+        if (range.x == 0 || range.y == 0 || range.z == 0) {
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+      }
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
@@ -730,7 +750,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
     if (has_work) {
       core::Agent* copy_agent = nullptr;
       // Ops that carry a multi-entry dst_agent list (broadcast, multi-linear,
-      // multi-swap, and multi-indirect) do not have a scalar dst_agent to
+      // rect, multi-swap, and multi-indirect) do not have a scalar dst_agent to
       // fall back on, so copy_agent is resolved from src_agent or, when
       // src_agent is not a GPU, from dst_agent_list[0].  Single-entry ops
       // keep the original dst_agent-based fallback.
@@ -851,7 +871,9 @@ hsa_status_t hsa_amd_memory_async_copy_rect(
   IS_VALID(out_signal_obj);
 
   if ((range->x != 0) && (range->y != 0) && (range->z != 0)) {
-    return agent->DmaCopyRect(dst, dst_offset, src, src_offset, range, dir, dep_signal_list,
+    const hsa_amd_memory_copy_rect_ptr_t rect_src = {*src, *src_offset};
+    const hsa_amd_memory_copy_rect_ptr_t rect_dst = {*dst, *dst_offset};
+    return agent->DmaCopyRect(&rect_src, &rect_dst, range, 1, dir, dep_signal_list,
                               *out_signal_obj);
   }
 
@@ -1079,8 +1101,13 @@ hsa_status_t hsa_amd_signal_batch_create(uint32_t count,
     return static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL);
   }
 
-  const bool host_access_via_hdp =
-      device_pool && static_cast<const AMD::GpuAgent*>(region->owner())->PcieStoresNeedFlush();
+  const auto* owner_gpu =
+      device_pool ? static_cast<const AMD::GpuAgent*>(region->owner()) : nullptr;
+  const bool host_access_via_hdp = device_pool && owner_gpu->PcieStoresNeedFlush();
+  // The host reaches a discrete GPU's memory across PCIe or XGMI, whether or not its stores need
+  // an HDP flush, so resolving a member through its slot would cost link round trips. An APU's
+  // device pool is in memory the host shares, where reading the slot is as cheap as the shadow.
+  const bool shadow_members = device_pool && !owner_gpu->properties().Integrated;
 
   bool use_interrupt;
   hsa_status_t status =
@@ -1102,7 +1129,7 @@ hsa_status_t hsa_amd_signal_batch_create(uint32_t count,
 
   core::SignalBatch* signal_batch;
   status = core::SignalBatch::Create(count, initial_values, use_interrupt, region, access_agents,
-                                     host_access_via_hdp, &signal_batch, signals);
+                                     host_access_via_hdp, shadow_members, &signal_batch, signals);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   *batch = core::SignalBatch::Convert(signal_batch);
@@ -1156,7 +1183,7 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
   std::vector<hsa_signal_condition_t> valid_conds;
   std::vector<hsa_signal_value_t> valid_values;
   for (uint32_t i = 0; i < signal_count; i++){
-    if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
+    if (core::Signal::IsValidHandle(hsa_signals[i])) {
       valid_signals.emplace_back(hsa_signals[i]);
       valid_signal_ids.emplace_back(i);
       valid_conds.emplace_back(conds[i]);
@@ -1214,7 +1241,7 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
   std::vector<hsa_signal_condition_t> valid_conds;
   std::vector<hsa_signal_value_t> valid_values;
   for (uint32_t i = 0; i < signal_count; i++){
-    if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
+    if (core::Signal::IsValidHandle(hsa_signals[i])) {
       valid_signals.emplace_back(hsa_signals[i]);
       valid_signal_ids.emplace_back(i);
       valid_conds.emplace_back(conds[i]);

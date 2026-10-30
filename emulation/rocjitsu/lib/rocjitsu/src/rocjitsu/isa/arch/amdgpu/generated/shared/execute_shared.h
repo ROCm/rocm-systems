@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -277,8 +278,8 @@ inline void execute_s_add_co_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_s_add_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result =
-      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) +
-       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))));
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) +
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -887,13 +888,9 @@ inline void execute_s_cbranch_cdbguser_sopp([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
-inline void execute_s_cbranch_join_sop1([[maybe_unused]] Inst &inst,
-                                        [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
 inline void execute_s_ceil_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = std::ceil(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -977,9 +974,9 @@ inline void execute_s_cmovk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_s_cmp_eq_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) ==
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) ==
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1008,9 +1005,9 @@ inline void execute_s_cmp_eq_u64_sopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_s_cmp_ge_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) >=
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) >=
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1033,9 +1030,9 @@ inline void execute_s_cmp_ge_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_s_cmp_gt_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) >
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) >
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1058,9 +1055,9 @@ inline void execute_s_cmp_gt_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_s_cmp_le_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) <=
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) <=
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1085,9 +1082,9 @@ template <typename Inst>
 inline void execute_s_cmp_lg_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.write_scc(([&]() {
     auto a =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf)));
     auto b =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
     return (a < b) || (a > b);
   }()));
 }
@@ -1130,9 +1127,9 @@ inline void execute_s_cmp_lg_u64_sopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_s_cmp_lt_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) <
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) <
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1156,9 +1153,9 @@ inline void execute_s_cmp_lt_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_s_cmp_neq_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) !=
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) !=
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1171,10 +1168,9 @@ inline void execute_s_cmp_neq_f32_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_cmp_nge_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((!(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) >=
-      util::f16_to_f32(
-          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+  wf.write_scc((
+      !(util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) >=
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1187,10 +1183,9 @@ inline void execute_s_cmp_nge_f32_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_cmp_ngt_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((!(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) >
-      util::f16_to_f32(
-          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+  wf.write_scc((
+      !(util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) >
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1203,10 +1198,9 @@ inline void execute_s_cmp_ngt_f32_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_cmp_nle_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((!(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) <=
-      util::f16_to_f32(
-          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+  wf.write_scc((
+      !(util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) <=
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1221,9 +1215,9 @@ inline void execute_s_cmp_nlg_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   wf.write_scc((!([&]() {
     auto a =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf)));
     auto b =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
     return (a < b) || (a > b);
   }())));
 }
@@ -1241,10 +1235,9 @@ inline void execute_s_cmp_nlg_f32_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_cmp_nlt_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((!(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) <
-      util::f16_to_f32(
-          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+  wf.write_scc((
+      !(util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) <
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1257,9 +1250,9 @@ inline void execute_s_cmp_nlt_f32_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_cmp_o_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.write_scc((!std::isnan(util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)))) &&
+                    static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf)))) &&
                 !std::isnan(util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+                    static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1272,9 +1265,9 @@ inline void execute_s_cmp_o_f32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_s_cmp_u_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.write_scc((std::isnan(util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)))) ||
+                    static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf)))) ||
                 std::isnan(util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+                    static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1434,7 +1427,7 @@ inline void execute_s_cvt_f32_f16_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   // SOP1 scalar conversions preserve SCC.
   uint32_t result = std::bit_cast<uint32_t>(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
 }
 
@@ -1461,7 +1454,7 @@ inline void execute_s_cvt_hi_f32_f16_sop1([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
   // SOP1 scalar conversions preserve SCC.
   uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(
-      static_cast<uint16_t>((amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)) >> 16)));
+      static_cast<uint16_t>((amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf, true)) >> 16)));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
 }
 
@@ -1609,7 +1602,7 @@ inline void execute_s_flbit_i32_i64_sop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_floor_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = util::floor_scalar(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -1633,8 +1626,8 @@ inline void execute_s_fmaak_f32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_s_fmac_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = std::fma(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))),
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))),
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))),
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))),
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.sdst))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
@@ -1776,8 +1769,8 @@ inline void execute_s_max_num_f16_sop2([[maybe_unused]] Inst &inst,
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   amdgpu::RegisterAccess(wf).write_scalar(
       inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>(
-                     input_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
-                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+                     input_policy, amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf),
+                     amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
 }
 
 template <typename Inst>
@@ -1805,8 +1798,8 @@ inline void execute_s_maximum_f16_sop2([[maybe_unused]] Inst &inst,
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   amdgpu::RegisterAccess(wf).write_scalar(
       inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::Maximum>(
-                     input_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
-                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+                     input_policy, amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf),
+                     amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
 }
 
 template <typename Inst>
@@ -1853,8 +1846,8 @@ inline void execute_s_min_num_f16_sop2([[maybe_unused]] Inst &inst,
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   amdgpu::RegisterAccess(wf).write_scalar(
       inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>(
-                     input_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
-                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+                     input_policy, amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf),
+                     amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
 }
 
 template <typename Inst>
@@ -1882,8 +1875,8 @@ inline void execute_s_minimum_f16_sop2([[maybe_unused]] Inst &inst,
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   amdgpu::RegisterAccess(wf).write_scalar(
       inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::Minimum>(
-                     input_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
-                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+                     input_policy, amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf),
+                     amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
 }
 
 template <typename Inst>
@@ -1918,8 +1911,8 @@ inline void execute_s_movk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]
 template <typename Inst>
 inline void execute_s_mul_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result =
-      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) *
-       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))));
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) *
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -2326,7 +2319,7 @@ inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_rndne_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = util::rndne_scalar(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -2555,8 +2548,8 @@ inline void execute_s_sub_co_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_s_sub_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result =
-      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) -
-       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))));
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) -
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -2610,7 +2603,7 @@ inline void execute_s_trap_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wa
 template <typename Inst>
 inline void execute_s_trunc_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = util::trunc_scalar(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -2908,17 +2901,14 @@ inline void execute_v_add_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_add_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
-                                                 wf.fp_denorm_mode_f16_f64())) {
-    if (wf.fp16_ovfl()) {
-      ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) + util::f16_to_f32_simd(b));
-      });
-    } else {
-      ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_simd(util::f16_to_f32_simd(a) + util::f16_to_f32_simd(b));
-      });
-    }
+  if (wf.fp_round_mode_f16_f64() == 0) {
+    ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
+        uint32_t,
+        [&wf](auto a, auto b) {
+          return amdgpu::binary_f16_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>(
+              a, b, wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl());
+        },
+        0);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -2943,7 +2933,8 @@ inline void execute_v_add_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_add_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false, amdgpu::fp_mode::Arithmetic::ADD);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false, amdgpu::fp_mode::Arithmetic::ADD,
+                                          amdgpu::NegatedSource::NONE);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
@@ -2977,12 +2968,12 @@ inline void execute_v_add_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_add_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, [&wf](auto a, auto b) {
-      return amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::ADD>(a, b, wf);
-    });
-  }
+  ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
+      float32_t,
+      [&wf](auto a, auto b) {
+        return amdgpu::binary_f32_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>(a, b, wf);
+      },
+      wf.fp_round_mode_f32());
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2998,20 +2989,16 @@ inline void execute_v_add_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_add_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, [&inst, &wf](auto a, auto b) {
-      return amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::ADD>(
-          a, b, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
-    });
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP_SCOPED(float32_t, [&inst, &wf](auto a, auto b) {
+    return amdgpu::binary_f32_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>(
+        a, b, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
           float v = [&]() {
             float v = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
                 [&]() {
@@ -3030,15 +3017,16 @@ inline void execute_v_add_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 wf.ieee_mode(),
                 (amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                  wf.ieee_mode(), inst.inst_.omod) != 0));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 0)
-              return v;
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
-          if (inst.inst_.clamp)
+          if (inst.inst_.clamp) {
+            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
             v = amdgpu::clamp_floating_result(v, wf);
+          }
           return v;
         }()));
   }
@@ -8058,8 +8046,9 @@ inline void execute_v_cos_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 wf.fp_denorm_mode_f32(),
                 amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(),
-                                                   inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod),
+                0);
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -8289,156 +8278,96 @@ inline void execute_v_cubetc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cvt_f16_f32_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, uint32_t,
-                                 [](auto a) { return util::f32_to_f16_ovfl_simd(a); });
-  } else {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, uint32_t,
-                                 [](auto a) { return util::f32_to_f16_simd(a); });
-  }
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>(inst, wf);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::round_f16_result(inst, wf,
-                                       std::bit_cast<float>(static_cast<uint32_t>(
-                                           amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))),
-                                       wf.fp16_ovfl()));
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f16_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, uint32_t,
-                                 [](auto a) { return util::f32_to_f16_ovfl_simd(a); });
-  } else {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, uint32_t,
-                                 [](auto a) { return util::f32_to_f16_simd(a); });
-  }
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(
+          wf, inst.inst_.abs, inst.inst_.neg, inst.inst_.omod, inst.inst_.clamp);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::round_f16_result(inst, wf,
-                                       std::bit_cast<float>(static_cast<uint32_t>(
-                                           amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))),
-                                       wf.fp16_ovfl()));
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f16_i16_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(int32_t, uint32_t, [](auto a) {
-      auto i = (a << 16) >> 16;
-      return util::f32_to_f16_ovfl_simd(util::stdx::static_simd_cast<util::native<float32_t>>(i));
-    });
-  } else {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(int32_t, uint32_t, [](auto a) {
-      auto i = (a << 16) >> 16;
-      return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float32_t>>(i));
-    });
-  }
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::I16>(inst, wf);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::round_f16_result(
-            inst, wf,
-            static_cast<float>(static_cast<int16_t>(
-                amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) & 0xFFFF)),
-            wf.fp16_ovfl()));
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f16_i16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(int32_t, uint32_t, [](auto a) {
-      auto i = (a << 16) >> 16;
-      return util::f32_to_f16_ovfl_simd(util::stdx::static_simd_cast<util::native<float32_t>>(i));
-    });
-  } else {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(int32_t, uint32_t, [](auto a) {
-      auto i = (a << 16) >> 16;
-      return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float32_t>>(i));
-    });
-  }
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::conversion::I16, amdgpu::fp_format::F16>(
+          wf, 0u, 0u, inst.inst_.omod, inst.inst_.clamp);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::round_f16_result(
-            inst, wf,
-            static_cast<float>(static_cast<int16_t>(
-                amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) & 0xFFFF)),
-            wf.fp16_ovfl()));
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f16_u16_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
-      auto u = a & 0xFFFFu;
-      return util::f32_to_f16_ovfl_simd(util::stdx::static_simd_cast<util::native<float32_t>>(u));
-    });
-  } else {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
-      auto u = a & 0xFFFFu;
-      return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float32_t>>(u));
-    });
-  }
+  const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::conversion::U16>(inst, wf);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::round_f16_result(inst, wf,
-                                       static_cast<float>(static_cast<uint16_t>(
-                                           amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))),
-                                       wf.fp16_ovfl()));
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f16_u16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
-      auto u = a & 0xFFFFu;
-      return util::f32_to_f16_ovfl_simd(util::stdx::static_simd_cast<util::native<float32_t>>(u));
-    });
-  } else {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
-      auto u = a & 0xFFFFu;
-      return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float32_t>>(u));
-    });
-  }
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::conversion::U16, amdgpu::fp_format::F16>(
+          wf, 0u, 0u, inst.inst_.omod, inst.inst_.clamp);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::round_f16_result(inst, wf,
-                                       static_cast<float>(static_cast<uint16_t>(
-                                           amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))),
-                                       wf.fp16_ovfl()));
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
@@ -8483,8 +8412,10 @@ inline void execute_v_cvt_f32_f16_vop3([[maybe_unused]] Inst &inst,
                     0, inst.inst_.abs, inst.inst_.neg),
                 wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -8496,122 +8427,99 @@ inline void execute_v_cvt_f32_f16_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f32_f64_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(
-      float32_t, [](auto s) { return util::stdx::static_simd_cast<util::narrow32<float32_t>>(s); });
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::fp_format::F64, amdgpu::fp_format::F32>(wf);
+  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint32_t>(static_cast<float>(std::bit_cast<double>(
-            static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane))))));
+        conversion(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f32_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(
-      float32_t, [](auto s) { return util::stdx::static_simd_cast<util::narrow32<float32_t>>(s); });
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::fp_format::F64, amdgpu::fp_format::F32>(
+          wf, inst.inst_.abs, inst.inst_.neg, inst.inst_.omod, inst.inst_.clamp);
+  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint32_t>(static_cast<float>(std::bit_cast<double>(
-            static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane))))));
+        conversion(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f32_i32_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(int32_t, float32_t, [](auto a) {
-    return util::stdx::static_simd_cast<util::native<float32_t>>(a);
-  });
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::conversion::I32, amdgpu::fp_format::F32>(wf);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint32_t>(std::bit_cast<float>(std::bit_cast<uint32_t>(static_cast<float>(
-            static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)))))));
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f32_i32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  if (!inst.inst_.omod && !inst.inst_.clamp) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(int32_t, float32_t, [](auto a) {
-      return util::stdx::static_simd_cast<util::native<float32_t>>(a);
-    });
-  }
-  uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(std::bit_cast<uint32_t>(static_cast<float>(
-                static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)))));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
-  }
-}
-
-template <typename Inst>
-inline void execute_v_cvt_f32_u32_vop1([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, float32_t, [](auto a) {
-    return util::stdx::static_simd_cast<util::native<float32_t>>(a);
-  });
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::conversion::I32, amdgpu::fp_format::F32>(
+          wf, 0u, 0u, inst.inst_.omod, inst.inst_.clamp);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint32_t>(std::bit_cast<float>(std::bit_cast<uint32_t>(
-            static_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))))));
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
+  }
+}
+
+template <typename Inst>
+inline void execute_v_cvt_f32_u32_vop1([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::conversion::U32, amdgpu::fp_format::F32>(wf);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
+  uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
+        inst, wf, inst.vdst, lane,
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f32_u32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  if (!inst.inst_.omod && !inst.inst_.clamp) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, float32_t, [](auto a) {
-      return util::stdx::static_simd_cast<util::native<float32_t>>(a);
-    });
-  }
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::conversion::U32, amdgpu::fp_format::F32>(
+          wf, 0u, 0u, inst.inst_.omod, inst.inst_.clamp);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::bit_cast<float>(std::bit_cast<uint32_t>(
-                static_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))));
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
@@ -8650,8 +8558,10 @@ inline void execute_v_cvt_f32_ubyte0_vop3([[maybe_unused]] Inst &inst,
             float v = std::bit_cast<float>(std::bit_cast<uint32_t>(
                 static_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) & 0xFFu)));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -8695,8 +8605,10 @@ inline void execute_v_cvt_f32_ubyte1_vop3([[maybe_unused]] Inst &inst,
             float v = std::bit_cast<float>(std::bit_cast<uint32_t>(static_cast<float>(
                 (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) >> 8) & 0xFFu)));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -8740,8 +8652,10 @@ inline void execute_v_cvt_f32_ubyte2_vop3([[maybe_unused]] Inst &inst,
             float v = std::bit_cast<float>(std::bit_cast<uint32_t>(static_cast<float>(
                 (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) >> 16) & 0xFFu)));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -8785,8 +8699,10 @@ inline void execute_v_cvt_f32_ubyte3_vop3([[maybe_unused]] Inst &inst,
             float v = std::bit_cast<float>(std::bit_cast<uint32_t>(static_cast<float>(
                 (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) >> 24) & 0xFFu)));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -8798,44 +8714,33 @@ inline void execute_v_cvt_f32_ubyte3_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f64_f32_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(
-      float32_t, [](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); });
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F64>(wf);
+  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint64_t>(std::bit_cast<double>(std::bit_cast<uint64_t>(
-            static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>(
-                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))))))))));
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f64_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  if (!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && !inst.inst_.clamp) {
-    ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(
-        float32_t, [](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); });
-  }
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F64>(
+          wf, inst.inst_.abs, inst.inst_.neg, inst.inst_.omod, inst.inst_.clamp);
+  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::fp_format::F64>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        amdgpu::output_modifier::apply<amdgpu::fp_format::F64>(
-            std::bit_cast<uint64_t>(static_cast<double>(
-                std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>([&]() {
-                  float sv =
-                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }()))))),
-            output_policy));
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
@@ -8918,116 +8823,62 @@ inline void execute_v_cvt_f64_u32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_floor_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
-    auto r = util::stdx::floor(s);
-    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
-  });
+  const auto conversion = amdgpu::conversion_f32_to_integer<amdgpu::conversion::FloorI32>(wf);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>(
-              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)))));
-          float r = std::floor(s);
-          if (std::isnan(r))
-            return 0u;
-          if (r >= 2147483648.0f)
-            return static_cast<uint32_t>(INT32_MAX);
-          if (r < -2147483648.0f)
-            return static_cast<uint32_t>(INT32_MIN);
-          return static_cast<uint32_t>(static_cast<int32_t>(r));
-        }());
+        inst, wf, inst.vdst, lane,
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_floor_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  if (!inst.inst_.abs && !inst.inst_.neg) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
-      auto r = util::stdx::floor(s);
-      return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
-    });
-  }
+  const auto conversion = amdgpu::conversion_f32_to_integer<amdgpu::conversion::FloorI32>(
+      wf, inst.inst_.abs, inst.inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>([&]() {
-            float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-          }())));
-          float r = std::floor(s);
-          if (std::isnan(r))
-            return 0u;
-          if (r >= 2147483648.0f)
-            return static_cast<uint32_t>(INT32_MAX);
-          if (r < -2147483648.0f)
-            return static_cast<uint32_t>(INT32_MIN);
-          return static_cast<uint32_t>(static_cast<int32_t>(r));
-        }());
+        inst, wf, inst.vdst, lane,
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_flr_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
-    auto r = util::stdx::floor(s);
-    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
-  });
+  const auto conversion = amdgpu::conversion_f32_to_integer<amdgpu::conversion::FloorI32>(wf);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>(
-              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)))));
-          float r = std::floor(s);
-          if (std::isnan(r))
-            return 0u;
-          if (r >= 2147483648.0f)
-            return static_cast<uint32_t>(INT32_MAX);
-          if (r < -2147483648.0f)
-            return static_cast<uint32_t>(INT32_MIN);
-          return static_cast<uint32_t>(static_cast<int32_t>(r));
-        }());
+        inst, wf, inst.vdst, lane,
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_flr_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
-  if (!inst.inst_.abs && !inst.inst_.neg) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
-      auto r = util::stdx::floor(s);
-      return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
-    });
-  }
+  const auto conversion = amdgpu::conversion_f32_to_integer<amdgpu::conversion::FloorI32>(
+      wf, inst.inst_.abs, inst.inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>([&]() {
-            float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-          }())));
-          float r = std::floor(s);
-          if (std::isnan(r))
-            return 0u;
-          if (r >= 2147483648.0f)
-            return static_cast<uint32_t>(INT32_MAX);
-          if (r < -2147483648.0f)
-            return static_cast<uint32_t>(INT32_MIN);
-          return static_cast<uint32_t>(static_cast<int32_t>(r));
-        }());
+        inst, wf, inst.vdst, lane,
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
@@ -9157,8 +9008,7 @@ inline void execute_v_cvt_i32_f64_vop1([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          double s = std::bit_cast<double>(
-              static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
+          double s = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
           if (std::isnan(s))
             return 0;
           if (s >= 2147483648.0)
@@ -9173,18 +9023,23 @@ inline void execute_v_cvt_i32_f64_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_i32_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(int32_t, [](auto s) {
-    auto r = util::cvt_i32_f64_saturate_input_simd(s);
-    return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r);
-  });
+  if (!inst.inst_.abs && !inst.inst_.neg) {
+    ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(int32_t, [](auto s) {
+      auto r = util::cvt_i32_f64_saturate_input_simd(s);
+      return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r);
+    });
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          double s = std::bit_cast<double>(
-              static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
+          double s = [&]() {
+            double sv =
+                std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
+            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
+          }();
           if (std::isnan(s))
             return 0;
           if (s >= 2147483648.0)
@@ -9217,64 +9072,31 @@ inline void execute_v_cvt_i32_i16_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_nearest_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
-    auto r = util::stdx::floor(s);
-    util::stdx::where(s - r >= util::native<float32_t>(0.5f), r) += 1.0f;
-    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
-  });
+  const auto conversion = amdgpu::conversion_f32_to_integer<amdgpu::conversion::NearestI32>(wf);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>(
-              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)))));
-          float r = std::floor(s);
-          if (s - r >= 0.5f)
-            r += 1.0f;
-          if (std::isnan(r))
-            return 0u;
-          if (r >= 2147483648.0f)
-            return static_cast<uint32_t>(INT32_MAX);
-          if (r < -2147483648.0f)
-            return static_cast<uint32_t>(INT32_MIN);
-          return static_cast<uint32_t>(static_cast<int32_t>(r));
-        }());
+        inst, wf, inst.vdst, lane,
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_nearest_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
-  if (!inst.inst_.abs && !inst.inst_.neg) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
-      auto r = util::stdx::floor(s);
-      util::stdx::where(s - r >= util::native<float32_t>(0.5f), r) += 1.0f;
-      return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
-    });
-  }
+  const auto conversion = amdgpu::conversion_f32_to_integer<amdgpu::conversion::NearestI32>(
+      wf, inst.inst_.abs, inst.inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>([&]() {
-            float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-          }())));
-          float r = std::floor(s);
-          if (s - r >= 0.5f)
-            r += 1.0f;
-          if (std::isnan(r))
-            return 0u;
-          if (r >= 2147483648.0f)
-            return static_cast<uint32_t>(INT32_MAX);
-          if (r < -2147483648.0f)
-            return static_cast<uint32_t>(INT32_MIN);
-          return static_cast<uint32_t>(static_cast<int32_t>(r));
-        }());
+        inst, wf, inst.vdst, lane,
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
@@ -9282,13 +9104,15 @@ template <typename Inst>
 inline void execute_v_cvt_norm_i16_f16_vop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
           float s = util::f16_to_f32(
-              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
+              static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                  amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy)));
           if (std::isnan(s))
             return 0u;
           double scaled =
@@ -9302,16 +9126,17 @@ template <typename Inst>
 inline void execute_v_cvt_norm_i16_f16_vop3([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = [&]() {
-            float sv = util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-          }();
+          float s = amdgpu::source_modifier::apply_to_float(
+              util::f16_to_f32(
+                  static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                      amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy))),
+              0, inst.inst_.abs, inst.inst_.neg);
           if (std::isnan(s))
             return 0u;
           double scaled =
@@ -9325,13 +9150,15 @@ template <typename Inst>
 inline void execute_v_cvt_norm_u16_f16_vop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
           float s = util::f16_to_f32(
-              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
+              static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                  amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy)));
           if (std::isnan(s))
             return 0u;
           double scaled =
@@ -9345,16 +9172,17 @@ template <typename Inst>
 inline void execute_v_cvt_norm_u16_f16_vop3([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = [&]() {
-            float sv = util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-          }();
+          float s = amdgpu::source_modifier::apply_to_float(
+              util::f16_to_f32(
+                  static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                      amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy))),
+              0, inst.inst_.abs, inst.inst_.neg);
           if (std::isnan(s))
             return 0u;
           double scaled =
@@ -9400,8 +9228,10 @@ inline void execute_v_cvt_off_f32_i4_vop3([[maybe_unused]] Inst &inst,
               return static_cast<float>(nibble) * 0.0625f;
             }();
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -9525,54 +9355,32 @@ inline void execute_v_cvt_pk_norm_u16_f32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_pk_rtz_f16_f32_vop2([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-    auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));
-    auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));
-    return lo | (hi << 16);
-  });
+  const auto conversion = amdgpu::conversion_pk_rtz_f16(wf);
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane));
-    uint32_t lo = util::f32_to_f16_rtz(s0);
-    uint32_t hi = util::f32_to_f16_rtz(s1);
+    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
+    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane);
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::PK_F16>(inst, wf, inst.vdst, lane,
-                                                         lo | (hi << 16));
+                                                         conversion(s0, s1));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_pk_rtz_f16_f32_vop3([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [&inst](auto a, auto b) {
-    if (inst.inst_.abs & 1u)
-      a &= ~0x80000000u;
-    if (inst.inst_.neg & 1u)
-      a ^= 0x80000000u;
-    if (inst.inst_.abs & 2u)
-      b &= ~0x80000000u;
-    if (inst.inst_.neg & 2u)
-      b ^= 0x80000000u;
-    return ([](auto a, auto b) {
-      auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));
-      auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));
-      return lo | (hi << 16);
-    })(a, b);
-  });
+  const auto conversion = amdgpu::conversion_pk_rtz_f16(wf, inst.inst_.abs, inst.inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-    s0 = amdgpu::source_modifier::apply_to_float(s0, 0, inst.inst_.abs, inst.inst_.neg);
-    s1 = amdgpu::source_modifier::apply_to_float(s1, 1, inst.inst_.abs, inst.inst_.neg);
-    uint32_t lo = util::f32_to_f16_rtz(s0);
-    uint32_t hi = util::f32_to_f16_rtz(s1);
+    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
+    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::PK_F16>(inst, wf, inst.vdst, lane,
-                                                         lo | (hi << 16));
+                                                         conversion(s0, s1));
   }
 }
 
@@ -9604,17 +9412,17 @@ inline void execute_v_cvt_pk_u16_u32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_pk_u8_f32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
+  const auto conversion = amdgpu::conversion_pk_u8(wf, inst.inst_.abs, inst.inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-    uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) & 3;
-    uint32_t old = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));
-    uint32_t mask = ~(0xFFu << (byte_sel * 8));
+    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
+    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
-                                                       (old & mask) | (byte << (byte_sel * 8)));
+                                                       conversion(s0, s1, s2));
   }
 }
 
@@ -9628,7 +9436,7 @@ inline void execute_v_cvt_pkaccum_u8_f32_vop3([[maybe_unused]] Inst &inst,
     float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
     uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) & 3;
     uint32_t old = amdgpu::RegisterAccess(wf).read_lane(inst.vdst, lane);
-    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));
+    uint32_t byte = amdgpu::cvt_u8_f32(fval);
     uint32_t mask = ~(0xFFu << (byte_sel * 8));
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        (old & mask) | (byte << (byte_sel * 8)));
@@ -9828,118 +9636,63 @@ inline void execute_v_cvt_pknorm_u16_f32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_pkrtz_f16_f32_vop2([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-    auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));
-    auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));
-    return lo | (hi << 16);
-  });
+  const auto conversion = amdgpu::conversion_pk_rtz_f16(wf);
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane));
-    uint32_t lo = util::f32_to_f16_rtz(s0);
-    uint32_t hi = util::f32_to_f16_rtz(s1);
+    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
+    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane);
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::PK_F16>(inst, wf, inst.vdst, lane,
-                                                         lo | (hi << 16));
+                                                         conversion(s0, s1));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_pkrtz_f16_f32_vop3([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [&inst](auto a, auto b) {
-    if (inst.inst_.abs & 1u)
-      a &= ~0x80000000u;
-    if (inst.inst_.neg & 1u)
-      a ^= 0x80000000u;
-    if (inst.inst_.abs & 2u)
-      b &= ~0x80000000u;
-    if (inst.inst_.neg & 2u)
-      b ^= 0x80000000u;
-    return ([](auto a, auto b) {
-      auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));
-      auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));
-      return lo | (hi << 16);
-    })(a, b);
-  });
+  const auto conversion = amdgpu::conversion_pk_rtz_f16(wf, inst.inst_.abs, inst.inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-    s0 = amdgpu::source_modifier::apply_to_float(s0, 0, inst.inst_.abs, inst.inst_.neg);
-    s1 = amdgpu::source_modifier::apply_to_float(s1, 1, inst.inst_.abs, inst.inst_.neg);
-    uint32_t lo = util::f32_to_f16_rtz(s0);
-    uint32_t hi = util::f32_to_f16_rtz(s1);
+    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
+    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::PK_F16>(inst, wf, inst.vdst, lane,
-                                                         lo | (hi << 16));
+                                                         conversion(s0, s1));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_rpi_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
-    auto r = util::stdx::floor(s);
-    util::stdx::where(s - r >= util::native<float32_t>(0.5f), r) += 1.0f;
-    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
-  });
+  const auto conversion = amdgpu::conversion_f32_to_integer<amdgpu::conversion::NearestI32>(wf);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>(
-              std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)))));
-          float r = std::floor(s);
-          if (s - r >= 0.5f)
-            r += 1.0f;
-          if (std::isnan(r))
-            return 0u;
-          if (r >= 2147483648.0f)
-            return static_cast<uint32_t>(INT32_MAX);
-          if (r < -2147483648.0f)
-            return static_cast<uint32_t>(INT32_MIN);
-          return static_cast<uint32_t>(static_cast<int32_t>(r));
-        }());
+        inst, wf, inst.vdst, lane,
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_rpi_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
-  if (!inst.inst_.abs && !inst.inst_.neg) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
-      auto r = util::stdx::floor(s);
-      util::stdx::where(s - r >= util::native<float32_t>(0.5f), r) += 1.0f;
-      return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
-    });
-  }
+  const auto conversion = amdgpu::conversion_f32_to_integer<amdgpu::conversion::NearestI32>(
+      wf, inst.inst_.abs, inst.inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>([&]() {
-            float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-          }())));
-          float r = std::floor(s);
-          if (s - r >= 0.5f)
-            r += 1.0f;
-          if (std::isnan(r))
-            return 0u;
-          if (r >= 2147483648.0f)
-            return static_cast<uint32_t>(INT32_MAX);
-          if (r < -2147483648.0f)
-            return static_cast<uint32_t>(INT32_MIN);
-          return static_cast<uint32_t>(static_cast<int32_t>(r));
-        }());
+        inst, wf, inst.vdst, lane,
+        conversion(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
@@ -10061,8 +9814,7 @@ inline void execute_v_cvt_u32_f64_vop1([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          double s = std::bit_cast<double>(
-              static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
+          double s = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
           if (std::isnan(s) || s < 0.0)
             return 0u;
           if (s >= 4294967296.0)
@@ -10075,18 +9827,23 @@ inline void execute_v_cvt_u32_f64_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_u32_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(uint32_t, [](auto s) {
-    auto r = util::cvt_u32_f64_saturate_input_simd(s);
-    return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r);
-  });
+  if (!inst.inst_.abs && !inst.inst_.neg) {
+    ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(uint32_t, [](auto s) {
+      auto r = util::cvt_u32_f64_saturate_input_simd(s);
+      return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r);
+    });
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          double s = std::bit_cast<double>(
-              static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
+          double s = [&]() {
+            double sv =
+                std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
+            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
+          }();
           if (std::isnan(s) || s < 0.0)
             return 0u;
           if (s >= 4294967296.0)
@@ -10356,41 +10113,40 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
         raw0 = (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) >> 16) * 0x10001u;
       if (amdgpu::dot2_src_needs_half_replication(inst.inst_.src1))
         raw1 = (amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) >> 16) * 0x10001u;
-      uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
-      uint16_t a1 = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
-      uint16_t b0 = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
-      uint16_t b1 = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+      uint16_t src0_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+      uint16_t src0_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+      uint16_t src1_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+      uint16_t src1_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
       if (inst.inst_.neg & 1)
-        a0 ^= 0x8000u;
+        src0_lo ^= 0x8000u;
       if (inst.inst_.neg & 2)
-        b0 ^= 0x8000u;
+        src1_lo ^= 0x8000u;
       if (inst.inst_.neg_hi & 1)
-        a1 ^= 0x8000u;
+        src0_hi ^= 0x8000u;
       if (inst.inst_.neg_hi & 2)
-        b1 ^= 0x8000u;
+        src1_hi ^= 0x8000u;
       uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-      if (inst.inst_.neg & 4)
-        acc ^= 0x80000000u;
-      uint32_t result = amdgpu::gfx11_dot2_f32<true>(a0, b0, a1, b1, acc);
+      acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst.inst_.neg_hi,
+                                                                   inst.inst_.neg);
+      uint32_t result = amdgpu::gfx11_dot2_f32<true>(src0_lo, src1_lo, src0_hi, src1_hi, acc);
       sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
       continue;
     }
-    float a0 = util::bf16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float a1 = util::bf16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b0 = util::bf16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float b1 = util::bf16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
+    float src0_lo = util::bf16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
+    float src0_hi = util::bf16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
+    float src1_lo = util::bf16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
+    float src1_hi = util::bf16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
     if (inst.inst_.neg & 1)
-      a0 = -a0;
+      src0_lo = -src0_lo;
     if (inst.inst_.neg & 2)
-      b0 = -b0;
+      src1_lo = -src1_lo;
     if (inst.inst_.neg_hi & 1)
-      a1 = -a1;
+      src0_hi = -src0_hi;
     if (inst.inst_.neg_hi & 2)
-      b1 = -b1;
+      src1_hi = -src1_hi;
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-    if (inst.inst_.neg & 4)
-      acc = -acc;
-    float result = a0 * b0 + a1 * b1 + acc;
+    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst.inst_.neg_hi, inst.inst_.neg);
+    float result = src0_lo * src1_lo + src0_hi * src1_hi + acc;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        std::bit_cast<uint32_t>(result));
   }
@@ -10415,41 +10171,40 @@ inline void execute_v_dot2_f32_f16_vop3p([[maybe_unused]] Inst &inst,
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
     if (isa_properties(wf.cu().arch()).float_dot_accumulation == FloatDotAccumulation::Gfx11) {
-      uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
-      uint16_t a1 = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
-      uint16_t b0 = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
-      uint16_t b1 = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+      uint16_t src0_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+      uint16_t src0_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+      uint16_t src1_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+      uint16_t src1_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
       if (inst.inst_.neg & 1)
-        a0 ^= 0x8000u;
+        src0_lo ^= 0x8000u;
       if (inst.inst_.neg & 2)
-        b0 ^= 0x8000u;
+        src1_lo ^= 0x8000u;
       if (inst.inst_.neg_hi & 1)
-        a1 ^= 0x8000u;
+        src0_hi ^= 0x8000u;
       if (inst.inst_.neg_hi & 2)
-        b1 ^= 0x8000u;
+        src1_hi ^= 0x8000u;
       uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-      if (inst.inst_.neg & 4)
-        acc ^= 0x80000000u;
-      uint32_t result = amdgpu::gfx11_dot2_f32<false>(a0, b0, a1, b1, acc);
+      acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst.inst_.neg_hi,
+                                                                   inst.inst_.neg);
+      uint32_t result = amdgpu::gfx11_dot2_f32<false>(src0_lo, src1_lo, src0_hi, src1_hi, acc);
       sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
       continue;
     }
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
+    float src0_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
+    float src0_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
+    float src1_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
+    float src1_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
     if (inst.inst_.neg & 1)
-      a0 = -a0;
+      src0_lo = -src0_lo;
     if (inst.inst_.neg & 2)
-      b0 = -b0;
+      src1_lo = -src1_lo;
     if (inst.inst_.neg_hi & 1)
-      a1 = -a1;
+      src0_hi = -src0_hi;
     if (inst.inst_.neg_hi & 2)
-      b1 = -b1;
+      src1_hi = -src1_hi;
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-    if (inst.inst_.neg & 4)
-      acc = -acc;
-    float result = a0 * b0 + a1 * b1 + acc;
+    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst.inst_.neg_hi, inst.inst_.neg);
+    float result = src0_lo * src1_lo + src0_hi * src1_hi + acc;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        std::bit_cast<uint32_t>(result));
   }
@@ -10469,14 +10224,14 @@ inline void execute_v_dot2_i32_i16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
-    int16_t a0 = static_cast<int16_t>(sel0_lo ? (raw0 >> 16) : raw0);
-    int16_t a1 = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
-    int16_t b0 = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
-    int16_t b1 = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    int16_t src0_lo = static_cast<int16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    int16_t src0_hi = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    int16_t src1_lo = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    int16_t src1_hi = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
     int64_t result = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-    result += static_cast<int64_t>(a0) * b0;
-    result += static_cast<int64_t>(a1) * b1;
+    result += static_cast<int64_t>(src0_lo) * src1_lo;
+    result += static_cast<int64_t>(src0_hi) * src1_hi;
     if (inst.inst_.clamp) {
       result = std::clamp(result, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
                           static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
@@ -10500,13 +10255,13 @@ inline void execute_v_dot2_u32_u16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
-    uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
-    uint16_t a1 = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
-    uint16_t b0 = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
-    uint16_t b1 = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    uint16_t src0_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    uint16_t src0_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    uint16_t src1_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    uint16_t src1_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
     uint64_t result = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-    result += static_cast<uint64_t>(a0) * b0;
-    result += static_cast<uint64_t>(a1) * b1;
+    result += static_cast<uint64_t>(src0_lo) * src1_lo;
+    result += static_cast<uint64_t>(src0_hi) * src1_hi;
     if (inst.inst_.clamp)
       result = std::min(result, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
@@ -10656,12 +10411,14 @@ inline void execute_v_dot4_i32_i8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     for (int i = 0; i < 4; ++i) {
-      int8_t a = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);
-      int8_t b = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      int8_t src0_elem = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);
+      int8_t src1_elem = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp && amdgpu::dot4_clamp_supported(wf)) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10682,18 +10439,20 @@ inline void execute_v_dot4_i32_iu8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 4; ++i) {
-      uint32_t raw_a = (raw0 >> (i * 8)) & 0xFF;
-      uint32_t raw_b = (raw1 >> (i * 8)) & 0xFF;
-      int32_t a = src0_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_a))
-                              : static_cast<int32_t>(raw_a);
-      int32_t b = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_b))
-                              : static_cast<int32_t>(raw_b);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      uint32_t src0_bits = (raw0 >> (i * 8)) & 0xFF;
+      uint32_t src1_bits = (raw1 >> (i * 8)) & 0xFF;
+      int32_t src0_elem = src0_signed ? static_cast<int32_t>(static_cast<int8_t>(src0_bits))
+                                      : static_cast<int32_t>(src0_bits);
+      int32_t src1_elem = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(src1_bits))
+                                      : static_cast<int32_t>(src1_bits);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp && amdgpu::dot4_clamp_supported(wf)) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10714,11 +10473,13 @@ inline void execute_v_dot4_u32_u8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
     for (int i = 0; i < 4; ++i) {
-      uint8_t a = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
-      uint8_t b = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);
-      sum += static_cast<uint32_t>(a) * b;
+      uint8_t src0_elem = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
+      uint8_t src1_elem = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);
+      sum += static_cast<uint32_t>(src0_elem) * src1_elem;
     }
     if (inst.inst_.clamp && amdgpu::dot4_clamp_supported(wf))
       sum = std::min(sum, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
@@ -10777,16 +10538,18 @@ inline void execute_v_dot8_i32_i4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     for (int i = 0; i < 8; ++i) {
-      int32_t a = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);
-      if (a & 0x8)
-        a |= ~0xF;
-      int32_t b = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);
-      if (b & 0x8)
-        b |= ~0xF;
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      int32_t src0_elem = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);
+      if (src0_elem & 0x8)
+        src0_elem |= ~0xF;
+      int32_t src1_elem = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);
+      if (src1_elem & 0x8)
+        src1_elem |= ~0xF;
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10807,18 +10570,22 @@ inline void execute_v_dot8_i32_iu4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 8; ++i) {
-      uint32_t raw_a = (raw0 >> (i * 4)) & 0xF;
-      uint32_t raw_b = (raw1 >> (i * 4)) & 0xF;
-      int32_t a = src0_signed ? static_cast<int32_t>((raw_a & 0x8) ? (raw_a | ~0xF) : raw_a)
-                              : static_cast<int32_t>(raw_a);
-      int32_t b = src1_signed ? static_cast<int32_t>((raw_b & 0x8) ? (raw_b | ~0xF) : raw_b)
-                              : static_cast<int32_t>(raw_b);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      uint32_t src0_bits = (raw0 >> (i * 4)) & 0xF;
+      uint32_t src1_bits = (raw1 >> (i * 4)) & 0xF;
+      int32_t src0_elem =
+          src0_signed ? static_cast<int32_t>((src0_bits & 0x8) ? (src0_bits | ~0xF) : src0_bits)
+                      : static_cast<int32_t>(src0_bits);
+      int32_t src1_elem =
+          src1_signed ? static_cast<int32_t>((src1_bits & 0x8) ? (src1_bits | ~0xF) : src1_bits)
+                      : static_cast<int32_t>(src1_bits);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10839,11 +10606,13 @@ inline void execute_v_dot8_u32_u4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
     for (int i = 0; i < 8; ++i) {
-      uint32_t a = (raw0 >> (i * 4)) & 0xF;
-      uint32_t b = (raw1 >> (i * 4)) & 0xF;
-      sum += a * b;
+      uint32_t src0_elem = (raw0 >> (i * 4)) & 0xF;
+      uint32_t src1_elem = (raw1 >> (i * 4)) & 0xF;
+      sum += src0_elem * src1_elem;
     }
     if (inst.inst_.clamp)
       sum = std::min(sum, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
@@ -11001,7 +10770,7 @@ inline void execute_v_exp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       [&wf](auto a) {
         return util::exp_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
       },
-      true /* force_output_flush */);
+      true /* force_output_flush */, 0 /* round_mode */);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11018,8 +10787,9 @@ inline void execute_v_exp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 }(),
                 amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(),
-                                                   inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod),
+                0);
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -11064,8 +10834,9 @@ inline void execute_v_exp_legacy_f32_vop3([[maybe_unused]] Inst &inst,
                 }(),
                 amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(),
-                                                   inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod),
+                0);
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -11336,8 +11107,10 @@ template <typename Inst>
 inline void execute_v_fma_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
-    ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
-        [&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd(a, b, c, wf); },
+    ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32_SCOPED(
+        [&wf](auto a, auto b, auto c) {
+          return amdgpu::fma_dx9_zero_f32_simd_unscoped(a, b, c, wf);
+        },
         true /* apply_omod */, true /* force_output_flush */);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -11369,12 +11142,10 @@ inline void execute_v_fma_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
                 wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(),
                 (amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(),
                                                  inst.inst_.omod) != 0));
-            const uint32_t effective_omod =
-                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 0)
-              return v;
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp) {
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
@@ -11412,13 +11183,10 @@ inline void execute_v_fma_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_fma_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([&inst, &wf](auto a, auto b, auto c) {
-      return amdgpu::fma_f32_simd(a, b, c, wf,
-                                  amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
-    });
-  }
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32_SCOPED([&inst, &wf](auto a, auto b, auto c) {
+    return amdgpu::fma_f32_simd_unscoped(a, b, c, wf,
+                                         amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11448,12 +11216,11 @@ inline void execute_v_fma_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(),
                 (amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                  wf.ieee_mode(), inst.inst_.omod) != 0));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 0)
-              return v;
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp) {
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
@@ -11673,12 +11440,10 @@ inline void execute_v_fmaak_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_v_fmaak_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP2_TERNARY(
-        float32_t, amdgpu::RegisterAccess(wf).read_scalar(inst.simm32),
-        [&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd(a, b, k, wf); });
-  }
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_SCOPED(
+      float32_t, amdgpu::RegisterAccess(wf).read_scalar(inst.simm32),
+      [&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd_unscoped(a, b, k, wf); },
+      wf.fp_round_mode_f32());
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11698,9 +11463,12 @@ template <typename Inst>
 inline void execute_v_fmac_dx9_zero_f32_vop2([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
-    ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC(float32_t, 0u, [&wf](auto a, auto b, auto d, auto) {
-      return amdgpu::fma_dx9_zero_f32_simd(a, b, d, wf);
-    });
+    ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC_SCOPED(
+        float32_t, 0u,
+        [&wf](auto a, auto b, auto d, auto) {
+          return amdgpu::fma_dx9_zero_f32_simd_unscoped(a, b, d, wf);
+        },
+        wf.fp_round_mode_f32());
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -11721,8 +11489,10 @@ template <typename Inst>
 inline void execute_v_fmac_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
-    ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32(
-        [&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd(a, b, c, wf); },
+    ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32_SCOPED(
+        [&wf](auto a, auto b, auto c) {
+          return amdgpu::fma_dx9_zero_f32_simd_unscoped(a, b, c, wf);
+        },
         true /* force_output_flush */);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -11749,12 +11519,10 @@ inline void execute_v_fmac_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
                 wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(),
                 (amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(),
                                                  inst.inst_.omod) != 0));
-            const uint32_t effective_omod =
-                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 0)
-              return v;
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp) {
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
@@ -11815,12 +11583,10 @@ inline void execute_v_fmac_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_fmac_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC(float32_t, 0u, [&wf](auto a, auto b, auto d, auto) {
-      return amdgpu::fma_f32_simd(a, b, d, wf);
-    });
-  }
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC_SCOPED(
+      float32_t, 0u,
+      [&wf](auto a, auto b, auto d, auto) { return amdgpu::fma_f32_simd_unscoped(a, b, d, wf); },
+      wf.fp_round_mode_f32());
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11837,13 +11603,10 @@ inline void execute_v_fmac_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_fmac_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32([&inst, &wf](auto a, auto b, auto c) {
-      return amdgpu::fma_f32_simd(a, b, c, wf,
-                                  amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
-    });
-  }
+  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32_SCOPED([&inst, &wf](auto a, auto b, auto c) {
+    return amdgpu::fma_f32_simd_unscoped(a, b, c, wf,
+                                         amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11868,12 +11631,11 @@ inline void execute_v_fmac_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
                 wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(),
                 (amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                  wf.ieee_mode(), inst.inst_.omod) != 0));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 0)
-              return v;
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp) {
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
@@ -11952,12 +11714,10 @@ inline void execute_v_fmamk_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_v_fmamk_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP2_TERNARY(
-        float32_t, amdgpu::RegisterAccess(wf).read_scalar(inst.simm32),
-        [&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd(a, k, b, wf); });
-  }
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_SCOPED(
+      float32_t, amdgpu::RegisterAccess(wf).read_scalar(inst.simm32),
+      [&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd_unscoped(a, k, b, wf); },
+      wf.fp_round_mode_f32());
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -12340,11 +12100,14 @@ inline void execute_v_frexp_mant_f32_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_frexp_mant_f32_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, [&wf](auto a) {
-    return util::native<float>([&](auto i) {
-      return amdgpu::frexp_f32(static_cast<float>(a[i]), wf.fp_denorm_mode_f32()).mantissa;
-    });
-  });
+  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(
+      float32_t, float32_t,
+      [&wf](auto a) {
+        return util::native<float>([&](auto i) {
+          return amdgpu::frexp_f32(static_cast<float>(a[i]), wf.fp_denorm_mode_f32()).mantissa;
+        });
+      },
+      false /* force_output_flush */, wf.fp_round_mode_f32() /* round_mode */);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -12362,8 +12125,10 @@ inline void execute_v_frexp_mant_f32_vop3([[maybe_unused]] Inst &inst,
                           wf.fp_denorm_mode_f32())
                           .mantissa;
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -12658,7 +12423,7 @@ inline void execute_v_log_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       [&wf](auto a) {
         return util::log_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
       },
-      true /* force_output_flush */);
+      true /* force_output_flush */, 0 /* round_mode */);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -12675,8 +12440,9 @@ inline void execute_v_log_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 }(),
                 amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(),
-                                                   inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod),
+                0);
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -12721,8 +12487,9 @@ inline void execute_v_log_legacy_f32_vop3([[maybe_unused]] Inst &inst,
                 }(),
                 amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(),
-                                                   inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod),
+                0);
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -12988,12 +12755,10 @@ inline void execute_v_mac_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_mac_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC(float32_t, 0u, [&wf](auto a, auto b, auto d, auto) {
-      return amdgpu::fma_f32_simd(a, b, d, wf);
-    });
-  }
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC_SCOPED(
+      float32_t, 0u,
+      [&wf](auto a, auto b, auto d, auto) { return amdgpu::fma_f32_simd_unscoped(a, b, d, wf); },
+      wf.fp_round_mode_f32());
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -13010,13 +12775,10 @@ inline void execute_v_mac_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_mac_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32([&inst, &wf](auto a, auto b, auto c) {
-      return amdgpu::fma_f32_simd(a, b, c, wf,
-                                  amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
-    });
-  }
+  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32_SCOPED([&inst, &wf](auto a, auto b, auto c) {
+    return amdgpu::fma_f32_simd_unscoped(a, b, c, wf,
+                                         amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -13041,12 +12803,11 @@ inline void execute_v_mac_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(),
                 (amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                  wf.ieee_mode(), inst.inst_.omod) != 0));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 0)
-              return v;
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp) {
             amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
@@ -13138,11 +12899,14 @@ inline void execute_v_mad_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                                                                   inst.inst_.neg);
                  }());
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
-          if (inst.inst_.clamp)
+          if (inst.inst_.clamp) {
             v = amdgpu::clamp_floating_result(v, wf);
+          }
           return v;
         }()));
   }
@@ -13277,11 +13041,14 @@ inline void execute_v_mad_legacy_f32_vop3([[maybe_unused]] Inst &inst,
                                                                   inst.inst_.neg);
                  }());
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
-          if (inst.inst_.clamp)
+          if (inst.inst_.clamp) {
             v = amdgpu::clamp_floating_result(v, wf);
+          }
           return v;
         }()));
   }
@@ -13563,12 +13330,10 @@ inline void execute_v_madak_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_v_madak_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP2_TERNARY(
-        float32_t, amdgpu::RegisterAccess(wf).read_scalar(inst.simm32),
-        [&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd(a, b, k, wf); });
-  }
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_SCOPED(
+      float32_t, amdgpu::RegisterAccess(wf).read_scalar(inst.simm32),
+      [&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd_unscoped(a, b, k, wf); },
+      wf.fp_round_mode_f32());
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -13621,12 +13386,10 @@ inline void execute_v_madmk_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_v_madmk_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP2_TERNARY(
-        float32_t, amdgpu::RegisterAccess(wf).read_scalar(inst.simm32),
-        [&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd(a, k, b, wf); });
-  }
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY_SCOPED(
+      float32_t, amdgpu::RegisterAccess(wf).read_scalar(inst.simm32),
+      [&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd_unscoped(a, k, b, wf); },
+      wf.fp_round_mode_f32());
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -13644,9 +13407,13 @@ inline void execute_v_madmk_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_v_max3_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16(
-      [](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMax3>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -13654,72 +13421,43 @@ inline void execute_v_max3_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-            static_cast<uint32_t>(amdgpu::sdwa::round_f16_result(
-                inst, wf,
-                std::fmax(std::fmax(
-                              [&]() {
-                                float sv = util::f16_to_f32(static_cast<uint16_t>(
-                                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-                                return amdgpu::source_modifier::apply_to_float(
-                                    sv, 0, inst.inst_.abs, inst.inst_.neg);
-                              }(),
-                              [&]() {
-                                float sv = util::f16_to_f32(static_cast<uint16_t>(
-                                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
-                                return amdgpu::source_modifier::apply_to_float(
-                                    sv, 1, inst.inst_.abs, inst.inst_.neg);
-                              }()),
-                          [&]() {
-                            float sv = util::f16_to_f32(static_cast<uint16_t>(
-                                amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-                            return amdgpu::source_modifier::apply_to_float(sv, 2, inst.inst_.abs,
-                                                                           inst.inst_.neg);
-                          }()),
-                wf.fp16_ovfl())),
-            output_policy));
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMax3>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_max3_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
-      [](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::fp_format::F32,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMax3>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::fmax(
-                std::fmax(
-                    [&]() {
-                      float sv = std::bit_cast<float>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                      return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }(),
-                    [&]() {
-                      float sv = std::bit_cast<float>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                      return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }()),
-                [&]() {
-                  float sv =
-                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 2, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }());
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMax3>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -13830,163 +13568,128 @@ inline void execute_v_max3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_max_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-      return util::f32_to_f16_ovfl_simd(
-          util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
-    });
-  } else {
-    ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-      return util::f32_to_f16_simd(
-          util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
-    });
-  }
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(
+      uint32_t, [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+                 legacy_policy = amdgpu::fp_mode::legacy_minmax_policy(
+                     wf.cu().arch(), wf.ieee_mode())](auto a, auto b) {
+        return amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMax>{
+            input_policy, legacy_policy}(a, b);
+      });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::round_f16_result(
-            inst, wf,
-            std::fmax(util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))),
-                      util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))),
-            wf.fp16_ovfl()));
+        amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMax>{
+            input_policy, amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())}(
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_max_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(uint32_t, [](auto a, auto b) {
-      return util::f32_to_f16_ovfl_simd(
-          util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
-    });
-  } else {
-    ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(uint32_t, [](auto a, auto b) {
-      return util::f32_to_f16_simd(
-          util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
-    });
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP(
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMax>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         inst, wf, inst.vdst, lane,
-        amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-            static_cast<uint32_t>(amdgpu::sdwa::round_f16_result(
-                inst, wf,
-                std::fmax(
-                    [&]() {
-                      float sv = util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-                      return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }(),
-                    [&]() {
-                      float sv = util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
-                      return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }()),
-                wf.fp16_ovfl())),
-            output_policy));
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMax>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_max_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, [](auto a, auto b) { return util::stdx::fmax(a, b); });
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(
+      uint32_t, [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+                 legacy_policy = amdgpu::fp_mode::legacy_minmax_policy(
+                     wf.cu().arch(), wf.ieee_mode())](auto a, auto b) {
+        return amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMax>{
+            input_policy, legacy_policy}(a, b);
+      });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint32_t>(std::fmax(
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))));
+        amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMax>{
+            input_policy, amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())}(
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_max_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t,
-                                   [](auto a, auto b) { return util::stdx::fmax(a, b); });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP(
+      amdgpu::fp_format::F32,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMax>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::fmax(
-                [&]() {
-                  float sv =
-                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }(),
-                [&]() {
-                  float sv =
-                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }());
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMax>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_max_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64([](auto a, auto b) { return util::stdx::fmax(a, b); });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(
+      amdgpu::fp_format::F64,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F64, amdgpu::minmax::LegacyMax>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F64>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint64_t>([&]() {
-          double v = [&]() {
-            double v = std::fmax(
-                [&]() {
-                  double sv = std::bit_cast<double>(
-                      amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }(),
-                [&]() {
-                  double sv = std::bit_cast<double>(
-                      amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }());
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0;
-            else if (effective_omod == 2)
-              v *= 4.0;
-            else if (effective_omod == 3)
-              v *= 0.5;
-            v = amdgpu::fp_mode::finalize_omod_f64(v, effective_omod);
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F64>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F64, amdgpu::minmax::LegacyMax>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)));
   }
 }
 
@@ -14316,57 +14019,45 @@ inline void execute_v_maximumminimum_f32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_maxmin_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
-      [](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::fp_format::F32,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMaxMin>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::fmin(
-                std::fmax(
-                    [&]() {
-                      float sv = std::bit_cast<float>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                      return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }(),
-                    [&]() {
-                      float sv = std::bit_cast<float>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                      return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }()),
-                [&]() {
-                  float sv =
-                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 2, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }());
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMaxMin>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_maxmin_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      int32_t, [](auto a, auto b, auto c) { return util::stdx::min(util::stdx::max(a, b), c); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::fmin(
-            std::fmax(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-                      static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))),
+        std::min(
+            std::max(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
+                     static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))),
             static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane))));
   }
 }
@@ -14400,15 +14091,17 @@ inline void execute_v_maxmin_num_f32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_maxmin_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [](auto a, auto b, auto c) { return util::stdx::min(util::stdx::max(a, b), c); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::fmin(std::fmax(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
-                  amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
+        std::min(std::max(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
+                 amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -14445,10 +14138,13 @@ inline void execute_v_mbcnt_lo_u32_b32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_med3_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16([](auto a, auto b, auto c) {
-    return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b));
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMed3>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -14456,76 +14152,43 @@ inline void execute_v_med3_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-            static_cast<uint32_t>(amdgpu::sdwa::round_f16_result(
-                inst, wf,
-                [&]() {
-                  auto a = [&]() {
-                    float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-                    return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                   inst.inst_.neg);
-                  }();
-                  auto b = [&]() {
-                    float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
-                    return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                   inst.inst_.neg);
-                  }();
-                  auto c = [&]() {
-                    float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-                    return amdgpu::source_modifier::apply_to_float(sv, 2, inst.inst_.abs,
-                                                                   inst.inst_.neg);
-                  }();
-                  return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
-                }(),
-                wf.fp16_ovfl())),
-            output_policy));
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMed3>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_med3_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([](auto a, auto b, auto c) {
-    return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b));
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::fp_format::F32,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMed3>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = [&]() {
-              auto a = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                               inst.inst_.neg);
-              }();
-              auto b = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                               inst.inst_.neg);
-              }();
-              auto c = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-                return amdgpu::source_modifier::apply_to_float(sv, 2, inst.inst_.abs,
-                                                               inst.inst_.neg);
-              }();
-              return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
-            }();
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMed3>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -14643,9 +14306,13 @@ inline void execute_v_med3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_min3_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16(
-      [](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMin3>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -14653,72 +14320,43 @@ inline void execute_v_min3_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-            static_cast<uint32_t>(amdgpu::sdwa::round_f16_result(
-                inst, wf,
-                std::fmin(std::fmin(
-                              [&]() {
-                                float sv = util::f16_to_f32(static_cast<uint16_t>(
-                                    amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-                                return amdgpu::source_modifier::apply_to_float(
-                                    sv, 0, inst.inst_.abs, inst.inst_.neg);
-                              }(),
-                              [&]() {
-                                float sv = util::f16_to_f32(static_cast<uint16_t>(
-                                    amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
-                                return amdgpu::source_modifier::apply_to_float(
-                                    sv, 1, inst.inst_.abs, inst.inst_.neg);
-                              }()),
-                          [&]() {
-                            float sv = util::f16_to_f32(static_cast<uint16_t>(
-                                amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
-                            return amdgpu::source_modifier::apply_to_float(sv, 2, inst.inst_.abs,
-                                                                           inst.inst_.neg);
-                          }()),
-                wf.fp16_ovfl())),
-            output_policy));
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMin3>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_min3_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
-      [](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::fp_format::F32,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMin3>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::fmin(
-                std::fmin(
-                    [&]() {
-                      float sv = std::bit_cast<float>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                      return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }(),
-                    [&]() {
-                      float sv = std::bit_cast<float>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                      return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }()),
-                [&]() {
-                  float sv =
-                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 2, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }());
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMin3>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -14829,163 +14467,128 @@ inline void execute_v_min3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_min_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-      return util::f32_to_f16_ovfl_simd(
-          util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
-    });
-  } else {
-    ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-      return util::f32_to_f16_simd(
-          util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
-    });
-  }
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(
+      uint32_t, [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+                 legacy_policy = amdgpu::fp_mode::legacy_minmax_policy(
+                     wf.cu().arch(), wf.ieee_mode())](auto a, auto b) {
+        return amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMin>{
+            input_policy, legacy_policy}(a, b);
+      });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::round_f16_result(
-            inst, wf,
-            std::fmin(util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))),
-                      util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))),
-            wf.fp16_ovfl()));
+        amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMin>{
+            input_policy, amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())}(
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_min_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(uint32_t, [](auto a, auto b) {
-      return util::f32_to_f16_ovfl_simd(
-          util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
-    });
-  } else {
-    ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(uint32_t, [](auto a, auto b) {
-      return util::f32_to_f16_simd(
-          util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
-    });
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP(
+      amdgpu::fp_format::F16,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMin>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         inst, wf, inst.vdst, lane,
-        amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-            static_cast<uint32_t>(amdgpu::sdwa::round_f16_result(
-                inst, wf,
-                std::fmin(
-                    [&]() {
-                      float sv = util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-                      return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }(),
-                    [&]() {
-                      float sv = util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
-                      return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }()),
-                wf.fp16_ovfl())),
-            output_policy));
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMin>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_min_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, [](auto a, auto b) { return util::stdx::fmin(a, b); });
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(
+      uint32_t, [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+                 legacy_policy = amdgpu::fp_mode::legacy_minmax_policy(
+                     wf.cu().arch(), wf.ieee_mode())](auto a, auto b) {
+        return amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMin>{
+            input_policy, legacy_policy}(a, b);
+      });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint32_t>(std::fmin(
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))));
+        amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMin>{
+            input_policy, amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())}(
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_min_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t,
-                                   [](auto a, auto b) { return util::stdx::fmin(a, b); });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP(
+      amdgpu::fp_format::F32,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMin>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::fmin(
-                [&]() {
-                  float sv =
-                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }(),
-                [&]() {
-                  float sv =
-                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }());
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMin>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_min_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64([](auto a, auto b) { return util::stdx::fmin(a, b); });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(
+      amdgpu::fp_format::F64,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F64, amdgpu::minmax::LegacyMin>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F64>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint64_t>([&]() {
-          double v = [&]() {
-            double v = std::fmin(
-                [&]() {
-                  double sv = std::bit_cast<double>(
-                      amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }(),
-                [&]() {
-                  double sv = std::bit_cast<double>(
-                      amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }());
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0;
-            else if (effective_omod == 2)
-              v *= 4.0;
-            else if (effective_omod == 3)
-              v *= 0.5;
-            v = amdgpu::fp_mode::finalize_omod_f64(v, effective_omod);
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F64>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F64, amdgpu::minmax::LegacyMin>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)));
   }
 }
 
@@ -15315,57 +14918,45 @@ inline void execute_v_minimummaximum_f32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_minmax_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
-      [](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(
+      amdgpu::fp_format::F32,
+      amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMinMax>{
+          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+          amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = std::fmax(
-                std::fmin(
-                    [&]() {
-                      float sv = std::bit_cast<float>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                      return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }(),
-                    [&]() {
-                      float sv = std::bit_cast<float>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                      return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
-                                                                     inst.inst_.neg);
-                    }()),
-                [&]() {
-                  float sv =
-                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 2, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }());
-            return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F32>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F32, amdgpu::minmax::LegacyMinMax>{
+                input_policy,
+                amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())},
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_minmax_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      int32_t, [](auto a, auto b, auto c) { return util::stdx::max(util::stdx::min(a, b), c); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::fmax(
-            std::fmin(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-                      static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))),
+        std::max(
+            std::min(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
+                     static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))),
             static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane))));
   }
 }
@@ -15399,15 +14990,17 @@ inline void execute_v_minmax_num_f32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_minmax_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [](auto a, auto b, auto c) { return util::stdx::max(util::stdx::min(a, b), c); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::fmax(std::fmin(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
-                  amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
+        std::max(std::min(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                          amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)),
+                 amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
   }
 }
 
@@ -15535,8 +15128,10 @@ inline void execute_v_mul_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
                 }(),
                 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -15547,17 +15142,14 @@ inline void execute_v_mul_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_mul_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
-                                                 wf.fp_denorm_mode_f16_f64())) {
-    if (wf.fp16_ovfl()) {
-      ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) * util::f16_to_f32_simd(b));
-      });
-    } else {
-      ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_simd(util::f16_to_f32_simd(a) * util::f16_to_f32_simd(b));
-      });
-    }
+  if (wf.fp_round_mode_f16_f64() == 0) {
+    ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
+        uint32_t,
+        [&wf](auto a, auto b) {
+          return amdgpu::binary_f16_simd_unscoped<amdgpu::fp_mode::Arithmetic::MUL>(
+              a, b, wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl());
+        },
+        0);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -15582,7 +15174,8 @@ inline void execute_v_mul_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_mul_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false, amdgpu::fp_mode::Arithmetic::MUL);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false, amdgpu::fp_mode::Arithmetic::MUL,
+                                          amdgpu::NegatedSource::NONE);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
@@ -15619,12 +15212,12 @@ inline void execute_v_mul_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   uint32_t alu_causes = classify_mul_f32_vop2(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
   if (!alu_exception_trap_enables(wf)) {
-    {
-      amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-      ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, [&wf](auto a, auto b) {
-        return amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::MUL>(a, b, wf);
-      });
-    }
+    ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
+        float32_t,
+        [&wf](auto a, auto b) {
+          return amdgpu::binary_f32_simd_unscoped<amdgpu::fp_mode::Arithmetic::MUL>(a, b, wf);
+        },
+        wf.fp_round_mode_f32());
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -15644,13 +15237,10 @@ inline void execute_v_mul_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   uint32_t alu_causes = classify_mul_f32_vop3(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
   if (!alu_exception_trap_enables(wf)) {
-    {
-      amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, [&inst, &wf](auto a, auto b) {
-        return amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::MUL>(
-            a, b, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
-      });
-    }
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_FP_SCOPED(float32_t, [&inst, &wf](auto a, auto b) {
+      return amdgpu::binary_f32_simd_unscoped<amdgpu::fp_mode::Arithmetic::MUL>(
+          a, b, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
+    });
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -15658,7 +15248,6 @@ inline void execute_v_mul_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
           float v = [&]() {
             float v = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(
                 [&]() {
@@ -15677,15 +15266,16 @@ inline void execute_v_mul_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 wf.ieee_mode(),
                 (amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                  wf.ieee_mode(), inst.inst_.omod) != 0));
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 0)
-              return v;
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            return amdgpu::fp_mode::apply_omod_f32(v, effective_omod);
+            return amdgpu::fp_mode::apply_omod_f32(
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
-          if (inst.inst_.clamp)
+          if (inst.inst_.clamp) {
+            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
             v = amdgpu::clamp_floating_result(v, wf);
+          }
           return v;
         }()));
   }
@@ -15954,8 +15544,10 @@ inline void execute_v_mul_legacy_f32_vop3([[maybe_unused]] Inst &inst,
                 }(),
                 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -16047,35 +15639,24 @@ inline void execute_v_mul_u32_u24_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_mullit_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-    s0 = amdgpu::source_modifier::apply_to_float(s0, 0, inst.inst_.abs, inst.inst_.neg);
-    s1 = amdgpu::source_modifier::apply_to_float(s1, 1, inst.inst_.abs, inst.inst_.neg);
-    s2 = amdgpu::source_modifier::apply_to_float(s2, 2, inst.inst_.abs, inst.inst_.neg);
-    float result;
-    if (s1 == -std::numeric_limits<float>::max() || s1 == -std::numeric_limits<float>::infinity() ||
-        std::isnan(s1) || s2 <= 0.0f || std::isnan(s2))
-      result = -std::numeric_limits<float>::max();
-    else
-      result = (s0 == 0.0f || s1 == 0.0f) ? 0.0f : s0 * s1;
-    const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-        wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-    if (effective_omod == 1)
-      result *= 2.0f;
-    else if (effective_omod == 2)
-      result *= 4.0f;
-    else if (effective_omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    result = amdgpu::fp_mode::finalize_omod_f32(result, effective_omod);
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(inst, wf, inst.vdst, lane,
-                                                      std::bit_cast<uint32_t>(result));
+    const uint32_t s0 = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(
+        amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), 0, inst.inst_.abs, inst.inst_.neg);
+    const uint32_t s1 = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(
+        amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane), 1, inst.inst_.abs, inst.inst_.neg);
+    const uint32_t s2 = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(
+        amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane), 2, inst.inst_.abs, inst.inst_.neg);
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::output_modifier::apply<amdgpu::fp_format::F32>(
+            amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),
+                                        wf.cu().arch(), wf.ieee_mode(), output_policy.omod != 0),
+            output_policy));
   }
 }
 
@@ -16155,8 +15736,8 @@ inline void execute_v_or_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] 
 template <typename Inst>
 inline void execute_v_pack_b32_f16_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(
-      uint32_t, [](auto a, auto b) { return (a & 0xFFFFu) | ((b & 0xFFFFu) << 16); });
+  const auto conversion = amdgpu::conversion_pack_b32_f16(wf, inst.inst_.abs, inst.inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, conversion);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -16165,7 +15746,8 @@ inline void execute_v_pack_b32_f16_vop3([[maybe_unused]] Inst &inst,
         ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src0, wf, lane, inst.inst_.op_sel, 0);
     uint32_t s1 =
         ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src1, wf, lane, inst.inst_.op_sel, 1);
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, s0 | (s1 << 16));
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
+                                                       conversion(s0, s1));
   }
 }
 
@@ -16453,7 +16035,7 @@ template <typename Inst>
 inline void execute_v_pk_fma_f32_vop3p([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32(
-      [&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf); });
+      [&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -17235,7 +16817,7 @@ inline void execute_v_rcp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       [&wf](auto a) {
         return util::rcp_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
       },
-      true /* force_output_flush */);
+      true /* force_output_flush */, 0 /* round_mode */);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -17252,8 +16834,9 @@ inline void execute_v_rcp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 }(),
                 amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(),
-                                                   inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod),
+                0);
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -17335,8 +16918,9 @@ inline void execute_v_rcp_iflag_f32_vop3([[maybe_unused]] Inst &inst,
   uint32_t alu_causes = classify_rcp_iflag_f32_exceptions(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
   if (!alu_exception_trap_enables(wf)) {
-    ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t,
-                                    [](auto a) { return util::rcp_f32_simd(a); });
+    ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(
+        float32_t, float32_t, [](auto a) { return util::rcp_f32_simd(a); },
+        false /* force_output_flush */, 0 /* round_mode */);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -17351,8 +16935,10 @@ inline void execute_v_rcp_iflag_f32_vop3([[maybe_unused]] Inst &inst,
               return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
             }());
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                0);
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -17582,7 +17168,7 @@ inline void execute_v_rsq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       [&wf](auto a) {
         return util::rsq_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
       },
-      true /* force_output_flush */);
+      true /* force_output_flush */, 0 /* round_mode */);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -17599,8 +17185,9 @@ inline void execute_v_rsq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 }(),
                 amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(),
-                                                   inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod),
+                0);
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -17927,8 +17514,10 @@ inline void execute_v_sin_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 wf.fp_denorm_mode_f32(),
                 amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                0);
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -18048,7 +17637,7 @@ inline void execute_v_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
           return util::sqrt_f32_simd(a,
                                      amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
         },
-        true /* force_output_flush */);
+        true /* force_output_flush */, 0 /* round_mode */);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -18066,8 +17655,9 @@ inline void execute_v_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
                 }(),
                 amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(),
-                                                   inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst.inst_.omod),
+                0);
           }();
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -18232,17 +17822,14 @@ inline void execute_v_sub_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_sub_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
-                                                 wf.fp_denorm_mode_f16_f64())) {
-    if (wf.fp16_ovfl()) {
-      ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
-      });
-    } else {
-      ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
-      });
-    }
+  if (wf.fp_round_mode_f16_f64() == 0) {
+    ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
+        uint32_t,
+        [&wf](auto a, auto b) {
+          return amdgpu::binary_f16_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>(
+              a, b ^ amdgpu::fp_format::F16::kSign, wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl());
+        },
+        0);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -18253,13 +17840,13 @@ inline void execute_v_sub_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
         inst, wf, inst.vdst, lane,
         amdgpu::sdwa::finish_arithmetic_f16(
             inst, wf,
-            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
                 util::f16_to_f32(static_cast<uint16_t>(
                     amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                         amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy))),
-                util::f16_to_f32(static_cast<uint16_t>(
+                (-util::f16_to_f32(static_cast<uint16_t>(
                     amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
-                        amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane), input_policy))),
+                        amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane), input_policy)))),
                 0.0f, wf.fp_round_mode_f16_f64()),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
@@ -18267,18 +17854,8 @@ inline void execute_v_sub_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_sub_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
-                                                 wf.fp_denorm_mode_f16_f64())) {
-    if (wf.fp16_ovfl()) {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
-      });
-    } else {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
-      });
-    }
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false, amdgpu::fp_mode::Arithmetic::ADD,
+                                          amdgpu::NegatedSource::SRC1);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
@@ -18291,19 +17868,19 @@ inline void execute_v_sub_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
         amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
             static_cast<uint32_t>(amdgpu::sdwa::finish_arithmetic_f16(
                 inst, wf,
-                amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+                amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
                     amdgpu::source_modifier::apply_to_float(
                         util::f16_to_f32(static_cast<uint16_t>(
                             amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                                 amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
                                 input_policy))),
                         0, inst.inst_.abs, inst.inst_.neg),
-                    amdgpu::source_modifier::apply_to_float(
+                    (-amdgpu::source_modifier::apply_to_float(
                         util::f16_to_f32(static_cast<uint16_t>(
                             amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                                 amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
                                 input_policy))),
-                        1, inst.inst_.abs, inst.inst_.neg),
+                        1, inst.inst_.abs, inst.inst_.neg)),
                     0.0f, wf.fp_round_mode_f16_f64()),
                 wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
             output_policy));
@@ -18312,73 +17889,65 @@ inline void execute_v_sub_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_sub_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.exec() != 0 && !amdgpu::simd_force_scalar() && !wf.cu().observes_register_access() &&
-      !wf.cu().debug_active() && !inst.src0.delegate() && !inst.vsrc1.delegate() &&
-      !inst.vdst.delegate()) {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, [&wf](auto a, auto b) {
-      return amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::SUB>(a, b, wf);
-    });
-  }
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
-    ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, std::minus<>{});
-  }
+  ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
+      float32_t,
+      [&wf](auto a, auto b) {
+        return amdgpu::binary_f32_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>(a, -b, wf);
+      },
+      wf.fp_round_mode_f32());
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(
+        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
             std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)), 0.0f,
-            wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())));
+            (-std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))), 0.0f,
+            wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())));
   }
 }
 
 template <typename Inst>
 inline void execute_v_sub_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.exec() != 0 && !amdgpu::simd_force_scalar() && !wf.cu().observes_register_access() &&
-      !wf.cu().debug_active() && !inst.src0.delegate() && !inst.src1.delegate() &&
-      !inst.vdst.delegate()) {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, [&inst, &wf](auto a, auto b) {
-      return amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::SUB>(
-          a, b, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
-    });
-  }
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
-    ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, std::minus<>{});
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP_SCOPED(float32_t, [&inst, &wf](auto a, auto b) {
+    return amdgpu::binary_f32_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>(
+        a, -b, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
           float v = [&]() {
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            float v = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(
+            float v = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
                 [&]() {
                   float sv =
                       std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
                   return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
                                                                  inst.inst_.neg);
                 }(),
-                [&]() {
+                (-[&]() {
                   float sv =
                       std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
                   return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
                                                                  inst.inst_.neg);
-                }(),
-                0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                }()),
+                0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(),
+                wf.ieee_mode(),
+                (amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                 wf.ieee_mode(), inst.inst_.omod) != 0));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
-          if (inst.inst_.clamp)
+          if (inst.inst_.clamp) {
+            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
             v = amdgpu::clamp_floating_result(v, wf);
+          }
           return v;
         }()));
   }
@@ -18748,17 +18317,14 @@ inline void execute_v_subrev_co_u32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_subrev_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
-                                                 wf.fp_denorm_mode_f16_f64())) {
-    if (wf.fp16_ovfl()) {
-      ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
-      });
-    } else {
-      ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
-      });
-    }
+  if (wf.fp_round_mode_f16_f64() == 0) {
+    ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
+        uint32_t,
+        [&wf](auto a, auto b) {
+          return amdgpu::binary_f16_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>(
+              a ^ amdgpu::fp_format::F16::kSign, b, wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl());
+        },
+        0);
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -18769,13 +18335,13 @@ inline void execute_v_subrev_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
         inst, wf, inst.vdst, lane,
         amdgpu::sdwa::finish_arithmetic_f16(
             inst, wf,
-            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+            amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
+                (-util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy)))),
                 util::f16_to_f32(static_cast<uint16_t>(
                     amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                         amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane), input_policy))),
-                util::f16_to_f32(static_cast<uint16_t>(
-                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
-                        amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy))),
                 0.0f, wf.fp_round_mode_f16_f64()),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
@@ -18783,18 +18349,8 @@ inline void execute_v_subrev_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_subrev_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
-                                                 wf.fp_denorm_mode_f16_f64())) {
-    if (wf.fp16_ovfl()) {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
-      });
-    } else {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
-      });
-    }
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false, amdgpu::fp_mode::Arithmetic::ADD,
+                                          amdgpu::NegatedSource::SRC0);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
@@ -18807,19 +18363,19 @@ inline void execute_v_subrev_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
         amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
             static_cast<uint32_t>(amdgpu::sdwa::finish_arithmetic_f16(
                 inst, wf,
-                amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+                amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
+                    (-amdgpu::source_modifier::apply_to_float(
+                        util::f16_to_f32(static_cast<uint16_t>(
+                            amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                                amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                input_policy))),
+                        0, inst.inst_.abs, inst.inst_.neg)),
                     amdgpu::source_modifier::apply_to_float(
                         util::f16_to_f32(static_cast<uint16_t>(
                             amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                                 amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
                                 input_policy))),
                         1, inst.inst_.abs, inst.inst_.neg),
-                    amdgpu::source_modifier::apply_to_float(
-                        util::f16_to_f32(static_cast<uint16_t>(
-                            amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
-                                amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-                                input_policy))),
-                        0, inst.inst_.abs, inst.inst_.neg),
                     0.0f, wf.fp_round_mode_f16_f64()),
                 wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
             output_policy));
@@ -18828,73 +18384,65 @@ inline void execute_v_subrev_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_subrev_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.exec() != 0 && !amdgpu::simd_force_scalar() && !wf.cu().observes_register_access() &&
-      !wf.cu().debug_active() && !inst.src0.delegate() && !inst.vsrc1.delegate() &&
-      !inst.vdst.delegate()) {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, [&wf](auto a, auto b) {
-      return amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::SUB>(b, a, wf);
-    });
-  }
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
-    ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, [](auto a, auto b) { return b - a; });
-  }
+  ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
+      float32_t,
+      [&wf](auto a, auto b) {
+        return amdgpu::binary_f32_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>(-a, b, wf);
+      },
+      wf.fp_round_mode_f32());
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)),
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)), 0.0f,
-            wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())));
+        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
+            (-std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))),
+            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)), 0.0f,
+            wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())));
   }
 }
 
 template <typename Inst>
 inline void execute_v_subrev_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.exec() != 0 && !amdgpu::simd_force_scalar() && !wf.cu().observes_register_access() &&
-      !wf.cu().debug_active() && !inst.src0.delegate() && !inst.src1.delegate() &&
-      !inst.vdst.delegate()) {
-    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, [&inst, &wf](auto a, auto b) {
-      return amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::SUB>(
-          b, a, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
-    });
-  }
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {
-    ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, [](auto a, auto b) { return b - a; });
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP_SCOPED(float32_t, [&inst, &wf](auto a, auto b) {
+    return amdgpu::binary_f32_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>(
+        -a, b, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod));
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
           float v = [&]() {
-            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-            float v = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(
+            float v = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
+                (-[&]() {
+                  float sv =
+                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
+                  return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
+                                                                 inst.inst_.neg);
+                }()),
                 [&]() {
                   float sv =
                       std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
                   return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
                                                                  inst.inst_.neg);
                 }(),
-                [&]() {
-                  float sv =
-                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                  return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
-                                                                 inst.inst_.neg);
-                }(),
-                0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(),
+                wf.ieee_mode(),
+                (amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                 wf.ieee_mode(), inst.inst_.omod) != 0));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst.inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst.inst_.omod),
+                wf.fp_round_mode_f32());
           }();
-          if (inst.inst_.clamp)
+          if (inst.inst_.clamp) {
+            amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
             v = amdgpu::clamp_floating_result(v, wf);
+          }
           return v;
         }()));
   }
