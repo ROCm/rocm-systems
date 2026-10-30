@@ -10,7 +10,7 @@ from contextlib import ExitStack
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
+from typing import Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
 import common
@@ -19,6 +19,8 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
+from membw_analysis.engine import run_membw_analysis
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
 from memory_chart.loader import Layouts
 from pc_sampling import (
     per_kernel_isa_export,
@@ -32,6 +34,7 @@ from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
     db_analysis,
     filter_dispatch_frame,
+    membw_metric_tables,
     report_evaluation_diagnostics,
 )
 from utils import analysis_orm as orm
@@ -49,6 +52,7 @@ ISA_WORKLOAD_SUB_NAME = "run"
 VIEW_CSV_FILENAMES = frozenset({
     "kernel.csv",
     "kernel_metric.csv",
+    "membw_node.csv",
     "pc_sampling_summary.csv",
     "roofline_ceiling.csv",
     "source_lines.csv",
@@ -269,6 +273,7 @@ def make_pc_sampling_database_analyzer(
         for workload_path, tool_data_records in tool_data_per_workload.items()
     }
     analyzer._roofline_data_per_kernel = {}
+    analyzer._membw_result_per_workload = {}
     return analyzer
 
 
@@ -317,6 +322,7 @@ def make_counter_backed_database_analyzer(
         ])
     }
     analyzer._roofline_data_per_kernel = {workload_path: pd.DataFrame()}
+    analyzer._membw_result_per_workload = {}
     analyzer._metrics_info_data_per_workload = {}
     analyzer._kernel_values_data_per_workload = {}
     analyzer._workload_values_data_per_workload = {}
@@ -576,6 +582,170 @@ def record_and_exit_filter_errors(monkeypatch):
         monkeypatch, "utils.filter_validation", "error", error=record_and_exit
     )
     return calls
+
+
+# Metric names of the gfx950 membw tree, by the panel 3000 table that holds them.
+MEMBW_TABLE_METRICS = {
+    3001: [
+        "L1 Cache - TA stalled by TCP (aggregated)",
+        "L1 Cache - TCP stalled by UTCL1",
+        "L1 Cache - TCP stalled by UTCL2",
+        "L1 Cache - TCP stalled by TD",
+        "L1 Cache - TCP stalled by L2",
+        "L1 Cache - VMEM stalled by L1 Cache",
+    ],
+    3012: [
+        "L2 Back Pressure Indicator",
+        "L2 Memory BW Bound - Combined Credit Pressure",
+        "L2 Memory BW Bound - Read Credit Pressure",
+        "L2 Memory BW Bound - Write Credit Pressure",
+        "L2 Internal Resource Pressure - Latency FIFO",
+        "L2 Internal Resource Pressure - Source FIFO",
+        "L2 Cache Efficiency",
+        "L2 Remote Access Pressure (GMI)",
+    ],
+    3018: [
+        "EA IO BW Bound - Combined",
+        "EA Write Backpressure",
+        "EA HBM Atomic Pressure",
+    ],
+}
+
+# Avg values that activate the UTCL1 stall and HBM bandwidth branches.
+MEMBW_UTCL1_HBM_AVG = {
+    "L1 Cache - TA stalled by TCP (aggregated)": 22.4,
+    "L1 Cache - TCP stalled by UTCL1": 18.7,
+    "L1 Cache - TCP stalled by UTCL2": 1.2,
+    "L1 Cache - TCP stalled by TD": 0.5,
+    "L1 Cache - TCP stalled by L2": 2.1,
+    "L1 Cache - VMEM stalled by L1 Cache": 3.0,
+    "L2 Back Pressure Indicator": 5.0,
+    "L2 Memory BW Bound - Combined Credit Pressure": 15.0,
+    "L2 Memory BW Bound - Read Credit Pressure": 12.0,
+    "L2 Memory BW Bound - Write Credit Pressure": 3.0,
+    "L2 Internal Resource Pressure - Latency FIFO": 2.0,
+    "L2 Internal Resource Pressure - Source FIFO": 1.0,
+    "L2 Cache Efficiency": 80.0,
+    "L2 Remote Access Pressure (GMI)": 0.5,
+    "EA IO BW Bound - Combined": 0.0,
+    "EA Write Backpressure": 1.0,
+    "EA HBM Atomic Pressure": 0.5,
+}
+
+
+def make_membw_arch_dfs() -> Dict[int, pd.DataFrame]:
+    """Panel 3000 metric tables as the arch config holds them, before values."""
+    return {
+        table_id: pd.DataFrame(
+            {"Metric": metric_names, "Unit": ["Percent"] * len(metric_names)},
+            index=pd.Index(
+                [
+                    f"{table_id // 100}.{table_id % 100}.{index}"
+                    for index in range(len(metric_names))
+                ],
+                name="Metric_ID",
+            ),
+        )
+        for table_id, metric_names in MEMBW_TABLE_METRICS.items()
+    }
+
+
+def make_membw_workload_values(
+    avg_by_metric_name: Dict[str, float],
+    arch_dfs: Dict[int, pd.DataFrame],
+) -> pd.DataFrame:
+    """Workload value rows for the panel 3000 metrics, with a Max row to ignore."""
+    rows = []
+    for template in arch_dfs.values():
+        for metric_id, metric_name in template["Metric"].items():
+            rows.append({"metric_id": metric_id, "value_name": "Max", "value": 999.0})
+            if metric_name in avg_by_metric_name:
+                rows.append({
+                    "metric_id": metric_id,
+                    "value_name": "Avg",
+                    "value": avg_by_metric_name[metric_name],
+                })
+    return pd.DataFrame(rows, columns=["metric_id", "value_name", "value"])
+
+
+def rebuild_membw_node(node_row, children_by_parent) -> BottleneckNode:
+    """Rebuild one tree node, and its subtree, from its stored rows."""
+    return BottleneckNode(
+        id=node_row.node_id,
+        label=node_row.label,
+        level=node_row.level,
+        state=node_row.state,
+        supporting=tuple(
+            SupportingMetric(
+                key=metric_row.metric_key,
+                value=metric_row.value,
+                unit=metric_row.unit,
+                display=metric_row.display,
+            )
+            for metric_row in node_row.supporting_metrics
+        ),
+        children=tuple(
+            rebuild_membw_node(child_row, children_by_parent)
+            for child_row in children_by_parent.get(node_row.membw_node_uuid, [])
+        ),
+        guidance_id=node_row.guidance_id,
+    )
+
+
+def rebuild_membw_result(session, workload) -> MemBwAnalysisResult:
+    """Rebuild a workload's membw result from the analysis rows alone."""
+    analysis_row = (
+        session
+        .query(orm.MembwAnalysis)
+        .filter_by(workload_id=workload.workload_id)
+        .one()
+    )
+    node_rows = (
+        session
+        .query(orm.MembwNode)
+        .filter_by(membw_analysis_uuid=analysis_row.membw_analysis_uuid)
+        .order_by(orm.MembwNode.node_order)
+        .all()
+    )
+    children_by_parent: Dict[Optional[int], List[orm.MembwNode]] = {}
+    for node_row in node_rows:
+        children_by_parent.setdefault(node_row.parent_node_uuid, []).append(node_row)
+    block_rows = (
+        session
+        .query(orm.MembwGuidanceBlock)
+        .filter_by(membw_analysis_uuid=analysis_row.membw_analysis_uuid)
+        .order_by(orm.MembwGuidanceBlock.block_order)
+        .all()
+    )
+    return MemBwAnalysisResult(
+        arch=analysis_row.arch,
+        availability=analysis_row.availability,
+        availability_reason=analysis_row.availability_reason,
+        nodes=tuple(
+            rebuild_membw_node(root_row, children_by_parent)
+            for root_row in children_by_parent.get(None, [])
+        ),
+        guidance_blocks=tuple(block_row.text for block_row in block_rows),
+    )
+
+
+def make_membw_analyzer(workload_path, gpu_arch, membw_analysis):
+    """Build a counter-backed analyzer whose workload has panel 3000 values."""
+    analyzer = make_counter_backed_database_analyzer(workload_path, ["3"], [])
+    analyzer._runs[workload_path].sys_info = pd.DataFrame([{"gpu_arch": gpu_arch}])
+    analyzer._profiling_config = {
+        "filter_blocks": ["3"],
+        "membw_analysis": membw_analysis,
+    }
+    arch_dfs = make_membw_arch_dfs()
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = arch_dfs
+    analyzer._arch_configs = {gpu_arch: arch_config}
+    analyzer._workload_values_data_per_workload = {
+        workload_path: make_membw_workload_values(MEMBW_UTCL1_HBM_AVG, arch_dfs)
+    }
+    analyzer._membw_result_per_workload = analyzer.calc_membw_analysis()
+    return analyzer
 
 
 # =============================================================================
@@ -2009,6 +2179,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
         )
     }
     analyzer._roofline_data_per_kernel = {}
+    analyzer._membw_result_per_workload = {}
 
     with ExitStack() as patch_stack:
         patch_stack.enter_context(patch.object(orm.Database, "init"))
@@ -4167,6 +4338,7 @@ def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_p
 
 
 # =============================================================================
+
 # Roofline ceilings stored per workload (FR-23)
 # =============================================================================
 
@@ -4732,3 +4904,125 @@ def test_run_analysis_stored_values_ignore_decimal_and_time_unit(tmp_path):
     other_options = store_metric_values(tmp_path, 6, "us")
 
     assert other_options == default_options
+
+
+# Memory bandwidth analysis rows
+# =============================================================================
+
+
+def test_membw_metric_tables_reads_the_avg_value_of_each_metric():
+    """Each panel 3000 table gets its metrics' Avg values, and no other value."""
+    arch_dfs = make_membw_arch_dfs()
+    workload_values = make_membw_workload_values(
+        {"L2 Cache Efficiency": 80.0},
+        arch_dfs,
+    )
+
+    membw_tables = membw_metric_tables(arch_dfs, workload_values)
+
+    assert sorted(membw_tables) == [3001, 3012, 3018]
+    l2_table = membw_tables[3012]
+    assert list(l2_table.columns) == ["Metric", "Avg", "Unit"]
+    avg_by_metric = dict(zip(l2_table["Metric"], l2_table["Avg"]))
+    assert avg_by_metric["L2 Cache Efficiency"] == 80.0
+    assert pd.isna(avg_by_metric["L2 Back Pressure Indicator"])
+    assert set(l2_table["Unit"]) == {"Percent"}
+
+
+def test_membw_metric_tables_skips_tables_the_arch_config_lacks():
+    """Without panel 3000 in the arch config, there is no membw input."""
+    workload_values = make_membw_workload_values(MEMBW_UTCL1_HBM_AVG, {})
+
+    assert membw_metric_tables({}, workload_values) == {}
+
+
+@pytest.mark.parametrize(
+    ("avg_by_metric_name", "expected_availability"),
+    [
+        (MEMBW_UTCL1_HBM_AVG, "full"),
+        ({"L2 Cache Efficiency": 80.0}, "partial"),
+        ({}, "unavailable"),
+    ],
+    ids=["full", "partial", "unavailable"],
+)
+def test_membw_analysis_rows_rebuild_the_result_they_came_from(
+    db_session,
+    avg_by_metric_name,
+    expected_availability,
+):
+    """The stored rows rebuild the membw result they were written from, unchanged."""
+    arch_dfs = make_membw_arch_dfs()
+    result = run_membw_analysis(
+        membw_metric_tables(
+            arch_dfs,
+            make_membw_workload_values(avg_by_metric_name, arch_dfs),
+        ),
+        "gfx950",
+    )
+    assert result.availability == expected_availability
+    workload = orm.Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    db_analysis.add_membw_analysis(workload, result)
+    db_session.commit()
+
+    assert rebuild_membw_result(db_session, workload) == result
+
+
+def test_calc_membw_analysis_skips_a_workload_without_block_30_values(tmp_path):
+    """A later workload with no block 30 values gets no membw result, even when
+    the first workload was profiled with block 30.
+    """
+    membw_path = str(tmp_path / "membw")
+    plain_path = str(tmp_path / "plain")
+    analyzer = make_membw_analyzer(membw_path, "gfx950", True)
+    analyzer._runs[plain_path] = schema.Workload(
+        sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+    )
+    analyzer._workload_values_data_per_workload[plain_path] = pd.DataFrame(
+        columns=["metric_id", "value_name", "value"]
+    )
+
+    membw_results = analyzer.calc_membw_analysis()
+
+    assert list(membw_results) == [membw_path]
+
+
+@pytest.mark.parametrize(
+    ("gpu_arch", "membw_analysis", "expects_analysis"),
+    [
+        ("gfx950", True, True),
+        ("gfx950", False, False),
+        ("gfx942", True, False),
+    ],
+    ids=["membw_profiled", "membw_not_profiled", "arch_without_tree_spec"],
+)
+def test_run_analysis_stores_membw_analysis_only_for_profiled_workloads(
+    db_session,
+    tmp_path,
+    gpu_arch,
+    membw_analysis,
+    expects_analysis,
+):
+    """Only a membw-profiled workload on an arch with a tree spec gets rows."""
+    analyzer = make_membw_analyzer(str(tmp_path), gpu_arch, membw_analysis)
+
+    run_analysis_with_materialized_views(analyzer)
+
+    analysis_row = db_session.query(orm.MembwAnalysis).one_or_none()
+    if not expects_analysis:
+        assert analysis_row is None
+        assert db_session.query(orm.MembwNode).count() == 0
+        assert db_session.query(orm.MembwGuidanceBlock).count() == 0
+        return
+    assert analysis_row.arch == gpu_arch
+    assert analysis_row.availability == "full"
+    assert analysis_row.nodes
+    assert analysis_row.guidance_blocks
+    # Each node gives one view row per supporting metric, or one row when it has none
+    expected_view_row_count = sum(
+        max(1, len(node.supporting_metrics)) for node in analysis_row.nodes
+    )
+    view_row_count = db_session.execute(
+        text("SELECT COUNT(*) FROM compute_membw_node_view")
+    ).scalar()
+    assert view_row_count == expected_view_row_count

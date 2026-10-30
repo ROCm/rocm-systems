@@ -103,6 +103,8 @@ They live in `src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml` and
 when you need to explain a verdict, and report the guidance the tool produced
 rather than substituting your own numbers.
 
+With `--output-format db`, the result is also stored in the analysis database (the `compute_membw_*` tables and the `compute_membw_node_view` view).
+
 On any other architecture, use the Memory Chart path above.
 
 ## 5. Normalization

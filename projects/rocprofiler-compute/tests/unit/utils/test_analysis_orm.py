@@ -22,6 +22,9 @@ from utils.analysis_orm import (
     InstructionTypeLookup,
     Kernel,
     KernelSymbol,
+    MembwAnalysis,
+    MembwNode,
+    MembwSupportingMetric,
     PCSampleStallReason,
     PCSampleStallReasonLookup,
     PCSampleState,
@@ -1188,6 +1191,153 @@ def test_pc_sample_state_needs_exactly_one_owner(db_session, owner_count):
     )
     db_session.add_all([instruction_line, PCSampleState(total_count=1, **owners)])
 
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+# =============================================================================
+# membw_node view and membw rows
+# =============================================================================
+
+
+def add_membw_analysis_with_tree(session, workload: Workload) -> MembwAnalysis:
+    """Add a two-node membw tree: a root with one metric, and a child with none."""
+    analysis = MembwAnalysis(
+        workload=workload,
+        arch="gfx950",
+        availability="full",
+    )
+    root = MembwNode(
+        membw_analysis=analysis,
+        node_order=0,
+        node_id="gl1_tcp_stall",
+        label="TCP stall",
+        level="GL1",
+        state="active",
+    )
+    child = MembwNode(
+        membw_analysis=analysis,
+        parent=root,
+        node_order=1,
+        node_id="gl1_tcp_utcl1_stall",
+        label="TCP<-UTCL1",
+        level="GL1",
+        state="active",
+        guidance_id="gl1_tcp_utcl1_stall",
+    )
+    session.add_all([
+        analysis,
+        MembwSupportingMetric(
+            node=root,
+            metric_order=0,
+            metric_key="L1 Cache - TA stalled by TCP (aggregated)",
+            value=22.4,
+            unit="Percent",
+            display="22.4%",
+        ),
+        MembwSupportingMetric(
+            node=child,
+            metric_order=0,
+            metric_key="L1 Cache - TCP stalled by UTCL1",
+            value=None,
+            unit="Percent",
+            display="N/A",
+        ),
+    ])
+    return analysis
+
+
+def test_membw_node_view_flattens_tree_with_parent_order_and_metrics(db_session):
+    """The membw node view has one row per node metric, with the parent's order."""
+    workload = Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    add_membw_analysis_with_tree(db_session, workload)
+    Database.create_views()
+    db_session.commit()
+
+    rows = db_session.execute(
+        text(
+            "SELECT workload_name, arch, availability, node_order, "
+            "parent_node_order, node_id, metric_key, value, display "
+            "FROM compute_membw_node_view ORDER BY node_order, metric_order"
+        )
+    ).fetchall()
+    assert rows == [
+        (
+            "w",
+            "gfx950",
+            "full",
+            0,
+            None,
+            "gl1_tcp_stall",
+            "L1 Cache - TA stalled by TCP (aggregated)",
+            22.4,
+            "22.4%",
+        ),
+        (
+            "w",
+            "gfx950",
+            "full",
+            1,
+            0,
+            "gl1_tcp_utcl1_stall",
+            "L1 Cache - TCP stalled by UTCL1",
+            None,
+            "N/A",
+        ),
+    ]
+
+
+def test_membw_node_view_keeps_a_node_without_metrics(db_session):
+    """A node without supporting metrics gets one row with empty metric columns."""
+    workload = Workload(name="w", sub_name="s")
+    analysis = MembwAnalysis(workload=workload, arch="gfx950", availability="full")
+    db_session.add_all([
+        workload,
+        analysis,
+        MembwNode(
+            membw_analysis=analysis,
+            node_order=0,
+            node_id="gl2_other",
+            label="Other",
+            level="GL2",
+            state="inactive",
+        ),
+    ])
+    Database.create_views()
+    db_session.commit()
+
+    rows = db_session.execute(
+        text("SELECT node_id, metric_key FROM compute_membw_node_view")
+    ).fetchall()
+    assert rows == [("gl2_other", None)]
+
+
+def test_duplicate_membw_node_order_under_one_analysis_rejected(db_session):
+    """Reject two tree nodes at one position in an analysis."""
+    workload = Workload(name="w", sub_name="s")
+    analysis = MembwAnalysis(workload=workload, arch="gfx950", availability="full")
+    db_session.add(workload)
+    db_session.add(analysis)
+    for node_id in ("gl1_tcp_stall", "gl2_other"):
+        db_session.add(
+            MembwNode(
+                membw_analysis=analysis,
+                node_order=0,
+                node_id=node_id,
+                state="inactive",
+            )
+        )
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_second_membw_analysis_for_one_workload_rejected(db_session):
+    """Reject a second memory bandwidth analysis for the same workload."""
+    workload = Workload(name="w", sub_name="s")
+    db_session.add(workload)
+    db_session.add(MembwAnalysis(workload=workload, arch="gfx950"))
+    db_session.add(MembwAnalysis(workload=workload, arch="gfx950"))
     with pytest.raises(IntegrityError):
         db_session.commit()
 

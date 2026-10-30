@@ -756,6 +756,8 @@ holds:
   GIOP/s and KB per Wave are stored as Bytes/s, FLOP/s, IOP/s and Bytes per Wave. The roofline
   table ``compute_kernel_roofline_data`` keeps GFLOP/s and FLOPs/Byte. ``--decimal`` and
   ``--time-unit`` change the terminal output only, not the database.
+  For a workload profiled with ``--experimental --membw-analysis``, the database also holds the
+  memory bandwidth analysis; see :ref:`membw-analysis-database`.
 * The roofline ceilings of each workload are in the view ``compute_roofline_ceiling_view``, also
   written as ``roofline_ceiling.csv``. It has one row per memory level for bandwidth, and one row
   per data type and pipe (VALU, MFMA or WMMA) for compute. Each value is in Bytes/s, FLOP/s or
