@@ -288,8 +288,9 @@ static __device__ inline unsigned getWorstPackCount(unsigned nElts, unsigned nEl
   return (nElts + 2 * (nEltPerPack - 1)) / nEltPerPack;
 }
 
-template <typename Coop, typename DstSpace, typename GetDst, template <typename> typename Red, typename Acc,
-          typename GetSrc, typename GetSrcPtrMasked>
+// PostOp applies red's post-op (e.g. the division of an average) to each sum before it is stored.
+template <bool PostOp = false, typename Coop, typename DstSpace, typename GetDst, template <typename> typename Red,
+          typename Acc, typename GetSrc, typename GetSrcPtrMasked>
 __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstSpace dstMem, unsigned dstAlignMin,
                             /*(int i)->DstT* */ GetDst getDst, Red<Acc> red, int nSrcs,
                             /*(int i, int srcIx)->SrcT* */ GetSrc getSrc,
@@ -342,7 +343,7 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
                             });
       DstPack dstVal[UnrollData];
       NVCC_PRAGMA_UNROLL_AUTO
-      for (int u = 0; u < UnrollData; u++) dstVal[u] = applyCast<Acc, DstT>(acc[u]);
+      for (int u = 0; u < UnrollData; u++) dstVal[u] = applyCast<Acc, DstT>(PostOp ? applyPostOp(red, acc[u]) : acc[u]);
       storePacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, 32, lastPackEmpty);
     }
     int nRemPacks = nPacks - nBlobs * nPackPerBlob;
@@ -366,7 +367,7 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
                               [&] __device__(int srcIx) -> SrcPack* {
                                 return (SrcPack*)(getSrc(batchIx, srcIx) - padElts) + packIx;
                               });
-        DstPack dstVal[1] = {applyCast<Acc, DstT>(acc[0])};
+        DstPack dstVal[1] = {applyCast<Acc, DstT>(PostOp ? applyPostOp(red, acc[0]) : acc[0])};
         storePacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, tn, false);
       }
     }
@@ -380,17 +381,17 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
       if (inPlace) acc[0] = (Acc)loadMem(dstMem, dstPtr + eltIx);
       accumulateLoads<SrcT>(red, inPlace, acc, /*stride(no data unroll)=*/0, /*lastPackEmpty=*/false, nSrcs,
                             [&] __device__(int srcIx) -> SrcT* { return getSrc(batchIx, srcIx) + eltIx; });
-      storeMem(dstMem, dstPtr + eltIx, (DstT)acc[0]);
+      storeMem(dstMem, dstPtr + eltIx, (DstT)(PostOp ? applyPostOp(red, acc[0]) : acc[0]));
     }
   }
 }
 
-template <typename Coop, template <typename> typename Red, typename Acc, typename DstSpace, typename DstT,
-          typename GetSrc>
+template <bool PostOp = false, typename Coop, template <typename> typename Red, typename Acc, typename DstSpace,
+          typename DstT, typename GetSrc>
 static __device__ void reduce(Coop coop, Red<Acc> red, bool inPlace, int nElts, DstSpace dstMem, unsigned dstAlignMin,
                               DstT* dst, int nSrcs, unsigned srcPtrCommonMask, unsigned srcPtrMasked,
                               /*(int srcIx)->SrcT* */ GetSrc getSrc) {
-  reduceBatch(
+  reduceBatch<PostOp>(
     coop, inPlace, /*nBatch=*/1, nElts, dstMem, dstAlignMin, [=] __device__(int d) -> DstT* { return dst; }, red, nSrcs,
     [&] __device__(int d, int s) { return getSrc(s); }, srcPtrCommonMask,
     /*getSrcPtrMasked=*/[=] __device__(int d) -> unsigned { return srcPtrMasked; });
