@@ -5,6 +5,10 @@
 
 import pytest
 
+from rocprof_compute_soc.counter_file import (
+    flat_counters_in_perfmon_file,
+    perfmon_config_for_arch,
+)
 from rocprof_compute_soc.counter_grouping_buckets import (
     iter_metric_groups,
     rebuild_counter_file,
@@ -18,7 +22,6 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
     fill_multi_pass_metrics_into_existing_passes,
     try_allocate_single_pass_metrics,
 )
-from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
 from vendored import yaml
 
 TCC_BUDGET_CONFIG = {"TCC": 4, "SQ": 8}
@@ -88,7 +91,7 @@ def test_overlapping_unions_share_bucket_when_cap_allows():
 
 def test_sp_valu_and_sq_vmem_stay_in_different_passes():
     """Placement, merge, and leftover fill keep the two gfx1250 families apart."""
-    cfg = {"SQ": 8}
+    cfg = perfmon_config_for_arch("gfx1250", {"SQ": 8})
     sp_group = frozenset({"SP_VALU_FLOPS_FP32", "SP_VALU_FLOPS_FP16"})
     vmem_group = frozenset({"SQ_VMEM_REQ", "SQ_VMEM_STALL"})
     files, file_count = _ensure_single_pass_metric_set([], sp_group, cfg, 0)
@@ -409,7 +412,7 @@ def test_weighted_avg_weight_joins_the_sub_ratio_group():
         "SQ_INSTS_VALU_MUL_F32",
         "TCC_EA0_RDREQ_sum",
     }
-    rows = iter_metric_groups((), yaml_metrics, "MI300", profiled)
+    rows = iter_metric_groups(yaml_metrics, "MI300", profiled)
     groups = [counters for _key, counters, _label in rows]
     assert len(groups) == 1
     assert groups[0] == frozenset({
