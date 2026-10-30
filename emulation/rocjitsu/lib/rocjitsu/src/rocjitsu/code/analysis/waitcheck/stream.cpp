@@ -85,12 +85,8 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
       const auto *op = inst.dst_operand(i);
       if (!op)
         continue;
-      if (auto ref = op->to_register_ref()) {
-        // Encoded wave-mask operands can retain their maximum two-SGPR width.
-        if (ref->cls == RegClass::SGPR && op->is_wave_mask())
-          ref->width = wave_size / 32;
-        effects.defs.expand(*ref);
-      }
+      if (auto ref = op->to_register_ref())
+        effects.defs.expand(wave_sized_register(*op, *ref, wave_size));
     }
   }
   inst.implicit_defs(effects.defs);
@@ -105,9 +101,7 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
       continue;
     if (i == 0 && scalar_address && ref->cls == RegClass::VGPR)
       ref->width = 1;
-    if (ref->cls == RegClass::SGPR && op->is_wave_mask())
-      ref->width = wave_size / 32;
-    effects.uses.expand(*ref);
+    effects.uses.expand(wave_sized_register(*op, *ref, wave_size));
   }
   inst.implicit_uses(effects.uses);
   if (inst.flags() & WRITES_EXEC)
@@ -195,6 +189,12 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
 
 bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> current,
                  rj_code_arch_t arch) {
+  if (amdgpu::has_ordered_lds_direct_writeback(arch) && event.counter == WaitCounterKind::Exp &&
+      event.kind == WaitEventKind::LdsDirect) {
+    return std::ranges::any_of(current, [](const auto &other) {
+      return other.counter == WaitCounterKind::Exp && other.kind == WaitEventKind::LdsDirect;
+    });
+  }
   if (!amdgpu::has_ordered_vmem_writeback(arch))
     return false;
   if (event.kind == WaitEventKind::FlatLoad) {

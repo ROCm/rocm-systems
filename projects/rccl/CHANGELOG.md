@@ -5,12 +5,16 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ## RCCL 2.32.3 for ROCm 10.3.0 (Unreleased)
 
 ### Added
+* `ncclGinFlushTimeout` and `ncclGinWaitTimeout` support on the rocSHMEM GDA and Anvil SDMA GIN backends, along with `ncclGinFlushAsync` and `ncclGinWait` on rocSHMEM GDA. Flush and wait on both backends also return when the communicator is aborted, except blocking flush on Anvil SDMA.
 
 ### Changed
+* On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.
 
 ### Removed
 
 ### Resolved issues
+* Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
+* Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
 
 ### Known issues
 
@@ -124,6 +128,18 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Updated the RMA plugin interface to v15.
 * Reduced communicator host memory by allocating topology path link arrays to their actual length.
 * Widened the LL128 per-thread shared-memory slice from 8 to 32 elements on gfx1250 (MI450/MI455); other architectures are unchanged. Forced Ring/LL128 bandwidth roughly doubles at 16 MB and above. Per-block LDS rises from 36448 to 85472 bytes, and because the scratch region is shared across protocols this applies to every kernel launch, not only LL128 ones. The tuner's protocol selection is unchanged, so the gain is only visible when LL128 is selected explicitly.
+* Registered-window CE AllReduce is now eligible without requiring ``NCCL_CTA_POLICY=2``
+  (``CTA_POLICY_ZERO``); it is gated only by the per-arch table window and ``RCCL_CE_ALLREDUCE``.
+  ``RCCL_FORCE_CE_ALLREDUCE`` now applies exclusively to the non-registered (2-shot/staged) CE
+  AllReduce path.
+* `RCCL_FORCE_SYMMETRIC` (default `0`): when set to a non-zero value, biases the `ncclAllReduce`
+  backend selector to prefer the symmetric kernel path over all other candidates. The selector
+  still requires the operand buffers to be registered symmetric windows; if the symmetric
+  path is ineligible the selector falls back normally.
+* `RCCL_FORCE_DDA` (default `0`): when set to a non-zero value, biases the `ncclAllReduce`
+  backend selector to prefer DDA (Direct Data Access) paths over all other candidates,
+  including symmetric and Copy Engine. If no DDA path is eligible for the given message
+  size and communicator the selector falls back normally.
 
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
@@ -147,6 +163,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed a 15 to 30% `ncclScatter` bandwidth loss from 16 MB upward on multi-node AINIC jobs, caused by the move to two network channels per peer (for example on 4 nodes of 8 GPUs). Scatter now uses and connects the most channels per peer whose flows still fit the P2P channel pool. Point-to-point operations and the other collectives keep their channel count.
 * Fixed intermittent data corruption in multi-node collectives, seen as out-of-bounds values in 8-node AllToAll, on hosts that use GPU Direct RDMA through peermem. Since RCCL 2.30.4 the GDR flush scratchpad was registered only through dma-buf, so on peermem hosts the flush degraded to a single RDMA read of the receive buffer, which does not order earlier relaxed-ordering writes. The scratchpad is now also registered through peermem, restoring the strictly ordered RDMA write that precedes the flush read.
 * Fixed `ncclCommAbort` and `ncclCommRevoke` hanging when a DDA collective (IPC on gfx942/gfx950, fabric LL/LL128/VMM on gfx1250) was waiting on a peer that never joined. DDA kernels now observe the communicator abort flag while waiting. A parent communicator shrunk with `NCCL_SHRINK_ABORT` no longer uses DDA for later collectives.
+* Fixed wrong results and hangs in application kernels that use the GIN device API, such as the `07_kernel_fusion` GIN and hybrid RMSNorm examples. `nccl_device/coop.h` selected `__syncwarp` from `ROCM_VERSION`, which only RCCL's own build defines, so in application code the thread and warp cooperative groups synchronized the whole block with `__syncthreads()`. The GIN barrier calls them from a subset of threads, which left the block's waves out of step. The headers now fall back to the HIP version when `ROCM_VERSION` is not defined.
 * Fixed FP8 E4M3 and E5M2 `ncclAvg` returning wrong values for every element of every reduction collective on gfx942, and on architectures that use the software FP8 fallback. The `1/nRanks` scale was packed as an FP8 value in the host's OCP encoding, which those devices decode as FNUZ, so every result came out half as large. The scale is now carried as `float` on all architectures, which also keeps it exact at rank counts FP8 cannot represent: in OCP E4M3, `1/384` was off by 25% and `1/1024` rounded to zero. Single-rank FP8 reductions on gfx942 no longer fail to launch the `oneRankReduce` kernel, and rccl-tests no longer skips FP8 `avg` for `all_reduce`, `all_reduce_bias` and `reduce`.
 * Fixed the GIN plugin never being finalized for a communicator that had connected a GIN backend, leaking the plugin's per-communicator context and leaving its reference count one too high after every `ncclCommDestroy`. `ncclGinHostFinalize` closed the GIN connections and then zeroed the whole `ncclGinState`, so the `ncclGinFinalize` that follows it in `commFree` saw no active backend and skipped the plugin `finalize()` call. Host finalize now clears only the per-connection state and hands the backend records to `ncclGinFinalize`, which finalizes each one on the last shared-resource reference. `commFree` returns the first of a `closeColl` or plugin-finalize error after those frees; if both fail, the `closeColl` error is the one reported. An `ncclRmaProxyFinalize` error still aborts the rest of teardown immediately. On the Anvil SDMA backend (`NCCL_GIN_TYPE=7`) this was one leaked init context per connected communicator.
 * Restored topo tuning-model init (`ncclTopoTuneModel`) after the 2.31 `ncclTuningInit` switch so multi-node kernels do not launch with `blockDim.x=0`.
@@ -181,6 +198,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Enabled the Copy-Engine profiler path (`ncclProfiler_v6`): Copy-Engine events are emitted for CE collectives, and the example profiler plugin reports them.
 
 ### Changed
+* `hipcc` is no longer accepted as the CMake CXX compiler for RCCL builds. Use `amdclang++` directly (`-DCMAKE_CXX_COMPILER=amdclang++` or set `ROCM_PATH`). `hipcc` was a wrapper around `amdclang++` that is being phased out across the ROCm stack.
 * Adapted the device-initiated GIN backends (Anvil SDMA and rocSHMEM GDA) to the NCCL 2.30.7 GIN API v14: added the new `getGinProperties` host op, dropped the data-path ops (`iput`/`iputSignal`/`iget`/`iflush`/`test`) that moved out of GIN under the GIN/RMA split, switched `createContext` to `ncclGinConfig_v14_t`, updated the device dispatch signatures, and matched the GIN type renumbering (`ROCSHMEM_GDA` and `ANVIL_SDMA` shifted after the new `GIN_GPI` type). The plugins now use the generic (unversioned) `ncclGin_t` / `ncclGinConfig_t` / `ncclGinProperties_t` typedefs so future ABI bumps do not require touching call sites.
 * Updated the ROCSHMEM GIN plugin registration to the v14 layout (corrected struct field names and the conditional that previously only compiled without ROCSHMEM GIN).
 * Adapted the InfiniBand transports (`net_ib` and `net_ib_cast`) to the v14 GIN/RMA split: the host/proxy backend is now registered as an `ncclRma_t` vtable (`RMA_IB_PROXY`) that owns the `iput`/`iputSignal`/`iget`/`iflush`/`test` data-path ops, with GIN layered on top through the generic `ncclGinProxy`.

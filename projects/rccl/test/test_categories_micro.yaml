@@ -75,6 +75,19 @@ test_categories:
       - "NetTelemetrySamplerMicrotest.*"
       - "NetTelemetryJsonMicrotest.*"
       - "NetTelemetryFlushMicrotest.*"
+      # transport/net_socket.cc, transport/net_socket/common.cc
+      - "NetSocketDevicesMicrotest.*"
+      - "NetSocketInitMicrotest.*"
+      - "NetSocketThreadsMicrotest.*"
+      - "NetSocketListenMicrotest.*"
+      - "NetSocketConnectMicrotest.*"
+      - "NetSocketAcceptMicrotest.*"
+      - "NetSocketRequestMicrotest.*"
+      - "NetSocketTransferMicrotest.*"
+      - "NetSocketTaskMicrotest.*"
+      - "NetSocketHelperThreadMicrotest.*"
+      - "NetSocketMultiSocketMicrotest.*"
+      - "NetSocketCloseMicrotest.*"
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"
@@ -100,6 +113,8 @@ test_categories:
       - "RmaDebugLoggingTest.*"
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
+      # plugin/rma.cc
+      - "RmaPluginInitTest.*"
       # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc
