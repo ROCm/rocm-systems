@@ -7802,6 +7802,130 @@ TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric_Avg) {
   }
 }
 
+// rsAlgoHier with counts that span several chunks and end in a partial one.
+// NCCL_SYM_RS_GIN_CHUNK_SIZE=4096 sizes the per-block accumulator to 8 KiB (2048
+// floats, the chunk cap) and NCCL_SYM_CTAS=1 gives one block the whole count.
+// NCCL_PARAM caches both, so the CI entry sets them for a fresh process.
+TEST_F(GinMPIDeviceTests, ReduceScatter_RailA2AChunkRemainder) {
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
+    GTEST_SKIP() << "Skipping symmetric ReduceScatter (RailA2A_LsaLD) for rocSHMEM-GDA";
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    GTEST_SKIP() << "Symmetric ReduceScatter not supported for anvil-sdma: single-node backend";
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (auto reason = crossNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (auto reason = intraNodeSymReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  constexpr uint32_t kChunkBytes = 4096;
+  MPIHelpers::MpiEnvGuard chunkEnv("NCCL_SYM_RS_GIN_CHUNK_SIZE", "4096");
+  MPIHelpers::MpiEnvGuard ctasEnv("NCCL_SYM_CTAS", "1");
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  // Accumulator holds 2 chunks of kChunkBytes; the kernel caps a chunk at its float capacity.
+  constexpr uint32_t kAccumBytes = 2 * kChunkBytes;
+  constexpr size_t kMaxChunkElts = kAccumBytes / sizeof(float);
+  // Full chunks plus a remainder; 2065 and 7145 also leave a non-16-byte tail.
+  const std::vector<size_t> counts = {2 * kMaxChunkElts + 1000, kMaxChunkElts + 17, 3 * kMaxChunkElts + 1001};
+  constexpr size_t kGuardElems = 64;
+  constexpr float kGuard = -7777.0f;
+  // Shifts every input per repeat so a stale result from the previous round cannot match.
+  constexpr size_t kRepeatShift = size_t{1} << 16;
+  constexpr int kRepeats = 2;
+
+  for (size_t count : counts) {
+    SCOPED_TRACE(::testing::Message() << "count=" << count);
+
+    const size_t sendElems = count * static_cast<size_t>(nRanks);
+    const size_t sendBytes = sendElems * sizeof(float);
+    const size_t recvElems = count + kGuardElems;
+    const size_t recvBytes = recvElems * sizeof(float);
+
+    void* dSend = nullptr;
+    void* dRecv = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, sendBytes));
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, recvBytes));
+    auto memCleanup = makeScopeGuard([&]() {
+      if (dSend) (void)ncclMemFree(dSend);
+      if (dRecv) (void)ncclMemFree(dRecv);
+    });
+
+    ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommWindowRegister(comm, dSend, sendBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommWindowRegister(comm, dRecv, recvBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+    auto winCleanup = makeScopeGuard([&]() {
+      if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+      if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+    });
+
+    // A silent fallback to a non-symmetric backend must not pass.
+    int algo = -1, proto = -1, nCh = -1;
+    ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncReduceScatter, count, ncclFloat32, ncclSum, dSend,
+                                                   dRecv, /*graphCapturing=*/0, &algo, &proto, &nCh));
+    ASSERT_MPI_EQ(static_cast<int>(RCCL_SYMMETRIC), algo);
+    // The query initialized the symmetric state; the pinned chunk and CTA count must be in effect.
+    if (auto reason = mpiCoordinatedSkipReason(
+            comm->symkState.kcomm.rsGinAccumBytesPerBlock != kAccumBytes || nCh != 1,
+            "NCCL_SYM_RS_GIN_CHUNK_SIZE / NCCL_SYM_CTAS were read before this test; run it in its own process");
+        !reason.empty())
+      GTEST_SKIP() << reason;
+
+    std::vector<float> hostRecv(recvElems, -1.0f);
+    std::fill(hostRecv.begin() + count, hostRecv.end(), kGuard);
+    ASSERT_MPI_EQ(hipSuccess,
+        hipMemcpy(dRecv, hostRecv.data(), recvBytes, hipMemcpyHostToDevice));
+
+    std::vector<float> hostSend(sendElems);
+    for (int rep = 0; rep < kRepeats; rep++) {
+      SCOPED_TRACE(::testing::Message() << "repeat=" << rep);
+      const size_t shift = static_cast<size_t>(rep) * kRepeatShift;
+      for (size_t j = 0; j < sendElems; j++)
+        hostSend[j] = static_cast<float>(j + static_cast<size_t>(rank) + shift);
+      ASSERT_MPI_EQ(hipSuccess,
+          hipMemcpy(dSend, hostSend.data(), sendBytes, hipMemcpyHostToDevice));
+
+      MPI_Barrier(MPI_COMM_WORLD);
+
+      ASSERT_MPI_EQ(ncclSuccess,
+          ncclReduceScatter(dSend, dRecv, count, ncclFloat32, ncclSum, comm, stream));
+      ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+      MPI_Barrier(MPI_COMM_WORLD);
+
+      // Expected[i] on rank r = nRanks*(r*count + i + shift) + nRanks*(nRanks-1)/2 (< 2^24, exact).
+      ASSERT_MPI_EQ(hipSuccess,
+          hipMemcpy(hostRecv.data(), dRecv, recvBytes, hipMemcpyDeviceToHost));
+      const double sumOfRanks = static_cast<double>(nRanks) * (nRanks - 1) / 2.0;
+      size_t nBad = 0;
+      for (size_t i = 0; i < recvElems; i++) {
+        const double base = static_cast<double>(static_cast<size_t>(rank) * count + i + shift);
+        const float expected = i < count ? static_cast<float>(nRanks * base + sumOfRanks) : kGuard;
+        if (hostRecv[i] != expected && nBad++ == 0)
+          ADD_FAILURE() << "rank=" << rank << " i=" << i << (i < count ? "" : " (guard)")
+                        << " expected=" << expected << " got=" << hostRecv[i];
+      }
+      ASSERT_MPI_EQ(size_t{0}, nBad);
+    }
+  }
+}
+
 TEST_F(GinMPIDeviceTests, AllGather_Symmetric) {
   if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
     GTEST_SKIP() << "Skipping symmetric AllGather (RailRing_LsaST) for rocSHMEM-GDA";
