@@ -51,7 +51,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from config_management import utils_ruamel as cm_utils  # noqa: E402
+from config_management import utils_ruamel as cm_utils
 
 REQUIRED_PANEL_KEYS = ("id", "title", "data source", "metrics_description")
 OPTIONAL_PANEL_KEYS = ("alias", "experimental")
