@@ -49,6 +49,21 @@ def parse_metadata_resources(lines):
     return resources
 
 
+def max_named_barriers(lines):
+    """Largest named-barrier count named by any .set in the assembly.
+
+    The YAML metadata does not carry this count. Every integer in the .set
+    expression counts, because operands such as max(9, sym) can name symbols
+    that only resolve in another shard."""
+    best = 0
+    for line in lines:
+        m = re.match(r'\s*\.set\s+\S*num_named_barrier,\s*(.*)', line)
+        if m:
+            for value in re.findall(r'(?<![\w.])\d+(?![\w.])', m.group(1)):
+                best = max(best, int(value))
+    return best
+
+
 def find_devfunc_symbol(lines):
     """Find the mangled ncclDevFunc_* symbol name."""
     for line in lines:
@@ -124,6 +139,7 @@ def extract(input_path, output_asm_path, output_json_path=None):
 
     # Parse resources BEFORE stripping metadata
     resources = parse_metadata_resources(lines)
+    resources['num_named_barrier'] = max_named_barriers(lines)
     resources['function_name'] = unmangled
     resources['mangled_name'] = mangled
 

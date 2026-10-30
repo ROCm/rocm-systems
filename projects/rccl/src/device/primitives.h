@@ -16,8 +16,28 @@
 #include "common.h"
 
 #define NCCL_SPINS_BEFORE_CHECK_ABORT 10000
-#define barrier_generic(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR) \
+// NAMED_BARRIER indexes ncclNamedBarriers where the hardware has them; otherwise
+// sub-block barriers spin on the BARRIERS_PTR counter.
+#if RCCL_HAVE_NAMED_BARRIERS
+// The signal also sets the expected wave count, so groups of different widths
+// can reuse a barrier. s_barrier_wait 1 waits on the last barrier this wave joined.
+#define barrier_generic(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, NAMED_BARRIER) \
+  do { \
+    __THREAD_FENCE; \
+    if (nthreads == threadsPerBlock) { \
+      __builtin_amdgcn_s_barrier(); \
+    } else { \
+      __builtin_amdgcn_s_barrier_join(&ncclNamedBarriers[(NAMED_BARRIER)]); \
+      __builtin_amdgcn_s_barrier_signal_var(&ncclNamedBarriers[(NAMED_BARRIER)], (NWORKERS) / WARP_SIZE); \
+      __builtin_amdgcn_s_barrier_wait(1); \
+      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup"); \
+    } \
+  } while (0)
+#else
+#define barrier_generic(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, NAMED_BARRIER) \
   barrier_generic_ordered(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)
+#endif
+
 // ARRIVE_ORDER/WAIT_ORDER order the software arrive/spin on BARRIERS_PTR. A workgroup-scope release
 // there drains every outstanding store (s_wait_storecnt on gfx1250), so callers that order memory
 // with their own fences pass __ATOMIC_RELAXED.
