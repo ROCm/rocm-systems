@@ -489,11 +489,11 @@ size_t rcclCeAr2ShotMax(const ncclComm*) {
   TaskAppendCeFakedOrFailLoud("rcclCeAr2ShotMax");
   return 0;
 }
-size_t rcclCeArNonRegCap(const ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
-}
 size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
+}
+size_t rcclCeArNonRegCap(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
 }
 bool rcclNcclAlgoEnvIsSet() {
   TaskAppendCeFakedOrFailLoud("rcclNcclAlgoEnvIsSet");

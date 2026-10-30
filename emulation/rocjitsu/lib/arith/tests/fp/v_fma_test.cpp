@@ -246,6 +246,36 @@ template <int Lanes, bool Half = false, typename Call> static void check_fma_dpp
       }
     }
   }
+  // Representative routing branches, with sparse EXEC and partial row/bank masks.
+  // The scalar router is independent of the SIMD permutation implementation.
+  const struct {
+    uint32_t control;
+    bool fi, bc;
+  } routes[] = {{0x1b, false, false}, {0x109, false, true}, {0x11a, true, false},
+                {0x12c, true, true},  {0x141, false, true}, {0x15b, true, false},
+                {0x16d, false, false}};
+  for (const auto &route : routes) {
+    const Mask exec_mask = Mask(0xb5b5b5b5b5b5b5b5ULL);
+    const uint64_t instruction_flags =
+        RJ_ARITH_DPP16 | (uint64_t(route.control) << RJ_ARITH_DPP_CTRL_SHIFT) |
+        (0xaULL << RJ_ARITH_DPP_ROW_SHIFT) | (0xbULL << RJ_ARITH_DPP_BANK_SHIFT) |
+        (route.fi ? RJ_ARITH_DPP_FI : 0) | (route.bc ? RJ_ARITH_DPP_BOUND_CTRL : 0);
+    auto expected = input;
+    ASSERT_EQ(call(RJ_ARITH_SEMANTICS_LOOSE, exec_mask, instruction_flags, expected.v + 3,
+                   expected.v, expected.v + 1, expected.v + 2, nullptr),
+              RJ_ARITH_SUCCESS);
+    for (uint64_t cpu : supported_cpu_levels()) {
+      auto actual = input;
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_LOOSE, exec_mask, instruction_flags, actual.v + 3,
+                     actual.v, actual.v + 1, actual.v + 2, nullptr),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < Lanes; ++lane) {
+        EXPECT_EQ(actual.v[3][lane], expected.v[3][lane])
+            << route.control << '/' << cpu << '/' << lane;
+      }
+      actual.expect_preserved(input, 3, 1);
+    }
+  }
   // gfx1100/gfx1201 Wave32 observations: FI reads inactive sources, not out-of-range
   // sources (unlike the FI=1 rows of RDNA4 ISA Table 39). BC supplies zero for either.
   for (int lane = 0; lane < Lanes; ++lane) {
