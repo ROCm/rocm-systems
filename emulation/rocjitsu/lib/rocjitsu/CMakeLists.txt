@@ -30,8 +30,25 @@ target_include_directories(
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+option(
+    RJ_BUILD_CONSAN_COMPILER
+    "Build the experimental offline ConSan compiler"
+    OFF
+)
+option(
+    RJ_BUILD_CONSAN_RUNTIME
+    "Build the experimental standalone ConSan HSA plugin"
+    OFF
+)
+option(
+    RJ_BUILD_CONSAN_ANALYZER
+    "Build the standalone offline ConSan analyzer"
+    OFF
+)
+
 add_subdirectory(src/rocjitsu/code/analysis)
 add_subdirectory(src/rocjitsu/code)
+add_subdirectory(src/rocjitsu/code/consan)
 add_subdirectory(src/rocjitsu/isa)
 
 # Private static-analysis composition. It owns no default ISA registry: each
@@ -59,7 +76,7 @@ endforeach()
 # requirement; the simulation library is deliberately absent from the link.
 target_link_libraries(
     rocjitsu_analysis_internal
-    PUBLIC util Threads::Threads simdojo_headers
+    PUBLIC util Threads::Threads simdojo_headers rocjitsu_kernel_descriptor_scan
 )
 set_target_properties(
     rocjitsu_analysis_internal
@@ -100,11 +117,23 @@ foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)
         PRIVATE $<TARGET_OBJECTS:${_object_lib}>
     )
 endforeach()
-target_link_libraries(rocjitsu_dbt_internal PUBLIC util Threads::Threads)
+target_link_libraries(
+    rocjitsu_dbt_internal
+    PUBLIC
+        util
+        Threads::Threads
+        rocjitsu_kernel_descriptor_scan
+        rocjitsu_kernarg_extension
+        rocjitsu_amdhsa_metadata
+)
 set_target_properties(
     rocjitsu_dbt_internal
     PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
+
+if(RJ_BUILD_CONSAN_COMPILER)
+    add_subdirectory(src/rocjitsu/code/patch/consan)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Fixed-profile gfx1250 B0-to-A0 translator. Its default registry contains
@@ -153,6 +182,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_gfx1250_b0_to_a0
         PRIVATE
             rocjitsu_cdna5_model_registry
+            rocjitsu_kernel_descriptor_scan
+            rocjitsu_kernarg_extension
+            rocjitsu_amdhsa_metadata
             simdojo_headers
             util
             Threads::Threads
