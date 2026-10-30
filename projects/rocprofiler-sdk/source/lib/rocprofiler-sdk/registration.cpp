@@ -1612,6 +1612,13 @@ rocprofiler_set_api_table(const char* name,
                           uint64_t    num_tables)
 {
     if(rocprofiler::registration::fork_child_abandoned()) return 0;
+    // Runtime registration mutates profiler state after initialize() returns, including table
+    // copies, hook installation, queue state, and client notifications. Keep the complete
+    // operation visible to fork admission without acquiring session-lifecycle ownership from a
+    // runtime callback.
+    rocprofiler::internal_threading::register_fork_handler();
+    auto activity =
+        rocprofiler::common::fork_lifecycle::activity{rocprofiler::registration::lifecycle};
 
     // implementation has a call once
     rocprofiler::registration::init_logging();

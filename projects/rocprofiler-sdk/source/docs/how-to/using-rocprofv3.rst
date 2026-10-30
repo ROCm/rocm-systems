@@ -55,7 +55,9 @@ requires the updated SDK and tool together. When attached to an older SDK withou
 coordination hook, the tool retains the older SDK's best-effort fork behavior.
 Prepare handlers release snapshot locks before subsequent application prepare handlers run.
 Lifecycle work after a snapshot invalidates it, even when that work finishes before fork.
-Startup and profiler-owned signal-disposition changes participate in this activity tracking.
+Startup, runtime API-table registration, and profiler-owned signal-disposition changes
+participate in this activity tracking. Runtime registration stays tracked through table copying,
+hook installation, and client notifications, including after initial SDK setup returns.
 Handled signals remain blocked on the forking thread until the child decision and worker setup
 finish. A PID ownership check also prevents inherited worker use before the child handlers run,
 including ``abort()`` unblocking ``SIGABRT`` during that transition.
