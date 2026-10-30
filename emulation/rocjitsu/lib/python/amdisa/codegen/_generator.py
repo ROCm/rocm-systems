@@ -6718,6 +6718,18 @@ class CodeGenerator:
         if rj_arith_compare is not None:
             return rj_arith_compare
 
+        from amdisa.codegen.execute.rj_arith_ds import gen_ds
+
+        rj_arith_ds = gen_ds(self.isa_spec.arch_name, inst.name, dst_ops, src_ops)
+        if rj_arith_ds is not None:
+            return rj_arith_ds
+
+        from amdisa.codegen.execute.rj_arith_lane import gen_lane
+
+        rj_arith_lane = gen_lane(self.isa_spec.arch_name, inst.name, dst_ops, src_ops)
+        if rj_arith_lane is not None:
+            return rj_arith_lane
+
         from amdisa.codegen.execute.rj_arith_vector import (
             gen_vector32,
             gen_carry32,
@@ -14160,6 +14172,8 @@ class CodeGenerator:
                             PACKED_INTEGER_NAMES,
                             INTEGER_DOT_NAMES,
                         )
+                        from amdisa.codegen.execute.rj_arith_ds import DS_NAMES
+                        from amdisa.codegen.execute.rj_arith_lane import LANE_NAMES
                         from amdisa.codegen.execute.rj_arith_division import (
                             DIVISION_NAMES,
                         )
@@ -14173,9 +14187,11 @@ class CodeGenerator:
                             'rdna3',
                             'rdna4',
                         ) and (
-                            inst.name in DIVISION_NAMES
-                            or inst.name in COMPARE_NAMES
-                            or inst.name in CARRY32_NAMES
+                            inst.name in DS_NAMES
+                            or inst.name in LANE_NAMES
+                            or inst.name in DIVISION_NAMES
+                            or (inst.name in COMPARE_NAMES)
+                            or (inst.name in CARRY32_NAMES)
                             or (inst.name in WIDE_INTEGER_NAMES)
                             or (inst.name in INTEGER16_NAMES)
                             or (inst.name in WIDENING_INTEGER_NAMES)
@@ -14812,7 +14828,22 @@ class CodeGenerator:
                             False,
                         )
                     )
+                from amdisa.codegen.execute.rj_arith_ds import DS_NAMES
 
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in DS_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_lane import LANE_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in LANE_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_lane_exec.h', False)
+                    )
                 from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
 
                 if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(

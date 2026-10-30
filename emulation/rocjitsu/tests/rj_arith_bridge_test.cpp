@@ -5818,5 +5818,619 @@ TEST(ArithBridgeTest, HalfFixupGuestRoundingNanClampAndPartialWrites) {
               EXPECT_EQ(fixture.wave->trapsts(), 0x20U);
             }
 }
+
+TEST(ArithBridgeTest, RelativeVectorMovesAndSwapsKeepAddressingMasksAndAliases) {
+  const uint16_t vop1_ops[2][5] = {
+      {rdna4::kVMovrelsB32Vop1, rdna4::kVMovreldB32Vop1, rdna4::kVMovrelsdB32Vop1,
+       rdna4::kVMovrelsd2B32Vop1, rdna4::kVSwaprelB32Vop1},
+      {rdna3::kVMovrelsB32Vop1, rdna3::kVMovreldB32Vop1, rdna3::kVMovrelsdB32Vop1,
+       rdna3::kVMovrelsd2B32Vop1, rdna3::kVSwaprelB32Vop1}};
+  const uint16_t vop3_ops[2][4] = {{rdna4::kVMovrelsB32Vop3, rdna4::kVMovreldB32Vop3,
+                                    rdna4::kVMovrelsdB32Vop3, rdna4::kVMovrelsd2B32Vop3},
+                                   {rdna3::kVMovrelsB32Vop3, rdna3::kVMovreldB32Vop3,
+                                    rdna3::kVMovrelsdB32Vop3, rdna3::kVMovrelsd2B32Vop3}};
+  const auto value = [](unsigned reg, unsigned lane) {
+    return 0x80000000U + reg * 0x10000U + lane;
+  };
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32U, 64U})
+      for (bool e64 : {false, true})
+        for (unsigned operation = 0; operation < (e64 ? 4U : 5U); ++operation)
+          for (uint32_t m0 : {0U, 3U, 0x00040003U, 255U, 1023U, 1024U})
+            for (bool alias : {false, true}) {
+              SCOPED_TRACE(::testing::Message()
+                           << "rdna3=" << rdna3 << " lanes=" << lanes << " e64=" << e64
+                           << " operation=" << operation << " m0=" << m0 << " alias=" << alias);
+              BridgeFixture fixture(rdna3, lanes);
+              const unsigned source_base = 1, destination_base = alias ? 1 : 8;
+              const unsigned source_offset = operation == 1 ? 0 : operation >= 3 ? m0 & 1023 : m0;
+              const unsigned destination_offset = operation == 0   ? 0
+                                                  : operation >= 3 ? (m0 >> 16) & 1023
+                                                                   : m0;
+              const bool source_valid =
+                  source_offset <= 1023 && source_base + uint64_t(source_offset) < 256;
+              const bool destination_valid = destination_offset <= 1023 &&
+                                             destination_base + uint64_t(destination_offset) < 256;
+              const unsigned source = source_valid ? source_base + source_offset : 0;
+              const unsigned destination =
+                  destination_valid ? destination_base + destination_offset : 0;
+              const uint64_t exec_mask =
+                  0xa55af00f0f0f00f3ULL & (lanes == 32 ? 0xffffffffULL : ~0ULL);
+              const uint64_t write_mask = exec_mask & ~2ULL;
+              fixture.wave->set_exec(exec_mask);
+              fixture.wave->set_vgpr_write_mask(~2ULL);
+              fixture.wave->set_m0(m0);
+              for (unsigned reg : {0U, source_base, destination_base, source, destination})
+                for (unsigned lane = 0; lane < lanes; ++lane)
+                  fixture.cu->write_vgpr(fixture.base() + reg, lane, value(reg, lane));
+              std::vector<uint32_t> words;
+              const auto set_words = [&](const auto &encoding) {
+                words.assign(encoding.begin(), encoding.end());
+              };
+              if (e64)
+                set_words(rdna3 ? rdna3::build_vop3(vop3_ops[1][operation],
+                                                    {.vdst = uint8_t(destination_base),
+                                                     .src0 = uint16_t(256 + source_base)})
+                                : rdna4::build_vop3(vop3_ops[0][operation],
+                                                    {.vdst = uint8_t(destination_base),
+                                                     .src0 = uint16_t(256 + source_base)}));
+              else
+                set_words(rdna3 ? rdna3::build_vop1(vop1_ops[1][operation],
+                                                    {.src0 = uint16_t(256 + source_base),
+                                                     .vdst = uint8_t(destination_base)})
+                                : rdna4::build_vop1(vop1_ops[0][operation],
+                                                    {.src0 = uint16_t(256 + source_base),
+                                                     .vdst = uint8_t(destination_base)}));
+              auto instruction = fixture.decoder->decode_window(words);
+              ASSERT_TRUE(instruction.succeeded());
+              fixture.recorder->writes.clear();
+              ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                              .succeeded());
+              const bool writes = destination_valid && (operation != 4 || source_valid);
+              uint64_t actual_write_mask = 0;
+              for (const auto &event : fixture.recorder->writes)
+                actual_write_mask |= event.lanes;
+              EXPECT_EQ(actual_write_mask, writes ? write_mask : 0);
+              for (unsigned reg : {0U, source_base, destination_base, source, destination})
+                for (unsigned lane = 0; lane < lanes; ++lane) {
+                  uint32_t expected = value(reg, lane);
+                  if (writes && ((write_mask >> lane) & 1)) {
+                    if (reg == destination)
+                      expected = value(source, lane);
+                    if (operation == 4 && reg == source)
+                      expected = value(destination, lane);
+                  }
+                  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + reg, lane), expected);
+                }
+            }
+}
+
+TEST(ArithBridgeTest, RelativeSourceSelectionPrecedesDppRouting) {
+  for (bool rdna3 : {false, true}) {
+    BridgeFixture fixture(rdna3);
+    fixture.wave->set_m0(1);
+    fixture.wave->set_exec(0xffffffffU);
+    for (unsigned lane = 0; lane < 32; ++lane) {
+      fixture.cu->write_vgpr(fixture.base() + 7, lane, 0x7000U + lane);
+      fixture.cu->write_vgpr(fixture.base() + 8, lane, 0x8000U + lane);
+    }
+    const auto first = rdna3 ? rdna3::build_vop1(rdna3::kVMovrelsB32Vop1, {.src0 = 250, .vdst = 5})
+                             : rdna4::build_vop1(rdna4::kVMovrelsB32Vop1, {.src0 = 250, .vdst = 5});
+    // row_shr:1, all rows/banks, bound_ctrl=1, encoded source v7.
+    const std::array<uint32_t, 2> words{first[0], 0xff091107U};
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    for (unsigned lane = 0; lane < 32; ++lane)
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 5, lane),
+                lane % 16 ? 0x8000U + lane - 1 : 0);
+  }
+}
+
+TEST(ArithBridgeTest, DsPermutationsRespectGroupingCollisionsAliasesAndSourceObservations) {
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32U, 64U})
+      for (bool observed : {false, true})
+        for (bool suppress : {false, true})
+          for (unsigned operation = 0; operation < (rdna3 ? 2U : 3U); ++operation)
+            for (unsigned destination : {0U, 1U, 2U})
+              for (uint16_t offset : {uint16_t(0), uint16_t(1), uint16_t(4), uint16_t(0xfffc)})
+                for (uint64_t requested_exec : {0ULL, 0x80ff00015355500fULL, ~0ULL}) {
+                  SCOPED_TRACE(::testing::Message()
+                               << "rdna3=" << rdna3 << " lanes=" << lanes
+                               << " operation=" << operation << " destination=" << destination
+                               << " offset=" << offset << " observed=" << observed
+                               << " suppress=" << suppress << " exec=" << requested_exec);
+                  ArithmeticPolicy policy{};
+                  policy.semantics = suppress ? ArithmeticSemantics::Loose
+                                              : ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+
+                  BridgeFixture fixture(rdna3, lanes, policy);
+                  if (!observed)
+                    fixture.cu->set_plugin_group(nullptr);
+                  const uint64_t exec_mask = requested_exec & (lanes == 32 ? 0xffffffffULL : ~0ULL);
+                  const uint64_t write_mask =
+                      exec_mask & (suppress ? 0x3333333333333333ULL : ~0ULL);
+                  fixture.wave->set_exec(exec_mask);
+                  fixture.wave->set_vgpr_write_mask(write_mask);
+                  std::array<uint32_t, 64> address{}, values{}, expected{};
+                  for (unsigned lane = 0; lane < lanes; ++lane) {
+                    address[lane] =
+                        lane == 0 ? 0xfffffffcU
+                                  : 4 * (operation == 0 ? lane % 5 : (lane * 13 + 37) % lanes) +
+                                        (lane & 3);
+                    values[lane] = 0xa0000000U + lane;
+                    expected[lane] = destination == 0   ? address[lane]
+                                     : destination == 1 ? values[lane]
+                                                        : 0xdeadbeefU;
+                    fixture.cu->write_vgpr(fixture.base(), lane, address[lane]);
+                    fixture.cu->write_vgpr(fixture.base() + 1, lane, values[lane]);
+                    fixture.cu->write_vgpr(fixture.base() + 2, lane, 0xdeadbeefU);
+                  }
+                  std::array<uint32_t, 2> words;
+                  if (rdna3)
+                    words = rdna3::build_ds(operation == 0 ? rdna3::kDsPermuteB32Ds
+                                                           : rdna3::kDsBpermuteB32Ds,
+                                            {.offset0 = uint8_t(offset),
+                                             .offset1 = uint8_t(offset >> 8),
+                                             .addr = 0,
+                                             .data0 = 1,
+                                             .vdst = uint8_t(destination)});
+                  else {
+                    const uint16_t opcodes[] = {rdna4::kDsPermuteB32Vds, rdna4::kDsBpermuteB32Vds,
+                                                rdna4::kDsBpermuteFiB32Vds};
+                    words = rdna4::build_vds(opcodes[operation], {.offset0 = uint8_t(offset),
+                                                                  .offset1 = uint8_t(offset >> 8),
+                                                                  .addr = 0,
+                                                                  .data0 = 1,
+                                                                  .vdst = uint8_t(destination)});
+                  }
+                  auto instruction = fixture.decoder->decode_window(words);
+                  ASSERT_TRUE(instruction.succeeded());
+                  if (observed) {
+                    fixture.recorder->reads.clear();
+                    fixture.recorder->writes.clear();
+                  }
+                  ASSERT_TRUE(
+                      fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+                  std::array<uint32_t, 64> result{};
+                  uint64_t consumed = 0;
+                  const unsigned group = rdna3 ? 32 : lanes;
+                  // Ordered scatter matches the existing collision rule. Gather
+                  // uses original EXEC even when destination stores are suppressed.
+                  for (unsigned lane = 0; lane < lanes; ++lane) {
+                    if (!((exec_mask >> lane) & 1))
+                      continue;
+                    const unsigned selected =
+                        lane / group * group + (uint32_t(address[lane] + offset) / 4) % group;
+                    if (operation == 0) {
+                      result[selected] = values[lane];
+                      consumed |= 1ULL << lane;
+                    } else if (operation == 2 || ((exec_mask >> selected) & 1)) {
+                      result[lane] = values[selected];
+                      consumed |= 1ULL << selected;
+                    }
+                  }
+                  if (observed) {
+                    uint64_t address_reads = 0, data_reads = 0, written = 0;
+                    for (const auto &read : fixture.recorder->reads) {
+                      EXPECT_EQ(read.bytes, 0xf);
+                      if (read.reg == fixture.base())
+                        address_reads |= read.lanes;
+                      else if (read.reg == fixture.base() + 1)
+                        data_reads |= read.lanes;
+                      else
+                        ADD_FAILURE() << "Unexpected source register";
+                    }
+                    for (const auto &write : fixture.recorder->writes) {
+                      EXPECT_EQ(write.reg, fixture.base() + destination);
+                      EXPECT_EQ(write.bytes, 0xf);
+                      written |= write.lanes;
+                    }
+                    EXPECT_EQ(address_reads, exec_mask);
+                    EXPECT_EQ(data_reads, consumed);
+                    EXPECT_EQ(written, write_mask);
+                  }
+                  for (unsigned lane = 0; lane < lanes; ++lane) {
+                    if ((write_mask >> lane) & 1)
+                      expected[lane] = result[lane];
+                    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + destination, lane),
+                              expected[lane]);
+                  }
+                }
+}
+
+TEST(ArithBridgeTest, DsSwizzleModesUseMatchingExecutionAndReadFootprints) {
+  // Published basic patterns and FFT order, plus one-step masked rotations.
+  // rj-arith already tests these ISA rules and carries RDNA4 hardware captures.
+  constexpr unsigned fft[] = {0, 16, 8, 24, 4, 20, 12, 28, 2, 18, 10, 26, 6, 22, 14, 30,
+                              1, 17, 9, 25, 5, 21, 13, 29, 3, 19, 11, 27, 7, 23, 15, 31};
+  constexpr uint16_t offsets[] = {0x801b, 0x401f, 0xc020, 0xc420, 0xc02f, 0xe000, 0xe00f};
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32U, 64U})
+      for (bool observed : {false, true})
+        for (bool alias : {false, true})
+          for (unsigned mode = 0; mode < std::size(offsets); ++mode)
+            for (uint64_t requested_exec : {0ULL, 0x55550003f003ff01ULL, ~0ULL}) {
+              SCOPED_TRACE(::testing::Message()
+                           << "rdna3=" << rdna3 << " lanes=" << lanes << " mode=" << mode
+                           << " observed=" << observed << " alias=" << alias);
+              BridgeFixture fixture(rdna3, lanes);
+              if (!observed)
+                fixture.cu->set_plugin_group(nullptr);
+              const uint64_t exec_mask = requested_exec & (lanes == 32 ? 0xffffffffULL : ~0ULL);
+              const uint64_t write_mask = exec_mask & (alias ? ~2ULL : ~0ULL);
+              fixture.wave->set_exec(exec_mask);
+              fixture.wave->set_vgpr_write_mask(write_mask);
+              for (unsigned lane = 0; lane < lanes; ++lane)
+                fixture.cu->write_vgpr(fixture.base(), lane, 0xab000000U + lane);
+              const uint8_t destination = alias ? 0 : 1;
+              const uint16_t offset = offsets[mode];
+              const auto words =
+                  rdna3
+                      ? rdna3::build_ds(rdna3::kDsSwizzleB32Ds, {.offset0 = uint8_t(offset),
+                                                                 .offset1 = uint8_t(offset >> 8),
+                                                                 .addr = 0,
+                                                                 .vdst = destination})
+                      : rdna4::build_vds(rdna4::kDsSwizzleB32Vds, {.offset0 = uint8_t(offset),
+                                                                   .offset1 = uint8_t(offset >> 8),
+                                                                   .addr = 0,
+                                                                   .vdst = destination});
+              auto instruction = fixture.decoder->decode_window(words);
+              ASSERT_TRUE(instruction.succeeded());
+              if (observed) {
+                fixture.recorder->reads.clear();
+                fixture.recorder->writes.clear();
+              }
+              ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                              .succeeded());
+              uint64_t consumed = 0;
+              std::array<uint32_t, 64> expected{};
+              for (unsigned lane = 0; lane < lanes; ++lane) {
+                const unsigned local = lane % 32;
+                const unsigned source =
+                    lane / 32 * 32 + (mode == 0   ? (local / 4 * 4 + 3 - local % 4)
+                                      : mode == 1 ? local ^ 16
+                                      : mode == 2 ? (local + 1) % 32
+                                      : mode == 3 ? (local + 31) % 32
+                                      : mode == 4 ? (local & 15) | ((local + 1) & 16)
+                                      : mode == 5 ? fft[local]
+                                                  : (fft[local] / 16) | (local & 15));
+                const bool readable = (exec_mask >> source) & 1;
+                if (((exec_mask >> lane) & 1) && readable)
+                  consumed |= 1ULL << source;
+                expected[lane] = (write_mask >> lane) & 1 ? (readable ? 0xab000000U + source : 0)
+                                 : alias                  ? 0xab000000U + lane
+                                                          : 0x3c003c00U;
+              }
+              if (observed) {
+                uint64_t read = 0, written = 0;
+                for (const auto &event : fixture.recorder->reads) {
+                  EXPECT_EQ(event.reg, fixture.base());
+                  read |= event.lanes;
+                }
+                for (const auto &event : fixture.recorder->writes)
+                  written |= event.lanes;
+                EXPECT_EQ(read, consumed);
+                EXPECT_EQ(written, write_mask);
+              }
+              for (unsigned lane = 0; lane < lanes; ++lane)
+                EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + destination, lane),
+                          expected[lane]);
+            }
+}
+
+TEST(ArithBridgeTest, LaneTransfersIgnoreVectorMasksAndObserveSelectedSource) {
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32U, 64U})
+      for (unsigned operation = 0; operation < 4; ++operation)
+        for (bool empty : {false, true}) {
+          BridgeFixture fixture(rdna3, lanes);
+          fixture.wave->set_exec(empty ? 0 : 1ULL << (lanes - 2));
+          fixture.wave->set_vgpr_write_mask(0);
+          for (unsigned lane = 0; lane < lanes; ++lane)
+            fixture.cu->write_vgpr(fixture.base(), lane, 0xabc00000U + lane);
+          const uint32_t scalar = fixture.wave->sgpr_alloc().base;
+          fixture.cu->write_sgpr(scalar, 0x12345678U);
+          fixture.cu->write_sgpr(scalar + 1, lanes + 7);
+          std::vector<uint32_t> words;
+          const auto set_words = [&](const auto &value) {
+            words.assign(value.begin(), value.end());
+          };
+          if (operation == 0)
+            set_words(
+                rdna3 ? rdna3::build_vop1(rdna3::kVReadfirstlaneB32Vop1, {.src0 = 256, .vdst = 4})
+                      : rdna4::build_vop1(rdna4::kVReadfirstlaneB32Vop1, {.src0 = 256, .vdst = 4}));
+          else if (operation == 1)
+            set_words(
+                rdna3 ? rdna3::build_vop3(rdna3::kVReadfirstlaneB32Vop3, {.vdst = 4, .src0 = 256})
+                      : rdna4::build_vop3(rdna4::kVReadfirstlaneB32Vop3, {.vdst = 4, .src0 = 256}));
+          else if (operation == 2)
+            set_words(rdna3 ? rdna3::build_vop3(rdna3::kVReadlaneB32Vop3,
+                                                {.vdst = 4, .src0 = 256, .src1 = 1})
+                            : rdna4::build_vop3(rdna4::kVReadlaneB32Vop3,
+                                                {.vdst = 4, .src0 = 256, .src1 = 1}));
+          else
+            set_words(rdna3 ? rdna3::build_vop3(rdna3::kVWritelaneB32Vop3,
+                                                {.vdst = 0, .src0 = 0, .src1 = 1})
+                            : rdna4::build_vop3(rdna4::kVWritelaneB32Vop3,
+                                                {.vdst = 0, .src0 = 0, .src1 = 1}));
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          fixture.recorder->reads.clear();
+          fixture.recorder->writes.clear();
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          if (operation < 3) {
+            const unsigned selected = operation == 2 ? 7 : empty ? 0 : lanes - 2;
+            ASSERT_EQ(fixture.recorder->reads.size(), 1U);
+            EXPECT_EQ(fixture.recorder->reads[0].lanes, 1ULL << selected);
+            EXPECT_TRUE(fixture.recorder->writes.empty());
+            EXPECT_EQ(fixture.cu->read_sgpr(scalar + 4), 0xabc00000U + selected);
+          } else {
+            EXPECT_TRUE(fixture.recorder->reads.empty());
+            ASSERT_EQ(fixture.recorder->writes.size(), 1U);
+            EXPECT_EQ(fixture.recorder->writes[0].lanes, 1ULL << 7);
+            for (unsigned lane = 0; lane < lanes; ++lane)
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane),
+                        lane == 7 ? 0x12345678U : 0xabc00000U + lane);
+          }
+        }
+}
+
+TEST(ArithBridgeTest, LaneSwapsPreserveOtherHalvesAndSnapshotAliases) {
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32U, 64U})
+      for (bool half : {false, true})
+        for (bool alias : {false, true})
+          for (unsigned halves = 0; halves < (half ? 4U : 1U); ++halves) {
+            BridgeFixture fixture(rdna3, lanes);
+            const uint64_t exec_mask =
+                0x9249249249249249ULL & (lanes == 32 ? 0xffffffffULL : ~0ULL);
+            const uint64_t write_mask = exec_mask & ~1ULL;
+            fixture.wave->set_exec(exec_mask);
+            fixture.wave->set_vgpr_write_mask(~1ULL);
+            for (unsigned lane = 0; lane < lanes; ++lane) {
+              fixture.cu->write_vgpr(fixture.base(), lane, 0xa0001000U + 0x10001U * lane);
+              fixture.cu->write_vgpr(fixture.base() + 1, lane, 0xb0002000U + 0x10001U * lane);
+            }
+            const uint16_t src = 256 + (alias ? 0 : 1) + ((halves & 1) ? 128 : 0);
+            const uint8_t dst = halves & 2 ? 128 : 0;
+            const auto words(
+                rdna3 ? rdna3::build_vop1(half ? rdna3::kVSwapB16Vop1 : rdna3::kVSwapB32Vop1,
+                                          {.src0 = src, .vdst = dst})
+                      : rdna4::build_vop1(half ? rdna4::kVSwapB16Vop1 : rdna4::kVSwapB32Vop1,
+                                          {.src0 = src, .vdst = dst}));
+            auto instruction = fixture.decoder->decode_window(words);
+            ASSERT_TRUE(instruction.succeeded());
+            ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                            .succeeded());
+            for (unsigned lane = 0; lane < lanes; ++lane) {
+              uint32_t d = 0xa0001000U + 0x10001U * lane;
+              uint32_t a = alias ? d : 0xb0002000U + 0x10001U * lane;
+              if ((write_mask >> lane) & 1) {
+                if (!half) {
+                  std::swap(d, a);
+                } else {
+                  const unsigned ds = halves & 2 ? 16 : 0, as = halves & 1 ? 16 : 0;
+                  const uint32_t old_d = (d >> ds) & 0xffff, old_a = (a >> as) & 0xffff;
+                  d = (d & ~(0xffffU << ds)) | (old_a << ds);
+                  if (alias)
+                    d = (d & ~(0xffffU << as)) | (old_d << as);
+                  else
+                    a = (a & ~(0xffffU << as)) | (old_d << as);
+                }
+              }
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane), d);
+              if (!alias) {
+                EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, lane), a);
+              }
+            }
+          }
+}
+
+TEST(ArithBridgeTest, LanePermutationsPreserveInactiveSourcesAndDestinationMasks) {
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32U, 64U})
+      for (bool observed : {false, true})
+        for (bool cross : {false, true})
+          for (bool variable : {false, true})
+            for (unsigned modifiers = 0; modifiers < 4; ++modifiers)
+              for (unsigned destination : {0U, 1U, 2U}) {
+                if (rdna3 && variable)
+                  continue;
+                BridgeFixture fixture(rdna3, lanes);
+                if (!observed)
+                  fixture.cu->set_plugin_group(nullptr);
+                const uint64_t exec_mask =
+                    0xf0ff00f30ff000f3ULL & (lanes == 32 ? 0xffffffffULL : ~0ULL);
+                const uint64_t write_mask = exec_mask & (observed ? ~2ULL : ~0ULL);
+                fixture.wave->set_exec(exec_mask);
+                fixture.wave->set_vgpr_write_mask(write_mask);
+                for (unsigned lane = 0; lane < lanes; ++lane) {
+                  fixture.cu->write_vgpr(fixture.base(), lane, 0xabc00000U + lane);
+                  fixture.cu->write_vgpr(fixture.base() + 1, lane, 15 - (lane & 15));
+                  fixture.cu->write_vgpr(fixture.base() + 2, lane, 0xdef00000U + lane);
+                }
+                fixture.cu->write_sgpr(fixture.wave->sgpr_alloc().base, 0x89abcdefU);
+                fixture.cu->write_sgpr(fixture.wave->sgpr_alloc().base + 1, 0x01234567U);
+                std::vector<uint32_t> words;
+                const auto set_words = [&](const auto &value) {
+                  words.assign(value.begin(), value.end());
+                };
+                if (rdna3)
+                  set_words(rdna3::build_vop3(cross ? rdna3::kVPermlanex16B32Vop3
+                                                    : rdna3::kVPermlane16B32Vop3,
+                                              {.vdst = static_cast<uint8_t>(destination),
+                                               .op_sel = static_cast<uint8_t>(modifiers),
+                                               .src0 = 256,
+                                               .src1 = 0,
+                                               .src2 = 1}));
+                else
+                  set_words(rdna4::build_vop3(
+                      variable
+                          ? (cross ? rdna4::kVPermlanex16VarB32Vop3 : rdna4::kVPermlane16VarB32Vop3)
+                          : (cross ? rdna4::kVPermlanex16B32Vop3 : rdna4::kVPermlane16B32Vop3),
+                      {.vdst = static_cast<uint8_t>(destination),
+                       .opsel = static_cast<uint8_t>(modifiers),
+                       .src0 = 256,
+                       .src1 = static_cast<uint16_t>(variable ? 257 : 0),
+                       .src2 = static_cast<uint16_t>(variable ? 0 : 1)}));
+                auto instruction = fixture.decoder->decode_window(words);
+                ASSERT_TRUE(instruction.succeeded());
+                if (observed)
+                  fixture.recorder->writes.clear();
+                ASSERT_TRUE(
+                    fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                        .succeeded());
+                uint64_t expected_writes = 0;
+                for (unsigned lane = 0; lane < lanes; ++lane) {
+                  uint32_t expected = destination == 0   ? 0xabc00000U + lane
+                                      : destination == 1 ? 15 - (lane & 15)
+                                                         : 0xdef00000U + lane;
+                  const unsigned from = ((lane & ~15U) ^ (cross ? 16 : 0)) | (15 - (lane & 15));
+                  if ((write_mask >> lane) & 1) {
+                    if ((modifiers & 1) || ((exec_mask >> from) & 1)) {
+                      expected = 0xabc00000U + from;
+                      expected_writes |= 1ULL << lane;
+                    } else if (modifiers & 2) {
+                      expected = 0;
+                      expected_writes |= 1ULL << lane;
+                    }
+                  }
+                  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + destination, lane), expected);
+                }
+                if (observed) {
+                  uint64_t written = 0;
+                  for (const auto &write : fixture.recorder->writes)
+                    written |= write.lanes;
+                  EXPECT_EQ(written, expected_writes);
+                }
+              }
+}
+
+TEST(ArithBridgeTest, Permlane64ReadsOppositeHalfEvenWhenInactive) {
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32U, 64U})
+      for (bool alias : {false, true}) {
+        BridgeFixture fixture(rdna3, lanes);
+        fixture.wave->set_exec(5);
+        for (unsigned lane = 0; lane < lanes; ++lane)
+          fixture.cu->write_vgpr(fixture.base(), lane, 0xabc00000U + lane);
+        const uint8_t destination = alias ? 0 : 1;
+        const auto words(rdna3 ? rdna3::build_vop1(rdna3::kVPermlane64B32Vop1,
+                                                   {.src0 = 256, .vdst = destination})
+                               : rdna4::build_vop1(rdna4::kVPermlane64B32Vop1,
+                                                   {.src0 = 256, .vdst = destination}));
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        fixture.recorder->reads.clear();
+        fixture.recorder->writes.clear();
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        if (lanes == 32) {
+          EXPECT_TRUE(fixture.recorder->reads.empty());
+          EXPECT_TRUE(fixture.recorder->writes.empty());
+        } else {
+          ASSERT_EQ(fixture.recorder->reads.size(), 1U);
+          EXPECT_EQ(fixture.recorder->reads[0].lanes, 5ULL << 32);
+        }
+        for (unsigned lane = 0; lane < lanes; ++lane)
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + destination, lane),
+                    lanes == 64 && (lane == 0 || lane == 2) ? 0xabc00000U + (lane ^ 32)
+                    : alias                                 ? 0xabc00000U + lane
+                                                            : 0x3c003c00U);
+      }
+}
+
+TEST(ArithBridgeTest, VectorMovesAndSelectionsPreservePayloadsHalvesAndMaskedAliases) {
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32U, 64U})
+      for (bool half : {false, true})
+        for (bool conditional : {false, true})
+          for (bool high : {false, true})
+            for (bool modifiers : {false, true})
+              for (bool inactive : {false, true}) {
+                BridgeFixture fixture(rdna3, lanes);
+                const uint64_t exec_mask = inactive ? 0 : 5ULL | (1ULL << (lanes - 1));
+                const uint64_t condition = 1ULL << (lanes - 1);
+                fixture.wave->set_exec(exec_mask);
+                fixture.wave->set_vcc_mask(condition);
+                const uint32_t sb = fixture.wave->sgpr_alloc().base;
+                fixture.cu->write_sgpr(sb, uint32_t(condition));
+                fixture.cu->write_sgpr(sb + 1, uint32_t(condition >> 32));
+                std::array<uint32_t, 64> a{}, b{};
+                for (unsigned lane = 0; lane < lanes; ++lane) {
+                  // Fixed integer mixing retains NaN payloads and arbitrary raw halves.
+                  a[lane] = 0xff800001U | ((lane * 0x19660dU) & 0x7fffffU);
+                  b[lane] = 0x80001234U ^ (lane * 0x41c64e6dU);
+                  fixture.cu->write_vgpr(fixture.base(), lane, a[lane]);
+                  fixture.cu->write_vgpr(fixture.base() + 1, lane, b[lane]);
+                }
+                const uint16_t opcode3 =
+                    conditional ? (half ? rdna3::kVCndmaskB16Vop3 : rdna3::kVCndmaskB32Vop3)
+                                : (half ? rdna3::kVMovB16Vop3 : rdna3::kVMovB32Vop3);
+                const uint16_t opcode4 =
+                    conditional ? (half ? rdna4::kVCndmaskB16Vop3 : rdna4::kVCndmaskB32Vop3)
+                                : (half ? rdna4::kVMovB16Vop3 : rdna4::kVMovB32Vop3);
+                const uint8_t opsel = half ? (high ? 9 : 2) : 0;
+                const uint8_t sign_modifiers = modifiers ? 3 : 0;
+                const auto words = rdna3 ? rdna3::build_vop3(opcode3, {.vdst = 0,
+                                                                       .abs = sign_modifiers,
+                                                                       .op_sel = opsel,
+                                                                       .clamp = 1,
+                                                                       .src0 = 256,
+                                                                       .src1 = 257,
+                                                                       .src2 = 0,
+                                                                       .omod = 3,
+                                                                       .neg = sign_modifiers})
+                                         : rdna4::build_vop3(opcode4, {.vdst = 0,
+                                                                       .abs = sign_modifiers,
+                                                                       .opsel = opsel,
+                                                                       .clamp = 1,
+                                                                       .src0 = 256,
+                                                                       .src1 = 257,
+                                                                       .src2 = 0,
+                                                                       .omod = 3,
+                                                                       .neg = sign_modifiers});
+                auto instruction = fixture.decoder->decode_window(words);
+                ASSERT_TRUE(instruction.succeeded());
+                fixture.recorder->writes.clear();
+                fixture.recorder->reads.clear();
+                fixture.recorder->scalar_reads.clear();
+                ASSERT_TRUE(
+                    fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                        .succeeded());
+                if (inactive) {
+                  EXPECT_TRUE(fixture.recorder->reads.empty());
+                  EXPECT_TRUE(fixture.recorder->scalar_reads.empty());
+                  EXPECT_TRUE(fixture.recorder->writes.empty());
+                } else {
+                  ASSERT_EQ(fixture.recorder->writes.size(), 1U);
+                  EXPECT_EQ(fixture.recorder->writes[0].lanes, exec_mask);
+                  EXPECT_EQ(fixture.recorder->writes[0].bytes, half ? (high ? 0xc : 0x3) : 0xf);
+                }
+                for (unsigned lane = 0; lane < lanes; ++lane) {
+                  const bool choose_b = conditional && ((condition >> lane) & 1);
+                  uint32_t value = choose_b ? b[lane] : a[lane];
+                  if (half) {
+                    const unsigned shift = choose_b ? (high ? 0 : 16) : (high ? 16 : 0);
+                    value = (value >> shift) & 0xffff;
+                    if (conditional && modifiers) {
+                      // CNDMASK applies ABS/NEG to the selected half's sign bit.
+                      value = (value & 0x7fff) ^ 0x8000;
+                    }
+                    value =
+                        high ? (a[lane] & 0xffff) | (value << 16) : (a[lane] & 0xffff0000) | value;
+                  } else if (conditional && modifiers) {
+                    value = (value & 0x7fffffff) ^ 0x80000000;
+                  }
+                  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane),
+                            ((exec_mask >> lane) & 1) ? value : a[lane]);
+                }
+              }
+}
 } // namespace
 } // namespace rocjitsu::amdgpu

@@ -24,6 +24,32 @@ void fp8_dot_x86_64_v4(bool bf8_a, bool bf8_b, uint32_t exec_mask, uint32_t modi
                        const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
+// Evaluate permlane64 for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void permlane64_x86_64_v3(uint64_t exec_mask, uint32_t *d, const uint32_t *a);
+
+// Evaluate move half for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void move_half_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a);
+
+// Evaluate swap half for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void swap_half_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t mode, uint32_t *d, uint32_t *a);
+
+// Evaluate ds bpermute for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void ds_bpermute_x86_64_v3(int lanes, int group, uint64_t exec_mask, uint32_t *d,
+                           const uint32_t *addr, const uint32_t *data, uint16_t offset);
+
+// Evaluate ds swizzle for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void ds_swizzle_x86_64_v3(int lanes, uint64_t exec_mask, uint32_t *d, const uint32_t *a,
+                          uint16_t offset);
 
 // Loose FP16/BF16 DOT2 with a selected 16-bit result half.
 // Preserve the other destination half and inactive lanes; D may alias inputs.
