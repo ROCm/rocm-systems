@@ -164,6 +164,13 @@ def unify_bitfield_padding(full_path_file_name):
     shutil.move(abs_path, full_path_file_name)
 
 
+def finish_wrapper(full_path_file_name):
+    # Both steps edit the written wrapper in place. The 'ms' layout keeps the C
+    # layout only for structs whose padding unify_bitfield_padding() fixed.
+    unify_bitfield_padding(full_path_file_name)
+    insert_layout_ms(full_path_file_name)
+
+
 def find_replacement(search_str1, search_str2, line):
     pos1 = line.find(search_str1)
     if pos1 < 0:
@@ -542,8 +549,7 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
 
         write_file(output_file, output_file_array)
 
-    unify_bitfield_padding(output_file)
-    insert_layout_ms(output_file)
+    finish_wrapper(output_file)
 
 
 if __name__ == "__main__":

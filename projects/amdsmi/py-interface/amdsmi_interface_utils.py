@@ -266,7 +266,7 @@ class _RsmiFreqVoltRegion(ctypes.Structure):
     rocm_smi fills the caller's buffer with rsmi_freq_volt_region_t records
     (two 16-byte ranges, 32 bytes per record), not the 64-byte
     amdsmi_freq_volt_region_t declared in amdsmi.h, whose ranges carry two
-    extra reserved words.
+    extra reserved words. amd_smi.cc asserts that size next to its cast.
     """
 
     _fields_ = [("freq_range", _RsmiRange), ("volt_range", _RsmiRange)]
@@ -281,7 +281,7 @@ class _RsmiOdVoltFreqData(ctypes.Structure):
 
     rocm_smi fills the caller's buffer with its rsmi_od_volt_freq_data_t
     (16-byte ranges, 152 bytes), not the 248-byte amdsmi_od_volt_freq_data_t
-    declared in amdsmi.h.
+    declared in amdsmi.h. amd_smi.cc asserts that size next to its cast.
     """
 
     _fields_ = [

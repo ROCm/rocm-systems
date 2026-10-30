@@ -30,6 +30,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from types import ModuleType
@@ -469,6 +470,89 @@ def _load_generator() -> ModuleType:
                 sys.modules[name] = module
 
 
+def _ms_bitfield_layout_problems(fields) -> list:
+    """Bit-fields that MSVC rules (_layout_ = 'ms', used from Python 3.14) place differently.
+
+    Before 3.14, Python lets a bit-field join the open storage unit whenever it
+    fits, widening the unit for a wider type, as the C layout clang2py describes
+    does. MSVC rules start a new unit when the type size changes or a bit-field
+    does not fit, and pad each unit to its full size. The check accepts what the
+    generator produces: bit-fields of the unit's own size fill each unit exactly,
+    and no wider bit-field follows that would fit in a widened unit. It is
+    stricter than needed and reads only the declarations, so the answer is the
+    same on every Python version.
+    """
+    problems = []
+    unit_bits = used = 0
+    for field in list(fields) + [("<end of struct>", None)]:
+        name = field[0]
+        bits = field[2] if len(field) > 2 else None
+        size_bits = ctypes.sizeof(field[1]) * 8 if bits is not None else 0
+        new_unit = bits is None or size_bits != unit_bits or used == unit_bits
+        if new_unit and used not in (0, unit_bits):
+            problems.append("%s: the unit before it holds %d of %d bits" % (name, used, unit_bits))
+        elif new_unit and 0 < unit_bits < size_bits and used + bits <= size_bits:
+            problems.append("%s: Python before 3.14 widens the unit before it" % name)
+        if bits is None:
+            unit_bits = used = 0
+            continue
+        if new_unit:
+            unit_bits, used = size_bits, 0
+        if used + bits > unit_bits:
+            problems.append("%s: %d bits do not fit its %d-bit unit" % (name, bits, unit_bits))
+        used += bits
+    return problems
+
+
+def _parse_fields(lines) -> list:
+    """Turn "('name', ctypes.c_type[, bits])" lines into _fields_ tuples."""
+    fields = []
+    for line in lines:
+        name, ctype, bits = re.match(r"\('(\w+)', ctypes\.(\w+)(?:, (\d+))?\)$", line).groups()
+        fields.append((name, getattr(ctypes, ctype)) + ((int(bits),) if bits else ()))
+    return fields
+
+
+class WrapperBitfieldLayoutTest(_LibOverrideEnvMixin, unittest.TestCase):
+    """The checked-in wrapper keeps the C bit-field layout on every Python version."""
+
+    def test_ms_structs_fill_whole_bitfield_units(self):
+        with _Patch(STABLE_SYMBOLS):
+            w = _import_fresh_wrapper()
+        seen, problems = set(), []
+        for value in vars(w).values():
+            if (
+                isinstance(value, type)
+                and issubclass(value, ctypes.Structure)
+                and value.__dict__.get("_layout_") == "ms"
+                and id(value) not in seen
+            ):
+                seen.add(id(value))
+                problems += [
+                    "%s.%s" % (value.__name__, problem)
+                    for problem in _ms_bitfield_layout_problems(value._fields_)
+                ]
+        self.assertGreater(len(seen), 100, "found too few 'ms' structs to check")
+        self.assertEqual(problems, [])
+
+    def test_check_flags_layouts_that_differ(self):
+        u8, u16 = ctypes.c_uint8, ctypes.c_uint16
+        # amdsmi_dimm_power_t as generated before the padding fix.
+        mixed_padding = [("power", u16, 15), ("PADDING_0", u8, 1), ("update_rate", u16, 9)]
+        # Size 4 before Python 3.14, 3 from 3.14.
+        widened = [("a", u8, 8), ("b", u16, 8), ("c", u16, 8)]
+        # amdsmi_dimm_power_t's first 32 bits as generated now.
+        whole_units = [
+            ("power", u16, 15),
+            ("PADDING_0", u16, 1),
+            ("update_rate", u16, 9),
+            ("PADDING_1", u16, 7),
+        ]
+        self.assertNotEqual(_ms_bitfield_layout_problems(mixed_padding), [])
+        self.assertNotEqual(_ms_bitfield_layout_problems(widened), [])
+        self.assertEqual(_ms_bitfield_layout_problems(whole_units), [])
+
+
 @unittest.skipUnless(GENERATOR_TOOL.is_file(), "generator.py not found (installed layout)")
 class GeneratorBitfieldPaddingTest(unittest.TestCase):
     """tools/generator.py types each PADDING bit-field like the unit it completes."""
@@ -522,10 +606,10 @@ class GeneratorBitfieldPaddingTest(unittest.TestCase):
                 "('b', ctypes.c_uint32)",
             ]
         )
-        fields = []
-        for line in lines:
-            name, ctype, bits = re.match(r"\('(\w+)', ctypes\.(\w+)(?:, (\d+))?\)$", line).groups()
-            fields.append((name, getattr(ctypes, ctype)) + ((int(bits),) if bits else ()))
+        fields = _parse_fields(lines)
+        # Python ignores _layout_ before 3.14, so check the declarations too.
+        self.assertEqual(_ms_bitfield_layout_problems(fields), [])
+        self.assertEqual(sum(f[2] for f in fields if f[0].startswith("PADDING_0")), 29)
 
         class Record(ctypes.Structure):
             _pack_ = 1
@@ -533,6 +617,59 @@ class GeneratorBitfieldPaddingTest(unittest.TestCase):
             _fields_ = fields
 
         self.assertEqual((Record.b.offset, ctypes.sizeof(Record)), (4, 8))
+
+    def test_wider_padding_splits_into_the_open_unit_size(self):
+        # amdsmi_dimm_thermal_t: 24 padding bits after an 8-bit field in a
+        # 16-bit unit fill that unit and one more.
+        fields = _parse_fields(
+            self._unify(
+                [
+                    "('dimm_addr', ctypes.c_uint16, 8)",
+                    "('PADDING_2', ctypes.c_uint32, 24)",
+                    "('temp', ctypes.c_float)",
+                ]
+            )
+        )
+        self.assertEqual(_ms_bitfield_layout_problems(fields), [])
+        self.assertEqual(
+            [(name, ctype, bits) for name, ctype, bits in fields[1:3]],
+            [("PADDING_2", ctypes.c_uint16, 8), ("PADDING_2_1", ctypes.c_uint16, 16)],
+        )
+
+    def test_finish_wrapper_unifies_padding_and_sets_ms_layout(self):
+        # main() hands the written wrapper to finish_wrapper(); dropping either
+        # step from it fails here.
+        source = textwrap.dedent(
+            """\
+            import ctypes
+
+            class struct_dimm_power(ctypes.Structure):
+                pass
+
+            struct_dimm_power._pack_ = 1 # source:False
+            struct_dimm_power._fields_ = [
+                ('power', ctypes.c_uint16, 15),
+                ('PADDING_0', ctypes.c_uint8, 1),
+                ('update_rate', ctypes.c_uint16, 9),
+                ('PADDING_1', ctypes.c_uint8, 7),
+                ('dimm_addr', ctypes.c_uint16, 8),
+                ('PADDING_2', ctypes.c_uint8, 8),
+            ]
+            """
+        )
+        tmp = Path(tempfile.mkdtemp(prefix="amdsmi-finish-"))
+        try:
+            path = tmp / "wrapper.py"
+            path.write_text(source)
+            _load_generator().finish_wrapper(str(path))
+            namespace = {}
+            exec(path.read_text(), namespace)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        record = namespace["struct_dimm_power"]
+        self.assertEqual(record.__dict__.get("_layout_"), "ms")
+        self.assertEqual(_ms_bitfield_layout_problems(record._fields_), [])
+        self.assertEqual(ctypes.sizeof(record), 6)
 
 
 def _stdlib_top_level_names() -> frozenset:
