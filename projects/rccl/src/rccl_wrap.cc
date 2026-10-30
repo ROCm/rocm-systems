@@ -69,6 +69,7 @@ RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", -1);
 // Opt-in. Unlike CE AllReduce these do not follow the per-arch default.
 RCCL_PARAM(CeReduceScatter, "CE_REDUCESCATTER", 0);
+RCCL_PARAM(P2pMnnvlChunkSize, "P2P_MNNVL_CHUNKSIZE", (1 << 17)); /* 128 kB */
 // -1 = auto (enabled on gfx1250, disabled elsewhere); 0 = disabled; 1 = bypass CTAPolicy check.
 RCCL_PARAM(ForceSymmetric,   "FORCE_SYMMETRIC",    0);
 RCCL_PARAM(ForceDda,         "FORCE_DDA",          0);           // non-zero: prefer DDA over all other backends
