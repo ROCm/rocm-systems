@@ -846,11 +846,23 @@ def _trusted_server_log_dir(run_dir: Path, slurm_job_id: str) -> Path | None:
     if job_logs.is_symlink() or not job_logs.is_dir():
         return None
     if private_roots:
-        try:
-            nobody_uid = pwd.getpwnam("nobody").pw_uid
-        except KeyError:
-            return None
-        if job_logs.stat(follow_symlinks=False).st_uid != nobody_uid:
+        # Docker root may appear as root (no_root_squash), the local nobody or
+        # nfsnobody account, or NFSv4's unmapped anonymous UID. Normal cluster
+        # users cannot own any of these; accept the platform variants without
+        # weakening the unlistable random-root and exact-job checks.
+        trusted_uids = {0, (1 << 32) - 2}
+        for account in ("nobody", "nfsnobody"):
+            try:
+                trusted_uids.add(pwd.getpwnam(account).pw_uid)
+            except KeyError:
+                pass
+        owner_uid = job_logs.stat(follow_symlinks=False).st_uid
+        if owner_uid not in trusted_uids:
+            log.warning(
+                "Rejecting server log directory %s owned by untrusted uid %d",
+                job_logs,
+                owner_uid,
+            )
             return None
     return job_logs
 
