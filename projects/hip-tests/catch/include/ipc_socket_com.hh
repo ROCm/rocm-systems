@@ -39,11 +39,7 @@ class ipcSocketCom {
 
   int createSocket() {
 #if HT_WIN
-    handle.reset(new (std::nothrow) ipcHdl());
-    if (!handle) {
-      perror("Socket failure: Handle memory allocation failed");
-      return -1;
-    }
+    handle.reset(new ipcHdl());
     handle->mailslot = INVALID_HANDLE_VALUE;
     return 0;
 #else
@@ -54,13 +50,7 @@ class ipcSocketCom {
     socklen_t addr_len;
 
     sprintf(name, "%u", getpid());
-
-    handle.reset(new (std::nothrow) ipcHdl());
-    if (!handle) {
-      perror("Socket failure: Handle memory allocation failed");
-      return -1;
-    }
-
+    handle.reset(new ipcHdl());
     handle->socket = -1;
 
     if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
@@ -72,10 +62,6 @@ class ipcSocketCom {
     servaddr.sun_family = AF_UNIX;
 
     size_t len = strlen(name);
-    if (len > (sizeof(servaddr.sun_path) - 2)) {
-      perror("Socket failure: Cannot bind provided name to socket. Name too large");
-      return -1;
-    }
 
     servaddr.sun_path[0] = '\0';
     strncpy(&servaddr.sun_path[1], name, len);
