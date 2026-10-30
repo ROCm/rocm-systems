@@ -617,6 +617,8 @@ HIP event trace
 
 HIP event tracing captures GPU-side barrier packets produced by ``hipEventRecord`` and ``hipStreamWaitEvent``. Each record includes the operation type, the ``hipEvent_t`` handle, the queue where the barrier executed, and (for cross-stream waits) the source queue where the event was originally recorded. This enables visibility into cross-stream synchronization dependencies at the GPU level.
 
+A record's start and end are the barrier's GPU timestamps, read from its completion signal as a kernel dispatch's are. A ``hipEventRecord`` barrier therefore starts after the work enqueued before it on its stream has completed. A wait that the runtime folds into the next dispatch, instead of enqueuing a barrier of its own, keeps CPU times: from its enqueue to the completion of that dispatch. If a barrier's GPU timestamps cannot be read, its record falls back to the same CPU times.
+
 .. code-block:: shell
 
     rocprofv3 --hip-event-trace -- <application_path>
