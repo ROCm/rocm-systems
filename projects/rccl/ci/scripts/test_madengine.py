@@ -930,7 +930,10 @@ def snapshot_server_logs(run_dir: Path, slurm_job_id: str) -> Path | None:
     destination.mkdir(mode=0o700)
     for path in sorted(source.rglob("*.log")):
         try:
-            src_fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            src_fd = os.open(
+                path,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            )
         except OSError:
             continue
         try:
