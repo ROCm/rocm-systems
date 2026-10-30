@@ -25,6 +25,28 @@ foreach(
     instruction
     IN
     ITEMS
+        v_swmmac_bf16_16x16x32_bf16_w32
+        v_swmmac_bf16_16x16x32_bf16_w64
+        v_swmmac_f16_16x16x32_f16_w32
+        v_swmmac_f16_16x16x32_f16_w64
+        v_swmmac_f32_16x16x32_bf16_w32
+        v_swmmac_f32_16x16x32_bf16_w64
+        v_swmmac_f32_16x16x32_bf8_bf8_w32
+        v_swmmac_f32_16x16x32_bf8_bf8_w64
+        v_swmmac_f32_16x16x32_bf8_fp8_w32
+        v_swmmac_f32_16x16x32_bf8_fp8_w64
+        v_swmmac_f32_16x16x32_f16_w32
+        v_swmmac_f32_16x16x32_f16_w64
+        v_swmmac_f32_16x16x32_fp8_bf8_w32
+        v_swmmac_f32_16x16x32_fp8_bf8_w64
+        v_swmmac_f32_16x16x32_fp8_fp8_w32
+        v_swmmac_f32_16x16x32_fp8_fp8_w64
+        v_swmmac_i32_16x16x32_iu4_w32
+        v_swmmac_i32_16x16x32_iu4_w64
+        v_swmmac_i32_16x16x32_iu8_w32
+        v_swmmac_i32_16x16x32_iu8_w64
+        v_swmmac_i32_16x16x64_iu4_w32
+        v_swmmac_i32_16x16x64_iu4_w64
         v_wmma_bf16_16x16x16_bf16_w32
         v_wmma_bf16_16x16x16_bf16_w32_gfx12
         v_wmma_bf16_16x16x16_bf16_w64
@@ -66,7 +88,21 @@ foreach(
 endforeach()
 
 # Group related operations, element types, wave widths and architectures; retain one test per entry point.
-foreach(mnemonic IN ITEMS v_fma)
+foreach(
+    mnemonic
+    IN
+    ITEMS
+        v_round_f64
+        v_fma_dx9_zero
+        v_fma
+        v_fma_mix
+        v_fmaak
+        v_fmac
+        v_fmamk
+        v_pk_fma_f16
+        v_pk_fmac_f16
+        v_rcp_rsq_sqrt_f64
+)
     string(REGEX REPLACE "^v_" "" test_name "${mnemonic}")
     set(target "rj_arith_${test_name}_test")
     rj_arith_add_test(${target} fp/${mnemonic}_test.cpp)

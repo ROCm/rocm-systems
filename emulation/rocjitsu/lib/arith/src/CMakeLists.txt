@@ -11,9 +11,16 @@ add_library(
     common/cpu_decode.cpp
     fp/scalar_repair.cpp
     fp/fma.cpp
+    fp/fp64.cpp
     fp/half_fma.cpp
+    fp/mixed_fma.cpp
+    fp/packed_fma.cpp
     dot/scalar_repair.cpp
     register/dpp.cpp
+    wmma/swmmac16.cpp
+    wmma/swmmac8.cpp
+    wmma/swmmac_float.cpp
+    wmma/swmmac_integer.cpp
     wmma/wmma.cpp
     wmma/wmma_fp8_integer.cpp
     wmma/wmma_replicated.cpp

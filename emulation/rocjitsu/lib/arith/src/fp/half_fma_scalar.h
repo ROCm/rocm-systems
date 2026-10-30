@@ -7,11 +7,11 @@
 #pragma once
 
 #include "common/bits.h"
-#include "rj_arith/rj_arith.h"
 
 #include "common/float_formats.h"
 #include "common/internal.h"
 #include "fp/fma_integer.h"
+#include "rj_arith/rj_arith.h"
 
 #include <stdint.h>
 
@@ -25,10 +25,10 @@ inline bool half_fma_reporting_unsupported(uint64_t flags, bool rdna3) {
                              RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_MASK)));
 }
 
-// Round finite FP64 to FP16 bits with guest rounding.
+// Round finite FP64 bits to FP16 with guest rounding and optional finite saturation.
 // Directed rounding follows rocjitsu pseudo_scalar.h::round_f64_to_f16;
 // integer discarded-bit tests avoid depending on host conversions.
-inline uint16_t half_fma_narrow(uint64_t bits, unsigned rounding = 0) {
+inline uint16_t half_fma_narrow(uint64_t bits, bool saturate, unsigned rounding = 0) {
   // Adapted from rocjitsu mixed_fma_simd.h: round_finite_f16_simd.
   int exponent = (bits >> 52) & 2047;
   uint16_t sign = uint16_t((bits >> 48) & 0x8000);
@@ -37,7 +37,7 @@ inline uint16_t half_fma_narrow(uint64_t bits, unsigned rounding = 0) {
     return sign | (away && (bits & 0x7fffffffffffffffULL) ? 1 : 0);
   }
   if (exponent > 1038) {
-    return sign | ((rounding && !away) ? 0x7bff : 0x7c00);
+    return sign | ((saturate || (rounding && !away)) ? 0x7bff : 0x7c00);
   }
   int shift = exponent < 1009 ? 1051 - exponent : 42;
   uint64_t significand = (bits & 0x000fffffffffffffULL) | (1ULL << 52);
@@ -50,7 +50,7 @@ inline uint16_t half_fma_narrow(uint64_t bits, unsigned rounding = 0) {
   rounded += rounding ? (away && remainder != 0)
                       : remainder > halfway || (remainder == halfway && (rounded & 1));
   if (rounded >= 0x7c00) {
-    rounded = (rounding && !away) ? 0x7bff : 0x7c00;
+    rounded = (saturate || (rounding && !away)) ? 0x7bff : 0x7c00;
   }
   return sign | uint16_t(rounded);
 }
@@ -148,12 +148,12 @@ inline uint16_t half_fma_value(uint16_t a, uint16_t b, uint16_t c, uint32_t inst
     bits = 1ULL << 63;
   }
   double value = rocjitsu::arith::bit_cast<double>(bits);
-  uint16_t result = half_fma_narrow(bits, rounding);
+  uint16_t result = half_fma_narrow(bits, false, rounding);
   uint32_t omod = (instruction_flags >> 6) & 3;
   if (report) {
     // FP16_OVFL changes the result, not overflow reporting. The round-to-odd
     // intermediate retains discarded information even across large exponent gaps.
-    uint16_t rounded = rounding ? half_fma_narrow(bits) : result;
+    uint16_t rounded = rounding ? half_fma_narrow(bits, false) : result;
     uint16_t magnitude = rounded & 0x7fff;
     if (magnitude == 0x7c00) {
       *exceptions |= RJ_ARITH_EXCEPTION_OVERFLOW | (omod ? 0 : RJ_ARITH_EXCEPTION_INEXACT);
@@ -189,7 +189,7 @@ inline uint16_t half_fma_value(uint16_t a, uint16_t b, uint16_t c, uint32_t inst
     } else if (magnitude < 0x7c00) {
       const double scales[] = {1, 2, 4, 0.5};
       double scaled = double(f16_to_float(result)) * scales[omod];
-      result = half_fma_narrow(rocjitsu::arith::bit_cast<uint64_t>(scaled), rounding);
+      result = half_fma_narrow(rocjitsu::arith::bit_cast<uint64_t>(scaled), saturate, rounding);
       if (saturate && (result & 0x7fff) == 0x7c00) {
         result = (result & 0x8000) | 0x7bff;
       }
