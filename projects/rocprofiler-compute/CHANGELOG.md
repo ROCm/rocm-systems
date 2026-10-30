@@ -54,9 +54,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
-* The PC sampling analyze table, `compute_pc_sampling_summary_view`, and `pc_sampling_summary.csv` now show one row per kernel instead of one row per instruction. A kernel's counts are summed over its instructions and processes, and its percentages are averaged over its samples.
+* The PC sampling analyze table, `compute_pc_sampling_summary_view`, and `pc_sampling_summary.csv` now show one row per kernel instead of one row per instruction.
   * `--pc-sampling-rows` now sets the number of kernels shown.
-  * Per-instruction counts are in the per-kernel ISA files that `--output-format csv` writes.
+  * Per-instruction counts are in the per-kernel ISA CSV files.
 
 ### Removed
 

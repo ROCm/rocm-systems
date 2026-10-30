@@ -5,7 +5,7 @@ import argparse
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -543,32 +543,17 @@ def _combine_instruction_rows_by_kernel(instruction_rows: pd.DataFrame) -> pd.Da
     kernel_rows = kernel_groups[["count", "issue_count", "stall_count"]].sum(
         min_count=1
     )
-    kernel_rows["stall_reason"] = kernel_groups["stall_reason"].agg(_sum_stall_reasons)
-    for percent_column in ("active_thread_percent", "wave_occupancy_percent"):
-        kernel_rows[percent_column] = _sample_weighted_mean_by_kernel(
-            instruction_rows, percent_column
-        )
-    return kernel_rows.reset_index()
-
-
-def _sum_stall_reasons(stall_reasons: pd.Series) -> Dict[str, int]:
-    """Sum the {reason: count} dicts of one kernel's instruction rows."""
-    reason_counts = Counter()
-    for instruction_stall_reasons in stall_reasons.dropna():
-        reason_counts.update(instruction_stall_reasons)
-    return dict(reason_counts)
-
-
-def _sample_weighted_mean_by_kernel(
-    instruction_rows: pd.DataFrame, percent_column: str
-) -> pd.Series:
-    """Average one percentage per kernel, weighted by sample count."""
-    percent = instruction_rows[percent_column]
-    sample_weight = instruction_rows["count"].where(percent.notna())
+    kernel_rows["stall_reason"] = kernel_groups["stall_reason"].agg(
+        lambda stall_reasons: dict(sum(map(Counter, stall_reasons.dropna()), Counter()))
+    )
     kernel_names = instruction_rows["Kernel_Name"]
-    weighted_sum = (percent * sample_weight).groupby(kernel_names).sum(min_count=1)
-    weight_sum = sample_weight.groupby(kernel_names).sum(min_count=1)
-    return weighted_sum / weight_sum
+    for percent_column in ("active_thread_percent", "wave_occupancy_percent"):
+        percent = instruction_rows[percent_column]
+        sample_weight = instruction_rows["count"].where(percent.notna())
+        weighted_sum = (percent * sample_weight).groupby(kernel_names).sum(min_count=1)
+        weight_sum = sample_weight.groupby(kernel_names).sum(min_count=1)
+        kernel_rows[percent_column] = weighted_sum / weight_sum
+    return kernel_rows.reset_index()
 
 
 def _stall_reason_dict_to_list(

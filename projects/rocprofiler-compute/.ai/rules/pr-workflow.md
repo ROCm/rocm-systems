@@ -32,7 +32,7 @@ Before drafting, ask the user:
 - "Do you have a JIRA ID for this PR?"
 - If yes, include it in the JIRA ID section.
 - If no, leave the JIRA ID section empty (keep the heading, leave body blank).
-- JIRA ID should never be specified using url. Write it as `JIRA ID: AIPROFCOMP-123`, without the hyperlink part
+- JIRA ID should never be specified using url. Write it as `JIRA ID: EXAMPLECOMPONENT-1234`, without the hyperlink part
 
 ### 4. Draft the PR title and body, then confirm with user
 
@@ -56,7 +56,7 @@ approval. Do NOT create the PR without confirmation.
 - **Technical Details**: Bullet list of key changes. Only include what a
   reviewer needs to know — omit obvious refactoring details. Keep each point
   to one line where possible.
-- **JIRA ID**: The JIRA ticket ID (e.g., `AIPROFCOMP-123`), or empty if none.
+- **JIRA ID**: The JIRA ticket ID (e.g., `EXAMPLECOMPONENT-1234`), or empty if none.
 - **Test Plan**: Concrete steps to verify the change works.
 - **Test Result**: Fill in if tests were run, leave empty if pending.
 - **Submission Checklist**: Check off items that apply.

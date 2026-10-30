@@ -166,7 +166,9 @@ filed under ``vecCopy_2_uuid_7``. Overloads and template instantiations share a
 short name, so the ``kernel_uuid`` suffix keeps each folder unique. ``kernel.csv``
 carries ``kernel_uuid`` alongside ``short_name`` and ``kernel_name``, so it maps
 a folder back to the kernel it holds. One kernel has more than one file when it
-was compiled into several code objects, or when several processes ran it.
+was compiled into several code objects, or when several processes ran it. Their
+counts are never merged, because the same offset can hold different code in each
+process or code object.
 
 Each file holds one row per instruction line, ordered by code object offset:
 
