@@ -21,11 +21,9 @@ subtrees:
       - file: tutorials/inspect-code-object
       - file: tutorials/translate-cdna4-to-rdna4
       - file: tutorials/race-detection-walkthrough
-      - file: tutorials/consan-detect-lds-race
       - file: tutorials/waitcheck-analyze-code-object
   - caption: Reference
     entries:
-      - file: reference/consan
       - file: reference/waitcheck
       - file: reference/api-vm
       - file: reference/api-code-object

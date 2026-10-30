@@ -2,7 +2,7 @@
   "snapshot": {
     "header": "include/amd_smi/amdsmi.h",
     "version": "27.2.0",
-    "header_sha256": "c6f8ee9c760d6f5928857f833ab01f97dabadcf45fdf31072f924e46b03a1ec2",
+    "header_sha256": "c64aaec178089ea823ea943ca5e22fef0fbac0499d49f3bc2f7e26d6adfcff17",
     "note": "Source provenance only; comparison uses declarations and binding type fingerprints, not the whole-file digest. Bound means binding presence, not consumer readiness."
   },
   "reasons": {
@@ -308,9 +308,6 @@
     "amdsmi_set_gpu_compute_partition": {"signature": "amdsmi_status_t(amdsmi_processor_handle,amdsmi_compute_partition_type_t)", "status": "deferred", "reason": "partition"},
     "amdsmi_set_gpu_compute_partition_mem_alloc_mode": {"signature": "amdsmi_status_t(amdsmi_processor_handle,amdsmi_compute_partition_mem_alloc_mode_t)", "status": "deferred", "reason": "partition"},
     "amdsmi_set_gpu_event_notification_mask": {"signature": "amdsmi_status_t(amdsmi_processor_handle,uint64_t)", "status": "deferred", "reason": "events"},
-    "amdsmi_set_gpu_fabric_ppod_config": {"signature": "amdsmi_status_t(amdsmi_processor_handle,const amdsmi_fabric_ppod_config_t*)", "status": "deferred", "reason": "fabric"},
-    "amdsmi_set_gpu_fabric_station_config": {"signature": "amdsmi_status_t(amdsmi_processor_handle,const amdsmi_fabric_station_config_t*)", "status": "deferred", "reason": "fabric"},
-    "amdsmi_set_gpu_fabric_vpod_config": {"signature": "amdsmi_status_t(amdsmi_processor_handle,const amdsmi_fabric_vpod_config_t*)", "status": "deferred", "reason": "fabric"},
     "amdsmi_set_gpu_fan_speed": {"signature": "amdsmi_status_t(amdsmi_processor_handle,uint32_t,uint64_t)", "status": "deferred", "reason": "mutation"},
     "amdsmi_set_gpu_memory_partition": {"signature": "amdsmi_status_t(amdsmi_processor_handle,amdsmi_memory_partition_type_t)", "status": "deferred", "reason": "partition"},
     "amdsmi_set_gpu_memory_partition_mode": {"signature": "amdsmi_status_t(amdsmi_processor_handle,amdsmi_memory_partition_type_t)", "status": "deferred", "reason": "partition"},

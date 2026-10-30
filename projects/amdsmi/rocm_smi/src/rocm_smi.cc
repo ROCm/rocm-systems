@@ -20,7 +20,6 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -489,28 +488,6 @@ rsmi_status_t rsmi_shut_down(void) {
 
   if (smi.ref_count() == 0) {
     return RSMI_STATUS_INIT_ERROR;
-  }
-
-  // Release any device mutexes that are being held
-#if DEBUG
-  int ret = 0;
-#endif
-  for (uint32_t i = 0; i < smi.devices().size(); ++i) {
-#if DEBUG
-    ret = pthread_mutex_unlock(smi.devices()[i]->mutex());
-    if (ret != EPERM) {  // We expect to get EPERM if the lock has already
-                         // been released
-      if (ret == 0) {
-        std::cout << "WARNING: Unlocked monitor_devices lock; "
-                  << "it should have already been unlocked." << std::endl;
-      } else {
-        std::cout << "WARNING: pthread_mutex_unlock() returned " << ret << " for device " << i
-                  << " in rsmi_shut_down()" << std::endl;
-      }
-    }
-#else
-    (void)pthread_mutex_unlock(smi.devices()[i]->mutex());
-#endif
   }
 
   (void)smi.ref_count_dec();

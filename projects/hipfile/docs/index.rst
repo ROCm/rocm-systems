@@ -53,6 +53,7 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
       * :doc:`hipFile ais-stats tool <reference/hipFile-ais-stats-tool>`
       * :doc:`hipFile environment variables <reference/hipFile-environment-variables>`
       * :doc:`cuFile compatibility <reference/hipFile-cuFile-compatibility>`
+      * :doc:`Frameworks and applications using hipFile <reference/hipFile-integrations>`
       * :doc:`hipFile API reference <reference/hipFile-api-reference>`
 
    .. grid-item-card:: Troubleshooting

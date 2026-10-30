@@ -48,7 +48,7 @@ field may be explicitly deferred instead of exposed, but must not be silently lo
 
 Inventory updates are manual and reviewed; CI never refreshes its own expected
 data. A new binding also needs behavioral tests and the agreed Host contract.
-The inventory accounts for 262 C declarations: 37 bound and 225 deferred. The
+The inventory accounts for 259 C declarations: 37 bound and 222 deferred. The
 separate 37-call scope check and 14-enum completeness check constrain the
 implemented slice; complete accounting does not imply complete implementation.
 

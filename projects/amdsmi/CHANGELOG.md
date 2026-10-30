@@ -51,27 +51,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `AmdSmiEventReader.read()` now attaches a `timestamp` (Unix epoch seconds) to every event record, and the `event` subcommand surfaces it as a `TIMESTAMP` field so events can be correlated across streams.
   - Human-readable output renders one indented block per event (including `TIMESTAMP`); `--csv` writes the header once followed by a row per event, and `--json` emits newline-delimited JSON (one object per line).
 
-- **Added the fabric PPoD/vPoD/DF-station configuration write APIs**.  
-  - New APIs: `amdsmi_set_gpu_fabric_ppod_config()`, `amdsmi_set_gpu_fabric_vpod_config()`, `amdsmi_set_gpu_fabric_station_config()`.
-  - New structures: `amdsmi_fabric_ppod_config_t`, `amdsmi_fabric_vpod_config_t`, `amdsmi_fabric_station_config_t`, and the `amdsmi_fabric_ppod_data_t`, `amdsmi_fabric_vpod_data_t`, `amdsmi_fabric_station_data_t` payloads they share with `amdsmi_get_gpu_fabric_info()`.
-  - New enums: `amdsmi_fabric_config_version_t`, `amdsmi_fabric_ppod_field_t`, `amdsmi_fabric_vpod_field_t`, `amdsmi_fabric_df_field_t`. Each config carries a `mask` selecting the fields to write and a `commit` flag.
-  - `commit == false` validates the request and writes nothing. The driver ignores the staging files unless a commit follows, so values left there would only be picked up by the next commit.
-  - `mask` must select at least one field. A request with `mask == 0` returns `AMDSMI_STATUS_INVAL` even when `commit` is set, so a bare commit cannot flush whatever a prior partial write left staged.
-  - A committing request compares the write subtree against the flat surface before it writes anything and logs any field already pending, since the driver applies everything staged rather than only the fields the request named. The check is observational and never changes the result; enable debug logging to see the report.
-
-- **Added `amdsmi_fabric_info_v2_t`, a second layout for `amdsmi_get_gpu_fabric_info()`**.  
-  - Groups the version 1 fields into the `ppod`/`vpod`/`station` payloads shared with the write APIs above, and exposes the DF/station data (`station_flags`, `num_stations`, `lane_en_bitmap`) and `local_accelerator_count`, none of which have a version 1 equivalent.
-  - New enum `amdsmi_fabric_info_version_t` selects the layout. Set `fabric_version` to `AMDSMI_FABRIC_INFO_VERSION_2` before the call to receive the new layout:
-
-    ```c
-    amdsmi_fabric_info_t info = {0};   /* C++: amdsmi_fabric_info_t info = {}; */
-    info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
-    amdsmi_get_gpu_fabric_info(handle, &info);
-    ```
-
-  - Adds `ppod_mask`, `vpod_mask`, and `station_mask`, reporting which fields the call actually read. A clear bit means the corresponding field holds its sentinel, which distinguishes "not published by the driver" from a real value that happens to equal the sentinel. The three words are carved from the existing `reserved` array, so `sizeof(amdsmi_fabric_info_v2_t)` is unchanged.
-  - The Python `amdsmi_get_gpu_fabric_info()` requests the new layout automatically; its dictionary gains the three mask keys and is otherwise unchanged.
-
 - **Expanded read-only Go GPU queries**.  
   - Added PCIe information, power-management status, link metrics, nearest GPU topology, and SOC P-state policies.
 
@@ -189,14 +168,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `--numa` was previously limited to Linux baremetal and passthrough guests.
   - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
 
-- **`amdsmi_fabric_info_t::fabric_version` is now an in/out layout selector**.  
-  - On input it names the union member `amdsmi_get_gpu_fabric_info()` fills; on output it reports the member that was filled. Any value other than `AMDSMI_FABRIC_INFO_VERSION_2` selects `amdsmi_fabric_info_v1_t`, so a zero-initialized structure and one left uninitialized both yield the version 1 layout. An unrecognized value is not an error.
-  - `amdsmi_fabric_info_v1_t` and its field offsets are unchanged and now frozen; on the version 1 path no byte past that union member is written, including the trailing `reserved` words. Existing binaries need no recompile.
-  - `sizeof(amdsmi_fabric_info_t)` grows from 320 to 552 bytes to accommodate `amdsmi_fabric_info_v2_t`. Code that allocates the structure by name is unaffected after a recompile; code that hardcodes the size or serializes the structure whole must be updated.
-
-- **`amdsmi_get_gpu_fabric_info()` reports an over-length accelerator list as absent instead of truncating it**.  
-  - `vpod_active_accelerators` and `local_accelerators` previously kept as many IDs as the array holds and dropped the rest. Neither field carries a count that covers the drop, so a truncated list was indistinguishable from a complete one. A list longer than the array now leaves the field at its sentinel with the corresponding `vpod_mask` / `ppod_mask` bit clear.
-
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -240,6 +211,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed APU video engine (VCN) utilization reading 100 times too high**.  
   - On APUs such as Ryzen AI Max (Strix Halo), `amdsmi_get_gpu_metrics_info()` returned `apu_metrics.average_vcn_activity` in hundredths of a percent (6067 for 61 %), so Python reported it as N/A and `amd-smi metric --usage` left it out. It is now whole percent.
+
+- **Fixed `amd-smi list`/`amd-smi static` reporting a placeholder UUID instead of `N/A` on WSL APUs without an ASIC serial**.  
+  - On WSL2/DXG with APUs such as Ryzen AI Max (Strix Halo / gfx1151), HSA-KMT reports its "unavailable" sentinel for `UniqueID`, which was packed into a UUID-shaped string instead of surfacing `N/A`. `amdsmi_get_gpu_device_uuid()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` for that case.
 
 - **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
   - On MI450 the GPU connects to the CPU over xGMI, and the driver reports that link's traffic as a single counter. It was dropped instead of being stored as the first link, so `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`).

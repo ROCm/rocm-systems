@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace rocjitsu::amdgpu {
@@ -69,6 +70,8 @@ struct SdmaPacketProcessResult {
   PacketProcessResult packet;
   bool operation_committed = false;
   bool completion_published = false;
+  /// @brief Offending root or indirect packet header, if available, for a malformed result.
+  std::optional<uint32_t> malformed_header = std::nullopt;
 };
 
 /// @brief Result of reading one frontend register for an SDMA poll packet.
