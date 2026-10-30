@@ -94,17 +94,26 @@ METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical")
 # A roofline benchmark ceiling, the measured peak in "peak_empirical".
 EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
 # Ceilings the roofline benchmark measures that no row shows as a peak: on every arch,
-# the VALU integer rates; per arch, the rates the roofline combines or does not show.
-CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops")
-ARCH_CEILINGS_WITHOUT_METRIC = {}
+# the VALU integer rates and MALL bandwidth (analyze skips MALL, roofline_calc.py); per
+# arch, the rates the roofline combines or does not show.
+CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
+ARCH_CEILINGS_WITHOUT_METRIC = {
+    # The roofline shows the combined F6F4 MFMA rate.
+    "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
+}
 VARIABLE_FIELDS = ("formula",)
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
-# by a different measured ceiling.
-SHARED_FORMULA_IDS = {}
+# by a different measured ceiling. gfx950 counts MXF8 matrix work in the F8 counter.
+SHARED_FORMULA_IDS = {
+    "compute.mfma_flops_mxf8": "compute.mfma_flops_f8",
+}
 # Ids that hold another id's formula on a different arch (id -> that id): one label
-# shows two equations on an arch (D8 Kind 3), and the parent arch's equation keeps
-# the id until the metric owners choose one.
-SPLIT_FORMULA_IDS = {}
+# shows two equations on gfx940 and gfx941 (D8 Kind 3), and the parent arch's equation
+# keeps the id until the metric owners choose one.
+SPLIT_FORMULA_IDS = {
+    "fabric.rd_bw_incl_128b": "fabric.rd_bw",
+    "vl1d.cache_bw_128b": "vl1d.cache_bw",
+}
 
 # A row's equation comes from the first of these columns it has; a row with none
 # shows one equation in each of its table's value columns.
@@ -133,6 +142,11 @@ _ROOFLINE_L2_BW = (
     "vl1d.l2_bw",
     _ROOFLINE_L2_BW_EQUATION.format(64),
 )
+_ROOFLINE_L2_BW_128B = (
+    "L2 Cache Bandwidth",
+    "vl1d.l2_bw",
+    _ROOFLINE_L2_BW_EQUATION.format(128),
+)
 _ROOFLINE_LDS_BW = (
     "LDS Bandwidth",
     "lds.theoretical_bw",
@@ -155,10 +169,131 @@ DISPLAY_VARIANTS = {
         "4.1.11": _ROOFLINE_LDS_BW,
         "11.2.7": _PIPELINE_MFMA_UTIL,
     },
+    "gfx940": {
+        "4.1.10": _ROOFLINE_L2_BW,
+        "4.1.12": _ROOFLINE_LDS_BW,
+        "11.2.7": _PIPELINE_MFMA_UTIL,
+    },
+}
+DISPLAY_VARIANTS["gfx941"] = DISPLAY_VARIANTS["gfx940"]
+DISPLAY_VARIANTS["gfx950"] = {
+    "2.1.23": (
+        "L2-Fabric Read BW",
+        "fabric.rd_bw",
+        "SUM(128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum "
+        "+ 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)",
+    ),
+    "4.1.12": _ROOFLINE_L2_BW_128B,
+    "4.1.14": _ROOFLINE_LDS_BW,
+    "11.2.9": _PIPELINE_MFMA_UTIL,
+    # Panel 3000 shows each latency as SUM/SUM and as AVG/AVG over the same rows: the
+    # counters are summed across CUs (channels), so both give the same value.
+    "30.2.6": (
+        "L1 latency",
+        "vl1d.average_lat",
+        "AVG(TCP_TCP_LATENCY_sum) / AVG(TCP_TOTAL_ACCESSES_sum)",
+    ),
+    "30.2.10": (
+        "L2 read latency",
+        "vl1d.l2_rd_average_lat",
+        "AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)",
+    ),
+    "30.2.12": (
+        "L2 write latency",
+        "vl1d.l2_wr_average_lat",
+        "AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)",
+    ),
+    "30.2.14": (
+        "UTCL1 latency",
+        "vl1d.utcl1_average_lat",
+        "AVG(TCP_CLIENT_UTCL1_INFLIGHT_sum) / AVG(TCP_UTCL1_REQUEST_sum)",
+    ),
+    "30.2.16": (
+        "UTCL1 to UTCL2 latency",
+        "vl1d.utcl1_to_utcl2_average_lat",
+        "AVG(TCP_UTCL1_UTCL2_INFLIGHT_sum) / AVG(TCP_UTCL1_TRANSLATION_MISS_sum)",
+    ),
+    "30.8.4": (
+        "L2 to EA read latency",
+        "fabric.rd_lat",
+        "AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)",
+    ),
+    "30.8.6": (
+        "L2 to EA write latency",
+        "fabric.wr_lat",
+        "AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)",
+    ),
+    "30.8.8": (
+        "L2 to EA atomic latency",
+        "fabric.atomic_lat",
+        "AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)",
+    ),
+    "30.14.11": (
+        "EA read latency",
+        "fabric.rd_lat",
+        "AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)",
+    ),
+    "30.14.13": (
+        "EA write latency",
+        "fabric.wr_lat",
+        "AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)",
+    ),
+    "30.14.15": (
+        "EA atomic latency",
+        "fabric.atomic_lat",
+        "AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)",
+    ),
+    "30.7.1": (
+        "L2 utilization",
+        "l2.util",
+        "100 * SUM(TCC_BUSY_sum) "
+        "/ (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))",
+    ),
+}
+DISPLAY_VARIANTS["gfx942"] = {
+    **DISPLAY_VARIANTS["gfx940"],
+    "4.1.10": _ROOFLINE_L2_BW_128B,
+    # TODO(AIPROFCOMP-820): the clamp is deferred (FOLLOWUPS); the other vL1D hit rate
+    # rows have no NOISE_CLAMP.
+    "16.3.5": (
+        "Cache Hit Rate",
+        "vl1d.hit_rate",
+        "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum "
+        "+ TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+        "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
+        "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
+    ),
 }
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
-UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a")}
+UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942")}
+# gfx940 and gfx941 label integer ops in FLOPs.
+_GFX940_UNIT_VARIANTS = {
+    **_CDNA_UNIT_VARIANTS,
+    "11.3.1": ("IOPs (Total)", "(FLOPs + $normUnit)"),
+    "11.3.7": ("INT8 OPs", "(FLOPs + $normUnit)"),
+}
+UNIT_VARIANTS["gfx940"] = _GFX940_UNIT_VARIANTS
+UNIT_VARIANTS["gfx941"] = _GFX940_UNIT_VARIANTS
+UNIT_VARIANTS["gfx950"] = {
+    **_CDNA_UNIT_VARIANTS,
+    "30.3.6": ("TD - atomic wavefronts", "(Wavefronts + $normUnit)"),
+    "30.3.7": ("TD - store wavefronts", "(Wavefronts + $normUnit)"),
+    "30.6.30": ("TCP_CLIENT_UTCL1_INFLIGHT", "(Cycles + $normUnit)"),
+    "30.6.43": ("TD_LOAD_WAVEFRONT", "(Instructions + $normUnit)"),
+    "30.8.3": ("L2 to EA read average latency", "Cycles per Request"),
+    "30.8.5": ("L2 to EA write average latency", "Cycles per Request"),
+    "30.8.7": ("L2 to EA atomic average latency", "Cycles per Request"),
+    "30.14.10": ("EA read average latency", "Cycles per Request"),
+    "30.14.12": ("EA write average latency", "Cycles per Request"),
+    "30.14.14": ("EA atomic average latency", "Cycles per Request"),
+    "30.8.4": ("L2 to EA read latency", "Cycles per Request"),
+    "30.8.6": ("L2 to EA write latency", "Cycles per Request"),
+    "30.8.8": ("L2 to EA atomic latency", "Cycles per Request"),
+    "30.14.11": ("EA read latency", "Cycles per Request"),
+    "30.14.13": ("EA write latency", "Cycles per Request"),
+    "30.14.15": ("EA atomic latency", "Cycles per Request"),
+}
 
 
 def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> List[str]:
