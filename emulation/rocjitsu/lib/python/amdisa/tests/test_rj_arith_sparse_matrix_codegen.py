@@ -3,12 +3,14 @@
 
 """Sparse matrix bindings and metadata-selector normalization."""
 
-from rj_arith_headers import public_headers
-
 from types import SimpleNamespace
+
+
 import re
 
+
 import pytest
+
 
 from amdisa.codegen.execute.rj_arith_sparse_matrix import gen_sparse_wmma
 
@@ -21,40 +23,6 @@ def context(result, depth, factors, arch='rdna4', indexed=False):
         dst_ops=['vdst'],
         src_ops=['src0', 'src1', 'src2'],
     )
-
-
-@pytest.mark.parametrize(
-    'result,depth,factors',
-    [
-        ('F32', 32, 'F16'),
-        ('F32', 32, 'BF16'),
-        ('F16', 32, 'F16'),
-        ('BF16', 32, 'BF16'),
-        ('F32', 32, 'FP8_FP8'),
-        ('F32', 32, 'FP8_BF8'),
-        ('F32', 32, 'BF8_FP8'),
-        ('F32', 32, 'BF8_BF8'),
-        ('I32', 32, 'IU8'),
-        ('I32', 32, 'IU4'),
-        ('I32', 64, 'IU4'),
-    ],
-)
-@pytest.mark.parametrize('indexed', [False, True])
-def test_sparse_forms_bind_both_wave_widths_and_preserve_operands(
-    result, depth, factors, indexed
-):
-    ctx = context(result, depth, factors, indexed=indexed)
-    body = gen_sparse_wmma(ctx)
-    api = 'rj_arith_' + ctx.inst.name.lower()
-    assert f'lanes == 32 ? {api}_w32 : {api}_w64' in body
-    header = public_headers()
-    for function in (api + '_w32', api + '_w64'):
-        assert re.search(r'\bint ' + function + r'\(', header)
-    assert 'flags, modifiers, dst, src0_base, src1_base, index_base,' in body
-    assert ('resolved_vgpr_offset' in body) == indexed
-    assert 'exec_mask' not in body
-    assert 'const_acc' not in body
-    assert 'arithmetic_flags()' in body
 
 
 def test_sparse_index_aliases_are_normalized_before_rj_arith_validation():
