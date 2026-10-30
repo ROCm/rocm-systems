@@ -54,6 +54,17 @@ class CandidateResolutionTest(unittest.TestCase):
                 github_sha=SHA,
             )
 
+    def test_override_different_from_run_requires_artifact_id(self):
+        with self.assertRaisesRegex(
+            cp.ProvenanceError, "candidate_sha differs from this workflow"
+        ):
+            cp.resolve_candidate_sha(
+                event_name="workflow_dispatch",
+                github_ref="refs/heads/topic",
+                github_sha=OTHER_SHA,
+                candidate_override=SHA,
+            )
+
     def test_artifact_run_source_must_match(self):
         run = {
             "head_sha": SHA,
@@ -117,6 +128,30 @@ class CandidateCompositionTest(unittest.TestCase):
                     self.assertRaisesRegex(RuntimeError, "does not match"):
                 tm.candidate_provenance(SHA, artifact, tuner, lib, bad)
 
+            artifact.write_text(json.dumps({
+                "candidate_sha": OTHER_SHA,
+                "artifact_source_sha": SHA,
+                "artifact_run_id": "123",
+            }))
+            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    self.assertRaisesRegex(RuntimeError, "provenance mismatch"):
+                tm.candidate_provenance(SHA, artifact, tuner, lib, fp)
+
+            artifact.write_text(json.dumps({
+                "candidate_sha": SHA,
+                "artifact_source_sha": SHA,
+                "artifact_run_id": "123",
+            }))
+            dirty = dict(fp, version=f"2.40.0-develop:{SHA[:7]}+")
+            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    self.assertRaisesRegex(RuntimeError, "does not match"):
+                tm.candidate_provenance(SHA, artifact, tuner, lib, dirty)
+
+            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=True), \
+                    mock.patch.object(tm, "rccl_kpack_files", return_value=[]), \
+                    self.assertRaisesRegex(RuntimeError, "no .kpack files"):
+                tm.candidate_provenance(SHA, artifact, tuner, lib, fp)
+
     def test_overlay_removes_stock_assets_before_installing_candidate(self):
         snippet = tm._librccl_swap_snippet(kpack=True)
         self.assertIn('rm -f "$d/.kpack"/rccl*.kpack', snippet)
@@ -152,6 +187,55 @@ class CandidateCompositionTest(unittest.TestCase):
             self.assertIn('for d in "$SDK_KPACK_LIB" "$SDK_KPACK_DEV"', dockerfile)
             self.assertTrue(
                 (work / tm.OVERLAY_CTX / "rccl_libs" / "tuner" / tuner.name).is_file()
+            )
+
+    def test_skip_overlay_bind_mounts_all_assets_and_skips_image_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            (work / "scripts" / "primus_megatron-lm").mkdir(parents=True)
+            artifacts = root / "artifacts"
+            lib_dir = artifacts / "lib"
+            lib_dir.mkdir(parents=True)
+            lib = lib_dir / "librccl.so"
+            lib.write_bytes(b"candidate")
+            kpack = artifacts / ".kpack" / "rccl_lib_gfx950.kpack"
+            kpack.parent.mkdir()
+            kpack.write_bytes(b"kpack")
+            tuner = root / "rccl_tuner_gfx950.csv"
+            tuner.write_text("collective,minBytes\n")
+
+            manifest_path = tm.generate_manifest(
+                "llama-3.1-70b-training",
+                tm.WORKLOAD_CONFIGS["llama-3.1-70b-training"],
+                tm.CLUSTER_CONFIGS["ruby"],
+                "prebuilt:helper",
+                2,
+                work,
+                rccl_lib=lib,
+                candidate_tuner_config=tuner,
+                run_dir=tm.prepare_phase_dir(work, tm.CANDIDATE),
+            )
+            manifest = json.loads(manifest_path.read_text())
+            model = manifest["built_models"]["overlay"]
+            opts = model["additional_docker_run_options"]
+            self.assertIn(f"-v {tuner.resolve()}:{tm.BIND_MOUNT_TUNER_PATH}:ro", opts)
+            self.assertIn("_rocm_sdk_libraries/.kpack/rccl_lib_gfx950.kpack", opts)
+            self.assertIn("_rocm_sdk_devel/.kpack/rccl_lib_gfx950.kpack", opts)
+            for env in (
+                manifest["context"]["docker_env_vars"],
+                manifest["deployment_config"]["env_vars"],
+            ):
+                self.assertEqual(
+                    env["NCCL_TUNER_CONFIG_FILE"], tm.BIND_MOUNT_TUNER_PATH
+                )
+                self.assertIn("TUNING", env["NCCL_DEBUG_SUBSYS"])
+            self.assertEqual(
+                tm.candidate_image_verification_target("prebuilt:helper", True), ""
+            )
+            self.assertEqual(
+                tm.candidate_image_verification_target("built:candidate", False),
+                "built:candidate",
             )
 
 

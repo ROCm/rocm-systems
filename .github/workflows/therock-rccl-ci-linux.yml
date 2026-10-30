@@ -66,7 +66,6 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          ref: ${{ inputs.candidate_sha }}
           sparse-checkout: projects/rccl/ci/scripts
       - name: Verify candidate artifact source
         env:
