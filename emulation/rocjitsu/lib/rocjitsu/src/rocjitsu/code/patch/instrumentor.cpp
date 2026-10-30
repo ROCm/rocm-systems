@@ -1200,8 +1200,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // Resolve the probe request. An unresolvable or non-relocatable probe is
     // a fatal, all-or-nothing validation error.
     if (pt.probe_obj != nullptr) {
-      // A temp past the kernel's .sgpr_count would be unallocated, so the call
-      // needs a descriptor to bound SGPR selection or explicit register growth.
+      // A temp past the kernel's .sgpr_count would be unallocated, so probe
+      // calls always require a kernel descriptor to bound both SGPR selection
+      // and register growth.
       if (out.kernels.empty()) {
         out.errors.push_back("probe call at anchor_offset " + std::to_string(pt.anchor_offset) +
                              " requires a discovered kernel descriptor to bound SGPR "
