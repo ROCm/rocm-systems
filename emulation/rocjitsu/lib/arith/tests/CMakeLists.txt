@@ -132,6 +132,16 @@ foreach(family IN ITEMS integer fp8 half dot2)
     rj_arith_add_test(${target} dot/${family}_test.cpp)
 endforeach()
 
+# Math families share unary layouts, with independent loose and exact references.
+foreach(
+    family
+    IN
+    ITEMS round root_reciprocal log_exp decompose trig rcp_iflag preop
+)
+    set(target "rj_arith_math_${family}_test")
+    rj_arith_add_test(${target} math/${family}_test.cpp)
+endforeach()
+
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(

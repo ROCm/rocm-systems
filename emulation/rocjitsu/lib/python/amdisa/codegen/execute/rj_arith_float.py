@@ -7,7 +7,23 @@ from .rj_arith_names import wave_api
 
 # RCP_IFLAG and SQRT carry their legacy exception policies into rj-arith;
 # other entries here have no legacy classifier.
-UNARY_F32 = {'V_FREXP_EXP_I32_F32'}
+UNARY_F32 = {
+    'V_TRUNC_F32',
+    'V_CEIL_F32',
+    'V_RNDNE_F32',
+    'V_FLOOR_F32',
+    'V_FRACT_F32',
+    'V_RCP_F32',
+    'V_RCP_IFLAG_F32',
+    'V_SQRT_F32',
+    'V_RSQ_F32',
+    'V_EXP_F32',
+    'V_LOG_F32',
+    'V_SIN_F32',
+    'V_COS_F32',
+    'V_FREXP_EXP_I32_F32',
+    'V_FREXP_MANT_F32',
+}
 
 
 def gen_float_unary32(arch, mnemonic, dst, src, is_vop3):
@@ -51,6 +67,9 @@ UNARY_F64 = {
     'V_FRACT_F64',
     'V_FREXP_MANT_F64',
     'V_FREXP_EXP_I32_F64',
+    'V_RCP_F64',
+    'V_RSQ_F64',
+    'V_SQRT_F64',
 }
 
 
@@ -155,7 +174,7 @@ def gen_float_fma64(arch, mnemonic, dst, src, is_vop3):
 def gen_float64_word(arch, mnemonic, dst, src, is_vop3):
     if arch not in ('rdna3', 'rdna4') or not is_vop3:
         return None
-    if mnemonic not in {'V_LDEXP_F64'}:
+    if mnemonic not in {'V_LDEXP_F64', 'V_TRIG_PREOP_F64'}:
         return None
     if len(dst) != 1 or len(src) != 2:
         return None
@@ -252,7 +271,22 @@ BINARY_SELECTION_F16 = {
 }
 
 
-UNARY_F16 = {'V_FREXP_EXP_I16_F16'}
+UNARY_F16 = {
+    'V_TRUNC_F16',
+    'V_CEIL_F16',
+    'V_RNDNE_F16',
+    'V_FLOOR_F16',
+    'V_RCP_F16',
+    'V_RSQ_F16',
+    'V_SQRT_F16',
+    'V_EXP_F16',
+    'V_LOG_F16',
+    'V_FRACT_F16',
+    'V_FREXP_MANT_F16',
+    'V_FREXP_EXP_I16_F16',
+    'V_SIN_F16',
+    'V_COS_F16',
+}
 
 
 FMA_F16 = {'V_FMA_F16', 'V_FMAC_F16', 'V_FMAAK_F16', 'V_FMAMK_F16'}
@@ -839,5 +873,5 @@ FLOAT_NAMES = (
     | UNARY_F16
     | UNARY_F32
     | UNARY_F64
-    | {'V_LDEXP_F64', 'V_FMA_F64'}
+    | {'V_TRIG_PREOP_F64', 'V_FMA_F64', 'V_LDEXP_F64'}
 )
