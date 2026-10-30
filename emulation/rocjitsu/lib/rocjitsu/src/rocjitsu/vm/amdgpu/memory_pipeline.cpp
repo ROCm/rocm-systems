@@ -1382,6 +1382,20 @@ void LocalMemPipeline::initiate_lds_access(VectorMemState &d, Wavefront &wf,
   }
 }
 
+bool LocalMemPipeline::complete_inline(const Instruction &inst, VectorMemState &d, Wavefront &wf) {
+  ComputeUnitCore &cu = wf.raw_cu();
+  if (!cu.completes_lds_inline() || d.lds_dst)
+    return false;
+  d.wf_size = wf.wf_size();
+  initiate_lds_access(d, wf, transpose_request_lane_mask(d, d.wf_size));
+  const MemoryAccessCompletion completion =
+      complete_lds_access(d, wf, MemoryAccessDeferredCompletion{});
+  assert(completion == MemoryAccessCompletion::Complete);
+  (void)completion;
+  cu.note_lds_inline_completion(inst);
+  return true;
+}
+
 MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
                                                          MemoryAccessDeferredCompletion complete) {
   return complete_lds_access(*inst.data_as<VectorMemState>(), wf, std::move(complete));

@@ -452,6 +452,25 @@ public:
   }
   bool debug_active() const { return debug_active_.load(std::memory_order_relaxed); }
 
+  /// @brief Whether the instruction now executing may complete its LDS access
+  /// inside its own execute_impl() instead of being routed to the local memory
+  /// pipeline.
+  /// @details Decided by this CU's issue loop before each execution, so a caller
+  /// that executes an instruction directly still gets state to route. Off while
+  /// a plugin observes the instruction after execution or its memory routing,
+  /// or while a debugger is attached: they rely on the routed order.
+  /// RJ_DS_INLINE=0 turns it off for comparison.
+  bool completes_lds_inline() const { return lds_inline_issue_; }
+
+  /// @brief Record that @p inst completed its LDS access inline and holds no state.
+  void note_lds_inline_completion(const Instruction &inst) { lds_inline_completed_ = &inst; }
+
+  /// @brief Test hook overriding RJ_DS_INLINE for this CU.
+  void set_lds_inline_for_test(bool enabled) { lds_inline_enabled_ = enabled; }
+
+  /// @brief Test hook: whether the last executed instruction completed inline.
+  bool lds_inline_completed_for_test() const { return lds_inline_completed_ != nullptr; }
+
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
 
@@ -1593,6 +1612,16 @@ protected:
   bool pool_driven_ = false;
   bool observes_memory_routing_ = false;
   bool observes_register_access_ = false;
+  bool lds_inline_enabled_ = lds_inline_enabled_by_env();
+  /// Set by the issue loop for one execution when completes_lds_inline() applies.
+  bool lds_inline_issue_ = false;
+  /// Instruction whose current execute_impl() completed its LDS access inline.
+  const Instruction *lds_inline_completed_ = nullptr;
+  static bool lds_inline_enabled_by_env();
+  bool lds_inline_allowed() const {
+    return lds_inline_enabled_ && !observes_after_execute_instruction_ &&
+           !observes_memory_instruction_routing_ && !observes_memory_routing_ && !debug_active();
+  }
   uint64_t memory_wait_diagnostic_count_ = 0;
   std::vector<waitcheck_detail::ClassifiedEvent> memory_wait_classification_;
   uint64_t xcnt_diagnostic_count_ = 0;

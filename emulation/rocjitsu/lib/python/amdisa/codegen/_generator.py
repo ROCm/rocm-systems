@@ -7906,7 +7906,7 @@ class CodeGenerator:
                 f'  amdgpu::prepare_lds_stack(wf, *d, inst_.addr, inst_.data0, inst_.data1, '
                 f'inst_.vdst, {push}, {sem.num_elems}, {size}, {flags});'
             )
-            L.append('  set_data(std::move(d));')
+            L.extend(self._ds_complete_or_route('  '))
             return self._gen_ds_gds_guard() + '\n'.join(L)
 
         if cls in ('ds_atomic', 'ds_atomic2'):
@@ -9165,7 +9165,7 @@ class CodeGenerator:
             )
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_atomic2(
@@ -9239,7 +9239,7 @@ class CodeGenerator:
                 f'&val1_{i}, 4);'
             )
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_mskor(
@@ -9288,8 +9288,20 @@ class CodeGenerator:
                 f'    std::memcpy(&d->store_data[lane * {stride} + {esz + i * 4}], &src{i}, 4);'
             )
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
+
+    @staticmethod
+    def _ds_complete_or_route(indent: str) -> list[str]:
+        """Hand a DS instruction's LDS state to its access.
+
+        The CU may complete the access inside execute_impl(); otherwise the state
+        is set on the instruction and routed to the local memory pipeline.
+        """
+        return [
+            f'{indent}if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))',
+            f'{indent}  set_data(std::move(d));',
+        ]
 
     def _gen_ds_append_consume(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
@@ -9319,7 +9331,7 @@ class CodeGenerator:
         L.append('    if (exec & (1ULL << lane))')
         L.append('      d->per_lane_addr[lane] = addr;')
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_barrier_arrive(
@@ -9688,7 +9700,7 @@ class CodeGenerator:
         if sem.d16_lo:
             L.append('  d->d16_lo = true;')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _append_ds_addtid_addresses(self, lines: list[str]) -> None:
@@ -9731,7 +9743,7 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         self._append_wait_counter_type(L, sem, 'ds_read_addtid')
         self._append_ds_addtid_addresses(L)
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_write_addtid(
@@ -9757,7 +9769,7 @@ class CodeGenerator:
                 '    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);',
                 '    if (data.valid()) {',
                 '      data.copy_dwords_lane_major(d->store_data, exec);',
-                '      set_data(std::move(d));',
+                *self._ds_complete_or_route('      '),
                 '      return;',
                 '    }',
                 '  }',
@@ -9772,7 +9784,7 @@ class CodeGenerator:
             f'    std::memcpy(&d->store_data[lane * {sem.elem_size}], &val0, {sem.elem_size});'
         )
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_read_tr(
@@ -9815,7 +9827,7 @@ class CodeGenerator:
             else 'ds_calculate_addresses'
         )
         L.append(f'  {address_helper}(inst_, wf, *d);')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_write(
@@ -9846,7 +9858,7 @@ class CodeGenerator:
             )
             L.append('    if (data.valid()) {')
             L.append('      data.copy_dwords_lane_major(d->store_data, exec);')
-            L.append('      set_data(std::move(d));')
+            L.extend(self._ds_complete_or_route('      '))
             L.append('      return;')
             L.append('    }')
             L.append('  }')
@@ -9895,7 +9907,7 @@ class CodeGenerator:
                 )
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_read2(
@@ -9964,7 +9976,7 @@ class CodeGenerator:
             '    calculate_addresses([&](uint32_t lane) { return addresses[lane]; });'
         )
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_write2(
@@ -10039,7 +10051,7 @@ class CodeGenerator:
                 f'    std::memcpy(&d->ds2_store_data[lane * {esz} + {i * 4}], &v1_{i}, 4);'
             )
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _enc_has_field(self, field_name: str) -> bool:
