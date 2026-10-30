@@ -128,6 +128,7 @@ set(TEST_FILES
     gfx10_test.cpp
     gfx11_test.cpp
     gfx12_test.cpp
+    dispatch_end_test.cpp
     token_stream_test.cpp
     quick_scan_api_test.cpp
     sqttparser_test.cpp
