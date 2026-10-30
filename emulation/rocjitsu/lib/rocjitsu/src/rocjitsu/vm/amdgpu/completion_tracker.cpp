@@ -101,6 +101,24 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
     uint32_t last_queue_id = 0;
     AddressSpaceHandle last_address_space;
     bool publication_stalled = false;
+    const auto publish = [&](DispatchEntry &entry) {
+      const VmAccessOutcome outcome = deliver_completion(entry);
+      if (outcome == VmAccessOutcome::Unavailable) {
+        qs.publication_retry_pending = true;
+        result.retry_pending = true;
+      } else if (outcome != VmAccessOutcome::Complete) {
+        entry.terminal_faulted = true;
+        if (entry.grid_completion)
+          entry.grid_completion->mark_faulted();
+        result.terminal_fault = CompletionDrainFault{
+            .queue_id = entry.queue_id,
+            .process_id = entry.process_id,
+            .dispatch_id = entry.dispatch_id,
+            .outcome = outcome,
+        };
+      }
+      return outcome;
+    };
     while (!qs.entries.empty() && qs.entries.front().fully_completed()) {
       auto &entry = qs.entries.front();
       last_process_id = entry.process_id;
@@ -117,25 +135,13 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
                           entry.completed_wgs, entry.total_wgs, entry.completion_signal);
       });
 
-      const VmAccessOutcome outcome = deliver_completion(entry);
+      const VmAccessOutcome outcome = publish(entry);
       if (outcome == VmAccessOutcome::Unavailable) {
-        qs.publication_retry_pending = true;
-        result.retry_pending = true;
         publication_stalled = true;
         break;
       }
-      if (outcome != VmAccessOutcome::Complete) {
-        entry.terminal_faulted = true;
-        if (entry.grid_completion)
-          entry.grid_completion->mark_faulted();
-        result.terminal_fault = CompletionDrainFault{
-            .queue_id = entry.queue_id,
-            .process_id = entry.process_id,
-            .dispatch_id = entry.dispatch_id,
-            .outcome = outcome,
-        };
+      if (outcome != VmAccessOutcome::Complete)
         return result;
-      }
       if (!entry.completion_notified)
         break;
       if (dispatch_retirement_gate_) {
@@ -165,6 +171,22 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
         --qs.next_dispatch_idx;
       qs.entries.pop_front();
       result.progress_made = true;
+    }
+
+    // A non-kernel packet can start its notification before an earlier kernel
+    // retires. Finish only those already-started publications, including while
+    // the queue is suspended. Packet execution and ring retirement stay gated
+    // by the CP and the ordered head loop above, respectively.
+    for (size_t index = 1; index < qs.entries.size(); ++index) {
+      auto &entry = qs.entries[index];
+      const auto phase = entry.completion_publication.phase;
+      if (entry.grid_faulted() || phase == CompletionPublicationPhase::ExecutionEnd ||
+          phase == CompletionPublicationPhase::Complete)
+        continue;
+      if (publish(entry) == VmAccessOutcome::Complete)
+        result.progress_made = true;
+      else if (result.terminal_fault)
+        return result;
     }
 
     if (publication_stalled)

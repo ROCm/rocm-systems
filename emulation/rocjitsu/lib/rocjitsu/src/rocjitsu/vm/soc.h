@@ -16,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/mes_engine.h"
+#include "rocjitsu/vm/amdgpu/scratch_reservations.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_scheduler.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -245,6 +246,11 @@ public:
   /// so the whole SoC shares one store rather than one per XCD (see GwsDevice).
   const std::shared_ptr<amdgpu::GwsDevice> &gws_device() const { return gws_device_; }
 
+  /// @brief Scratch backing reservations shared across this device's command processors.
+  const std::shared_ptr<amdgpu::ScratchReservations> &scratch_reservations() const {
+    return scratch_reservations_;
+  }
+
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
@@ -273,10 +279,24 @@ private:
   /// @brief Share the SoC-owned device-global GWS store across every XCD's CUs.
   void wire_gws_to_xcds();
   [[nodiscard]] bool install_internal_address_space(amdgpu::GpuMemory *memory);
+  /// @brief Acquire the PCI/MES compute owner and install its CU hooks once.
+  /// @details Topology must be complete before the first binding request. The
+  /// owner lasts for the SoC lifetime; resets change MES state, not its hooks.
+  /// Local/daemon SimulatedKfd owns these slots instead and must not share this CP.
+  [[nodiscard]] amdgpu::CommandProcessor *acquire_mes_queue_owner_cp();
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_aql(uint32_t queue_ordinal) override;
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_pm4(uint32_t queue_ordinal, amdgpu::Pm4PacketCallbacks callbacks) override;
+  [[nodiscard]] amdgpu::QueueContextSaveResult save_context(const amdgpu::QueueIdentity &identity,
+                                                            uint64_t address, uint32_t area_size,
+                                                            uint32_t control_stack_size) override;
+  void cancel_context_save(const amdgpu::QueueIdentity &identity) override;
+  void release_context(const amdgpu::QueueIdentity &identity) override;
+  void resume_context(const amdgpu::QueueIdentity &identity) override;
+  [[nodiscard]] amdgpu::VmAccessOutcome restore_context(const amdgpu::QueueIdentity &identity,
+                                                        uint64_t address, uint32_t area_size,
+                                                        uint32_t control_stack_size) override;
 
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
@@ -287,11 +307,14 @@ private:
   amdgpu::GpuVm gpu_vm_;
   /// Device-global GWS store shared by every CU of every XCD (see gws_device()).
   std::shared_ptr<amdgpu::GwsDevice> gws_device_ = std::make_shared<amdgpu::GwsDevice>();
+  std::shared_ptr<amdgpu::ScratchReservations> scratch_reservations_ =
+      std::make_shared<amdgpu::ScratchReservations>();
   std::shared_ptr<amdgpu::GpuMemoryPhysicalAccess> internal_memory_access_;
   amdgpu::AddressSpaceHandle internal_address_space_;
   amdgpu::SdmaQueueScheduler sdma_queue_scheduler_;
   amdgpu::GpuQueueRegistry queue_registry_;
   amdgpu::MesEngine mes_engine_;
+  amdgpu::CommandProcessor *mes_queue_owner_ = nullptr; ///< CP whose CU hooks MES owns.
   std::vector<amdgpu::Xcd *> xcds_;
   std::vector<amdgpu::Iod *> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;

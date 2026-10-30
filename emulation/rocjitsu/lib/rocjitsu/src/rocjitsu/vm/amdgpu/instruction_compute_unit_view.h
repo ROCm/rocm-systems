@@ -77,6 +77,8 @@ public:
   simdojo::SimulationEngine *engine() const;
   uint32_t fetch_instruction_word(uint64_t address, uint32_t process_id) const;
   void request_functional_yield();
+  /// @brief Return the configured TMA byte address for this wave's execution context.
+  uint64_t trap_memory_address() const;
   bool handle_sendmsg(Wavefront &wf, uint32_t message);
   void notify_trap_complete(Wavefront &wf);
   /// Queue a runtime exception for delivery after instruction execution drops

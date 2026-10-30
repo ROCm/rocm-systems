@@ -21,8 +21,10 @@
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_allocator.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/trap_handler_config.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
@@ -49,6 +51,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -282,7 +285,7 @@ public:
   /// via maybe_reset_lds_alloc() once the whole workgroup completes.
   void free_wavefront_resources(Wavefront &wf);
 
-  /// @brief Reset the per-WG LDS bump allocator once the CU has fully drained.
+  /// @brief Reclaim all CU-local LDS reservations once the CU has fully drained.
   /// @details No-op while any wavefront is resident or a cluster pin is held (peer
   /// cluster workgroups may still multicast into LDS after the source wave halts).
   void maybe_reset_lds_alloc();
@@ -402,15 +405,17 @@ public:
   /// @brief Register the CP wakeup used when a pool-driven CU becomes runnable.
   void set_on_pool_ready(std::function<void()> cb) { on_pool_ready_ = std::move(cb); }
 
-  struct TrapHandlerConfig {
-    uint64_t tba = 0;
-    uint64_t tma = 0;
-    bool debug_enabled = false;
-  };
+  using TrapHandlerConfig = amdgpu::TrapHandlerConfig;
 
-  /// @brief Resolve the KFD trap handler for a wave's process and GPU.
+  /// @brief Resolve trap configuration using the wave's frontend-owned identity.
+  /// @details SimulatedKfd resolves local/daemon process and GPU state; MES resolves
+  /// the process, queue, and address-space generation. The active frontend owns
+  /// this resolver and the sendmsg hook; a CP must not mix KFD and MES ownership.
   using TrapHandlerResolver = std::function<std::optional<TrapHandlerConfig>(const Wavefront &wf)>;
   void set_trap_handler_resolver(TrapHandlerResolver cb) { trap_handler_resolver_ = std::move(cb); }
+  [[nodiscard]] std::optional<TrapHandlerConfig> resolve_trap_config(const Wavefront &wf) const {
+    return trap_handler_resolver_ ? trap_handler_resolver_(wf) : std::nullopt;
+  }
 
   /// @brief Handle an architected scalar message issued by trap-handler code.
   using SendmsgHandler = std::function<bool(Wavefront &wf, uint32_t message)>;
@@ -769,18 +774,37 @@ public:
   void clear_lds() { lds_.clear(); }
 
   /// @brief Allocate a per-WG LDS region and return its base offset.
+  /// @details The caller must check admission first. Throws std::bad_alloc if
+  /// no contiguous range fits. Reuse does not initialize the physical bytes.
   uint32_t allocate_lds(uint32_t size_bytes) {
-    uint32_t base = next_lds_alloc_;
-    uint32_t aligned = util::align_up(size_bytes, 256u);
-    // Reusing a physical LDS region does not initialize its contents. Keep the
-    // bytes written by prior workgroups until another instruction overwrites them.
-    lds_.materialize_range(base, aligned);
-    next_lds_alloc_ += aligned;
-    return base;
+    std::lock_guard lock(wave_state_mutex_);
+    const auto base = lds_allocator_.allocate(size_bytes);
+    if (!base)
+      throw std::bad_alloc();
+    lds_.materialize_range(*base, util::align_up(size_bytes, LdsAllocator::kAlignment));
+    return *base;
+  }
+
+  /// @brief Whether count separate CU-local LDS reservations of size_bytes each fit.
+  /// @details Checks availability without allocating or changing the allocator state.
+  bool can_allocate_lds(uint32_t size_bytes, uint32_t count = 1) const {
+    std::lock_guard lock(wave_state_mutex_);
+    return lds_allocator_.can_allocate(size_bytes, count);
+  }
+
+  /// @brief Return one quiescent CU-local reservation, without clearing its data.
+  /// @details Use the original requested size. The caller must establish that
+  /// no wave or cluster peer can still access it; shared WG storage is released once.
+  void release_lds(uint32_t base, uint32_t size_bytes) {
+    std::lock_guard lock(wave_state_mutex_);
+    lds_allocator_.release(base, size_bytes);
   }
 
   /// @brief Reset LDS allocation when no resident waves or pinned clusters remain.
-  void reset_lds_alloc() { next_lds_alloc_ = 0; }
+  void reset_lds_alloc() {
+    std::lock_guard lock(wave_state_mutex_);
+    lds_allocator_.reset();
+  }
 
   /// @brief Hold LDS allocation state while a workgroup cluster is resident.
   ///
@@ -789,14 +813,21 @@ public:
   /// completes so a later WG cannot reuse LDS while peer multicast writes are
   /// still possible, but larger dispatches can reclaim LDS between clusters.
   void pin_lds_until_cluster_retired(uint64_t cluster_key) {
+    std::lock_guard lock(wave_state_mutex_);
     lds_pinned_clusters_.insert(cluster_key);
   }
 
   /// @brief Release the LDS allocation pin for a retired workgroup cluster.
-  void unpin_lds_for_cluster(uint64_t cluster_key) { lds_pinned_clusters_.erase(cluster_key); }
+  void unpin_lds_for_cluster(uint64_t cluster_key) {
+    std::lock_guard lock(wave_state_mutex_);
+    lds_pinned_clusters_.erase(cluster_key);
+  }
 
   /// @brief Return true while any cluster can still receive multicast LDS writes.
-  bool lds_allocation_pinned() const { return !lds_pinned_clusters_.empty(); }
+  bool lds_allocation_pinned() const {
+    std::lock_guard lock(wave_state_mutex_);
+    return !lds_pinned_clusters_.empty();
+  }
 
   /// @brief Flush all per-CU caches and the shared L2 to backing store.
   ///
@@ -1586,7 +1617,7 @@ protected:
   Lds lds_;
   ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
-  uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
+  LdsAllocator lds_allocator_;
   std::unordered_set<uint64_t> lds_pinned_clusters_;
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
@@ -1824,6 +1855,10 @@ inline uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t addr
 }
 inline void InstructionComputeUnitView::request_functional_yield() {
   raw_cu().request_functional_yield();
+}
+inline uint64_t InstructionComputeUnitView::trap_memory_address() const {
+  const auto config = raw_cu().resolve_trap_config(raw_wavefront());
+  return config ? config->tma : 0;
 }
 inline bool InstructionComputeUnitView::handle_sendmsg(Wavefront &wf, uint32_t message) {
   return raw_cu().handle_sendmsg(wf, message);

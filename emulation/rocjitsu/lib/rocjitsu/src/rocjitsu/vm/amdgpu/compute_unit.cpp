@@ -168,8 +168,9 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
       setreg_vgpr_msb_fixup_(has_setreg_vgpr_msb_fixup(config)), decoder_(create_decoder(config)),
       l2_(l2), l1_scalar_(l2),
       l1_vector_(l2, memory ? memory->transaction_policy() : MemoryTransactionPolicy{}),
-      lds_(config.lds_size_kb), scalar_mem_pipeline_(&l1_scalar_),
-      global_mem_pipeline_(&l1_vector_, l2), local_mem_pipeline_() {
+      lds_(config.lds_size_kb), lds_allocator_(static_cast<uint32_t>(lds_.size_bytes())),
+      scalar_mem_pipeline_(&l1_scalar_), global_mem_pipeline_(&l1_vector_, l2),
+      local_mem_pipeline_() {
   if (!decoder_)
     throw std::runtime_error("Unsupported architecture for ComputeUnit decoder");
 
@@ -562,6 +563,7 @@ void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
 }
 
 void ComputeUnitCore::maybe_reset_lds_alloc() {
+  std::lock_guard lock(wave_state_mutex_);
   if (!has_active_wfs() && !lds_allocation_pinned())
     reset_lds_alloc();
 }
@@ -924,15 +926,7 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
     return false;
   }
 
-  if (lds_bytes > 0) {
-    uint32_t aligned = util::align_up(lds_bytes, 256u);
-    uint32_t lds_capacity_bytes = config_.lds_size_kb * 1024u;
-    if (next_lds_alloc_ + aligned > lds_capacity_bytes) {
-      return false;
-    }
-  }
-
-  return true;
+  return can_allocate_lds(lds_bytes);
 }
 
 void ComputeUnitCore::retry_paused_queue_memory(uint32_t process_id, uint32_t queue_id,
@@ -1627,7 +1621,9 @@ void ComputeUnitCore::update_wf_states() {
     if (wf->state() == WfState::WAITCNT && wf->wait_satisfied()) {
       wf->set_state(WfState::RUNNING);
       wf->set_ready_cycle(cycle_counter_);
-    } else if (wf->state() == WfState::ENDING && wf->wait_counters().empty()) {
+    } else if (wf->state() == WfState::ENDING && !wf->debug_paused() &&
+               wf->wait_counters().empty()) {
+      // Restored waves retain their resources until the whole queue resumes.
       wf->halt();
     }
   }
@@ -2095,8 +2091,8 @@ template <bool EnableAsync>
     // instruction slot that ends the gfx1250 setreg/VGPR-MSB hazard window.
     active->clear_setreg_vgpr_msb_hazard();
     uint32_t trap_id = words[0] & 0xFFu;
-    if (!active->in_trap_handler() && trap_handler_resolver_) {
-      auto config = trap_handler_resolver_(*active);
+    if (!active->in_trap_handler()) {
+      const auto config = resolve_trap_config(*active);
       if (config && config->tba != 0) {
         const uint64_t saved_pc = active->pc;
         const uint32_t saved_status = active->status_raw();

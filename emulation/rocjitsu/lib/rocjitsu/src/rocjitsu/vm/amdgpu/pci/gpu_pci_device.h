@@ -484,6 +484,7 @@ private:
 
   /// One revocable route owned solely by this PCI frontend and its queues.
   amdgpu::InterruptSubscription interrupt_subscription_;
+  amdgpu::InterruptSubscription trap_interrupt_subscription_;
 
   /// @brief The blocks @ref spec_ publishes, looked up rather than scanned for.
   ///

@@ -2,15 +2,91 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_allocator.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstdint>
+#include <limits>
 
 namespace {
 
 using rocjitsu::amdgpu::Lds;
+using rocjitsu::amdgpu::LdsAllocator;
+
+TEST(LdsAllocatorTest, AlignsRequestsAndLeavesFailedAllocationsUnchanged) {
+  LdsAllocator allocator(1024);
+  EXPECT_EQ(allocator.allocate(0), 0u);
+  EXPECT_EQ(allocator.allocate(1), 0u);
+  EXPECT_EQ(allocator.allocate(257), 256u);
+  EXPECT_FALSE(allocator.can_allocate(257));
+  EXPECT_FALSE(allocator.allocate(257));
+  EXPECT_FALSE(allocator.allocate(std::numeric_limits<uint32_t>::max()));
+  EXPECT_EQ(allocator.allocate(256), 768u);
+  EXPECT_FALSE(allocator.can_allocate(1));
+  allocator.release(0, 0);
+  EXPECT_FALSE(allocator.can_allocate(1));
+  EXPECT_EQ(allocator.allocate(0), 0u);
+  allocator.reset();
+  EXPECT_EQ(allocator.allocate(1024), 0u);
+}
+
+TEST(LdsAllocatorTest, ReusesMiddleAllocationWithoutReleasingItsNeighbors) {
+  LdsAllocator allocator(1024);
+  ASSERT_EQ(allocator.allocate(256), 0u);
+  ASSERT_EQ(allocator.allocate(512), 256u);
+  ASSERT_EQ(allocator.allocate(256), 768u);
+  allocator.release(256, 512);
+  ASSERT_TRUE(allocator.can_allocate(512));
+  EXPECT_EQ(allocator.allocate(512), 256u);
+  EXPECT_FALSE(allocator.can_allocate(1));
+}
+
+TEST(LdsAllocatorTest, CoalescesAdjacentReleasesRegardlessOfOrder) {
+  for (const auto &order :
+       {std::array{0u, 512u, 256u}, std::array{256u, 512u, 0u}, std::array{512u, 256u, 0u}}) {
+    LdsAllocator allocator(1024);
+    for (uint32_t base = 0; base < 1024; base += 256)
+      ASSERT_EQ(allocator.allocate(256), base);
+    for (const auto base : order)
+      allocator.release(base, 256);
+    EXPECT_EQ(allocator.allocate(768), 0u);
+    EXPECT_FALSE(allocator.can_allocate(1));
+  }
+}
+
+TEST(LdsAllocatorTest, ChecksContiguousSpaceForEachAllocationInAFragmentedPool) {
+  LdsAllocator allocator(1024);
+  for (uint32_t base = 0; base < 1024; base += 256)
+    ASSERT_EQ(allocator.allocate(256), base);
+  allocator.release(0, 256);
+  allocator.release(512, 256);
+  EXPECT_FALSE(allocator.can_allocate(512));
+  EXPECT_FALSE(allocator.allocate(512));
+  // Cluster admission needs two separate WG reservations, not one twice as large.
+  EXPECT_TRUE(allocator.can_allocate(256, 2));
+  EXPECT_FALSE(allocator.can_allocate(256, 3));
+  EXPECT_EQ(allocator.allocate(256), 0u);
+  EXPECT_EQ(allocator.allocate(256), 512u);
+  EXPECT_FALSE(allocator.can_allocate(1));
+}
+
+TEST(LdsAllocatorTest, RecombinesLargeReservationsWithoutUsingPastTheCapacity) {
+  LdsAllocator allocator(129 * 256);
+  ASSERT_EQ(allocator.allocate(63 * 256), 0u);
+  ASSERT_EQ(allocator.allocate(65 * 256), 63u * 256);
+  ASSERT_EQ(allocator.allocate(256), 128u * 256);
+  EXPECT_FALSE(allocator.can_allocate(1));
+  allocator.release(63 * 256, 65 * 256);
+  EXPECT_FALSE(allocator.can_allocate(66 * 256));
+  EXPECT_EQ(allocator.allocate(65 * 256), 63u * 256);
+  allocator.release(63 * 256, 65 * 256);
+  allocator.release(0, 63 * 256);
+  EXPECT_TRUE(allocator.can_allocate(64 * 256, 2));
+  EXPECT_EQ(allocator.allocate(128 * 256), 0u);
+  EXPECT_FALSE(allocator.can_allocate(1));
+}
 
 TEST(LdsTest, ConstructionKeepsLogicalCapacityUnmaterialized) {
   Lds lds(320);

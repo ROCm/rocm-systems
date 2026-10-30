@@ -314,6 +314,8 @@ struct GridCompletion {
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
+  /// Queue doorbell byte offset captured when this dispatch was admitted.
+  uint32_t doorbell_offset = 0;
   /// Wrapped AQL ring slot exposed in saved wave context.
   uint32_t queue_packet_id = 0;
   AddressSpaceHandle address_space;
@@ -739,6 +741,17 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   /// tears it down; fault notification is handled separately.
   bool faulted = false;
   bool debug_suspended = false;
+  /// Host-only rollback state for a pending MES save; never part of the CWSR image.
+  struct ContextSaveSuspension {
+    bool debug_suspended;
+    struct Wave {
+      ComputeUnitCore *cu;
+      uint32_t slot;
+      uint64_t generation;
+    };
+    std::vector<Wave> newly_suspended;
+  };
+  std::optional<ContextSaveSuspension> context_save_suspension;
   bool runtime_suspended = scheduling_percentage == 0;
   bool exception_suspended = false;
   [[nodiscard]] bool suspended() const {

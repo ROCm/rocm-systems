@@ -2349,13 +2349,20 @@ inline void execute_s_sendmsg_rtn_b32_sop1([[maybe_unused]] Inst &inst,
   uint32_t msg = static_cast<uint32_t>(inst.ssrc0.encoding_value_);
   uint64_t value = 0;
   switch (msg) {
-  case 0x83: {
+  case 0x80: { // MSG_RTN_GET_DOORBELL
+    value = wf.doorbell_id();
+    break;
+  }
+  case 0x82: { // MSG_RTN_GET_TMA
+    // Hardware stores TMA in units of 256 bytes.
+    value = wf.cu().trap_memory_address() >> 8;
+    break;
+  }
+  case 0x83: { // MSG_RTN_GET_REALTIME
     value = wf.realtime_timestamp();
     break;
   }
-  case 0x80:
   case 0x81:
-  case 0x82:
   case 0x84:
   case 0x85:
   case 0x86:
@@ -2378,13 +2385,20 @@ inline void execute_s_sendmsg_rtn_b64_sop1([[maybe_unused]] Inst &inst,
   uint32_t msg = static_cast<uint32_t>(inst.ssrc0.encoding_value_);
   uint64_t value = 0;
   switch (msg) {
-  case 0x83: {
+  case 0x80: { // MSG_RTN_GET_DOORBELL
+    value = wf.doorbell_id();
+    break;
+  }
+  case 0x82: { // MSG_RTN_GET_TMA
+    // Hardware stores TMA in units of 256 bytes.
+    value = wf.cu().trap_memory_address() >> 8;
+    break;
+  }
+  case 0x83: { // MSG_RTN_GET_REALTIME
     value = wf.realtime_timestamp();
     break;
   }
-  case 0x80:
   case 0x81:
-  case 0x82:
   case 0x84:
   case 0x85:
   case 0x86:

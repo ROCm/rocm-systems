@@ -11,15 +11,20 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
+#include "rocjitsu/vm/amdgpu/queue_context_save.h"
+#include "rocjitsu/vm/amdgpu/trap_handler_config.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -32,6 +37,16 @@ struct ComputeQueueBindingPlan {
   bool xcd_fanout = false;
 };
 
+/// @brief Save completion and the MQD offsets chosen by the CWSR producer.
+/// @details Offsets are relative to the context-save base and valid only on
+/// Complete. A queue without resident waves may still save CP execution state
+/// after the public wave image, so it can report a nonempty save.
+struct QueueContextSaveResult {
+  QueueContextSaveOutcome outcome = VmAccessOutcome::Faulted;
+  uint32_t control_stack_offset = 0;
+  uint32_t wave_state_offset = 0;
+};
+
 /// @brief Device-level compute placement used by transport-neutral MES semantics.
 class ComputeQueueBindingProvider {
 public:
@@ -40,6 +55,40 @@ public:
   [[nodiscard]] virtual std::optional<ComputeQueueBindingPlan> make_aql(uint32_t queue_ordinal) = 0;
   [[nodiscard]] virtual std::optional<ComputeQueueBindingPlan>
   make_pm4(uint32_t queue_ordinal, Pm4PacketCallbacks callbacks) = 0;
+
+  /// @brief Suspend a queue and publish its state in the context-save area.
+  /// @details address and area_size name the GPU virtual save area;
+  /// control_stack_size is its control-stack capacity. Complete supplies the
+  /// MQD offsets. Unavailable leaves the operation pending: retry with the same
+  /// identity and area, without acknowledging REMOVE. Until release_context(),
+  /// cancel_context_save() can undo the save's suspension without discarding work.
+  /// Unsupported requires cancellation before retrying so accepted
+  /// work can finish; any pause that predates the save must remain in effect.
+  [[nodiscard]] virtual QueueContextSaveResult save_context(const QueueIdentity &identity,
+                                                            uint64_t address, uint32_t area_size,
+                                                            uint32_t control_stack_size) = 0;
+  /// @brief Restore the pre-save suspension state when abandoning a save attempt.
+  /// @details Preserve unfinished work and any pre-existing pause. No-op if no
+  /// save is pending. Partial save-area/MQD writes are not rolled back; a retry
+  /// must publish a fresh snapshot. Failed saves discarded by REMOVE instead
+  /// keep execution suspended until release_context() frees the resources.
+  virtual void cancel_context_save(const QueueIdentity &identity) = 0;
+  /// @brief Release paused resident resources without completing their work.
+  /// @details Used after publishing a successful save, invalidating a failed
+  /// save, or to roll back a failed restore. Queue deregistration belongs to MES.
+  virtual void release_context(const QueueIdentity &identity) = 0;
+
+  /// @brief Apply saved state into a new binding, keeping execution suspended.
+  /// @details identity names the new suspended binding; address, area_size and
+  /// control_stack_size describe the preceding save. Complete leaves waves
+  /// suspended until the caller publishes the queue and resumes it. Unavailable
+  /// keeps ADD pending; the caller releases the new resources and binding before
+  /// retrying ADD. Other outcomes are failures and require the same cleanup.
+  [[nodiscard]] virtual VmAccessOutcome restore_context(const QueueIdentity &identity,
+                                                        uint64_t address, uint32_t area_size,
+                                                        uint32_t control_stack_size) = 0;
+  /// @brief Make a queue runnable after MES publishes its mapping.
+  virtual void resume_context(const QueueIdentity &identity) = 0;
 };
 
 /// @brief Result of servicing one MES or MES-created queue doorbell.
@@ -130,7 +179,8 @@ private:
 /// retry journals, and firmware-free MES control execution. A PCI or legacy
 /// frontend supplies only physical-memory access, register callbacks, and
 /// interrupt/SDMA adapters. No MMIO register layout or PCI transport type is
-/// visible here.
+/// visible here. Frontends serialize control operations; CU trap lookups and
+/// interrupt delivery may run concurrently with them.
 class MesEngine {
 public:
   /// @brief Construct the semantic engine over shared VM and queue services.
@@ -148,10 +198,13 @@ public:
   [[nodiscard]] bool
   attach_frontend(std::string diagnostic_name,
                   std::shared_ptr<SdmaQueueBindingFactory> sdma_queue_binding_factory,
-                  InterruptSink interrupt_sink, MesFrontendCallbacks callbacks);
+                  InterruptSink interrupt_sink, MesFrontendCallbacks callbacks,
+                  InterruptSink trap_interrupt_sink = {});
   /// @brief Detach frontend callbacks while retaining any core-owned orphan bindings.
   /// @returns false while a queue or retry journal still requires the frontend.
   [[nodiscard]] bool detach_frontend();
+  /// @brief Forward a privileged shader message through the attached frontend.
+  [[nodiscard]] bool deliver_trap_interrupt(uint32_t process_id, uint32_t data) const;
   /// @brief Destroy every MES-created queue and address-space binding that can be released.
   /// @returns true only when all frontend-created state was released.
   [[nodiscard]] bool teardown_queues();
@@ -168,12 +221,18 @@ public:
                   const MesDoorbellContext &context);
 
   /// @brief Return the number of queues currently mapped by MES.
-  [[nodiscard]] std::size_t active_queues() const { return mapped_queues_.size(); }
+  [[nodiscard]] std::size_t active_queues() const {
+    return std::ranges::count_if(mapped_queues_, [](const auto &queue) { return queue.active; });
+  }
   /// @brief Return the number of process address spaces currently tracked by MES.
   [[nodiscard]] std::size_t active_address_spaces() const { return address_spaces_.size(); }
   /// @brief Return the MES-owned handle for one process, for focused integration tests.
   [[nodiscard]] std::optional<AddressSpaceHandle>
   process_address_space_for_test(uint32_t process_id) const;
+
+  /// @brief Resolve trap state for a live MES compute queue and address-space generation.
+  [[nodiscard]] std::optional<TrapHandlerConfig>
+  resolve_trap_config(const QueueIdentity &identity) const;
 
 private:
   enum class QueueKind : uint8_t { Mes, Compute, Sdma };
@@ -187,6 +246,14 @@ private:
     uint64_t initial_read_pointer = 0;
     uint64_t page_table_base = 0;
     uint64_t process_context_address = 0;
+    uint64_t trap_handler_address = 0;
+    uint64_t trap_memory_address = 0;
+    uint64_t mqd_address = 0;
+    uint64_t context_save_address = 0;
+    uint32_t context_save_size = 0;
+    uint32_t control_stack_size = 0;
+    uint32_t control_stack_offset = 0;
+    uint32_t wave_state_offset = 0;
     uint64_t ring_dwords = 0;
     uint64_t doorbell_offset = 0;
     uint32_t process_id = 0;
@@ -194,6 +261,10 @@ private:
     uint32_t engine_id = 0;
     bool active = false;
     bool aql = false;
+    bool trap_enabled = false;
+    // A terminal save failure commits REMOVE to discarding the context.
+    // Retries may finish invalidating the MQD but must never restart the save.
+    bool discard_context_on_remove = false;
     AddressSpaceHandle address_space;
     QueueHandle queue_handle;
     QueueKind kind = QueueKind::Mes;
@@ -254,7 +325,8 @@ private:
                                                      const MesDoorbellContext &context,
                                                      const GpuVmAccess &gart_access);
   [[nodiscard]] VmAccessOutcome publish_mes_frame(PendingMesFrame &pending);
-  [[nodiscard]] VmAccessOutcome remove_queue(uint64_t doorbell_offset);
+  [[nodiscard]] VmAccessOutcome remove_queue(uint64_t doorbell_offset,
+                                             const GpuVmAccess &gart_access);
   [[nodiscard]] VmAccessOutcome commit_queue(Queue queue, bool created_address_space);
   void release_unused_address_space(uint32_t process_id);
   void reap_orphaned_address_spaces();
@@ -265,8 +337,8 @@ private:
   [[nodiscard]] bool update_process_address_space(uint64_t process_context_address,
                                                   uint64_t page_table_base,
                                                   std::shared_ptr<PhysicalMemoryAccess> memory);
-  [[nodiscard]] bool register_aql_queue(Queue &queue);
-  [[nodiscard]] bool register_pm4_queue(Queue &queue);
+  [[nodiscard]] bool register_aql_queue(Queue &queue, bool suspended = false);
+  [[nodiscard]] bool register_pm4_queue(Queue &queue, bool suspended = false);
   [[nodiscard]] bool register_sdma_queue(Queue &queue);
   [[nodiscard]] bool same_source(const PendingMesFrame &pending,
                                  const MesDoorbellContext &context) const;
@@ -274,12 +346,21 @@ private:
   GpuVm &gpu_vm_;
   GpuQueueRegistry &queue_registry_;
   ComputeQueueBindingProvider &compute_bindings_;
+  // Synchronize CU trap readers with owner-side mutations of mapped queues,
+  // process debug state and the trap interrupt sink. Never hold this lock across
+  // queue/provider operations or frontend callbacks: they can wait for a CU
+  // whose trap lookup needs the shared lock. Owner-only reads need no lock,
+  // since CU callbacks return copies and never mutate the MES containers.
+  mutable std::shared_mutex trap_state_mutex_;
   std::vector<Queue> mapped_queues_;
   std::unordered_map<uint32_t, AddressSpace> address_spaces_;
+  // SET_SHADER_DEBUGGER may enable a context before its first queue is created.
+  std::unordered_set<uint64_t> debug_enabled_contexts_;
   std::vector<AddressSpaceHandle> orphaned_address_spaces_;
   std::unordered_map<uint64_t, PendingMesFrame> pending_mes_frames_;
   std::shared_ptr<SdmaQueueBindingFactory> sdma_queue_binding_factory_;
   InterruptSink interrupt_sink_;
+  InterruptSink trap_interrupt_sink_;
   MesFrontendCallbacks callbacks_;
   std::string diagnostic_name_ = "MES";
   uint32_t next_queue_ordinal_ = 0;

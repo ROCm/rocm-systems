@@ -73,13 +73,14 @@ public:
   /// one fan-out queue must give each a distinct id.
   /// @param address_space GPUVM address space used by the queue.
   /// @param process_id VMID associated with @p address_space.
+  /// @param doorbell_offset Byte offset of the queue's 64-bit doorbell slot.
   AqlQueue(amdgpu::GpuMemory *memory, amdgpu::CommandProcessor *cp,
            uint64_t ring_addr = DEFAULT_RING_ADDR, uint32_t ring_size = DEFAULT_RING_SIZE,
            uint64_t read_ptr_addr = DEFAULT_READ_PTR_ADDR,
            uint64_t write_ptr_addr = DEFAULT_WRITE_PTR_ADDR,
            uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR, bool xcd_fanout = false,
            uint32_t queue_id = 1, amdgpu::AddressSpaceHandle address_space = {},
-           uint32_t process_id = 0)
+           uint32_t process_id = 0, uint32_t doorbell_offset = 0)
       : memory_(memory), cp_(cp), ring_addr_(ring_addr), ring_size_(ring_size),
         read_ptr_addr_(read_ptr_addr), write_ptr_addr_(write_ptr_addr),
         doorbell_addr_(doorbell_addr) {
@@ -97,6 +98,7 @@ public:
     hw.read_ptr_va = read_ptr_addr_;
     hw.write_ptr_va = write_ptr_addr_;
     hw.doorbell_va = doorbell_addr_;
+    hw.doorbell_offset = doorbell_offset;
     hw.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
     hw.xcd_fanout = xcd_fanout;
     cp_->register_queue(std::move(hw));

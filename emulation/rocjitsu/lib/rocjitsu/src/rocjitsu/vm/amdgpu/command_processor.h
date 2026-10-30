@@ -33,6 +33,8 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
+#include "rocjitsu/vm/amdgpu/queue_context_save.h"
+#include "rocjitsu/vm/amdgpu/scratch_reservations.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
@@ -50,6 +52,7 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <span>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -113,6 +116,11 @@ public:
   /// not participate in numeric VMID routing.
   void set_gpu_vm(GpuVm *gpu_vm, AddressSpaceHandle default_address_space = {});
   [[nodiscard]] AddressSpaceHandle default_address_space() const { return default_address_space_; }
+
+  /// @brief Wire the device-wide scratch owner during topology setup, before admitting waves.
+  void set_scratch_reservations(std::shared_ptr<ScratchReservations> reservations) {
+    scratch_reservations_ = std::move(reservations);
+  }
 
   /// @brief Replace the GWS store across this CP's drained compute units.
   /// @details The caller serializes topology changes. Preflights every CU and
@@ -197,6 +205,33 @@ public:
 
   /// @brief Whether this CP currently owns any AQL or PM4 queue state.
   [[nodiscard]] bool has_registered_queues() const;
+
+  /// @brief Close admission and pause waves, retaining the original gates across retries.
+  /// @returns Unavailable while a trap handler must finish before its wave can pause.
+  [[nodiscard]] VmAccessOutcome suspend_queue_context(const QueueIdentity &identity);
+  /// @brief Undo only the suspension introduced by a save that did not release resources.
+  void cancel_queue_context_save(const QueueIdentity &identity);
+
+  /// @brief Save progress and resource requirements of a suspended, non-fanned-out queue.
+  /// @details The encoding is rocjitsu-private: public AMD documentation does not
+  /// specify the complete CP firmware checkpoint format. No host pointers or VM
+  /// leases are encoded. Wave/register state is saved separately through CWSR.
+  /// The caller must quiesce waves and their memory accesses first. Host-owned
+  /// PM4 submissions, cross-XCD state, workgroup clusters, WGP LDS and GWS waits
+  /// are unsupported. Unsupported live dispatch/wave state requires draining;
+  /// unsupported queue ownership or host submissions return Faulted.
+  /// Unavailable requires an outstanding publication to finish before retrying.
+  [[nodiscard]] QueueContextSaveOutcome save_queue_context(const QueueIdentity &identity,
+                                                           std::vector<uint8_t> &context);
+  /// @brief Rebuild progress and resident resources in a new suspended binding.
+  /// @details Validates before mutation; leaves admission suspended. The caller
+  /// must restore the queue's waves before making the queue runnable.
+  [[nodiscard]] VmAccessOutcome restore_queue_context(const QueueIdentity &identity,
+                                                      std::span<const uint8_t> context);
+  /// @brief Discard paused resident resources without completing their work.
+  /// @details Called after durable context publication, or to roll back restore.
+  /// The caller owns queue deregistration and must keep admission suspended.
+  void release_queue_context(const QueueIdentity &identity);
 
   /// @brief Compute queues whose root ring initially processes PM4.
   /// @details Test-only visibility for cross-layer teardown assertions.
@@ -572,6 +607,7 @@ private:
     std::array<uint32_t, 4> scratch_resource_descriptor{};
     uint64_t write_dispatch_id = 0;
   };
+  struct QueueContext;
 
   struct KernelDescriptorReadResult {
     VmAccessOutcome outcome;
@@ -1029,6 +1065,8 @@ private:
   std::chrono::milliseconds runtime_exception_ack_timeout_ = kRuntimeExceptionAckTimeout;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
+  std::shared_ptr<ScratchReservations> scratch_reservations_ =
+      std::make_shared<ScratchReservations>();
   uint32_t scratch_wave_divisor_ = 1;
   uint32_t scratch_shader_engine_count_ = 1;
   uint32_t scratch_waves_per_se_ = 1;

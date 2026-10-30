@@ -32,6 +32,7 @@ class ExecutionPluginGroup;
 namespace amdgpu {
 
 struct Pm4FailureState;
+class ScratchReservation;
 
 // Forward declaration - wavefront accesses registers through its CU.
 class ComputeUnitCore;
@@ -258,6 +259,10 @@ public:
   /// queue whose context-save-restore area holds its saved state.
   void set_queue_id(uint32_t id) { queue_id_ = id; }
 
+  /// @brief Queue's 10-bit doorbell ID returned by shader messages.
+  uint32_t doorbell_id() const { return doorbell_id_; }
+  void set_doorbell_id(uint32_t id) { doorbell_id_ = id; }
+
   /// @brief Return the owning process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }
 
@@ -289,8 +294,11 @@ public:
   }
   /// @brief Report a failed shader to its PM4 queue; returns false for an AQL wave.
   bool fail_pm4_submission();
-  /// @brief Retain a PM4 scratch slot until this wave retires.
-  void set_scratch_lease(std::shared_ptr<uint32_t> lease) { scratch_lease_ = std::move(lease); }
+  /// @brief Retain the scratch backing reservation until this wave retires, including pauses.
+  void set_scratch_lease(std::shared_ptr<ScratchReservation> lease) {
+    scratch_lease_ = std::move(lease);
+  }
+  const std::shared_ptr<ScratchReservation> &scratch_lease() const { return scratch_lease_; }
 
   /// @brief Return the per-WG LDS base offset assigned at dispatch.
   uint32_t lds_base() const { return lds_base_; }
@@ -519,10 +527,11 @@ public:
   /// @brief Set this wave's scratch scoreboard id (set at dispatch by the CP).
   void set_scratch_scoreboard_id(uint32_t val) { scratch_scoreboard_id_ = val; }
 
-  /// @brief Return the physical shader engine containing this wave.
+  /// @brief Return the shader-engine bank used by this wave's scratch allocation.
+  /// A restored wave can execute on another CU while retaining this bank.
   uint32_t shader_engine_id() const { return shader_engine_id_; }
 
-  /// @brief Set the physical shader engine containing this wave.
+  /// @brief Set the shader-engine bank used by this wave's scratch allocation.
   void set_shader_engine_id(uint32_t val) { shader_engine_id_ = val; }
 
   uint64_t shared_aperture_base() const { return shared_aperture_base_; }
@@ -972,6 +981,21 @@ public:
     fatal_exception_cwsr_valid_ = saved.fatal_exception_cwsr_valid;
   }
 
+  /// @brief Per-wave split-barrier state, separate from shared WG counters.
+  struct BarrierWaitState {
+    uint32_t named_barrier_id = 0;
+    std::array<bool, 5> complete{};
+    uint8_t waiting_bit = kNoBarrierWait;
+  };
+  BarrierWaitState barrier_wait_state() const {
+    return {named_barrier_id_, barrier_complete_, waiting_barrier_bit_};
+  }
+  void restore_barrier_wait_state(const BarrierWaitState &saved) {
+    named_barrier_id_ = saved.named_barrier_id;
+    barrier_complete_ = saved.complete;
+    waiting_barrier_bit_ = saved.waiting_bit;
+  }
+
   /// @brief Halt this wavefront and notify the CU for WG completion tracking.
   /// @details Transitions to HALTED and decrements the CU's per-WG refcount.
   /// When the refcount reaches zero (all WFs in the WG halted), the CU fires
@@ -1091,6 +1115,7 @@ public:
     trap_id_ = 0;
     debug_wave_id_ = 0;
     queue_id_ = 0;
+    doorbell_id_ = 0;
   }
 
 protected:
@@ -1123,8 +1148,9 @@ protected:
 
   bool use_system_clock_ = false;                ///< PM4 shader timestamps use host monotonic time.
   std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
-  std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
-  uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
+  std::shared_ptr<ScratchReservation> scratch_lease_; ///< Resident scratch backing reservation.
+  uint32_t queue_id_ = 0;    ///< Frontend queue ID that launched this wave (debugger correlation).
+  uint32_t doorbell_id_ = 0; ///< Queue doorbell ID captured at dispatch.
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
@@ -1173,7 +1199,7 @@ private:
   uint32_t scratch_lane_size_ = 0; ///< Per-lane private scratch allocation size in bytes.
   /// Scratch slot within @ref shader_engine_id_ (debugger private-memory mapping).
   uint32_t scratch_scoreboard_id_ = 0;
-  uint32_t shader_engine_id_ = 0; ///< Physical shader engine used by the scratch mapping.
+  uint32_t shader_engine_id_ = 0; ///< Scratch bank, independent of the current CU after restore.
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;

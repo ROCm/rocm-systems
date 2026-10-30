@@ -283,7 +283,7 @@ std::optional<AqlPacketDiagnostic> validate_cluster_shape(const DispatchEntry &d
 
 uint32_t aligned_lds_bytes_per_workgroup(const DispatchEntry &entry) {
   // Match ComputeUnitCore::allocate_lds()/can_accept_workgroup() granularity for all dispatches.
-  return util::align_up(entry.group_segment_fixed_size, 256u);
+  return util::align_up(entry.group_segment_fixed_size, LdsAllocator::kAlignment);
 }
 
 bool any_active_wavefronts(const std::vector<ComputeUnitCore *> &cus) {
@@ -314,9 +314,9 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
       uint64_t reserved_lds = static_cast<uint64_t>(lds_bytes_per_wg) * reserved_wgs;
       if (reserved_wfs > kU32Max || reserved_lds > kU32Max)
         continue;
-      if (!cu->can_accept_workgroup(static_cast<uint32_t>(reserved_wfs),
-                                    static_cast<uint32_t>(reserved_lds),
-                                    entry.scratch_wave_limit_per_se))
+      if (!cu->can_accept_workgroup(static_cast<uint32_t>(reserved_wfs), 0,
+                                    entry.scratch_wave_limit_per_se) ||
+          !cu->can_allocate_lds(lds_bytes_per_wg, reserved_wgs))
         continue;
 
       plan.push_back({local_wg_id, local_wg_id + entry.workgroup_id_offset, cu});
@@ -714,10 +714,17 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     uint32_t waves_per_wg = (wg_total_size + wf->wf_size() - 1) / wf->wf_size();
     uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
     uint64_t scratch_slot = global_wave_idx;
+    std::shared_ptr<uint32_t> pm4_slot;
+    std::shared_ptr<ScratchReservation> scratch;
+    const auto reserve_slot = [&](uint64_t slot) {
+      if (slot > (std::numeric_limits<uint64_t>::max() - scratch_pool) / per_wave_size)
+        return std::shared_ptr<ScratchReservation>{};
+      return scratch_reservations_->try_reserve(
+          pkt.address_space, scratch_pool + slot * per_wave_size, per_wave_size, pm4_slot);
+    };
     if (pkt.pm4_abi) {
-      auto lease = pkt.pm4_scratch_pool->acquire();
-      scratch_slot = *lease;
-      wf->set_scratch_lease(std::move(lease));
+      pm4_slot = pkt.pm4_scratch_pool->acquire();
+      scratch_slot = *pm4_slot;
     } else if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5 || pkt.queue_ptr != 0) {
       const uint32_t shader_engine_count =
           std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
@@ -736,13 +743,38 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
           (static_cast<uint64_t>(scratch_xcc_id_) * shader_engine_count + shader_engine_id) *
               scratch_wave_stride_per_se +
           scoreboard_id;
+      // The preferred region may still belong to a restored wave, independently
+      // of its current CU. Reserve against the shared address-space registry.
+      scratch = reserve_slot(scratch_slot);
+      if (!scratch) {
+        const uint32_t slots_per_se =
+            std::min(pkt.scratch_wave_limit_per_se, scratch_wave_stride_per_se);
+        for (uint32_t se = 0; se < shader_engine_count && !scratch; ++se)
+          for (uint32_t id = 0; id < slots_per_se; ++id) {
+            const uint64_t candidate = (uint64_t{scratch_xcc_id_} * shader_engine_count + se) *
+                                           scratch_wave_stride_per_se +
+                                       id;
+            scratch = reserve_slot(candidate);
+            if (!scratch)
+              continue;
+            scratch_slot = candidate;
+            wf->set_shader_engine_id(se);
+            wf->set_scratch_scoreboard_id(id);
+            break;
+          }
+        if (!scratch)
+          return VmAccessOutcome::Unavailable;
+      }
     } else {
       // Legacy CWSR records use the dispatch-wide logical scratch slot.
       wf->set_scratch_scoreboard_id(static_cast<uint32_t>(global_wave_idx));
     }
-    if (scratch_slot > (std::numeric_limits<uint64_t>::max() - scratch_pool) / per_wave_size)
-      return VmAccessOutcome::Malformed;
-    uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
+    if (!scratch)
+      scratch = reserve_slot(scratch_slot);
+    if (!scratch)
+      return VmAccessOutcome::Unavailable;
+    wf->set_scratch_lease(std::move(scratch));
+    const uint64_t wave_scratch = wf->scratch_lease()->base();
     std::optional<GpuVmAccess> fallback_scratch_access;
     const GpuVmAccess *scratch_access = pkt.execution_access.get();
     if (scratch_access == nullptr) {
@@ -2100,11 +2132,11 @@ void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, ui
                                                   uint32_t lds_base) {
   if (!entry.has_workgroup_clusters())
     return;
-  std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
   uint32_t cluster_base_wg_id =
       entry.cluster_base_local_wg_id(local_wg_id) + entry.workgroup_id_offset;
   uint64_t cluster_key = wg_key(entry.dispatch_id, cluster_base_wg_id);
   cu->pin_lds_until_cluster_retired(cluster_key);
+  std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
   ClusterWorkgroupPlacement placement{};
   placement.cu = cu;
   placement.lds_base = lds_base;
@@ -2281,8 +2313,8 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
 
 // The waves halted (and freed) before their pin was released, so reclaim each
 // peer CU's LDS once the whole cluster is done. Keep CU callbacks outside
-// cluster_placements_mutex_. maybe_reset_lds_alloc() now checks the atomic
-// activity count and LDS pin flag without taking the wave-state lock.
+// cluster_placements_mutex_. The CU protects its activity, pins, and allocator
+// under the wave-state lock.
 void CommandProcessor::release_cluster_lds_pins(
     const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin) {
   for (const auto &[cu, cluster_key] : unpin) {
@@ -2419,10 +2451,9 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // begin_workgroup() has not run, there is no active_wgs_ entry / cluster pin to
     // unwind either. Also reclaim the placement's LDS/WGP reservation symmetrically
     // with how it was reserved:
-    //   - CU / cluster mode: the SPI (or the direct CU path) advanced the CU's
-    //     next_lds_alloc_ via allocate_lds(); maybe_reset_lds_alloc() rolls it back
-    //     iff the CU is now idle (freeing these waves left no active waves) and
-    //     unpinned. It correctly no-ops when peers of the same dispatch are resident.
+    //   - CU / cluster mode: return this placement's CU-local LDS reservation, including
+    //     when earlier workgroups remain resident. maybe_reset_lds_alloc() also
+    //     resets the allocator once the whole CU is idle and unpinned.
     //   - WGP mode: allocate_workgroup() reserved SPI-side state (wgp.next_lds_alloc,
     //     wgp.active_workgroups, resident_wgp_workgroups_) that is NOT CU-local, so
     //     maybe_reset_lds_alloc() cannot reach it; release_wgp_workgroup() is the
@@ -2447,6 +2478,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         for (auto *spi : spis_)
           if (spi->release_wgp_workgroup(entry.dispatch_id, global_wg_id))
             break;
+      } else {
+        cu->release_lds(lds_base, entry.group_segment_fixed_size);
       }
       cu->maybe_reset_lds_alloc();
     };
@@ -2479,6 +2512,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_pm4_failure(entry.pm4_failure);
       wf->set_mode_raw(entry.initial_mode_raw);
       wf->set_queue_id(entry.queue_id);
+      wf->set_doorbell_id((entry.doorbell_offset / sizeof(uint64_t)) & 0x3ffu);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, wf->wf_size()));
       const uint32_t relative_wg_id = global_wg_id - entry.workgroup_id_offset;
       const WorkgroupCoord coord = entry.local_wg_coord(relative_wg_id);
@@ -3215,6 +3249,7 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.address_space = queue.address_space;
   dp.process_id = queue.process_id;
   dp.queue_id = queue.queue_id;
+  dp.doorbell_offset = queue.doorbell_offset;
   dp.interrupt_sink = queue.interrupt_sink;
   dp.enabled_cus = queue.enabled_cus;
   dp.kernel_wave_size = (initiator & (1u << 15)) ? 32 : 64;
@@ -4039,6 +4074,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
 
   DispatchEntry dp{};
   dp.queue_id = queue.queue_id;
+  dp.doorbell_offset = queue.doorbell_offset;
   dp.enabled_cus = queue.enabled_cus;
   dp.queue_packet_id = queue_packet_id;
   dp.address_space = queue.address_space;
