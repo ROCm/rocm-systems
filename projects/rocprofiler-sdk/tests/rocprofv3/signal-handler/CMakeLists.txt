@@ -224,6 +224,14 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED ${_inherited_name}
     ARGS --output-dir ${_inherited_outdir} --expect clean-exit --process-type fork)
 
+# Hook-driven regressions run only against non-installed variants in the build tree. The
+# ordinary installed-package signal/fork cases above use production libraries.
+if(NOT TARGET rocprofiler-sdk-fork-test-runtime)
+    return()
+endif()
+set(_fork_test_root "$<TARGET_FILE_DIR:rocprofiler-sdk-fork-test-shared>/..")
+add_dependencies(signal-handler-test rocprofiler-sdk-fork-test-runtime)
+
 # Model an application atfork prepare handler registered before rocprofv3 writing the
 # first marker record after the tool has locked its output registry. The record is
 # deliberately omitted instead of re-entering the registry and deadlocking fork().
@@ -239,9 +247,9 @@ rocprofiler_add_integration_cleanup_test(
 rocprofiler_add_integration_execute_test(
     ${_prepare_name}
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --output-format json -d
-        ${_prepare_outdir} -o out_%pid% -- $<TARGET_FILE:signal-handler-test>
-        --fork-prepare-marker
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocm-root ${_fork_test_root}
+        --marker-trace --output-format json -d ${_prepare_outdir} -o out_%pid% --
+        $<TARGET_FILE:signal-handler-test> --fork-prepare-marker
     DEPENDS signal-handler-test
     TIMEOUT ${CTEST_TIMEOUT}
     LABELS "integration-tests;signal-handler"
@@ -311,8 +319,9 @@ foreach(
     rocprofiler_add_integration_execute_test(
         ${_name}
         COMMAND
-            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --output-format json
-            -d ${_outdir} -o out_%pid% -- $<TARGET_FILE:signal-handler-test> --${_mode}
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocm-root ${_fork_test_root}
+            --marker-trace --output-format json -d ${_outdir} -o out_%pid% --
+            $<TARGET_FILE:signal-handler-test> --${_mode}
         DEPENDS signal-handler-test
         TIMEOUT ${CTEST_TIMEOUT}
         LABELS "integration-tests;signal-handler"

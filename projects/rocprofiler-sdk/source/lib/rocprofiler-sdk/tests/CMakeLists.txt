@@ -25,7 +25,6 @@ install(
 set(rocprofiler_lib_sources
     agent.cpp
     agent_mapping.cpp
-    initialization_fork_test.cpp
     parse_gfx_target_version_test.cpp
     buffer.cpp
     contexts.cpp
@@ -66,6 +65,18 @@ rocprofiler_add_unit_test(
     ENVIRONMENT
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+add_executable(rocprofiler-sdk-initialization-fork-tests initialization_fork_test.cpp)
+target_link_libraries(
+    rocprofiler-sdk-initialization-fork-tests
+    PRIVATE rocprofiler-sdk-fork-test-static
+            rocprofiler-sdk::rocprofiler-sdk-common-library GTest::gtest
+            GTest::gtest_main)
+rocprofiler_add_unit_test(
+    TARGET rocprofiler-sdk-initialization-fork-tests
+    SOURCES initialization_fork_test.cpp
+    TIMEOUT 30
+    LABELS "unittests")
 
 # -------------------------------------------------------------------------------------- #
 #
