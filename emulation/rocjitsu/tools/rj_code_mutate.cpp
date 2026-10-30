@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -260,4 +261,19 @@ int run(int argc, char **argv) {
 }
 } // namespace
 
-int main(int argc, char **argv) { return run(argc, argv); }
+int main(int argc, char **argv) {
+  // Let EPIPE/EFBIG reach the checked stream and file paths, including cleanup.
+#ifdef SIGPIPE
+  if (std::signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+    std::cerr << "rj_code_mutate: cannot ignore SIGPIPE\n";
+    return 3;
+  }
+#endif
+#ifdef SIGXFSZ
+  if (std::signal(SIGXFSZ, SIG_IGN) == SIG_ERR) {
+    std::cerr << "rj_code_mutate: cannot ignore SIGXFSZ\n";
+    return 3;
+  }
+#endif
+  return run(argc, argv);
+}
