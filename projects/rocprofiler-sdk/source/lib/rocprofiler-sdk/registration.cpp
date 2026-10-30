@@ -1243,8 +1243,8 @@ initialize()
 {
     if(fork_child_abandoned()) return;
     internal_threading::register_fork_handler();
-    auto activity  = common::fork_lifecycle::activity{lifecycle};
-    auto ownership = get_session_lifecycle().update();
+    auto initialization_activity = common::fork_lifecycle::activity{lifecycle};
+    auto ownership               = get_session_lifecycle().update();
     if(!ownership) return;
 
     init_logging();
@@ -1279,7 +1279,7 @@ initialize()
         set_init_status(-1);
         std::atexit([]() {
             if(fork_child_abandoned()) return;
-            auto activity = common::fork_lifecycle::activity{lifecycle};
+            auto atexit_activity = common::fork_lifecycle::activity{lifecycle};
             finalize();
             common::destroy_static_tl_objects();
             common::destroy_static_objects();
