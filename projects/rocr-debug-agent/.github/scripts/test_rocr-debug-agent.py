@@ -48,6 +48,21 @@ Environment Variables:
         default=5,
         help="Base delay in seconds between retries (default: 5).",
     )
+    parser.add_argument(
+        "--skip-unit",
+        action="store_true",
+        help="Skip unit tests even if the binary is found.",
+    )
+    parser.add_argument(
+        "--gpu-tests",
+        action="store_true",
+        help="Run only GPU-based integration tests (exclusive with --cpu-tests unless both specified).",
+    )
+    parser.add_argument(
+        "--cpu-tests",
+        action="store_true",
+        help="Run only CPU-based unit tests (exclusive with --gpu-tests unless both specified).",
+    )
 
     return parser.parse_args()
 
@@ -136,25 +151,27 @@ def get_rocm_tree_root(try_rocm_path: bool = False) -> Path:
     return rocm_root
 
 
-def get_default_paths(rocm_root: Path) -> Tuple[Path, Path]:
+def get_default_paths(rocm_root: Path) -> Tuple[Path, Path, Optional[Path]]:
     """
-    Get default paths for test binary and script.
+    Get default paths for test binary, script, and unit test binary.
 
     Args:
         rocm_root: ROCm tree root directory.
 
     Returns:
-        Tuple of (test_bin, test_script) paths.
+        Tuple of (test_bin, test_script, unit_test_bin) paths.
+        unit_test_bin is None if not found (non-fatal).
 
     Raises:
-        SystemExit: If paths cannot be resolved or don't exist.
+        SystemExit: If integration test paths cannot be resolved or don't exist.
     """
-    # Both test binary and script are in <root>/tests/rocm-debug-agent/
+    # Test binaries and script are in <root>/tests/rocm-debug-agent/
     test_dir = rocm_root / "tests" / "rocm-debug-agent"
     test_bin = test_dir / "rocm-debug-agent-test"
     test_script = test_dir / "run-test.py"
+    unit_test_bin = test_dir / "rocm-debug-agent-unit-tests"
 
-    # Validate that the paths exist.
+    # Validate that integration test paths exist.
     if not test_bin.exists():
         logger.error(f"[X] Error: Test binary not found: {test_bin}")
         sys.exit(1)
@@ -163,7 +180,13 @@ def get_default_paths(rocm_root: Path) -> Tuple[Path, Path]:
         logger.error(f"[X] Error: Test script not found: {test_script}")
         sys.exit(1)
 
-    return test_bin, test_script
+    # Unit test binary is optional.
+    if not unit_test_bin.exists():
+        logger.warning(f"[!] Warning: Unit test binary not found: {unit_test_bin}")
+        logger.warning("Skipping unit tests.")
+        unit_test_bin = None
+
+    return test_bin, test_script, unit_test_bin
 
 
 def print_section(
@@ -346,6 +369,59 @@ def run_tests(
                 sys.exit(1)
 
 
+def run_unit_tests(
+    unit_test_bin: Path,
+    env_vars: Dict[str, str],
+    max_retries: int = 3,
+    retry_delay: int = 5,
+) -> None:
+    """
+    Runs the unit tests with a retry mechanism.
+
+    Args:
+        unit_test_bin: Path to unit test binary.
+        env_vars: Environment variables for test execution.
+        max_retries: Maximum number of retry attempts.
+        retry_delay: Base delay in seconds between retries.
+
+    Raises:
+        SystemExit: If all retry attempts fail.
+    """
+    cmd = [str(unit_test_bin)]
+    test_bin_dir = unit_test_bin.parent
+
+    for attempt in range(1, max_retries + 1):
+        print_section(f"Running unit tests (Attempt {attempt}/{max_retries})")
+
+        logger.info(f"Exec [{test_bin_dir}]$ {shlex.join(cmd)}")
+
+        start_time = time.perf_counter()
+        try:
+            subprocess.run(cmd, cwd=str(test_bin_dir), env=env_vars, check=True)
+
+            duration = time.perf_counter() - start_time
+
+            print_section(
+                f"[✓] Unit tests succeeded on attempt {attempt}. Duration: {duration:.2f}s"
+            )
+            return
+
+        except subprocess.CalledProcessError as e:
+            duration = time.perf_counter() - start_time
+            logger.error(
+                f"[X] Attempt {attempt}/{max_retries} failed with exit code {e.returncode} "
+                f"after {duration:.2f}s"
+            )
+
+            if attempt < max_retries:
+                wait_time = attempt * retry_delay
+                logger.info(f"Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                print_section(f"[X] All {max_retries} attempts failed for unit tests.")
+                sys.exit(1)
+
+
 def main() -> None:
     """
     Main entry point for the script.
@@ -355,12 +431,16 @@ def main() -> None:
 
     print_section("Path discovery")
     rocm_root = get_rocm_tree_root(try_rocm_path=args.try_rocm_path)
-    test_bin, test_script = get_default_paths(rocm_root)
+    test_bin, test_script, unit_test_bin = get_default_paths(rocm_root)
     test_bin_dir = test_bin.parent
 
-    logger.info(f"Test Binary: {test_bin}")
-    logger.info(f"Test Script: {test_script}")
+    logger.info(f"Integration Test Binary: {test_bin}")
+    logger.info(f"Integration Test Script: {test_script}")
     logger.info(f"Test Bin Dir: {test_bin_dir}")
+    if unit_test_bin:
+        logger.info(f"Unit Test Binary: {unit_test_bin}")
+    else:
+        logger.info("Unit Test Binary: Not found (will skip)")
 
     env_vars = setup_environment(rocm_root, try_rocm_path=args.try_rocm_path)
 
@@ -369,14 +449,40 @@ def main() -> None:
     # Set core dump limit to 0 (ulimit -c 0).
     set_core_dump_limit()
 
-    # Run tests.
-    run_tests(
-        test_script=test_script,
-        test_bin_dir=test_bin_dir,
-        env_vars=env_vars,
-        max_retries=args.max_retries,
-        retry_delay=args.retry_delay,
-    )
+    # Determine which tests to run based on flags.
+    # Default (neither flag): run both
+    # --gpu-tests only: run integration tests
+    # --cpu-tests only: run unit tests
+    # Both flags: run both
+    run_gpu = args.gpu_tests or (not args.gpu_tests and not args.cpu_tests)
+    run_unit = args.cpu_tests or (not args.gpu_tests and not args.cpu_tests)
+
+    # Run integration tests if requested.
+    if run_gpu:
+        run_tests(
+            test_script=test_script,
+            test_bin_dir=test_bin_dir,
+            env_vars=env_vars,
+            max_retries=args.max_retries,
+            retry_delay=args.retry_delay,
+        )
+    else:
+        logger.info("Skipping GPU-based integration tests (--cpu-tests only)")
+
+    # Run unit tests if requested and binary exists and not skipped.
+    if args.skip_unit:
+        logger.info("Skipping unit tests (--skip-unit flag)")
+    elif not run_unit:
+        logger.info("Skipping unit tests (--gpu-tests only)")
+    elif unit_test_bin:
+        run_unit_tests(
+            unit_test_bin=unit_test_bin,
+            env_vars=env_vars,
+            max_retries=args.max_retries,
+            retry_delay=args.retry_delay,
+        )
+    else:
+        logger.info("Skipping unit tests (binary not found)")
 
 
 if __name__ == "__main__":
