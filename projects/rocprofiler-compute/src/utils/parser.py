@@ -3,14 +3,13 @@
 
 import argparse
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd
 
-from pc_sampling.code_object_analysis import InstructionPipelines
 from pc_sampling.pc_sampling_analysis import (
-    SOURCE_LINE_MISSING,
     aggregate_pc_sample_records,
     detect_pc_sampling_method,
     enrich_with_metadata,
@@ -405,11 +404,7 @@ def _build_pc_sampling_partial_frame(
         console_warning("PC sampling: no records found in PC sampling data.")
         return df
 
-    df = df.rename(
-        columns={"code_object_offset": "offset", "kernel_name": "Kernel_Name"}
-    )
-    # Row identity is process-scoped, so every row carries its own process.
-    df["pid"] = tool_data["metadata"]["pid"]
+    df = df.rename(columns={"kernel_name": "Kernel_Name"})
 
     if kernel_name is not None:
         df = df[df["Kernel_Name"] == kernel_name]
@@ -423,50 +418,20 @@ def _build_pc_sampling_partial_frame(
 def _format_pc_sampling_display_frame(
     df: pd.DataFrame,
     method: str,
-    sorting_type: str,
     num_rows: Optional[int] = None,
-    gpu_arch: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Return the sampling rows in their requested display layout."""
+    """Return the kernel rows in their display layout."""
     # Project stall_reason as a descending list[(reason, count)].
     df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
-    df["source_line"] = df["source_line"].apply(_trim_source_line)
-    df["instruction_type"] = df["instruction"].apply(
-        lambda instruction: InstructionPipelines.lookup(instruction, gpu_arch)
-    )
 
-    # Sort on the numeric offset (lexicographic hex order is wrong), then
-    # format offset as hex for display. Leading with pid keeps each process's
-    # rows contiguous.
-    if sorting_type == "offset":
-        df_sorted = df.sort_values(
-            by=["pid", "code_object_id", "Kernel_Name", "offset"]
-        )
-    elif sorting_type == "count":
-        df_sorted = df.sort_values(by=["count"], ascending=False)
-    else:
-        console_error(
-            'Error: pc sampling sorting_type must be either "offset" or "count".'
-        )
-        return pd.DataFrame()
+    df_sorted = df.sort_values(by=["count", "Kernel_Name"], ascending=[False, True])
 
     # num_rows of 0 or None (or a negative passed programmatically) shows all.
     if num_rows and num_rows > 0:
         df_sorted = df_sorted.head(num_rows)
 
-    df_sorted["offset"] = df_sorted["offset"].apply(hex)
-
     # Stochastic adds issue/stall detail on top of the host_trap columns.
-    shared_columns = [
-        "pid",
-        "source_line",
-        "instruction",
-        "instruction_type",
-        "code_object_id",
-        "offset",
-        "count",
-        "active_thread_percent",
-    ]
+    shared_columns = ["Kernel_Name", "count", "active_thread_percent"]
     # wave_occupancy_percent is stochastic-only: a host_trap record has no
     # wave count to derive it from.
     stochastic_only_columns = [
@@ -478,7 +443,6 @@ def _format_pc_sampling_display_frame(
     columns_to_return = shared_columns + (
         stochastic_only_columns if method == "stochastic" else []
     )
-    columns_to_return.append("Kernel_Name")
     # Renumber after sorting so the displayed index reads 0..n-1 rather than the
     # pre-sort positions the row happened to land on.
     return df_sorted[columns_to_return].reset_index(drop=True)
@@ -487,17 +451,15 @@ def _format_pc_sampling_display_frame(
 @demarcate
 def load_pc_sampling_data(
     workload: schema.Workload,
-    sorting_type: str,
     tool_data_records: Optional[list[dict[str, Any]]] = None,
     num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
-    """Return the detailed per-instruction table for a single kernel or all.
+    """Return the per-kernel table for a single kernel or all.
 
-    Detects the method, builds one frame per tool record, then formats the
-    concatenation for all kernels (no ``-k``) or a single kernel (one ``-k``).
-    The output schema is identical either way. Rows are process-scoped: the
-    same offset in two processes can be different code, so frames are never
-    merged across records. Callers pass the already-parsed *tool_data_records*.
+    Detects the method, builds the instruction rows of each tool record, then
+    combines the rows of each kernel across all records into one row, for all
+    kernels (no `-k`) or a single kernel (one `-k`). The output schema is
+    identical either way. Callers pass the already-parsed tool_data_records.
     """
     if not tool_data_records:
         return pd.DataFrame()
@@ -562,12 +524,36 @@ def load_pc_sampling_data(
         return pd.DataFrame()
 
     return _format_pc_sampling_display_frame(
-        pd.concat(process_frames, ignore_index=True),
+        _combine_instruction_rows_by_kernel(
+            pd.concat(process_frames, ignore_index=True)
+        ),
         pc_sampling_method,
-        sorting_type,
         num_rows=num_rows,
-        gpu_arch=sys_info.get("gpu_arch"),
     )
+
+
+def _combine_instruction_rows_by_kernel(instruction_rows: pd.DataFrame) -> pd.DataFrame:
+    """Combine the instruction rows of each kernel into one row.
+
+    Counts and stall reasons are summed. Each percentage is averaged, weighted
+    by the sample count of each instruction row. A row without the percentage
+    adds no weight.
+    """
+    kernel_groups = instruction_rows.groupby("Kernel_Name", sort=False)
+    kernel_rows = kernel_groups[["count", "issue_count", "stall_count"]].sum(
+        min_count=1
+    )
+    kernel_rows["stall_reason"] = kernel_groups["stall_reason"].agg(
+        lambda stall_reasons: dict(sum(map(Counter, stall_reasons.dropna()), Counter()))
+    )
+    kernel_names = instruction_rows["Kernel_Name"]
+    for percent_column in ("active_thread_percent", "wave_occupancy_percent"):
+        percent = instruction_rows[percent_column]
+        sample_weight = instruction_rows["count"].where(percent.notna())
+        weighted_sum = (percent * sample_weight).groupby(kernel_names).sum(min_count=1)
+        weight_sum = sample_weight.groupby(kernel_names).sum(min_count=1)
+        kernel_rows[percent_column] = weighted_sum / weight_sum
+    return kernel_rows.reset_index()
 
 
 def _stall_reason_dict_to_list(
@@ -577,13 +563,6 @@ def _stall_reason_dict_to_list(
     if not stall_reason:
         return []
     return sorted(stall_reason.items(), key=lambda item: item[1], reverse=True)
-
-
-def _trim_source_line(source_line: str) -> str:
-    """Show only the trailing path component of a real source line."""
-    if source_line == SOURCE_LINE_MISSING:
-        return source_line
-    return f".../{Path(source_line).name}"
 
 
 def nullify_unevaluated_metric_values(
@@ -655,7 +634,6 @@ def load_non_mertrics_table(
         elif "from_pc_sampling" in df.columns:
             tmp[df_id] = load_pc_sampling_data(
                 workload,
-                args.pc_sampling_sorting_type,
                 pc_sampling_tool_data,
                 num_rows=args.pc_sampling_rows,
             )

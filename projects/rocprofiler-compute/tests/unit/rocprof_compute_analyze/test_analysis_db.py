@@ -1808,26 +1808,17 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
         db_session
         .execute(
             text(
-                "SELECT pid, kernel_uuid, kernel_name, count "
-                "FROM compute_pc_sampling_summary_view ORDER BY pid"
+                "SELECT kernel_uuid, kernel_name, count "
+                "FROM compute_pc_sampling_summary_view"
             )
         )
         .mappings()
         .all()
     )
-    assert [row["kernel_name"] for row in pc_sampling_rows] == [
-        "vecCopy",
-        "vecCopy",
-    ]
-    # Both rows name the same kernel; pid is what keeps them apart.
-    assert len({row["kernel_uuid"] for row in pc_sampling_rows}) == 1
-    pc_sampling_mapping = {row["pid"]: row["count"] for row in pc_sampling_rows}
-    expected_pc_sampling_mapping = {
-        line.kernel_symbol.code_object_store.pid: line.pc_sample_state.total_count
-        for line in instruction_lines
-    }
-    assert pc_sampling_mapping == expected_pc_sampling_mapping
-    assert sum(pc_sampling_mapping.values()) == 3
+    # Both processes ran the same kernel, so the summary has one row that sums
+    # their samples.
+    assert [row["kernel_name"] for row in pc_sampling_rows] == ["vecCopy"]
+    assert [row["count"] for row in pc_sampling_rows] == [3]
 
     kernel_rows = (
         db_session
@@ -1850,10 +1841,10 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
     }
 
 
-def test_run_analysis_exports_process_scoped_pc_sampling_csv(
+def test_run_analysis_exports_per_kernel_pc_sampling_csv(
     tmp_path,
 ):
-    """Export one PC sampling CSV row per process, resolvable in kernel.csv."""
+    """Export one PC sampling CSV row per kernel, resolvable in kernel.csv."""
     try:
         orm.Database.init(":memory:")
         database_session = orm.Database.get_session()
@@ -1869,11 +1860,11 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
         run_analysis_with_materialized_views(analyzer)
 
         expected_pc_sampling_mapping = {
-            pid: count
-            for pid, count in database_session.execute(
+            kernel_uuid: count
+            for kernel_uuid, count in database_session.execute(
                 text(
-                    "SELECT pid, count "
-                    "FROM compute_pc_sampling_summary_view ORDER BY pid"
+                    "SELECT kernel_uuid, count "
+                    "FROM compute_pc_sampling_summary_view ORDER BY kernel_uuid"
                 )
             )
         }
@@ -1896,16 +1887,15 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
 
         pc_sampling_frame = pd.read_csv(csv_directory / "pc_sampling_summary.csv")
         kernel_frame = pd.read_csv(csv_directory / "kernel.csv")
-        assert "pid" in pc_sampling_frame.columns
-        assert "code_object_id" in pc_sampling_frame.columns
         assert "pid" not in kernel_frame.columns
-        assert list(pc_sampling_frame["kernel_name"]) == ["vecCopy", "vecCopy"]
+        assert list(pc_sampling_frame["kernel_name"]) == ["vecCopy"]
         assert list(kernel_frame["kernel_name"]) == ["vecCopy"]
 
         pc_sampling_csv_mapping = {
-            row.pid: row.count for row in pc_sampling_frame.itertuples(index=False)
+            row.kernel_uuid: row.count
+            for row in pc_sampling_frame.itertuples(index=False)
         }
-        assert pc_sampling_csv_mapping == {42: 1, 99: 2}
+        assert list(pc_sampling_csv_mapping.values()) == [3]
         assert pc_sampling_csv_mapping == expected_pc_sampling_mapping
 
         kernel_csv_mapping = {
@@ -2469,7 +2459,7 @@ def test_run_analysis_records_line_past_end_of_source_file(db_session, tmp_path)
 
 
 def test_run_analysis_links_frames_innermost_first(db_session, tmp_path):
-    """An inline stack is stored in order and rebuilt by the summary view."""
+    """An inline stack is stored in order and rebuilt by the ISA export."""
     workload_path = tmp_path / "workload"
     tool_data_records = make_source_workload_tool_data_records(
         workload_path,
@@ -2504,12 +2494,12 @@ def test_run_analysis_links_frames_innermost_first(db_session, tmp_path):
         (2, "/home/u/app/vcopy.cpp", 1),
     ]
 
+    workload = db_session.query(orm.Workload).one()
     rebuilt_sources = {
-        offset: source
-        for offset, source in db_session.execute(
-            text(
-                "SELECT offset, source FROM compute_pc_sampling_summary_view "
-                "ORDER BY offset"
+        row.offset: row.source
+        for row in db_session.execute(
+            orm.Database._per_kernel_isa_statement(
+                workload_id=workload.workload_id, stall_reasons=[]
             )
         )
     }
@@ -3087,12 +3077,12 @@ def test_run_analysis_keeps_sampled_row_without_a_comment(db_session, tmp_path):
     assert [
         source_file.file_path for source_file in db_session.query(orm.SourceFile)
     ] == ["/home/u/app/vcopy.cpp"]
+    workload = db_session.query(orm.Workload).one()
     rebuilt_sources = {
-        offset: source
-        for offset, source in db_session.execute(
-            text(
-                "SELECT offset, source FROM compute_pc_sampling_summary_view "
-                "ORDER BY offset"
+        row.offset: row.source
+        for row in db_session.execute(
+            orm.Database._per_kernel_isa_statement(
+                workload_id=workload.workload_id, stall_reasons=[]
             )
         )
     }
@@ -3475,9 +3465,8 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     kernel_frame = pd.read_csv(result_path / "kernel.csv")
     assert list(kernel_frame["kernel_name"]) == ["vecCopy"]
     summary_frame = pd.read_csv(result_path / "pc_sampling_summary.csv")
-    assert list(summary_frame["offset"]) == [0x10]
+    assert list(summary_frame["kernel_name"]) == ["vecCopy"]
     # The second code object held only the kernel the filter dropped.
-    assert set(summary_frame["code_object_id"]) == {5}
     assert per_kernel_isa_paths(result_path) == [
         f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
         f"_uuid_{kernel_frame['kernel_uuid'].iloc[0]}"

@@ -54,6 +54,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
+* The PC sampling analyze table, `compute_pc_sampling_summary_view`, and `pc_sampling_summary.csv` now show one row per kernel instead of one row per instruction.
+  * `--pc-sampling-rows` now sets the number of kernels shown.
+  * Per-instruction counts are in the per-kernel ISA CSV files.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -72,6 +76,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the `analyze --sort`, `analyze --mem-level`, and `analyze --roofline-data-type` options.
   * These options were utilized solely by roofline plot in CLI analyze output block 4.3, which has been removed. The roofline HTML output shows every memory level and precision, and you can filter them in the browser.
+
+* Removed the `analyze --pc-sampling-sorting-type` option. The PC sampling table is always sorted by sample count.
 
 ### Optimized
 

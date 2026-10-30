@@ -8,7 +8,7 @@
       "expected_behavior": [
         "queries the device for supported PC sampling configurations before choosing an interval",
         "collects with --experimental --pc-sampling",
-        "sorts the analysis by sample count and reads the stall reason column"
+        "picks the hottest kernel from the analysis table, then reads the stall reasons in that kernel's ISA CSV"
       ],
       "unexpected_behavior": [
         "hardcodes a sampling interval without querying the device"

@@ -39,7 +39,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql import Select
-from sqlalchemy.sql.expression import Subquery
+from sqlalchemy.sql.expression import ColumnElement, Subquery
 
 from pc_sampling.source_snapshot_analysis import (
     SOURCE_FRAME_SEPARATOR,
@@ -1014,6 +1014,17 @@ class Database:
         ]
 
     @staticmethod
+    def _sample_weighted_average(percent: ColumnElement[Any]) -> ColumnElement[Any]:
+        """Average a percentage over sample states, weighted by sample count.
+
+        A state without the percentage adds no weight. The average is null when
+        no state has it.
+        """
+        return func.sum(percent * PCSampleState.total_count) / func.sum(
+            case((percent.is_not(None), PCSampleState.total_count))
+        )
+
+    @staticmethod
     def _compile_view_sql() -> dict[str, str]:
         """Build and compile the analysis views to SQLite SQL strings."""
         median_sort_subquery = (
@@ -1049,23 +1060,51 @@ class Database:
             .group_by(median_sort_subquery.c.kernel_uuid)
         ).subquery()
 
-        stall_reason_json_subquery = (
+        # Each kernel's count of each stall reason, summed over its instructions.
+        # The join through InstructionLine leaves out the source line states.
+        kernel_stall_reason_subquery = (
             select(
-                PCSampleStallReason.pc_sample_state_uuid,
-                func.json_group_object(
-                    PCSampleStallReasonLookup.text, PCSampleStallReason.count
-                ).label("stall_reason"),
+                KernelSymbol.kernel_uuid,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid,
+                func.sum(PCSampleStallReason.count).label("count"),
             )
             .select_from(PCSampleStallReason)
             .join(
-                PCSampleStallReasonLookup,
-                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
-                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+                PCSampleState,
+                PCSampleStallReason.pc_sample_state_uuid
+                == PCSampleState.pc_sample_state_uuid,
             )
-            .group_by(PCSampleStallReason.pc_sample_state_uuid)
+            .join(
+                InstructionLine,
+                PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
+            )
+            .join(
+                KernelSymbol,
+                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
+            )
+            .group_by(
+                KernelSymbol.kernel_uuid,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid,
+            )
         ).subquery()
 
-        source_chain_subquery = Database._source_chain_subquery()
+        # Each kernel's stall reason counts as one JSON object.
+        stall_reason_json_subquery = (
+            select(
+                kernel_stall_reason_subquery.c.kernel_uuid,
+                func.json_group_object(
+                    PCSampleStallReasonLookup.text,
+                    kernel_stall_reason_subquery.c.count,
+                ).label("stall_reason"),
+            )
+            .select_from(kernel_stall_reason_subquery)
+            .join(
+                PCSampleStallReasonLookup,
+                kernel_stall_reason_subquery.c.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+            )
+            .group_by(kernel_stall_reason_subquery.c.kernel_uuid)
+        ).subquery()
 
         definitions: dict[str, Select[Any]] = {
             "kernel": select(
@@ -1146,24 +1185,21 @@ class Database:
                 WorkloadMetricValue,
                 MetricDefinition.metric_uuid == WorkloadMetricValue.metric_uuid,
             ),
-            # One row per sampled instruction line. Identity is
-            # (pid, code_object_id, kernel, offset): the same offset in two
-            # processes can be different code, so the rows stay separate.
+            # One row per sampled kernel. A kernel is keyed by its name, so the
+            # instructions of all its processes and code objects merge into it.
             "pc_sampling_summary": select(
-                CodeObjectStore.workload_id.label("workload_id"),
-                CodeObjectStore.pid.label("pid"),
-                CodeObjectStore.code_object_id.label("code_object_id"),
+                Kernel.workload_id.label("workload_id"),
                 Kernel.kernel_uuid.label("kernel_uuid"),
                 Kernel.kernel_name,
-                InstructionLine.code_object_offset.label("offset"),
-                InstructionLine.instruction,
-                InstructionTypeLookup.text.label("instruction_type"),
-                source_chain_subquery.c.source.label("source"),
-                PCSampleState.total_count.label("count"),
-                PCSampleState.issue_count,
-                PCSampleState.stall_count,
-                PCSampleState.wave_occupancy_percent,
-                PCSampleState.active_thread_percent,
+                func.sum(PCSampleState.total_count).label("count"),
+                func.sum(PCSampleState.issue_count).label("issue_count"),
+                func.sum(PCSampleState.stall_count).label("stall_count"),
+                Database._sample_weighted_average(
+                    PCSampleState.wave_occupancy_percent
+                ).label("wave_occupancy_percent"),
+                Database._sample_weighted_average(
+                    PCSampleState.active_thread_percent
+                ).label("active_thread_percent"),
                 stall_reason_json_subquery.c.stall_reason,
             )
             .select_from(PCSampleState)
@@ -1175,29 +1211,13 @@ class Database:
                 KernelSymbol,
                 InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
             )
-            .join(
-                CodeObjectStore,
-                KernelSymbol.code_object_uuid == CodeObjectStore.code_object_uuid,
-            )
             .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
-            # An instruction with no pipeline leaves the type empty.
-            .outerjoin(
-                InstructionTypeLookup,
-                InstructionLine.instruction_type_uuid
-                == InstructionTypeLookup.instruction_type_lookup_uuid,
-            )
             # host_trap samples have no stall reasons, so the subquery is empty.
             .outerjoin(
                 stall_reason_json_subquery,
-                PCSampleState.pc_sample_state_uuid
-                == stall_reason_json_subquery.c.pc_sample_state_uuid,
+                Kernel.kernel_uuid == stall_reason_json_subquery.c.kernel_uuid,
             )
-            # An instruction line can have no source at all.
-            .outerjoin(
-                source_chain_subquery,
-                InstructionLine.instruction_uuid
-                == source_chain_subquery.c.instruction_uuid,
-            ),
+            .group_by(Kernel.kernel_uuid),
             "source_lines": select(
                 SourceFile.workload_id.label("workload_id"),
                 SourceFile.file_path,

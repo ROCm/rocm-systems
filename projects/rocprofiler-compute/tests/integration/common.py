@@ -14,6 +14,7 @@ import inspect
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 from functools import lru_cache
 from pathlib import Path
@@ -23,7 +24,9 @@ import pandas as pd
 import pytest
 import yaml
 from common import SUPPORTED_ARCHS
+from sqlalchemy.dialects import sqlite
 
+from utils.analysis_orm import Database
 from utils.utils_common import canonical_config_arch
 
 # Runtime config options
@@ -286,6 +289,25 @@ def skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):
     if is_pc_sampling_not_supported(f"{stdout}\n{stderr}"):
         common.clean_output_dir(config["cleanup"], workload_dir)
         pytest.skip("PC sampling is not supported")
+
+
+def read_per_kernel_isa_rows(connection: sqlite3.Connection) -> pd.DataFrame:
+    """Read the per-instruction rows of the per-kernel ISA export from an
+    analysis database that holds one workload."""
+    workload_id = connection.execute(
+        "SELECT workload_id FROM compute_workload"
+    ).fetchone()[0]
+    statement = Database._per_kernel_isa_statement(
+        workload_id=workload_id, stall_reasons=[]
+    )
+    return pd.read_sql_query(
+        str(
+            statement.compile(
+                dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}
+            )
+        ),
+        connection,
+    )
 
 
 def inject_mpirun(command, num_ranks):

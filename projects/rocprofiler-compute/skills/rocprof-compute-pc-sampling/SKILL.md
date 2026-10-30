@@ -38,7 +38,7 @@ comes from the device, so take it from the command above.
 
 Samples always map to the kernel's assembly. Mapping assembly back to a source
 line requires debug info in the application, for example `hipcc -g`. Without
-it, `source_line` reads `N/A` and the `Source` column in CSV output is empty.
+it, the `Source` column in CSV output is empty.
 Keep optimization flags on; profiling a `-O0` build measures the wrong program.
 
 Ask about the build before collecting, because rebuilding afterwards means
@@ -63,26 +63,22 @@ counter panels. When the user needs both, collect two workloads.
 ## 4. Analyze
 
 ```bash
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-
-rocprof-compute analyze \
-    --path ./workloads/<name>/<gpu_model> \
-    -k <kernel_id> \
-    --pc-sampling-sorting-type count \
-    --pc-sampling-rows 20
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model>
 ```
 
-Sorting defaults to `count`, which puts the hottest instruction first. Use
-`offset` to read the kernel in program order instead. `--pc-sampling-rows`
-defaults to 10; pass `0` for every row.
+The PC sampling table shows one row per kernel, hottest first, so it picks the
+kernel to look at. `--pc-sampling-rows` defaults to 10 kernels; pass `0` for
+every kernel.
 
 Read the table as:
 
 | Column | Meaning |
 |---|---|
-| PC offset | where the instruction sits in the kernel's ISA |
-| Sample count | how often execution was there |
-| Stall reason | what the wavefront was waiting on, stochastic sampling only |
+| Sample count | how often execution was in the kernel |
+| Stall reason | what the kernel's wavefronts were waiting on, stochastic sampling only |
+
+For the hot instructions of that kernel, export the annotated disassembly
+(step 5) and open the kernel's ISA CSV.
 
 A high sample count marks a hot instruction, not a defective one. A loop body
 is supposed to be hot. What matters is a hot instruction whose stall reason

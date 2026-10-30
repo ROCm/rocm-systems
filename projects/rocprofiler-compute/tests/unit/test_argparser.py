@@ -182,20 +182,12 @@ def test_analyze_verify_deps_needs_no_workload():
 def test_pc_sampling_analyze_options():
     """Defaults, overrides, and validation for the analyze PC sampling options."""
     defaults = build_args(["analyze"])
-    assert defaults.pc_sampling_sorting_type == "count"
     assert defaults.pc_sampling_rows == 10
 
-    overrides = build_args([
-        "analyze",
-        "--pc-sampling-sorting-type",
-        "offset",
-        "--pc-sampling-rows",
-        "25",
-    ])
-    assert overrides.pc_sampling_sorting_type == "offset"
+    overrides = build_args(["analyze", "--pc-sampling-rows", "25"])
     assert overrides.pc_sampling_rows == 25
 
-    # 0 is allowed and means "show all rows".
+    # 0 is allowed and means "show all kernels".
     assert build_args(["analyze", "--pc-sampling-rows", "0"]).pc_sampling_rows == 0
 
     # Negative row counts trigger an argparse error.
