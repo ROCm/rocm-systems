@@ -428,6 +428,11 @@ class IsaProfile(ABC):
     """
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        """Opt into rj-arith matrix execution independently of operand layout."""
+        return False
+
+    @property
     @abstractmethod
     def supported_versions(self) -> list[str]:
         """Schema versions this profile supports."""
@@ -2383,6 +2388,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
     flat_saddr_null_aliases = ('127',)
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return True
+
+    @property
     def has_gfx11_image_address_extension(self) -> bool:
         return True
 
@@ -2616,6 +2625,10 @@ class Rdna3_5Profile(Rdna3Profile):
     """
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return False
+
+    @property
     def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
         # Literal lane indices are only qualified on RDNA3 and RDNA4.
         return ((192, 192),)
@@ -2708,6 +2721,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         )
 
     flat_saddr_null_aliases = ('127',)
+
+    @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return True
 
     @property
     def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
@@ -3013,6 +3030,10 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     flat_saddr_null_aliases = ()
+
+    @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return False
 
     @property
     def bf16_inline_uses_f32_carrier(self) -> bool:

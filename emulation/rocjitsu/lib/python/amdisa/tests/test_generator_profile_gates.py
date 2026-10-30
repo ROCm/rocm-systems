@@ -128,8 +128,10 @@ def _matrix_profile(
     wave_size: int = 64,
     wave_size_max: int | None = None,
     supports_gpr_idx: bool = False,
+    uses_rj_arith_matrix: bool = False,
 ) -> SimpleNamespace:
     return SimpleNamespace(
+        uses_rj_arith_matrix=uses_rj_arith_matrix,
         uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
         swmmac_layout=swmmac_layout,
         matrix_layout=matrix_layout,
@@ -154,6 +156,7 @@ def _matrix_profile_for_arch(
         )
     if arch_name == 'rdna4':
         return _matrix_profile(
+            uses_rj_arith_matrix=True,
             uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
             swmmac_layout=SwmmacLayout.RUNTIME_WAVE,
             matrix_layout=MatrixLayout.WMMA_SPLIT_K,
@@ -162,6 +165,7 @@ def _matrix_profile_for_arch(
         )
     if arch_name in ('rdna3', 'rdna3_5'):
         return _matrix_profile(
+            uses_rj_arith_matrix=arch_name == 'rdna3',
             uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
             matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
             wave_size=32,
@@ -299,6 +303,7 @@ def gen_mfma(
     profile = _profile_for_arch(arch_name)
     if supports_gpr_idx is not None:
         profile = SimpleNamespace(
+            uses_rj_arith_matrix=profile.uses_rj_arith_matrix,
             uses_vgpr_msb_indexing=profile.uses_vgpr_msb_indexing,
             swmmac_layout=profile.swmmac_layout,
             matrix_layout=profile.matrix_layout,
@@ -2050,10 +2055,10 @@ def test_matrix_resolved_dense_operands_support_vgpr_and_inline_accumulators():
         uses_vgpr_msb_indexing=True,
         matrix_layout=MatrixLayout.WMMA_SPLIT_K,
         wave_size=32,
-        wave_size_max=64,
+        wave_size_max=32,
     )
 
-    body = _gen_mfma(inst, 'rdna4', profile)
+    body = _gen_mfma(inst, 'cdna5', profile)
 
     for operand in ('vdst', 'src0', 'src1'):
         assert (
@@ -2068,38 +2073,14 @@ def test_matrix_resolved_dense_operands_support_vgpr_and_inline_accumulators():
     assert 's2 = vb + *src2_off;' in body
     assert 'const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);' in body
     assert (
-        'amdgpu::exec_wmma_f32(cu, 16, 16, 32, 16, dst, src0_base, '
-        'src1_base, s2,' in body
-    )
-
-
-def test_matrix_resolved_sparse_index_rejects_missing_vgpr_offset():
-    inst = Instruction('V_SWMMAC_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
-    profile = _matrix_profile(
-        uses_vgpr_msb_indexing=True,
-        swmmac_layout=SwmmacLayout.RUNTIME_WAVE,
-        matrix_layout=MatrixLayout.WMMA_SPLIT_K,
-        wave_size=32,
-        wave_size_max=64,
-    )
-
-    body = _gen_mfma(inst, 'rdna4', profile)
-
-    assert (
-        'auto index_off = Isa::resolved_vgpr_offset(wf, src2.opr_type_, '
-        'src2.encoding_value_, src2.vgpr_msb_role());'
-    ) in body
-    assert 'if (!index_off)\n    throw util::UnimplementedInst(mnemonic());' in body
-    assert 'uint32_t index_base = vb + *index_off;' in body
-    assert (
-        'amdgpu::exec_gfx12_swmmac_dot4<false>(cu, wf.wf_size(), dst, src0_base, '
-        'src1_base, index_base, index_key,' in body
+        'amdgpu::exec_wmma_f32_16x16x32_f16(cu, dst, src0_base, src1_base, s2,' in body
     )
 
 
 def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
     inst = Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, [])
     profile = _matrix_profile(
+        uses_rj_arith_matrix=True,
         matrix_layout=MatrixLayout.WMMA_SPLIT_K,
         wave_size=32,
         wave_size_max=64,
@@ -2110,10 +2091,8 @@ def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert 'Isa::resolved_vgpr_offset' not in body
     assert 'rdna4::resolve_acc(vb, dst,' in body
-    assert (
-        'amdgpu::exec_gfx12_wmma_dot4<false>(cu, wf.wf_size(), dst, '
-        'src0_base, src1_base, s2,' in body
-    )
+    assert 'amdgpu::arith::exec_wmma(wf,' in body
+    assert 'flags, modifiers, dst, src0_base, src1_base, s2,' in body
 
 
 def test_matrix_direct_sparse_operands_reach_final_call():
@@ -2288,12 +2267,12 @@ def test_matrix_i32_final_call_sources_follow_profile_gate():
 
     resolved = _gen_mfma(
         inst,
-        'rdna4',
+        'cdna5',
         _matrix_profile(
             uses_vgpr_msb_indexing=True,
             matrix_layout=MatrixLayout.WMMA_SPLIT_K,
             wave_size=32,
-            wave_size_max=64,
+            wave_size_max=32,
         ),
     )
     direct = _gen_mfma(
@@ -2307,8 +2286,8 @@ def test_matrix_i32_final_call_sources_follow_profile_gate():
     )
 
     assert (
-        'amdgpu::exec_rdna_wmma_i32<true, 8>(cu, wf.wf_size(), dst, src0_base, '
-        'src1_base, s2,' in resolved
+        'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, src1_base, s2,'
+        in resolved
     )
     assert (
         'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, '
@@ -2323,207 +2302,225 @@ def _generated_matrix_call(body: str, callee: str) -> str:
 
 
 @pytest.mark.parametrize(
-    ('mnemonic', 'arch', 'callee', 'is_sparse'),
+    ('mnemonic', 'arch', 'callee', 'is_sparse', 'uses_vgpr_msb_indexing'),
     [
-        # Fixed-wave I32: sparse, specialized dense, and generic dense.
-        ('V_SWMMAC_I32_16X16X32_IU8', 'cdna5', 'exec_swmmac_i32', True),
-        (
-            'V_WMMA_I32_16X16X64_IU8',
-            'cdna5',
-            'exec_wmma_i32_16x16x64_iu8',
-            False,
-        ),
-        ('V_WMMA_I32_16X16X16_IU4', 'cdna5', 'exec_wmma_i32', False),
-        # Runtime-wave and replicated-half-wave I32.
-        ('V_WMMA_I32_16X16X16_IU4', 'rdna3', 'exec_rdna_wmma_i32<false, 4>', False),
-        ('V_WMMA_I32_16X16X16_IU4', 'rdna4', 'exec_rdna_wmma_i32<true, 4>', False),
-        ('V_WMMA_I32_16X16X32_IU4', 'rdna4', 'exec_rdna_wmma_i32<true, 4, 32>', False),
-        (
-            'V_SWMMAC_I32_16X16X32_IU8',
-            'rdna4',
-            'exec_rdna_swmmac_i32<8, 32>',
-            True,
-        ),
-        (
-            'V_SWMMAC_I32_16X16X32_IU4',
-            'rdna4',
-            'exec_rdna_swmmac_i32<4, 32>',
-            True,
-        ),
-        (
-            'V_SWMMAC_I32_16X16X64_IU4',
-            'rdna4',
-            'exec_rdna_swmmac_i32<4, 64>',
-            True,
-        ),
-        ('V_WMMA_I32_16X16X16_IU8', 'rdna3', 'exec_rdna_wmma_i32<false, 8>', False),
-        ('V_WMMA_I32_16X16X16_IU8', 'rdna4', 'exec_rdna_wmma_i32<true, 8>', False),
-        # I32 MFMA-style fallback dispatches.
-        ('V_WMMA_I32_16X16X16_IU8', 'test_arch', 'exec_i32_mixed', False),
-        ('V_MFMA_I32_16X16X16_IU4', 'cdna3', 'exec_i32_mixed', False),
-        ('V_MFMA_I32_16X16X16_I8', 'cdna3', 'exec_i32_i8', False),
-        # Dynamic matrix-format WMMA.
-        (
-            'V_WMMA_F32_16X16X128_F8F6F4',
-            'cdna5',
-            'exec_wmma_f32_mixed',
-            False,
-        ),
-        # Standalone structured-sparse SMFMAC variants.
-        (
-            'V_SMFMAC_F32_16X16X32_F16',
-            'cdna3',
-            'exec_smfmac_f32_16x16x32_f16',
-            True,
-        ),
-        (
-            'V_SMFMAC_F32_16X16X64_FP8_BF8',
-            'cdna3',
-            'exec_smfmac_f32_16x16x64_fp8',
-            True,
-        ),
-        ('V_SMFMAC_I32_16X16X64_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
-        ('V_SMFMAC_I32_32X32X32_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
-        ('V_SMFMAC_I32_16X16X128_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
-        ('V_SMFMAC_I32_32X32X64_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
-        # Fixed-wave sparse float result variants.
-        ('V_SWMMAC_F32_16X16X32_F16', 'cdna5', 'exec_swmmac_f32', True),
-        ('V_SWMMAC_F16_16X16X32_F16', 'cdna5', 'exec_swmmac_f16', True),
-        ('V_SWMMAC_BF16_16X16X32_BF16', 'cdna5', 'exec_swmmac_bf16', True),
-        (
-            'V_SWMMAC_BF16F32_16X16X64_BF16',
-            'cdna5',
-            'exec_swmmac_bf16f32',
-            True,
-        ),
-        # Runtime-wave sparse float result variants.
-        ('V_SWMMAC_F32_16X16X32_F16', 'rdna4', 'exec_gfx12_swmmac_dot4<false>', True),
-        ('V_SWMMAC_F32_16X16X32_BF16', 'rdna4', 'exec_gfx12_swmmac_dot4<true>', True),
-        (
-            'V_SWMMAC_F16_16X16X32_F16',
-            'rdna4',
-            'exec_gfx12_swmmac_dot4<false, true>',
-            True,
-        ),
-        (
-            'V_SWMMAC_BF16_16X16X32_BF16',
-            'rdna4',
-            'exec_gfx12_swmmac_dot4<true, true>',
-            True,
-        ),
-        (
-            'V_SWMMAC_F32_16X16X32_FP8_FP8',
-            'rdna4',
-            'exec_gfx12_swmmac_dot8<true, true>',
-            True,
-        ),
-        (
-            'V_SWMMAC_F32_16X16X32_FP8_BF8',
-            'rdna4',
-            'exec_gfx12_swmmac_dot8<true, false>',
-            True,
-        ),
-        (
-            'V_SWMMAC_F32_16X16X32_BF8_FP8',
-            'rdna4',
-            'exec_gfx12_swmmac_dot8<false, true>',
-            True,
-        ),
-        (
-            'V_SWMMAC_F32_16X16X32_BF8_BF8',
-            'rdna4',
-            'exec_gfx12_swmmac_dot8<false, false>',
-            True,
-        ),
-        # Fixed-wave specialized dense result variants.
-        (
-            'V_WMMA_F32_16X16X32_F16',
-            'cdna5',
-            'exec_wmma_f32_16x16x32_f16',
-            False,
-        ),
-        (
-            'V_WMMA_BF16F32_16X16X32_BF16',
-            'cdna5',
-            'exec_wmma_bf16f32_16x16x32_bf16',
-            False,
-        ),
-        ('V_WMMA_F16_16X16X32_F16', 'cdna5', 'exec_wmma_f16_spec', False),
-        ('V_WMMA_BF16_16X16X32_BF16', 'cdna5', 'exec_wmma_bf16_spec', False),
-        (
-            'V_WMMA_F16_16X16X64_FP8_BF8',
-            'cdna5',
-            'exec_wmma_f16_f8_spec',
-            False,
-        ),
-        # Fixed-wave generic dense result variants.
-        ('V_WMMA_F32_16X16X16_F16', 'cdna5', 'exec_wmma_f32', False),
-        ('V_WMMA_F16_16X16X16_F16', 'cdna5', 'exec_wmma_f16', False),
-        ('V_WMMA_BF16_16X16X16_BF16', 'cdna5', 'exec_wmma_bf16', False),
-        # Replicated-half-wave and runtime-wave float dispatches.
-        ('V_WMMA_F32_16X16X16_F16', 'rdna3', 'exec_gfx11_wmma_dot2<false>', False),
-        (
-            'V_WMMA_F16_16X16X16_F16',
-            'rdna3',
-            'exec_gfx11_wmma_dot2<false, true>',
-            False,
-        ),
-        (
-            'V_WMMA_BF16_16X16X16_BF16',
-            'rdna3',
-            'exec_gfx11_wmma_dot2<true, true>',
-            False,
-        ),
-        ('V_WMMA_F32_16X16X16_F16', 'rdna4', 'exec_gfx12_wmma_dot4<false>', False),
-        (
-            'V_WMMA_F16_16X16X16_F16',
-            'rdna4',
-            'exec_gfx12_wmma_dot4<false, true>',
-            False,
-        ),
-        (
-            'V_WMMA_BF16_16X16X16_BF16',
-            'rdna4',
-            'exec_gfx12_wmma_dot4<true, true>',
-            False,
-        ),
-        (
-            'V_WMMA_F32_16X16X16_FP8_FP8',
-            'rdna4',
-            'exec_gfx12_wmma_dot8<true, true>',
-            False,
-        ),
-        (
-            'V_WMMA_F32_16X16X16_FP8_BF8',
-            'rdna4',
-            'exec_gfx12_wmma_dot8<true, false>',
-            False,
-        ),
-        (
-            'V_WMMA_F32_16X16X16_BF8_FP8',
-            'rdna4',
-            'exec_gfx12_wmma_dot8<false, true>',
-            False,
-        ),
-        (
-            'V_WMMA_F32_16X16X16_BF8_BF8',
-            'rdna4',
-            'exec_gfx12_wmma_dot8<false, false>',
-            False,
-        ),
-        # MFMA specialized and generic float dispatches.
-        (
-            'V_MFMA_F32_16X16X32_FP8_FP8',
-            'cdna3',
-            'exec_f32_mfma_f8_spec',
-            False,
-        ),
-        ('V_MFMA_F32_16X16X16_F16', 'cdna3', 'exec_f32_mfma_f16_spec', False),
-        ('V_MFMA_F32_16X16X16_F4', 'cdna3', 'exec_f32', False),
-        ('V_MFMA_F32_16X16X16_F16', 'test_arch', 'exec_f32', False),
+        (*case, indexed)
+        for case in [
+            # Fixed-wave I32: sparse, specialized dense, and generic dense.
+            ('V_SWMMAC_I32_16X16X32_IU8', 'cdna5', 'exec_swmmac_i32', True),
+            (
+                'V_WMMA_I32_16X16X64_IU8',
+                'cdna5',
+                'exec_wmma_i32_16x16x64_iu8',
+                False,
+            ),
+            ('V_WMMA_I32_16X16X16_IU4', 'cdna5', 'exec_wmma_i32', False),
+            # Runtime-wave and replicated-half-wave I32.
+            ('V_WMMA_I32_16X16X16_IU4', 'rdna3', 'exec_rdna_wmma_i32<false, 4>', False),
+            ('V_WMMA_I32_16X16X16_IU4', 'rdna4', 'exec_rdna_wmma_i32<true, 4>', False),
+            (
+                'V_WMMA_I32_16X16X32_IU4',
+                'rdna4',
+                'exec_rdna_wmma_i32<true, 4, 32>',
+                False,
+            ),
+            (
+                'V_SWMMAC_I32_16X16X32_IU8',
+                'rdna4',
+                'exec_rdna_swmmac_i32<8, 32>',
+                True,
+            ),
+            (
+                'V_SWMMAC_I32_16X16X32_IU4',
+                'rdna4',
+                'exec_rdna_swmmac_i32<4, 32>',
+                True,
+            ),
+            (
+                'V_SWMMAC_I32_16X16X64_IU4',
+                'rdna4',
+                'exec_rdna_swmmac_i32<4, 64>',
+                True,
+            ),
+            ('V_WMMA_I32_16X16X16_IU8', 'rdna3', 'exec_rdna_wmma_i32<false, 8>', False),
+            ('V_WMMA_I32_16X16X16_IU8', 'rdna4', 'exec_rdna_wmma_i32<true, 8>', False),
+            # I32 MFMA-style fallback dispatches.
+            ('V_WMMA_I32_16X16X16_IU8', 'test_arch', 'exec_i32_mixed', False),
+            ('V_MFMA_I32_16X16X16_IU4', 'cdna3', 'exec_i32_mixed', False),
+            ('V_MFMA_I32_16X16X16_I8', 'cdna3', 'exec_i32_i8', False),
+            # Dynamic matrix-format WMMA.
+            (
+                'V_WMMA_F32_16X16X128_F8F6F4',
+                'cdna5',
+                'exec_wmma_f32_mixed',
+                False,
+            ),
+            # Standalone structured-sparse SMFMAC variants.
+            (
+                'V_SMFMAC_F32_16X16X32_F16',
+                'cdna3',
+                'exec_smfmac_f32_16x16x32_f16',
+                True,
+            ),
+            (
+                'V_SMFMAC_F32_16X16X64_FP8_BF8',
+                'cdna3',
+                'exec_smfmac_f32_16x16x64_fp8',
+                True,
+            ),
+            ('V_SMFMAC_I32_16X16X64_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
+            ('V_SMFMAC_I32_32X32X32_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
+            ('V_SMFMAC_I32_16X16X128_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
+            ('V_SMFMAC_I32_32X32X64_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
+            # Fixed-wave sparse float result variants.
+            ('V_SWMMAC_F32_16X16X32_F16', 'cdna5', 'exec_swmmac_f32', True),
+            ('V_SWMMAC_F16_16X16X32_F16', 'cdna5', 'exec_swmmac_f16', True),
+            ('V_SWMMAC_BF16_16X16X32_BF16', 'cdna5', 'exec_swmmac_bf16', True),
+            (
+                'V_SWMMAC_BF16F32_16X16X64_BF16',
+                'cdna5',
+                'exec_swmmac_bf16f32',
+                True,
+            ),
+            # Runtime-wave sparse float result variants.
+            (
+                'V_SWMMAC_F32_16X16X32_F16',
+                'rdna4',
+                'exec_gfx12_swmmac_dot4<false>',
+                True,
+            ),
+            (
+                'V_SWMMAC_F32_16X16X32_BF16',
+                'rdna4',
+                'exec_gfx12_swmmac_dot4<true>',
+                True,
+            ),
+            (
+                'V_SWMMAC_F16_16X16X32_F16',
+                'rdna4',
+                'exec_gfx12_swmmac_dot4<false, true>',
+                True,
+            ),
+            (
+                'V_SWMMAC_BF16_16X16X32_BF16',
+                'rdna4',
+                'exec_gfx12_swmmac_dot4<true, true>',
+                True,
+            ),
+            (
+                'V_SWMMAC_F32_16X16X32_FP8_FP8',
+                'rdna4',
+                'exec_gfx12_swmmac_dot8<true, true>',
+                True,
+            ),
+            (
+                'V_SWMMAC_F32_16X16X32_FP8_BF8',
+                'rdna4',
+                'exec_gfx12_swmmac_dot8<true, false>',
+                True,
+            ),
+            (
+                'V_SWMMAC_F32_16X16X32_BF8_FP8',
+                'rdna4',
+                'exec_gfx12_swmmac_dot8<false, true>',
+                True,
+            ),
+            (
+                'V_SWMMAC_F32_16X16X32_BF8_BF8',
+                'rdna4',
+                'exec_gfx12_swmmac_dot8<false, false>',
+                True,
+            ),
+            # Fixed-wave specialized dense result variants.
+            (
+                'V_WMMA_F32_16X16X32_F16',
+                'cdna5',
+                'exec_wmma_f32_16x16x32_f16',
+                False,
+            ),
+            (
+                'V_WMMA_BF16F32_16X16X32_BF16',
+                'cdna5',
+                'exec_wmma_bf16f32_16x16x32_bf16',
+                False,
+            ),
+            ('V_WMMA_F16_16X16X32_F16', 'cdna5', 'exec_wmma_f16_spec', False),
+            ('V_WMMA_BF16_16X16X32_BF16', 'cdna5', 'exec_wmma_bf16_spec', False),
+            (
+                'V_WMMA_F16_16X16X64_FP8_BF8',
+                'cdna5',
+                'exec_wmma_f16_f8_spec',
+                False,
+            ),
+            # Fixed-wave generic dense result variants.
+            ('V_WMMA_F32_16X16X16_F16', 'cdna5', 'exec_wmma_f32', False),
+            ('V_WMMA_F16_16X16X16_F16', 'cdna5', 'exec_wmma_f16', False),
+            ('V_WMMA_BF16_16X16X16_BF16', 'cdna5', 'exec_wmma_bf16', False),
+            # Replicated-half-wave and runtime-wave float dispatches.
+            ('V_WMMA_F32_16X16X16_F16', 'rdna3', 'exec_gfx11_wmma_dot2<false>', False),
+            (
+                'V_WMMA_F16_16X16X16_F16',
+                'rdna3',
+                'exec_gfx11_wmma_dot2<false, true>',
+                False,
+            ),
+            (
+                'V_WMMA_BF16_16X16X16_BF16',
+                'rdna3',
+                'exec_gfx11_wmma_dot2<true, true>',
+                False,
+            ),
+            ('V_WMMA_F32_16X16X16_F16', 'rdna4', 'exec_gfx12_wmma_dot4<false>', False),
+            (
+                'V_WMMA_F16_16X16X16_F16',
+                'rdna4',
+                'exec_gfx12_wmma_dot4<false, true>',
+                False,
+            ),
+            (
+                'V_WMMA_BF16_16X16X16_BF16',
+                'rdna4',
+                'exec_gfx12_wmma_dot4<true, true>',
+                False,
+            ),
+            (
+                'V_WMMA_F32_16X16X16_FP8_FP8',
+                'rdna4',
+                'exec_gfx12_wmma_dot8<true, true>',
+                False,
+            ),
+            (
+                'V_WMMA_F32_16X16X16_FP8_BF8',
+                'rdna4',
+                'exec_gfx12_wmma_dot8<true, false>',
+                False,
+            ),
+            (
+                'V_WMMA_F32_16X16X16_BF8_FP8',
+                'rdna4',
+                'exec_gfx12_wmma_dot8<false, true>',
+                False,
+            ),
+            (
+                'V_WMMA_F32_16X16X16_BF8_BF8',
+                'rdna4',
+                'exec_gfx12_wmma_dot8<false, false>',
+                False,
+            ),
+            # MFMA specialized and generic float dispatches.
+            (
+                'V_MFMA_F32_16X16X32_FP8_FP8',
+                'cdna3',
+                'exec_f32_mfma_f8_spec',
+                False,
+            ),
+            ('V_MFMA_F32_16X16X16_F16', 'cdna3', 'exec_f32_mfma_f16_spec', False),
+            ('V_MFMA_F32_16X16X16_F4', 'cdna3', 'exec_f32', False),
+            ('V_MFMA_F32_16X16X16_F16', 'test_arch', 'exec_f32', False),
+        ]
+        for indexed in ([False] if case[1] in ('rdna3', 'rdna4') else [False, True])
     ],
 )
-@pytest.mark.parametrize('uses_vgpr_msb_indexing', [False, True])
 def test_every_matrix_executor_uses_profile_selected_operand_bases(
     mnemonic, arch, callee, is_sparse, uses_vgpr_msb_indexing
 ):
@@ -2535,10 +2532,21 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
             uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
         ),
     )
+    if arch in ('rdna3', 'rdna4') and mnemonic.startswith('V_WMMA_'):
+        callee = 'arith::exec_wmma'
+        assert 'rj_arith_' + mnemonic.lower() in body
+    if arch == 'rdna4' and mnemonic.startswith('V_SWMMAC_'):
+        callee = 'arith::exec_swmmac'
+        assert 'rj_arith_' + mnemonic.lower() in body
     call = _generated_matrix_call(body, callee)
     is_standalone_smfmac = mnemonic.startswith('V_SMFMAC_')
     is_rdna_sparse = is_sparse and callee.startswith(
-        ('exec_rdna_swmmac_i32', 'exec_gfx12_swmmac_dot4', 'exec_gfx12_swmmac_dot8')
+        (
+            'exec_rdna_swmmac_i32',
+            'exec_gfx12_swmmac_dot4',
+            'exec_gfx12_swmmac_dot8',
+            'arith::exec_swmmac',
+        )
     )
 
     if is_standalone_smfmac:
@@ -2574,7 +2582,10 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
     assert expected_operands in call
     if is_sparse and not is_standalone_smfmac:
         if is_rdna_sparse:
-            assert 'index_base, index_key' in call
+            if callee == 'arith::exec_swmmac':
+                assert 'uint64_t(index_key) << 7' in body
+            else:
+                assert 'index_base, index_key' in call
         else:
             assert f'{expected_operands}, index_base,' in call
         if uses_vgpr_msb_indexing:
@@ -2809,29 +2820,37 @@ def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
         body = _gen_mfma(inst, arch)
 
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-        assert 'amdgpu::exec_gfx11_wmma_dot2<false>(cu, wf.wf_size(), dst,' in body
+        if arch == 'rdna3':
+            assert 'rj_arith_v_wmma_f32_16x16x16_f16_w32' in body
+        else:
+            assert 'amdgpu::exec_gfx11_wmma_dot2<false>(cu, wf.wf_size(), dst,' in body
         assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
 
     body = _gen_mfma(inst, 'rdna4')
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert 'amdgpu::exec_gfx12_wmma_dot4<false>(cu, wf.wf_size(), dst,' in body
+    assert 'rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12' in body
     assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
 
 
 @pytest.mark.parametrize('bits', [4, 8])
-@pytest.mark.parametrize(
-    'arch, gfx12', [('rdna3', 'false'), ('rdna3_5', 'false'), ('rdna4', 'true')]
-)
-def test_rdna_wmma_i32_uses_measured_accumulation_policy(bits, arch, gfx12):
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5', 'rdna4'])
+def test_rdna_wmma_i32_uses_measured_accumulation_policy(bits, arch):
     inst = Instruction(f'V_WMMA_I32_16X16X16_IU{bits}', 'ENC_VOP3P', 0, [])
     body = _gen_mfma(inst, arch)
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert f'amdgpu::exec_rdna_wmma_i32<{gfx12}, {bits}>(cu, wf.wf_size(), dst,' in body
     assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
-    assert (
-        '/*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp'
-        in body
-    )
+    if arch == 'rdna3_5':
+        assert (
+            f'amdgpu::exec_rdna_wmma_i32<false, {bits}>(cu, wf.wf_size(), dst,' in body
+        )
+        assert (
+            '/*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp'
+            in body
+        )
+    else:
+        suffix = '_w32_gfx12' if arch == 'rdna4' else ''
+        assert f'rj_arith_v_wmma_i32_16x16x16_iu{bits}{suffix}' in body
+        assert '(inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u)' in body
     assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
     # CDNA5 shares a split-K layout but has independent numerical behavior.
     assert 'exec_rdna_wmma_i32' not in _gen_mfma(inst, 'cdna5')
@@ -2842,6 +2861,10 @@ def test_rdna_wmma_i32_uses_measured_accumulation_policy(bits, arch, gfx12):
 )
 def test_rdna_unmeasured_integer_shape_is_not_approximated(arch, dtype):
     inst = Instruction(f'V_WMMA_I32_16X16X32_{dtype}', 'ENC_VOP3P', 0, [])
+    if arch in ('rdna3', 'rdna4'):
+        with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
+            _gen_mfma(inst, arch)
+        return
     body = _gen_mfma(inst, arch)
     assert 'throw util::UnimplementedInst(mnemonic());' in body
     assert 'exec_wmma_i32(' not in body
@@ -2851,16 +2874,15 @@ def test_rdna_unmeasured_integer_shape_is_not_approximated(arch, dtype):
 @pytest.mark.parametrize('dtype, k', [('IU8', 64), ('IU4', 128)])
 def test_rdna4_unmeasured_sparse_integer_shape_is_not_approximated(dtype, k):
     inst = Instruction(f'V_SWMMAC_I32_16X16X{k}_{dtype}', 'ENC_VOP3P', 0, [])
-    body = _gen_mfma(inst, 'rdna4')
-    assert 'throw util::UnimplementedInst(mnemonic());' in body
-    assert 'exec_swmmac_i32(' not in body
-    assert 'exec_rdna_swmmac_i32' not in body
+    with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
+        _gen_mfma(inst, 'rdna4')
 
 
 def test_rdna4_iu4_k32_uses_measured_saturation():
     inst = Instruction('V_WMMA_I32_16X16X32_IU4', 'ENC_VOP3P', 0, [])
     body = _gen_mfma(inst, 'rdna4')
-    assert 'exec_rdna_wmma_i32<true, 4, 32>' in body
+    assert 'rj_arith_v_wmma_i32_16x16x32_iu4_w32_gfx12' in body
+    assert 'RJ_ARITH_WMMA_CLAMP' in body
     assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
     assert 'exec_wmma_i32(' not in body
     assert 'exec_rdna_wmma_i32' not in _gen_mfma(inst, 'cdna5')
@@ -2870,26 +2892,25 @@ def test_rdna4_iu4_k32_uses_measured_saturation():
 def test_rdna4_sparse_integers_use_full_index_key_and_measured_groups(bits, k):
     inst = Instruction(f'V_SWMMAC_I32_16X16X{k}_IU{bits}', 'ENC_VOP3P', 0, [])
     body = _gen_mfma(inst, 'rdna4')
-    assert f'exec_rdna_swmmac_i32<{bits}, {k}>' in body
-    assert 'uint32_t index_key = inst_.opsel & 0x3u;' in body
-    assert 'index_base, index_key' in body
+    assert f'rj_arith_v_swmmac_i32_16x16x{k}_iu{bits}' in body
+    key_mask = (
+        'lanes == 32 ? 0u : 1u'
+        if k == 64
+        else '1u' if bits == 4 else 'lanes == 32 ? 1u : 3u'
+    )
+    assert f'uint32_t index_key = inst_.opsel & ({key_mask});' in body
+    assert 'uint64_t(index_key) << 7' in body
+    assert '(inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u)' in body
     assert 'const_acc' not in body
     assert 'exec_rdna_swmmac_i32' not in _gen_mfma(inst, 'cdna5')
 
 
-@pytest.mark.parametrize(
-    'input_type, a_fp8, b_fp8',
-    [
-        ('FP8_FP8', 'true', 'true'),
-        ('FP8_BF8', 'true', 'false'),
-        ('BF8_FP8', 'false', 'true'),
-        ('BF8_BF8', 'false', 'false'),
-    ],
-)
-def test_rdna_wmma_f8_uses_native_eight_product_steps(input_type, a_fp8, b_fp8):
+@pytest.mark.parametrize('input_type', ['FP8_FP8', 'FP8_BF8', 'BF8_FP8', 'BF8_BF8'])
+def test_rdna_wmma_f8_uses_native_eight_product_steps(input_type):
     inst = Instruction(f'V_WMMA_F32_16X16X16_{input_type}', 'ENC_VOP3P', 0, [])
     body = _gen_mfma(inst, 'rdna4')
-    assert f'exec_gfx12_wmma_dot8<{a_fp8}, {b_fp8}>' in body
+    assert f'rj_arith_v_wmma_f32_16x16x16_{input_type.lower()}' in body
+    assert 'uint64_t modifiers = 0;' in body
     assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
     assert 'wmma_c_modifier' not in body
     assert 'exec_gfx12_wmma_dot8' not in _gen_mfma(inst, 'cdna5')
@@ -2898,10 +2919,8 @@ def test_rdna_wmma_f8_uses_native_eight_product_steps(input_type, a_fp8, b_fp8):
 @pytest.mark.parametrize('input_type', ['FP8_FP8', 'FP8_BF8', 'BF8_FP8', 'BF8_BF8'])
 def test_rdna_unmeasured_f8_shape_is_not_approximated(input_type):
     inst = Instruction(f'V_WMMA_F32_16X16X32_{input_type}', 'ENC_VOP3P', 0, [])
-    body = _gen_mfma(inst, 'rdna4')
-    assert 'throw util::UnimplementedInst(mnemonic());' in body
-    assert 'exec_wmma_f32(' not in body
-    assert 'exec_gfx12_wmma_dot8' not in body
+    with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
+        _gen_mfma(inst, 'rdna4')
 
 
 @pytest.mark.parametrize(
@@ -2922,20 +2941,22 @@ def test_rdna4_sparse_float_uses_measured_arithmetic(result_type, input_type, ca
         f'V_SWMMAC_{result_type}_16X16X32_{input_type}', 'ENC_VOP3P', 0, []
     )
     body = _gen_mfma(inst, 'rdna4')
-    assert callee in body
+    assert (
+        f'rj_arith_v_swmmac_{result_type.lower()}_16x16x32_{input_type.lower()}' in body
+    )
     assert ('wf.fp16_ovfl()' in body) == (result_type != 'F32')
-    assert 'index_base, index_key' in body
-    assert 'uint32_t index_key = inst_.opsel & 0x3u;' in body
+    assert 'uint64_t(index_key) << 7' in body
+    assert 'uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);' in body
+    if input_type in ('F16', 'BF16'):
+        assert '(inst_.neg & 7u) | (uint64_t(inst_.neg_hi & 7u) << 3)' in body
     assert 'const_acc' not in body
     assert callee.split('<')[0] not in _gen_mfma(inst, 'cdna5')
 
 
 def test_rdna4_unmeasured_sparse_float_shape_is_not_approximated():
     inst = Instruction('V_SWMMAC_F32_16X16X64_F16', 'ENC_VOP3P', 0, [])
-    body = _gen_mfma(inst, 'rdna4')
-    assert 'throw util::UnimplementedInst(mnemonic());' in body
-    assert 'exec_swmmac_' not in body
-    assert 'exec_gfx12_swmmac_' not in body
+    with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
+        _gen_mfma(inst, 'rdna4')
 
 
 def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
@@ -2959,21 +2980,31 @@ def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
             body = _gen_mfma(inst, arch)
 
             assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-            assert (
-                f'amdgpu::exec_gfx11_wmma_dot2<{bf16}, true>(cu, wf.wf_size(), dst,'
-                in body
-            )
-            assert '(inst_.op_sel >> 2) & 1u' in body
-            assert 'inst_.neg, inst_.neg_hi' in body
+            if arch == 'rdna3':
+                assert (
+                    f'rj_arith_v_wmma_{dtype.lower()}_16x16x16_{dtype.lower()}' in body
+                )
+                assert '(inst_.op_sel & 4u) != 0' in body
+                assert 'RJ_ARITH_WMMA_HIGH_C_D' in body
+                assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in body
+            else:
+                assert (
+                    f'amdgpu::exec_gfx11_wmma_dot2<{bf16}, true>(cu, wf.wf_size(), dst,'
+                    in body
+                )
+                assert '(inst_.op_sel >> 2) & 1u' in body
+                assert 'inst_.neg, inst_.neg_hi' in body
             assert 'wf.fp16_ovfl()' in body
             assert f'dot_packed16::inline_word<{bf16}>' in body
 
         body = _gen_mfma(inst, 'rdna4')
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
         assert (
-            f'amdgpu::exec_gfx12_wmma_dot4<{bf16}, true>(cu, wf.wf_size(), dst,' in body
+            f'rj_arith_v_wmma_{dtype.lower()}_16x16x16_{dtype.lower()}_w32_gfx12'
+            in body
         )
-        assert 'inst_.neg, inst_.neg_hi, wf.fp16_ovfl());' in body
+        assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in body
+        assert 'wf.fp16_ovfl()' in body
         assert f'dot_packed16::inline_word<{bf16}>' in body
         assert 'exec_gfx11_wmma' not in body
 
@@ -3201,9 +3232,13 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
         body = _gen_mfma(inst, arch)
         assert 's2, const_acc, inst_.blgp);' in body
 
-    for arch in ('rdna3', 'rdna4', 'cdna5'):
+    for arch in ('rdna3_5', 'cdna5'):
         body = _gen_mfma(inst, arch)
         assert 's2, const_acc, 0u);' in body
+
+    for arch in ('rdna3', 'rdna4'):
+        with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
+            _gen_mfma(inst, arch)
 
 
 def test_gfx1251_f64_wmma_uses_wave32_mode_independent_executor():
@@ -7143,12 +7178,9 @@ def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
     assert 'const_acc' not in body
     assert 'uint32_t s2' not in body
     assert 'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
-    assert 'uint32_t index_key = inst_.opsel & 0x3u;' in body
-    assert (
-        'amdgpu::exec_gfx12_swmmac_dot8<true, true>(cu, wf.wf_size(), dst, src0_base, '
-        'src1_base, index_base, '
-        'index_key);'
-    ) in body
+    assert 'index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);' in body
+    assert 'rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w32' in body
+    assert 'flags, modifiers, dst, src0_base, src1_base, index_base,' in body
     assert 'resolve_acc' not in body
 
 
