@@ -55,8 +55,8 @@ _METRIC_TO_AI_FIELD = {
 }
 
 # Table ids defined in <arch>/0400_roofline.yaml and 0000_top_stats.yaml.
-_ROOFLINE_RATES_TABLE_ID = 401
-_ROOFLINE_POINTS_TABLE_ID = 402
+ROOFLINE_RATES_TABLE_ID = 401
+ROOFLINE_POINTS_TABLE_ID = 402
 _KERNEL_TOP_TABLE_ID = 1
 
 
@@ -364,7 +364,7 @@ def _evaluate_kernel_tables(
     """Evaluate the roofline arch-config tables (401/402) for one kernel."""
     kernel_dfs: dict[int, pd.DataFrame] = {}
     kernel_dfs_type: dict[int, str] = {}
-    for table_id in (_ROOFLINE_RATES_TABLE_ID, _ROOFLINE_POINTS_TABLE_ID):
+    for table_id in (ROOFLINE_RATES_TABLE_ID, ROOFLINE_POINTS_TABLE_ID):
         if table_id in arch_config.dfs:
             kernel_dfs[table_id] = arch_config.dfs[table_id].copy()
             kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
@@ -463,7 +463,7 @@ def calc_ai_analyze(
 
         kernel_dfs = _evaluate_kernel_tables(arch_config, workload, kernel_pmc_df)
 
-        metrics = _extract_ai_metrics(kernel_dfs.get(_ROOFLINE_POINTS_TABLE_ID))
+        metrics = _extract_ai_metrics(kernel_dfs.get(ROOFLINE_POINTS_TABLE_ID))
         performance = metrics["performance"]
         console_debug(
             "roofline",
@@ -496,8 +496,8 @@ def calc_ai_analyze(
         # store metrics for display
         workload.roofline_metrics[kernel_id] = {
             "name": kernel_name,
-            "ai_table": kernel_dfs.get(_ROOFLINE_RATES_TABLE_ID, pd.DataFrame()),
-            "calc_table": kernel_dfs.get(_ROOFLINE_POINTS_TABLE_ID, pd.DataFrame()),
+            "ai_table": kernel_dfs.get(ROOFLINE_RATES_TABLE_ID, pd.DataFrame()),
+            "calc_table": kernel_dfs.get(ROOFLINE_POINTS_TABLE_ID, pd.DataFrame()),
         }
 
     console_debug("roofline", f"Generated {len(plot_points.kernelNames)} plot points")

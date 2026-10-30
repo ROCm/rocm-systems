@@ -1693,17 +1693,6 @@ class db_analysis(OmniAnalyze_Base):
         metrics_info_data_per_workload: dict[str, pd.DataFrame] = {}
         metric_expression_data_per_workload: dict[str, pd.DataFrame] = {}
 
-        non_expression_columns = {
-            "Metric",
-            "Unit",
-            "Description",
-            "Type",
-            "Xfer",
-            "Coherency",
-            "Transaction",
-            "Percent of Peak",
-        }
-
         for workload_path in self._pmc_df_per_workload.keys():
             gfx_arch = self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
             arch_config = self._arch_configs[gfx_arch]
@@ -1723,7 +1712,12 @@ class db_analysis(OmniAnalyze_Base):
                 (
                     table_names_map[table_id // 100 * 100],
                     table_names_map[table_id],
-                    [c for c in metric_df.columns if c not in non_expression_columns],
+                    [
+                        c
+                        for c in metric_df.columns
+                        if c not in schema.METRIC_DESCRIPTIVE_COLUMNS
+                        and c != schema.PERCENT_OF_PEAK_COLUMN
+                    ],
                     list(metric_df.iterrows()),
                 )
                 for table_id, metric_df in arch_config.dfs.items()
