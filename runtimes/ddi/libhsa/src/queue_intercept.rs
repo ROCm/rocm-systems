@@ -401,6 +401,13 @@ impl InterceptQueue {
         let Some(_drain) = self.drains.enter() else {
             return;
         };
+        // Forwarding may ring the lower queue through an HSA signal store.
+        // Keep that nested work in the admitted generation even if final
+        // shutdown commits while this drain is running.
+        let Some(process) = crate::runtime::process_admission().enter() else {
+            return;
+        };
+        let _lease_scope = crate::runtime::ApiLeaseScope::enter(process);
         if !self.active.load(Ordering::Acquire) {
             return;
         }

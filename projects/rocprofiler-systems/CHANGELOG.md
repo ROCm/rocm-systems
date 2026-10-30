@@ -31,6 +31,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
   Timemory PR: [ROCm/timemory#46](https://github.com/ROCm/timemory/pull/46)
+- Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
+  finalization. Regions that never received their end callback are now emitted with the
+  finalization timestamp and an `[incomplete]` name suffix instead of being dropped.
 - Fixed `rocprof-sys-instrument` aborting with `SIGABRT` on invalid input (non-ELF text
   file, missing target, or already-instrumented binary). Uncaught `std::runtime_error`
   exceptions from instrumentation setup are now caught in `main`, reported as

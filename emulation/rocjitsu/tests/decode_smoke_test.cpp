@@ -32,9 +32,11 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -45,6 +47,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
@@ -71,8 +74,11 @@
 #include <cmath>
 #include <cstdint>
 #include <format>
+#include <ios>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -725,7 +731,7 @@ TEST(DecoderSmokeTest, ImageAtomicsSeparatePayloadFromOptionalReturn) {
               EXPECT_NE(decoded.value()->disassemble().find("[v20, v21]"), std::string::npos)
                   << decoded.value()->disassemble();
             }
-            InstDefUse def_use(*decoded.value());
+            InstDefUse def_use(*decoded.value(), 64);
             for (unsigned word = 0; word < 5; ++word) {
               const RegisterRef reg{RegClass::VGPR, static_cast<uint16_t>(8 + word), 1};
               EXPECT_EQ(def_use.uses.contains(reg), word < payload_words);
@@ -1329,7 +1335,7 @@ TEST(Rdna35MimgDecodeTest, FixedFormWidthsDriveDefUse) {
     EXPECT_EQ(inst->dst_operand(0)->size_bits(), 128);
     EXPECT_EQ(inst->src_operand(0)->size_bits(), test.vaddr_words * 32);
 
-    InstDefUse def_use(*inst);
+    InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, test.vdata_base, 4}));
     EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, test.vaddr_base, test.vaddr_words}));
     EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, test.srsrc_base, test.srsrc_words}));
@@ -1537,6 +1543,167 @@ TEST(FieldlessOperandDecodeTest, PlaceholderVaddrInertButSimm32StaysValueBearing
     EXPECT_EQ(v, 0x1234u);
 }
 
+std::unique_ptr<Instruction> decode_one(rj_code_arch_t arch, const std::array<uint32_t, 4> &words) {
+  auto decoder = Decoder::create(arch);
+  return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, words.data()) : nullptr);
+}
+
+// A VALU destination an RDNA decoder reports as an SGPR pair is a lane mask.
+// Those destinations are VOP3 and VOP3SD operands, so this decodes every VOP3
+// opcode with zero register fields.
+TEST(WaveMaskOperandDecodeTest, RdnaVop3SgprPairDestinationsAreWaveMasks) {
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    bool reached_compare = false;
+    bool reached_carry_out = false;
+    for (uint32_t opcode = 0; opcode < 1024; ++opcode) {
+      // GFX10+ VOP3: encoding 53 in [31:26], opcode in [25:16].
+      const std::array<uint32_t, 4> words{(53u << 26) | (opcode << 16)};
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      if (inst == nullptr)
+        continue;
+      for (int i = 0; i < inst->num_dst_operands(); ++i) {
+        const Operand *op = inst->dst_operand(i);
+        const std::optional<RegisterRef> ref = op != nullptr ? op->to_register_ref() : std::nullopt;
+        if (!ref || ref->cls != RegClass::SGPR || ref->width < 2)
+          continue;
+        reached_compare |= inst->mnemonic() == "v_cmp_eq_u32";
+        reached_carry_out |= inst->mnemonic() == "v_add_co_u32";
+        EXPECT_TRUE(op->is_wave_mask())
+            << inst->mnemonic() << " destination " << i << " is an unmarked SGPR pair";
+      }
+    }
+    EXPECT_TRUE(reached_compare) << "the sweep never reached a VOP3 compare";
+    EXPECT_TRUE(reached_carry_out) << "the sweep never reached a VOP3SD carry-out";
+  }
+}
+
+// RDNA1/2 VOPC SDWA with sd=1 writes its compare result to an encoded SGPR pair,
+// which the constructor marks. With sd=0 the destination stays VCC (EXEC for
+// v_cmpx) and unmarked. v_cmpx has no SDWA sdst field, so only v_cmp checks
+// sd=1.
+TEST(WaveMaskOperandDecodeTest, Rdna1And2SdwaCompareDestinationFollowsSd) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const bool sd : {false, true}) {
+      SCOPED_TRACE(testing::Message() << static_cast<int>(arch) << " sd=" << sd);
+      size_t checked = 0;
+      for (uint32_t opcode = 0; opcode < 256; ++opcode) {
+        // VOPC: encoding 0x3E in [31:25], opcode in [24:17], vsrc1 v2, src0 249
+        // (SDWA). The SDWA dword: src0 v1, sdst s2 in [14:8], sd in [15], and
+        // dword selects.
+        const std::array<uint32_t, 4> words{(0x3Eu << 25) | (opcode << 17) | (2u << 9) | 249u,
+                                            0x06060001u | (sd ? (1u << 15) | (2u << 8) : 0u)};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        if (inst == nullptr || !inst->mnemonic().ends_with("_sdwa"))
+          continue;
+        const bool cmpx = inst->mnemonic().starts_with("v_cmpx_");
+        if (sd && cmpx)
+          continue;
+        ++checked;
+        const Operand *dst = inst->dst_operand(0);
+        ASSERT_NE(dst, nullptr) << inst->mnemonic();
+        if (sd) {
+          EXPECT_EQ(dst->to_register_ref(), (RegisterRef{RegClass::SGPR, 2, 2}))
+              << inst->mnemonic();
+          EXPECT_TRUE(dst->is_wave_mask()) << inst->mnemonic();
+        } else {
+          EXPECT_EQ(dst->to_special_reg_class(), cmpx ? RegClass::EXEC : RegClass::VCC)
+              << inst->mnemonic();
+          EXPECT_FALSE(dst->is_wave_mask()) << inst->mnemonic();
+        }
+      }
+      EXPECT_GT(checked, 0u);
+    }
+  }
+}
+
+// gfx1250 declares a VOP3 compare destination at one SGPR, so its width does
+// not show that it is a lane mask.
+TEST(WaveMaskOperandDecodeTest, Gfx1250Vop3CompareDestinationIsWaveMask) {
+  // v_cmp_eq_u32_e64 s53, 32, v4.
+  std::unique_ptr<Instruction> inst =
+      decode_one(ROCJITSU_CODE_ARCH_CDNA5, {0xD44A0035u, 0x020208A0u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmp_eq_u32");
+  EXPECT_TRUE(inst->dst_operand(0)->is_wave_mask());
+  EXPECT_FALSE(inst->src_operand(0)->is_wave_mask());
+  EXPECT_FALSE(inst->src_operand(1)->is_wave_mask());
+}
+
+// The gfx1250 VOPD3 decoder declares a v_dual_cndmask_b32 selector, in either
+// slot, as a 64-bit SGPR operand. Only that selector is marked, not the other
+// slot's src2.
+TEST(WaveMaskOperandDecodeTest, Gfx1250VopdCndmaskSelectorIsWaveMask) {
+  constexpr uint32_t kCndmask = 9;
+  constexpr uint32_t kFmac = 0;
+  for (const bool x_slot : {true, false}) {
+    SCOPED_TRACE(x_slot ? "X slot" : "Y slot");
+    // The selector is s8. The v_dual_fmac_f32 src2 is v12 (X) or v14 (Y).
+    const uint32_t opx = x_slot ? kCndmask : kFmac;
+    const uint32_t opy = x_slot ? kFmac : kCndmask;
+    std::unique_ptr<Instruction> inst =
+        decode_one(ROCJITSU_CODE_ARCH_CDNA5,
+                   {0xcf000000u | (opx << 18) | (opy << 12) | 256u,
+                    258u | (4u << 16) | ((x_slot ? 8u : 12u) << 24),
+                    16u | (6u << 8) | ((x_slot ? 14u : 8u) << 16) | (18u << 24), 0u});
+    ASSERT_NE(inst, nullptr);
+    ASSERT_NE(inst->mnemonic().find("v_dual_cndmask_b32"), std::string_view::npos)
+        << inst->mnemonic();
+    int marked = 0;
+    for (int i = 0; i < inst->num_src_operands(); ++i) {
+      const Operand *op = inst->src_operand(i);
+      if (op == nullptr || !op->is_wave_mask())
+        continue;
+      ++marked;
+      const std::optional<RegisterRef> ref = op->to_register_ref();
+      ASSERT_TRUE(ref.has_value());
+      EXPECT_EQ(ref->cls, RegClass::SGPR);
+      EXPECT_EQ(ref->index, 8u);
+    }
+    EXPECT_EQ(marked, 1);
+  }
+}
+
+// Only an encoded lane mask is marked. A fieldless VCC stays unmarked although
+// the MR ISA gives it the same FMT_NUM_M64 format.
+TEST(WaveMaskOperandDecodeTest, Rdna4MarksOnlyEncodedLaneMasks) {
+  // v_cndmask_b32_e64 v0, v1, v2, s8.
+  std::unique_ptr<Instruction> vop3 =
+      decode_one(ROCJITSU_CODE_ARCH_RDNA4, {0xd5010000u, 0x00220501u});
+  ASSERT_NE(vop3, nullptr);
+  ASSERT_EQ(vop3->mnemonic(), "v_cndmask_b32");
+  EXPECT_FALSE(vop3->dst_operand(0)->is_wave_mask());
+  EXPECT_FALSE(vop3->src_operand(0)->is_wave_mask());
+  EXPECT_FALSE(vop3->src_operand(1)->is_wave_mask());
+  EXPECT_EQ(vop3->src_operand(2)->to_register_ref(), (RegisterRef{RegClass::SGPR, 8, 2}));
+  EXPECT_TRUE(vop3->src_operand(2)->is_wave_mask());
+
+  // v_cmp_eq_u32_e32 vcc_lo, v1, v2 and v_cndmask_b32_e32 v0, v1, v2, vcc_lo.
+  for (uint32_t word : {0x7c940501u, 0x02000501u}) {
+    SCOPED_TRACE(testing::Message() << std::hex << word);
+    std::unique_ptr<Instruction> inst = decode_one(ROCJITSU_CODE_ARCH_RDNA4, {word});
+    ASSERT_NE(inst, nullptr);
+    int fieldless_vcc = 0;
+    auto expect_unmarked = [&](const Operand *op) {
+      if (op == nullptr || !op->is_fieldless() || op->to_special_reg_class() != RegClass::VCC)
+        return;
+      ++fieldless_vcc;
+      EXPECT_FALSE(op->is_wave_mask());
+    };
+    for (int i = 0; i < inst->num_dst_operands(); ++i)
+      expect_unmarked(inst->dst_operand(i));
+    for (int i = 0; i < inst->num_src_operands(); ++i)
+      expect_unmarked(inst->src_operand(i));
+    EXPECT_EQ(fieldless_vcc, 1);
+  }
+}
+
 TEST(Rdna4WaitcntDecodeSmokeTest, FormatsCompatWaitcntWithGfx11Layout) {
   constexpr uint32_t s_waitcnt_vmcnt1 = make_sopp(/*op=*/9, /*simm16=*/1u << 10);
 
@@ -1740,7 +1907,7 @@ TEST(Rdna3DecodeTest, GlobalFlatAllOnesSaddrIsNull) {
     EXPECT_EQ(fieldless_srcs, 1);
   }
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 0x7F, 1}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 0x7F, 2}));
@@ -2281,6 +2448,94 @@ INSTANTIATE_TEST_SUITE_P(
       return std::string(info.param.arch_name);
     });
 
+class VopdExecutionFailureTest : public ::testing::TestWithParam<RdnaVopdExecutionCase> {};
+
+TEST_P(VopdExecutionFailureTest, UnsupportedSlotCommitsNeitherDestination) {
+  const auto &tc = GetParam();
+  amdgpu::GpuMemory gpu_mem("vopd_failure_mem");
+  amdgpu::L2Cache l2("vopd_failure_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = tc.arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("vopd_failure", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0x1000, cfg.sgprs_per_wf, cfg.vgprs_per_wf, 32);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (bool invalid_x : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << tc.arch_name << " invalid_x=" << invalid_x);
+    const auto words = make_vopdxy_pair(invalid_x ? 14 : 8, invalid_x ? 8 : 14);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
+    // Bypass decoder validation deliberately to exercise the execution fallback.
+    const auto *backend = tc.arch == ROCJITSU_CODE_ARCH_RDNA3     ? &rdna3::execution_backend()
+                          : tc.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? &rdna3_5::execution_backend()
+                          : tc.arch == ROCJITSU_CODE_ARCH_RDNA4   ? &rdna4::execution_backend()
+                                                                  : &cdna5::execution_backend();
+    ScopedIsaExecutionBackend execution_backend_scope{backend};
+    const auto construct =
+        [&]<typename Vopd, typename MachineInst>() -> std::unique_ptr<Instruction> {
+      return std::make_unique<Vopd>(reinterpret_cast<const MachineInst *>(words.data()));
+    };
+    std::unique_ptr<Instruction> inst;
+    switch (tc.arch) {
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      inst = construct.operator()<rdna3::Vopd, rdna3::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA3_5:
+      inst = construct.operator()<rdna3_5::Vopd, rdna3_5::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      inst = construct.operator()<rdna4::Vopd, rdna4::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      inst = construct.operator()<cdna5::Vopd, cdna5::MachineInst>();
+      break;
+    default:
+      FAIL() << "unexpected VOPD architecture";
+    }
+    ASSERT_NE(inst, nullptr);
+    ASSERT_NE(inst->execute, nullptr);
+    for (uint64_t exec : {uint64_t{0}, uint64_t{0xAAAA'AAAA}}) {
+      wf->set_exec(exec);
+      wf->set_vcc(0x87654321);
+      wf->write_scc(1);
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < 5; ++reg)
+          cu->write_vgpr(base + reg, lane, 100u * reg + lane);
+      }
+      wf->clear_instruction_execution_error();
+      ASSERT_NO_THROW(inst->execute(*inst, wf));
+      EXPECT_EQ(wf->instruction_execution_error(),
+                exec ? amdgpu::InstructionExecutionError::UnimplementedInstruction
+                     : amdgpu::InstructionExecutionError::None);
+      EXPECT_EQ(wf->exec(), exec);
+      EXPECT_EQ(wf->vcc(), 0x87654321u);
+      EXPECT_EQ(wf->read_scc(), 1u);
+      EXPECT_EQ(wf->pc, 0x1000u);
+      EXPECT_FALSE(wf->is_halted());
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(cu->read_vgpr(base, lane), lane);
+        EXPECT_EQ(cu->read_vgpr(base + 1, lane), 100u + lane);
+      }
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AllArchitectures, VopdExecutionFailureTest,
+    ::testing::Values(RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_CDNA5, "cdna5"}),
+    [](const ::testing::TestParamInfo<RdnaVopdExecutionCase> &info) {
+      return info.param.arch_name;
+    });
+
 void expect_sleep_yields_before_quantum_expires(rj_code_arch_t arch, uint32_t sleep_encoding) {
   constexpr uint64_t kCodeAddress = 0x2000;
 
@@ -2421,7 +2676,7 @@ TEST(CdnaSmemDecodeTest, SgprOffsetFormExposesOffsetRegister) {
       ASSERT_NE(inst, nullptr) << arch;
       EXPECT_EQ(inst->disassemble(), tc.text) << arch;
 
-      InstDefUse def_use(*inst);
+      InstDefUse def_use(*inst, 64);
       EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 5, 1})) << arch << " " << tc.text;
     }
   }
@@ -2440,7 +2695,7 @@ TEST(Cdna3DecodeTest, DsRead2st64AccDestinationUsesAccumulatorRegisterClass) {
   EXPECT_EQ(inst->mnemonic(), "ds_read2st64_b32");
   EXPECT_EQ(inst->disassemble(), "ds_read2st64_b32 acc[62:63], v243 offset0:70 offset1:71");
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 62, 2}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 62, 2}));
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 243, 1}));
@@ -2522,7 +2777,7 @@ TEST(Cdna3DecodeTest, MfmaAccCdUsesAccumulatorRegisterClassForCAndD) {
   EXPECT_EQ(inst->disassemble(),
             "v_mfma_f32_32x32x8_bf16 acc[136:151], acc[84:85], acc[82:83], acc[136:151]");
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 136, 16}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 136, 16}));
   EXPECT_TRUE(def_use.uses.contains({RegClass::ACC_VGPR, 84, 2}));
@@ -2550,7 +2805,7 @@ TEST(Cdna3DecodeTest, MfmaAccBitsSelectIndependentMultiplicandBanks) {
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x8_bf16");
 
-    InstDefUse def_use(*inst);
+    InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains({tc.src0_class, 84, 2})) << inst->disassemble();
     EXPECT_TRUE(def_use.uses.contains({tc.src1_class, 82, 2})) << inst->disassemble();
   }
@@ -2687,7 +2942,7 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
       }
     EXPECT_EQ(fieldless_srcs, 1);
   }
-  InstDefUse saddr_def_use(*saddr_inst);
+  InstDefUse saddr_def_use(*saddr_inst, 64);
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 1}));
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
@@ -2696,7 +2951,7 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "flat_load_b64");
   EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
-  InstDefUse vector_only_def_use(*vector_only_inst);
+  InstDefUse vector_only_def_use(*vector_only_inst, 64);
   EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 2}));
@@ -2735,7 +2990,7 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
       }
     EXPECT_EQ(fieldless_srcs, 1);
   }
-  InstDefUse saddr_def_use(*saddr_inst);
+  InstDefUse saddr_def_use(*saddr_inst, 64);
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 2}));
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
@@ -2744,7 +2999,7 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "global_load_b64");
   EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
-  InstDefUse vector_only_def_use(*vector_only_inst);
+  InstDefUse vector_only_def_use(*vector_only_inst, 64);
   EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 10, 2}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 2}));
@@ -2764,7 +3019,7 @@ TEST(Gfx1250DecodeTest, GlobalStoreUsesScalarOffsetVaddrWidth) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "global_store_b64");
   EXPECT_EQ(inst->disassemble(), "global_store_b64 v10, v[2:3], s[6:7]");
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 10, 2}));
 }
@@ -2786,7 +3041,7 @@ TEST(Gfx1250DecodeTest, Vop3CompareWritesSingleScalarMaskRegister) {
   EXPECT_NE(disasm.find("s2"), std::string::npos) << disasm;
   EXPECT_EQ(disasm.find("s[2:3]"), std::string::npos) << disasm;
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::SGPR, 2, 1}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::SGPR, 3, 1}));
 }
@@ -2804,7 +3059,7 @@ TEST(Cdna4DecodeTest, MfmaF8f6f4DecodesStandaloneVop3pSuffix) {
   EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
   EXPECT_EQ(inst->size(), sizeof(words));
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 36, 4}));
 }
 
@@ -2831,7 +3086,7 @@ TEST(Cdna4DecodeTest, MfmaF8f6f4SourceWidthsFollowFormatSelectors) {
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
 
-    InstDefUse def_use(*inst);
+    InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 0, register_count}));
     EXPECT_FALSE(
         def_use.uses.contains({RegClass::VGPR, 0, static_cast<uint8_t>(register_count + 1)}));
