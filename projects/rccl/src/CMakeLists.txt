@@ -1107,6 +1107,19 @@ endif()
 #   self-contained: the rocshmem host code GIN needs is compiled directly into
 #   librccl.so, so no host symbol is left unresolved.  Does not enable
 #   alltoall_wg offload.
+# GIN backend availability for consumers (see rccl_gin_config.h.in).
+if (ENABLE_ROCSHMEM_GIN)
+  set(NCCL_GIN_ROCSHMEM_GDA_AVAILABLE 1)
+  set(NCCL_GIN_ANVIL_SDMA_AVAILABLE 1)
+else()
+  set(NCCL_GIN_ROCSHMEM_GDA_AVAILABLE 0)
+  set(NCCL_GIN_ANVIL_SDMA_AVAILABLE 0)
+endif()
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/gin/rccl_gin_config.h.in"
+  "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rccl_gin_config.h"
+  @ONLY)
+
 if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
   # Ensure rocSHMEM is fully built/installed before compiling rccl

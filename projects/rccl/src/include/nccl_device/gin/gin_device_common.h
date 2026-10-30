@@ -49,12 +49,12 @@
 #endif
 #endif
 
-// Enable a backend when its device header is installed; the subtree's includes
-// are nccl_device/-rooted, so it compiles from -I<prefix>/include with no extra -I.
-// The C++17 clause keeps the backend off for a C++14 consumer: the copied QP/SDMA
-// device headers use if constexpr / is_aggregate_v, which a C++14 TU cannot compile.
+// NCCL_GIN_*_AVAILABLE comes from the build (see rccl_gin_config.h); the C++17
+// clause additionally keeps the backend off for a C++14 consumer.
+#include "nccl_device/gin/rccl_gin_config.h"
+
 #ifndef NCCL_GIN_ROCSHMEM_GDA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && __cplusplus >= 201703L && __has_include("rocshmem_gda/gin_rocshmem_gda.h")
+#if defined(__HIP_PLATFORM_AMD__) && __cplusplus >= 201703L && NCCL_GIN_ROCSHMEM_GDA_AVAILABLE
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 1
 #else
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 0
@@ -62,7 +62,7 @@
 #endif
 
 #ifndef NCCL_GIN_ANVIL_SDMA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && __cplusplus >= 201703L && __has_include("anvil_sdma/gin_anvil_sdma.h")
+#if defined(__HIP_PLATFORM_AMD__) && __cplusplus >= 201703L && NCCL_GIN_ANVIL_SDMA_AVAILABLE
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 1
 #else
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 0
