@@ -289,6 +289,9 @@ argument, read, admission, selection or mutation errors, and 3 for output I/O
 errors. All successful stdout paths flush and check the stream. A completed
 mutant file remains if writing its subsequent assumptions or summary fails;
 status 3 does not guarantee that no output file exists.
+The executable ignores `SIGPIPE` and `SIGXFSZ` where available so closed pipes
+and file-size limits reach these I/O checks and incomplete-file cleanup,
+regardless of the caller's signal dispositions.
 
 Diagnostics go to stderr. Discovery, selection and mutation failures preserve
 the library's typed error as `code=NAME offset=N` before the explanatory message.
