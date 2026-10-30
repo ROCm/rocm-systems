@@ -151,6 +151,10 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
       !image_store_selectors_supported(state.decoded_buffer_format, descriptor_selectors))
     return fail(InstructionExecutionError::UnimplementedInstruction);
 
+  // Linear execution consumes the spatial prefix selected by the resource type,
+  // which can be shorter than the DIM-encoded coordinate list. The compatibility
+  // checks below require DIM to supply enough coordinates, not an equal count;
+  // for example, a 2D resource with 2D_ARRAY DIM uses X/Y and ignores layer.
   const bool has_y = resource.type != kImage1d && resource.type != kImage1dArray;
   const bool has_slice = resource.type == kImage3d || (layered && fields.da);
   const uint32_t coordinates = 1 + (has_y ? 1 : 0) + (has_slice ? 1 : 0);

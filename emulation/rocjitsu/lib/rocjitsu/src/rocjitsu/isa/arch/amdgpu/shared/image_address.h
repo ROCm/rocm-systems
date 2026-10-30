@@ -15,9 +15,11 @@
 namespace rocjitsu::amdgpu {
 
 /// @brief Candidate wave-relative VGPR selectors for image coordinates.
-/// @details Callers consume only the required prefix. On RDNA, DIM and A16
-/// determine that count, so entries outside the prefix need not name valid
-/// registers.
+/// @details Printing and dependency metadata consume the prefix selected by
+/// the instruction's DIM and A16 fields. Linear execution may consume a
+/// shorter prefix selected by the resource type after checking that DIM
+/// supplies enough coordinates. Entries outside a caller's prefix need not
+/// name valid registers.
 using ImageAddressRegisters = std::array<uint32_t, 4>;
 
 /// MIMG/VIMAGE DIM encodings. These are instruction fields (0-7), distinct
