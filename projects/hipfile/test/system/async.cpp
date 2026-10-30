@@ -4,15 +4,9 @@
  */
 
 #ifdef __HIP_PLATFORM_AMD__
-#include "backend/asyncop-fallback.h"
-#include "backend/memcpy-kernel.h"
-#include "buffer.h"
 #include "configuration.h"
 #include "context.h"
 #include "hip.h"
-#include "io.h"
-#include "state.h"
-#include "stream.h"
 #endif
 
 #include "ais-capability.h"
@@ -24,21 +18,16 @@
 #include "test-options.h"
 
 #include <array>
-#include <cassert>
 #include <cerrno>
 #include <cstdint>
 #include <cstddef>
-#include <cstring>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
-#include <memory>
-#include <sstream>
 #include <string>
 #include <sys/types.h>
 #include <system_error>
 #include <tuple>
-#include <variant>
 #include <vector>
 #include <unistd.h>
 
@@ -61,219 +50,6 @@ struct AsyncIoFunction {
 static std::array<AsyncIoFunction, 2> asyncIOFns{
     {{hipFileReadAsync, "hipFileReadAsync"}, {hipFileWriteAsync, "hipFileWriteAsync"}}};
 HIPFILE_WARN_NO_EXIT_DTOR_ON
-
-#ifdef __HIP_PLATFORM_AMD__
-class HipAsyncMemcpyKernel : public ::testing::Test {
-public:
-    HipAsyncMemcpyKernel() : tf{test_env.ais_capable_dir}
-    {
-    }
-    void SetUp() override
-    {
-        ASSERT_EQ(hipFileDriverOpen(), HIPFILE_SUCCESS);
-        ASSERT_EQ(hipMalloc(&dev_ptr, buffer_size), hipSuccess);
-        ASSERT_EQ(hipFileBufRegister(dev_ptr, buffer_size, 0), HIPFILE_SUCCESS);
-        hipFileDescr_t d{hipFileHandleTypeOpaqueFD, {tf.fd}, nullptr};
-        ASSERT_EQ(hipFileHandleRegister(&fh, &d), HIPFILE_SUCCESS);
-        ASSERT_EQ(hipStreamCreateWithFlags(&hip_stream, hipStreamNonBlocking), hipSuccess);
-        ASSERT_EQ(hipFileStreamRegister(hip_stream, 0xf), HIPFILE_SUCCESS);
-        auto [_file, _buffer, _stream] =
-            Context<DriverState>::get()->getFileBufferAndStream(fh, dev_ptr, hip_stream);
-        file              = _file;
-        buffer            = _buffer;
-        stream            = _stream;
-        op                = std::shared_ptr<AsyncOpFallback>(new AsyncOpFallback(
-            io_type, file, buffer, stream, &io_size, &file_offset, &buffer_offset, &bytes_transferred));
-        bytes_transferred = static_cast<ssize_t>(io_size);
-        if (io_type == IoType::Read) {
-            // For a read, bytes_transferred_internal needs to be set to simulate that the read from disk
-            // occurred. We fill the source (CPU bounce buffer) with random data and memset the destination
-            // (GPU buffer) to zero.
-            HipFileDataOps::randomizeMemoryRegion(op->bounce_buffer_host_ptr, 0, io_size);
-            op->bytes_transferred_internal = static_cast<ssize_t>(io_size);
-            ASSERT_EQ(hipMemset(op->gpu_buffer, 0, buffer_size), hipSuccess);
-            ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
-        }
-        else {
-            // For a write, we fill the source (GPU bounce buffer) with random data and memset the destination
-            // (CPU bounce buffer) to zero.
-            HipFileDataOps::randomizeMemoryRegion(op->gpu_buffer, 0, buffer_size);
-            memset(op->bounce_buffer_host_ptr, 0, io_size);
-        }
-        op_dev_ptr            = op->devPtr();
-        kernel_args[0]        = {&op_dev_ptr};
-        max_threads_per_block = Context<Hip>::get()->hipDeviceGetAttribute(
-            hipDeviceAttributeMaxThreadsPerBlock, buffer->getGpuId());
-    }
-    void TearDown() override
-    {
-        ASSERT_EQ(hipFileStreamDeregister(hip_stream), HIPFILE_SUCCESS);
-        ASSERT_EQ(hipStreamDestroy(hip_stream), hipSuccess);
-        ASSERT_EQ(hipFree(dev_ptr), hipSuccess);
-    }
-    void                            *dev_ptr{};
-    Tmpfile                          tf;
-    hipFileHandle_t                  fh{};
-    IoType                           io_type           = IoType::Read;
-    size_t                           file_size         = 4_KiB;
-    size_t                           buffer_size       = 4_KiB;
-    size_t                           io_size           = 4_KiB;
-    size_t                           chunk_size        = 1_MiB;
-    hoff_t                           file_offset       = 0;
-    hoff_t                           buffer_offset     = 0;
-    ssize_t                          bytes_transferred = 0;
-    hipStream_t                      hip_stream{};
-    std::shared_ptr<IFile>           file;
-    std::shared_ptr<IBuffer>         buffer;
-    std::shared_ptr<IStream>         stream;
-    std::shared_ptr<AsyncOpFallback> op;
-    void                            *op_dev_ptr{};
-    void                            *kernel_args[1]{};
-    int                              max_threads_per_block = 0;
-};
-
-TEST_F(HipAsyncMemcpyKernel, unfixedSizeReturnsInval)
-{
-    op->size = &io_size;
-    Context<Hip>::get()->hipLaunchKernel(reinterpret_cast<void *>(hipFileMemcpyKernel), dim3(1),
-                                         dim3(static_cast<uint32_t>(max_threads_per_block)), kernel_args, 0,
-                                         op->stream->getHipStream());
-    Context<Hip>::get()->hipStreamSynchronize(op->stream->getHipStream());
-    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInvalidValue);
-}
-
-TEST_F(HipAsyncMemcpyKernel, unfixedBufferOffsetReturnsInval)
-{
-    op->buffer_offset = &buffer_offset;
-    Context<Hip>::get()->hipLaunchKernel(reinterpret_cast<void *>(hipFileMemcpyKernel), dim3(1),
-                                         dim3(static_cast<uint32_t>(max_threads_per_block)), kernel_args, 0,
-                                         op->stream->getHipStream());
-    Context<Hip>::get()->hipStreamSynchronize(op->stream->getHipStream());
-    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInvalidValue);
-}
-
-TEST_F(HipAsyncMemcpyKernel, nullCpuBufferDevPointerReturnsInval)
-{
-    op->bounce_buffer_dev_ptr = nullptr;
-    Context<Hip>::get()->hipLaunchKernel(reinterpret_cast<void *>(hipFileMemcpyKernel), dim3(1),
-                                         dim3(static_cast<uint32_t>(max_threads_per_block)), kernel_args, 0,
-                                         op->stream->getHipStream());
-    Context<Hip>::get()->hipStreamSynchronize(op->stream->getHipStream());
-    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInvalidValue);
-}
-
-struct AsyncMemcpyKernelTestParams {
-    IoType io_type;
-    size_t buffer_size;
-    size_t io_size;
-    hoff_t buffer_offset;
-    size_t chunk_size;
-    size_t bytes_completed; // op->bytes_transferred_internal at kernel launch (offset already done)
-    size_t expected_chunk;  // bytes this single kernel invocation copies
-};
-
-class HipAsyncMemcpyKernelWithParams : public HipAsyncMemcpyKernel,
-                                       public ::testing::WithParamInterface<AsyncMemcpyKernelTestParams> {
-public:
-    void SetUp() override
-    {
-        auto [_io_type, _buffer_size, _io_size, _buffer_offset, _chunk_size, _bytes_completed,
-              _expected_chunk] = GetParam();
-        io_type                = _io_type;
-        buffer_size            = _buffer_size;
-        io_size                = _io_size;
-        buffer_offset          = _buffer_offset;
-        chunk_size             = _chunk_size;
-        bytes_completed        = _bytes_completed;
-        expected_chunk         = _expected_chunk;
-        HipAsyncMemcpyKernel::SetUp();
-        // The op's bounce buffer size normally comes from the stream's async buffer. Override it with the
-        // chunk_size param so the write path stages at most one chunk per kernel invocation, letting a
-        // full interior chunk sit strictly in the middle of a larger IO.
-        op->bounce_buffer_size         = chunk_size;
-        op->bytes_transferred_internal = static_cast<ssize_t>(bytes_completed);
-        // On a read, cpu_copy runs before the kernel and publishes how many bytes it staged in the
-        // bounce buffer; simulate that here. On a write, the kernel computes and publishes it.
-        if (io_type == IoType::Read) {
-            op->chunk_bytes_copied = expected_chunk;
-        }
-    }
-    void TearDown() override
-    {
-        HipAsyncMemcpyKernel::TearDown();
-    }
-    size_t bytes_completed;
-    size_t expected_chunk;
-};
-
-TEST_P(HipAsyncMemcpyKernelWithParams, verifyIoRegions)
-{
-    Context<Hip>::get()->hipLaunchKernel(reinterpret_cast<void *>(hipFileMemcpyKernel), dim3(1),
-                                         dim3(static_cast<uint32_t>(max_threads_per_block)), kernel_args, 0,
-                                         op->stream->getHipStream());
-    Context<Hip>::get()->hipStreamSynchronize(op->stream->getHipStream());
-    // The kernel copies a single chunk; it leaves the running offset for async_io_advance to update.
-    ASSERT_EQ(op->bytes_transferred_internal, static_cast<ssize_t>(bytes_completed));
-    ASSERT_EQ(op->chunk_bytes_copied, expected_chunk);
-    if (expected_chunk == 0) {
-        return;
-    }
-    // The chunk lands at buffer_offset plus however much has already been transferred.
-    const hoff_t chunk_gpu_offset = buffer_offset + static_cast<hoff_t>(bytes_completed);
-    if (io_type == IoType::Read) {
-        HipFileDataOps::assertZeroedMemRegion(op->gpu_buffer, 0, static_cast<size_t>(chunk_gpu_offset));
-    }
-    HipFileDataOps::assertMemoryRegionsMatch(op->bounce_buffer_host_ptr, 0, op->gpu_buffer, chunk_gpu_offset,
-                                             expected_chunk);
-    if (io_type == IoType::Read) {
-        size_t end_length = buffer_size - (static_cast<size_t>(chunk_gpu_offset) + expected_chunk);
-        HipFileDataOps::assertZeroedMemRegion(
-            op->gpu_buffer, chunk_gpu_offset + static_cast<hoff_t>(expected_chunk), end_length);
-    }
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    HipAsyncMemcpyKernelSuite, HipAsyncMemcpyKernelWithParams,
-    testing::Values(
-        // Single chunk covers the whole transfer (chunk_size >= io_size, nothing completed yet).
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 0, 1_MiB, 0, 1_MiB},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 0, 1_MiB, 0, 1_MiB},
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB - 8_KiB, 4_KiB, 1_MiB, 0, 1_MiB - 8_KiB},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB - 8_KiB, 4_KiB, 1_MiB, 0, 1_MiB - 8_KiB},
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB - 1, 0, 1_MiB, 0, 1_MiB - 1},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB - 1, 0, 1_MiB, 0, 1_MiB - 1},
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB - 1, 1, 1_MiB, 0, 1_MiB - 1},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB - 1, 1, 1_MiB, 0, 1_MiB - 1},
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB - 2, 1, 1_MiB, 0, 1_MiB - 2},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB - 2, 1, 1_MiB, 0, 1_MiB - 2},
-        // Short read: cpu_copy staged fewer bytes than a full chunk (e.g. EOF).
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 0, 1_MiB, 0, 512_KiB},
-        // Middle chunk: a full interior chunk, with bytes already transferred before it and untouched
-        // buffer still remaining after it (1 MiB IO, 256 KiB chunk, second of four chunks).
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 0, 256_KiB, 256_KiB, 256_KiB},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 0, 256_KiB, 256_KiB, 256_KiB},
-        // Final full chunk: the last chunk is a full chunk that lands exactly at the buffer end
-        // (1 MiB IO, 512 KiB chunk, second of two chunks).
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 0, 512_KiB, 512_KiB, 512_KiB},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 0, 512_KiB, 512_KiB, 512_KiB},
-        // Tail chunk: chunk_size larger than what remains, so the kernel clamps to the remainder.
-        AsyncMemcpyKernelTestParams{IoType::Read, 1_MiB, 1_MiB, 0, 512_KiB, 768_KiB, 256_KiB},
-        AsyncMemcpyKernelTestParams{IoType::Write, 1_MiB, 1_MiB, 0, 512_KiB, 768_KiB, 256_KiB}),
-    [](const testing::TestParamInfo<HipAsyncMemcpyKernelWithParams::ParamType> &param_info) {
-        auto params = param_info.param;
-
-        std::stringstream label;
-        if (params.io_type == IoType::Read) {
-            label << "read";
-        }
-        else {
-            label << "write";
-        }
-        label << "_" << params.buffer_size << "_" << params.io_size << "_" << params.buffer_offset << "_"
-              << params.chunk_size << "_" << params.bytes_completed << "_" << params.expected_chunk;
-        return label.str();
-    });
-#endif
 
 class HipAsync : public ::testing::Test {
 public:
@@ -902,27 +678,14 @@ INSTANTIATE_TEST_SUITE_P(
         return param_info.param.name;
     });
 
-// Fallback path where the IO is several times the async buffer size, so the fallback loops over
-// multiple chunks. The async buffer defaults to 16 MiB, so a 64 MiB IO spans four chunks.
-class HipAsyncFallbackMultiChunk : public HipAsync, public ::testing::WithParamInterface<AsyncIoFunction> {
+// Async IO on a stream that was never registered; hipFile registers it implicitly on first use.
+class HipAsyncUnregisteredStream : public HipAsync, public ::testing::WithParamInterface<AsyncIoFunction> {
 public:
-    HipAsyncFallbackMultiChunk()
-    {
-        io_size     = 64_MiB;
-        file_size   = 64_MiB;
-        buffer_size = 64_MiB;
-    }
     void SetUp() override
     {
         HipAsync::SetUp();
         io_op = GetParam().function;
         name  = GetParam().name;
-
-        // Force the fallback backend. Disabling fastpath means backend selection throws rather than
-        // silently choosing fastpath, guaranteeing the fallback path is exercised.
-        Context<Configuration>::get()->fastpath(false);
-        Context<Configuration>::get()->fallback(true);
-
         if (name == "hipFileReadAsync") {
             HipFileDataOps::zeroMemoryRegion(dev_ptr, 0, buffer_size);
             HipFileDataOps::randomizeFileRegion(tf.fd, file_size);
@@ -931,16 +694,14 @@ public:
             HipFileDataOps::zeroFileRegion(tf.fd, file_size);
             HipFileDataOps::randomizeMemoryRegion(dev_ptr, 0, buffer_size);
         }
-
         ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
-        ASSERT_EQ(hipFileStreamRegister(stream, 0xf), HIPFILE_SUCCESS);
     }
     void TearDown() override
     {
+        // A stream used for async IO must be deregistered before it's destroyed, even if it was only
+        // registered implicitly.
         ASSERT_EQ(hipFileStreamDeregister(stream), HIPFILE_SUCCESS);
         ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
-        Context<Configuration>::get()->fastpath(true);
-        Context<Configuration>::get()->fallback(true);
         HipAsync::TearDown();
     }
     hipFileError_t (*io_op)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
@@ -948,7 +709,7 @@ public:
     hipStream_t stream;
 };
 
-TEST_P(HipAsyncFallbackMultiChunk, spansMultipleChunks)
+TEST_P(HipAsyncUnregisteredStream, roundTrip)
 {
     ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
               HIPFILE_SUCCESS);
@@ -957,80 +718,58 @@ TEST_P(HipAsyncFallbackMultiChunk, spansMultipleChunks)
     HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
 }
 
-INSTANTIATE_TEST_SUITE_P(HipAsyncFallbackMultiChunkSuite, HipAsyncFallbackMultiChunk,
-                         ::testing::ValuesIn(asyncIOFns),
-                         [](const testing::TestParamInfo<HipAsyncFallbackMultiChunk::ParamType> &param_info) {
+// The app holds the stream on its own wait value while it queues work, then releases it. Submitting
+// must not wait for the stream, or the app would never get to release it.
+TEST_P(HipAsyncUnregisteredStream, submitWhileStreamIsHeld)
+{
+    int attr = 0;
+    ASSERT_EQ(hipDeviceGetAttribute(&attr, hipDeviceAttributeCanUseStreamWaitValue, 0), hipSuccess);
+    ASSERT_EQ(attr, 1);
+    uint64_t *gate{};
+    uint64_t  value{0};
+    ASSERT_EQ(
+        hipExtMallocWithFlags(reinterpret_cast<void **>(&gate), sizeof(uint64_t), hipMallocSignalMemory),
+        hipSuccess);
+    ASSERT_EQ(hipMemcpy(gate, &value, sizeof(uint64_t), hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipStreamWaitValue64(stream, gate, 1, hipStreamWaitValueEq), hipSuccess);
+
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    value = 1;
+    ASSERT_EQ(hipMemcpy(gate, &value, sizeof(uint64_t), hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
+    ASSERT_EQ(hipFree(gate), hipSuccess);
+}
+
+INSTANTIATE_TEST_SUITE_P(HipAsyncUnregistered, HipAsyncUnregisteredStream, ::testing::ValuesIn(asyncIOFns),
+                         [](const testing::TestParamInfo<HipAsyncUnregisteredStream::ParamType> &param_info) {
                              return param_info.param.name;
                          });
 
-// Fallback path on an unfixed, paused stream where the IO shrinks by more than a whole chunk after
-// submission. The fallback fixes the chunk count from the original (multi-chunk) size at submission
-// time, so the surplus chunks must safely no-op once bind_params publishes the smaller size.
-class HipAsyncFallbackMultiChunkShrink : public HipAsyncStreamUnfixedPaused,
-                                         public ::testing::WithParamInterface<AsyncIoFunction> {
-public:
-    HipAsyncFallbackMultiChunkShrink()
-    {
-        io_size     = 64_MiB;
-        file_size   = 64_MiB;
-        buffer_size = 64_MiB;
-    }
-    void SetUp() override
-    {
-        HipAsyncStreamUnfixedPaused::SetUp();
-        io_op = GetParam().function;
-        name  = GetParam().name;
-
-        Context<Configuration>::get()->fastpath(false);
-        Context<Configuration>::get()->fallback(true);
-
-        if (name == "hipFileReadAsync") {
-            HipFileDataOps::zeroMemoryRegion(dev_ptr, 0, buffer_size);
-            HipFileDataOps::randomizeFileRegion(tf.fd, file_size);
-        }
-        else {
-            HipFileDataOps::randomizeMemoryRegion(dev_ptr, 0, buffer_size);
-            HipFileDataOps::zeroFileRegion(tf.fd, file_size);
-        }
-    }
-    void TearDown() override
-    {
-        Context<Configuration>::get()->fastpath(true);
-        Context<Configuration>::get()->fallback(true);
-        HipAsyncStreamUnfixedPaused::TearDown();
-    }
-    hipFileError_t (*io_op)(hipFileHandle_t, void *, size_t *, hoff_t *, hoff_t *, ssize_t *, hipStream_t);
-    std::string name;
-};
-
-TEST_P(HipAsyncFallbackMultiChunkShrink, shrinkBelowChunkCountStillCorrect)
+// The greatest priority is reserved for the fallback path's bounce streams.
+TEST_F(HipAsync, reservedPriorityStreamIsRejected)
 {
-    // Submit the full 64 MiB (four 16 MiB chunks) while paused, then shrink to 24 MiB before releasing.
-    // That leaves two real chunks plus two surplus chunks that must no-op; bytes_transferred must
-    // reflect the shrunken size and the untouched tail of the destination must stay zero.
-    const size_t shrunk_size = 16_MiB + 8_MiB;
-    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
-              HIPFILE_SUCCESS);
-    io_size = shrunk_size;
-    updateFlag(1);
-    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
-    ASSERT_EQ(bytes_transferred, io_size);
-    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
-    if (name == "hipFileReadAsync") {
-        HipFileDataOps::assertZeroedMemRegion(dev_ptr, static_cast<hoff_t>(shrunk_size),
-                                              buffer_size - shrunk_size);
+    int least{};
+    int greatest{};
+    ASSERT_EQ(hipDeviceGetStreamPriorityRange(&least, &greatest), hipSuccess);
+    if (least == greatest) {
+        GTEST_SKIP() << "Device has a single stream priority";
     }
-    else {
-        HipFileDataOps::assertZeroedFileRegion(tf.fd, static_cast<hoff_t>(shrunk_size),
-                                               file_size - shrunk_size);
-    }
-}
+    hipStream_t stream{};
+    ASSERT_EQ(hipStreamCreateWithPriority(&stream, hipStreamNonBlocking, greatest), hipSuccess);
 
-INSTANTIATE_TEST_SUITE_P(
-    HipAsyncFallbackMultiChunkShrinkSuite, HipAsyncFallbackMultiChunkShrink, ::testing::ValuesIn(asyncIOFns),
-    [](const testing::TestParamInfo<HipAsyncFallbackMultiChunkShrink::ParamType> &param_info) {
-        return param_info.param.name;
-    });
+    EXPECT_EQ(hipFileStreamRegister(stream, 0), HipFileOpError(hipFileInvalidValue));
+    for (const auto &fn : asyncIOFns) {
+        EXPECT_EQ(
+            fn.function(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+            HipFileOpError(hipFileAsyncNotSupported))
+            << fn.name;
+    }
+    EXPECT_EQ(hipFileStreamDeregister(stream), HipFileOpError(hipFileInvalidValue));
+    ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+}
 
 // Overrides only the fastpath AIS entry points to throw, so a fastpath async IO that is otherwise
 // selected fails at stream-execution time. Every other HIP call inherits the real implementation, so

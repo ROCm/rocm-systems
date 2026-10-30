@@ -59,10 +59,10 @@ struct HipFileConfiguration : public Test {
             .WillOnce(Return(const_cast<char *>(hipfile_unsupported_file_systems)));
     }
 
-    void expect_configuration_async_buffer_size(const char *hipfile_async_buffer_size)
+    void expect_configuration_device_stream_pool_size(const char *hipfile_device_stream_pool_size)
     {
-        EXPECT_CALL(msys, getenv(StrEq(hipFile::Environment::ASYNC_BUFFER_SIZE)))
-            .WillOnce(Return(const_cast<char *>(hipfile_async_buffer_size)));
+        EXPECT_CALL(msys, getenv(StrEq(hipFile::Environment::DEVICE_STREAM_POOL_SIZE)))
+            .WillOnce(Return(const_cast<char *>(hipfile_device_stream_pool_size)));
     }
 };
 
@@ -243,28 +243,28 @@ TEST_F(HipFileConfiguration, UnsupportedFilesystemsDisabledIfEnvironmentVariable
     ASSERT_FALSE(Configuration().unsupportedFileSystems());
 }
 
-TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsNotSet)
+TEST_F(HipFileConfiguration, DeviceStreamPoolSizeEnvironmentVariableIsNotSet)
 {
-    expect_configuration_async_buffer_size(nullptr);
-    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
+    expect_configuration_device_stream_pool_size(nullptr);
+    ASSERT_EQ(32, Configuration().deviceStreamPoolSize());
 }
 
-TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsInvalid)
+TEST_F(HipFileConfiguration, DeviceStreamPoolSizeEnvironmentVariableIsInvalid)
 {
-    expect_configuration_async_buffer_size("not-a-number");
-    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
+    expect_configuration_device_stream_pool_size("not-a-number");
+    ASSERT_EQ(32, Configuration().deviceStreamPoolSize());
 }
 
-TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsSet)
+TEST_F(HipFileConfiguration, DeviceStreamPoolSizeEnvironmentVariableIsSet)
 {
-    expect_configuration_async_buffer_size("2097152");
-    ASSERT_EQ(2097152, Configuration().asyncBufferSize());
+    expect_configuration_device_stream_pool_size("64");
+    ASSERT_EQ(64, Configuration().deviceStreamPoolSize());
 }
 
-TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsZero)
+TEST_F(HipFileConfiguration, DeviceStreamPoolSizeEnvironmentVariableIsZero)
 {
-    expect_configuration_async_buffer_size("0");
-    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
+    expect_configuration_device_stream_pool_size("0");
+    ASSERT_EQ(32, Configuration().deviceStreamPoolSize());
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

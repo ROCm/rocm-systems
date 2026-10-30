@@ -63,9 +63,54 @@ Hip::hipMemcpy(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind)
 }
 
 void
+Hip::hipMemcpyWithStream(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind,
+                         hipStream_t stream) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipMemcpyWithStream(dst, src, sizeBytes, kind, stream));
+}
+
+void
 Hip::hipStreamSynchronize(hipStream_t stream) const
 {
     (void)throwOnHipError<Hip::RuntimeError>(::hipStreamSynchronize(stream));
+}
+
+hipStream_t
+Hip::hipStreamCreateWithPriority(unsigned int flags, int priority) const
+{
+    hipStream_t stream;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamCreateWithPriority(&stream, flags, priority));
+    return stream;
+}
+
+HipStreamPriorityRange
+Hip::hipDeviceGetStreamPriorityRange() const
+{
+    HipStreamPriorityRange range{};
+    (void)throwOnHipError<Hip::RuntimeError>(
+        ::hipDeviceGetStreamPriorityRange(&range.least, &range.greatest));
+    return range;
+}
+
+int
+Hip::hipStreamGetPriority(hipStream_t stream) const
+{
+    int priority{};
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamGetPriority(stream, &priority));
+    return priority;
+}
+
+void
+Hip::hipStreamDestroy(hipStream_t stream) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamDestroy(stream));
+}
+
+void
+Hip::hipStreamWaitValue64(hipStream_t stream, uint64_t *ptr, uint64_t value, unsigned int flags,
+                          uint64_t mask) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamWaitValue64(stream, ptr, value, flags, mask));
 }
 
 void *
@@ -74,6 +119,20 @@ Hip::hipHostMalloc(size_t size, unsigned int flags) const
     void *host_ptr;
     (void)throwOnHipError<Hip::RuntimeError>(::hipHostMalloc(&host_ptr, size, flags));
     return host_ptr;
+}
+
+void *
+Hip::hipExtMallocWithFlags(size_t size, unsigned int flags) const
+{
+    void *dev_ptr;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipExtMallocWithFlags(&dev_ptr, size, flags));
+    return dev_ptr;
+}
+
+void
+Hip::hipFree(void *ptr) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipFree(ptr));
 }
 
 void

@@ -171,15 +171,15 @@ DriverState::registerStream(const hipStream_t hip_stream, uint32_t flags)
 void
 DriverState::deregisterStream(const hipStream_t hip_stream)
 {
-    unique_lock<shared_mutex> ulock{state_mutex};
-    stream_map->deregisterStream(hip_stream);
-}
-
-shared_ptr<IStream>
-DriverState::getStream(hipStream_t hip_stream)
-{
-    shared_lock<shared_mutex> slock{state_mutex};
-    return stream_map->getStream(hip_stream);
+    shared_ptr<IStream> stream;
+    {
+        unique_lock<shared_mutex> ulock{state_mutex};
+        stream = stream_map->deregisterStream(hip_stream);
+    }
+    // Drain outside state_mutex: it waits on in-flight IO, which must not hold the global lock.
+    if (stream) {
+        stream->drainAndRelease();
+    }
 }
 
 //
@@ -210,13 +210,40 @@ DriverState::getFileAndBuffer(hipFileHandle_t fh, const void *buf)
 file_buffer_stream_tuple
 DriverState::getFileBufferAndStream(hipFileHandle_t fh, const void *buf, hipStream_t hipStream)
 {
-    shared_lock<shared_mutex> slock{state_mutex};
+    shared_ptr<IFile>   file;
+    shared_ptr<IBuffer> buffer;
+    shared_ptr<IStream> stream;
+    {
+        shared_lock<shared_mutex> slock{state_mutex};
 
-    if (ref_count == 0) {
-        throw DriverNotInitialized();
+        if (ref_count == 0) {
+            throw DriverNotInitialized();
+        }
+
+        file   = file_map->getFile(fh);
+        buffer = buffer_map->getBuffer(buf);
+        if (!isDefaultStream(hipStream)) {
+            stream = stream_map->findStream(hipStream);
+        }
     }
 
-    return {file_map->getFile(fh), buffer_map->getBuffer(buf), stream_map->getStream(hipStream)};
+    // Built outside state_mutex: it makes HIP calls.
+    if (isDefaultStream(hipStream)) {
+        stream = StreamMap::makeDefaultStream(hipStream);
+    }
+    else if (!stream) {
+        // Implicit registration on first async use, as cuFile does. A candidate that loses the race is
+        // dropped after the lock is released.
+        auto candidate = StreamMap::makeImplicitStream(hipStream);
+
+        unique_lock<shared_mutex> ulock{state_mutex};
+        if (ref_count == 0) {
+            throw DriverNotInitialized();
+        }
+        stream = stream_map->adoptImplicitStream(hipStream, candidate);
+    }
+
+    return {std::move(file), std::move(buffer), std::move(stream)};
 }
 
 //
@@ -246,6 +273,14 @@ DriverState::decrRefCount()
         batch_map->clear();
         buffer_map->clear();
         file_map->clear();
+        for (auto &backend : getBackends()) {
+            try {
+                backend->driver_state_teardown();
+            }
+            catch (...) {
+                // Ignore exceptions during teardown
+            }
+        }
     }
 
     // Negative reference count, should never get here

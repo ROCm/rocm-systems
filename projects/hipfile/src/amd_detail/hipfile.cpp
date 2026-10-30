@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "async.h"
 #include "backend.h"
 #include "backend/fallback.h"
 #include "batch/batch.h"
@@ -547,13 +548,16 @@ try {
     std::shared_ptr<Backend> backend{
         selectBackend(backends, file, buffer, *size_p, *file_offset_p, *buffer_offset_p)};
 
-    backend->async_io(io_type, file, buffer, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p,
-                      stream);
+    enqueueAsync(std::move(backend), io_type, std::move(file), std::move(buffer), size_p, file_offset_p,
+                 buffer_offset_p, bytes_transferred_p, std::move(stream));
 
     return {hipFileSuccess, hipSuccess};
 }
 catch (hipFileError_t e) {
     return e;
+}
+catch (const ReservedStreamPriority &) {
+    return {hipFileAsyncNotSupported, hipSuccess};
 }
 catch (const std::invalid_argument &) {
     return {hipFileInvalidValue, hipSuccess};
