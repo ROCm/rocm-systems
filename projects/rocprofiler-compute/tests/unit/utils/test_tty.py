@@ -1063,7 +1063,7 @@ def test_show_all_view_table_skips_per_kernel_roofline_layout(
 
 
 @pytest.mark.parametrize("view", [None, "table"], ids=["default", "view_table"])
-@pytest.mark.parametrize("html_path", [None, "wl/empirRoof_gpu-0.html"])
+@pytest.mark.parametrize("html_path", [None, "run/1-wl/roofline-gpu-0.html"])
 def test_show_all_prints_roofline_html_path_under_heading(
     monkeypatch: pytest.MonkeyPatch,
     view: Optional[str],

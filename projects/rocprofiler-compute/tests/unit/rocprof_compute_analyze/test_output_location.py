@@ -13,6 +13,7 @@ from rocprof_compute_analyze.output_location import (
     OutputFolderExistsError,
     resolve_run_folder,
     validate_output_name,
+    workload_folder_name,
 )
 
 NOW = datetime(2026, 10, 30, 14, 5, 9)
@@ -89,3 +90,8 @@ def test_valid_name_passes(name) -> None:
 def test_resolved_path_keeps_relative_directory() -> None:
     """A relative directory stays relative; the caller decides the base."""
     assert resolve_run_folder(Path("out"), "X", NOW) == Path("out") / "X"
+
+
+def test_workload_folder_name_joins_position_and_workload_directory() -> None:
+    """The subfolder is the 1-based -p position and the workload folder name."""
+    assert workload_folder_name(2, Path("/data/vcopy/MI300X")) == "2-MI300X"

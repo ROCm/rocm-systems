@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Optional
 
 RUN_FOLDER_PREFIX = "rocprof_compute_analyze"
+REPORT_FILE_NAME = "report.txt"
+ANALYSIS_DB_FILE_NAME = "analysis.db"
 RUN_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 
 
@@ -50,6 +52,16 @@ def resolve_run_folder(directory: Path, name: Optional[str], now: datetime) -> P
         (directory / f"{base_name}_{index}" for index in itertools.count(1)),
     )
     return next(path for path in candidates if not path.exists())
+
+
+def workload_folder_name(position: int, workload_path: Path) -> str:
+    """Return the run-folder subfolder name for the -p workload at position.
+
+    Args:
+        position: 1-based position of the workload among the -p paths.
+        workload_path: The workload directory given with -p.
+    """
+    return f"{position}-{workload_path.name}"
 
 
 class OutputLocationError(Exception):

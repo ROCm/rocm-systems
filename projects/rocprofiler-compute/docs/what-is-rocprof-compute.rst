@@ -154,7 +154,7 @@ The following are key ``profile`` and ``analyze`` commands:
 
   .. code-block:: shell-session
 
-     $ rocprof-compute profile -n my_run -d 1 2 3 -- ./app
+     $ rocprof-compute profile -n my_run --kernel-iteration-range 1 2 3 -- ./app
 
 * To profile only the counters needed for specific analysis report blocks, which speeds up the profiling run:
 
@@ -174,11 +174,11 @@ The following are key ``profile`` and ``analyze`` commands:
 
      $ rocprof-compute analyze -p workloads/my_run/MI300X/
 
-* To write the analysis to a SQLite analysis database instead of printing to the terminal:
+* To write the analysis into a run folder named ``my_analysis`` inside ``analysis_runs/``:
 
   .. code-block:: shell-session
 
-     $ rocprof-compute analyze -p workloads/my_run/MI300X/ --output-format db
+     $ rocprof-compute analyze -p workloads/my_run/MI300X/ -d analysis_runs -o my_analysis
 
 * To compare two profiled runs of the same SoC side by side:
 
@@ -194,8 +194,8 @@ Flags reference
 ==================
 
 ROCm Compute Profiler supports many flags for filtering kernels, dispatches, and
-hardware blocks during profiling and analysis, and for selecting the analysis output
-format. See :doc:`how-to/profile/mode` for the full list of profile mode flags and
+hardware blocks during profiling and analysis, and for choosing where the analysis
+output goes. See :doc:`how-to/profile/mode` for the full list of profile mode flags and
 :doc:`how-to/analyze/mode` for analyze mode flags, or run ``rocprof-compute profile -h``
 or ``rocprof-compute analyze -h`` for the complete set.
 
@@ -204,35 +204,26 @@ or ``rocprof-compute analyze -h`` for the complete set.
 Output formats
 ================
 
-``analyze`` accepts an ``--output-format`` option for the analysis report. The following table lists the available values, plus the HTML roofline plots that ``analyze`` writes automatically, and the ``rocpd`` database that ``profile`` always writes:
+``profile`` writes a ``rocpd`` database of raw counters per dispatch into the workload
+directory. Every ``analyze`` run creates a new run folder and writes all of the following into it:
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 20 60
+   :widths: 30 70
 
-   * - Format
-     - Produced by
+   * - File
      - Description
-   * - ``rocpd``
-     - profile
-     - SQLite database of raw counters per dispatch, written automatically. Required for ``analyze --output-format csv`` or ``db``.
-   * - ``stdout`` (default)
-     - analyze
-     - Analysis results printed to the terminal only.
-   * - ``txt``
-     - analyze
-     - Analysis results written to a ``rocprof_compute_<uuid>.txt`` file.
-   * - ``csv``
-     - analyze
-     - Analysis results written to a folder of CSV files. Requires the workload's ``rocpd`` database from profiling.
-   * - ``db``
-     - analyze
-     - Analysis results written to a ``rocprof_compute_<uuid>.db`` SQLite analysis database. Same requirement as ``csv``.
-   * - ``html``
-     - analyze
-     - Standalone Plotly roofline plot(s) (``empirRoof_gpu-<id>...html``), written automatically whenever the workload includes roofline data, independent of ``--output-format``. See :ref:`standalone-roofline`.
+   * - ``report.txt``
+     - The full analysis report, as printed on the terminal.
+   * - ``analysis.db``
+     - SQLite analysis database with all the data in the analysis report.
+   * - ``*.csv``
+     - One CSV file per analysis database view.
+   * - ``1-<workload>/roofline-gpu-<id>.html``
+     - Standalone Plotly roofline plot, written when a single workload includes roofline data. See :ref:`standalone-roofline`.
 
-Select the analyze output format with ``--output-format`` and override the file name with ``--output-name``. See :ref:`analysis-output-format` for details.
+Choose the parent directory of the run folder with ``-d``/``--output-directory`` and its name with
+``-o``/``--output-name``. See :ref:`analysis-output-format` for details.
 
 .. _glance-supported-hardware:
 

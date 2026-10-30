@@ -3,18 +3,13 @@
 
 import argparse
 import copy
-import sys
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional, TextIO
+from typing import Any, Optional
 
 import pandas as pd
 
-from rocprof_compute_analyze.output_location import (
-    InvalidOutputNameError,
-    validate_output_name,
-)
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
@@ -22,7 +17,6 @@ from utils.logger import (
     console_debug,
     console_error,
     console_log,
-    console_warning,
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
@@ -33,7 +27,6 @@ from utils.utils_analysis import (
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
     canonical_config_arch,
-    get_uuid,
     is_only_pc_sampling,
     load_panel_configs,
     validate_roofline_csv,
@@ -72,7 +65,6 @@ class OmniAnalyze_Base:
         self._runs: OrderedDict[str, schema.Workload] = OrderedDict()
         self._arch_configs: dict[str, schema.ArchConfig] = {}
         self.__supported_archs = supported_archs
-        self._output: Optional[TextIO] = None
         self.__socs: Optional[dict[str, OmniSoC_Base]] = None
 
     def get_args(self) -> argparse.Namespace:
@@ -334,23 +326,6 @@ class OmniAnalyze_Base:
             ]):
                 validate_workload(dir_info[0])
 
-        # Ensure analysis output does not overwrite existing files
-        if args.output_name:
-            try:
-                validate_output_name(args.output_name)
-            except InvalidOutputNameError as error:
-                console_error("analysis", str(error))
-
-            path_to_check = args.output_name
-            if args.output_format in ("txt", "db"):
-                path_to_check += f".{args.output_format}"
-
-            if Path(path_to_check).exists():
-                console_error(
-                    f"Analysis output file/folder {path_to_check} already exists. "
-                    "Please choose a different name."
-                )
-
         if profiling_config.get("iteration_multiplexing") is not None:
             console_log(
                 "analysis",
@@ -369,15 +344,6 @@ class OmniAnalyze_Base:
         console_debug("analysis", "prepping to do some analysis")
         console_log("analysis", "deriving rocprofiler-compute metrics...")
         args = self.get_args()
-
-        # initalize output file
-        if args.output_format == "txt":
-            output_filename = args.output_name or f"rocprof_compute_{get_uuid()}"
-            output_filename += ".txt"
-            self._output = open(output_filename, "w+", encoding="utf-8")
-            console_warning("analysis", f"Created file: {output_filename}")
-        elif args.output_format == "stdout":
-            self._output = sys.stdout
 
         # initalize runs
         self._runs = self.initalize_runs()
@@ -402,6 +368,6 @@ class OmniAnalyze_Base:
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
     @abstractmethod
-    def run_analysis(self) -> None:
-        """Run analysis."""
-        console_debug("analysis", "generating analysis")
+    def write_outputs(self, run_folder: Path) -> None:
+        """Write this analyzer's artifacts into run_folder, which already exists."""
+        console_debug("analysis", "writing analysis outputs")

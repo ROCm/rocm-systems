@@ -127,7 +127,7 @@ always follows them:
 Each `metric` is the name of a metric in the memory chart panel (panel 3). Names are
 unique within panel 3. They can repeat in other panels, so look only in panel 3.
 
-In the analysis database (`analyze --output-format db`), each workload's layout file is
+In the analysis database (`analysis.db` in the analyze run folder), each workload's layout file is
 stored unchanged in the `memory_chart_layout_extdata` column of `compute_workload`. It
 is null when the workload's GPU has no layout. Each metric of a workload has a row in
 `compute_metric_definition`. For a layout metric, use the workload's row whose

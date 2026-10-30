@@ -33,15 +33,15 @@ def test_analyze_rocpd(
     db_name = "test"
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
-        "--output-format",
-        "db",
+        "--output-directory",
+        ".",
         "--output-name",
         f"{db_name}",
         "--path",
         workload_dir,
     ])
     assert code == 0
-    assert os.path.isfile(f"{db_name}.db")
+    assert os.path.isfile(f"{db_name}/analysis.db")
 
     # Open the sqlite database and assert the schema
     # Import Kernel from analysis_orm.py
@@ -69,7 +69,7 @@ def test_analyze_rocpd(
     }
 
     def check_cols(table_name, orm_obj):
-        conn = sqlite3.connect(f"{db_name}.db")
+        conn = sqlite3.connect(f"{db_name}/analysis.db")
         cursor = conn.cursor()
         cursor.execute(f"PRAGMA table_info('{table_name}');")
         columns = cursor.fetchall()
@@ -81,7 +81,7 @@ def test_analyze_rocpd(
     for table_name, orm_obj in table_name_map.items():
         check_cols(table_name, orm_obj)
 
-    os.remove(f"{db_name}.db")
+    common.clean_output_dir(config["cleanup"], db_name)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -95,8 +95,8 @@ def test_save_csv(
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
-        "--output-format",
-        "csv",
+        "--output-directory",
+        ".",
         "--output-name",
         analysis_workload_dir,
         "--path",
@@ -114,7 +114,7 @@ def test_save_csv(
         df = pd.read_csv(csv_path)
         assert len(df.index) >= 1, f"Per-view CSV is empty: {csv_path}"
 
-    assert not Path(f"{analysis_workload_dir}.db").exists()
+    assert (csv_dir / "analysis.db").is_file()
 
     common.clean_output_dir(config["cleanup"], analysis_workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)

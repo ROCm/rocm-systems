@@ -36,11 +36,32 @@ def embedded_roofline_model(document: str) -> dict:
     return json.loads(match.group(1))
 
 
+def analyze_into_run_folder(
+    analyze: Callable[[list[str]], int], workload_dir: str, run_folder: Path
+) -> int:
+    """Run analyze on workload_dir with run_folder as its run folder."""
+    return analyze([
+        "analyze",
+        "--path",
+        workload_dir,
+        "--output-directory",
+        str(run_folder.parent),
+        "--output-name",
+        run_folder.name,
+    ])
+
+
+def roofline_html_path(run_folder: Path, workload_dir: str) -> Path:
+    """Return where analyze writes the roofline HTML of the single -p workload."""
+    return run_folder / f"1-{Path(workload_dir).name}" / "roofline-gpu-0.html"
+
+
 # Roofline HTML generation
 
 
 def test_analyze_generates_roofline_html(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
 ) -> None:
     """
     Analyze generates roofline HTML from existing workload data.
@@ -50,17 +71,17 @@ def test_analyze_generates_roofline_html(
     try:
         assert (Path(workload_dir) / "roofline.csv").exists()
 
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-        ])
+        run_folder = tmp_path / "run"
+        code = analyze_into_run_folder(
+            binary_handler_analyze_rocprof_compute, workload_dir, run_folder
+        )
         assert code == 0
 
-        html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-        assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
+        html_path = roofline_html_path(run_folder, workload_dir)
+        assert html_path.is_file()
+        assert list(Path(workload_dir).glob("*.html")) == []
 
-        html_text = html_files[0].read_text(encoding="utf-8")
+        html_text = html_path.read_text(encoding="utf-8")
         assert 'id="roofline-precision-btn"' in html_text
         model = embedded_roofline_model(html_text)
         assert "FP32" in model["precisions"]
@@ -94,31 +115,29 @@ def test_analyze_missing_roofline_csv_graceful(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_analyze_roofline_idempotent(
+def test_analyze_roofline_rerun_writes_a_new_run_folder(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
 ) -> None:
     """
-    Running analyze twice on the same profiling output should produce
-    consistent results without errors.
+    Running analyze twice on the same profiling output gives two run folders
+    with the same roofline HTML.
     """
     workload_dir = integration_common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
 
-    analyze_args = [
-        "analyze",
-        "--path",
-        workload_dir,
-    ]
+    html_documents = []
+    for run_name in ("first", "second"):
+        run_folder = tmp_path / run_name
+        code = analyze_into_run_folder(
+            binary_handler_analyze_rocprof_compute, workload_dir, run_folder
+        )
+        assert code == 0
+        html_path = roofline_html_path(run_folder, workload_dir)
+        html_documents.append(embedded_roofline_model(html_path.read_text("utf-8")))
 
-    code1 = binary_handler_analyze_rocprof_compute(analyze_args)
-    assert code1 == 0
-
-    code2 = binary_handler_analyze_rocprof_compute(analyze_args)
-    assert code2 == 0
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
+    assert html_documents[0] == html_documents[1]
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -159,6 +178,7 @@ DATATYPE_LEGEND_CASES = {
 def test_analyze_roofline_datatype_html_legend(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
     dtype: str,
+    tmp_path: Path,
 ) -> None:
     """The roofline HTML embeds the expected VALU/MFMA legend for each datatype.
 
@@ -169,14 +189,13 @@ def test_analyze_roofline_datatype_html_legend(
 
     assert (Path(workload_dir) / "roofline.csv").exists()
 
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
+    run_folder = tmp_path / "run"
+    code = analyze_into_run_folder(
+        binary_handler_analyze_rocprof_compute, workload_dir, run_folder
+    )
     assert code == 0
 
-    html_path = Path(workload_dir) / "empirRoof_gpu-0.html"
+    html_path = roofline_html_path(run_folder, workload_dir)
     assert html_path.is_file(), "Analyze should generate the roofline HTML"
 
     html_text = html_path.read_text(encoding="utf-8")

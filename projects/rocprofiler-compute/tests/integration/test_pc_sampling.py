@@ -152,6 +152,7 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
+    tmp_path,
     sampling_method,
 ):
     """Assert each process keeps its own code-object ID for the same kernel.
@@ -192,23 +193,20 @@ def test_multiprocess_pc_sampling_distinct_code_objects(
     file_dict = integration_common.check_non_pmc_files(workload_dir, num_devices, 1)
     _assert_pc_sampling_files(file_dict, expected_count=2)
 
-    # --output-name forbids path separators, so the db lands in the cwd; run
-    # from the workload dir to keep it there for clean_output_dir to remove.
     workload_path = Path(workload_dir).resolve()
-    database_name = f"cg_code_objects_{sampling_method}"
-    monkeypatch.chdir(workload_path)
+    run_folder = tmp_path / f"cg_code_objects_{sampling_method}"
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
         str(workload_path),
-        "--output-format",
-        "db",
+        "--output-directory",
+        str(tmp_path),
         "--output-name",
-        database_name,
+        run_folder.name,
     ])
     assert code == 0
 
-    database_path = workload_path / f"{database_name}.db"
+    database_path = run_folder / "analysis.db"
     assert database_path.is_file()
     connection = sqlite3.connect(str(database_path))
     try:
