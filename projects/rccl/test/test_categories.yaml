@@ -114,6 +114,7 @@ test_categories:
       - "ProxyTraceTestFixture.*"
       - "CollTraceUtilsTest.*"
       - "GinPluginInitFail.*"
+      - "CpuAffinity.*"
     exclude_windows:
       - "*"
     labels:
