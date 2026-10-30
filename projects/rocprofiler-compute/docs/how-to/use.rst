@@ -63,7 +63,9 @@ Common filters to customize data collection include:
    analyze mode, selects which already-profiled dispatches to report on.
 
 ``-b``, ``--block``
-   Enables collection metrics for only the specified analysis report blocks.
+   In profile mode, collects metrics for only the specified analysis report
+   blocks. In analyze mode, also prints the specified blocks on the terminal;
+   ``report.txt`` always holds every profiled block.
 
 See :ref:`Filtering <filtering>` for an in-depth walkthrough.
 

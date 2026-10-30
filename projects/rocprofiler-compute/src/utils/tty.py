@@ -29,6 +29,7 @@ from memory_chart.units import panel_units
 from utils import parser, schema
 from utils.logger import console_log, console_warning
 from utils.metrics.aggregation import calc_pct_of_peak
+from utils.terminal_selection import TerminalSelection
 from utils.utils_analysis import (
     ARGS_DISPLAY_MAX_VARIANTS,
     NS_TO_MS,
@@ -198,7 +199,7 @@ def has_time_data(df: pd.DataFrame) -> bool:
     )
 
 
-def _print_roofline_html_path(runs: dict[str, Any], output: Optional[TextIO]) -> None:
+def print_roofline_html_path(runs: dict[str, Any], output: Optional[TextIO]) -> None:
     """Print where analyze saved the interactive roofline HTML, if it did."""
     for workload in runs.values():
         html_path = getattr(workload, "roofline_html_path", None)
@@ -219,11 +220,7 @@ def is_roofline_shown(
         for table_type in data_source
     )
 
-    if not has_roofline_style or (
-        args.filter_metrics
-        and "4" not in args.filter_metrics
-        and "roof" not in args.filter_metrics
-    ):
+    if not has_roofline_style:
         return False
 
     # Check if any run has valid roofline data (already validated in analysis_base.py)
@@ -238,7 +235,7 @@ def is_roofline_shown(
 
     print(f"\n{'-' * 80}", file=output)
     print("4. Roofline", file=output)
-    _print_roofline_html_path(runs, output)
+    print_roofline_html_path(runs, output)
 
     # Display roofline metrics for each run
     for run_path, workload in runs.items():
@@ -937,15 +934,34 @@ def resolve_hidden_columns(args: argparse.Namespace) -> List[str]:
     ]
 
 
+def select_terminal_rows(
+    table_df: pd.DataFrame,
+    terminal_selection: TerminalSelection,
+    panel_id: int,
+    table_id: int,
+) -> pd.DataFrame:
+    """Keep the metric rows of table_df, indexed by Metric_ID, that the
+    terminal selection prints."""
+    return table_df.loc[
+        [
+            terminal_selection.shows_metric(panel_id, table_id, str(metric_id))
+            for metric_id in table_df.index
+        ]
+    ]
+
+
 def show_all(
     args: argparse.Namespace,
     runs: dict[str, Any],
     arch_configs: schema.ArchConfig,
     output: Optional[TextIO],
     profiling_config: dict[str, Any],
+    *,
+    terminal_selection: Optional[TerminalSelection] = None,
 ) -> None:
     """
-    Show all panels with their data in plain text mode.
+    Show all panels with their data in plain text mode. With terminal_selection,
+    only the panels, tables and metric rows it selects are shown.
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
 
@@ -968,15 +984,15 @@ def show_all(
     )
     roofline_warning_shown = False
 
-    # True if roofline (block 4) is in the active filter
-    # or no filter is applied
-    roofline_in_filter = (
-        any(str(m).split(".")[0] == "4" for m in args.filter_metrics)
-        if args.filter_metrics
-        else (not filter_panel_ids or 400 in filter_panel_ids)
-    )
+    # True if roofline (block 4) was profiled or no profile filter is applied
+    roofline_in_filter = not filter_panel_ids or 400 in filter_panel_ids
 
     for panel_id, panel in arch_configs.panel_configs.items():
+        if terminal_selection is not None and not terminal_selection.shows_panel(
+            panel_id
+        ):
+            continue
+
         # Handle roofline panel (400) with custom display logic
         # Skip if --view table is set; tables 401/402 will be rendered as normal tables
         if panel_id == 400 and not _tty_view_is_table(args):
@@ -989,10 +1005,15 @@ def show_all(
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
                 # Skip tables that were filtered out at build_dfs time
-                # (e.g. analyze-mode -b dropped this block). In baseline mode
+                # (e.g. profile-mode -b dropped this block). In baseline mode
                 # require the table in every run so per-run dfs[id] lookups
                 # downstream stay safe.
                 if not all(table_config["id"] in run.dfs for run in runs.values()):
+                    continue
+                if (
+                    terminal_selection is not None
+                    and not terminal_selection.shows_table(panel_id, table_config["id"])
+                ):
                     continue
 
                 # Emit warnings for roofline tables (401, 402)
@@ -1006,12 +1027,10 @@ def show_all(
                         roofline_warning_shown = True
 
                 # Block-filter logic:
-                # - If analysis used --filter-metrics, ignore profiling block filters
                 # - If profiling had block filters, only show selected tables/panels
                 # - Always show panels with id <= 100
                 if (
-                    not args.filter_metrics
-                    and filter_panel_ids
+                    filter_panel_ids
                     and table_config["id"] not in filter_panel_ids
                     and panel_id not in filter_panel_ids
                     and panel_id > 100
@@ -1063,6 +1082,11 @@ def show_all(
                     comparable_columns,
                     hidden_cols,
                 )
+
+                if terminal_selection is not None and table_type == "metric_table":
+                    processed_df = select_terminal_rows(
+                        processed_df, terminal_selection, panel_id, table_config["id"]
+                    )
 
                 if processed_df.empty:
                     continue
@@ -1130,7 +1154,7 @@ def show_all(
                 print(f"\n{'-' * 80}", file=output)
                 print(f"{panel_id // 100}. {panel['title']}", file=output)
                 if panel_id == 400:
-                    _print_roofline_html_path(runs, output)
+                    print_roofline_html_path(runs, output)
                 print(panel_content, file=output)
 
 

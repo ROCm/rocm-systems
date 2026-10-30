@@ -766,6 +766,24 @@ def test_handle_analyze_args_warns_on_deprecated_output_format(
     assert mock_warning.called == expect_warning
 
 
+@pytest.mark.parametrize(
+    "block_args",
+    [{"filter_blocks": ["2"]}, {"mode": "analyze", "filter_metrics": ["2"]}],
+    ids=["profile", "analyze"],
+)
+def test_list_option_with_block_errors(monkeypatch, block_args):
+    """-b cannot be combined with --list-metrics in either mode."""
+    mock_error = common.patch_console(monkeypatch, "rocprof_compute_base", "error")[
+        "error"
+    ]
+    args = _make_rpc_args(**block_args)
+    args.list_metrics = "gfx942"
+
+    _make_rpc_with_args(args)._validate_list_option_exclusions()
+
+    mock_error.assert_called_once_with("Cannot use --list-metrics with --blocks")
+
+
 # ---------------------------------------------------------------------------
 # pre_processing(): memory-bandwidth configuration persistence
 # ---------------------------------------------------------------------------

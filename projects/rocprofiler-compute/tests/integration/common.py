@@ -24,7 +24,7 @@ import pytest
 import yaml
 from common import SUPPORTED_ARCHS
 
-from utils.utils_common import canonical_config_arch
+from utils.utils_common import canonical_config_arch, strip_ansi
 
 # Runtime config options
 config = {}
@@ -569,3 +569,24 @@ def is_gfx1250_soc():
 
 
 # --
+# Analyze run folder helpers
+# --
+
+RUN_FOLDER_PREFIX = "Run folder: "
+
+
+def last_output_line(captured_output):
+    """Return the last non-empty line printed, without colour codes."""
+    lines = strip_ansi(captured_output).strip().splitlines()
+    return lines[-1].strip()
+
+
+def read_report(captured_output):
+    """Return the report.txt of the analyze run whose output was captured.
+
+    The terminal shows panels only up to speed-of-light; later panels are in
+    report.txt inside the run folder named on the last line printed.
+    """
+    last_line = last_output_line(captured_output)
+    run_folder = Path(last_line.split(RUN_FOLDER_PREFIX, maxsplit=1)[1])
+    return (run_folder / "report.txt").read_text(encoding="utf-8")

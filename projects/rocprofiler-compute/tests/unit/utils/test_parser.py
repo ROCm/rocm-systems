@@ -165,30 +165,16 @@ def _two_block_config() -> schema.ArchConfig:
 class TestBuildDfs:
     def test_no_filter_builds_all_metrics(self):
         ac = _two_block_config()
-        build_dfs(ac, filter_metrics=None, sys_info=_sys_info(), profiling_config={})
+        build_dfs(ac, sys_info=_sys_info(), profiling_config={})
 
         assert set(ac.dfs.keys()) == {1, 101, 201, 1101}
         assert len(ac.dfs[201]) == 2
         assert len(ac.dfs[1101]) == 1
 
-    def test_filter_metrics_overrides_profiling_filter_blocks(self):
-        ac = _two_block_config()
-        build_dfs(
-            ac,
-            filter_metrics=["2"],
-            sys_info=_sys_info(),
-            profiling_config={"filter_blocks": ["11"]},  # ignored
-        )
-
-        # filter_metrics wins -> block 200 present, block 1100 absent.
-        assert set(ac.dfs.keys()) == {1, 101, 201}
-        assert len(ac.dfs[201]) == 2
-
     def test_profiling_filter_blocks_keeps_only_matching_block(self):
         ac = _two_block_config()
         build_dfs(
             ac,
-            filter_metrics=None,
             sys_info=_sys_info(),
             profiling_config={"filter_blocks": ["11"]},
         )
@@ -200,7 +186,6 @@ class TestBuildDfs:
         ac = _two_block_config()
         build_dfs(
             ac,
-            filter_metrics=None,
             sys_info=_sys_info(),
             profiling_config={"filter_blocks": ["99"]},  # excludes blocks 2 and 11
         )
@@ -217,31 +202,12 @@ class TestBuildDfs:
         ac = _make_arch_config([
             (1800, _metric_panel(1800, 1801, metrics=metrics)),
         ])
-        build_dfs(ac, filter_metrics=None, sys_info=_sys_info(), profiling_config={})
+        build_dfs(ac, sys_info=_sys_info(), profiling_config={})
 
         df = ac.dfs[1801]
         # Three expanded rows: Channel_0, Channel_1, Channel_2
         assert len(df) == 3
         assert set(df["Metric"]) == {"Channel_0", "Channel_1", "Channel_2"}
-
-    def test_metric_level_filter_drops_siblings_keeps_headers(self):
-        ac = _two_block_config()
-        build_dfs(
-            ac, filter_metrics=["2.1.0"], sys_info=_sys_info(), profiling_config={}
-        )
-
-        df = ac.dfs[201]
-        # Headers preserved
-        assert list(df.columns) == ["Metric", "Avg"]
-        # Only the matching metric remains
-        assert list(df["Metric"]) == ["M1"]
-
-    def test_whole_block_filter_keeps_every_metric_in_block(self):
-        ac = _two_block_config()
-        build_dfs(ac, filter_metrics=["2"], sys_info=_sys_info(), profiling_config={})
-
-        df = ac.dfs[201]
-        assert list(df["Metric"]) == ["M1", "M2"]
 
     def test_profile_side_alias_resolves_to_panel_id(self, monkeypatch):
         monkeypatch.setattr(
@@ -251,65 +217,27 @@ class TestBuildDfs:
         ac = _two_block_config()
         build_dfs(
             ac,
-            filter_metrics=None,
             sys_info=_sys_info(),
             profiling_config={"filter_blocks": ["lds"]},
             arch="gfx942",
         )
         assert set(ac.dfs.keys()) == {1, 101, 1101}
 
-    def test_analyze_side_alias_resolves_to_panel_id(self, monkeypatch):
-        monkeypatch.setattr(
-            "utils.utils_common.get_arch_alias_to_panel_id",
-            lambda arch: {"lds": "11"},
-        )
-        ac = _two_block_config()
-        build_dfs(
-            ac,
-            filter_metrics=["lds"],
-            sys_info=_sys_info(),
-            profiling_config={"filter_blocks": ["2"]},  # ignored
-            arch="gfx942",
-        )
-        assert set(ac.dfs.keys()) == {1, 101, 1101}
-
-    def test_analyze_mixed_numeric_and_alias_filter(self, monkeypatch):
-        monkeypatch.setattr(
-            "utils.utils_common.get_arch_alias_to_panel_id",
-            lambda arch: {"lds": "11"},
-        )
-        ac = _two_block_config()
-        build_dfs(
-            ac,
-            filter_metrics=["2.1.0", "lds"],
-            sys_info=_sys_info(),
-            profiling_config={},
-            arch="gfx942",
-        )
-        # Numeric token keeps only M1 in block 2; alias keeps block 11.
-        assert set(ac.dfs.keys()) == {1, 101, 201, 1101}
-        assert list(ac.dfs[201]["Metric"]) == ["M1"]
-        assert list(ac.dfs[1101]["Metric"]) == ["X1"]
-
     def test_expressions_only_for_built_metrics(self):
         ac = _make_arch_config([
+            (200, _metric_panel(200, 201, metrics={"Kept": {"value": "AVG(KEPT)"}})),
             (
-                200,
-                _metric_panel(
-                    200,
-                    201,
-                    metrics={
-                        "Kept": {"value": "AVG(COUNTER_KEPT)"},
-                        "Dropped": {"value": "AVG(COUNTER_DROPPED)"},
-                    },
-                ),
+                1100,
+                _metric_panel(1100, 1101, metrics={"Dropped": {"value": "AVG(DROP)"}}),
             ),
         ])
         build_dfs(
-            ac, filter_metrics=["2.1.0"], sys_info=_sys_info(), profiling_config={}
+            ac,
+            sys_info=_sys_info(),
+            profiling_config={"filter_blocks": ["2"]},
         )
 
-        assert ac.dfs_expressions[201] == ["AVG(COUNTER_KEPT)"]
+        assert ac.dfs_expressions == {201: ["AVG(KEPT)"]}
 
     @pytest.mark.parametrize(
         "profiling_config,expected_table_ids",
@@ -331,7 +259,6 @@ class TestBuildDfs:
         ])
         build_dfs(
             ac,
-            filter_metrics=None,
             sys_info=_sys_info(),
             profiling_config=profiling_config,
         )
@@ -345,9 +272,8 @@ class TestBuildDfs:
         ])
         build_dfs(
             ac,
-            filter_metrics=["3"],
             sys_info=_sys_info(),
-            profiling_config={"membw_analysis": True},
+            profiling_config={"membw_analysis": True, "filter_blocks": ["3"]},
         )
 
         assert 301 in ac.dfs
@@ -360,9 +286,8 @@ class TestBuildDfs:
         ])
         build_dfs(
             ac,
-            filter_metrics=["2"],
             sys_info=_sys_info(),
-            profiling_config={"membw_analysis": True},
+            profiling_config={"membw_analysis": True, "filter_blocks": ["2"]},
         )
 
         assert 201 in ac.dfs
@@ -379,9 +304,8 @@ class TestBuildDfs:
         ])
         build_dfs(
             ac,
-            filter_metrics=["memchart"],
             sys_info=_sys_info(),
-            profiling_config={"membw_analysis": True},
+            profiling_config={"membw_analysis": True, "filter_blocks": ["memchart"]},
             arch="gfx950",
         )
 

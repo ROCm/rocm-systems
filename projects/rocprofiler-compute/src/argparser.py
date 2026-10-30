@@ -801,7 +801,10 @@ Examples:
         metavar="",
         nargs="+",
         type=block_token_or_alias,
-        help="\t\tSpecify metric id(s) from --list-metrics for filtering.",
+        help=(
+            "\t\tAlso print the given metric id(s) from --list-metrics or block\n"
+            "\t\talias(es) on the terminal. report.txt always has every block."
+        ),
     )
     analyze_group.add_argument(
         "--gpu-id",

@@ -477,9 +477,10 @@ def test_pc_sampling_with_sol_block(
 
     captured = capsys.readouterr()
     assert "2.1 System Speed-of-Light" in captured.out
-    assert "21. PC Sampling" in captured.out
+    report = integration_common.read_report(captured.out)
+    assert "21. PC Sampling" in report
     # The "instruction" column header only renders when the table has rows.
-    assert "instruction" in captured.out
-    assert "instruction_type" in captured.out
+    assert "instruction" in report
+    assert "instruction_type" in report
 
     common.clean_output_dir(config["cleanup"], workload_dir)
