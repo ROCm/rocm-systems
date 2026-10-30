@@ -753,6 +753,11 @@ holds:
   GIOP/s and KB per Wave are stored as Bytes/s, FLOP/s, IOP/s and Bytes per Wave. The roofline
   table ``compute_kernel_roofline_data`` keeps GFLOP/s and FLOPs/Byte. ``--decimal`` and
   ``--time-unit`` change the terminal output only, not the database.
+* The roofline ceilings of each workload are in the view ``compute_roofline_ceiling_view``, also
+  written as ``roofline_ceiling.csv``. It has one row per memory level for bandwidth, and one row
+  per data type and pipe (VALU, MFMA or WMMA) for compute. Each value is in Bytes/s, FLOP/s or
+  IOP/s, taken from the device-0 row of ``roofline.csv``. A workload with no valid
+  ``roofline.csv`` has no ceiling rows.
 * One CSV file per view of the :ref:`analysis database schema <analysis-database>`.
 * For a PC-sampled workload, each kernel's disassembly and source and the samples per source
   line in ``per_kernel_pc_sampling/``; see :ref:`pc-sampling-per-kernel-csv` and

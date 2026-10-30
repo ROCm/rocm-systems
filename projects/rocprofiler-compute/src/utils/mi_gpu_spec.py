@@ -488,6 +488,12 @@ class MIGPUSpecs:
         )
 
     @classmethod
+    def get_roofline_mixed_data_types(cls, gpu_arch: str) -> Tuple[str, ...]:
+        """Return the mixed-precision matrix data types measured on gpu_arch, such as
+        F6F4. The roofline does not plot them, but the benchmark stores them."""
+        return cls._roofline_list(gpu_arch, "mixed")
+
+    @classmethod
     def get_roofline_columns(cls, gpu_arch: str) -> FrozenSet[str]:
         """Return the roofline.csv columns measured on gpu_arch; none for an arch
         without a roofline benchmark, such as gfx908."""

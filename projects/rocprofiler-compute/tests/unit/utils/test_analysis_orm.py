@@ -25,6 +25,7 @@ from utils.analysis_orm import (
     PCSampleStallReason,
     PCSampleStallReasonLookup,
     PCSampleState,
+    RooflineCeiling,
     SourceFile,
     SourceLine,
     Workload,
@@ -1189,3 +1190,155 @@ def test_pc_sample_state_needs_exactly_one_owner(db_session, owner_count):
 
     with pytest.raises(IntegrityError):
         db_session.commit()
+
+
+# =============================================================================
+# roofline_ceiling table and view
+# =============================================================================
+
+
+def test_roofline_ceiling_view_names_each_roof_of_its_workload(db_session):
+    """The view carries the workload name and one row per roof, in base units."""
+    workload = Workload(name="w", sub_name="s")
+    db_session.add_all([
+        RooflineCeiling(
+            workload=workload,
+            kind="bandwidth",
+            memory_level="HBM",
+            unit="Bytes/s",
+            value=5.3e12,
+        ),
+        RooflineCeiling(
+            workload=workload,
+            kind="compute",
+            data_type="FP16",
+            pipe="MFMA",
+            unit="FLOP/s",
+            value=5e14,
+        ),
+    ])
+    Database.create_views()
+    db_session.commit()
+
+    rows = db_session.execute(
+        text(
+            "SELECT workload_name, kind, memory_level, data_type, pipe, unit, value "
+            "FROM compute_roofline_ceiling_view ORDER BY kind"
+        )
+    ).fetchall()
+    assert rows == [
+        ("w", "bandwidth", "HBM", None, None, "Bytes/s", 5.3e12),
+        ("w", "compute", None, "FP16", "MFMA", "FLOP/s", 5e14),
+    ]
+
+
+def test_roofline_ceiling_view_keeps_workloads_apart(db_session):
+    """Each workload's ceilings stay under its own workload_id."""
+    first = Workload(name="w", sub_name="a")
+    second = Workload(name="w", sub_name="b")
+    db_session.add_all([
+        RooflineCeiling(
+            workload=first,
+            kind="bandwidth",
+            memory_level="L2",
+            unit="Bytes/s",
+            value=1.0,
+        ),
+        RooflineCeiling(
+            workload=second,
+            kind="bandwidth",
+            memory_level="L2",
+            unit="Bytes/s",
+            value=2.0,
+        ),
+    ])
+    Database.create_views()
+    db_session.commit()
+
+    rows = db_session.execute(
+        text(
+            "SELECT workload_id, value FROM compute_roofline_ceiling_view "
+            "ORDER BY workload_id"
+        )
+    ).fetchall()
+    assert rows == [(first.workload_id, 1.0), (second.workload_id, 2.0)]
+
+
+@pytest.mark.parametrize(
+    ("kind", "memory_level", "data_type", "pipe"),
+    [
+        ("bandwidth", None, None, None),
+        ("bandwidth", "HBM", "FP16", None),
+        ("compute", None, "FP16", None),
+        ("compute", "HBM", "FP16", "MFMA"),
+        ("latency", "HBM", None, None),
+    ],
+    ids=[
+        "bandwidth-without-level",
+        "bandwidth-with-data-type",
+        "compute-without-pipe",
+        "compute-with-level",
+        "unknown-kind",
+    ],
+)
+def test_roofline_ceiling_rejects_a_roof_with_the_wrong_parts(
+    db_session, kind, memory_level, data_type, pipe
+):
+    """A bandwidth roof names a memory level only; a compute roof names a data type
+    and a pipe only."""
+    db_session.add(
+        RooflineCeiling(
+            workload=Workload(name="w", sub_name="s"),
+            kind=kind,
+            memory_level=memory_level,
+            data_type=data_type,
+            pipe=pipe,
+            unit="FLOP/s",
+            value=1.0,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (
+            {"kind": "bandwidth", "memory_level": "HBM"},
+            {"kind": "bandwidth", "memory_level": "HBM"},
+        ),
+        (
+            {"kind": "compute", "data_type": "FP32", "pipe": "VALU"},
+            {"kind": "compute", "data_type": "FP32", "pipe": "VALU"},
+        ),
+    ],
+    ids=["bandwidth-level", "compute-data-type-and-pipe"],
+)
+def test_duplicate_roof_under_one_workload_rejected(db_session, first, second):
+    """One workload has one ceiling per memory level, and per data type and pipe."""
+    workload = Workload(name="w", sub_name="s")
+    db_session.add_all([
+        RooflineCeiling(workload=workload, unit="FLOP/s", value=1.0, **first),
+        RooflineCeiling(workload=workload, unit="FLOP/s", value=2.0, **second),
+    ])
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_same_roof_under_two_workloads_allowed(db_session):
+    """Two workloads each store their own ceiling for the same roof."""
+    db_session.add_all([
+        RooflineCeiling(
+            workload=Workload(name="w", sub_name=sub_name),
+            kind="compute",
+            data_type="FP32",
+            pipe="VALU",
+            unit="FLOP/s",
+            value=1.0,
+        )
+        for sub_name in ("a", "b")
+    ])
+    db_session.commit()
+
+    assert db_session.query(RooflineCeiling).count() == 2

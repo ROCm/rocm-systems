@@ -19,7 +19,7 @@ from utils import file_io, parser, schema, tty
 from utils.filter_validation import validate_kernel_filter_ids
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.roofline_calc import calc_ai_analyze
+from utils.roofline_calc import ROOFLINE_DEVICE_ID, calc_ai_analyze
 from utils.terminal_selection import TerminalSelection, build_terminal_selection
 from utils.utils_analysis import (
     CallTreeNode,
@@ -31,9 +31,6 @@ from utils.utils_analysis import (
     rollup_node_stats,
 )
 from utils.utils_common import validate_roofline_csv
-
-# Analyze plots the roofline of the first GPU only.
-ROOFLINE_DEVICE_ID = 0
 
 # Maps each ML API trace backend to its analyze CLI attributes and display label.
 _ML_API_ANALYSIS_CLI_OPTIONS = {

@@ -18,6 +18,7 @@ from utils.roofline_calc import (
     calc_ai_analyze,
     calc_ceilings,
     construct_roof,
+    device_ceilings,
     machine_ceilings,
     roofline_mem_levels,
     sanitize_ai_value,
@@ -124,6 +125,16 @@ def run_calc_ai_analyze_with_values(
         pmc_df=pmc_df,
         arch_config=arch_config,
     )
+
+
+def ceilings_by_roof(
+    ceilings: List,
+) -> Dict[Tuple[str, object, object, object], Tuple[str, float]]:
+    """Index ceilings by (kind, memory level, data type, pipe) for comparison."""
+    return {
+        (c.kind, c.memory_level, c.data_type, c.pipe): (c.unit, c.value)
+        for c in ceilings
+    }
 
 
 def test_calc_ai_analyze_replaces_inf_with_zero(
@@ -928,3 +939,110 @@ def test_calc_ceilings_uses_xmax_default_for_compute_roofs() -> None:
 
     assert result["valu"][0][1] == XMAX_DEFAULT
     assert result["matrix_ops"][0][1] == XMAX_DEFAULT
+
+
+# -------------------------------------------------------------------------------------
+#                     device_ceilings: ceilings stored in the database
+# -------------------------------------------------------------------------------------
+def test_device_ceilings_stores_every_positive_mean_of_device_zero(
+    tmp_path: Path,
+) -> None:
+    """Each positive device-0 mean is one ceiling in base units, MALL included;
+    the device-1 row is not read."""
+    csv_path = tmp_path / "roofline.csv"
+    write_roofline_csv(
+        csv_path,
+        "device,HBMBw,MALLBw,L2Bw,L1Bw,LDSBw,FP32Flops,MFMAF16Flops,MFMAI8Ops",
+        [
+            "0,5300,9000,10000,20000,30000,81000,500000,700000",
+            "1,6300,9100,20100,21000,31000,91000,600000,800000",
+        ],
+    )
+
+    assert ceilings_by_roof(device_ceilings(csv_path, "gfx942")) == {
+        ("bandwidth", "HBM", None, None): ("Bytes/s", 5.3e12),
+        ("bandwidth", "MALL", None, None): ("Bytes/s", 9e12),
+        ("bandwidth", "L2", None, None): ("Bytes/s", 1e13),
+        ("bandwidth", "L1", None, None): ("Bytes/s", 2e13),
+        ("bandwidth", "LDS", None, None): ("Bytes/s", 3e13),
+        ("compute", None, "FP32", "VALU"): ("FLOP/s", 8.1e13),
+        ("compute", None, "FP16", "MFMA"): ("FLOP/s", 5e14),
+        ("compute", None, "I8", "MFMA"): ("IOP/s", 7e14),
+    }
+
+
+def test_device_ceilings_skips_non_positive_and_invalid_means(
+    tmp_path: Path,
+) -> None:
+    """Zero, negative, N/A, nan and inf means are not ceilings, and neither are the
+    Low and High bounds of a mean."""
+    csv_path = tmp_path / "roofline.csv"
+    write_roofline_csv(
+        csv_path,
+        "device,HBMBw,HBMBwLow,HBMBwHigh,L2Bw,L1Bw,FP32Flops,MFMAF16Flops",
+        ["0,0,4000,4100,10000,-1,nan,N/A"],
+    )
+
+    assert ceilings_by_roof(device_ceilings(csv_path, "gfx942")) == {
+        ("bandwidth", "L2", None, None): ("Bytes/s", 1e13),
+    }
+
+
+def test_device_ceilings_ignores_roofs_the_arch_does_not_measure(
+    tmp_path: Path,
+) -> None:
+    """A column is a ceiling only when the arch's roofline benchmark measures it."""
+    csv_path = tmp_path / "roofline.csv"
+    write_roofline_csv(csv_path, "device,MALLBw,L2Bw", ["0,9000,10000"])
+
+    assert ceilings_by_roof(device_ceilings(csv_path, "gfx90a")) == {
+        ("bandwidth", "L2", None, None): ("Bytes/s", 1e13),
+    }
+
+
+def test_device_ceilings_names_wmma_pipe_and_mixed_precision_types(
+    tmp_path: Path,
+) -> None:
+    """WMMA ceilings carry the WMMA pipe; mixed-precision types such as F6F4 keep
+    their roofline.csv name and are stored too."""
+    csv_path = tmp_path / "roofline.csv"
+    write_roofline_csv(
+        csv_path,
+        "device,L0Bw,WMMAF16Flops,WMMAF6F4Flops",
+        ["0,8000,300000,250000"],
+    )
+
+    assert ceilings_by_roof(device_ceilings(csv_path, "gfx1250")) == {
+        ("bandwidth", "L0", None, None): ("Bytes/s", 8e12),
+        ("compute", None, "FP16", "WMMA"): ("FLOP/s", 3e14),
+        ("compute", None, "F6F4", "WMMA"): ("FLOP/s", 2.5e14),
+    }
+
+
+def test_device_ceilings_without_device_zero_raises(tmp_path: Path) -> None:
+    """A roofline.csv with no device-0 row has no ceilings to store."""
+    csv_path = tmp_path / "roofline.csv"
+    write_roofline_csv(csv_path, "device,HBMBw", ["1,5300"])
+
+    with pytest.raises(ValueError, match="device id 0 occurs 0 times"):
+        device_ceilings(csv_path, "gfx942")
+
+
+def test_device_ceilings_reads_the_mi200_fixture() -> None:
+    """The MI200 mem_levels fixture gives its device-0 row, with the MI200 mean
+    bandwidths and compute rates."""
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "workloads/mem_levels_HBM/MI200/roofline.csv"
+    )
+
+    ceilings = ceilings_by_roof(device_ceilings(fixture, "gfx90a"))
+
+    assert len(ceilings) == 11
+    unit, hbm = ceilings[("bandwidth", "HBM", None, None)]
+    assert unit == "Bytes/s"
+    assert hbm == pytest.approx(1388.7961e9)
+    assert ceilings[("compute", None, "FP32", "VALU")] == (
+        "FLOP/s",
+        pytest.approx(20948.875e9),
+    )

@@ -12,6 +12,7 @@ import pandas as pd
 
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning
+from utils.metrics.base_units import SCALED_UNITS
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.mi_gpu_spec import mi_gpu_specs, roofline_column
 from utils.specs import MachineSpecs
@@ -20,6 +21,9 @@ from utils.utils_common import _workload_base_dir
 # Log-axis extent for ceiling math.
 XMIN = 0.01
 XMAX_DEFAULT = 1000.0
+
+# The roofline.csv device that Analyze plots, and whose ceilings the database stores.
+ROOFLINE_DEVICE_ID = 0
 
 CACHE_LEVELS = ["ai_l0", "ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
 
@@ -729,3 +733,98 @@ def _device_values(
         if sanitized > 0:
             values.append(sanitized)
     return values
+
+
+# -------------------------------------------------------------------------------------
+#                       Ceilings stored in the analysis database
+# -------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class CeilingColumn:
+    """The roof a roofline.csv benchmark mean column measures."""
+
+    kind: str  # "bandwidth" or "compute"
+    memory_level: Optional[str]  # bandwidth only, e.g. "HBM"
+    data_type: Optional[str]  # compute only, e.g. "FP16"
+    pipe: Optional[str]  # compute only: "VALU", "MFMA" or "WMMA"
+    config_unit: str  # unit of the benchmark mean, a key of SCALED_UNITS
+
+
+@dataclass(frozen=True)
+class Ceiling:
+    """One roofline ceiling of a workload, in the base unit the database stores."""
+
+    kind: str
+    memory_level: Optional[str]
+    data_type: Optional[str]
+    pipe: Optional[str]
+    unit: str
+    value: float
+
+
+def _ceiling_columns(gpu_arch: str) -> dict[str, CeilingColumn]:
+    """Map each roofline.csv benchmark mean column of gpu_arch to the roof it measures.
+
+    Low and High bounds are not means, so no column of theirs gets an entry.
+    """
+    columns: dict[str, CeilingColumn] = {}
+    for level in mi_gpu_specs.get_roofline_bandwidth(gpu_arch):
+        columns[roofline_column(level, "bandwidth")] = CeilingColumn(
+            kind="bandwidth",
+            memory_level=level,
+            data_type=None,
+            pipe=None,
+            config_unit="GB/s",
+        )
+
+    matrix_type = mi_gpu_specs.get_roofline_matrix_type(gpu_arch)
+    compute_pipes: list[tuple[str, str]] = []  # (data type, pipe)
+    for data_type, valu, matrix in mi_gpu_specs.get_roofline_data_types(gpu_arch):
+        if valu:
+            compute_pipes.append((data_type, "VALU"))
+        if matrix:
+            compute_pipes.append((data_type, matrix_type))
+    compute_pipes.extend(
+        (data_type, matrix_type)
+        for data_type in mi_gpu_specs.get_roofline_mixed_data_types(gpu_arch)
+    )
+    for data_type, pipe in compute_pipes:
+        column = roofline_column(data_type, "valu" if pipe == "VALU" else pipe)
+        columns[column] = CeilingColumn(
+            kind="compute",
+            memory_level=None,
+            data_type=data_type,
+            pipe=pipe,
+            # Integer ops are measured in GOPS, floating-point ops in GFLOPS.
+            config_unit="GIOP/s" if column.endswith("Ops") else "GFLOP/s",
+        )
+    return columns
+
+
+def device_ceilings(benchmark_results: Path, gpu_arch: str) -> list[Ceiling]:
+    """Return the ceilings of the device-0 row of roofline.csv, in base units.
+
+    Every positive benchmark mean of gpu_arch is one ceiling, MALL included. The
+    caller validates the file first; a malformed file or a missing device-0 row
+    raises ValueError, OSError or csv.Error.
+    """
+    csv_data = _parse_roofline_csv(benchmark_results)
+    row_index = _resolve_device_row_index(csv_data, ROOFLINE_DEVICE_ID)
+    ceilings: list[Ceiling] = []
+    for column, roof in _ceiling_columns(gpu_arch).items():
+        if column not in csv_data.columns:
+            continue
+        value = sanitize_ai_value(csv_data.columns[column][row_index])
+        if value <= 0:
+            continue
+        unit, scale = SCALED_UNITS[roof.config_unit]
+        ceilings.append(
+            Ceiling(
+                kind=roof.kind,
+                memory_level=roof.memory_level,
+                data_type=roof.data_type,
+                pipe=roof.pipe,
+                unit=unit,
+                value=value * scale,
+            )
+        )
+    return ceilings
