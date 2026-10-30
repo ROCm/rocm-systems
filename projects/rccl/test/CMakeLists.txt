@@ -297,6 +297,7 @@ if(BUILD_TESTS)
     GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasDiagnosticsTests.cpp
     RasJsonTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
