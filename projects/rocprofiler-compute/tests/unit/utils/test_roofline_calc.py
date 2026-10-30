@@ -14,7 +14,9 @@ import pytest
 from utils import schema
 from utils.roofline_calc import (
     XMAX_DEFAULT,
+    Ceiling,
     GraphPoints,
+    benchmark_from_ceilings,
     calc_ai_analyze,
     calc_ceilings,
     construct_roof,
@@ -23,6 +25,8 @@ from utils.roofline_calc import (
     roofline_mem_levels,
     sanitize_ai_value,
 )
+
+MI200_FIXTURE = Path(__file__).resolve().parents[2] / "workloads/mem_levels_HBM/MI200"
 
 
 def assert_graph_points_positive_finite(
@@ -1031,12 +1035,9 @@ def test_device_ceilings_without_device_zero_raises(tmp_path: Path) -> None:
 def test_device_ceilings_reads_the_mi200_fixture() -> None:
     """The MI200 mem_levels fixture gives its device-0 row, with the MI200 mean
     bandwidths and compute rates."""
-    fixture = (
-        Path(__file__).resolve().parents[2]
-        / "workloads/mem_levels_HBM/MI200/roofline.csv"
+    ceilings = ceilings_by_roof(
+        device_ceilings(MI200_FIXTURE / "roofline.csv", "gfx90a")
     )
-
-    ceilings = ceilings_by_roof(device_ceilings(fixture, "gfx90a"))
 
     assert len(ceilings) == 11
     unit, hbm = ceilings[("bandwidth", "HBM", None, None)]
@@ -1046,3 +1047,58 @@ def test_device_ceilings_reads_the_mi200_fixture() -> None:
         "FLOP/s",
         pytest.approx(20948.875e9),
     )
+
+
+def test_benchmark_from_ceilings_gives_the_file_machine_and_roof_values() -> None:
+    """The ceiling rows of a benchmark, rebuilt as a device row, feed the same
+    machine ceilings and rooflines as the roofline.csv file they came from."""
+    parameters = {
+        "workload_dir": str(MI200_FIXTURE),
+        "device_id": 0,
+        "matrix_ops_type": "MFMA",
+    }
+    mspec = MockMspec(gpu_model="MI210", gpu_arch="gfx90a")
+    benchmark = benchmark_from_ceilings(
+        device_ceilings(MI200_FIXTURE / "roofline.csv", "gfx90a"), "gfx90a"
+    )
+
+    file_bandwidths, file_peaks = machine_ceilings(parameters, mspec)
+    bandwidths, peaks = machine_ceilings(parameters, mspec, benchmark=benchmark)
+    assert sorted(bandwidths) == pytest.approx(sorted(file_bandwidths))
+    assert sorted(peaks) == pytest.approx(sorted(file_peaks))
+
+    file_roof = construct_roof(parameters, "FP32", mspec)
+    roof = construct_roof(parameters, "FP32", mspec, benchmark=benchmark)
+    for key, file_values in file_roof.items():
+        assert len(roof[key]) == len(file_values)
+        for value, file_value in zip(roof[key], file_values):
+            if isinstance(file_value, list):
+                assert value == pytest.approx(file_value)
+            elif file_value is None:
+                assert value is None
+            else:
+                assert value == pytest.approx(file_value)
+
+
+def test_benchmark_from_ceilings_leaves_out_the_columns_without_a_ceiling() -> None:
+    """A benchmark column without a ceiling row is absent, as it is in a file that
+    lacks the column, so only the ceilings given show up in the machine ceilings."""
+    benchmark = benchmark_from_ceilings(
+        [
+            Ceiling("bandwidth", "HBM", None, None, "Bytes/s", 1.5e12),
+            Ceiling("compute", None, "FP32", "VALU", "FLOP/s", 2.0e13),
+        ],
+        "gfx90a",
+    )
+
+    assert machine_ceilings(
+        {"device_id": 0}, MockMspec(gpu_model="MI210", gpu_arch="gfx90a"), benchmark
+    ) == ([pytest.approx(1500.0)], [pytest.approx(20000.0)])
+
+
+def test_benchmark_from_ceilings_rejects_a_roof_the_arch_does_not_measure() -> None:
+    with pytest.raises(ValueError, match="no roofline.csv column"):
+        benchmark_from_ceilings(
+            [Ceiling("bandwidth", "L9", None, None, "Bytes/s", 1.0e12)],
+            "gfx90a",
+        )
