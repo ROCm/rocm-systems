@@ -31,7 +31,6 @@ struct shmSendResources {
   ncclShmIpcDesc_t remDesc;
   struct ncclSendMem* hostMem;
   struct ncclSendMem* devHostMem;
-  bool isP2p; // Send/recv connection; sizes its FIFO with ncclConnBuffSize
 };
 
 struct shmRecvResources {
@@ -40,7 +39,6 @@ struct shmRecvResources {
   ncclShmIpcDesc_t remDesc;
   struct ncclRecvMem* hostMem;
   struct ncclRecvMem* devHostMem;
-  bool isP2p; // Send/recv connection; sizes its FIFO with ncclConnBuffSize
 };
 
 struct shmProxyInfo {
@@ -115,10 +113,9 @@ static ncclResult_t shmSendSetup(struct ncclComm* comm, struct ncclTopoGraph* gr
 
   NCCLCHECK(ncclCalloc(&resources, 1));
   send->transportResources = resources;
-  resources->isP2p = graph == NULL;
 
   if (shmLocality == SHM_SEND_SIDE) {
-    for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) shmSize += ncclConnBuffSize(comm, resources->isP2p, p);
+    for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) shmSize += comm->buffSizes[p];
   }
   req.size = shmSize;
   if (myInfo->hostHash == peerInfo->hostHash && myInfo->pidHash == peerInfo->pidHash) req.legacy = true;
@@ -148,12 +145,11 @@ static ncclResult_t shmRecvSetup(struct ncclComm* comm, struct ncclTopoGraph* gr
 
   NCCLCHECK(ncclCalloc(&resources, 1));
   recv->transportResources = resources;
-  resources->isP2p = graph == NULL;
 
   static_assert(sizeof(struct shmConnectInfo) <= sizeof(struct ncclConnect), "shm Connect Info is too big");
 
   if (shmLocality == SHM_RECV_SIDE) {
-    for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) shmSize += ncclConnBuffSize(comm, resources->isP2p, p);
+    for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) shmSize += comm->buffSizes[p];
   }
   req.size = shmSize;
   if (myInfo->hostHash == peerInfo->hostHash && myInfo->pidHash == peerInfo->pidHash) req.legacy = true;
@@ -184,7 +180,7 @@ static ncclResult_t shmSendConnect(struct ncclComm* comm, struct ncclConnect* co
   buff = shmLocality == SHM_SEND_SIDE ? (char*)(resources->devHostMem + 1) : (char*)(resources->devRemHostMem + 1);
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     send->conn.buffs[p] = buff;
-    buff += ncclConnBuffSize(comm, resources->isP2p, p);
+    buff += comm->buffSizes[p];
   }
   send->conn.tail = &resources->devRemHostMem->tail;
   send->conn.head = &resources->devHostMem->head;
@@ -222,7 +218,7 @@ static ncclResult_t shmRecvConnect(struct ncclComm* comm, struct ncclConnect* co
   buff = shmLocality == SHM_RECV_SIDE ? (char*)(resources->devHostMem + 1) : (char*)(resources->devRemHostMem + 1);
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     recv->conn.buffs[p] = buff;
-    buff += ncclConnBuffSize(comm, resources->isP2p, p);
+    buff += comm->buffSizes[p];
   }
   recv->conn.head = &resources->devRemHostMem->head;
   recv->conn.tail = &resources->devHostMem->tail;
