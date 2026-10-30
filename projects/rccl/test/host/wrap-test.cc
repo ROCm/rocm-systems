@@ -7769,6 +7769,56 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
+// gfx1250 DPX: the AllReduce LL128 tier and its two-shot stop at nRanks x 2 MiB
+// from 8 ranks; SPX keeps 256 MiB.
+TEST(WrapMicrotestIsolated, DdaLL128Threshold_Gfx1250DpxAllReduceRankScaled) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128Threshold_Gfx1250DpxAllReduceRankScaled",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL128_TWOSHOT_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        const std::pair<int, size_t> cases[] = {{4, 256 * kMiB}, {8, 16 * kMiB}, {16, 32 * kMiB}, {32, 64 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(c.second, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << c.first;
+          EXPECT_EQ(c.second, rcclDdaLL128TwoShotThreshold(comm)) << c.first;
+        }
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        for (int nRanks : {8, 16, 32}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "SPX " << nRanks;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 DPX: DDA LL128 takes AllReduce up to its cap; one 16-byte shard past
+// it, the selector moves on.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250DpxLL128StopsAtCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250DpxLL128StopsAtCap",
+      []() {
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+        ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
+                                 [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                   return true;
+                                 });
+        ncclComm* comm = MakeArDdaComm(8);
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const std::pair<int, size_t> cases[] = {{8, 16 * kMiB}, {16, 32 * kMiB}, {32, 64 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(ll128, SelectAllReduceDdaAlgo(comm, c.second)) << c.first;
+          EXPECT_NE(ll128, SelectAllReduceDdaAlgo(comm, c.second + (size_t)c.first * 16)) << c.first;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
 // gfx1250 SPX symMaxR2[ReduceScatter] is 0: at and above symMinR2 (2 MiB) symk stays withdrawn even when requested.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
   RUN_ISOLATED_TEST(
