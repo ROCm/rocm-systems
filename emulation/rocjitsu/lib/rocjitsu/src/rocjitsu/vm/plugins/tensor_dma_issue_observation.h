@@ -34,7 +34,8 @@ struct TensorDmaLdsRange {
 /// that encoding is not established. The LDS ranges are the bytes the transfer
 /// will write (loads) or read (stores), in element order, with adjacent
 /// elements merged. A load writes every element of its tile, zero-filling those
-/// outside the tensor; a store reads only in-bounds elements. Padding bytes are
+/// outside the tensor; a store reads only in-bounds elements. Padding bytes and
+/// bytes outside the wave's LDS allocation, which are not transferred, are
 /// excluded.
 ///
 /// element_size_bytes describes the transfer only when lds_ranges is nonempty.
