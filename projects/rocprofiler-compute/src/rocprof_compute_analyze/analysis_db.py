@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import ast
+import csv
 import json
 import re
 import warnings
@@ -95,6 +96,7 @@ from utils.metrics.noise_clamper import (
     to_noise_clamp,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.roofline_calc import Ceiling, device_ceilings
 from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
@@ -365,6 +367,7 @@ class db_analysis(OmniAnalyze_Base):
         super().pre_processing()
 
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
+        self._roofline_ceiling_rows_per_workload = self.calc_roofline_ceiling_rows()
         self._typed_sys_info_per_workload = self.calc_typed_sys_info()
         self._pc_sampling_tool_data_per_workload = (
             {path: load_pc_sampling_results(path) for path in self._runs}
@@ -446,6 +449,22 @@ class db_analysis(OmniAnalyze_Base):
                         start_timestamp=dispatch.start_timestamp,
                         end_timestamp=dispatch.end_timestamp,
                         kernel=kernel_objs[kernel_key],
+                    )
+                )
+
+            # Add the workload's roofline ceilings, one per positive benchmark mean
+            for ceiling in self._roofline_ceiling_rows_per_workload.get(
+                workload_path, []
+            ):
+                Database.get_session().add(
+                    orm.RooflineCeiling(
+                        workload=workload_obj,
+                        kind=ceiling.kind,
+                        memory_level=ceiling.memory_level,
+                        data_type=ceiling.data_type,
+                        pipe=ceiling.pipe,
+                        unit=ceiling.unit,
+                        value=ceiling.value,
                     )
                 )
 
@@ -727,6 +746,35 @@ class db_analysis(OmniAnalyze_Base):
         if roofline_ceilings_per_workload:
             console_debug("Collected roofline ceilings")
         return roofline_ceilings_per_workload
+
+    def calc_roofline_ceiling_rows(self) -> dict[str, list[Ceiling]]:
+        """Read each valid roofline.csv as its workload's ceiling rows.
+
+        The gate is the one calc_roofline_ceilings applies: an arch without a
+        roofline, or a roofline.csv that fails validation, gets no rows. That
+        method already warns about those workloads.
+        """
+        ceiling_rows_per_workload: dict[str, list[Ceiling]] = {}
+
+        for workload_path in self._runs.keys():
+            sys_row = self._runs[workload_path].sys_info.iloc[0]
+            gpu_arch = sys_row["gpu_arch"]
+
+            if gpu_arch not in ROOFLINE_SUPPORTED:
+                continue
+            is_valid, _ = validate_roofline_csv(workload_path)
+            if not is_valid:
+                continue
+            try:
+                ceiling_rows_per_workload[workload_path] = device_ceilings(
+                    Path(workload_path) / "roofline.csv", gpu_arch
+                )
+            except (OSError, csv.Error, ValueError) as error:
+                console_warning(
+                    f"Roofline ceilings are not stored for {workload_path}: {error}"
+                )
+
+        return ceiling_rows_per_workload
 
     def calc_typed_sys_info(self) -> dict[str, dict[str, Any]]:
         """Type each workload's sys.info before evaluation (FR-14).

@@ -50,6 +50,7 @@ VIEW_CSV_FILENAMES = frozenset({
     "kernel.csv",
     "kernel_metric.csv",
     "pc_sampling_summary.csv",
+    "roofline_ceiling.csv",
     "source_lines.csv",
     "workload_metric.csv",
 })
@@ -97,6 +98,15 @@ def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
 def write_roofline_csv(workload_dir: Path, csv_text: str) -> None:
     """Write a roofline.csv into a workload directory."""
     (workload_dir / "roofline.csv").write_text(csv_text, encoding="utf-8")
+
+
+def make_ceiling_analyzer(workload_path: str, gpu_arch: str):
+    """Build an analyzer whose only input is the workload's gpu_arch."""
+    analyzer = db_analysis(SimpleNamespace(output_name=None), {})
+    analyzer._runs = {
+        workload_path: schema.Workload(sys_info=pd.DataFrame([{"gpu_arch": gpu_arch}]))
+    }
+    return analyzer
 
 
 def make_pct_of_peak_arch_config():
@@ -249,6 +259,7 @@ def make_pc_sampling_database_analyzer(
         for workload_path in tool_data_per_workload
     }
     analyzer._roofline_ceilings_per_workload = {}
+    analyzer._roofline_ceiling_rows_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
     analyzer._pc_sampling_tool_data_per_workload = tool_data_per_workload
     analyzer._dispatch_data_per_workload = {
@@ -291,6 +302,7 @@ def make_counter_backed_database_analyzer(
         )
     }
     analyzer._roofline_ceilings_per_workload = {}
+    analyzer._roofline_ceiling_rows_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": filter_blocks}
     analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
     analyzer._dispatch_data_per_workload = {
@@ -1988,6 +2000,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     )
     analyzer._runs = {workload_path: workload}
     analyzer._roofline_ceilings_per_workload = {}
+    analyzer._roofline_ceiling_rows_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
     analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
     analyzer._dispatch_data_per_workload = {
@@ -4151,6 +4164,119 @@ def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_p
     # Also covers a layout file skipped as broken
     workload = run_memory_chart_workload(tmp_path, "gfx1030")
     assert workload.memory_chart_layout_extdata is None
+
+
+# =============================================================================
+# Roofline ceilings stored per workload (FR-23)
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "gpu_arch, roofline_text",
+    [
+        ("gfx942", None),
+        ("gfx942", "device,FP32Flops\n0,2000.0,extra\n1,9999.0\n"),
+        ("gfx908", "device,HBMBw\n0,5300\n1,6300\n"),
+    ],
+    ids=["missing", "invalid", "arch-without-roofline"],
+)
+def test_roofline_ceiling_rows_need_a_supported_arch_and_a_valid_roofline(
+    tmp_path, gpu_arch, roofline_text
+):
+    """No ceiling rows without a roofline benchmark or a validated roofline.csv."""
+    if roofline_text is not None:
+        write_roofline_csv(tmp_path, roofline_text)
+    analyzer = make_ceiling_analyzer(str(tmp_path), gpu_arch)
+
+    assert analyzer.calc_roofline_ceiling_rows() == {}
+
+
+@pytest.mark.parametrize(
+    "roofline_text, expected_message",
+    [
+        ("device,HBMBw\n0,5300\n0,6300\n", "duplicate device id"),
+        ("device,HBMBw\n1,5300\n2,6300\n", "device id 0 occurs 0 times"),
+    ],
+    ids=["duplicate-device-id", "no-device-zero"],
+)
+def test_roofline_ceiling_rows_warn_when_the_device_zero_row_is_unusable(
+    tmp_path, roofline_text, expected_message
+):
+    """validate_roofline_csv passes these files; the device-0 reader rejects them."""
+    write_roofline_csv(tmp_path, roofline_text)
+    analyzer = make_ceiling_analyzer(str(tmp_path), "gfx942")
+
+    with patch(
+        "rocprof_compute_analyze.analysis_db.console_warning"
+    ) as console_warning_mock:
+        rows = analyzer.calc_roofline_ceiling_rows()
+
+    assert rows == {}
+    console_warning_mock.assert_called_once()
+    message = console_warning_mock.call_args.args[0]
+    assert "not stored" in message
+    assert expected_message in message
+
+
+def test_roofline_ceiling_rows_take_device_zero_in_base_units(tmp_path):
+    """Device 0 gives the ceilings, MALL included, in base units. A zero mean is not
+    a ceiling, and the device-1 row is ignored."""
+    write_roofline_csv(
+        tmp_path,
+        "device,HBMBw,MALLBw,FP32Flops,I8Ops\n0,5300,9000,81000,0\n"
+        "1,6300,9100,91000,50000\n",
+    )
+    analyzer = make_ceiling_analyzer(str(tmp_path), "gfx942")
+
+    rows = analyzer.calc_roofline_ceiling_rows()
+
+    assert {
+        (row.kind, row.memory_level, row.data_type, row.pipe): (row.unit, row.value)
+        for row in rows[str(tmp_path)]
+    } == {
+        ("bandwidth", "HBM", None, None): ("Bytes/s", 5.3e12),
+        ("bandwidth", "MALL", None, None): ("Bytes/s", 9e12),
+        ("compute", None, "FP32", "VALU"): ("FLOP/s", 8.1e13),
+    }
+
+
+def test_roofline_ceiling_rows_read_the_mi200_fixture():
+    """The MI200 mem_levels fixture gives 4 bandwidth and 7 compute ceilings."""
+    fixture_dir = (
+        Path(__file__).resolve().parents[2] / "workloads" / "mem_levels_HBM" / "MI200"
+    )
+    analyzer = make_ceiling_analyzer(str(fixture_dir), "gfx90a")
+
+    rows = analyzer.calc_roofline_ceiling_rows()[str(fixture_dir)]
+
+    assert len(rows) == 11
+    hbm = next(row for row in rows if row.memory_level == "HBM")
+    assert hbm.value == pytest.approx(1388.7961e9)
+
+
+def test_run_analysis_stores_the_roofline_ceilings_of_each_workload(
+    db_session, tmp_path
+):
+    """Each workload's ceilings reach the database with their roof parts and unit."""
+    write_roofline_csv(tmp_path, "device,HBMBw,MALLBw,FP32Flops\n0,5300,9000,81000\n")
+    analyzer = make_counter_backed_database_analyzer(str(tmp_path), ["3"], [])
+    analyzer._runs[str(tmp_path)].sys_info = pd.DataFrame([{"gpu_arch": "gfx942"}])
+    analyzer._roofline_ceiling_rows_per_workload = analyzer.calc_roofline_ceiling_rows()
+
+    run_analysis_with_existing_database(analyzer)
+
+    workload = db_session.query(orm.Workload).one()
+    assert {
+        (ceiling.kind, ceiling.memory_level, ceiling.data_type, ceiling.pipe): (
+            ceiling.unit,
+            ceiling.value,
+        )
+        for ceiling in workload.roofline_ceilings
+    } == {
+        ("bandwidth", "HBM", None, None): ("Bytes/s", 5.3e12),
+        ("bandwidth", "MALL", None, None): ("Bytes/s", 9e12),
+        ("compute", None, "FP32", "VALU"): ("FLOP/s", 8.1e13),
+    }
 
 
 # =============================================================================

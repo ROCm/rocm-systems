@@ -22,6 +22,7 @@ from sqlalchemy import (
     Column,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -80,6 +81,8 @@ class Workload(Base):
     code_object_stores = relationship("CodeObjectStore", back_populates="workload")
     # Workload can have multiple source files
     source_files = relationship("SourceFile", back_populates="workload")
+    # Workload can have multiple roofline ceilings
+    roofline_ceilings = relationship("RooflineCeiling", back_populates="workload")
 
 
 class MetricDefinition(Base):
@@ -125,6 +128,51 @@ class KernelRooflineData(Base):
 
     # Roofline data point can have one kernel
     kernel = relationship("Kernel", back_populates="roofline_data_points")
+
+
+class RooflineCeiling(Base):
+    __tablename__ = f"{PREFIX}roofline_ceiling"
+    __table_args__ = (
+        # One ceiling per memory level of a workload, and one per data type and
+        # pipe. Each partial index covers one kind, since the other kind's key
+        # parts are NULL and SQLite never compares NULLs as equal.
+        Index(
+            f"{PREFIX}roofline_ceiling_bandwidth_key",
+            "workload_id",
+            "memory_level",
+            unique=True,
+            sqlite_where=text("kind = 'bandwidth'"),
+        ),
+        Index(
+            f"{PREFIX}roofline_ceiling_compute_key",
+            "workload_id",
+            "data_type",
+            "pipe",
+            unique=True,
+            sqlite_where=text("kind = 'compute'"),
+        ),
+        CheckConstraint(
+            "(kind = 'bandwidth' AND memory_level IS NOT NULL"
+            " AND data_type IS NULL AND pipe IS NULL)"
+            " OR (kind = 'compute' AND memory_level IS NULL"
+            " AND data_type IS NOT NULL AND pipe IS NOT NULL)",
+            name="roofline_ceiling_roof_parts",
+        ),
+    )
+
+    ceiling_uuid = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    kind = Column(String, nullable=False)  # bandwidth or compute
+    memory_level = Column(String)  # bandwidth only, e.g. HBM
+    data_type = Column(String)  # compute only, e.g. FP16
+    pipe = Column(String)  # compute only: VALU, MFMA or WMMA
+    unit = Column(String)  # base unit, e.g. Bytes/s, FLOP/s or IOP/s
+    value = Column(Float, nullable=False)  # unrounded, in the base unit
+
+    # Ceiling belongs to one workload
+    workload = relationship("Workload", back_populates="roofline_ceilings")
 
 
 class Dispatch(Base):
@@ -1201,6 +1249,21 @@ class Database:
                 InstructionLine.instruction_uuid
                 == source_chain_subquery.c.instruction_uuid,
             ),
+            # Roofline ceilings of each workload, in base units. Ceilings come from the
+            # device-0 row of roofline.csv.
+            "roofline_ceiling": select(
+                RooflineCeiling.ceiling_uuid.label("ceiling_uuid"),
+                RooflineCeiling.workload_id.label("workload_id"),
+                Workload.name.label("workload_name"),
+                RooflineCeiling.kind,
+                RooflineCeiling.memory_level,
+                RooflineCeiling.data_type,
+                RooflineCeiling.pipe,
+                RooflineCeiling.unit,
+                RooflineCeiling.value,
+            )
+            .select_from(RooflineCeiling)
+            .join(Workload, RooflineCeiling.workload_id == Workload.workload_id),
             "source_lines": select(
                 SourceFile.workload_id.label("workload_id"),
                 SourceFile.file_path,

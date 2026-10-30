@@ -95,6 +95,8 @@ caches are absorbing the traffic.
 kernel. To compare many kernels, query the
 [analysis database](../../docs/how-to/analyze/cli.rst) with SQL. Every analyze
 run writes it as `analysis.db` in the run folder whose path it prints last.
+The view `compute_roofline_ceiling_view` lists each workload's ceilings in base units
+(Bytes/s, FLOP/s, IOP/s), one row per memory level or per data type and pipe.
 
 ## 4. When roofline data is missing
 
