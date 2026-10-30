@@ -187,11 +187,26 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   barrierState->resources = std::move(barrierPair.first);
   barrierState->barrierHost = barrierPair.second;
 
+  // LL epoch cells (DDA broadcast LL); optional, a failure only disables that tier.
+  // Sized for the CU-derived cap so the Broadcast grid is not limited by the cells.
+  const size_t epochLen = nccl_dda_detail::ddaLLEpochCount(
+    kDdaNranks, nccl_dda_detail::ddaFabricMaxNBlocksForScratch(comm->cuCount, nullptr));
+  uint32_t* epochDev = nullptr;
+  if (cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)) != cudaSuccess ||
+      cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)) != cudaSuccess) {
+    (void)cudaGetLastError(); // clear the sticky error
+    CUDACHECKIGNORE(cudaFree(epochDev));
+    epochDev = nullptr;
+    WARN("ncclDdaIpcCommInit: LL epoch cells unavailable; DDA Broadcast disabled");
+  }
+
   comm->ddaIpcMemHandler = handler;
   comm->ddaScratch = scratch;
   comm->ddaScratchBytes = bytes;
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
+  comm->ddaLLEpochDev = epochDev;
+  comm->ddaLLEpochLen = epochDev != nullptr ? (int)epochLen : 0;
   INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
        nBlocksMax);
   return ncclSuccess;
@@ -209,6 +224,9 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   comm->ddaPeerPtrsDev = nullptr;
   free(comm->ddaPeerPtrsHost);
   comm->ddaPeerPtrsHost = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaLLEpochDev));
+  comm->ddaLLEpochDev = nullptr;
+  comm->ddaLLEpochLen = 0;
   if (comm->ddaIpcMemHandler != nullptr) {
     delete comm->ddaIpcMemHandler;
     comm->ddaIpcMemHandler = nullptr;

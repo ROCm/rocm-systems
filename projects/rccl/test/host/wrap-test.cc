@@ -9339,6 +9339,32 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_NonGfx1250_NeverChecksTiers) {
   });
 }
 
+TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowed_PicksLLAndNeverChecksLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_IpcAllowed_PicksLLAndNeverChecksLL128", []() {
+    auto base = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    g_loadParam = [base](const char* env, int64_t def) -> int64_t {
+      return std::strcmp(env, "RCCL_DDA_BC_ALLOW_IPC") == 0 ? 1 : base(env, def);
+    };
+    int ll128Calls = 0;
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++ll128Calls > 0; });
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm("gfx950");
+    comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+
+    ScopedHook llOff(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return false; });
+    d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, ll128Calls);
+    comm->ddaIpcMemHandler = nullptr;
+    DeleteCommWithArch(comm);
+  });
+}
+
 TEST(WrapMicrotestIsolated, SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder", []() {
     g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/0);
