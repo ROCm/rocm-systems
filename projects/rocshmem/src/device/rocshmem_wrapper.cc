@@ -486,19 +486,19 @@ WRAP_RMA_EXTENDED(unsigned long long, ulonglong)
 #define WRAP_AMO_STANDARD(T, TNAME)                                            \
   ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_compare_swap(                \
       T *dest, T cond, T value, int pe) {                                      \
-    return rocshmem::rocshmem_##TNAME##_atomic_compare_swap(                    \
+    return rocshmem::rocshmem_##TNAME##_atomic_compare_swap(                   \
         dest, cond, value, pe);                                                \
   }                                                                            \
   ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch_inc(                   \
       T *dest, int pe) {                                                       \
-    return rocshmem::rocshmem_##TNAME##_atomic_fetch_inc(dest, pe);             \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch_inc(dest, pe);            \
   }                                                                            \
   ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_inc(T *dest, int pe) {    \
     rocshmem::rocshmem_##TNAME##_atomic_inc(dest, pe);                         \
   }                                                                            \
   ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch_add(                   \
       T *dest, T value, int pe) {                                              \
-    return rocshmem::rocshmem_##TNAME##_atomic_fetch_add(dest, value, pe);      \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch_add(dest, value, pe);     \
   }                                                                            \
   ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_add(                      \
       T *dest, T value, int pe) {                                              \
@@ -508,7 +508,7 @@ WRAP_RMA_EXTENDED(unsigned long long, ulonglong)
 #define WRAP_AMO_EXTENDED(T, TNAME)                                            \
   ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch(                       \
       T *source, int pe) {                                                     \
-    return rocshmem::rocshmem_##TNAME##_atomic_fetch(source, pe);               \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch(source, pe);              \
   }                                                                            \
   ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_set(                      \
       T *dest, T value, int pe) {                                              \
@@ -516,13 +516,13 @@ WRAP_RMA_EXTENDED(unsigned long long, ulonglong)
   }                                                                            \
   ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_swap(                        \
       T *dest, T value, int pe) {                                              \
-    return rocshmem::rocshmem_##TNAME##_atomic_swap(dest, value, pe);           \
+    return rocshmem::rocshmem_##TNAME##_atomic_swap(dest, value, pe);          \
   }
 
 #define WRAP_AMO_BITWISE(T, TNAME)                                             \
   ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch_and(                   \
       T *dest, T value, int pe) {                                              \
-    return rocshmem::rocshmem_##TNAME##_atomic_fetch_and(dest, value, pe);      \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch_and(dest, value, pe);     \
   }                                                                            \
   ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_and(                      \
       T *dest, T value, int pe) {                                              \
@@ -530,7 +530,7 @@ WRAP_RMA_EXTENDED(unsigned long long, ulonglong)
   }                                                                            \
   ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch_or(                    \
       T *dest, T value, int pe) {                                              \
-    return rocshmem::rocshmem_##TNAME##_atomic_fetch_or(dest, value, pe);       \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch_or(dest, value, pe);      \
   }                                                                            \
   ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_or(                       \
       T *dest, T value, int pe) {                                              \
@@ -538,7 +538,7 @@ WRAP_RMA_EXTENDED(unsigned long long, ulonglong)
   }                                                                            \
   ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch_xor(                   \
       T *dest, T value, int pe) {                                              \
-    return rocshmem::rocshmem_##TNAME##_atomic_fetch_xor(dest, value, pe);      \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch_xor(dest, value, pe);     \
   }                                                                            \
   ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_xor(                      \
       T *dest, T value, int pe) {                                              \
@@ -827,7 +827,7 @@ ROCSHMEM_DEVICE_API int rocshmem_tile_broadcast_wg(
 ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_alltoall_wg(                    \
     rocshmem_team_t team, T *dest, const T *source, int nelems) {           \
   rocshmem_ctx_##TNAME##_alltoall_wg(                                       \
-      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);  \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);          \
 }
 
 ROCSHMEM_ALLTOALL_WG_WRAPPER(float,     float)
@@ -848,9 +848,9 @@ ROCSHMEM_ALLTOALL_WG_WRAPPER(ulonglong, unsigned long long)
 // Collective - Alltoall (typed wave)
 #define ROCSHMEM_ALLTOALL_WAVE_WRAPPER(TNAME, T)                            \
 ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_alltoall_wave(                   \
-    rocshmem_team_t team, T *dest, const T *source, int nelems) {          \
+    rocshmem_team_t team, T *dest, const T *source, int nelems) {           \
   return rocshmem_ctx_##TNAME##_alltoall_wave(                              \
-      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);  \
+      rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);          \
 }
 
 ROCSHMEM_ALLTOALL_WAVE_WRAPPER(float,     float)
@@ -892,9 +892,9 @@ ROCSHMEM_DEVICE_API int rocshmem_alltoallmem_wave(
 // Collective - Broadcast (typed wg, default ctx)
 #define ROCSHMEM_BROADCAST_WG_WRAPPER(TNAME, T)                             \
 ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_broadcast_wg(                   \
-    rocshmem_team_t team, T *dest, const T *source, int nelems,            \
+    rocshmem_team_t team, T *dest, const T *source, int nelems,             \
     int pe_root) {                                                          \
-  rocshmem_ctx_##TNAME##_broadcast_wg(                                     \
+  rocshmem_ctx_##TNAME##_broadcast_wg(                                      \
       rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems, pe_root); \
 }
 
@@ -916,9 +916,9 @@ ROCSHMEM_BROADCAST_WG_WRAPPER(ulonglong, unsigned long long)
 // Collective - Broadcast (typed wave, default ctx)
 #define ROCSHMEM_BROADCAST_WAVE_WRAPPER(TNAME, T)                           \
 ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_broadcast_wave(                  \
-    rocshmem_team_t team, T *dest, const T *source, int nelems,            \
+    rocshmem_team_t team, T *dest, const T *source, int nelems,             \
     int pe_root) {                                                          \
-  return rocshmem_ctx_##TNAME##_broadcast_wave(                            \
+  return rocshmem_ctx_##TNAME##_broadcast_wave(                             \
       rocshmem::ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems, pe_root); \
 }
 
