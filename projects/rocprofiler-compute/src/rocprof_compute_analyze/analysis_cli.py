@@ -4,6 +4,7 @@
 import argparse
 import sys
 from pathlib import Path
+from typing import Dict, List, Set, Tuple
 
 import pandas as pd
 
@@ -30,7 +31,7 @@ from utils.utils_analysis import (
 from utils.utils_common import validate_roofline_csv
 
 
-def _labels_for_backends(backends: list[str]) -> str:
+def _labels_for_backends(backends: List[str]) -> str:
     """Join backend display names."""
     if not backends:
         return "ML API"
@@ -38,8 +39,8 @@ def _labels_for_backends(backends: list[str]) -> str:
 
 
 def _restrict_patterns_to_operator_backends(
-    selections: dict[str, list[str]],
-) -> dict[str, list[str]]:
+    selections: Dict[str, List[str]],
+) -> Dict[str, List[str]]:
     """Restrict pattern lists to keys in OPERATOR_SELECTORS."""
     return {
         backend: list(patterns)
@@ -49,9 +50,9 @@ def _restrict_patterns_to_operator_backends(
 
 
 def _bind_operator_patterns_for_workload(
-    operator_patterns: dict[str, list[str]],
+    operator_patterns: Dict[str, List[str]],
     workload_path: str,
-) -> dict[str, list[str]]:
+) -> Dict[str, List[str]]:
     """Bind unscoped --operator patterns using this workload's yaml."""
     profiling_config = file_io.load_profiling_config(workload_path)
     trace_ml_api = profiling_config.get("trace_ml_api")
@@ -62,11 +63,11 @@ def _bind_operator_patterns_for_workload(
 
 
 def _join_unique_operator_patterns(
-    operator_patterns_by_backend: dict[str, list[str]],
+    operator_patterns_by_backend: Dict[str, List[str]],
 ) -> str:
     """Join unique operator patterns."""
-    seen: set[str] = set()
-    ordered: list[str] = []
+    seen: Set[str] = set()
+    ordered: List[str] = []
     for patterns in operator_patterns_by_backend.values():
         for pattern in patterns:
             if pattern in seen:
@@ -77,9 +78,9 @@ def _join_unique_operator_patterns(
 
 
 def _collect_nodes_matching_operator_patterns(
-    forest: dict[str, list[CallTreeNode]],
-    operator_patterns_by_backend: dict[str, list[str]],
-) -> list[CallTreeNode]:
+    forest: Dict[str, List[CallTreeNode]],
+    operator_patterns_by_backend: Dict[str, List[str]],
+) -> List[CallTreeNode]:
     """Collect nodes whose name or path matches a pattern for that node's backend."""
     return [
         node
@@ -460,7 +461,7 @@ class cli_analysis(OmniAnalyze_Base):
         args: argparse.Namespace,
         workload: schema.Workload,
         workload_path: str,
-    ) -> tuple[list[tuple], dict[str, list[str]]]:
+    ) -> Tuple[List[Tuple], Dict[str, List[str]]]:
         """Filter the operator forest and return pmc keys plus the bound map."""
         operator_patterns = getattr(args, "operator_patterns", None)
         if operator_patterns is None:
