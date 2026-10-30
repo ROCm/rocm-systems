@@ -58,6 +58,12 @@ extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapS
 extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce;
+// ncclDevrCommCreateInternal calls this after it has swapped the thread into
+// relaxed stream-capture mode. The default succeeds; a test that needs GIN
+// setup to fail installs its own so the capture-mode restore can be observed.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
+                                  uint32_t)>
+    g_devrGinDevCommSetup;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
                                   uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int)>
@@ -83,13 +89,6 @@ extern std::function<ncclResult_t(struct ncclDevrState*, struct ncclDevrMemory*,
 extern std::function<ncclResult_t(struct ncclDevrMemory*, struct ncclComm*)> g_devrVerifySegmentLayouts;
 extern std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos;
 extern std::function<ncclResult_t(void*, size_t, struct ncclComm*, bool, int)> g_devrCheckRegistrationSupport;
-
-// ncclDevrCommCreateInternal calls this after it has swapped the thread into
-// relaxed stream-capture mode. The default succeeds; a test that needs GIN
-// setup to fail installs its own so the capture-mode restore can be observed.
-extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                  uint32_t)>
-    g_ncclGinDevCommSetup;
 
 // The CFT seams 2.31 added: the two team accessors, the two sizes
 // ncclDevrInitOnce caches, and whether the RMA proxy is in play. Defaults

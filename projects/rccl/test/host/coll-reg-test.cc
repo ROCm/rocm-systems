@@ -1058,6 +1058,22 @@ class RegisterCollRingMicrotest : public RegisterCollMicrotestBase {
   }
   std::vector<ncclConnector*> SendNetConns() { return {SendConn(0, 2), nullptr}; }
   std::vector<ncclConnector*> RecvNetConns() { return {nullptr, RecvConn(1, 3)}; }
+
+  void ExpectOneRpnRegisteredLeavesChannels(ncclFunc_t func, int minNetCount, int expectedMaxChannels) {
+    comm_->isAllDirectP2p = false;
+    comm_->isOneRPN = true;
+    comm_->minNetCount = minNetCount;
+    task_.func = func;
+    task_.nMaxChannels = 32;
+    NetLocalRegisters({1, 1, 1});
+    EXPECT_EQ(Run(), ncclSuccess) << func;
+    EXPECT_EQ(task_.nMaxChannels, expectedMaxChannels) << func;
+    free(task_.sendNetHandles);
+    free(task_.recvNetHandles);
+    free(task_.srecvNetHandles);
+    task_.sendNetHandles = task_.recvNetHandles = task_.srecvNetHandles = nullptr;
+    netLocal_.clear();
+  }
 };
 
 TEST_F(RegisterCollRingMicrotest, NoRecvRecordOutsideCapture_LeavesBufferUnregistered) {
@@ -1319,44 +1335,21 @@ TEST_F(RegisterCollRingMicrotest, GraphNetMissWithoutLocalRegister_LeavesBufferU
   EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
 }
 
-TEST_F(RegisterCollRingMicrotest, OneRpnGatherRegistered_CapsChannelsAtNetCount) {
-  comm_->isAllDirectP2p = false;
-  comm_->isOneRPN = true;
-  comm_->minNetCount = 3;
-  NetLocalRegisters({1, 1, 1});
-  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncBroadcast}) {
-    task_.func = func;
-    task_.nMaxChannels = 32;
-    EXPECT_EQ(Run(), ncclSuccess);
-    // AllGather is capped only when the matching net-offload kernel is compiled in.
-    const int expected = ncclUseOneRpnNetRegChannelCap(func) ? 3 : 32;
-    EXPECT_EQ(task_.nMaxChannels, expected) << func;
-    free(task_.sendNetHandles);
-    free(task_.recvNetHandles);
-    free(task_.srecvNetHandles);
-    task_.sendNetHandles = task_.recvNetHandles = task_.srecvNetHandles = nullptr;
-    netLocal_.clear();
-  }
+TEST_F(RegisterCollRingMicrotest, OneRpnBroadcastRegistered_CapsChannelsAtNetCount) {
+  ExpectOneRpnRegisteredLeavesChannels(ncclFuncBroadcast, /*minNetCount=*/3, /*expectedMaxChannels=*/3);
+}
+
+TEST_F(RegisterCollRingMicrotest, OneRpnGatherRegistered_LeavesChannelsUncapped) {
+  ExpectOneRpnRegisteredLeavesChannels(ncclFuncAllGather, /*minNetCount=*/3, /*expectedMaxChannels=*/32);
 }
 
 TEST_F(RegisterCollRingMicrotest, OneRpnGatherRegistered_KeepsChannelsWithinCtaLimits) {
-  comm_->isAllDirectP2p = false;
-  comm_->isOneRPN = true;
-  comm_->minNetCount = 3;
   comm_->config.minCTAs = 5;
-  task_.func = ncclFuncBroadcast;
-  NetLocalRegisters({1, 1, 1});
-  EXPECT_EQ(Run(), ncclSuccess);
-  EXPECT_EQ(task_.nMaxChannels, 5);
+  ExpectOneRpnRegisteredLeavesChannels(ncclFuncBroadcast, /*minNetCount=*/3, /*expectedMaxChannels=*/5);
 }
 
 TEST_F(RegisterCollRingMicrotest, OneRpnAllReduceRegistered_KeepsChannels) {
-  comm_->isAllDirectP2p = false;
-  comm_->isOneRPN = true;
-  comm_->minNetCount = 3;
-  NetLocalRegisters({1, 1, 1});
-  EXPECT_EQ(Run(), ncclSuccess);
-  EXPECT_EQ(task_.nMaxChannels, 32);
+  ExpectOneRpnRegisteredLeavesChannels(ncclFuncAllReduce, /*minNetCount=*/3, /*expectedMaxChannels=*/32);
 }
 
 TEST_F(RegisterCollRingMicrotest, MultiRpnGatherRegistered_KeepsChannels) {

@@ -301,6 +301,22 @@ static ncclResult_t DefaultGinConnectOnce(struct ncclComm*) { return ncclSuccess
 std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce = DefaultGinConnectOnce;
 
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnectOnce(comm); }
+// Seam: reached only for a devComm that requests a GIN connection.
+// ncclDevrCommCreateInternal calls this after swapping the thread into relaxed
+// stream-capture mode. The default succeeds; a test that needs GIN setup to fail
+// installs its own so the capture-mode restore can be observed.
+static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
+                                           struct ncclDevComm*, uint32_t) {
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
+    g_devrGinDevCommSetup = DefaultGinDevCommSetup;
+ASSERT_HOOK_MATCHES_PROD(g_devrGinDevCommSetup, ncclGinDevCommSetup);
+
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+  return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
+}
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
 void ncclGinDevCommClearFields(struct ncclDevComm*) {}
 #ifdef ENABLE_ROCSHMEM_GIN
@@ -524,17 +540,6 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
-static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                           uint32_t) {
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
-    g_ncclGinDevCommSetup = DefaultGinDevCommSetup;
-ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
-                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
-  return g_ncclGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
-}
-ASSERT_HOOK_MATCHES_PROD(g_ncclGinDevCommSetup, ncclGinDevCommSetup);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // The enqueue-rearch job path: collective_stubs.cc pins
@@ -569,6 +574,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapSend                           = DefaultBootstrapSend;
   g_devrBootstrapRecv                           = DefaultBootstrapRecv;
   g_devrGinConnectOnce                          = DefaultGinConnectOnce;
+  g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
@@ -594,7 +600,6 @@ void ResetDevRuntimeMicroFakes() {
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_devrVerifySegmentLayouts                = DefaultVerifySegmentLayouts;
   g_devrBuildGinSegmentInfos                = DefaultBuildGinSegmentInfos;
-  g_ncclGinDevCommSetup                     = DefaultGinDevCommSetup;
   g_devrCheckRegistrationSupport            = DefaultCheckRegistrationSupport;
 
   // Not a hook either, but 12 tests assign it directly to steer the
