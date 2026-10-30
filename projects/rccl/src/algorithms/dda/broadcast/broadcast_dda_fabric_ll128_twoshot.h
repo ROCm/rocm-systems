@@ -65,14 +65,10 @@ __launch_bounds__(512)
       ddaLL128LoadRegs<int8_t, kLine, kAligned, kWarp>(regs, src + s * kSliceBytes,
                                                       rem < kSliceBytes ? (int)rem : kSliceBytes, lane, flagLane);
       ddaLL128StoreWire<kWarp>(ownerBase + s * kSliceWords + 2 * lane, regs, flag, flagLane);
-    }
-
-    if (sendbuff != recvbuff) {
-      for (size_t i = (size_t)flatBlockId * nthreads + tid; i < (bytes >> 4); i += (size_t)total * nthreads) {
-        uint64_t lo, hi;
-        ddaLL128UserLoad16B<kAligned>(src + 16 * i, lo, hi);
-        ddaLL128UserStore16B<kAligned>(dst + 16 * i, lo, hi);
-      }
+      // Out-of-place: write the root's own copy from the same registers.
+      if (sendbuff != recvbuff)
+        ddaLL128StoreRegs<int8_t, kLine, kAligned, kWarp>(dst + s * kSliceBytes, regs,
+                                                         rem < kSliceBytes ? (int)rem : kSliceBytes, lane, flagLane);
     }
 
     if (blockIdx.y == 0 && tid == 0) {
