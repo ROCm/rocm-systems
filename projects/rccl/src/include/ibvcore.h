@@ -1166,10 +1166,12 @@ struct verbs_context {
 	int (*query_port)(struct ibv_context *context, uint8_t port_num,
 			  struct ibv_port_attr *port_attr,
 			  size_t port_attr_len);
-	/* The 25 verbs_context slots between query_port and priv (upstream layout).
-	 * Order and count must stay exact so verbs_get_ctx_op() resolves the right
-	 * entry. Only the ops rccl calls carry real signatures; the rest are opaque
-	 * 8-byte fn-ptrs preserving ABI offsets without vendoring unused verbs types. */
+	/* All 25 verbs_context slots between query_port and priv (upstream layout).
+	 * Every slot is present and in exact upstream order so verbs_get_ctx_op()
+	 * resolves the right offset. The two rccl calls (alloc_parent_domain,
+	 * create_cq_ex) carry real signatures; the other 23 are opaque 8-byte
+	 * void(*)(void) placeholders that hold the ABI offset without vendoring
+	 * their argument types. */
 	void (*advise_mr)(void);
 	void (*alloc_null_mr)(void);
 	void (*read_counters)(void);

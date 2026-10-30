@@ -1116,13 +1116,7 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
 
   # The rocshmem *source/install* include dirs are ONLY for ENABLE_ROCSHMEM:
   # its device collectives (AlltoAllGda) compile against rocshmem directly
-  # (<rocshmem/rocshmem.hpp> etc.). A GIN build must NOT put the rocshmem source
-  # tree on its include path — every header the GIN TUs need is a rccl-owned copy
-  # under PROJECT_BINARY_DIR/.../rocshmem_gda (added below), and the factory's
-  # former host-header deps (ibv_wrapper, topology, envvar, debug_gda) are shimmed
-  # with rccl-native equivalents. Exposing ${ROCSHMEM_SOURCE_DIR}/src would let a
-  # stray/transitive include silently resolve an unshimmed rocshmem host header
-  # instead of rccl's copy — a real correctness hazard, not a convenience.
+  # (<rocshmem/rocshmem.hpp> etc.).
   if (ENABLE_ROCSHMEM)
     if (ROCSHMEM_INCLUDE_DIR)
       target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
@@ -1141,12 +1135,11 @@ endif()
 
 if (ENABLE_ROCSHMEM_GIN)
   # The rccl-owned copied GIN header tree — the ONLY rocshmem header root on a GIN
-  # build's include path (the rocshmem source tree is intentionally not added; see
-  # above). The GIN TUs and the copied headers' internal (bare) includes resolve
-  # from here.
+  # build's include path. The rocshmem source tree is intentionally NOT added:
+  # exposing it would let a stray include resolve an unshimmed rocshmem host
+  # header instead of rccl's copy. The GIN TUs and the copied headers' internal
+  # (bare) includes resolve from here.
   target_include_directories(rccl BEFORE PRIVATE ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda)
-
-  # Build-tree dir for the factory's in-tree <gda/...> angle-includes.
   target_include_directories(rccl BEFORE INTERFACE
     $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda>
   )
@@ -1155,20 +1148,14 @@ if (ENABLE_ROCSHMEM_GIN)
   add_custom_target(copy_rocshmem_headers)
   add_dependencies(rccl copy_rocshmem_headers)
 
-  # rccl owns the GDA config the copied GIN QueuePair headers include (their
-  # rocshmem/rocshmem_config.h include is rewritten to this gda_config.h by the
-  # header copy step), generated from gda_config.h.in. This decouples the GIN
-  # header path from a rocSHMEM *build* — only the macros the GIN host+device
-  # headers actually consult are
-  # emitted. The GDA provider set and GDA_MUX are fixed by rccl's design (all
-  # three providers, runtime mux); USE_CONSTMEM is OFF (GIN reads the provider
-  # from the QueuePair instance); BUILD_DEBUG_DEVICE / USE_FUNC_CALL stay OFF.
+  # rccl-owned gda_config.h (from gda_config.h.in) replaces rocSHMEM's generated
+  # config, so the GIN header path needs no rocSHMEM build. Flags are fixed by
+  # rccl's design (all providers + GDA_MUX on, USE_CONSTMEM off); BUILD_DEBUG_DEVICE
+  # tracks Debug builds (set below).
   set(GDA_IONIC ON)
   set(GDA_BNXT  ON)
   set(GDA_MLX5  ON)
-  # GDA_MUX must be ON whenever >1 provider is enabled (else queue_pair_provider.hpp
-  # silently aliases QueuePair to the first-listed provider). Derive it so the
-  # invariant holds if the provider set ever changes.
+  # GDA_MUX must be ON whenever >1 provider is enabled.
   set(_gda_provider_count 0)
   foreach(_p GDA_IONIC GDA_BNXT GDA_MLX5)
     if(${_p})
@@ -1186,14 +1173,13 @@ if (ENABLE_ROCSHMEM_GIN)
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(BUILD_DEBUG_DEVICE ON)
   endif()
-  # USE_CONSTMEM intentionally left unset.
   configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/gin/rocshmem_gda/gda_config.h.in"
     "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/gda_config.h"
     @ONLY)
-  # ibvcore.h is a top-level rccl header the copied gda/ibv_core.hpp needs; place a
-  # copy under rocshmem_gda/ so its nccl_device/-rooted include resolves in both
-  # the build tree and an installed consumer, with no extra -I.
+  # ibvcore.h is transitively included from the GIN-GDA device headers; copy it
+  # under rocshmem_gda/ so that nccl_device/-rooted include resolves for both the
+  # build tree and an installed consumer, with no extra -I.
   add_custom_command(
     OUTPUT "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/ibvcore.h"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -1216,9 +1202,7 @@ if (ENABLE_ROCSHMEM_GIN)
       gda/queue_pair/queue_pair_shmem.hpp
       gda/queue_pair/queue_pair_device.hpp
       gda/queue_pair_provider.hpp
-      # GDA_MUX (Multiplexing provider). Copied verbatim: with USE_CONSTMEM OFF in
-      # rccl's gda_config.h, its device dispatch reads the per-QP provider member
-      # instead of __constant__ constmem (no sed needed).
+      # GDA_MUX (Multiplexing provider)
       gda/queue_pair_mux.hpp
       # GDA_IONIC (AMD Pensando IONIC RDMA provider)
       gda/ionic/queue_pair_ionic.hpp
@@ -1287,9 +1271,8 @@ if (ENABLE_ROCSHMEM_GIN)
     target_sources(rccl PRIVATE "${_GIN_SDMA_DIR}/anvil.cpp")
     # src/gin/ so host log.hpp wins over the device shim for anvil.cpp.
     target_include_directories(rccl BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gin")
-    # ${PROJECT_BINARY_DIR}/gin so gin_anvil_sdma_factory.cc's #include
-    # "sdma/anvil.hpp" resolves from the rccl-copied anvil tree above, NOT from the
-    # rocshmem source tree (which is deliberately off the GIN include path).
+    # so anvil's #include "sdma/anvil.hpp" resolves from the rccl-copied tree,
+    # not the rocshmem source (deliberately off the GIN include path).
     target_include_directories(rccl PRIVATE "${PROJECT_BINARY_DIR}/gin")
 
     # Copy SDMA device headers next to gin_anvil_sdma.h so "sdma/anvil_device.hpp"
@@ -1347,11 +1330,6 @@ if (ENABLE_ROCSHMEM_GIN)
     add_custom_target(copy_rocshmem_mlx5_provider
       DEPENDS "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp")
     add_dependencies(copy_rocshmem_headers copy_rocshmem_mlx5_provider)
-    # Follows rccl's target-wide visibility (hidden in normal builds; default only
-    # in the coverage/MPI-test fixtures, which export everything on purpose). No
-    # per-file override: the old double-free concern is moot now that librccl
-    # duplicates no stateful rocshmem host global (ibv access goes through
-    # wrap_ibv_*), and this TU exports only functions, which cannot double-free.
     target_sources(rccl PRIVATE "${_GIN_MLX5_DIR}/provider_gda_mlx5.cpp")
   endif()
 

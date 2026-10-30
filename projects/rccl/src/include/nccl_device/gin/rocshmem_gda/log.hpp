@@ -10,9 +10,6 @@
 #ifndef RCCL_GIN_LOG_DEVICE_HPP
 #define RCCL_GIN_LOG_DEVICE_HPP
 
-// For BUILD_DEBUG_DEVICE. Guarded, so double-inclusion with the QP headers that
-// also pull it is harmless; including it here makes the LOGD gating below robust
-// regardless of consumer include order.
 #include "nccl_device/gin/rocshmem_gda/gda_config.h"
 
 // Host-side: no-ops (device headers should not emit host log calls).
@@ -26,7 +23,6 @@
 // Device-side. Unlike rocSHMEM's LOGD (which reads __constant__ logd_constants
 // for the PE/flags), the GIN build carries no device globals, so these emit a
 // plain constmem-free device printf gated at compile time on BUILD_DEBUG_DEVICE.
-// Output is the raw error message + source location (no PE/rank prefix).
 #define LOGD_ERROR_ABORT(fmt, ...) do { LOGD_ERROR(fmt, ##__VA_ARGS__); __builtin_trap(); } while (0)
 #if defined(BUILD_DEBUG_DEVICE)
 #define LOGD_ERROR(fmt, ...)       printf("GIN-GDA ERROR: " fmt " (" __FILE__ ":%d)\n", ##__VA_ARGS__, __LINE__)
