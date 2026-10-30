@@ -108,6 +108,12 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
          arch == ROCJITSU_CODE_ARCH_RDNA4;
 }
 
+/// @brief Return true when absolute flat-scratch launches append a per-wave byte-offset SGPR.
+[[nodiscard]] inline constexpr bool arch_appends_flat_scratch_wave_offset(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
 /// @brief Return true when scalar selectors 102 and 103 name FLAT_SCRATCH.
 ///
 /// @details GFX10+ makes those selectors ordinary SGPRs. Keep both the legacy

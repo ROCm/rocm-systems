@@ -270,9 +270,70 @@ inline bool rdna_buffer_range_check_lane(VectorMemState &d, uint32_t lane, uint3
   return any;
 }
 
+inline bool uses_gfx10_buffer_addressing(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
 inline bool uses_rdna_buffer_range_check(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
          arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+inline bool uses_rdna_buffer_addressing(rj_code_arch_t arch) {
+  return uses_gfx10_buffer_addressing(arch) || uses_rdna_buffer_range_check(arch);
+}
+
+/// @brief Address GFX10 buffers using their single SWIZZLE_ENABLE bit.
+/// @details CACHE_SWIZZLE does not change addresses. The IDXEN+ADD_TID rule
+/// follows the RDNA1 manual and remains unqualified on GFX10 hardware; the
+/// compiler spill path uses IDXEN=0. Later hardware differs from that manual.
+constexpr RdnaBufferAddress gfx10_buffer_address(uint32_t srd1, uint32_t srd3, uint32_t stride,
+                                                 bool idxen, uint32_t index, uint32_t offset,
+                                                 uint32_t soffset, uint32_t lane) {
+  index = (idxen ? index : 0) + ((srd3 & (1u << 23)) ? lane : 0);
+  if (!(srd1 & (1u << 31)))
+    return {index, false, buffer_total_offset(index, stride, offset, soffset)};
+  const uint32_t group = 8u << ((srd3 >> 21) & 3);
+  return {index, true,
+          (uint64_t{index / group} * stride + (offset / 4) * uint64_t{4}) * group +
+              (index % group) * 4 + offset % 4 + soffset};
+}
+
+inline void gfx10_buffer_apply_swizzle(VectorMemState &d, uint32_t srd1, uint32_t srd3,
+                                       uint64_t exec, uint64_t base, uint32_t soffset) {
+  if (!(srd1 & (1u << 31)))
+    return;
+  d.scratch_swizzle = true;
+  d.scratch_lane_mask = exec;
+  d.scratch_addr_stride = 4 * (8u << ((srd3 >> 21) & 3));
+  d.scratch_addr_base_offset = (base + soffset) % 4;
+}
+
+/// GFX10 mode 3 checks row payloads, ignoring the index for unswizzled buffers.
+inline bool gfx10_buffer_range_check_lane(VectorMemState &d, uint32_t lane,
+                                          RdnaBufferOobSelect mode, uint32_t index, uint32_t stride,
+                                          uint32_t offset, uint32_t soffset, uint32_t records,
+                                          bool swizzle, bool per_element) {
+  const uint32_t count = per_element ? d.num_elems : 1;
+  const uint32_t payload = d.elem_size * (per_element ? 1 : d.num_elems);
+  if (mode == RdnaBufferOobSelect::Complete)
+    records -= std::min(records, soffset);
+  bool any = false;
+  for (uint32_t element = 0; element < count; ++element) {
+    const uint64_t element_offset = uint64_t{offset} + uint64_t{element} * payload;
+    const bool valid =
+        mode == RdnaBufferOobSelect::Complete
+            ? (swizzle && stride != 0 ? index < records && element_offset + payload <= stride
+                                      : element_offset + payload <= records)
+            : (mode == RdnaBufferOobSelect::IndexOnly ||
+               mode == RdnaBufferOobSelect::NumRecordsZero || element_offset <= UINT32_MAX) &&
+                  rdna_buffer_access_in_range(mode, index, stride, element_offset, soffset, records,
+                                              payload);
+    if (per_element && !valid)
+      d.element_lane_masks[element] &= ~(uint64_t{1} << lane);
+    any |= valid;
+  }
+  return any;
 }
 
 /// @brief Compute per-lane addresses for MUBUF encoding.
@@ -338,6 +399,8 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   const auto rdna_oob_select = static_cast<RdnaBufferOobSelect>((srd3 >> 28) & 0x3);
   const bool gfx9 = arch_is_cdna_4_or_lower(wf.cu().arch());
   const Gfx9BufferResource gfx9_srd = gfx9_buffer_resource(srd1, srd3);
+  const bool rdna_addressing = uses_rdna_buffer_addressing(wf.cu().arch());
+  const bool gfx10 = uses_gfx10_buffer_addressing(wf.cu().arch());
   const bool format_op = gfx9_mubuf_is_format_op(inst.op);
   // Format preparation rejects INVALID for typed accesses. Raw GFX9 buffers
   // need the same no-access behavior here, before opcode-derived formats hide it.
@@ -349,13 +412,15 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   }
   const bool rdna = uses_rdna_buffer_range_check(wf.cu().arch());
   const bool per_element = d.num_elems > 1 && d.atomic_op == AtomicOp::NONE &&
-                           (gfx9 ? !format_op : rdna && !d.buffer_components);
+                           (gfx9 ? !format_op : (rdna || gfx10) && !d.buffer_components);
   d.element_lane_masks.clear();
   if (per_element)
     d.element_lane_masks.assign(d.num_elems, exec);
   if (gfx9)
     gfx9_buffer_apply_swizzle(d, gfx9_srd, exec, base_addr, soffset_val);
-  else if (uses_rdna_buffer_range_check(wf.cu().arch()))
+  else if (gfx10)
+    gfx10_buffer_apply_swizzle(d, srd1, srd3, exec, base_addr, soffset_val);
+  else if (rdna_addressing)
     rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
   std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
@@ -377,12 +442,15 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
       voffset = vaddr_region->lane(0, lane);
     }
     uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
-    const auto rdna_addr = rdna_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
-                                               offset_part, soffset_val, lane);
-    uint64_t total_offset = gfx9   ? gfx9_buffer_lane_offset(gfx9_srd, inst.idxen != 0, format_op,
-                                                             index, offset_part, soffset_val, lane)
-                            : rdna ? rdna_addr.offset
-                                   : buffer_total_offset(index, stride, offset_part, soffset_val);
+    const auto rdna_addr = gfx10 ? gfx10_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
+                                                        offset_part, soffset_val, lane)
+                                 : rdna_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
+                                                       offset_part, soffset_val, lane);
+    uint64_t total_offset = gfx9 ? gfx9_buffer_lane_offset(gfx9_srd, inst.idxen != 0, format_op,
+                                                           index, offset_part, soffset_val, lane)
+                            : rdna_addressing
+                                ? rdna_addr.offset
+                                : buffer_total_offset(index, stride, offset_part, soffset_val);
     // OOB check.
     bool oob;
     if (gfx9) {
@@ -399,6 +467,10 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
                                           rdna_addr.index, offset_part, soffset_val,
                                           rdna_addr.swizzled, per_element);
 
+    } else if (gfx10) {
+      oob = !gfx10_buffer_range_check_lane(d, lane, rdna_oob_select, rdna_addr.index, stride,
+                                           offset_part, soffset_val, num_records,
+                                           rdna_addr.swizzled, per_element);
     } else {
       const uint64_t payload =
           std::max<uint64_t>(1, static_cast<uint64_t>(d.elem_size) * d.num_elems);
@@ -466,9 +538,13 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   const auto rdna_oob_select = static_cast<RdnaBufferOobSelect>((srd3 >> 28) & 0x3);
   const bool gfx9 = arch_is_cdna_4_or_lower(wf.cu().arch());
   const Gfx9BufferResource gfx9_srd = gfx9_buffer_resource(srd1, srd3);
+  const bool rdna_addressing = uses_rdna_buffer_addressing(wf.cu().arch());
+  const bool gfx10 = uses_gfx10_buffer_addressing(wf.cu().arch());
   if (gfx9)
     gfx9_buffer_apply_swizzle(d, gfx9_srd, exec, base_addr, soffset_val);
-  else if (uses_rdna_buffer_range_check(wf.cu().arch()))
+  else if (gfx10)
+    gfx10_buffer_apply_swizzle(d, srd1, srd3, exec, base_addr, soffset_val);
+  else if (rdna_addressing)
     rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
   std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
@@ -490,14 +566,15 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
       voffset = vaddr_region->lane(0, lane);
     }
     uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
-    const auto rdna_addr = rdna_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
-                                               offset_part, soffset_val, lane);
+    const auto rdna_addr = gfx10 ? gfx10_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
+                                                        offset_part, soffset_val, lane)
+                                 : rdna_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
+                                                       offset_part, soffset_val, lane);
     uint64_t total_offset =
-        gfx9 ? gfx9_buffer_lane_offset(gfx9_srd, inst.idxen != 0,
-                                       /*format_op=*/true, index, offset_part, soffset_val, lane)
-        : uses_rdna_buffer_range_check(wf.cu().arch())
-            ? rdna_addr.offset
-            : buffer_total_offset(index, stride, offset_part, soffset_val);
+        gfx9              ? gfx9_buffer_lane_offset(gfx9_srd, inst.idxen != 0,
+                                                    /*format_op=*/true, index, offset_part, soffset_val, lane)
+        : rdna_addressing ? rdna_addr.offset
+                          : buffer_total_offset(index, stride, offset_part, soffset_val);
     bool oob;
     if (gfx9) {
       oob = !gfx9_buffer_range_check_lane(d, lane,
@@ -513,6 +590,10 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
                                           rdna_addr.index, offset_part, soffset_val,
                                           rdna_addr.swizzled, false);
 
+    } else if (gfx10) {
+      oob = !gfx10_buffer_range_check_lane(d, lane, rdna_oob_select, rdna_addr.index, stride,
+                                           offset_part, soffset_val, num_records,
+                                           rdna_addr.swizzled, false);
     } else {
       const uint64_t payload =
           std::max<uint64_t>(1, static_cast<uint64_t>(d.elem_size) * d.num_elems);

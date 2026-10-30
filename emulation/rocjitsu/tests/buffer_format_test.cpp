@@ -1855,4 +1855,61 @@ TEST_P(RdnaLegacyFormatDecodeTest, SplitOpcodeBitSelectsD16BeforeExecution) {
 
 INSTANTIATE_TEST_SUITE_P(Rdna, RdnaLegacyFormatDecodeTest,
                          ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2));
+
+TEST(BufferAddressGenerationTest, Cdna5DoesNotInheritGfx10IndexChecks) {
+  amdgpu::GpuMemory memory{"cdna5_memory"};
+  amdgpu::L2Cache l2{"cdna5_l2"};
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna5_cu", config, &memory, &l2);
+  amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, 106, 32);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t sb = wf->sgpr_alloc().base;
+  cu->write_sgpr(sb, 0x1000);
+  cu->write_sgpr(sb + 1, 16u << 16);
+  cu->write_sgpr(sb + 3, (1u << 23) | (1u << 28)); // ADD_TID and index-only bounds.
+  wf->set_exec(5);
+  for (uint32_t records : {1u, 0u}) {
+    cu->write_sgpr(sb + 2, records);
+    for (bool typed : {false, true}) {
+      amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+      state.elem_size = 4;
+      state.num_elems = 1;
+      if (typed) {
+        rdna3_5::MtbufMachineInst instruction{};
+        instruction.srsrc = sb / 4;
+        instruction.soffset = 128; // Constant zero.
+        amdgpu::addr_calc::mtbuf_calculate_addresses(instruction, *wf, state);
+      } else {
+        rdna3_5::MubufMachineInst instruction{};
+        instruction.srsrc = sb / 4;
+        instruction.soffset = 128;
+        amdgpu::addr_calc::mubuf_calculate_addresses(instruction, *wf, state);
+      }
+      EXPECT_EQ(state.lane_mask, records ? 5u : 0u);
+      EXPECT_EQ(state.per_lane_addr[0], records ? 0x1000u : 0u);
+      EXPECT_EQ(state.per_lane_addr[2], records ? 0x1000u : 0u);
+    }
+  }
+  wf->halt();
+}
+
+TEST(LegacyRdnaBufferAddressTest, SwizzledTidExcludesScalarOffset) {
+  using amdgpu::addr_calc::gfx10_buffer_address;
+  constexpr uint32_t swizzle = 1u << 31;
+  constexpr uint32_t cache_swizzle = 1u << 30;
+  constexpr uint32_t word3 = (2u << 21) | (1u << 23); // 32 indices and ADD_TID.
+  // Spill addressing: lane 5, dword offset 4, scalar offset 7, IDXEN disabled.
+  EXPECT_EQ(gfx10_buffer_address(swizzle, word3, 16, false, 3, 4, 7, 5).offset, 155u);
+  EXPECT_EQ(gfx10_buffer_address(swizzle | cache_swizzle, word3, 16, false, 3, 4, 7, 5).offset,
+            155u);
+  EXPECT_EQ(gfx10_buffer_address(cache_swizzle, word3, 16, false, 3, 4, 7, 5).offset, 91u);
+  EXPECT_EQ(gfx10_buffer_address(swizzle, 2u << 21, 16, false, 3, 4, 7, 5).offset, 135u);
+}
+
 } // namespace

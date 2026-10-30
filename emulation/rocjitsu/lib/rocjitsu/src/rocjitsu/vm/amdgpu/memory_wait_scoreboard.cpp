@@ -175,13 +175,7 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
   if (!shared_base || !result.requests)
     return result;
   const auto arch = wf.cu().arch();
-  const auto layout = arch == ROCJITSU_CODE_ARCH_CDNA5 ? FlatPrivateLayout::EncodedLane
-                      : arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                              arch == ROCJITSU_CODE_ARCH_RDNA4
-                          ? FlatPrivateLayout::Linear
-                      : arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2
-                          ? FlatPrivateLayout::None
-                          : FlatPrivateLayout::Interleaved;
+  const auto layout = flat_private_layout(arch);
   const auto address = registers.source_register(*modifiers.flat_address);
   uint64_t remaining = result.requests;
   while (remaining) {

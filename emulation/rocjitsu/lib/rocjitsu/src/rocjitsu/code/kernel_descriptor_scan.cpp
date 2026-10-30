@@ -261,6 +261,9 @@ uint32_t kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch, const KD &des
     ++sgprs;
   if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
     ++sgprs;
+  if (arch_appends_flat_scratch_wave_offset(arch) &&
+      RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT))
+    ++sgprs;
   return sgprs;
 }
 
