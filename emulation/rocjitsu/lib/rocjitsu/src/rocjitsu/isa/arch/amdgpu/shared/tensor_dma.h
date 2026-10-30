@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -368,6 +369,8 @@ public:
   uint32_t lds_address = 0;
   std::array<uint8_t, 8> bytes{};
   std::size_t completed_bytes = 0;
+  /// Trailing bytes outside the wave's LDS. Loads drop them; stores read zero.
+  uint8_t lds_dropped_bytes = 0;
   bool in_bounds = false;
 };
 
@@ -385,6 +388,7 @@ public:
   /// PC of the tensor DMA instruction. A deferred transfer completes after the
   /// wave's PC has advanced past it.
   uint64_t instruction_pc = 0;
+  uint64_t lds_end = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   bool store_from_lds = false;
   bool completion_committed = false;
@@ -474,16 +478,21 @@ inline TensorDmaLdsPadding tensor_dma_lds_padding(const TensorDmaDescriptor &des
           .amount_bytes = uint64_t{desc.pad_amount} * sizeof(uint32_t)};
 }
 
+/// @brief End of the LDS a wave owns, clamped to the CU's LDS.
+inline uint64_t tensor_dma_lds_end(const Wavefront &wf) {
+  return std::min<uint64_t>(wf.lds().size_bytes(),
+                            uint64_t{wf.lds_base()} + uint64_t{wf.lds_size()});
+}
+
 /// @brief Prove that global and LDS address formation is safe before materialization.
-/// @details The proof includes load padding and the wave's LDS allocation, allowing the element
-/// walker and append_copy to use unchecked arithmetic and narrow LDS addresses to uint32_t.
+/// @details The proof includes load padding, allowing the element walker and append_copy to use
+/// unchecked 64-bit arithmetic. LDS addresses outside the wave's allocation do not abort the
+/// operation (CDNA5 ISA 4.10.7); append_copy drops those bytes. The atomic-barrier cell must still
+/// lie within the allocation.
 inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout,
                                                     const Wavefront &wf, bool store_from_lds) {
-  const auto owned_end = util::checked_add(uint64_t{wf.lds_base()}, uint64_t{wf.lds_size()});
-  if (!owned_end) [[unlikely]]
-    return false;
-  const uint64_t allocation_end = std::min<uint64_t>(wf.lds().size_bytes(), *owned_end);
+  const uint64_t allocation_end = tensor_dma_lds_end(wf);
   // Barrier completion writes eight bytes even when the transfer has no elements.
   if (desc.atomic_barrier) {
     const auto barrier_address =
@@ -530,9 +539,7 @@ inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &d
       descriptor_base ? util::checked_add(*descriptor_base, *max_lds_byte) : std::nullopt;
   const auto transfer_end =
       last_address ? util::checked_add(*last_address, uint64_t{desc.elem_size}) : std::nullopt;
-  if (!descriptor_base || !transfer_end) [[unlikely]]
-    return false;
-  return *descriptor_base >= wf.lds_base() && *transfer_end <= allocation_end;
+  return descriptor_base && transfer_end;
 }
 
 /// @brief Append one transfer element after the descriptor-wide address proof.
@@ -549,12 +556,19 @@ inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t global_el
     lds_byte += (lds_byte / padding.interval_bytes) * padding.amount_bytes;
   }
 
-  const uint32_t lds_address =
-      static_cast<uint32_t>(uint64_t{wf.lds_base()} + uint64_t{desc.lds_base} + lds_byte);
+  // Bytes past the wave's LDS are dropped rather than aborting the operation
+  // (CDNA5 ISA 4.10.7). Like other LDS loads, a store reads them as zero.
+  const uint64_t lds_address = uint64_t{wf.lds_base()} + uint64_t{desc.lds_base} + lds_byte;
+  const uint64_t lds_bytes = lds_address < state.lds_end
+                                 ? std::min<uint64_t>(desc.elem_size, state.lds_end - lds_address)
+                                 : 0;
   TensorDmaTransferElement element{
-      .global_address = global_address, .lds_address = lds_address, .in_bounds = in_bounds};
+      .global_address = global_address,
+      .lds_address = lds_bytes ? static_cast<uint32_t>(lds_address) : kInvalidLdsAddress,
+      .lds_dropped_bytes = static_cast<uint8_t>(desc.elem_size - lds_bytes),
+      .in_bounds = in_bounds};
   if (state.store_from_lds && in_bounds) {
-    for (uint32_t byte = 0; byte < desc.elem_size; ++byte)
+    for (uint32_t byte = 0; byte < lds_bytes; ++byte)
       element.bytes[byte] = wf.lds().read8(element.lds_address + byte);
   }
   state.elements.push_back(element);
@@ -659,6 +673,7 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   }
   if (!validate_materialization_address_ranges(desc, layout, wf, state.store_from_lds)) [[unlikely]]
     return util::Result::failure();
+  state.lds_end = tensor_dma_lds_end(wf);
   state.elements.reserve(static_cast<size_t>(*element_count));
   auto append_element = [&](uint64_t global_element, uint64_t lds_element, bool in_bounds) {
     append_copy(state, wf, global_element, lds_element, in_bounds);
@@ -699,13 +714,13 @@ inline bool materialize_observed_addresses(const void *context, std::span<uint64
 
 /// @brief Merge the LDS bytes a transfer touched into runs, in element order.
 /// @details Loads write every element; out-of-tensor elements are zero-filled.
-/// Stores read only in-bounds elements.
+/// Stores read only in-bounds elements. Bytes outside the wave's LDS are omitted.
 inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState &state) {
   std::vector<TensorDmaLdsRange> ranges;
   ranges.reserve(state.elements.size());
-  const uint32_t size = state.desc.elem_size;
   for (const TensorDmaTransferElement &element : state.elements) {
-    if (state.store_from_lds && !element.in_bounds)
+    const uint32_t size = state.desc.elem_size - element.lds_dropped_bytes;
+    if (size == 0 || (state.store_from_lds && !element.in_bounds))
       continue;
     if (!ranges.empty() && ranges.back().address + ranges.back().bytes == element.lds_address)
       ranges.back().bytes += size;
@@ -869,7 +884,7 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
   if (!state.completion_committed) {
     if (!state.store_from_lds) {
       for (const TensorDmaTransferElement &element : state.elements) {
-        for (uint32_t byte = 0; byte < state.desc.elem_size; ++byte)
+        for (uint32_t byte = 0; byte + element.lds_dropped_bytes < state.desc.elem_size; ++byte)
           wf.lds().write8(element.lds_address + byte, element.bytes[byte]);
       }
     }
