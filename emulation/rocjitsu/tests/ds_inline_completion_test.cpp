@@ -8,6 +8,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -30,7 +31,15 @@ using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 
 constexpr uint64_t kCodeBase = 0x10000;
-constexpr uint32_t kSEndpgm = 0xBF810000u;
+
+/// @brief The target a DsCu emulates: CDNA4 (gfx950) has SRAM ECC, which makes
+/// D16 loads zero the other half; RDNA4 (gfx1201) does not, and runs wave32.
+struct Target {
+  rj_code_arch_t arch;
+  uint32_t s_endpgm;
+  uint32_t wave;
+};
+constexpr Target kCdna4{ROCJITSU_CODE_ARCH_CDNA4, 0xBF810000u, 64};
 constexpr uint32_t kVgprs = 256;
 constexpr uint32_t kLdsBytes = 64 * 1024;
 
@@ -40,12 +49,13 @@ uint32_t seed_word(uint32_t index) { return index * 0x9E3779B9u ^ 0x5A5A0F0Fu; }
 /// past the allocation so both paths take their bounds handling.
 enum class Addresses { Permuted, Broadcast, PastEnd };
 
-/// @brief One CDNA4 CU running a single DS instruction followed by s_endpgm.
+/// @brief One CU running a single DS instruction followed by s_endpgm.
 class DsCu {
 public:
-  explicit DsCu(bool lds_inline) : memory_("ds_inline_mem"), l2_("ds_inline_l2") {
+  explicit DsCu(bool lds_inline, Target target = kCdna4)
+      : memory_("ds_inline_mem"), l2_("ds_inline_l2"), target_(target) {
     ComputeUnitCore::Config config{};
-    config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    config.arch = target.arch;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = kVgprs;
@@ -59,9 +69,9 @@ public:
   void run(const std::array<uint32_t, 2> &ds, uint64_t exec, Addresses addresses) {
     memory_.write32(kCodeBase, ds[0]);
     memory_.write32(kCodeBase + 4, ds[1]);
-    memory_.write32(kCodeBase + 8, kSEndpgm);
+    memory_.write32(kCodeBase + 8, target_.s_endpgm);
     cu_->begin_workgroup(1, 0, 1);
-    wf_ = cu_->dispatch_wf(0, kCodeBase, 106, kVgprs);
+    wf_ = cu_->dispatch_wf(0, kCodeBase, 106, kVgprs, target_.wave);
     ASSERT_NE(wf_, nullptr);
     wf_->set_lds_base(cu_->allocate_lds(kLdsBytes));
     wf_->set_lds_size(kLdsBytes);
@@ -109,22 +119,26 @@ public:
 private:
   GpuMemory memory_;
   L2Cache l2_;
+  Target target_;
   std::unique_ptr<ComputeUnitCore> cu_;
   Wavefront *wf_ = nullptr;
 };
 
-TEST(DsInlineCompletion, EveryDsOpcodeMatchesTheRoutedPath) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+/// @brief Run every decodable DS opcode on @p target both ways and require
+/// identical results. Returns {compared, inline completions}.
+template <typename Build>
+std::pair<unsigned, unsigned> compare_every_ds_opcode(Target target, Build build) {
+  auto decoder = Decoder::create(target.arch);
   unsigned compared = 0, inline_completions = 0;
   // Ordinary operands, then data and destination registers at the end of the
   // allocation, so multi-register forms reach past it.
-  const std::array<cdna4::DsBuilderFields, 2> operand_sets{{
-      {.offset0 = 8, .offset1 = 1, .addr = 0, .data0 = 1, .data1 = 2, .vdst = 8},
-      {.offset0 = 8, .offset1 = 1, .addr = 0, .data0 = 255, .data1 = 255, .vdst = 255},
-  }};
+  struct Operands {
+    uint8_t data0, data1, vdst;
+  };
   for (uint16_t op = 0; op < 256; ++op)
-    for (const auto &operands : operand_sets) {
-      const auto words = cdna4::build_ds(op, operands);
+    for (const Operands operands : {Operands{1, 2, 8}, Operands{255, 255, 255}}) {
+      const std::array<uint32_t, 2> words =
+          build(op, operands.data0, operands.data1, operands.vdst);
       DecodeResult decoded = decoder->decode(words.data());
       if (decoded.failed())
         continue;
@@ -135,21 +149,52 @@ TEST(DsInlineCompletion, EveryDsOpcodeMatchesTheRoutedPath) {
       for (const uint64_t exec : {~uint64_t{0}, uint64_t{0xA55AA55AA55AA55Aull}, uint64_t{0}})
         for (const Addresses addresses :
              {Addresses::Permuted, Addresses::Broadcast, Addresses::PastEnd}) {
-          SCOPED_TRACE(testing::Message()
-                       << mnemonic << " data0=" << unsigned(operands.data0) << " exec=" << std::hex
-                       << exec << " addresses=" << static_cast<int>(addresses));
-          DsCu routed(false), inlined(true);
+          SCOPED_TRACE(testing::Message() << mnemonic << " wave" << target.wave << " data0="
+                                          << unsigned(operands.data0) << " exec=" << std::hex
+                                          << exec << " addresses=" << static_cast<int>(addresses));
+          DsCu routed(false, target), inlined(true, target);
           routed.run(words, exec, addresses);
           inlined.run(words, exec, addresses);
           EXPECT_FALSE(routed.cu().lds_inline_completed_for_test());
           inline_completions += inlined.cu().lds_inline_completed_for_test();
-          ASSERT_EQ(inlined.snapshot(), routed.snapshot());
+          EXPECT_EQ(inlined.snapshot(), routed.snapshot());
+          if (testing::Test::HasFailure())
+            return {compared, inline_completions};
           ++compared;
         }
     }
+  return {compared, inline_completions};
+}
+
+TEST(DsInlineCompletion, EveryDsOpcodeMatchesTheRoutedPath) {
+  const auto [compared, inline_completions] =
+      compare_every_ds_opcode(kCdna4, [](uint16_t op, uint8_t data0, uint8_t data1, uint8_t vdst) {
+        return cdna4::build_ds(
+            op,
+            {.offset0 = 8, .offset1 = 1, .addr = 0, .data0 = data0, .data1 = data1, .vdst = vdst});
+      });
   // Ordinary DS loads, stores and atomics must actually take the inline path.
   EXPECT_GT(compared, 600u);
   EXPECT_GT(inline_completions, compared / 2);
+}
+
+// RDNA4 has no SRAM ECC, so D16 loads keep the other half of the destination,
+// and waves are 32 or 64 lanes; the inline writeback is specialized by both.
+TEST(DsInlineCompletion, EveryRdna4DsOpcodeMatchesTheRoutedPathInBothWaveSizes) {
+  for (const uint32_t wave : {32u, 64u}) {
+    const auto [compared, inline_completions] =
+        compare_every_ds_opcode(Target{ROCJITSU_CODE_ARCH_RDNA4, 0xBFB00000u, wave},
+                                [](uint16_t op, uint8_t data0, uint8_t data1, uint8_t vdst) {
+                                  return rdna4::build_vds(op, {.offset0 = 8,
+                                                               .offset1 = 1,
+                                                               .addr = 0,
+                                                               .data0 = data0,
+                                                               .data1 = data1,
+                                                               .vdst = vdst});
+                                });
+    EXPECT_GT(compared, 400u);
+    EXPECT_GT(inline_completions, compared / 2);
+  }
 }
 
 /// @brief Plugin that observes exactly one hook family, so attaching it shows

@@ -21,9 +21,6 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace {
 
-/// Largest per-lane footprint of a plain DS access (b128).
-constexpr uint32_t kMaxLaneBytes = 16;
-
 /// One VGPR's lanes from raw storage. An unmaterialized register reads as the
 /// shared zero backing, as it does through RegisterAccess.
 const uint32_t *vgpr_lanes(const ComputeUnitCore &cu, uint32_t reg) {
@@ -56,56 +53,6 @@ void gather_payload(const LdsAccessRequest &req, const ComputeUnitCore &cu, uint
 
 /// Destination VGPRs a load writes.
 uint32_t dst_vgpr_count(uint32_t stride) { return std::max(1u, (stride + 3u) / 4u); }
-
-/// Write a load's lane-major response to its destination VGPRs: the
-/// non-atomic part of the routed path's vector_complete(). DS lanes are never
-/// dropped as out of bounds, so there is no OOB zeroing.
-void write_back(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu, uint64_t exec,
-                uint32_t stride, const uint8_t *response) {
-  const uint32_t vgpr_count = dst_vgpr_count(stride);
-  if (req.elem_size == sizeof(uint32_t) && !req.sign_extend && !req.d16_hi && !req.d16_lo) {
-    for (uint32_t i = 0; i < vgpr_count; ++i) {
-      auto *destination = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(req.dst_vgpr + i));
-      for (uint64_t lanes = exec; lanes; lanes &= lanes - 1) {
-        const uint32_t lane = std::countr_zero(lanes);
-        std::memcpy(&destination[lane], &response[lane * stride + i * sizeof(uint32_t)],
-                    sizeof(uint32_t));
-      }
-    }
-    return;
-  }
-  const uint32_t copy_size = std::min<uint32_t>(req.elem_size, 4u);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    for (uint32_t i = 0; i < vgpr_count; ++i) {
-      uint32_t value = 0;
-      const uint8_t *source = &response[lane * stride + i * 4];
-      if (copy_size == 4)
-        std::memcpy(&value, source, 4);
-      else if (copy_size == 2)
-        std::memcpy(&value, source, 2);
-      else
-        std::memcpy(&value, source, copy_size);
-      if (req.sign_extend && i == 0 && req.elem_size < 4) {
-        if (req.elem_size == 1)
-          value = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(value)));
-        else
-          value = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(value)));
-      }
-      if (copy_size <= 2 && (req.d16_hi || req.d16_lo)) {
-        if (cu.sram_ecc()) {
-          value = req.d16_hi ? value << 16 : value & 0xFFFFu;
-        } else {
-          const uint32_t old = cu.read_vgpr_storage(req.dst_vgpr + i, lane);
-          value = req.d16_hi ? (old & 0xFFFFu) | (value << 16)
-                             : (old & 0xFFFF0000u) | (value & 0xFFFFu);
-        }
-      }
-      cu.write_vgpr(req.dst_vgpr + i, lane, value);
-    }
-  }
-}
 
 /// 1. Gate: whether @p req may complete here. Nothing has been read or built
 ///    yet, so declining costs a few loads and branches, and the handler falls
@@ -140,8 +87,8 @@ void write_back(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu,
 
 } // namespace
 
-bool LdsInlineAccess::complete(const Instruction &inst, const LdsAccessRequest &req,
-                               Wavefront &wf) {
+bool LdsInlineAccess::access(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf,
+                             uint8_t *staging, LdsStagedLoad &load) {
   ComputeUnitCore &cu = wf.raw_cu();
   const uint32_t stride = req.num_elems * req.elem_size;
   assert(stride != 0 && stride <= kMaxLaneBytes);
@@ -170,26 +117,39 @@ bool LdsInlineAccess::complete(const Instruction &inst, const LdsAccessRequest &
   //    one bounds check and fixed copies. Lanes not fully backed keep Lds' exact
   //    rules. Stores keep the run walk in Lds::vector_store.
 
-  // 5. The access itself, through per-lane staging on the stack. The reader may
-  //    write any lane of the span; writeback reads active lanes only.
-  alignas(64) uint8_t lanes[64 * kMaxLaneBytes];
+  // 5. The access itself, through per-lane staging on the caller's stack. The
+  //    reader may write any lane of the span; writeback reads active lanes only.
   if (req.is_load) {
-    // LDS -> staging -> destination VGPR(s), applying sign_extend / d16.
-    lds.vector_load32(address_lanes, offset, exec, req.elem_size, req.num_elems, lanes);
-    write_back(req, wf, cu, exec, stride, lanes);
+    // LDS -> staging. The caller's typed writeback (lds_writeback.h) then
+    // stores the active lanes to the destination VGPR(s), applying
+    // sign_extend / d16; ownership was checked in 1e.
+    lds.vector_load32(address_lanes, offset, exec, req.elem_size, req.num_elems, staging);
+    for (uint32_t i = 0; i < dst_vgpr_count(stride); ++i)
+      load.dst[i] = cu.raw_vgpr_data(req.dst_vgpr + i);
+    load.exec = exec;
+    load.wave = wave;
+    load.sram_ecc = cu.sram_ecc();
   } else {
     // Payload VGPR(s) -> staging -> LDS, lanes ascending so the highest lane
     // wins on overlap. Inactive address lanes are never read.
     alignas(32) uint64_t addresses[64];
     addr_calc::ds_lane_addresses({address_lanes, wave}, exec, wave, offset, addresses);
-    gather_payload(req, cu, exec, stride, lanes);
-    lds.vector_store(addresses, exec, req.elem_size, req.num_elems, lanes);
+    gather_payload(req, cu, exec, stride, staging);
+    lds.vector_store(addresses, exec, req.elem_size, req.num_elems, staging);
   }
 
   // 6. No wait counters (acquire and release would cancel), no routing, no state.
   //    Register writes bypass instruction write callbacks, as VM completion does.
   cu.note_lds_inline_completion(inst); // CU caches the decoded instruction
   return true;
+}
+
+bool LdsInlineAccess::complete(const Instruction &inst, const LdsAccessRequest &req,
+                               Wavefront &wf) {
+  assert(!req.is_load && "loads name their writeback format");
+  alignas(64) uint8_t staging[64 * kMaxLaneBytes];
+  LdsStagedLoad unused;
+  return access(inst, req, wf, staging, unused);
 }
 
 bool LdsInlineAccess::complete(const Instruction &inst, VectorMemState &d, Wavefront &wf) {
