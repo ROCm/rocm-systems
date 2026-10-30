@@ -124,6 +124,90 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_signal(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_signal(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_signal(
+    __half *dest, const __half *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_signal(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_signal(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_signal(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_signal(
+    int8_t *dest, const int8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_signal(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_signal(
+    int16_t *dest, const int16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_put_signal(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_put_signal(
+    int32_t *dest, const int32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_put_signal(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_put_signal(
+    int64_t *dest, const int64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_signal(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_signal(
+    uint8_t *dest, const uint8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_signal(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_signal(
+    uint16_t *dest, const uint16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_put_signal(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_put_signal(
+    uint32_t *dest, const uint32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_put_signal(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_put_signal(
+    uint64_t *dest, const uint64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_put_signal(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_put_signal(
+    size_t *dest, const size_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_put_signal(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_signal(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_putmem_signal_wg(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
@@ -220,6 +304,90 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put_signal_wg(
     uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_signal_wg(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_signal_wg(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_signal_wg(
+    __half *dest, const __half *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_signal_wg(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_signal_wg(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_signal_wg(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_signal_wg(
+    int8_t *dest, const int8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_signal_wg(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_signal_wg(
+    int16_t *dest, const int16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_put_signal_wg(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_put_signal_wg(
+    int32_t *dest, const int32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_put_signal_wg(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_put_signal_wg(
+    int64_t *dest, const int64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_signal_wg(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_signal_wg(
+    uint8_t *dest, const uint8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_signal_wg(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_signal_wg(
+    uint16_t *dest, const uint16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_put_signal_wg(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_put_signal_wg(
+    uint32_t *dest, const uint32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_put_signal_wg(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_put_signal_wg(
+    uint64_t *dest, const uint64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_put_signal_wg(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_put_signal_wg(
+    size_t *dest, const size_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_put_signal_wg(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_signal_wg(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
 
 __device__ ATTR_NO_INLINE void rocshmem_putmem_signal_wave(
@@ -320,6 +488,90 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_signal_wave(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_signal_wave(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_signal_wave(
+    __half *dest, const __half *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_signal_wave(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_signal_wave(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_signal_wave(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_signal_wave(
+    int8_t *dest, const int8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_signal_wave(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_signal_wave(
+    int16_t *dest, const int16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_put_signal_wave(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_put_signal_wave(
+    int32_t *dest, const int32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_put_signal_wave(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_put_signal_wave(
+    int64_t *dest, const int64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_signal_wave(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_signal_wave(
+    uint8_t *dest, const uint8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_signal_wave(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_signal_wave(
+    uint16_t *dest, const uint16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_put_signal_wave(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_put_signal_wave(
+    uint32_t *dest, const uint32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_put_signal_wave(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_put_signal_wave(
+    uint64_t *dest, const uint64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_put_signal_wave(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_put_signal_wave(
+    size_t *dest, const size_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_put_signal_wave(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_signal_wave(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_putmem_signal_nbi(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
@@ -416,6 +668,90 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put_signal_nbi(
     uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_signal_nbi(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_signal_nbi(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_signal_nbi(
+    __half *dest, const __half *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_signal_nbi(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_signal_nbi(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_signal_nbi(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_signal_nbi(
+    int8_t *dest, const int8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_signal_nbi(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_signal_nbi(
+    int16_t *dest, const int16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_put_signal_nbi(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_put_signal_nbi(
+    int32_t *dest, const int32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_put_signal_nbi(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_put_signal_nbi(
+    int64_t *dest, const int64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_signal_nbi(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_signal_nbi(
+    uint8_t *dest, const uint8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_signal_nbi(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_signal_nbi(
+    uint16_t *dest, const uint16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_put_signal_nbi(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_put_signal_nbi(
+    uint32_t *dest, const uint32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_put_signal_nbi(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_put_signal_nbi(
+    uint64_t *dest, const uint64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_put_signal_nbi(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_put_signal_nbi(
+    size_t *dest, const size_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_put_signal_nbi(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_signal_nbi(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
 
 __device__ ATTR_NO_INLINE void rocshmem_putmem_signal_nbi_wg(
@@ -516,6 +852,90 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_signal_nbi_wg(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_signal_nbi_wg(
+    __half *dest, const __half *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_signal_nbi_wg(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_signal_nbi_wg(
+    int8_t *dest, const int8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_signal_nbi_wg(
+    int16_t *dest, const int16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_put_signal_nbi_wg(
+    int32_t *dest, const int32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_put_signal_nbi_wg(
+    int64_t *dest, const int64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_signal_nbi_wg(
+    uint8_t *dest, const uint8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_signal_nbi_wg(
+    uint16_t *dest, const uint16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_put_signal_nbi_wg(
+    uint32_t *dest, const uint32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_put_signal_nbi_wg(
+    uint64_t *dest, const uint64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_put_signal_nbi_wg(
+    size_t *dest, const size_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_put_signal_nbi_wg(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_signal_nbi_wg(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_putmem_signal_nbi_wave(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
@@ -612,6 +1032,90 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put_signal_nbi_wave(
     uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_signal_nbi_wave(
     unsigned long long *dest, const unsigned long long *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_half_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, __half *dest, const __half *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_half_put_signal_nbi_wave(
+    __half *dest, const __half *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_bfloat16_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_bfloat16_put_signal_nbi_wave(
+    __hip_bfloat16 *dest, const __hip_bfloat16 *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int8_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, int8_t *dest, const int8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int8_put_signal_nbi_wave(
+    int8_t *dest, const int8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int16_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, int16_t *dest, const int16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int16_put_signal_nbi_wave(
+    int16_t *dest, const int16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_put_signal_nbi_wave(
+    int32_t *dest, const int32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_put_signal_nbi_wave(
+    int64_t *dest, const int64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint8_put_signal_nbi_wave(
+    uint8_t *dest, const uint8_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint16_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, uint16_t *dest, const uint16_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint16_put_signal_nbi_wave(
+    uint16_t *dest, const uint16_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_put_signal_nbi_wave(
+    uint32_t *dest, const uint32_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_put_signal_nbi_wave(
+    uint64_t *dest, const uint64_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_put_signal_nbi_wave(
+    size_t *dest, const size_t *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_put_signal_nbi_wave(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_signal_nbi_wave(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
 
 
