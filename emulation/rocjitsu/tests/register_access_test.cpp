@@ -776,14 +776,10 @@ TEST(RegisterAccessTest, CuBoundSgprWritesCannotBypassObservation) {
 
   RegisterAccess registers(*fx.cu);
   fx.wf->clear_instruction_execution_error();
-  bool failed = false;
-  EXPECT_NO_THROW(failed = registers.write_sgpr(reg, 0x33334444u).failed());
-  EXPECT_TRUE(failed);
+  EXPECT_TRUE(registers.write_sgpr(reg, 0x33334444u).failed());
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
   fx.wf->clear_instruction_execution_error();
-  failed = false;
-  EXPECT_NO_THROW(failed = registers.write_sgpr64(reg, 0x5555666677778888ull).failed());
-  EXPECT_TRUE(failed);
+  EXPECT_TRUE(registers.write_sgpr64(reg, 0x5555666677778888ull).failed());
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
 
   EXPECT_EQ(fx.cu->read_sgpr_storage(reg), 0x11112222u);
@@ -1735,9 +1731,7 @@ TEST(RegisterAccessTest, PartialByteRawRegionOperationsRejectBeforeSideEffects) 
   const auto original_bytes = bytes;
   auto expect_failure = [&](auto operation) {
     fx.wf->clear_instruction_execution_error();
-    bool failed = false;
-    EXPECT_NO_THROW(failed = operation().failed());
-    EXPECT_TRUE(failed);
+    EXPECT_TRUE(operation().failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
     EXPECT_EQ(fx.plugin->reads.size(), reads);
@@ -1763,9 +1757,7 @@ TEST(RegisterAccessTest, ScalarBackedPartialByteStoresRejectBeforeObservation) {
   auto write = regs.write_operand(dst, 1, 0b0011);
   auto expect_failure = [&](auto operation) {
     fx.wf->clear_instruction_execution_error();
-    bool failed = false;
-    EXPECT_NO_THROW(failed = operation().failed());
-    EXPECT_TRUE(failed);
+    EXPECT_TRUE(operation().failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
     EXPECT_EQ(fx.cu->read_sgpr_storage(reg), 0xAABBCCDDu);
@@ -1776,7 +1768,7 @@ TEST(RegisterAccessTest, ScalarBackedPartialByteStoresRejectBeforeObservation) {
   expect_failure(
       [&] { return write.store_narrow<uint32_t>(0, util::broadcast_narrow<uint32_t>(1), 1); });
   fx.wf->clear_instruction_execution_error();
-  EXPECT_NO_THROW((void)regs.readwrite_operand(dst, 1, 0xF, 0b0011));
+  (void)regs.readwrite_operand(dst, 1, 0xF, 0b0011);
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
   EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
   EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
@@ -1862,9 +1854,7 @@ TEST(RegisterAccessTest, RejectedReadRegionsReportIssuingWaveAtInstructionBounda
     const uint32_t source = snapshot ? issuer_last : neighbor_base;
     RejectedRead instruction(source, snapshot);
     std::string detail;
-    bool failed = false;
-    EXPECT_NO_THROW(failed = fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed());
-    EXPECT_TRUE(failed);
+    EXPECT_TRUE(fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed());
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
     const char *expected = snapshot ? "VGPR snapshot destination is smaller than the wave region"
@@ -1950,9 +1940,7 @@ TEST(RegisterAccessTest, RejectedPhysicalWritesReportIssuingWaveAtInstructionBou
     const bool pair = operation == Operation::Sgpr64 || operation == Operation::ConstSgpr64;
     RejectedWrite instruction(operation, pair ? issuer_last : neighbor_sgpr, neighbor_vgpr);
     std::string detail;
-    bool failed = false;
-    EXPECT_NO_THROW(failed = fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed());
-    EXPECT_TRUE(failed);
+    EXPECT_TRUE(fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed());
     EXPECT_TRUE(instruction.rejected);
     EXPECT_EQ(fx.wf->instruction_execution_error(),
               InstructionExecutionError::InvalidRegisterAccess);
