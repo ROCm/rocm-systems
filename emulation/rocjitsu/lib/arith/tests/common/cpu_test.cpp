@@ -4,6 +4,7 @@
 // CPU feature/OS gating, reserved flag bits, shared enumerations, and readable names.
 
 #include "common/cpu.h"
+#include "common/cpu_decode.h"
 #include "common/internal.h"
 #include "common/semantics.h"
 #include "rj_arith/rj_arith.h"

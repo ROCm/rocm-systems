@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// gfx12 sparse selector policy and raw 8/16-bit operand layouts, shared by floating and integer
+// paths.
+#pragma once
+
+#include "common/isa.h"
+#include "rj_arith/rj_arith.h"
+#include <stdint.h>
+
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
+
+// Metadata banks contain two bits per compressed A element in a lane.
+// IU4 Wave32 K=64 consumes the whole word; Wave64 IU4 retains two banks.
+template <int Bits, int K, int WaveSize> struct SwmmacIndex {
+  static_assert((Bits == 4 || Bits == 8 || Bits == 16) && (K == 32 || (Bits == 4 && K == 64)) &&
+                (WaveSize == 32 || WaveSize == 64));
+  static constexpr int bank_bits = WaveSize == 64 && Bits != 4 ? 8
+                                   : WaveSize == 32 && K == 64 ? 32
+                                                               : 16;
+  static constexpr uint32_t mask = (bank_bits < 32 ? RJ_ARITH_SWMMAC_INDEX_KEY_1 : 0) |
+                                   (bank_bits == 8 ? RJ_ARITH_SWMMAC_INDEX_KEY_2 : 0);
+
+  // Return the bit offset of the bank selected by already-validated controls.
+  static constexpr int shift(uint32_t instruction_flags) {
+    int selector = (instruction_flags & RJ_ARITH_SWMMAC_INDEX_KEY_1 ? 1 : 0) |
+                   (instruction_flags & RJ_ARITH_SWMMAC_INDEX_KEY_2 ? 2 : 0);
+    return selector * bank_bits;
+  }
+};
+
+// Identify one packed field in a VGPR array.
+class SparseField {
+public:
+  int reg, lane, shift;
+  // Return the selected field and any higher bits; the caller narrows its type.
+  uint32_t read(const uint32_t *const *v) const { return v[reg][lane] >> shift; }
+};
+
+// Locate compressed A element ck in [0,16), before source modifiers.
+template <int Bits, int WaveSize> constexpr SparseField swmmac_a_field(int row, int ck) {
+  static_assert((Bits == 8 || Bits == 16) && (WaveSize == 32 || WaveSize == 64));
+  if constexpr (Bits == 16) {
+    return {WaveSize == 64 ? (ck % 4) / 2 : 2 * (ck / 8) + ((ck / 2) & 1),
+            row + 16 * (WaveSize == 64 ? ck / 4 : (ck / 4) & 1), 16 * (ck % 2)};
+  } else {
+    return {(ck % (WaveSize == 64 ? 4 : 8)) / 4,
+            row + 16 * (ck / 8) + (WaveSize == 64 ? 32 * ((ck / 4) % 2) : 0), 8 * (ck % 4)};
+  }
+}
+
+// Decode the dense B coordinate selected by A's compressed slot and metadata key.
+// Metadata pair ordering is a caller precondition, not validated here.
+template <int Bits, int WaveSize>
+inline int swmmac_selected_k(const uint32_t *const *index, int row, int ck, int key) {
+  auto field = swmmac_a_field<Bits, WaveSize>(row, ck);
+  int slot = WaveSize == 64 ? ck % 4 : Bits == 16 ? (ck % 4) + 4 * (ck / 8) : ck % 8;
+  return 4 * (ck / 2) + ((index[0][field.lane] >> (key + 2 * slot)) & 3);
+}
+
+// Read one raw dense B value at k in [0,32), before source modifiers.
+template <int Bits, int WaveSize>
+inline uint32_t swmmac_b_bits(const uint32_t *const *b, int col, int k) {
+  if constexpr (Bits == 16) {
+    int lane = col + 16 * (WaveSize == 64 ? k / 8 : (k / 8) & 1);
+    int slot = WaveSize == 64 ? k % 8 : 8 * (k / 16) + k % 8;
+    return (b[slot / 2][lane] >> (16 * (slot % 2))) & 0xffff;
+  } else {
+    int lane = col + 16 * (k / 16) + (WaveSize == 64 ? 32 * ((k / 8) % 2) : 0);
+    return (b[(k % (WaveSize == 64 ? 8 : 16)) / 4][lane] >> (8 * (k % 4))) & 0xff;
+  }
+}
+
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
