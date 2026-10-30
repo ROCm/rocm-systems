@@ -365,13 +365,35 @@ TEST_F(DdaIpcLifecycleMicrotest, FinalizationWithoutIpcInitializationIsNonCollec
   }
 }
 
-TEST_F(DdaIpcLifecycleMicrotest, AbortOrRevokeCleanupStaysLocalAndClosesPeerMappings) {
+TEST_F(DdaIpcLifecycleMicrotest, RevokeClosesAllLocalPeerMappingsBeforeSerialCommFree) {
+  initializeDdaIpcForAllRanks();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    comms_[rank]->revokedFlag = true;
+  }
+
+  // commReclaim closes every revoked local rank's mappings before its serial
+  // commCleanup loop, without the normal-destroy barrier.
+  closeDdaIpcPeerMappingsForAllRanks();
+  EXPECT_EQ(0, openMappingCount());
+  finalizeDdaIpcSerially();
+
+  EXPECT_EQ(0, bootstrap_.timeouts);
+  EXPECT_EQ(0, bootstrap_.desyncs);
+  EXPECT_EQ(0, bootstrap_.barrierCalls);
+  EXPECT_EQ(0, earlyFrees_);
+  EXPECT_TRUE(liveAllocations_.empty());
+  for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(ncclSuccess, closeResults_[rank]) << "rank " << rank;
+    EXPECT_EQ(ncclSuccess, finiResults_[rank]) << "rank " << rank;
+  }
+}
+
+TEST_F(DdaIpcLifecycleMicrotest, FiniWithoutPriorCloseStaysLocalAndClosesPeerMappings) {
   initializeDdaIpcForAllRanks();
   abortFlags_[0] = 1;
-  comms_[1]->revokedFlag = true;
 
-  // Abort/revoke may have only a subset of ranks alive. Finalization must
-  // remain local and complete even when no normal-destroy barrier is possible.
+  // Direct commFree paths (e.g. init failure) have no earlier close stage.
+  // Fini must stay local and still release every mapping and allocation.
   finalizeDdaIpcSerially();
 
   EXPECT_EQ(0, bootstrap_.timeouts);
@@ -379,7 +401,6 @@ TEST_F(DdaIpcLifecycleMicrotest, AbortOrRevokeCleanupStaysLocalAndClosesPeerMapp
   EXPECT_EQ(0, bootstrap_.barrierCalls);
   EXPECT_EQ(0, openMappingCount());
   EXPECT_TRUE(liveAllocations_.empty());
-  EXPECT_GT(earlyFrees_, 0);
   for (int rank = 0; rank < kRanks; ++rank) {
     EXPECT_EQ(ncclSuccess, finiResults_[rank]) << "rank " << rank;
   }

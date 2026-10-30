@@ -234,9 +234,10 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  // commFree must remain non-collective. Normal destruction closes mappings
-  // from commDestroySync before its existing intranode barrier; this idempotent
-  // call handles abort, revoke, and partial-init cleanup locally.
+  // commFree must remain non-collective. Destroy and abort close mappings in
+  // commDestroySync and revoke closes them in commReclaim, before the serial
+  // commFree loop; this idempotent call is the local backstop for init-failure
+  // and other direct commFree paths.
   ncclResult_t closeResult = ncclSuccess;
   NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(comm), closeResult);
 
