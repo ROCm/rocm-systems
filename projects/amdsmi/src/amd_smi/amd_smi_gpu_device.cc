@@ -178,19 +178,14 @@ std::mutex compute_process_list_mutex;
 static const std::chrono::milliseconds kComputeProcessCacheDuration =
     std::chrono::milliseconds(read_env_ms("AMDSMI_PROCESS_INFO_CACHE_MS", 1));
 
-// Room for processes that start while the KFD processes are listed.
-constexpr auto kProcessListHeadroom = uint32_t(64);
-// Listings tried before processes that keep starting make the read fail.
-constexpr auto kListAttempts = std::uint16_t(3);
-
 }  // namespace
 
-int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
+amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
     GPUComputeProcessList_t& compute_process_list, ComputeProcessListType_t list_type) {
   compute_process_list.clear();
   if (list_type != ComputeProcessListType_t::kAllProcesses &&
       list_type != ComputeProcessListType_t::kAllProcessesOnDevice) {
-    return rsmi_status_t::RSMI_STATUS_SUCCESS;
+    return AMDSMI_STATUS_SUCCESS;
   }
   ComputeProcessCache* cache_ptr = nullptr;
   {
@@ -206,45 +201,27 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
   if (cache_ptr->valid &&
       std::chrono::steady_clock::now() - cache_ptr->updated <= kComputeProcessCacheDuration) {
     compute_process_list = cache_ptr->list;
-    return rsmi_status_t::RSMI_STATUS_SUCCESS;
+    return AMDSMI_STATUS_SUCCESS;
   }
 
   // List the KFD processes by PID only; each one's stats are read below, for
-  // this GPU. Processes that start during a listing can make it longer than
-  // the buffer, so list again with room for them.
-  std::vector<rsmi_process_info_t> procs(cache_ptr->num_kfd_processes + kProcessListHeadroom);
-  auto num_kfd_processes = uint32_t(0);
-  for (auto attempt = std::uint16_t(1);; ++attempt) {
-    const int err =
-        GetProcessInfo(procs.data(), static_cast<uint32_t>(procs.size()), &num_kfd_processes);
-    if (err == ENOENT) {
-      // No KFD process directory: KFD is not loaded, so no process uses a GPU through it.
-      num_kfd_processes = 0;
-      break;
-    }
-    if (err != 0) {
-      return static_cast<int32_t>(ErrnoToRsmiStatus(err));
-    }
-    if (num_kfd_processes <= procs.size()) {
-      break;
-    }
-    if (attempt == kListAttempts) {
-      return rsmi_status_t::RSMI_STATUS_INSUFFICIENT_SIZE;
-    }
-    procs.resize(num_kfd_processes + kProcessListHeadroom);
+  // this GPU.
+  std::vector<rsmi_process_info_t> procs;
+  const amdsmi_status_t list_status =
+      smi_amdgpu_list_kfd_processes(GetProcessInfo, cache_ptr->num_kfd_processes, &procs);
+  if (list_status != AMDSMI_STATUS_SUCCESS) {
+    return list_status;
   }
-  procs.resize(num_kfd_processes);
-  cache_ptr->num_kfd_processes = num_kfd_processes;
-  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  cache_ptr->num_kfd_processes = static_cast<uint32_t>(procs.size());
 
   /**
    *  Check that you have devices that are able to be monitored, ie excluding CPUs
    */
   auto num_running_devices = uint32_t(0);
   auto list_device_allocation_size = uint32_t(0);
-  status_code = rsmi_num_monitor_devices(&num_running_devices);
+  const rsmi_status_t status_code = rsmi_num_monitor_devices(&num_running_devices);
   if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_devices <= 0)) {
-    return static_cast<int32_t>(status_code);
+    return rsmi_to_amdsmi_status(status_code);
   }
 
   /**
@@ -308,15 +285,26 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     const auto gpus_status = rsmi_compute_process_gpus_get(
         rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
     if (gpus_status != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      // Without its GPUs the process cannot be placed on any GPU's list. Leave it out
-      // rather than failing the list for every other process; say so if it still runs.
-      if (KfdProcessExists(rsmi_proc_info.process_id)) {
-        std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << " | Leaving out pid " << rsmi_proc_info.process_id
-           << ": its GPUs could not be read from KFD (" << getRSMIStatusString(gpus_status, false)
-           << ")";
-        LOG_WARN(ss);
+      // A process that exited is left out. One still running is listed, with
+      // every KFD stat unknown, if its DRM fdinfo shows this GPU. The lookup
+      // skips KFD files that are gone, so only a missing KFD directory means
+      // that the process exited.
+      const auto pid = rsmi_proc_info.process_id;
+      if (!KfdProcessExists(pid)) {
+        return;
       }
+      amdsmi_proc_info_t amdsmi_proc_info{};
+      if (get_process_info(MakeUnavailableProcessInfo(pid), amdsmi_proc_info) ==
+          AMDSMI_STATUS_SUCCESS) {
+        compute_process_list.emplace(pid, amdsmi_proc_info);
+        return;
+      }
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | Leaving out pid " << pid
+         << " on this GPU: its GPUs could not be read from KFD ("
+         << getRSMIStatusString(gpus_status, false)
+         << ") and its DRM fdinfo does not show this GPU or cannot be read";
+      LOG_WARN(ss);
       return;
     }
 
@@ -325,17 +313,14 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
       if (list_device_ptr[device_idx] == get_gpu_id()) {
         // Read the process's KFD stats for this GPU only.
         std::unordered_set<uint64_t> gpu_set{kfd_gpu_id};
-        if (GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set) != 0) {
-          // Its KFD entry is gone: the process exited after the listing.
-          if (!KfdProcessExists(rsmi_proc_info.process_id)) {
+        const auto pid = rsmi_proc_info.process_id;
+        const int err = GetProcessInfoForPID(pid, &rsmi_proc_info, &gpu_set);
+        if (err != 0) {
+          if (KfdProcessExitedDuringRead(pid, err)) {
             break;
           }
           // Still running but unreadable: list it with each KFD stat unknown.
-          // KFD_STATS_INVALID is 32 bits wide; the 64-bit stats use all-ones.
-          rsmi_proc_info.vram_usage = std::numeric_limits<uint64_t>::max();
-          rsmi_proc_info.sdma_usage = std::numeric_limits<uint64_t>::max();
-          rsmi_proc_info.cu_occupancy = KFD_STATS_INVALID;
-          rsmi_proc_info.evicted_time = KFD_STATS_INVALID;
+          rsmi_proc_info = MakeUnavailableProcessInfo(pid);
         }
         amdsmi_proc_info_t amdsmi_proc_info{};
         get_process_info(rsmi_proc_info, amdsmi_proc_info);
@@ -354,17 +339,16 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
   cache_ptr->updated = std::chrono::steady_clock::now();
   cache_ptr->valid = true;
 
-  return static_cast<int32_t>(status_code);
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t AMDSmiGPUDevice::amdgpu_get_compute_process_list(
     GPUComputeProcessList_t& compute_process_list, ComputeProcessListType_t list_type) {
-  auto error_code = get_compute_process_list_impl(compute_process_list, list_type);
-  if (error_code) {
+  const amdsmi_status_t status = get_compute_process_list_impl(compute_process_list, list_type);
+  if (status != AMDSMI_STATUS_SUCCESS) {
     compute_process_list.clear();
-    return rsmi_to_amdsmi_status(static_cast<rsmi_status_t>(error_code));
   }
-  return AMDSMI_STATUS_SUCCESS;
+  return status;
 }
 
 // Convert `amdsmi_bdf_t` to a PCI BDF string

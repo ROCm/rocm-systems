@@ -4008,29 +4008,42 @@ pub fn amdsmi_get_gpu_available_counters(
 ///
 /// # Errors
 ///
-/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_compute_process_info` call fails.
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_compute_process_info` call fails,
+/// including [`AmdsmiStatusT::AmdsmiStatusInsufficientSize`] when processes keep starting through three attempts.
 pub fn amdsmi_get_gpu_compute_process_info() -> AmdsmiResult<(Vec<AmdsmiProcessInfoT>, u32)> {
-    let mut num_items: u32 = 0;
+    // A process that starts between the count and the read makes the read
+    // return INSUFFICIENT_SIZE; count again, as the Python API does. Processes
+    // that keep starting make the call fail after COUNT_ATTEMPTS.
+    const COUNT_ATTEMPTS: u32 = 3;
+    let mut attempt = 1;
+    loop {
+        let mut num_items: u32 = 0;
+        call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_info(
+            std::ptr::null_mut(),
+            &mut num_items
+        ));
 
-    // First call to get the number of items
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_info(
-        std::ptr::null_mut(),
-        &mut num_items
-    ));
-
-    let mut procs: Vec<AmdsmiProcessInfoT> = Vec::with_capacity(num_items as usize);
-
-    // Second call to get the actual process information. It lowers num_items
-    // when processes exited after the count, and returns INSUFFICIENT_SIZE
-    // instead of raising it, so set_len() stays within the capacity.
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_info(
-        procs.as_mut_ptr(),
-        &mut num_items
-    ));
-
-    unsafe { procs.set_len(num_items as usize) };
-
-    Ok((procs, num_items))
+        let mut procs: Vec<AmdsmiProcessInfoT> = Vec::with_capacity(num_items as usize);
+        let status = unsafe {
+            amdsmi_wrapper::amdsmi_get_gpu_compute_process_info(procs.as_mut_ptr(), &mut num_items)
+        };
+        match status {
+            AmdsmiStatusT::AmdsmiStatusSuccess => {
+                debug_assert!(num_items as usize <= procs.capacity());
+                // SAFETY: the library writes at most the capacity passed in
+                // num_items, and on success sets num_items to the number of
+                // records it wrote (lower when processes exited after the
+                // count). So the first num_items records are within the
+                // capacity and initialized.
+                unsafe { procs.set_len(num_items as usize) };
+                return Ok((procs, num_items));
+            }
+            AmdsmiStatusT::AmdsmiStatusInsufficientSize if attempt < COUNT_ATTEMPTS => {
+                attempt += 1;
+            }
+            _ => return Err(status),
+        }
+    }
 }
 
 /// Get the GPU compute process information by PID.
@@ -4123,24 +4136,45 @@ pub fn amdsmi_get_gpu_compute_process_info_by_pid(pid: u32) -> AmdsmiResult<Amds
 ///
 /// # Errors
 ///
-/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus` call fails.
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus` call fails,
+/// including [`AmdsmiStatusT::AmdsmiStatusInsufficientSize`] when the process keeps adding GPUs through three attempts.
 pub fn amdsmi_get_gpu_compute_process_gpus(pid: u32) -> AmdsmiResult<Vec<u32>> {
-    let mut num_devices: u32 = 0;
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus(
-        pid,
-        std::ptr::null_mut(),
-        &mut num_devices
-    ));
+    // As in amdsmi_get_gpu_compute_process_info(), count again when the process
+    // starts using another GPU between the count and the read.
+    const COUNT_ATTEMPTS: u32 = 3;
+    let mut attempt = 1;
+    loop {
+        let mut num_devices: u32 = 0;
+        call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus(
+            pid,
+            std::ptr::null_mut(),
+            &mut num_devices
+        ));
 
-    let mut devices: Vec<u32> = Vec::with_capacity(num_devices as usize);
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus(
-        pid,
-        devices.as_mut_ptr(),
-        &mut num_devices
-    ));
-    unsafe { devices.set_len(num_devices as usize) };
-
-    Ok(devices)
+        let mut devices: Vec<u32> = Vec::with_capacity(num_devices as usize);
+        let status = unsafe {
+            amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus(
+                pid,
+                devices.as_mut_ptr(),
+                &mut num_devices,
+            )
+        };
+        match status {
+            AmdsmiStatusT::AmdsmiStatusSuccess => {
+                debug_assert!(num_devices as usize <= devices.capacity());
+                // SAFETY: the library writes at most the capacity passed in
+                // num_devices, and on success sets num_devices to the number of
+                // indices it wrote. So the first num_devices indices are within
+                // the capacity and initialized.
+                unsafe { devices.set_len(num_devices as usize) };
+                return Ok(devices);
+            }
+            AmdsmiStatusT::AmdsmiStatusInsufficientSize if attempt < COUNT_ATTEMPTS => {
+                attempt += 1;
+            }
+            _ => return Err(status),
+        }
+    }
 }
 
 /// Get the XGMI error status of the device with the specified processor handle.

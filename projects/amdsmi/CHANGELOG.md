@@ -178,7 +178,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Listing GPU processes from several threads at once could crash or leave processes out, and a process that uses several GPUs could show another GPU's memory and engine usage.
 
 - **Fixed GPU process lists coming back empty or incomplete while GPU processes start or exit**.  
-  - On a busy system, `amd-smi process` and the process-list APIs could briefly return no processes, miss a running one, fail, or, in Python, return entries with process ID 0. A list that cannot be read is now reported as an error, and a process whose statistics cannot be read is listed with them not available.
+  - On a busy system, `amd-smi process` and the process-list APIs could briefly return no processes, miss a running one, fail, or, in Python, return entries with process ID 0. A list that cannot be read is now reported as an error (`AMDSMI_STATUS_RETRY` while processes keep starting). A process whose statistics cannot be read is listed with them not available, and so is one whose GPUs cannot be read, on each GPU its fdinfo shows.
 
 - **Fixed per-process memory and engine usage in `amd-smi process`**.  
   - VRAM, GTT and CPU memory read 2.3% low and could be counted several times for one process. A process that opened the same GPU more than once showed the engine usage of only one of those opens.
@@ -187,7 +187,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The documented count call, with a NULL index list, returned an invalid-argument error, so the Python and Rust APIs always failed.
 
 - **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` returning invalid entries**.  
-  - When processes exited between its count and its read, the list ended with entries of undefined content.
+  - When processes exited between its count and its read, the list ended with entries of undefined content; when processes started, the call failed.
 
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.

@@ -38,7 +38,13 @@
 namespace amd::smi {
 
 static bool is_number(const std::string& s);
-static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
+static const char kDefaultKFDProcPathRoot[] = "/sys/class/kfd/kfd/proc";
+// Set only by SetKFDProcPathRootForTesting(); production never writes it.
+static const char* g_kfd_proc_path_root_override = nullptr;
+
+const char* KFDProcPathRoot() {
+  return g_kfd_proc_path_root_override ? g_kfd_proc_path_root_override : kDefaultKFDProcPathRoot;
+}
 static const char* kKFDVramPrefix = "vram_";
 
 // Tri-state result of inspecting a PID's open file descriptors for /dev/kfd.
@@ -83,7 +89,7 @@ static bool PidHasKfdOpen(const std::string& pid_str) {
 // in that namespace they are our PIDs. Elsewhere, e.g. in a container with its
 // own PID namespace, KFD sysfs reports host PIDs that are not visible in the
 // container's /proc. We detect this by checking numeric entries under
-// kKFDProcPathRoot against /proc.
+// KFDProcPathRoot() against /proc.
 // For each numeric KFD PID: if it exists in /proc and has /dev/kfd open we
 // share its namespace; if it exists but lacks /dev/kfd, a container-local PID
 // reused the number (namespaced). A PID that is gone (exited) or whose fd dir
@@ -93,6 +99,8 @@ static bool PidHasKfdOpen(const std::string& pid_str) {
 // namespaced (the KFD entries will be cleaned up shortly anyway).
 // Result is cached for the lifetime of the process; PID namespace is assumed stable.
 static bool IsKfdPidNamespaced() {
+  // A mock tree (SetKFDProcPathRootForTesting()) is named by this process's PIDs.
+  if (g_kfd_proc_path_root_override != nullptr) return false;
   static std::atomic<int> cached{-1};
   int val = cached.load(std::memory_order_acquire);
   if (val >= 0) return val;
@@ -106,7 +114,7 @@ static bool IsKfdPidNamespaced() {
     return false;
   }
 
-  DIR* kfd_dir = opendir(kKFDProcPathRoot);
+  DIR* kfd_dir = opendir(KFDProcPathRoot());
   if (!kfd_dir) {
     cached.store(0, std::memory_order_release);
     return false;
@@ -192,7 +200,7 @@ static int ScanProcForKfdPids(rsmi_process_info_t* procs, uint32_t num_allocated
 // NOTE: Uses the first host-PID entry found; assumes all container processes
 // share the same GPU set (valid for typical single-container deployments).
 static void CollectGpuIdsFromKfdVram(std::unordered_set<uint64_t>* gpu_set) {
-  DIR* kfd_proc_dir = opendir(kKFDProcPathRoot);
+  DIR* kfd_proc_dir = opendir(KFDProcPathRoot());
   if (!kfd_proc_dir) return;
 
   struct dirent* de;
@@ -200,7 +208,7 @@ static void CollectGpuIdsFromKfdVram(std::unordered_set<uint64_t>* gpu_set) {
     std::string entry(de->d_name);
     if (!is_number(entry)) continue;
 
-    std::string host_proc = std::string(kKFDProcPathRoot) + "/" + entry;
+    std::string host_proc = std::string(KFDProcPathRoot()) + "/" + entry;
     DIR* pd = opendir(host_proc.c_str());
     if (!pd) continue;
 
@@ -549,7 +557,7 @@ static int ListKfdProcRoot(std::vector<std::string>* names) {
   names->clear();
   std::unordered_set<std::string> seen;
   for (int scan = 0; scan < kKfdProcRootScans; ++scan) {
-    DIR* proc_dir = opendir(kKFDProcPathRoot);
+    DIR* proc_dir = opendir(KFDProcPathRoot());
     if (proc_dir == nullptr) {
       return scan == 0 ? errno : 0;
     }
@@ -580,6 +588,15 @@ static KfdAltContextIndex& AltContextIndex() {
   return index;
 }
 
+void SetKFDProcPathRootForTesting(const char* path) {
+  KfdAltContextIndex& index = AltContextIndex();
+  std::lock_guard<std::mutex> lock(index.mtx);
+  g_kfd_proc_path_root_override = path;
+  // The index lists the previous root's directories.
+  index.dirs.clear();
+  index.valid = false;
+}
+
 // Rebuilds the index from the root `names` listed at `listed_at`, unless it
 // already holds a later listing. The caller holds index->mtx.
 static void UpdateAltContextIndexLocked(const std::vector<std::string>& names,
@@ -594,7 +611,7 @@ static void UpdateAltContextIndexLocked(const std::vector<std::string>& names,
     long owner = strtol(name.c_str() + 4, &end, 10);
     if (end == name.c_str() + 4) continue;       // no digits after "pid:"
     if (strncmp(end, "-id:", 4) != 0) continue;  // require "pid:<owner>-id:"
-    index->dirs[owner].push_back(std::string(kKFDProcPathRoot) + "/" + name);
+    index->dirs[owner].push_back(std::string(KFDProcPathRoot()) + "/" + name);
   }
   index->listed_at = listed_at;
   index->valid = true;
@@ -706,7 +723,7 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
     return 0;
   }
 
-  std::string pdir = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
+  std::string pdir = std::string(KFDProcPathRoot()) + "/" + std::to_string(pid);
 
   // Helper lambda to extract GPU IDs from files in a directory
   auto extract_gpu_ids_from_dir = [&out](const std::string& dir_path) {
@@ -792,7 +809,7 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
     return 0;
   }
 
-  std::string proc_path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
+  std::string proc_path = std::string(KFDProcPathRoot()) + "/" + std::to_string(pid);
 
   // Helper lambda to read GPU IDs from queues in a given base path
   auto read_gpus_from_queues = [&](const std::string& base_path) -> int {
@@ -960,8 +977,18 @@ static int GetProcessKFDStats(std::string path, uint32_t& val) {
 }
 
 bool KfdProcessExists(uint32_t pid) {
-  const std::string path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
+  const std::string path = std::string(KFDProcPathRoot()) + "/" + std::to_string(pid);
   return FileExists(path.c_str());
+}
+
+bool KfdProcessExitedDuringRead(uint32_t pid, int err) {
+  return err == ESRCH || err == ENODEV || (err != 0 && !KfdProcessExists(pid));
+}
+
+rsmi_process_info_t MakeUnavailableProcessInfo(uint32_t pid) {
+  return rsmi_process_info_t{pid, std::numeric_limits<uint64_t>::max(),
+                             std::numeric_limits<uint64_t>::max(), KFD_STATS_INVALID,
+                             KFD_STATS_INVALID};
 }
 
 int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
@@ -973,18 +1000,14 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
   std::unordered_set<uint64_t>::iterator itr;
   uint32_t kfd_stat;
 
-  std::string proc_str_path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
+  std::string proc_str_path = std::string(KFDProcPathRoot()) + "/" + std::to_string(pid);
 
   // In a PID namespace, pid is this namespace's PID while KFD names its
   // directories by host PID, so a directory named pid can be another
   // process's. Return sentinel values so callers can distinguish "unavailable"
   // from "zero usage".
   if (IsKfdPidNamespaced()) {
-    proc->process_id = pid;
-    proc->vram_usage = std::numeric_limits<uint64_t>::max();
-    proc->sdma_usage = std::numeric_limits<uint64_t>::max();
-    proc->cu_occupancy = std::numeric_limits<uint32_t>::max();
-    proc->evicted_time = std::numeric_limits<uint32_t>::max();
+    *proc = MakeUnavailableProcessInfo(pid);
     return 0;
   }
   if (!FileExists(proc_str_path.c_str())) {

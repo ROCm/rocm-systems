@@ -176,8 +176,8 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   uint32_t drm_render_minor_;
   uint64_t kfd_gpu_id_;   // Used to decode vram usage for KFD processes
   std::string gpu_uuid_;  // Device UUID for UALoE identification
-  int32_t get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
-                                        ComputeProcessListType_t list_type);
+  amdsmi_status_t get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
+                                                ComputeProcessListType_t list_type);
   void populate_ifoe_fabric_bdf_list();
   // UALoE — session is opened lazily on the first get_ualoe_handle() call
   void open_ualoe_session();

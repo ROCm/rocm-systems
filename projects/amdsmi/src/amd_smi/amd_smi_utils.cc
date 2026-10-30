@@ -1516,3 +1516,35 @@ auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string {
   }
   return std::string{drm_date};
 }
+
+namespace {
+// Room for processes that start while the KFD processes are listed.
+constexpr auto kProcessListHeadroom = uint32_t(64);
+// Listings tried before processes that keep starting make the read fail.
+constexpr auto kListAttempts = 3;
+}  // namespace
+
+auto smi_amdgpu_list_kfd_processes(const SmiKfdProcessLister& list, uint32_t expected,
+                                   std::vector<rsmi_process_info_t>* procs) -> amdsmi_status_t {
+  procs->assign(expected + kProcessListHeadroom, rsmi_process_info_t{});
+  auto found = uint32_t(0);
+  for (int attempt = 1;; ++attempt) {
+    const int err = list(procs->data(), static_cast<uint32_t>(procs->size()), &found);
+    if (err == ENOENT) {
+      // No KFD process directory: KFD is not loaded, so no process uses a GPU through it.
+      procs->clear();
+      return AMDSMI_STATUS_SUCCESS;
+    }
+    if (err != 0) {
+      return amd::smi::rsmi_to_amdsmi_status(amd::smi::ErrnoToRsmiStatus(err));
+    }
+    if (found <= procs->size()) {
+      procs->resize(found);
+      return AMDSMI_STATUS_SUCCESS;
+    }
+    if (attempt == kListAttempts) {
+      return AMDSMI_STATUS_RETRY;
+    }
+    procs->assign(found + kProcessListHeadroom, rsmi_process_info_t{});
+  }
+}
