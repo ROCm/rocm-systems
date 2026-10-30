@@ -958,5 +958,5 @@ FLOAT_NAMES = (
     | UNARY_F16
     | UNARY_F32
     | UNARY_F64
-    | {'V_TRIG_PREOP_F64', 'V_FMA_F64', 'V_LDEXP_F64'}
+    | {'V_LDEXP_F64', 'V_FMA_F64', 'V_TRIG_PREOP_F64'}
 )

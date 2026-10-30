@@ -6747,8 +6747,22 @@ class CodeGenerator:
         if rj_arith_compare is not None:
             return RjArithBody(rj_arith_compare)
 
-        from amdisa.codegen.execute.rj_arith_vector import gen_integer_dot
+        from amdisa.codegen.execute.rj_arith_vector import (
+            gen_vector32,
+            gen_carry32,
+            gen_wide_integer,
+            gen_integer16,
+            gen_widening_integer,
+            gen_packed_integer,
+            gen_integer_dot,
+        )
 
+        rj_arith_carry = gen_carry32(ctx)
+        if rj_arith_carry is not None:
+            return RjArithBody(rj_arith_carry)
+        rj_arith_wide = gen_wide_integer(ctx)
+        if rj_arith_wide is not None:
+            return RjArithBody(rj_arith_wide)
         from amdisa.codegen.execute.rj_arith_division import gen_division
 
         rj_arith_division = gen_division(ctx)
@@ -6778,6 +6792,10 @@ class CodeGenerator:
         if result_writer is None:
             for handler in (
                 gen_integer_dot,
+                gen_packed_integer,
+                gen_widening_integer,
+                gen_integer16,
+                gen_vector32,
                 gen_half_dot,
                 gen_float_dot32,
                 gen_packed_binary16,
@@ -14653,10 +14671,25 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
-                from amdisa.codegen.execute.rj_arith_vector import INTEGER_DOT_NAMES
+                from amdisa.codegen.execute.rj_arith_vector import (
+                    VECTOR32_NAMES,
+                    CARRY32_NAMES,
+                    WIDE_INTEGER_NAMES,
+                    INTEGER16_NAMES,
+                    WIDENING_INTEGER_NAMES,
+                    PACKED_INTEGER_NAMES,
+                    INTEGER_DOT_NAMES,
+                )
 
                 if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
-                    (i.name in INTEGER_DOT_NAMES for i in all_insts)
+                    i.name in VECTOR32_NAMES
+                    or i.name in CARRY32_NAMES
+                    or i.name in WIDE_INTEGER_NAMES
+                    or i.name in INTEGER16_NAMES
+                    or i.name in WIDENING_INTEGER_NAMES
+                    or i.name in PACKED_INTEGER_NAMES
+                    or i.name in INTEGER_DOT_NAMES
+                    for i in all_insts
                 ):
                     cpp_includes.append(
                         (

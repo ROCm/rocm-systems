@@ -4,6 +4,23 @@
 # Check every externally linkable callable definition, including Debug COMDATs.
 # ISA-local helpers use a namespace; exported backend entry points use a suffix.
 # Local text symbols cannot be selected from another object and data is separate.
+# Inspect the defining namespace in mangled names: a demangled parameter may
+# mention std::conditional without defining any standard-library function.
+execute_process(
+    COMMAND "${NM}" -A --defined-only "${ARCHIVE}"
+    OUTPUT_VARIABLE mangled_symbols
+    COMMAND_ERROR_IS_FATAL ANY
+)
+string(REPLACE "\n" ";" mangled_lines "${mangled_symbols}")
+foreach(line IN LISTS mangled_lines)
+    if(line MATCHES "[ ][TW][ ](_ZSt|_ZN[KVRrO]*St)")
+        message(
+            FATAL_ERROR
+            "Runtime standard-library definition in arithmetic object: ${line}"
+        )
+    endif()
+endforeach()
+
 execute_process(
     COMMAND "${NM}" -A -C --defined-only "${ARCHIVE}"
     OUTPUT_VARIABLE symbols
@@ -15,12 +32,6 @@ foreach(line IN LISTS lines)
         continue()
     endif()
     set(symbol "${CMAKE_MATCH_2}")
-    if(symbol MATCHES "std::")
-        message(
-            FATAL_ERROR
-            "Runtime standard-library definition in arithmetic object: ${line}"
-        )
-    endif()
     set(domain baseline)
     set(entry_suffix "")
     if(line MATCHES "_(x86_64_v[34](_bf16)?)[.]cpp[.]o:")
