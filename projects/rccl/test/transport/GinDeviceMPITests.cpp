@@ -21,7 +21,10 @@
 #include "comm.h"
 
 #include "nccl_device.h"
+// GIN-only backend header; the macro is pinned by test/CMakeLists.txt (see there).
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
+#endif
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "gin/gin_host_anvil_sdma.h"
 #endif
@@ -199,6 +202,11 @@ std::string getBackendSkipReason() {
 // sign, so " -1" would otherwise become ULLONG_MAX, and an unchecked overflow
 // does the same. Either value silently skips the SDMA-path tests.
 size_t anvilSdmaThresholdFromEnv() {
+#if !NCCL_GIN_ANVIL_SDMA_ENABLE
+  // No backend: callers are SDMA-only skip reasons that never fire here, and the
+  // header owning the real default is not included, so return an inactive sentinel.
+  return SIZE_MAX;
+#else
   const char* e = std::getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD");
   if (!e || !e[0] || std::isspace(static_cast<unsigned char>(e[0])) || *e == '-')
     return NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
@@ -207,6 +215,7 @@ size_t anvilSdmaThresholdFromEnv() {
   unsigned long long v = std::strtoull(e, &end, 10);
   if (end == e || *end != '\0' || errno == ERANGE) return NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
   return static_cast<size_t>(v);
+#endif
 }
 
 // The GIN-SDMA alltoall exists only on the SDMA backend.

@@ -413,7 +413,6 @@ if(BUILD_TESTS)
       device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
       device/GinBackendMaskDispatch_test.cpp
-      device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
       device/NcclUtilityDeviceTests.cpp
       device/ChannelMaskMapTests.cpp
@@ -426,10 +425,16 @@ if(BUILD_TESTS)
     )
 
     if(ENABLE_ROCSHMEM_GIN)
+      # Anvil-dependent fixtures: they include the anvil_sdma backend headers
+      # unconditionally, so they only build when ENABLE_ROCSHMEM_GIN puts those
+      # headers in the in-tree include path. Keeping them in the base list let a
+      # foreign -I (e.g. an unrelated /opt/rocm rccl) satisfy the include and mask
+      # a genuinely non-GIN build.
       list(APPEND TEST_FIXTURE_SOURCE_FILES
         gin/GinAnvilIpcTableHost_test.cpp
         ../src/gin/gin_anvil_ipc_table_host.cc
         device/sdma/anvil_stub_quiet_count.cpp
+        device/GinAnvilIpcDevice_test.cpp
         device/GinRocshmemGdaTemplate_test.cpp
         device/GinAnvilSdmaTemplate_test.cpp
       )
@@ -1163,10 +1168,13 @@ if(BUILD_TESTS)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
-    # RCCL_COMMON_COMPILE_DEFS inherits ENABLE_ROCSHMEM_GIN from rccl's COMPILE_DEFINITIONS,
-    # which defaults NCCL_GIN_ANVIL_SDMA_ENABLE and NCCL_GIN_ROCSHMEM_GDA_ENABLE to 1,
-    # pulling in rocSHMEM device headers that host-only tests cannot resolve.
-    if(ENABLE_ROCSHMEM_GIN AND NOT "${test_executable}" IN_LIST RCCL_ANVIL_SDMA_STUB_TARGETS)
+    # The NCCL_GIN_{ANVIL_SDMA,ROCSHMEM_GDA}_ENABLE gates in gin_device_common.h
+    # are __has_include-based, so a stray backend header on the include path (e.g.
+    # an unrelated /opt/rocm rccl) flips them on and pulls backend code a host-only
+    # test cannot resolve. Pin them to 0 for every non-stub target, and for every
+    # target in a non-GIN build, so only targets that truly compile the backend
+    # (the GIN stub targets) keep the self-detect at 1.
+    if(NOT ENABLE_ROCSHMEM_GIN OR NOT "${test_executable}" IN_LIST RCCL_ANVIL_SDMA_STUB_TARGETS)
       target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0 NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
     endif()
     if(ENABLE_DEVICE_LINKER)
