@@ -163,4 +163,11 @@ void integer_wmma_avx512vnni(uint32_t instruction_flags, uint32_t *const *d,
 
 #endif
 
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+// Evaluate division FMA with exact guest rounding; decline without writes when unsupported.
+bool div_fmas_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t *d, const uint32_t *a,
+                              const uint32_t *b, const uint32_t *c, uint32_t *state,
+                              uint32_t mode = 0);
+#endif
+
 } // namespace rocjitsu::arith
