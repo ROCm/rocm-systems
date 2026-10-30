@@ -1372,6 +1372,23 @@ TEST(RaceDetector, TensorDma_SameWaveTransfersOrdered) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, TensorDma_CrossWaveLoadThenStoreRace) {
+  // Tensor DMA is ordered only within one wave: wave 1's store reads bytes
+  // wave 0's load may still be writing.
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorStore(/*wave=*/1, {{.address = 4, .bytes = 8}});
+  EXPECT_TRUE(b.hasLdsRace(4));
+}
+
+TEST(RaceDetector, TensorDma_CrossWaveStoreThenLoadRace) {
+  // Wave 1's load overwrites bytes wave 0's store may still be reading.
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorStore(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoad(/*wave=*/1, {{.address = 4, .bytes = 8}});
+  EXPECT_TRUE(b.hasLdsRace(4));
+}
+
 TEST(RaceDetector, TensorDma_CrossWaveStoreSourceOverwriteRace) {
   RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorStore(/*wave=*/0, {{.address = 32, .bytes = 16}});
