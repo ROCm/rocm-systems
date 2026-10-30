@@ -50,7 +50,8 @@ void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -76,7 +77,8 @@ void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -102,7 +104,8 @@ void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -128,7 +131,8 @@ void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -154,7 +158,8 @@ void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -180,7 +185,8 @@ void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -206,7 +212,8 @@ void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -232,7 +239,8 @@ void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -258,7 +266,8 @@ void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -284,7 +293,8 @@ void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -310,7 +320,8 @@ void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -336,7 +347,8 @@ void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -365,7 +377,8 @@ void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t src0 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &src0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -388,7 +401,8 @@ void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
     if (data.valid()) {
       data.copy_dwords_lane_major(d->store_data, exec);
-      set_data(std::move(d));
+      if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+        set_data(std::move(d));
       return;
     }
   }
@@ -398,7 +412,8 @@ void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -436,7 +451,8 @@ void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t v1_0 = data1_0[lane];
     std::memcpy(&d->ds2_store_data[lane * 4 + 0], &v1_0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -474,7 +490,8 @@ void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t v1_0 = data1_0[lane];
     std::memcpy(&d->ds2_store_data[lane * 4 + 0], &v1_0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -503,7 +520,8 @@ void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -535,7 +553,8 @@ void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -564,7 +583,8 @@ void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -593,7 +613,8 @@ void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsNopDs::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_ds_nop_ds(*this, wf); }
@@ -624,7 +645,8 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -781,7 +803,8 @@ void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane, 0x1);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -806,7 +829,8 @@ void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane, 0x3);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -833,7 +857,8 @@ void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -860,7 +885,8 @@ void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -887,7 +913,8 @@ void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -914,7 +941,8 @@ void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -941,7 +969,8 @@ void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -968,7 +997,8 @@ void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -995,7 +1025,8 @@ void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1022,7 +1053,8 @@ void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1049,7 +1081,8 @@ void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1076,7 +1109,8 @@ void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1103,7 +1137,8 @@ void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1130,7 +1165,8 @@ void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1160,7 +1196,8 @@ void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t src0 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &src0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStorexchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1187,7 +1224,8 @@ void DsStorexchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStorexchg2addrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1226,7 +1264,8 @@ void DsStorexchg2addrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->ds2_store_data[lane * 4 + 0], &val1_0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStorexchg2addrStride64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1265,7 +1304,8 @@ void DsStorexchg2addrStride64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->ds2_store_data[lane * 4 + 0], &val1_0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1295,7 +1335,8 @@ void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1328,7 +1369,8 @@ void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1358,7 +1400,8 @@ void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1388,7 +1431,8 @@ void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1418,7 +1462,8 @@ void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsSwizzleB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1438,7 +1483,8 @@ void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoad2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1476,7 +1522,8 @@ void DsLoad2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoad2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1515,7 +1562,8 @@ void DsLoad2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
     const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1532,7 +1580,8 @@ void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   d->sign_extend = true;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1548,7 +1597,8 @@ void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1565,7 +1615,8 @@ void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   d->sign_extend = true;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1581,7 +1632,8 @@ void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -1608,7 +1660,8 @@ void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) {
     if (exec & (1ULL << lane))
       d->per_lane_addr[lane] = addr;
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -1635,7 +1688,8 @@ void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) {
     if (exec & (1ULL << lane))
       d->per_lane_addr[lane] = addr;
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -1668,7 +1722,8 @@ void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1696,7 +1751,8 @@ void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1724,7 +1780,8 @@ void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1752,7 +1809,8 @@ void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1780,7 +1838,8 @@ void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1808,7 +1867,8 @@ void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1836,7 +1896,8 @@ void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1864,7 +1925,8 @@ void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1892,7 +1954,8 @@ void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1920,7 +1983,8 @@ void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1948,7 +2012,8 @@ void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1976,7 +2041,8 @@ void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2009,7 +2075,8 @@ void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t src1 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &src1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2032,7 +2099,8 @@ void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
     if (data.valid()) {
       data.copy_dwords_lane_major(d->store_data, exec);
-      set_data(std::move(d));
+      if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+        set_data(std::move(d));
       return;
     }
   }
@@ -2044,7 +2112,8 @@ void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
     std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2088,7 +2157,8 @@ void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t v1_1 = data1_1[lane];
     std::memcpy(&d->ds2_store_data[lane * 8 + 4], &v1_1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2132,7 +2202,8 @@ void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t v1_1 = data1_1[lane];
     std::memcpy(&d->ds2_store_data[lane * 8 + 4], &v1_1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2165,7 +2236,8 @@ void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2201,7 +2273,8 @@ void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2232,7 +2305,8 @@ void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2263,7 +2337,8 @@ void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2292,7 +2367,8 @@ void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2321,7 +2397,8 @@ void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2350,7 +2427,8 @@ void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2379,7 +2457,8 @@ void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2408,7 +2487,8 @@ void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2437,7 +2517,8 @@ void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2466,7 +2547,8 @@ void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2495,7 +2577,8 @@ void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2524,7 +2607,8 @@ void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2553,7 +2637,8 @@ void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2582,7 +2667,8 @@ void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2611,7 +2697,8 @@ void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2645,7 +2732,8 @@ void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t src1 = amdgpu::RegisterAccess(cu).read_vgpr(src_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &src1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2674,7 +2762,8 @@ void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2717,7 +2806,8 @@ void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1_1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
     std::memcpy(&d->ds2_store_data[lane * 8 + 4], &val1_1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2760,7 +2850,8 @@ void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1_1 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
     std::memcpy(&d->ds2_store_data[lane * 8 + 4], &val1_1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2794,7 +2885,8 @@ void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2831,7 +2923,8 @@ void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2863,7 +2956,8 @@ void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2895,7 +2989,8 @@ void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2911,7 +3006,8 @@ void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoad2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2949,7 +3045,8 @@ void DsLoad2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoad2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2988,7 +3085,8 @@ void DsLoad2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
     const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3018,7 +3116,8 @@ void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsAddGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -3060,7 +3159,8 @@ void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -3086,7 +3186,8 @@ void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
     val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -3112,7 +3213,8 @@ void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
     val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3129,7 +3231,8 @@ void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   d->d16_lo = true;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -3146,7 +3249,8 @@ void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   d->d16_hi = true;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3164,7 +3268,8 @@ void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = true;
   d->d16_lo = true;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -3182,7 +3287,8 @@ void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = true;
   d->d16_hi = true;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3199,7 +3305,8 @@ void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   d->d16_lo = true;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -3216,7 +3323,8 @@ void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   d->d16_hi = true;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsBvhStackRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3229,7 +3337,8 @@ void DsBvhStackRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   amdgpu::prepare_lds_stack(wf, *d, inst_.addr, inst_.data0, inst_.data1, inst_.vdst, 4, 1,
                             (8u << ((inst_.offset1 >> 4) & 3u)), 0u);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3266,7 +3375,8 @@ void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
     if (data.valid()) {
       data.copy_dwords_lane_major(d->store_data, exec);
-      set_data(std::move(d));
+      if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+        set_data(std::move(d));
       return;
     }
   }
@@ -3276,7 +3386,8 @@ void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
     std::memcpy(&d->store_data[lane * 4], &val0, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3306,7 +3417,8 @@ void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
       d->per_lane_addr[lane] = byte_base + lane * 4u + wf.lds_base();
     }
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsPermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3337,7 +3449,8 @@ void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
     if (data.valid()) {
       data.copy_dwords_lane_major(d->store_data, exec);
-      set_data(std::move(d));
+      if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+        set_data(std::move(d));
       return;
     }
   }
@@ -3351,7 +3464,8 @@ void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
     std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3374,7 +3488,8 @@ void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
     if (data.valid()) {
       data.copy_dwords_lane_major(d->store_data, exec);
-      set_data(std::move(d));
+      if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+        set_data(std::move(d));
       return;
     }
   }
@@ -3390,7 +3505,8 @@ void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3406,7 +3522,8 @@ void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 void DsLoadB128Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3422,7 +3539,8 @@ void DsLoadB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+  if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))
+    set_data(std::move(d));
 }
 
 } // namespace rdna3
