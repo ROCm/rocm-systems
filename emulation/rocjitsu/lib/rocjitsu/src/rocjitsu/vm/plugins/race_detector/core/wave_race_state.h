@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/profiler_interface.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
+#include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -119,6 +120,14 @@ public:
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, int elementBytes = 0);
+
+  /// Register an LDS event described by byte ranges rather than lanes, such as
+  /// a tensor DMA transfer. The event has no registers. Each range is retained
+  /// in whole elements of elementBytes that fit the LDS backing.
+  void registerLdsRangeEvent(uint64_t pc, MemoryEventType type,
+                             std::span<const amdgpu::TensorDmaLdsRange> ranges, int elementBytes,
+                             std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                             MemoryOrderClass memoryOrder);
 
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8

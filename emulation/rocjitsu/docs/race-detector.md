@@ -169,6 +169,13 @@ races. Some examples:
   `s_barrier`;
   or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
   before the required `s_waitcnt vmcnt`.
+- **Tensor DMA races** (gfx1250): `tensor_load_to_lds` writes and
+  `tensor_store_from_lds` reads are LDS events on `tensorcnt`. Any wave,
+  including the issuing one, that reads a load's destination or overwrites a
+  store's source before `s_wait_tensorcnt` is reported; other waves also need an
+  `s_barrier`. A load covers every element of its tile, including elements
+  outside the tensor, which it zero-fills; padding bytes are excluded. A store
+  covers only the elements inside the tensor.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -406,6 +413,8 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
+- `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
+  tensor DMA transfers on gfx1250.
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
@@ -451,6 +460,17 @@ the corpus's `--case` option.
   `wait_exp:7` (no wait), both keep those results pending. The shared
   `wait_hazard_test.cpp` suite records this boundary. Supporting embedded waits
   requires retirement before the instruction's register accesses.
+
+- **Deferred tensor DMA transfers**: a tensor DMA transfer is registered when it
+  completes. When the emulator defers a transfer until its memory becomes
+  available, the issuing wave stalls, but other waves keep running. Their LDS
+  accesses during the delay are checked when the transfer is registered, and
+  such a race is reported at the issuing wave's PC at completion, which is past
+  the tensor instruction.
+
+- **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
+  memory accesses are not checked, and the LDS barrier arrival a descriptor can
+  request is not modeled.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently
