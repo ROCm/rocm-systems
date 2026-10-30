@@ -3543,8 +3543,13 @@ public:
               return nullptr;
             }
             execution_driver = local_vm_->vm->driver();
-            rocjitsu::config::validate_dbt_simulator_device_limits(dbt_guest,
-                                                                   local_vm_->loaded.device);
+            if (rocjitsu::config::validate_dbt_simulator_device_limits(
+                    dbt_guest, local_vm_->loaded.device, diagnostic.emitter())
+                    .failed()) {
+              util::Logger::warn("rocjitsu: failed to load child config: ", diagnostic.message());
+              destroy_local_vm();
+              return nullptr;
+            }
           }
 
           // The deleter captures local_vm_, so the guest is destroyed BEFORE the VM
@@ -3579,10 +3584,9 @@ public:
           return nullptr;
         }
       } catch (const std::exception &e) {
-        // This is where a broken runtime handoff lands, including an enabled DBT config
-        // with no resolved host gpu_id. Failing closed leaves the process with a null
-        // driver and an opaque downstream failure, so the reason must be audible in a
-        // default build the way the hook layer's equivalent refusal already is.
+        // Retain containment for allocation and library exceptions during config
+        // loading and driver initialization. Failing closed leaves the process with
+        // a null driver, so the reason must be audible in a default build.
         util::Logger::warn("rocjitsu: failed to load child config: ", e.what());
         destroy_local_vm();
         return nullptr;
