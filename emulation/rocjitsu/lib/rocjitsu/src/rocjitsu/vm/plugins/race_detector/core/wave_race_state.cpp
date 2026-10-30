@@ -280,9 +280,8 @@ void WaveRaceState::registerLdsEvent(
 }
 
 void WaveRaceState::registerLdsRangeEvent(
-    InstructionSnapshot instruction, MemoryEventType type,
-    std::span<const amdgpu::TensorDmaLdsRange> ranges, int elementBytes,
-    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    InstructionSnapshot instruction, MemoryEventType type, std::span<const LdsByteRange> ranges,
+    int elementBytes, std::span<const amdgpu::MemoryCounterObligation> counterObligations,
     MemoryOrderClass memoryOrder) {
   IntervalSet intervals;
   for (const auto &range : ranges)
