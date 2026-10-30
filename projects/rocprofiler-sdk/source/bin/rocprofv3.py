@@ -59,12 +59,17 @@ PERFETTO_BUFFER_SIZE_KB_MIN = 1
 PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
 DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
 ATT_RESOURCE_MODES = ("default", "hsa", "code-object")
+PASS_LOCAL_OUTPUT_OPTIONS = ("output_file", "output_directory")
 REATTACH_INVARIANT_FILTER = (
     r".*_trace|^pc_sampling_.*$|^att_.*$|"
     r"^(pmc|pmc_groups|output_config|extra_counters)$|"
     r"^selected_regions(_ref_count)?$|"
     r"^kernel_(include_regex|exclude_regex|iteration_range)$"
 )
+
+
+class Rocprofv3ConfigurationError(RuntimeError):
+    """Invalid combination of user-supplied rocprofv3 options."""
 
 
 class dotdict(dict):
@@ -1449,6 +1454,18 @@ def has_set_attr(obj, key):
         return False
 
 
+def copy_args_without(args, excluded):
+    """Return a shallow copy with the excluded options unset."""
+    if isinstance(args, argparse.Namespace):
+        copied = argparse.Namespace(**vars(args))
+    else:
+        copied = dotdict(dict(args))
+
+    for option in excluded:
+        setattr(copied, option, None)
+    return copied
+
+
 def services_conflicting_with_kernel_replay(args, environ=None):
     """Services that kernel replay cannot collect correctly in the same run.
 
@@ -1512,15 +1529,19 @@ def get_args(
     Merges key and values in dict cmd_args and inp_args and returns the merged dict. This is typically used to combine
     arguments from multiple sources (e.g. command line and an input file).
 
-    If a key has conflicting values in cmd_args and inp_args, a RuntimeError is thrown.
+    If a key has conflicting values in cmd_args and inp_args, a
+    Rocprofv3ConfigurationError is thrown.
     If a filter is provided (as a list of regex strings), only keys matching at least one filter regex will throw a
-    RuntimeError for conflicting values. If the key with conflicting values does not match a filter, a warning is
-    generated instead, and the value from cmd_args is used in the merged dict.
-    If require_in_both is True, all keys must be present in both cmd_args and inp_args or a RuntimeError is thrown.
-    This is typically used when arguments must match exactly.
+    Rocprofv3ConfigurationError for conflicting values. If the key with conflicting
+    values does not match a filter, a warning is generated instead, and the value
+    from cmd_args is used in the merged dict. If require_in_both is True, all keys
+    must be present in both cmd_args and inp_args or a
+    Rocprofv3ConfigurationError is thrown. This is typically used when arguments
+    must match exactly.
     If a filter is provided and require_in_both is True, only keys matching at least one filter regex will throw a
-    RuntimeError if they are not present in both cmd_args and inp_args. If the key does not match a filter, a warning
-    is generated instead, and the unique key is used in the merged dict.
+    Rocprofv3ConfigurationError if they are not present in both cmd_args and
+    inp_args. If the key does not match a filter, a warning is generated instead,
+    and the unique key is used in the merged dict.
     """
 
     import re
@@ -1580,7 +1601,7 @@ def get_args(
             and getattr(cmd_args, itr) != getattr(inp_args, itr)
         ):
             if is_filtered(itr):
-                raise RuntimeError(
+                raise Rocprofv3ConfigurationError(
                     f"Option '{itr}' has conflicting values: {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
                 )
             else:
@@ -1593,7 +1614,7 @@ def get_args(
             has_set_attr(cmd_args, itr) != has_set_attr(inp_args, itr)
         ):
             if is_filtered(itr):
-                raise RuntimeError(
+                raise Rocprofv3ConfigurationError(
                     f"Option '{itr}' was only present in one argument list : {getattr(cmd_args, itr, None)} vs {getattr(inp_args, itr, None)}"
                 )
             else:
@@ -2864,8 +2885,25 @@ def main(argv=None):
             if has_set_attr(inp_arg, "pmc"):
                 all_pass_configs.append({"config": inp_arg, "from_cli": False})
 
-        # Get base args from first input arg (for CLI-only passes)
-        base_args = get_args(cmd_args, inp_args[0])
+        cli_pass_input_args = inp_args[0]
+        input_pass_cmd_args = cmd_args
+        if cli_has_pmc and input_has_pmc:
+            # Only the artifact name and destination are pass-local in combined
+            # mode: CLI paths belong to CLI passes and each job's paths belong to
+            # that job. Formats, filters, and other options intentionally keep
+            # get_args' existing inheritance and conflict behavior.
+            #
+            # Mask both merge directions because get_args prefers CLI values and
+            # rejects unequal values. Leaving either side visible would leak its
+            # destination into the other source or reject independent paths.
+            cli_pass_input_args = copy_args_without(
+                inp_args[0], PASS_LOCAL_OUTPUT_OPTIONS
+            )
+            input_pass_cmd_args = copy_args_without(cmd_args, PASS_LOCAL_OUTPUT_OPTIONS)
+
+        # Build CLI passes against the masked first job; non-output options still
+        # inherit from it when unspecified on the command line.
+        base_args = get_args(cmd_args, cli_pass_input_args)
 
         # Run each pass with its specific config
         for idx, pass_config in enumerate(all_pass_configs):
@@ -2876,7 +2914,7 @@ def main(argv=None):
                 pass_args.sub_directory = "pass_"
             else:
                 # Input file pass: merge cmd_args with the full job config
-                pass_args = get_args(cmd_args, pass_config["config"])
+                pass_args = get_args(input_pass_cmd_args, pass_config["config"])
 
             validate_selected_regions_conflicts(pass_args)
 
@@ -2893,6 +2931,14 @@ def main(argv=None):
     return ec if not None else 0
 
 
+def cli_main(argv=None):
+    """Run the CLI and report invalid user configurations without a traceback."""
+    try:
+        return main(argv)
+    except Rocprofv3ConfigurationError as err:
+        fatal_error(str(err))
+
+
 if __name__ == "__main__":
-    ec = main(sys.argv[1:])
+    ec = cli_main(sys.argv[1:])
     sys.exit(ec)

@@ -1114,18 +1114,26 @@ The preceding command creates two profiling passes:
 
 **Combining CLI and input file:**
 
-You can combine ``--pmc`` flag with an input file. The counters specified in CLI and input file are combined, creating separate passes for each counter:
+You can combine ``--pmc`` flags with an input file. The counter groups specified in the CLI and input file are combined, creating a separate pass for each group:
 
 .. code-block:: shell
 
-   rocprofv3 -i input.txt --pmc GRBM_COUNT --pmc SQ_WAVES -- <application_path>
+   rocprofv3 -i input.json --pmc GRBM_COUNT --pmc SQ_WAVES -- <application_path>
 
-If ``input.txt`` contains:
+If ``input.json`` contains:
 
-.. code-block:: text
+.. code-block:: json
 
-   pmc: FETCH_SIZE SQ_WAVES
-   pmc: GRBM_GUI_ACTIVE
+   {
+     "jobs": [
+       {
+         "pmc": ["FETCH_SIZE", "SQ_WAVES"]
+       },
+       {
+         "pmc": ["GRBM_GUI_ACTIVE"]
+       }
+     ]
+   }
 
 The preceding command creates four profiling passes:
 
@@ -1133,13 +1141,15 @@ The preceding command creates four profiling passes:
 
 - Pass 2: ``SQ_WAVES`` (from CLI).
 
-- Pass 3: ``FETCH_SIZE SQ_WAVE_CYCLES`` (from input file).
+- Pass 3: ``FETCH_SIZE SQ_WAVES`` (from input file).
 
 - Pass 4: ``GRBM_GUI_ACTIVE`` (from input file).
 
+Output file names and directories are scoped to their source in combined mode. The ``--output-file`` and ``--output-directory`` options configure only the passes created by CLI ``--pmc`` flags. Each input-file job uses its own ``output_file`` and ``output_directory`` values, or the default output location when they are omitted. CLI passes never inherit these values from an input-file job.
+
 **Output organization:**
 
-In multi-pass counter collection, each pass generates its output in a separate ``pass_n`` subdirectory:
+In multi-pass counter collection, each pass generates its output in a separate ``pass_n`` subdirectory under that pass's effective output directory. When all passes use the same output directory, the layout is:
 
 .. code-block:: text
 
@@ -1152,6 +1162,17 @@ In multi-pass counter collection, each pass generates its output in a separate `
    │   └── counter_collection.csv
    └── pass_4/
        └── counter_collection.csv
+
+When combined CLI and input-file passes use different output settings, their ``pass_n`` subdirectories are placed under their respective output directories. For example, a CLI pass configured with ``-d cli_out -o cli`` and an input-file job configured with ``"output_directory": "job_out"`` and ``"output_file": "job"`` produce:
+
+.. code-block:: text
+
+   cli_out/
+   └── pass_1/
+       └── cli_counter_collection.csv
+   job_out/
+   └── pass_2/
+       └── job_counter_collection.csv
 
 .. note::
 
@@ -1256,11 +1277,18 @@ Where the option ``--pmc`` is used to specify the extra counters to be collected
 Kernel counter collection output
 +++++++++++++++++++++++++++++++++
 
-Using ``rocprofv3`` for counter collection using input file or command line generates a ``./pmc_n/counter_collection.csv`` file prefixed with the process ID. For each ``pmc`` row, a directory ``pmc_n`` containing a ``counter_collection.csv`` file is generated, where n = 1 for the first row and so on.
+The deprecated plain-text input format uses a ``pmc_n`` subdirectory for each
+``pmc`` row, where ``n`` starts at 1. For example, the first row writes its
+counter data below ``./pmc_1/``.
 
-When using input file in JSON or YAML format, for each job, a directory ``pass_n`` containing a ``counter_collection.csv`` file is generated, where n = 1 for the first job and so on.
+Application-replay multi-pass collection uses ``pass_n`` instead. This includes
+multiple command-line ``--pmc`` flags and JSON or YAML input jobs. The
+``pass_n`` directory is placed under that pass's effective output directory, as
+described in the preceding output organization section, and ``n`` follows the
+combined pass order starting at 1.
 
-Each row of the CSV file is an instance of kernel execution. Here is a truncated version of the output file from ``pmc_1``:
+Each row of the CSV file is an instance of kernel execution. Here is a
+truncated example from the deprecated plain-text layout:
 
 .. code-block:: shell
 
