@@ -81,7 +81,7 @@ gfx10::Token TokenGenerator::next()
         if (type == VALU_INST)
             globaltime += TM_DELTA_TABLE[valu_inst_type{.raw = current}.wavetm];
         else
-            globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
+            globaltime = advanceTime(lookupbits, info, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
@@ -141,7 +141,7 @@ gfx10::Token TokenGenerator::next()
         if (type == VALU_INST)
             globaltime += TM_DELTA_TABLE[valu_inst_type{.raw = current}.wavetm];
         else
-            globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
+            globaltime = advanceTime(lookupbits, info, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {

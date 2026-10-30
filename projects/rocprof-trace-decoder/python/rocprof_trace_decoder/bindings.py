@@ -14,6 +14,10 @@ from .records import (
     Event,
     EventPayload,
     Instruction,
+    Marker,
+    MarkerFlags,
+    MarkerKind,
+    MarkerMetadata,
     Occupancy,
     OtherSimdInstruction,
     Pc,
@@ -126,6 +130,32 @@ class _ShaderData(ctypes.Structure):
     ]
 
 
+class _MarkerMetadata(ctypes.Structure):
+    _fields_ = [
+        ("size", ctypes.c_uint64),
+        ("code_object_id", ctypes.c_uint64),
+        ("name", ctypes.c_char_p),
+        ("source_location", ctypes.c_char_p),
+        ("marker_id", ctypes.c_uint32),
+        ("marker_kind", ctypes.c_uint32),
+        ("payload_count", ctypes.c_uint32),
+        ("wave_size", ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8 * 3),
+    ]
+
+
+class _Marker(ctypes.Structure):
+    _fields_ = [
+        ("size", ctypes.c_uint64),
+        ("shaderdata", _ShaderData),
+        ("kernel_entry", _PcInfo),
+        ("metadata", ctypes.POINTER(_MarkerMetadata)),
+        ("payload", ctypes.POINTER(ctypes.c_uint32)),
+        ("marker_flags", ctypes.c_uint32),
+        ("payload_count", ctypes.c_uint32),
+    ]
+
+
 class _OtherSimdInstruction(ctypes.Structure):
     _fields_ = [
         ("size", ctypes.c_uint64),
@@ -183,6 +213,22 @@ class _Dispatch(ctypes.Structure):
 
 class _Handle(ctypes.Structure):
     _fields_ = [("handle", ctypes.c_uint64)]
+
+
+class _RecordRequest(ctypes.Structure):
+    _fields_ = [
+        ("size", ctypes.c_uint64),
+        ("type", ctypes.c_int),
+        ("flags", ctypes.c_uint32),
+    ]
+
+
+class _RecordFilter(ctypes.Structure):
+    _fields_ = [
+        ("size", ctypes.c_uint64),
+        ("records", ctypes.POINTER(_RecordRequest)),
+        ("record_count", ctypes.c_uint64),
+    ]
 
 
 _TRACE_CB = ctypes.CFUNCTYPE(
@@ -384,6 +430,12 @@ class Decoder:
         ]
         lib.rocprof_trace_decoder_set_se_data_callback.restype = ctypes.c_int
 
+        lib.rocprof_trace_decoder_set_record_filter.argtypes = [
+            _Handle,
+            ctypes.POINTER(_RecordFilter),
+        ]
+        lib.rocprof_trace_decoder_set_record_filter.restype = ctypes.c_int
+
         lib.rocprof_trace_decoder_parse.argtypes = [
             _Handle,
             ctypes.c_void_p,
@@ -506,23 +558,74 @@ class Decoder:
         status = self._lib.rocprof_trace_decoder_codeobj_unload(self._handle, load_id)
         self._check(status)
 
+    def set_record_filter(
+        self,
+        record_types: Iterable[RecordType] | None = None,
+        *,
+        immediate: Iterable[RecordType] = (),
+    ) -> None:
+        """Select callback record types and their delivery mode.
+
+        ``record_types=None`` restores the native defaults: pooled delivery
+        with semantic marker decoding disabled. Enable ``RecordType.MARKER``
+        explicitly to decode markers. Types omitted from an explicit iterable
+        are disabled. Immediate delivery is supported for marker, shaderdata,
+        occupancy, and realtime records.
+        """
+        self._ensure_open()
+        immediate_types = {RecordType(value) for value in immediate}
+        if record_types is None:
+            if immediate_types:
+                raise ValueError("immediate record types require an explicit record filter")
+            self._check(self._lib.rocprof_trace_decoder_set_record_filter(self._handle, None))
+            return
+
+        selected = [RecordType(value) for value in record_types]
+        if not immediate_types.issubset(selected):
+            raise ValueError("immediate record types must also be selected")
+        array_type = _RecordRequest * len(selected)
+        requests = array_type(
+            *[
+                _RecordRequest(
+                    ctypes.sizeof(_RecordRequest),
+                    int(record_type),
+                    int(record_type in immediate_types),
+                )
+                for record_type in selected
+            ]
+        )
+        record_filter = _RecordFilter(
+            ctypes.sizeof(_RecordFilter),
+            ctypes.cast(requests, ctypes.POINTER(_RecordRequest)) if selected else None,
+            len(selected),
+        )
+        self._check(
+            self._lib.rocprof_trace_decoder_set_record_filter(
+                self._handle, ctypes.byref(record_filter)
+            )
+        )
+
     def parse_file(
         self,
         path: str | os.PathLike[str],
         isa: IsaProvider | None = None,
         on_batch: Callable[[RecordType, list[object] | int], None] | None = None,
+        *,
+        collect: bool = True,
     ) -> TraceRecords:
-        return self.parse(Path(path).read_bytes(), isa=isa, on_batch=on_batch)
+        return self.parse(Path(path).read_bytes(), isa=isa, on_batch=on_batch, collect=collect)
 
     def parse_chunks(
         self,
         chunks: Iterable[BytesLike],
         isa: IsaProvider | None = None,
         on_batch: Callable[[RecordType, list[object] | int], None] | None = None,
+        *,
+        collect: bool = True,
     ) -> TraceRecords:
         out = TraceRecords()
         for chunk in chunks:
-            partial = self.parse(chunk, isa=isa, on_batch=on_batch)
+            partial = self.parse(chunk, isa=isa, on_batch=on_batch, collect=collect)
             merge_records(out, partial)
         return out
 
@@ -531,18 +634,24 @@ class Decoder:
         data: BytesLike,
         isa: IsaProvider | None = None,
         on_batch: Callable[[RecordType, list[object] | int], None] | None = None,
+        *,
+        collect: bool = True,
     ) -> TraceRecords:
         """Decode a binary ATT payload into Python records.
 
         *isa* is called by the native decoder when it needs instruction text
         for a PC. *on_batch*, when provided, receives each converted native
         record batch before this method returns the accumulated TraceRecords.
+        Set *collect=False* to process batches without retaining them in the
+        returned TraceRecords. Python records own their strings and payloads
+        and may be kept after the callback returns.
         """
         self._ensure_open()
 
         raw = bytes(data)
         records = TraceRecords()
         callback_error: list[BaseException] = []
+        marker_metadata: dict[int, MarkerMetadata] = {}
 
         if isa is not None:
             self._isa_cb = self._make_isa_callback(isa)
@@ -554,9 +663,15 @@ class Decoder:
 
         def _trace(record_type: int, events: int | None, size: int, _userdata: int | None) -> int:
             try:
-                batch_type = RecordType(record_type)
-                batch = self._convert_batch(batch_type, events, int(size))
-                _append_batch(records, batch_type, batch)
+                try:
+                    batch_type = RecordType(record_type)
+                except ValueError:
+                    return int(DecoderStatus.SUCCESS)
+                if batch_type == RecordType.LAST or (not collect and on_batch is None):
+                    return int(DecoderStatus.SUCCESS)
+                batch = self._convert_batch(batch_type, events, int(size), marker_metadata)
+                if collect:
+                    _append_batch(records, batch_type, batch)
                 if on_batch is not None:
                     on_batch(batch_type, batch)
                 return int(DecoderStatus.SUCCESS)
@@ -611,7 +726,11 @@ class Decoder:
         return _ISA_CB(_isa)
 
     def _convert_batch(
-        self, record_type: RecordType, events: int | None, size: int
+        self,
+        record_type: RecordType,
+        events: int | None,
+        size: int,
+        marker_metadata: dict[int, MarkerMetadata] | None = None,
     ) -> list[object] | int:
         if record_type == RecordType.GFXIP:
             return int(events or 0)
@@ -650,6 +769,16 @@ class Decoder:
         if record_type == RecordType.DISPATCH:
             ptr = ctypes.cast(events, ctypes.POINTER(_Dispatch))
             return [_convert_dispatch(ptr[i]) for i in range(size)]
+        if record_type == RecordType.MARKER:
+            batch = []
+            address = events
+            for _ in range(size):
+                record_size = ctypes.c_uint64.from_address(address).value
+                if record_size < ctypes.sizeof(_Marker):
+                    raise ValueError("Native marker record is smaller than the supported layout")
+                batch.append(_convert_marker(_Marker.from_address(address), marker_metadata))
+                address += record_size
+            return batch
         return []
 
 
@@ -748,6 +877,52 @@ def _convert_shaderdata(c: _ShaderData) -> ShaderData:
     )
 
 
+def _decode_optional(value: bytes | None) -> str | None:
+    return value.decode("utf-8", errors="replace") if value else None
+
+
+def _convert_marker_metadata(c: _MarkerMetadata) -> MarkerMetadata:
+    if c.size < ctypes.sizeof(_MarkerMetadata):
+        raise ValueError("Native marker metadata is smaller than the supported layout")
+    kind = int(c.marker_kind)
+    if MarkerKind.UNKNOWN <= kind < MarkerKind.LAST:
+        kind = MarkerKind(kind)
+    return MarkerMetadata(
+        size=int(c.size),
+        code_object_id=int(c.code_object_id),
+        name=_decode_optional(c.name),
+        source_location=_decode_optional(c.source_location),
+        marker_id=int(c.marker_id),
+        marker_kind=kind,
+        payload_count=int(c.payload_count),
+        wave_size=int(c.wave_size),
+        reserved=bytes(c.reserved),
+    )
+
+
+def _convert_marker(c: _Marker, metadata_cache: dict[int, MarkerMetadata] | None = None) -> Marker:
+    metadata_address = ctypes.cast(c.metadata, ctypes.c_void_p).value
+    if metadata_address is None:
+        raise ValueError("Native marker metadata is NULL")
+    metadata = metadata_cache.get(metadata_address) if metadata_cache is not None else None
+    if metadata is None:
+        metadata = _convert_marker_metadata(c.metadata.contents)
+        if metadata_cache is not None:
+            metadata_cache[metadata_address] = metadata
+    if c.payload_count and not c.payload:
+        raise ValueError("Native marker payload is NULL with a nonzero count")
+    payload = [int(c.payload[index]) for index in range(c.payload_count)]
+    return Marker(
+        size=int(c.size),
+        shaderdata=_convert_shaderdata(c.shaderdata),
+        kernel_entry=_pc(c.kernel_entry),
+        metadata=metadata,
+        payload=payload,
+        marker_flags=MarkerFlags(int(c.marker_flags)),
+        payload_count=int(c.payload_count),
+    )
+
+
 def _convert_other_simd(c: _OtherSimdInstruction) -> OtherSimdInstruction:
     return OtherSimdInstruction(
         size=int(c.size),
@@ -825,6 +1000,8 @@ def _append_batch(
         records.other_simd.extend(batch)  # type: ignore[arg-type]
     elif record_type == RecordType.DISPATCH:
         records.dispatches.extend(batch)  # type: ignore[arg-type]
+    elif record_type == RecordType.MARKER:
+        records.markers.extend(batch)  # type: ignore[arg-type]
 
 
 def merge_records(dst: TraceRecords, src: TraceRecords) -> TraceRecords:
@@ -841,6 +1018,7 @@ def merge_records(dst: TraceRecords, src: TraceRecords) -> TraceRecords:
     dst.realtime.extend(src.realtime)
     dst.other_simd.extend(src.other_simd)
     dst.dispatches.extend(src.dispatches)
+    dst.markers.extend(src.markers)
     dst.batches.extend(src.batches)
     return dst
 

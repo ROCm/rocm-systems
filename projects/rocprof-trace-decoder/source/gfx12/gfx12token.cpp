@@ -73,7 +73,7 @@ gfx10::Token TokenGenerator::next()
         bIsExt = type == WAVE_START_EXT;
 
         int64_t real = 0;
-        globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
+        globaltime = advanceTime(lookupbits, info, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
@@ -119,7 +119,7 @@ gfx10::Token TokenGenerator::next()
         bIsExt = type == WAVE_START_EXT;
 
         int64_t real = 0;
-        globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
+        globaltime = advanceTime(lookupbits, info, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
