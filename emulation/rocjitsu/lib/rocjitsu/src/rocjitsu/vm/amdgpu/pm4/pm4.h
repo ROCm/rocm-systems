@@ -142,7 +142,9 @@ struct Pm4Submission {
   static constexpr uint32_t kMaxIndirectDepth = 64;
   static constexpr uint32_t kMaxIndirectExpansions = 4096;
   std::shared_ptr<Pm4FailureState> failure = std::make_shared<Pm4FailureState>();
-  /// Return false for pending dependencies; emit the reason and fail for a failed dependency.
+  /// @brief Check whether submission dependencies allow execution.
+  /// @details Success with true allows execution; success with false waits for pending
+  /// dependencies. Failure reports a terminal dependency failure and emits its diagnostic.
   std::function<util::FailureOr<bool>(util::DiagnosticEmitter)> ready;
   std::function<void(bool)> complete;
 };
