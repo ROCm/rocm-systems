@@ -367,35 +367,17 @@ static bool rcclRemoteFlushTuneNodes(struct ncclComm* comm) {
   return (comm->nNodes >= 2 && comm->nNodes <= 8) || comm->nNodes == 16;
 }
 
-// gfx950 LL128 steps are 4x deeper so the per-step credit wait, barriers and release fence are amortized over more
-// data; 16 lines per thread also makes a step a whole number of 4 KB slice rounds across the block's 4 warps.
-RCCL_PARAM(Ll128StepScale, "LL128_STEP_SCALE", -1);
-static constexpr int kMaxLl128StepScale = 16;
-
-// This rank's collective LL128 buffer scale: RCCL_LL128_STEP_SCALE, else 4 on gfx950 and 1 elsewhere. Both ends of
-// a connection size its FIFO, so ranks exchange this and keep the smallest (comm->ll128StepScale).
-int rcclLl128StepScale(struct ncclComm* comm) {
-  const int64_t scale = rcclParamLl128StepScale();
-  if (scale >= 1 && scale <= kMaxLl128StepScale) return (int)scale;
-  if (scale != -1)
-    WARN("Invalid RCCL_LL128_STEP_SCALE %ld, expected 1 to %d; using the default", (long)scale, kMaxLl128StepScale);
-  return IsArchMatch(comm->archName, "gfx950") ? 4 : 1;
-}
-
 // Ring all_reduce moves one LL128 chunk per channel per rank per loop, so data past chunk * nChannels * nRanks
 // needs a second loop at full ring latency and loses about a third of its bandwidth. A larger buffer lifts that
-// limit, and deeper steps (comm->ll128StepScale) amortize the per-step synchronization. Both scales apply only to
-// collectives and do not compound; send/recv keeps the default size (comm->p2pLl128BuffSize), since it allocates
-// one buffer per peer and channel and would grow with the node count. Not applied when NCCL_LL128_BUFFSIZE is set.
+// limit; send/recv keeps the default size (comm->p2pLl128BuffSize), since it allocates one buffer per network
+// peer and channel and would grow with the node count. Not applied when NCCL_LL128_BUFFSIZE is set.
 void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
-  if (!comm->topo->ll128Enabled) return;
-  int scale = std::max(comm->ll128StepScale, 1);
-  if (rcclParamIbGdrFlushFlagTune() != 0 && rcclRemoteFlushTuneNodes(comm) && rcclRemoteFlushTuned(comm))
-    scale = std::max(scale, kRemoteFlushLl128BuffScale);
-  if (scale == 1) return;
-  comm->buffSizes[NCCL_PROTO_LL128] = comm->p2pLl128BuffSize * scale;
-  INFO(NCCL_INIT, "LL128 buffer for collectives %d (x%d), for send/recv %d", comm->buffSizes[NCCL_PROTO_LL128], scale,
-       comm->p2pLl128BuffSize);
+  if (rcclParamIbGdrFlushFlagTune() == 0 || !rcclRemoteFlushTuneNodes(comm) || !comm->topo->ll128Enabled ||
+      !rcclRemoteFlushTuned(comm))
+    return;
+  comm->buffSizes[NCCL_PROTO_LL128] = comm->p2pLl128BuffSize * kRemoteFlushLl128BuffScale;
+  INFO(NCCL_INIT, "LL128 buffer for collectives %d (x%d), for send/recv %d", comm->buffSizes[NCCL_PROTO_LL128],
+       kRemoteFlushLl128BuffScale, comm->p2pLl128BuffSize);
 }
 
 // Bytes per node that Ring/LL128 all_reduce moves in one loop.
