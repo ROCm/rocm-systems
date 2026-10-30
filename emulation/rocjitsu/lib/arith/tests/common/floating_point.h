@@ -29,6 +29,11 @@ static const uint32_t kF32QuietNaNBits = 0x7fc12345U;
 static const uint32_t kF32SignalingNaNBits = 0x7f812345U;
 static const uint32_t kF32PositiveInfinityBits = 0x7f800000U;
 
+// E4M3FN has NaN but no infinity. E5M2 has both NaN and infinity.
+static const uint8_t kFP8QuietNaNBits = 0x7f;
+static const uint8_t kBF8QuietNaNBits = 0x7e;
+static const uint8_t kBF8PositiveInfinityBits = 0x7c;
+
 // Draw two finite FP16 values, using the high 16 bits of each engine result.
 // Preserve sign and fractional bits while excluding the NaN/Inf exponent.
 inline uint32_t random_f16_pair(std::minstd_rand &random) {
@@ -68,6 +73,33 @@ inline uint16_t random_bf16_bits(std::minstd_rand &random) {
   uint32_t raw = uint32_t(random()) >> 15;
   return uint16_t((raw & 0x8000) | ((124 + ((raw >> 7) & 3)) << 7) | (raw & 0x7f));
 }
+
+// Draw a finite FP8 encoding with a modest exponent from the engine's high bits.
+inline uint8_t random_fp8_bits(std::minstd_rand &random) {
+  uint32_t raw = uint32_t(random()) >> 23;
+  return uint8_t((raw & 0x80) | ((5 + ((raw >> 3) & 3)) << 3) | (raw & 7));
+}
+
+// Draw a finite BF8 encoding with a modest exponent from the engine's high bits.
+inline uint8_t random_bf8_bits(std::minstd_rand &random) {
+  uint32_t raw = uint32_t(random()) >> 23;
+  return uint8_t((raw & 0x80) | ((13 + ((raw >> 2) & 3)) << 2) | (raw & 3));
+}
+
+// IEEE FP16-to-FP32 widening is exact; no GPU arithmetic is modeled here.
+inline float f16_value(uint16_t bits) {
+  int exponent = (bits >> 10) & 31;
+  uint32_t fraction = bits & 0x3ff;
+  if (exponent == 31) {
+    return std::bit_cast<float>((uint32_t(bits & 0x8000) << 16) | 0x7f800000U | (fraction << 13));
+  }
+  float magnitude = exponent ? std::ldexp(float(1024 + fraction), exponent - 25)
+                             : std::ldexp(float(fraction), -24);
+  return bits & 0x8000 ? -magnitude : magnitude;
+}
+
+// Widen BF16 bits to FP32 without changing the encoded sign or payload.
+inline float bf16_value(uint16_t bits) { return std::bit_cast<float>(uint32_t(bits) << 16); }
 
 // Match NaNs by classification. Loose semantics compare signed infinities
 // exactly and finite values with atol/rtol; other semantics compare bits.

@@ -15,8 +15,6 @@
 
 // Adapted from rocjitsu ad2bb973ec4 shared/gfx12_dot.h (native FP8/BF8
 // extension dd63b040587). Empirical gfx1201 model, not a universal guarantee.
-// Current callers exercise FP16/BF16 DOT4 with FP32 output; packed-output and
-// FP8/BF8 instantiations are retained from the model but not exercised here.
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 namespace gfx12_dot_detail {
