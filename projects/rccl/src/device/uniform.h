@@ -20,18 +20,17 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-/// \file uniform.h
-/// \brief Wave-uniformity hints for device code.
-///
-/// Device functions often take arguments that are wave-uniform by contract, but the
-/// compiler cannot prove it when the caller derives them from threadIdx (e.g. a
-/// per-warp offset). Without that proof every loop bound, switch and wait count
-/// downstream becomes a per-lane value with EXEC-masked control flow, and each SGPR
-/// operand (such as a TDM descriptor field) is copied over with its own readfirstlane.
-/// Applying uniform() at entry restores the proof and keeps that work scalar.
-///
-/// uniform() returns lane 0's value, so it is only correct for values that really are
-/// the same across the active lanes of the wave.
+// Wave-uniformity hints for device code.
+//
+// Device functions often take arguments that are wave-uniform by contract, but the
+// compiler cannot prove it when the caller derives them from threadIdx (e.g. a
+// per-warp offset). Without that proof every loop bound, switch and wait count
+// downstream becomes a per-lane value with EXEC-masked control flow, and each SGPR
+// operand (such as a TDM descriptor field) is copied over with its own readfirstlane.
+// Applying uniform() at entry restores the proof and keeps that work scalar.
+//
+// uniform() returns the first active lane's value, so it is only correct for values
+// that really are the same across the active lanes of the wave.
 
 #ifndef RCCL_DEVICE_UNIFORM_H_
 #define RCCL_DEVICE_UNIFORM_H_
