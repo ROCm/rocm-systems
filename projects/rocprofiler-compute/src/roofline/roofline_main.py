@@ -634,34 +634,20 @@ class Roofline:
         flops_figure: Optional[go.Figure],
         ops_dt_list: str,
         flops_dt_list: str,
+        output_path: Path,
     ) -> Optional[str]:
-        """Write one precision-selectable Plotly HTML document to disk and
+        """Write one precision-selectable Plotly HTML document to output_path and
         return its path, or None when there is nothing to plot."""
-        dev_id = str(self.__run_parameters["device_id"])
-        kernel_list = ""
-        if self.__run_parameters.get("kernel_filter", False):
-            kernels = getattr(self.__args, "gpu_kernel", None)
-            if kernels:
-                flat = [
-                    str(k)
-                    for group in kernels
-                    for k in (group if isinstance(group, list) else [group])
-                ]
-                for name in sorted(flat):
-                    kernel_list += "_" + name
-
-        workload_dir = self.__run_parameters["workload_dir"]
         figure, view_model = self._combined_html_figure(ops_figure, flops_figure)
-        if figure is not None:
-            document = build_interactive_document(
-                figure,
-                view_model,
-                title="Empirical Roofline Analysis",
-            )
-            path = f"{workload_dir}/empirRoof_gpu-{dev_id}{kernel_list}.html"
-            Path(path).write_text(document, encoding="utf-8")
-            return path
-        return None
+        if figure is None:
+            return None
+        document = build_interactive_document(
+            figure,
+            view_model,
+            title="Empirical Roofline Analysis",
+        )
+        output_path.write_text(document, encoding="utf-8")
+        return str(output_path)
 
     def _combined_html_figure(
         self,

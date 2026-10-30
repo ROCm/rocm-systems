@@ -8,13 +8,14 @@ under docs/data/analyze/ with tools/schema_visualizer.py and commit them.
 """
 
 import csv
+import itertools
 import json
 import math
 import sqlite3
 from collections.abc import Iterator
 from contextlib import closing
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import (
     JSON,
@@ -557,15 +558,12 @@ def per_kernel_isa_file_key_columns() -> list[Any]:
     ]
 
 
-def per_source_line_file_key_columns() -> List[Any]:
-    """Return the columns that name the file a per-source-line row is written to.
-
-    The per-source-line query selects these columns first, and the exporter
-    uses their count to split them off each row.
-    """
+def per_kernel_source_line_file_key_columns() -> list[Any]:
+    """Return the columns that name one kernel's source-line export file."""
     return [
         Workload.name.label("workload_name"),
         Workload.sub_name.label("workload_sub_name"),
+        Kernel.kernel_uuid.label("kernel_uuid"),
         SourceFile.file_path.label("file_path"),
     ]
 
@@ -573,12 +571,11 @@ def per_source_line_file_key_columns() -> List[Any]:
 class Database:
     _session: Optional[Session] = None
     _engine: Optional[Engine] = None
-    _db_name: Optional[str] = None
     _view_sql_cache: Optional[dict[str, str]] = None
     _type_cache: Optional[dict[tuple[type[Base], str], Base]] = None
 
     @classmethod
-    def init(cls, db_name: str) -> str:
+    def init(cls) -> None:
         # StaticPool pins the engine to a single sqlite3 connection so the
         # session and the backup in write() share the same in-memory DB.
         cls._engine = create_engine(
@@ -591,12 +588,10 @@ class Database:
         )
         Base.metadata.create_all(cls._engine)
         cls._session = sessionmaker(bind=cls._engine)()
-        cls._db_name = db_name
         cls._type_cache = {}
         # Compile views eagerly so a broken definition fails at init time.
         cls._view_sql_cache = cls._compile_view_sql()
         console_debug("SQLite database initialized in memory")
-        return db_name
 
     @classmethod
     def get_session(cls) -> Optional[Session]:
@@ -627,49 +622,120 @@ class Database:
             console_error(f"Error committing analysis database: {e}")
 
     @classmethod
-    def write(cls) -> None:
-        """Back up the in-memory database to disk at the configured path."""
-        if cls._session is None:
-            console_error("No active database session")
-        try:
-            # Writing to disk is slow, so we built the database in memory.
-            # Now copy the finished database to disk in one step.
-            with closing(cls._engine.raw_connection()) as memory_conn:
-                with closing(sqlite3.connect(cls._db_name)) as disk_conn:
-                    memory_conn.backup(disk_conn)
-            console_debug("Completed writing database")
-            console_warning(f"Created file: {cls._db_name}")
-        except Exception as e:
-            console_error(f"Error writing analysis database: {e}")
-        finally:
-            cls._session.close()
-            cls._session = None
+    def write(cls, db_path: Path) -> None:
+        """Back up the in-memory database to disk at db_path.
 
-    @classmethod
-    def write_csv_dir(cls, csv_dir: Path) -> None:
-        """Stream each view's rows directly into a CSV file in csv_dir.
-
-        Uses the raw sqlite3 cursor and csv.writer so the full result set
-        is never held in memory at once.
+        The session stays open so other exports can still read it; call close()
+        when done. Disk errors propagate so the caller can report them.
         """
         if cls._session is None:
             console_error("No active database session")
-        try:
-            csv_dir.mkdir(parents=True, exist_ok=True)
-            # session.connection() is a SQLAlchemy Connection; its .connection
-            # attribute is the underlying sqlite3.Connection.
-            raw_conn = cls._session.connection().connection
-            for view_name, sql in cls.get_view_sql().items():
-                cursor = raw_conn.execute(sql)
-                csv_path = csv_dir / f"{view_name}.csv"
-                with csv_path.open("w", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([column[0] for column in cursor.description])
-                    writer.writerows(cursor)
-                console_warning(f"Created file: {csv_path}")
-        finally:
-            cls._session.close()
-            cls._session = None
+        # Writing to disk is slow, so we built the database in memory.
+        # Now copy the finished database to disk in one step.
+        with closing(cls._engine.raw_connection()) as memory_conn:
+            with closing(sqlite3.connect(db_path)) as disk_conn:
+                memory_conn.backup(disk_conn)
+        console_debug("Completed writing database")
+        console_warning(f"Created file: {db_path}")
+
+    @classmethod
+    def write_analysis_csvs(
+        cls,
+        metrics_summary_paths: Dict[int, Path],
+        pc_sampling_summary_paths: Dict[int, Path],
+        kernel_metrics_paths: Dict[int, Path],
+    ) -> None:
+        """Write the workload and kernel CSVs to their paths, in existing folders.
+
+        The workload paths are keyed by workload id and the kernel paths by
+        kernel uuid. A workload without PC sampling gets no PC-sampling summary.
+        """
+        if cls._session is None:
+            console_error("No active database session")
+
+        for workload_id, csv_path in metrics_summary_paths.items():
+            cls._write_view_csv(
+                "workload_metric", csv_path, "workload_id = ?", (workload_id,)
+            )
+        for workload_id, csv_path in pc_sampling_summary_paths.items():
+            cls._write_view_csv(
+                "pc_sampling_summary",
+                csv_path,
+                "workload_id = ?",
+                (workload_id,),
+                omit_empty=True,
+            )
+
+        kernel_sql = cls.get_view_sql()["kernel_metric"]
+        raw_conn = cls._session.connection().connection
+        header_cursor = raw_conn.execute(f"SELECT * FROM ({kernel_sql})")
+        header = [column[0] for column in header_cursor.description]
+        for csv_path in kernel_metrics_paths.values():
+            with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
+                csv.writer(csv_file).writerow(header)
+
+        cursor = raw_conn.execute(
+            f"SELECT * FROM ({kernel_sql}) "
+            "ORDER BY workload_id, kernel_uuid, metric_id, value_name"
+        )
+        for kernel_uuid, rows in itertools.groupby(cursor, key=lambda row: row[2]):
+            csv_path = kernel_metrics_paths.get(kernel_uuid)
+            if csv_path is None:
+                continue
+            with csv_path.open("a", newline="", encoding="utf-8") as csv_file:
+                csv.writer(csv_file).writerows(rows)
+
+    @classmethod
+    def workload_ids_with_pc_sampling(cls) -> set[int]:
+        """Return workload ids with at least one sampled instruction row."""
+        if cls._session is None:
+            console_error("No active database session")
+        statement = text(
+            "SELECT DISTINCT code_object.workload_id "
+            "FROM compute_pc_sample_state AS sample "
+            "JOIN compute_instruction_line AS instruction "
+            "ON sample.instruction_uuid = instruction.instruction_uuid "
+            "JOIN compute_kernel_symbol AS symbol "
+            "ON instruction.kernel_symbol_uuid = symbol.kernel_symbol_uuid "
+            "JOIN compute_code_object_store AS code_object "
+            "ON symbol.code_object_uuid = code_object.code_object_uuid "
+            "WHERE sample.instruction_uuid IS NOT NULL"
+        )
+        return {row[0] for row in cls._session.execute(statement)}
+
+    @classmethod
+    def _write_view_csv(
+        cls,
+        view_name: str,
+        csv_path: Path,
+        condition: str,
+        parameters: tuple[int, ...],
+        *,
+        omit_empty: bool = False,
+    ) -> None:
+        """Write one filtered view while streaming its rows to disk."""
+        raw_conn = cls._session.connection().connection
+        sql = f"SELECT * FROM ({cls.get_view_sql()[view_name]}) WHERE {condition}"
+        cursor = raw_conn.execute(sql, parameters)
+        first_row = cursor.fetchone()
+        if omit_empty and first_row is None:
+            return
+
+        with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow([column[0] for column in cursor.description])
+            if first_row is not None:
+                writer.writerow(first_row)
+                writer.writerows(cursor)
+        console_warning(f"Created file: {csv_path}")
+
+    @classmethod
+    def close(cls) -> None:
+        """Close the session. The database cannot be read or written after this."""
+        if cls._session is None:
+            return
+        cls._session.close()
+        cls._session = None
 
     @classmethod
     def get_stall_reasons_by_workload(cls) -> dict[int, list[str]]:
@@ -704,18 +770,14 @@ class Database:
         )
 
     @classmethod
-    def stream_per_source_line_rows(
+    def stream_per_kernel_source_line_rows(
         cls,
         workload_id: int,
         stall_reasons: List[str],
     ) -> Iterator[Tuple[Any, ...]]:
-        """Yield every source line of one workload's captured source files.
-
-        The rows arrive in the order the exporter writes them, through the raw
-        sqlite3 cursor, so the full result set is never held in memory.
-        """
+        """Yield captured source lines grouped by kernel and source file."""
         yield from cls._stream_rows(
-            cls._per_source_line_statement(workload_id, stall_reasons)
+            cls._per_kernel_source_line_statement(workload_id, stall_reasons)
         )
 
     @classmethod
@@ -934,68 +996,195 @@ class Database:
         )
 
     @staticmethod
-    def _per_source_line_statement(
+    def _per_kernel_source_line_statement(
         workload_id: int,
         stall_reasons: List[str],
     ) -> Select[Any]:
-        """Select every source line of one workload's captured source files.
-
-        Each source line has its sample state and the uuids of the instructions
-        whose inline stack includes that source line. This includes the "?"
-        row of each file, which holds the instructions without a source line
-        number.
-        """
-        return (
+        """Select sampled source lines and ISA references per kernel."""
+        kernel_instructions = (
             select(
-                *per_source_line_file_key_columns(),
-                SourceLine.line_number,
-                SourceLine.content,
-                PCSampleState.total_count.label("count"),
-                PCSampleState.issue_count,
-                PCSampleState.stall_count,
-                PCSampleState.wave_occupancy_percent,
-                PCSampleState.active_thread_percent,
-                *Database._stall_reason_columns(stall_reasons),
-                # DISTINCT removes the repeats that the stall-reason join adds.
-                # A source line without instructions gets an empty string.
-                func.coalesce(
-                    func.group_concat(distinct(InstructionSourceLine.instruction_uuid)),
-                    "",
-                ).label("instruction_uuids"),
+                InstructionSourceLine.source_line_uuid,
+                Kernel.kernel_uuid,
+                InstructionLine.instruction_uuid,
             )
-            .select_from(SourceLine)
+            .select_from(InstructionSourceLine)
+            .join(
+                InstructionLine,
+                InstructionSourceLine.instruction_uuid
+                == InstructionLine.instruction_uuid,
+            )
+            .join(
+                KernelSymbol,
+                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
+            )
+            .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
+            .distinct()
+        ).subquery("kernel_source_instructions")
+        kernel_source_files = (
+            select(
+                SourceFile.source_file_uuid,
+                Kernel.kernel_uuid,
+            )
+            .select_from(InstructionSourceLine)
+            .join(
+                SourceLine,
+                InstructionSourceLine.source_line_uuid == SourceLine.source_line_uuid,
+            )
             .join(
                 SourceFile,
                 SourceLine.source_file_uuid == SourceFile.source_file_uuid,
             )
-            .join(Workload, SourceFile.workload_id == Workload.workload_id)
-            # A source line without samples has empty counts.
-            .outerjoin(
-                PCSampleState,
-                SourceLine.source_line_uuid == PCSampleState.source_line_uuid,
+            .join(
+                InstructionLine,
+                InstructionSourceLine.instruction_uuid
+                == InstructionLine.instruction_uuid,
             )
-            .outerjoin(
+            .join(
+                KernelSymbol,
+                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
+            )
+            .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
+            .where(Kernel.workload_id == workload_id)
+            .where(SourceFile.md5_checksum.is_not(None))
+            .distinct()
+        ).subquery("kernel_source_files")
+
+        sample_total = PCSampleState.total_count
+        active_percent = PCSampleState.active_thread_percent
+        wave_percent = PCSampleState.wave_occupancy_percent
+        sample_data = (
+            select(
+                kernel_instructions.c.source_line_uuid,
+                kernel_instructions.c.kernel_uuid,
+                func.sum(sample_total).label("count"),
+                func.sum(PCSampleState.issue_count).label("issue_count"),
+                func.sum(PCSampleState.stall_count).label("stall_count"),
+                (
+                    func.sum(
+                        case((
+                            active_percent.is_not(None),
+                            active_percent * sample_total,
+                        ))
+                    )
+                    / func.nullif(
+                        func.sum(case((active_percent.is_not(None), sample_total))), 0
+                    )
+                ).label("active_thread_percent"),
+                (
+                    func.sum(
+                        case((
+                            wave_percent.is_not(None),
+                            wave_percent * sample_total,
+                        ))
+                    )
+                    / func.nullif(
+                        func.sum(case((wave_percent.is_not(None), sample_total))), 0
+                    )
+                ).label("wave_occupancy_percent"),
+            )
+            .select_from(kernel_instructions)
+            .join(
+                PCSampleState,
+                kernel_instructions.c.instruction_uuid
+                == PCSampleState.instruction_uuid,
+            )
+            .group_by(
+                kernel_instructions.c.source_line_uuid,
+                kernel_instructions.c.kernel_uuid,
+            )
+        ).subquery("kernel_source_sample_data")
+        stall_data = (
+            select(
+                kernel_instructions.c.source_line_uuid,
+                kernel_instructions.c.kernel_uuid,
+                *[
+                    func.sum(
+                        case((
+                            PCSampleStallReasonLookup.text == reason,
+                            PCSampleStallReason.count,
+                        ))
+                    ).label(reason)
+                    for reason in stall_reasons
+                ],
+            )
+            .select_from(kernel_instructions)
+            .join(
+                PCSampleState,
+                kernel_instructions.c.instruction_uuid
+                == PCSampleState.instruction_uuid,
+            )
+            .join(
                 PCSampleStallReason,
                 PCSampleState.pc_sample_state_uuid
                 == PCSampleStallReason.pc_sample_state_uuid,
             )
-            .outerjoin(
+            .join(
                 PCSampleStallReasonLookup,
                 PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
                 == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
             )
+            .group_by(
+                kernel_instructions.c.source_line_uuid,
+                kernel_instructions.c.kernel_uuid,
+            )
+        ).subquery("kernel_source_stall_data")
+        instruction_ids = (
+            select(
+                kernel_instructions.c.source_line_uuid,
+                kernel_instructions.c.kernel_uuid,
+                func.group_concat(
+                    distinct(kernel_instructions.c.instruction_uuid)
+                ).label("instruction_uuids"),
+            ).group_by(
+                kernel_instructions.c.source_line_uuid,
+                kernel_instructions.c.kernel_uuid,
+            )
+        ).subquery("kernel_source_instruction_ids")
+
+        return (
+            select(
+                *per_kernel_source_line_file_key_columns(),
+                SourceLine.line_number,
+                SourceLine.content,
+                sample_data.c.count,
+                sample_data.c.issue_count,
+                sample_data.c.stall_count,
+                sample_data.c.wave_occupancy_percent,
+                sample_data.c.active_thread_percent,
+                *[stall_data.c[reason] for reason in stall_reasons],
+                func.coalesce(
+                    instruction_ids.c.instruction_uuids,
+                    "",
+                ).label("instruction_uuids"),
+            )
+            .select_from(kernel_source_files)
+            .join(
+                SourceFile,
+                kernel_source_files.c.source_file_uuid == SourceFile.source_file_uuid,
+            )
+            .join(
+                SourceLine,
+                SourceFile.source_file_uuid == SourceLine.source_file_uuid,
+            )
+            .join(Workload, SourceFile.workload_id == Workload.workload_id)
+            .join(Kernel, kernel_source_files.c.kernel_uuid == Kernel.kernel_uuid)
             .outerjoin(
-                InstructionSourceLine,
-                SourceLine.source_line_uuid == InstructionSourceLine.source_line_uuid,
+                sample_data,
+                (SourceLine.source_line_uuid == sample_data.c.source_line_uuid)
+                & (Kernel.kernel_uuid == sample_data.c.kernel_uuid),
+            )
+            .outerjoin(
+                stall_data,
+                (SourceLine.source_line_uuid == stall_data.c.source_line_uuid)
+                & (Kernel.kernel_uuid == stall_data.c.kernel_uuid),
+            )
+            .outerjoin(
+                instruction_ids,
+                (SourceLine.source_line_uuid == instruction_ids.c.source_line_uuid)
+                & (Kernel.kernel_uuid == instruction_ids.c.kernel_uuid),
             )
             .where(SourceFile.workload_id == workload_id)
-            # Only captured files are exported.
-            .where(SourceFile.md5_checksum.is_not(None))
-            # The stall-reason and instruction joins add rows, so group them
-            # back into one row per source line.
-            .group_by(SourceLine.source_line_uuid)
-            # SQLite sorts NULL first, so the "?" row of a file comes first.
-            .order_by(SourceFile.file_path, SourceLine.line_number)
+            .order_by(Kernel.kernel_uuid, SourceFile.file_path, SourceLine.line_number)
         )
 
     @staticmethod

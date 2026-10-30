@@ -7,17 +7,15 @@ Source-snapshot analysis utilities.
 Each disassembled instruction carries a comment naming the source lines it came
 from, as an inline stack of "path:line" frames joined by " -> ", innermost
 first. This module parses those comments, reads the lines they name from the
-source snapshot, and exports captured source files with CSV analysis results.
+source snapshot, and resolves where exported copies of source files go.
 """
 
 import hashlib
 import json
-import shutil
-from collections.abc import Iterable
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import Optional
 
-from utils.logger import console_debug, console_warning
+from utils.logger import console_warning
 
 SOURCE_FRAME_SEPARATOR = " -> "
 UNKNOWN_SOURCE_LINE_TOKEN = "?"
@@ -27,19 +25,6 @@ SOURCE_PATH_MAP_FILE_PATTERN = "*_source_map.json"
 SOURCE_PATH_MAP_KEY = "source_paths"
 
 SourceFrame = tuple[str, Optional[int]]
-
-
-class WorkloadSourceSnapshot(NamedTuple):
-    """One workload's captured source files and the names it is filed under.
-
-    The names are the ones stored on the workload row, so the export folder
-    cannot drift from the database.
-    """
-
-    workload_path: Path
-    workload_name: str
-    workload_sub_name: str
-    absolute_source_paths: tuple[str, ...]
 
 
 def parse_source_frames(
@@ -136,47 +121,15 @@ def read_source_file_digest_and_lines(
 
 
 def resolve_export_path(
-    workload_result_directory: Path,
+    source_export_directory: Path,
     absolute_path: str,
 ) -> Path:
-    """Return where one source file is exported under a workload's folder.
+    """Return where one source file is exported under source_export_directory.
 
     The export mirrors the absolute path the database records for the file, so
     a source row locates its copy by dropping the leading separator.
     """
-    return workload_result_directory / Path(absolute_path).relative_to("/")
-
-
-def export_source_snapshot_files(
-    workload_source_snapshots: Iterable[WorkloadSourceSnapshot],
-    export_directory: Path,
-) -> None:
-    """Copy the source files a CSV result references into the result folder.
-
-    The source of one workload sits beside the ISA that points at it, under
-    that workload's folder.
-    """
-    for workload_source_snapshot in workload_source_snapshots:
-        workload_result_directory = (
-            export_directory
-            / workload_source_snapshot.workload_name
-            / workload_source_snapshot.workload_sub_name
-            / SOURCE_EXPORT_DIRECTORY_NAME
-        )
-        for absolute_path in workload_source_snapshot.absolute_source_paths:
-            export_path = resolve_export_path(workload_result_directory, absolute_path)
-            export_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(
-                resolve_snapshot_path(
-                    workload_source_snapshot.workload_path, absolute_path
-                ),
-                export_path,
-            )
-
-        console_debug(
-            f"Exported {len(workload_source_snapshot.absolute_source_paths)} "
-            f"source files for workload {workload_source_snapshot.workload_path}."
-        )
+    return source_export_directory / Path(absolute_path).relative_to("/")
 
 
 def _read_source_paths(map_path: Path) -> Optional[dict[str, str]]:

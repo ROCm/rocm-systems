@@ -119,9 +119,9 @@ contain that file, look one level down for the GPU model or rank directory.
 
 `--list-stats` prints `Detected Kernels (sorted descending by duration)` and a
 `Dispatch list`. The kernel index is what `-k` takes. Dispatch ids are 1-based
-and go to `-d`.
+and go to `--kernel-iteration-range`.
 
-`--list-stats` cannot be used with `--output-format csv` or `db`.
+`--list-stats` only prints. It writes no files.
 
 Work on one kernel at a time:
 
@@ -223,10 +223,15 @@ settings without stating that those differ.
 
 ## 8. Save a report
 
-Terminal output is the default. Only choose a format when the user asks to save
-or export. `--output-format` takes `txt`, `csv`, or `db`, each of which
-disables terminal output, and `--output-name` sets the file name. See
-[analysis output format](../../docs/how-to/analyze/cli.rst).
+Every analyze run prints the report and also saves it. It creates a new run
+folder holding root-level `report.txt` and `analysis.db`, plus numbered
+`workload-N/` folders with workload metrics and ranked `kernel-N/` folders,
+zero-padded so they sort in rank order (`kernel-00` to `kernel-11` for 12 kernels).
+Its last line gives the folder's absolute path. `-d/--output-directory` sets
+the parent directory, and `-o/--output-name` sets the folder name. If an `-o`
+folder exists, analyze appends a timestamp and a numeric suffix if needed. Do
+not pass `--output-format`; it is deprecated and has no effect. See
+[analysis output](../../docs/how-to/analyze/cli.rst).
 
 ## 9. When something looks wrong
 

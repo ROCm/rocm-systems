@@ -8,10 +8,16 @@ from pathlib import Path
 
 from pc_sampling.pc_sampling_csv_export import IsaLineLocation
 from pc_sampling.per_kernel_isa_export import (
+    WorkloadIsaExport,
     _resolve_isa_export_path,
     _write_per_kernel_isa_files,
     export_per_kernel_isa_files,
 )
+
+
+def make_kernel_directories(root):
+    """Return the kernel folders under root, keyed by kernel uuid."""
+    return {1: root / "kernel-0", 2: root / "kernel-1"}
 
 
 def make_isa_row(
@@ -62,13 +68,12 @@ def read_exported_rows(export_path):
 def test_resolve_isa_export_path_names_kernel_code_object_and_process():
     """One kernel's ISA is filed by short name and uuid, then by object and process."""
     export_path = _resolve_isa_export_path(
-        Path("/results/per_kernel_pc_sampling"),
-        ("vector_copy", "MI300X_A1", 7, "vecCopy_2", 5, 42),
+        make_kernel_directories(Path("/results/workload-1")),
+        ("vector_copy", "MI300X_A1", 2, "vecCopy_2", 5, 42),
     )
 
     assert export_path == Path(
-        "/results/per_kernel_pc_sampling/vector_copy/MI300X_A1"
-        "/vecCopy_2_uuid_7/isa_code_object_id_5_pid_42.csv"
+        "/results/workload-1/kernel-1/vecCopy_2_uuid_2/isa_code_object_id_5_pid_42.csv"
     )
 
 
@@ -77,18 +82,14 @@ def test_write_per_kernel_isa_files_places_stall_reasons_between_counts_and_sour
 ):
     """The reasons a workload observed become columns of their own."""
     _write_per_kernel_isa_files(
-        tmp_path,
         iter([make_isa_row(stall_reason_counts=(None, 1))]),
         ["NONE", "WAITCNT"],
         {},
+        make_kernel_directories(tmp_path),
     )
 
     header = read_exported_rows(
-        tmp_path
-        / "vector_copy"
-        / "MI300X_A1"
-        / "vecCopy_uuid_1"
-        / "isa_code_object_id_5_pid_42.csv"
+        tmp_path / "kernel-0" / "vecCopy_uuid_1" / "isa_code_object_id_5_pid_42.csv"
     )[0]
     assert header == [
         "Instruction line number",
@@ -117,17 +118,19 @@ def test_write_per_kernel_isa_files_opens_one_file_per_grouping_key(tmp_path):
         make_isa_row(kernel_uuid=2, code_object_id=6, pid=43),
     ]
 
-    file_count = _write_per_kernel_isa_files(tmp_path, iter(isa_rows), [], {})
+    file_count = _write_per_kernel_isa_files(
+        iter(isa_rows), [], {}, make_kernel_directories(tmp_path)
+    )
 
     assert file_count == 4
     assert sorted(
         str(export_path.relative_to(tmp_path))
         for export_path in tmp_path.rglob("*.csv")
     ) == [
-        "vector_copy/MI300X_A1/vecCopy_uuid_1/isa_code_object_id_5_pid_42.csv",
-        "vector_copy/MI300X_A1/vecCopy_uuid_1/isa_code_object_id_6_pid_42.csv",
-        "vector_copy/MI300X_A1/vecCopy_uuid_1/isa_code_object_id_6_pid_43.csv",
-        "vector_copy/MI300X_A1/vecCopy_uuid_2/isa_code_object_id_6_pid_43.csv",
+        "kernel-0/vecCopy_uuid_1/isa_code_object_id_5_pid_42.csv",
+        "kernel-0/vecCopy_uuid_1/isa_code_object_id_6_pid_42.csv",
+        "kernel-0/vecCopy_uuid_1/isa_code_object_id_6_pid_43.csv",
+        "kernel-1/vecCopy_uuid_2/isa_code_object_id_6_pid_43.csv",
     ]
 
 
@@ -143,14 +146,16 @@ def test_write_per_kernel_isa_files_numbers_instruction_lines_per_file(tmp_path)
     ]
     isa_line_locations = {}
 
-    _write_per_kernel_isa_files(tmp_path, iter(isa_rows), [], isa_line_locations)
+    _write_per_kernel_isa_files(
+        iter(isa_rows), [], isa_line_locations, make_kernel_directories(tmp_path)
+    )
 
-    workload_directory = tmp_path / "vector_copy" / "MI300X_A1" / "vecCopy_uuid_1"
+    kernel_directory = tmp_path / "kernel-0" / "vecCopy_uuid_1"
     first_rows = read_exported_rows(
-        workload_directory / "isa_code_object_id_5_pid_42.csv"
+        kernel_directory / "isa_code_object_id_5_pid_42.csv"
     )
     second_rows = read_exported_rows(
-        workload_directory / "isa_code_object_id_6_pid_42.csv"
+        kernel_directory / "isa_code_object_id_6_pid_42.csv"
     )
 
     assert [row[0] for row in first_rows[1:]] == ["1", "2"]
@@ -176,14 +181,12 @@ def test_write_per_kernel_isa_files_leaves_unsampled_counts_empty(tmp_path):
         make_isa_row(offset=0x14, stall_reason_counts=(4,)),
     ]
 
-    _write_per_kernel_isa_files(tmp_path, iter(isa_rows), ["WAITCNT"], {})
+    _write_per_kernel_isa_files(
+        iter(isa_rows), ["WAITCNT"], {}, make_kernel_directories(tmp_path)
+    )
 
     exported_rows = read_exported_rows(
-        tmp_path
-        / "vector_copy"
-        / "MI300X_A1"
-        / "vecCopy_uuid_1"
-        / "isa_code_object_id_5_pid_42.csv"
+        tmp_path / "kernel-0" / "vecCopy_uuid_1" / "isa_code_object_id_5_pid_42.csv"
     )
     assert exported_rows[1] == [
         "1",
@@ -205,15 +208,25 @@ def test_write_per_kernel_isa_files_leaves_unsampled_counts_empty(tmp_path):
 
 def test_write_per_kernel_isa_files_writes_nothing_without_rows(tmp_path):
     """A workload with no instruction lines leaves no folder behind."""
-    file_count = _write_per_kernel_isa_files(tmp_path / "per_kernel", iter([]), [], {})
+    file_count = _write_per_kernel_isa_files(
+        iter([]), [], {}, make_kernel_directories(tmp_path)
+    )
 
     assert file_count == 0
-    assert not (tmp_path / "per_kernel").exists()
+    assert not list(tmp_path.iterdir())
 
 
-def test_export_per_kernel_isa_files_returns_the_folder_it_wrote(tmp_path):
-    """The export folder is returned so the source lands beside the ISA."""
-    per_kernel_directory = export_per_kernel_isa_files(tmp_path, []).directory
+def test_export_per_kernel_isa_files_returns_each_instructions_location(tmp_path):
+    """The returned locations let the source-line export reference the ISA."""
+    isa_line_locations = export_per_kernel_isa_files([
+        WorkloadIsaExport(
+            1,
+            [],
+            iter([make_isa_row(instruction_uuid=100)]),
+            make_kernel_directories(tmp_path),
+        )
+    ])
 
-    assert per_kernel_directory == tmp_path / "per_kernel_pc_sampling"
-    assert not per_kernel_directory.exists()
+    assert isa_line_locations == {
+        100: IsaLineLocation(Path("vecCopy_uuid_1/isa_code_object_id_5_pid_42.csv"), 1)
+    }

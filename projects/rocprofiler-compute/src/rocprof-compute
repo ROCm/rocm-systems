@@ -189,7 +189,9 @@ def main() -> None:
         if rocprof_compute.get_args().verify_deps:
             console_log("All analyze dependencies are installed.")
             sys.exit(0)
-        rocprof_compute.run_analysis()
+        prepared_run = rocprof_compute.run_analysis()
+        if prepared_run is not None:
+            rocprof_compute.write_analysis_outputs(prepared_run)
     else:
         console_error("Unsupported execution mode")
 

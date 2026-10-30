@@ -20,6 +20,8 @@ from conftest import ProfileModeImportGuard
 
 from tests.integration.common import gpu_soc, inject_mpirun
 
+ANALYZE_OUTPUT_DIRECTORY_FLAGS = {"-d", "--output-directory"}
+
 # Exit code rocprof-compute uses when the SDK reports the GPU firmware is too old.
 OUTDATED_FIRMWARE_EXIT_CODE = 3
 OUTDATED_FIRMWARE_SKIP_REASON = (
@@ -190,9 +192,12 @@ def binary_handler_profile_rocprof_compute(request):
 
 
 @pytest.fixture
-def binary_handler_analyze_rocprof_compute():
+def binary_handler_analyze_rocprof_compute(tmp_path):
     """
     Fixture to run rocprof-compute analyze command.
+
+    Every analyze run creates a run folder, so runs that pass no
+    -d/--output-directory get one under tmp_path instead of the cwd.
 
     Args:
         arguments: Command-line arguments for the analyze command.
@@ -202,6 +207,12 @@ def binary_handler_analyze_rocprof_compute():
     """
 
     def _handler(arguments):
+        if not ANALYZE_OUTPUT_DIRECTORY_FLAGS.intersection(arguments):
+            arguments = [
+                *arguments,
+                "--output-directory",
+                str(tmp_path / "analyze_runs"),
+            ]
         with pytest.raises(SystemExit) as e:
             with patch(
                 "sys.argv",

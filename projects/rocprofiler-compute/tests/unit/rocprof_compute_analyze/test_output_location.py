@@ -9,8 +9,11 @@ from pathlib import Path
 import pytest
 
 from rocprof_compute_analyze.output_location import (
+    kernel_folder_name,
+    plan_run_layout,
     resolve_run_folder,
     validate_output_name,
+    workload_folder_name,
 )
 
 NOW = datetime(2026, 10, 30, 14, 5, 9)
@@ -100,3 +103,49 @@ def test_valid_name_passes(name) -> None:
 def test_resolved_path_keeps_relative_directory() -> None:
     """A relative directory stays relative; the caller decides the base."""
     assert resolve_run_folder(Path("out"), "X", NOW) == Path("out") / "X"
+
+
+@pytest.mark.parametrize(
+    ("position", "workload_count", "expected"),
+    [(1, 1, "workload-1"), (2, 3, "workload-2"), (2, 12, "workload-02")],
+    ids=["single", "one_digit", "two_digits"],
+)
+def test_workload_folder_name_pads_to_the_last_position(
+    position, workload_count, expected
+) -> None:
+    """The 1-based -p position is zero-padded to the width of the last one."""
+    assert workload_folder_name(position, workload_count) == expected
+
+
+@pytest.mark.parametrize(
+    ("position", "kernel_count", "expected"),
+    [
+        (0, 1, "kernel-0"),
+        (3, 10, "kernel-3"),
+        (3, 11, "kernel-03"),
+        (42, 1200, "kernel-0042"),
+    ],
+    ids=["single", "last_rank_is_9", "last_rank_is_10", "four_digits"],
+)
+def test_kernel_folder_name_pads_to_the_last_rank(
+    position, kernel_count, expected
+) -> None:
+    """The zero-based rank is zero-padded to the width of the last rank."""
+    assert kernel_folder_name(position, kernel_count) == expected
+
+
+def test_kernel_folder_names_sort_in_rank_order() -> None:
+    """A sorted listing of the kernel folders follows the top-stats order."""
+    folder_names = [kernel_folder_name(rank, 12) for rank in range(12)]
+    assert sorted(folder_names) == folder_names
+
+
+def test_plan_run_layout_numbers_workloads_in_path_order() -> None:
+    """Each -p path gets the folder of its 1-based position, in the run folder."""
+    layout = plan_run_layout(Path("run"), ["/data/b", "/data/a"])
+
+    assert layout.run_folder == Path("run")
+    assert layout.workload_folders == {
+        "/data/b": Path("run") / "workload-1",
+        "/data/a": Path("run") / "workload-2",
+    }

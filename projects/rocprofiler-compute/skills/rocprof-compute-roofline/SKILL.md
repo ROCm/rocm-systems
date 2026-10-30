@@ -92,9 +92,9 @@ HBM answers "am I limited by main memory", while L2 and vL1D show whether
 caches are absorbing the traffic.
 
 `--view table` prints one table for all kernels together instead of one per
-kernel. To compare many kernels, write the
-[analysis database](../../docs/how-to/analyze/cli.rst) with
-`--output-format db` and query it with SQL.
+kernel. To compare many kernels, query the
+[analysis database](../../docs/how-to/analyze/cli.rst) with SQL. Every analyze
+run writes it as `analysis.db` in the run folder whose path it prints last.
 
 ## 4. When roofline data is missing
 

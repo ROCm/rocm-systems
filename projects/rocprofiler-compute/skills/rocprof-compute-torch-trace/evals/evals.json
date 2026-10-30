@@ -54,7 +54,7 @@
       "prompt": "I added my own ROCTx ranges to my HIP application, profile and report on those ranges",
       "expected_behavior": [
         "says plainly that rocprof-compute does not attribute results to user-authored ROCTx ranges",
-        "offers kernel filtering with -k or dispatch filtering with -d instead"
+        "offers kernel filtering with -k or dispatch filtering with --kernel-iteration-range instead"
       ],
       "unexpected_behavior": [
         "claims rocprof-compute can profile, filter, or start and stop collection on user-authored ROCTx ranges"
@@ -66,7 +66,7 @@
       "prompt": "attribute GPU kernels to functions in my compiled C++ HIP binary",
       "expected_behavior": [
         "says that operator attribution requires a Python workload and cannot annotate a compiled binary",
-        "offers kernel filtering with -k or dispatch filtering with -d instead"
+        "offers kernel filtering with -k or dispatch filtering with --kernel-iteration-range instead"
       ],
       "unexpected_behavior": [
         "claims torch or triton tracing can attribute kernels to functions in a compiled binary"

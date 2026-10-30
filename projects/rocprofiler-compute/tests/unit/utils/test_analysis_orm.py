@@ -3,7 +3,9 @@
 
 """Unit tests for analysis_orm.py static methods."""
 
+import csv
 import json
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -12,6 +14,11 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from pc_sampling.pc_sampling_csv_export import IsaLineLocation
+from pc_sampling.per_source_line_export import (
+    WorkloadSourceLineExport,
+    export_per_source_line_files,
+)
 from pc_sampling.source_snapshot_analysis import parse_source_frames
 from utils.analysis_orm import (
     CodeObjectStore,
@@ -21,13 +28,16 @@ from utils.analysis_orm import (
     InstructionSourceLine,
     InstructionTypeLookup,
     Kernel,
+    KernelMetricValue,
     KernelSymbol,
+    MetricDefinition,
     PCSampleStallReason,
     PCSampleStallReasonLookup,
     PCSampleState,
     SourceFile,
     SourceLine,
     Workload,
+    WorkloadMetricValue,
     per_kernel_isa_file_key_columns,
 )
 
@@ -76,6 +86,69 @@ PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
 )
 def test_json_sanitize(value, expected):
     assert Database._json_sanitize(value) == expected
+
+
+def test_write_analysis_csvs_routes_metric_rows_to_workload_and_kernel_paths(
+    db_session, tmp_path
+):
+    """Metric CSV columns and values land in the given workload and kernel files."""
+    workload = Workload(name="copy", sub_name="MI300X_A1")
+    kernel = Kernel(kernel_name="vector_copy", workload=workload)
+    metric = MetricDefinition(
+        name="HBM Bandwidth",
+        metric_id="4.1.9",
+        table_name="Memory",
+        sub_table_name="Bandwidth",
+        unit="GB/s",
+        workload=workload,
+    )
+    db_session.add_all([
+        workload,
+        kernel,
+        metric,
+        WorkloadMetricValue(
+            workload=workload,
+            metric=metric,
+            value_name="Avg",
+            value=123.5,
+        ),
+        KernelMetricValue(
+            kernel=kernel,
+            metric=metric,
+            value_name="Avg",
+            value=120.25,
+        ),
+        Dispatch(
+            dispatch_id=0,
+            gpu_id=0,
+            start_timestamp=0,
+            end_timestamp=5,
+            kernel=kernel,
+        ),
+    ])
+    Database.commit()
+    Database.create_views()
+
+    metrics_summary_path = tmp_path / "metrics-summary.csv"
+    pc_sampling_summary_path = tmp_path / "pc-sampling-summary.csv"
+    kernel_metrics_path = tmp_path / "kernel-0-metrics.csv"
+    Database.write_analysis_csvs(
+        metrics_summary_paths={workload.workload_id: metrics_summary_path},
+        pc_sampling_summary_paths={workload.workload_id: pc_sampling_summary_path},
+        kernel_metrics_paths={kernel.kernel_uuid: kernel_metrics_path},
+    )
+
+    with metrics_summary_path.open(newline="", encoding="utf-8") as csv_file:
+        workload_rows = list(csv.DictReader(csv_file))
+    with kernel_metrics_path.open(newline="", encoding="utf-8") as csv_file:
+        kernel_rows = list(csv.DictReader(csv_file))
+
+    assert workload_rows[0]["metric_id"] == "4.1.9"
+    assert workload_rows[0]["value"] == "123.5"
+    assert kernel_rows[0]["kernel_name"] == "vector_copy"
+    assert kernel_rows[0]["metric_id"] == "4.1.9"
+    assert kernel_rows[0]["value"] == "120.25"
+    assert not pc_sampling_summary_path.exists()
 
 
 def add_kernel_with_durations(
@@ -1092,73 +1165,107 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
     ]
 
 
-def test_per_source_line_rows_read_each_lines_state_and_instructions(db_session):
-    """Each source line of a captured file has its sample state and instructions."""
+def test_per_kernel_source_line_rows_read_each_lines_samples_and_instructions(
+    db_session,
+):
+    """Each captured line of a kernel's source file sums the kernel's samples."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
-    source_file = add_captured_source_file(db_session, workload, "/s/a.cpp", 3)
-    add_captured_source_file(db_session, workload, "/s/hip.h", 2)
-    instruction_lines = {
-        code_object_id: add_pc_sampling_state(
+    add_captured_source_file(db_session, workload, "/s/a.cpp", 3)
+    sample_states = [
+        add_pc_sampling_state(
             db_session,
             workload=workload,
             kernel=kernel,
             pid=42,
             code_object_id=code_object_id,
-            source=source,
-        ).instruction_line
-        for code_object_id, source in (
-            (5, "/s/hip.h:2 -> /s/a.cpp:2"),
-            (6, "/s/a.cpp:2"),
-            (7, "/s/a.cpp:?"),
-            (8, "/s/absent.cpp:1"),
+            source="/s/a.cpp:2",
+            total_count=4,
+            issue_count=3,
+            stall_count=1,
+            wave_occupancy_percent=wave_occupancy_percent,
+            active_thread_percent=active_thread_percent,
+            stall_reasons={"WAITCNT": 1},
         )
-    }
-    # Only a.cpp:2 has a sample state, so hip.h:2 has instructions but no counts.
-    line_state = PCSampleState(
-        source_line=source_file.source_lines[1],
-        total_count=8,
-        issue_count=5,
-        stall_count=3,
+        for code_object_id, wave_occupancy_percent, active_thread_percent in (
+            (5, 20.0, 70.0),
+            (6, 30.0, 90.0),
+        )
+    ]
+    db_session.commit()
+
+    rows = list(
+        Database.stream_per_kernel_source_line_rows(workload.workload_id, ["WAITCNT"])
+    )
+
+    instruction_uuids = ",".join(
+        sorted(str(state.instruction_line.instruction_uuid) for state in sample_states)
+    )
+    empty_counts = (None,) * 6
+    assert [(*row[:-1], ",".join(sorted(row[-1].split(",")))) for row in rows] == [
+        ("w", "s", kernel.kernel_uuid, "/s/a.cpp", 1, "line 1", *empty_counts, ""),
+        # Wave occupancy, then active thread percent, both sample-weighted.
+        (
+            "w",
+            "s",
+            kernel.kernel_uuid,
+            "/s/a.cpp",
+            2,
+            "line 2",
+            8,
+            6,
+            2,
+            25.0,
+            80.0,
+            2,
+            instruction_uuids,
+        ),
+        ("w", "s", kernel.kernel_uuid, "/s/a.cpp", 3, "line 3", *empty_counts, ""),
+    ]
+
+
+def test_per_kernel_source_line_export_writes_each_value_under_its_header(
+    db_session, tmp_path
+):
+    """The exported percents keep the column order of the CSV header."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    add_captured_source_file(db_session, workload, "/s/a.cpp", 1)
+    sample_state = add_pc_sampling_state(
+        db_session,
+        workload=workload,
+        kernel=kernel,
+        pid=42,
+        source="/s/a.cpp:1",
         wave_occupancy_percent=25.0,
         active_thread_percent=80.0,
     )
-    db_session.add_all([
-        PCSampleStallReason(
-            pc_sample_state=line_state,
-            stall_reason_lookup=Database.get_or_create_type(
-                PCSampleStallReasonLookup, reason
-            ),
-            count=count,
-        )
-        for reason, count in (("NONE", 1), ("WAITCNT", 2))
-    ])
     db_session.commit()
+    kernel_directory = tmp_path / "kernel-0"
 
-    code_object_ids = {
-        instruction_line.instruction_uuid: code_object_id
-        for code_object_id, instruction_line in instruction_lines.items()
-    }
-    rows = [
-        (
-            *row[:-1],
-            sorted(code_object_ids[int(uuid)] for uuid in row[-1].split(",") if uuid),
-        )
-        for row in Database.stream_per_source_line_rows(
-            workload.workload_id, ["NONE", "WAITCNT"]
-        )
-    ]
+    export_per_source_line_files(
+        {
+            sample_state.instruction_line.instruction_uuid: IsaLineLocation(
+                Path("isa.csv"), 1
+            )
+        },
+        [
+            WorkloadSourceLineExport(
+                workload_id=workload.workload_id,
+                stall_reasons=[],
+                source_line_rows=Database.stream_per_kernel_source_line_rows(
+                    workload.workload_id, []
+                ),
+                kernel_directories={kernel.kernel_uuid: kernel_directory},
+            )
+        ],
+    )
 
-    empty_counts = (None,) * 7
-    assert rows == [
-        # The "?" row comes first, with the instruction without a source line number.
-        ("w", "s", "/s/a.cpp", None, None, *empty_counts, [7]),
-        ("w", "s", "/s/a.cpp", 1, "line 1", *empty_counts, []),
-        ("w", "s", "/s/a.cpp", 2, "line 2", 8, 5, 3, 25.0, 80.0, 1, 2, [5, 6]),
-        ("w", "s", "/s/a.cpp", 3, "line 3", *empty_counts, []),
-        ("w", "s", "/s/hip.h", 1, "line 1", *empty_counts, []),
-        ("w", "s", "/s/hip.h", 2, "line 2", *empty_counts, [5]),
-    ]
+    (export_path,) = kernel_directory.rglob("*_pc_sampling.csv")
+    with export_path.open(newline="", encoding="utf-8") as csv_file:
+        (exported_row,) = csv.DictReader(csv_file)
+    assert exported_row["Wave occupancy percent"] == "25.0"
+    assert exported_row["Active thread percent"] == "80.0"
 
 
 @pytest.mark.parametrize("owner_count", [0, 2], ids=["neither", "both"])

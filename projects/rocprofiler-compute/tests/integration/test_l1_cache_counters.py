@@ -14,7 +14,7 @@ config["cleanup"] = True
 
 
 def load_metrics(csv_file_path):
-    """Read workload_metric.csv and return {metric_name: {value_name: value}}."""
+    """Read metrics-summary.csv and return {metric: {value_name: value}}."""
     df = pd.read_csv(csv_file_path)
     return df.pivot(index="metric_name", columns="value_name", values="value").to_dict(
         orient="index"
@@ -59,15 +59,15 @@ def test_L1_cache_counters(
             workload_dir,
             "-b",
             "16.3",
-            "--output-format",
-            "csv",
+            "--output-directory",
+            ".",
             "--output-name",
             workload_dir_output,
         ])
         assert return_code == 0
 
         # 3. save results in local
-        csv_path = workload_dir_output + "/workload_metric.csv"
+        csv_path = workload_dir_output + "/workload-1/metrics-summary.csv"
         data = load_metrics(csv_path)
 
         for metric in metrics:

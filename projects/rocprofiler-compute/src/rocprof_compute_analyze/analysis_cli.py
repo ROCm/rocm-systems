@@ -4,12 +4,17 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, NamedTuple, Optional
 
 import pandas as pd
 
 from membw_analysis.engine import run_membw_analysis
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from rocprof_compute_analyze.output_location import (
+    REPORT_FILE_NAME,
+    RunLayout,
+    roofline_html_file_name,
+)
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
@@ -39,6 +44,15 @@ _ML_API_ANALYSIS_CLI_OPTIONS = {
         "label": "Triton",
     },
 }
+
+
+def active_operator_filters(args: argparse.Namespace) -> list[str]:
+    """Return the ML API backends whose operator filter option is given."""
+    return [
+        framework_name
+        for framework_name, framework_flags in _ML_API_ANALYSIS_CLI_OPTIONS.items()
+        if getattr(args, framework_flags["filter_attr"], None) is not None
+    ]
 
 
 def parse_operator_patterns(
@@ -148,7 +162,8 @@ def _intersect_with_user_dispatch_filter(
     if not selected_ids:
         console_error(
             "ml api trace",
-            f"No {labels} dispatches matched the -d filter: {user_dispatch_filter}",
+            f"No {labels} dispatches matched the --kernel-iteration-range filter: "
+            f"{user_dispatch_filter}",
         )
     return sorted(selected_ids)
 
@@ -197,6 +212,17 @@ def _apply_sliced_kernel_top(
         )
 
 
+class RooflineFigures(NamedTuple):
+    """Roofline plot built in memory, saved once the run folder exists."""
+
+    device_id: int
+    roofline: Roofline
+    ops_figure: Any
+    flops_figure: Any
+    ops_datatypes: str
+    flops_datatypes: str
+
+
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -207,12 +233,9 @@ class cli_analysis(OmniAnalyze_Base):
         """Perform any pre-processing steps prior to analysis."""
         super().pre_processing()
         args = self.get_args()
+        self._roofline_figures: Optional[dict[str, RooflineFigures]] = None
 
-        active_operator_filters = [
-            framework_name
-            for framework_name, framework_flags in _ML_API_ANALYSIS_CLI_OPTIONS.items()
-            if getattr(args, framework_flags["filter_attr"], None) is not None
-        ]
+        operator_filters = active_operator_filters(args)
 
         active_operator_lists = [
             framework_name
@@ -239,7 +262,7 @@ class cli_analysis(OmniAnalyze_Base):
                 )
                 continue
 
-            if active_operator_lists or active_operator_filters:
+            if active_operator_lists or operator_filters:
                 process_ml_api_trace_output(workload, path_info[0])
 
             if active_operator_lists:
@@ -265,13 +288,13 @@ class cli_analysis(OmniAnalyze_Base):
                 self.list_operators(path_info[0], kernel_top_df, active_operator_lists)
                 continue
 
-            if active_operator_filters:
+            if operator_filters:
                 pmc_group_keys = self.apply_operator_filter(
-                    args, workload, path_info[0], active_operator_filters
+                    args, workload, path_info[0], operator_filters
                 )
                 labels = ", ".join(
                     _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"]
-                    for backend in active_operator_filters
+                    for backend in operator_filters
                 )
                 workload.raw_pmc, slot_to_id = file_io.create_df_pmc_with_slot_ids(
                     path_info[0],
@@ -314,7 +337,7 @@ class cli_analysis(OmniAnalyze_Base):
             workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
-            if active_operator_filters:
+            if operator_filters:
                 _apply_sliced_kernel_top(workload, kernel_top_df, args, labels)
 
             # create the loaded table
@@ -333,100 +356,161 @@ class cli_analysis(OmniAnalyze_Base):
         if active_operator_lists:
             sys.exit(0)
 
+        if not args.list_stats:
+            self._roofline_figures = self._build_roofline_figures()
+
     @demarcate
-    def run_analysis(self) -> None:
-        """Run CLI analysis."""
-        super().run_analysis()
-
+    def show_listing(self) -> None:
+        """Print the --list-stats listing to the terminal; write no files."""
         args = self.get_args()
+        self._show_operators()
+        tty.show_kernel_stats(
+            args,
+            self._runs,
+            self._first_arch_config(),
+            sys.stdout,
+        )
 
-        workload_path = args.path[0][0]
-        workload = self._runs[workload_path]
-        gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
-        arch_config = self._arch_configs[gpu_arch]
-
-        active_operator_filters = [
-            framework_name
-            for framework_name, framework_flags in _ML_API_ANALYSIS_CLI_OPTIONS.items()
-            if getattr(args, framework_flags["filter_attr"], None) is not None
-        ]
-        if active_operator_filters:
-            for path_info in args.path:
-                self.handle_operator(
-                    args, self._runs[path_info[0]], active_operator_filters
-                )
-
-        if args.list_stats:
-            tty.show_kernel_stats(
-                args,
-                self._runs,
-                arch_config,
-                self._output,
-            )
-        else:
-            # Generate roofline plot for single-path, compatible architectures
-            if (len(args.path)) == 1:
-                if gpu_arch in ROOFLINE_SUPPORTED:
-                    is_roofline_valid, roofline_error_msg = validate_roofline_csv(
-                        Path(workload_path)
-                    )
-                    soc = self.get_socs()
-                    if not soc or gpu_arch not in soc:
-                        console_warning(
-                            "roofline",
-                            "Skipping roofline charting: "
-                            f"gpu arch {gpu_arch} not in soc {soc}",
-                        )
-                    if is_roofline_valid:
-                        soc_obj = soc[gpu_arch]
-
-                        roof_obj = Roofline(
-                            args=soc_obj.get_args(),
-                            mspec=soc_obj._mspec,
-                            run_parameters={
-                                "workload_dir": workload_path,
-                                "device_id": 0,
-                                "gpu_arch": gpu_arch,
-                                "kernel_filter": bool(args.gpu_kernel),
-                                "iteration_multiplexing": self._profiling_config.get(
-                                    "iteration_multiplexing"
-                                ),
-                                "matrix_ops_type": (
-                                    mi_gpu_specs.get_roofline_matrix_type(gpu_arch)
-                                ),
-                            },
-                        )
-                        workload.path = workload_path
-
-                        pmc_df = parser.apply_filters(workload, debug=args.debug)
-                        ai_data = calc_ai_analyze(
-                            workload=workload,
-                            pmc_df=pmc_df,
-                            arch_config=arch_config,
-                        )
-
-                        (
-                            ops_fig,
-                            flops_fig,
-                            ops_dt,
-                            flops_dt,
-                        ) = roof_obj.construct_plotly_figures(ai_data=ai_data)
-                        workload.roofline_html_path = roof_obj.save_html_files(
-                            ops_fig, flops_fig, ops_dt, flops_dt
-                        )
-                    else:
-                        console_warning(
-                            "roofline",
-                            "Skipping roofline charting: "
-                            f"Invalid roofline.csv: {roofline_error_msg}",
-                        )
-
+    @demarcate
+    def write_outputs(self, layout: RunLayout) -> None:
+        """Write the roofline HTML and report.txt, then print the report."""
+        super().write_outputs(layout)
+        args = self.get_args()
+        self._write_roofline_html(layout.workload_folders)
+        report_path = layout.run_folder / REPORT_FILE_NAME
+        with report_path.open("w", encoding="utf-8") as report:
             tty.show_all(
                 args,
                 self._runs,
-                arch_config,
-                self._output,
+                self._first_arch_config(),
+                report,
                 self._profiling_config,
+            )
+        self._show_operators()
+        tty.show_all(
+            args,
+            self._runs,
+            self._first_arch_config(),
+            sys.stdout,
+            self._profiling_config,
+        )
+
+    def _first_arch_config(self) -> schema.ArchConfig:
+        """Return the arch config of the first -p workload, which drives rendering."""
+        workload = self._runs[self.get_args().path[0][0]]
+        return self._arch_configs[workload.sys_info.iloc[0]["gpu_arch"]]
+
+    def _show_operators(self) -> None:
+        """Print the matched operator call tree of every workload to the terminal."""
+        args = self.get_args()
+        operator_filters = active_operator_filters(args)
+        if not operator_filters:
+            return
+        for path_info in args.path:
+            self.handle_operator(args, self._runs[path_info[0]], operator_filters)
+
+    def _build_roofline_figures(self) -> dict[str, RooflineFigures]:
+        """Build eligible workload roofline plots in memory."""
+        args = self.get_args()
+        figures_by_workload = {}
+        for path_info in args.path:
+            workload_path = path_info[0]
+            figures = self._build_roofline_figures_for_workload(workload_path)
+            if figures is not None:
+                figures_by_workload[workload_path] = figures
+        return figures_by_workload
+
+    def _build_roofline_figures_for_workload(
+        self,
+        workload_path: str,
+    ) -> Optional[RooflineFigures]:
+        """Build one workload's roofline plot when its data is eligible."""
+        args = self.get_args()
+        workload = self._runs[workload_path]
+        gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
+        if gpu_arch not in ROOFLINE_SUPPORTED:
+            return None
+        device_id = self._select_roofline_device_id(workload)
+        if device_id is None:
+            return None
+        is_roofline_valid, roofline_error_msg = validate_roofline_csv(
+            Path(workload_path)
+        )
+        if not is_roofline_valid:
+            console_warning(
+                "roofline",
+                f"Skipping roofline charting: Invalid roofline.csv: "
+                f"{roofline_error_msg}",
+            )
+            return None
+        soc = self.get_socs()
+        if not soc or gpu_arch not in soc:
+            console_warning(
+                "roofline",
+                f"Skipping roofline charting: gpu arch {gpu_arch} not in soc {soc}",
+            )
+            return None
+        soc_obj = soc[gpu_arch]
+        roof_obj = Roofline(
+            args=soc_obj.get_args(),
+            mspec=soc_obj._mspec,
+            run_parameters={
+                "workload_dir": workload_path,
+                "device_id": device_id,
+                "gpu_arch": gpu_arch,
+                "kernel_filter": bool(args.gpu_kernel),
+                "iteration_multiplexing": self._profiling_config.get(
+                    "iteration_multiplexing"
+                ),
+                "matrix_ops_type": mi_gpu_specs.get_roofline_matrix_type(gpu_arch),
+            },
+        )
+        workload.path = workload_path
+        requested_gpu_ids = workload.filter_gpu_ids
+        workload.filter_gpu_ids = [device_id]
+        try:
+            pmc_df = parser.apply_filters(workload, debug=args.debug)
+        finally:
+            workload.filter_gpu_ids = requested_gpu_ids
+        ai_data = calc_ai_analyze(
+            workload=workload,
+            pmc_df=pmc_df,
+            arch_config=self._arch_configs[gpu_arch],
+        )
+        ops_fig, flops_fig, ops_dt, flops_dt = roof_obj.construct_plotly_figures(
+            ai_data=ai_data
+        )
+        return RooflineFigures(
+            device_id, roof_obj, ops_fig, flops_fig, ops_dt, flops_dt
+        )
+
+    @staticmethod
+    def _select_roofline_device_id(workload: schema.Workload) -> Optional[int]:
+        """Select the first requested GPU, or the lowest GPU present in PMC data."""
+        if workload.filter_gpu_ids:
+            return int(workload.filter_gpu_ids[0])
+        if "GPU_ID" not in workload.raw_pmc:
+            return None
+        available_ids = sorted({
+            int(float(gpu_id)) for gpu_id in workload.raw_pmc["GPU_ID"].dropna()
+        })
+        return available_ids[0] if available_ids else None
+
+    def _write_roofline_html(self, workload_folders: dict[str, Path]) -> None:
+        """Save each workload's roofline HTML into its workload folder."""
+        if not self._roofline_figures:
+            return
+        for workload_path, figures in self._roofline_figures.items():
+            workload_folder = workload_folders[workload_path]
+            self._runs[
+                workload_path
+            ].roofline_html_path = figures.roofline.save_html_files(
+                figures.ops_figure,
+                figures.flops_figure,
+                figures.ops_datatypes,
+                figures.flops_datatypes,
+                output_path=workload_folder
+                / roofline_html_file_name(figures.device_id),
             )
 
     def list_operators(
