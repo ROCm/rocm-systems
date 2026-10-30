@@ -54,9 +54,19 @@ public:
   /// Value-only flags reject switch registration by default. Flags that intentionally
   /// parse bare-switch values must opt in.
   virtual bool allows_switch_mode() const { return false; }
+  /// @brief Parse text through the subclass hook and update the stored value.
+  ///
+  /// Adds this flag's primary spelling to diagnostics emitted by parse_value()
+  /// and reports a generic invalid-value diagnostic if the hook fails silently.
+  /// Custom flags should describe value-specific failures in parse_value()
+  /// without repeating the flag spelling.
   util::Result parse_and_set(std::string_view text, util::DiagnosticEmitter diagnostic);
 
 protected:
+  /// @brief Subclass hook for converting and storing a textual value.
+  ///
+  /// Implementations receive diagnostic context from parse_and_set(); they should
+  /// report conversion details and leave flag-name context to the public wrapper.
   virtual util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) = 0;
 
 private:
@@ -94,7 +104,6 @@ public:
   int64_t value() const { return value_; }
   util::Result set_value(int64_t value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
-  bool allows_switch_mode() const override { return false; }
 
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
@@ -108,7 +117,6 @@ public:
   uint64_t value() const { return value_; }
   util::Result set_value(uint64_t value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
-  bool allows_switch_mode() const override { return false; }
 
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
@@ -122,7 +130,6 @@ public:
   const std::string &value() const { return value_; }
   util::Result set_value(std::string value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
-  bool allows_switch_mode() const override { return false; }
 
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;
@@ -137,13 +144,6 @@ struct FlagGroup {
   std::vector<std::shared_ptr<Flag>> flags;
 };
 
-/// @brief Where positional arguments are accepted for a command.
-///
-/// Anywhere accepts bare positional arguments after option parsing. AfterSeparator
-/// requires callers to pass -- before any positional argument so launcher commands
-/// can forward application argv without parsing application options as their own.
-enum class PositionalMode { Anywhere, AfterSeparator };
-
 /// @brief A command scope containing child commands and flags.
 ///
 /// Command and Flag addresses stay stable as registration adds entries. All
@@ -152,14 +152,12 @@ enum class PositionalMode { Anywhere, AfterSeparator };
 /// writable through their typed flag handles.
 class Command {
 public:
-  explicit Command(std::string name, PositionalMode positional_mode = PositionalMode::Anywhere)
-      : name_(std::move(name)), positional_mode_(positional_mode) {}
+  explicit Command(std::string name) : name_(std::move(name)) {}
   Command(const Command &) = delete;
   Command &operator=(const Command &) = delete;
 
   const std::string &name() const { return name_; }
   std::string path() const;
-  PositionalMode positional_mode() const { return positional_mode_; }
   /// @brief Return the help-only positional usage suffix.
   const std::string &positional_usage() const { return positional_usage_; }
   /// @brief Set the help-only positional usage suffix.
@@ -171,8 +169,7 @@ public:
   ///
   /// The returned pointer is borrowed from this command and remains stable until
   /// this command is destroyed.
-  util::FailureOr<Command *> add_command(std::string name, util::DiagnosticEmitter diagnostic,
-                                         PositionalMode positional_mode = PositionalMode::Anywhere);
+  util::FailureOr<Command *> add_command(std::string name, util::DiagnosticEmitter diagnostic);
   /// @brief Register one flag before parsing.
   ///
   /// Before parsing, the same object is a no-op; conflicting spellings diagnose.
@@ -209,7 +206,6 @@ private:
   std::string name_;
   Command *parent_ = nullptr;
   bool sealed_ = false;
-  PositionalMode positional_mode_;
   std::string positional_usage_ = "[arguments...]";
   std::vector<FlagGroup> groups_;
   std::vector<std::unique_ptr<Command>> commands_;

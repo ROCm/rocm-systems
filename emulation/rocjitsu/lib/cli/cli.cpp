@@ -131,15 +131,14 @@ Result Flag::parse_and_set(std::string_view text, DiagnosticEmitter diagnostic) 
 
 std::string Command::path() const { return parent_ ? parent_->path() + " " + name_ : name_; }
 
-FailureOr<Command *> Command::add_command(std::string name, DiagnosticEmitter diagnostic,
-                                          PositionalMode positional_mode) {
+FailureOr<Command *> Command::add_command(std::string name, DiagnosticEmitter diagnostic) {
   if (sealed_)
     return diagnostic.emit() << path() << ": registration is closed";
   if (!valid_word(name) || name.front() == '-')
     return diagnostic.emit() << path() << ": invalid command name '" << name << "'";
   if (find_command(name))
     return diagnostic.emit() << path() << ": duplicate command '" << name << "'";
-  auto command = std::make_unique<Command>(std::move(name), positional_mode);
+  auto command = std::make_unique<Command>(std::move(name));
   command->parent_ = this;
   Command *result = command.get();
   commands_.push_back(std::move(command));
@@ -283,9 +282,6 @@ FailureOr<ParsedArguments> parse(Command &root, std::span<const std::string_view
         return diagnostic.emit() << result.command->path() << ": unknown command '" << arg << "'";
       result.command = next;
     } else {
-      if (result.command->positional_mode_ == PositionalMode::AfterSeparator)
-        return diagnostic.emit() << result.command->path()
-                                 << ": expected -- before application argument '" << arg << "'";
       result.positional.emplace_back(arg);
     }
   }
@@ -294,10 +290,7 @@ FailureOr<ParsedArguments> parse(Command &root, std::span<const std::string_view
 
 std::string format_help(const Command &command) {
   std::ostringstream out;
-  const auto write_positional_usage = [&]() {
-    out << (command.positional_mode() == PositionalMode::AfterSeparator ? " --" : " [--]") << ' '
-        << command.positional_usage();
-  };
+  const auto write_positional_usage = [&]() { out << " [--] " << command.positional_usage(); };
   out << "Usage: " << command.path() << " [options]";
   const bool has_commands = !command.commands().empty();
   if (has_commands)
