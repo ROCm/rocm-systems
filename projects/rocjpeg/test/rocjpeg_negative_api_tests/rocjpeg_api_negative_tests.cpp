@@ -23,6 +23,9 @@ THE SOFTWARE.
 
 #include "rocjpeg_api_negative_tests.h"
 
+#include <hip/hip_runtime_api.h>
+
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstdint>
@@ -359,6 +362,50 @@ RocJpegDecodeParams CropDecodeParams(const InvalidCropCase &crop_case) {
     decode_params.crop_rectangle.right = crop_case.right;
     decode_params.crop_rectangle.bottom = crop_case.bottom;
     return decode_params;
+}
+
+/**
+ * @brief Builds a flat 4:2:0 JPEG of the given size from the color seed.
+ *
+ * The 16x16 seed is below the minimum size the hardware decoder accepts, so tests that need a decode to be
+ * submitted build a larger image from it the same way as the restart marker fixture of TestStreamParseFuzz: the
+ * frame is widened to width x height, a DRI segment of one MCU is inserted ahead of the scan header, and the
+ * scan repeats the seed's all-zero MCU once per 16x16 block with a restart marker between MCUs.
+ *
+ * @param width The image width; a multiple of 16.
+ * @param height The image height; a multiple of 16.
+ * @return The stream, or an empty vector if the seed no longer carries parsable SOF and SOS segments.
+ */
+std::vector<uint8_t> FlatColorJpeg(uint16_t width, uint16_t height) {
+    const std::vector<uint8_t> &seed = ColorSeedJpeg();
+    const size_t sof_offset = FindMarker(seed, 0xC0);
+    const size_t sos_offset = FindMarker(seed, 0xDA);
+    if (sof_offset + 9 > seed.size() || sos_offset + 4 > seed.size()) {
+        return {};
+    }
+    const size_t scan_start = sos_offset + 2 + ((static_cast<size_t>(seed[sos_offset + 2]) << 8) | seed[sos_offset + 3]);
+    if (scan_start > seed.size()) {
+        return {};
+    }
+    std::vector<uint8_t> jpeg(seed.begin(), seed.begin() + scan_start);
+    jpeg[sof_offset + 5] = static_cast<uint8_t>(height >> 8);
+    jpeg[sof_offset + 6] = static_cast<uint8_t>(height & 0xFF);
+    jpeg[sof_offset + 7] = static_cast<uint8_t>(width >> 8);
+    jpeg[sof_offset + 8] = static_cast<uint8_t>(width & 0xFF);
+    const std::vector<uint8_t> dri_segment = {0xFF, 0xDD, 0x00, 0x04, 0x00, 0x01};
+    jpeg.insert(jpeg.begin() + sos_offset, dri_segment.begin(), dri_segment.end());
+    const std::vector<uint8_t> complete_mcu = {0x00, 0x00, 0x3F};
+    const uint32_t num_mcus = (width / 16u) * (height / 16u);
+    for (uint32_t i = 0; i < num_mcus; i++) {
+        if (i > 0) {
+            jpeg.push_back(0xFF);
+            jpeg.push_back(static_cast<uint8_t>(0xD0 + (i - 1) % 8));
+        }
+        jpeg.insert(jpeg.end(), complete_mcu.begin(), complete_mcu.end());
+    }
+    jpeg.push_back(0xFF);
+    jpeg.push_back(0xD9);
+    return jpeg;
 }
 
 }  // namespace
@@ -769,7 +816,81 @@ int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
             return EXIT_FAILURE;
         }
     }
-    return EXIT_SUCCESS;
+
+    // Scenario 2: Pass a batch size of 0 or -1 with a valid handle and destinations to rocJpegDecodeBatchedSync
+    for (int batch_size : {0, -1}) {
+        rocjpeg_status = rocJpegDecodeBatchedSync(rocjpeg_handle_, destinations, batch_size);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatchedSync with batch_size " << batch_size << ": Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+
+    // Scenario 3: Submit two images with rocJpegDecodeBatchedAsync, then pass rocJpegDecodeBatchedSync a third
+    // destination that has nothing pending. The call must fail without taking the two pending decodes, so syncing
+    // the original two afterwards must still succeed.
+    RocJpegDecodeCaps decode_caps = {};
+    rocjpeg_status = rocJpegGetDecoderCaps(rocjpeg_handle_, &decode_caps);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegGetDecoderCaps: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    // Round the minimum size the decoder accepts up to whole 16x16 MCUs.
+    const uint16_t width = static_cast<uint16_t>((std::max(decode_caps.min_width, 16u) + 15u) & ~15u);
+    const uint16_t height = static_cast<uint16_t>((std::max(decode_caps.min_height, 16u) + 15u) & ~15u);
+    const std::vector<uint8_t> flat_jpeg = FlatColorJpeg(width, height);
+    if (flat_jpeg.empty()) {
+        std::cerr << "The color seed no longer carries parsable SOF and SOS segments." << std::endl;
+        return EXIT_FAILURE;
+    }
+    rocjpeg_status = rocJpegStreamParse(flat_jpeg.data(), flat_jpeg.size(), rocjpeg_stream_handle_);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the " << width << "x" << height << " flat JPEG but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    constexpr int kNumSubmitted = 2;
+    RocJpegImage sync_destinations[kNumSubmitted + 1] = {};
+    RocJpegDecodeParams rgb_decode_params[kNumSubmitted] = {};
+    int result = EXIT_SUCCESS;
+    for (int k = 0; k < kNumSubmitted; k++) {
+        rgb_decode_params[k].output_format = ROCJPEG_OUTPUT_RGB;
+        sync_destinations[k].pitch[0] = width * 3u;
+        if (hipMalloc(reinterpret_cast<void **>(&sync_destinations[k].channel[0]), width * 3u * height) != hipSuccess) {
+            std::cerr << "hipMalloc failed for the output of destination " << k << std::endl;
+            result = EXIT_FAILURE;
+        }
+    }
+    if (result == EXIT_SUCCESS) {
+        rocjpeg_status = rocJpegDecodeBatchedAsync(rocjpeg_handle_, stream_handles, kNumSubmitted, rgb_decode_params, sync_destinations);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "rocJpegDecodeBatchedAsync of the " << width << "x" << height << " flat JPEG: Expected ROCJPEG_STATUS_SUCCESS but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            result = EXIT_FAILURE;
+        }
+    }
+    if (result == EXIT_SUCCESS) {
+        rocjpeg_status = rocJpegDecodeBatchedSync(rocjpeg_handle_, sync_destinations, kNumSubmitted + 1);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatchedSync with a destination that has nothing pending: Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            result = EXIT_FAILURE;
+        }
+        // Sync the submitted batch even after a failure above, so its decodes do not stay pending.
+        rocjpeg_status = rocJpegDecodeBatchedSync(rocjpeg_handle_, sync_destinations, kNumSubmitted);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "rocJpegDecodeBatchedSync of the submitted batch after a rejected sync: Expected ROCJPEG_STATUS_SUCCESS but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            result = EXIT_FAILURE;
+        }
+    }
+    for (int k = 0; k < kNumSubmitted; k++) {
+        if (sync_destinations[k].channel[0] != nullptr) {
+            (void)hipFree(sync_destinations[k].channel[0]);
+        }
+    }
+    return result;
 }
 
 int RocJpegApiNegativeTests::TestInvalidGetDecoderCaps() {
