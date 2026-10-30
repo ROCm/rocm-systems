@@ -1842,7 +1842,8 @@ TEST_P(AllImageAccessTest, ArrayLayerPositionFollowsInstructionDimension) {
     dimension_override_ = dim;
     for (uint32_t layer : {1u, 2u}) {
       SCOPED_TRACE(testing::Message() << "dim=" << dim << " layer=" << layer);
-      // Physical 1DA R32 captures put each layer on a 256-byte boundary.
+      // Native R32 1D-array captures on gfx1100 (W7900) and gfx1201 (R9700)
+      // place each layer on a 256-byte boundary.
       const uint32_t offset = layer * 256 + 5 * 4;
       write_coordinates(0, dim == amdgpu::kImageDim1dArray ? std::array<uint32_t, 3>{5, layer, 0}
                                                            : std::array<uint32_t, 3>{5, 0, layer});
@@ -1938,6 +1939,30 @@ TEST_P(AllImageAccessTest, StubMimgInstructionsScaleDescriptorSelectors) {
       EXPECT_TRUE(uses.uses.contains({RegClass::SGPR, 12, 4}));
     }
     EXPECT_FALSE(uses.uses.contains({RegClass::SGPR, 4, 1}));
+  }
+}
+
+TEST_P(AllImageAccessTest, LinearOneDimensionalArraysUseIndependentLayerStride) {
+  Image image;
+  image.width = 30;
+  image.depth = 3;
+  image.type = amdgpu::kImage1dArray;
+  dimension_override_ = image.type - amdgpu::kImage1d;
+  bind_image(image);
+  wf_->set_exec(1);
+  // Native R32 1D-array captures on gfx1100 (W7900) and gfx1201 (R9700)
+  // place each layer on a 256-byte boundary.
+  for (uint32_t layer : {1u, 2u}) {
+    const uint32_t offset = layer * 256 + 5 * 4;
+    write_coordinates(0, {5, layer, 0});
+    cu_->write_vgpr(vb_ + 8, 0, 0x12340000u + offset);
+    ASSERT_TRUE(decoded_issue(false, 2));
+    EXPECT_EQ(memory_.read32(kBase + offset), 0x12340000u + offset);
+    memory_.write32(kBase + offset, 0xabcd0000u + offset);
+    cu_->l1_vector().invalidate_all();
+    l2_.invalidate_all();
+    ASSERT_TRUE(decoded_issue(true, 2));
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0xabcd0000u + offset);
   }
 }
 
