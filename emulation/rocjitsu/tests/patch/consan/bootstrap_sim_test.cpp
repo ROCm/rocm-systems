@@ -430,6 +430,23 @@ TEST_F(ConSanBootstrapSim,
   }
 }
 
+TEST_F(ConSanBootstrapSim, Gfx1250PublicationBarrierBlocksAnEarlyConsumer) {
+  // Both kernels initialize LDS to zero and synchronize. Only the producer
+  // then delays. Without the second barrier the consumer must see the old
+  // value; original and instrumented barriers must both expose input=7.
+  RunResult without_publication_barrier;
+  ASSERT_NO_FATAL_FAILURE(
+      run("native-26", Bootstrap::None, without_publication_barrier, {"gfx1250", 32}, 65, true));
+  EXPECT_EQ(without_publication_barrier.output, (std::array<uint32_t, 2>{0, 0}));
+
+  for (const Bootstrap mode : {Bootstrap::None, Bootstrap::Instrumented}) {
+    SCOPED_TRACE(mode == Bootstrap::None ? "original" : "instrumented");
+    RunResult synchronized;
+    ASSERT_NO_FATAL_FAILURE(run("native-25", mode, synchronized, {"gfx1250", 32}, 65, true));
+    EXPECT_EQ(synchronized.output, (std::array<uint32_t, 2>{7, 0}));
+  }
+}
+
 class ConSanTargetSim : public ConSanBootstrapSim,
                         public ::testing::WithParamInterface<test::TargetMode> {};
 

@@ -132,9 +132,8 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
       bool intervening_memory = false;
       while (wait_index < instructions.size() &&
              instructions[wait_index]->mnemonic() != "s_barrier_wait") {
-        const std::string_view name = instructions[wait_index]->mnemonic();
-        if (name.starts_with("ds_") || name.starts_with("global_") || name.starts_with("s_load") ||
-            name.starts_with("s_barrier"))
+        const Instruction &instruction = *instructions[wait_index];
+        if (instruction.is_memory_op() || instruction.is_barrier())
           intervening_memory = true;
         ++wait_index;
       }

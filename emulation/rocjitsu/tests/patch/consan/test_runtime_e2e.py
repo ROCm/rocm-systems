@@ -9,10 +9,25 @@ import tempfile
 import unittest
 from unittest import mock
 
+from consan_e2e import clear_examples
 from consan_runtime_e2e import Driver, HardwareUnavailable
 
 
 class RuntimeIntegration(unittest.TestCase):
+    def test_example_limit_preserves_unresolved_counts_and_coverage(self):
+        execution = {
+            'cross_wave_examples': [],
+            'collision_examples': [],
+            'ordered_examples': [],
+            'unresolved_examples': [{'ordering': 'ordering_unresolved'}],
+            'ordering_unresolved_pairs': 1,
+            'coverage_complete': False,
+        }
+        expected = execution | {'unresolved_examples': []}
+        result = {'executions': [execution]}
+        clear_examples(result)
+        self.assertEqual(result, {'executions': [expected]})
+
     def test_preparation_failures_cannot_continue_the_pipeline(self):
         for status in (0, 2):
             with self.subTest(

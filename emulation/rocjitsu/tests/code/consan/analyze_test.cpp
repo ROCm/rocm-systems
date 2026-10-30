@@ -289,6 +289,33 @@ TEST_F(ConSanAnalysis, FixedBarrierDoesNotEraseIndependentSameInstructionCollisi
   EXPECT_TRUE(execution.coverage_complete);
 }
 
+TEST_F(ConSanAnalysis, OrderedPairSummaryAccumulatesAcrossExecutionsWithoutExamples) {
+  access(0, 0, 1);
+  access(1, 1, 1);
+  barrier();
+  append_execution();
+  std::vector<uint8_t> &second = capture_.executions[1].report;
+  second = capture_.executions[0].report;
+  wire::write_u64(second, wire::kReportSerial, 2);
+  for (const uint32_t wave : {0u, 1u})
+    wire::write_u64(second, row(wave) + wire::kRowSerial, 2);
+
+  const FailureOr<LdsRaceResult> result = analyze({0});
+  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.value().coverage_complete);
+  ASSERT_EQ(result.value().executions.size(), 2u);
+  EXPECT_EQ(result.value().ordered_pairs, 2u);
+  for (const LdsRaceExecutionResult &execution : result.value().executions) {
+    EXPECT_EQ(execution.ordered_pairs, 1u);
+    EXPECT_TRUE(execution.ordered_examples.empty());
+  }
+  const std::string json = render_analysis(result.value());
+  const size_t executions = json.find("\"executions\":");
+  ASSERT_NE(executions, std::string::npos);
+  EXPECT_NE(json.substr(0, executions).find("\"ordered_pairs\":2"), std::string::npos);
+  EXPECT_FALSE(has_findings(result.value()));
+}
+
 TEST_F(ConSanAnalysis, FixedBarrierReadReadAndDisjointKeepObservationsWithoutCandidates) {
   for (const bool read_read : {false, true}) {
     capture_.executions.clear();
@@ -721,9 +748,10 @@ TEST_F(ConSanAnalysis, MissingStaticMappingIsAnInputErrorNotInstructionZero) {
 TEST_F(ConSanAnalysis, UnmodeledScopeCannotBeTreatedAsConfirmedUnorderedAccesses) {
   access(0, 0, 1);
   access(1, 1, 1);
-  capture_.header.manifest.scope = static_cast<ScopeKind>(2);
+  capture_.header.manifest.scope = static_cast<ScopeKind>(99);
   EXPECT_TRUE(analyze_capture(capture_, {}, &error_).failed());
   EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+  EXPECT_EQ(error_.message, "empty image or unsupported target, ABI, scope or options");
 }
 
 TEST_F(ConSanAnalysis, TypedHeaderConditionsAndIdentityCannotBypassFileValidation) {

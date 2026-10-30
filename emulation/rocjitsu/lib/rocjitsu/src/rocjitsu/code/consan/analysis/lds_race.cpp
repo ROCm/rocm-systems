@@ -8,10 +8,13 @@
 #include <array>
 #include <bit>
 #include <map>
+#include <optional>
 #include <set>
 
 namespace rocjitsu::consan {
 namespace {
+
+static_assert(kSyncCapacity <= 32, "Barrier witness masks must fit in uint32_t");
 
 bool all_zero(std::span<const uint8_t> bytes) {
   return std::ranges::all_of(bytes, [](uint8_t value) { return value == 0; });

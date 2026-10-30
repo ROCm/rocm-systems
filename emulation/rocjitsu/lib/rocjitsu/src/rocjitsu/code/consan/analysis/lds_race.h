@@ -86,6 +86,7 @@ struct LdsRaceResult {
   uint32_t wave_size = 0;
   ScopeKind scope = ScopeKind::NativeLdsNoSynchronization;
   // Totals over executions, using the same record-pair/group units as above.
+  uint64_t ordered_pairs = 0;
   uint64_t cross_wave_pairs = 0;
   uint64_t ordering_unresolved_pairs = 0;
   uint64_t collision_groups = 0;

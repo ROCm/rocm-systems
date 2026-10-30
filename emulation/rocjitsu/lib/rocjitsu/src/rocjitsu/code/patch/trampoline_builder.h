@@ -204,6 +204,10 @@ struct TrampolineBytes {
   std::vector<uint8_t> patched_anchor_bytes;
   std::vector<uint32_t> trampoline_words;
   uint32_t original_byte_offset = 0;
+  /// Call envelope relative to trampoline start, excluding the relocated guest
+  /// instruction and resume branch. Both fields are zero for inline plans.
+  uint32_t call_envelope_byte_offset = 0;
+  uint32_t call_envelope_byte_size = 0;
 };
 
 class TrampolineBuilder {

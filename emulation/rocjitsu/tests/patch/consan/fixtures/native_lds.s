@@ -148,6 +148,39 @@ CONSAN_KERNEL:
   GLOBAL_STORE v5, v3, s[6:7]
 #endif
   .endr
+#elif CONSAN_CASE == 25 || CONSAN_CASE == 26
+  // Initialize the shared word before racing a delayed producer against the
+  // consumer. The first barrier makes the old value deterministic in both
+  // variants; case 26 omits only the publication barrier.
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  v_mov_b32 v2, 0
+  DS_STORE v1, v2
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  s_wait_dscnt 0
+  s_barrier_signal -1
+  s_barrier_wait -1
+  v_mov_b32 v2, s4
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  s_cbranch_execz .Lpublication
+  // Forward-only delay keeps this fixture inside the acyclic T02 profile.
+  .rept 128
+  s_nop 0
+  .endr
+  DS_STORE v1, v2
+.Lpublication:
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+#if CONSAN_CASE == 25
+  s_wait_dscnt 0
+  s_barrier_signal -1
+  s_barrier_wait -1
+#endif
+  v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_LOAD v3, v1
+  consan_wait_all
+  GLOBAL_STORE v5, v3, s[6:7]
 #elif CONSAN_CASE == 4 || CONSAN_CASE == 5
 #if CONSAN_CASE == 4
   v_cmp_gt_u32 MASK_VCC, 2, v0

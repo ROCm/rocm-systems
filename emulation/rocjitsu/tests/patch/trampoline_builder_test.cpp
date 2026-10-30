@@ -1554,6 +1554,11 @@ TEST(TrampolineBuilderEmit, Rdna4GuardsTargetWritesAndPreservesGetpcRelativeAddr
       EXPECT_EQ(words.size(),
                 plan.before_word_count + 2 * (drain.value().size() + 1) + original_bytes / 4 + 2);
       EXPECT_EQ(bytes->original_byte_offset, after ? 0u : 4 * (words.size() - 1) - original_bytes);
+      EXPECT_EQ(bytes->call_envelope_byte_offset, after ? original_bytes : 0u);
+      EXPECT_EQ(bytes->call_envelope_byte_size, 4 * (words.size() - 1) - original_bytes);
+      const uint32_t getpc_offset = 4 * (getpc - words.begin());
+      EXPECT_GE(getpc_offset, bytes->call_envelope_byte_offset);
+      EXPECT_LT(getpc_offset, bytes->call_envelope_byte_offset + bytes->call_envelope_byte_size);
       EXPECT_TRUE(std::equal(plan.original_words.begin(), plan.original_words.end(),
                              words.begin() + bytes->original_byte_offset / 4));
       const uint64_t return_pc = plan.trampoline_offset + 4 * (words.size() - 1);

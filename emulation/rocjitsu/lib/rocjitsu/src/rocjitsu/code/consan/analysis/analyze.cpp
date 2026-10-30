@@ -51,6 +51,7 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
   for (const CapturedExecution &execution : capture.executions) {
     LdsRaceExecutionResult analyzed =
         analyze_lds_race_execution(capture.header.manifest, execution, options.examples);
+    result.ordered_pairs += analyzed.ordered_pairs;
     result.cross_wave_pairs += analyzed.cross_wave_pairs;
     result.ordering_unresolved_pairs += analyzed.ordering_unresolved_pairs;
     result.collision_groups += analyzed.collision_groups;

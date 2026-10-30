@@ -377,6 +377,9 @@ int run(int argc, char **argv) {
           result = 23;
     }
     if (synchronized) {
+      // This checks output preservation, not that a wait actually blocked: an
+      // eager producer can also yield input without a barrier. The simulator's
+      // Gfx1250PublicationBarrierBlocksAnEarlyConsumer test supplies that control.
       for (size_t word = 0; word < last_output.size(); ++word)
         if (last_output[word] != (word == 0 ? input : 0))
           result = 23;

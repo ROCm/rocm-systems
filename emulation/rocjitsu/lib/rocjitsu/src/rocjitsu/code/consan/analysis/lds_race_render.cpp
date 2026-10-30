@@ -90,6 +90,7 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
       << ",\"execution_conditions\":" << result.execution_conditions
       << ",\"coverage_complete\":" << result.coverage_complete
       << ",\"ordering_unresolved_pairs\":" << result.ordering_unresolved_pairs
+      << ",\"ordered_pairs\":" << result.ordered_pairs
       << ",\"cross_wave_pairs\":" << result.cross_wave_pairs
       << ",\"collision_groups\":" << result.collision_groups << ",\"executions\":[";
   bool first = true;

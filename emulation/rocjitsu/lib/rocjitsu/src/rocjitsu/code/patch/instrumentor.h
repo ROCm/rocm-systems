@@ -262,9 +262,13 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///
 /// Temporary rules enforced here:
 ///   - @p pt.filter_flags is zero.
-///   - @p pt.kind is BeforeInst, KernelEntry, or KernelExit. Boundaries require
+///   - @p pt.kind is BeforeInst, AfterInst, KernelEntry, or KernelExit. Boundaries require
 ///     a probe; KernelExit must name s_endpgm. The orchestrator separately checks
 ///     that KernelEntry names the sole kernel's descriptor entry.
+///   - AfterInst requires a callable probe and an anchor that preserves VGPR
+///     bank selection, since liveness proves bank state before the anchor.
+///     @p setreg_vgpr_msb_fixup selects the concrete target's MODE-write behavior;
+///     the default conservatively applies gfx1250's clobber semantics on CDNA5.
 ///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe
 ///     call) or both empty (the inline nop). Setting only one is rejected.
 ///   - @p pt.probe_args is empty without a probe: an inline-nop site has
@@ -274,7 +278,8 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
-                rj_code_arch_t arch, std::string *error_out = nullptr);
+                rj_code_arch_t arch, std::string *error_out = nullptr,
+                bool setreg_vgpr_msb_fixup = true);
 
 /// @brief Build a TrampolinePlan from a validated site.
 ///

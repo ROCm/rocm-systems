@@ -20,6 +20,15 @@ from consan_runtime_e2e import (
 )
 
 
+def clear_examples(result):
+    """Normalize a result for comparison with --examples 0."""
+    for execution in result['executions']:
+        execution['cross_wave_examples'] = []
+        execution['collision_examples'] = []
+        execution['ordered_examples'] = []
+        execution['unresolved_examples'] = []
+
+
 class AnalysisDriver(Driver):
     def prepare_original(self, fixture, original):
         self.entry = super().prepare_original(fixture, original)
@@ -81,6 +90,9 @@ class AnalysisDriver(Driver):
         assert result['wave_size'] == self.args.wave_size
         assert result['entry'] == self.entry, (result['entry'], self.entry)
         assert result['cross_wave_pairs'] == pairs
+        assert result['ordered_pairs'] == sum(
+            execution['ordered_pairs'] for execution in result['executions']
+        )
         assert result['collision_groups'] == collisions
         assert result['coverage_complete'] == (case != 'exhausted')
         assert result['verdict'] == ('findings' if status else 'no_observed_findings')
@@ -148,10 +160,7 @@ class AnalysisDriver(Driver):
                 status,
             )
         )
-        for execution in result['executions']:
-            execution['cross_wave_examples'] = []
-            execution['collision_examples'] = []
-            execution['ordered_examples'] = []
+        clear_examples(result)
         assert (
             result == hidden
         ), 'example limit changed full semantic counts or coverage'

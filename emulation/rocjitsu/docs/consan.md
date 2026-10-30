@@ -219,7 +219,8 @@ phases remain Incomplete.
 This independence does not apply to barrier profiles: every required participant
 must supply the witnesses needed to classify the pair, even without LDS accesses.
 
-The analyzer keeps `ordered_pairs`, confirmed `cross_wave_pairs`, and
+The analyzer reports `ordered_pairs` both per execution and as a total across
+executions. It keeps ordered pairs, confirmed `cross_wave_pairs`, and
 `ordering_unresolved_pairs` separate, with separate example arrays. Missing or
 contradictory required evidence retains an unresolved candidate and incomplete
 coverage. It contributes neither to confirmed totals nor the default findings
@@ -362,6 +363,7 @@ conflict was found; exit 0 means no findings were observed. The result includes:
   "target": 1250,
   "wave_size": 32,
   "cross_wave_pairs": 1,
+  "ordered_pairs": 0,
   "collision_groups": 0,
   "coverage_complete": true
 }
@@ -465,3 +467,13 @@ matching physical hardware. Required simulator cases must execute without skips;
 physical cases skip when the requested HSA agent is unavailable. Runtime-stage
 scenarios remain available without building the analyzer. Keep simulator and
 physical-target evidence distinct.
+
+The synchronized runner checks output preservation; that alone does not prove
+that a wait blocked an early consumer. The
+`ConSanBootstrapSim.Gfx1250PublicationBarrierBlocksAnEarlyConsumer` simulator
+control uses assembly cases 25/26: both initialize LDS to zero and synchronize,
+then only the producer delays before publishing input=7. Without the publication
+barrier the consumer reads zero; both the original and instrumented synchronized
+kernels must read seven. The forward-only delay keeps this control in the
+acyclic profile. Its scheduling-dependent negative case is simulator evidence,
+not a requirement that physical hardware reproduce the same unsynchronized read.

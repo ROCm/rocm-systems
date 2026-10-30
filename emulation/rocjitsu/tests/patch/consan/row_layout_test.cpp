@@ -24,7 +24,8 @@ TEST(ConSanRowLayout, BarrierJournalIsSeparateFromEveryAccessReservation) {
   for (size_t sites : {size_t{1}, size_t{2}, size_t{ContractLimits{}.sites}}) {
     const auto stride = lds_race_row_stride(sites, error, true);
     ASSERT_TRUE(stride.succeeded()) << error.message;
-    EXPECT_EQ(stride.value(), kRowHeaderBytes + sites * 4 * 64 + 16 * 32);
+    EXPECT_EQ(stride.value(), kRowHeaderBytes + sites * kAddressGroupsPerSite * kAccessRecordBytes +
+                                  kSyncCapacity * kSyncRecordBytes);
   }
 }
 

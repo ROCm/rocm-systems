@@ -321,6 +321,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   const uint32_t original_offset = body.size() * sizeof(uint32_t);
   if (plan.emit_original)
     body.insert(body.end(), plan.original_words.begin(), plan.original_words.end());
+  const uint32_t after_offset = body.size() * sizeof(uint32_t);
   for (const InlineAsmItem &item : plan.after_items)
     body.insert(body.end(), item.words.begin(), item.words.end());
 
@@ -341,6 +342,12 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
 
   out.trampoline_words = std::move(body);
   out.original_byte_offset = original_offset;
+  if (plan.is_probe_call) {
+    out.call_envelope_byte_offset = plan.probe_after_original ? after_offset : 0;
+    out.call_envelope_byte_size =
+        plan.probe_after_original ? out.trampoline_words.size() * sizeof(uint32_t) - after_offset
+                                  : original_offset;
+  }
   if (plan.returns_to_kernel)
     out.trampoline_words.push_back(build_s_branch(*ret, plan.arch));
   return out;
