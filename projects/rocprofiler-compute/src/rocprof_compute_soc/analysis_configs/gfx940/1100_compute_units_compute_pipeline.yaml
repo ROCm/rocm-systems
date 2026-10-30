@@ -74,8 +74,8 @@ Panel Config:
           unit: Instructions per Cycle
         IPC (Issued):
           avg: COLLECT_SUM(_collect.ipc_issued_a, _collect.ipc_issued_b)
-          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
-          max: None
+          min: MIN(_collect.ipc_issued_a + _collect.ipc_issued_b)  # min over dispatches of the summed pieces
+          max: MAX(_collect.ipc_issued_a + _collect.ipc_issued_b)  # max over dispatches of the summed pieces
           unit: Instructions per Cycle
         SALU Utilization:
           avg: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -140,8 +140,8 @@ Panel Config:
       metric:
         FLOPs (Total):
           avg: COLLECT_SUM(_collect.flops_total_a, _collect.flops_total_b, _collect.flops_total_c)
-          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
-          max: None
+          min: MIN(_collect.flops_total_a + _collect.flops_total_b + _collect.flops_total_c)  # min over dispatches of the summed pieces
+          max: MAX(_collect.flops_total_a + _collect.flops_total_b + _collect.flops_total_c)  # max over dispatches of the summed pieces
           unit: (FLOPs + $normUnit)
         IOPs (Total):
           avg: SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64) + SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / SUM($denom)

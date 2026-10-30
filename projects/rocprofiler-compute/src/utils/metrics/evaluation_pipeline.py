@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,7 @@ from utils.logger import console_debug, console_error, console_warning, demarcat
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.collectable import (
     _avg_column_name,
+    _collect_piece_dispatch_series,
     apply_composite_metrics,
     build_metric_eval_graph,
     cache_collectable_expressions,
@@ -197,6 +198,48 @@ def calc_builtin_vars(
             builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     return builtin_vars_collection
+
+
+def _series_for_collect_piece(
+    metric_table: pd.DataFrame,
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: dict[str, Any],
+    empirical_peaks: dict[str, Any],
+    piece_name: str,
+) -> pd.Series:
+    """Resolve one _collect piece to its per-dispatch values.
+
+    Scalar piece averages are not a min or max. When no per-dispatch series
+    is available the empty series leaves that extent unset.
+    """
+    series = _collect_piece_dispatch_series(
+        metric_table,
+        piece_name,
+        raw_pmc_df,
+        sys_vars,
+        empirical_peaks,
+    )
+    if series is None:
+        # Only scalar piece averages exist; do not report their sum as Min/Max.
+        return pd.Series(dtype=float)
+    return series
+
+
+def _bind_collect_piece(
+    metric_evaluator: MetricEvaluator,
+    metric_table: pd.DataFrame,
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: dict[str, Any],
+    empirical_peaks: dict[str, Any],
+) -> None:
+    """Point collect_piece at this metric table's collectable lookup."""
+    metric_evaluator.collect_piece = partial(
+        _series_for_collect_piece,
+        metric_table,
+        raw_pmc_df,
+        sys_vars,
+        empirical_peaks,
+    )
 
 
 def _gui_active_zero_detected(raw_pmc_df: pd.DataFrame) -> Optional[str]:
@@ -447,6 +490,9 @@ def eval_metric(
     # )
     for df_id, df in dfs.items():
         if dfs_type[df_id] == "metric_table":
+            _bind_collect_piece(
+                metric_evaluator, df, raw_pmc_df, sys_vars, empirical_peaks
+            )
             for row_id, row in df.iterrows():
                 for expr in df.columns:
                     if expr in SUPPORTED_FIELD and expr.lower() not in {
@@ -474,6 +520,13 @@ def eval_metric(
 
     for df_id, row_id, col, expr in exprs_to_eval:
         noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
+        _bind_collect_piece(
+            metric_evaluator,
+            dfs[df_id],
+            raw_pmc_df,
+            sys_vars,
+            empirical_peaks,
+        )
         eval_result = metric_evaluator.eval_expression(expr)
         noise_clamp_count_new = get_noise_clamp_warnings()["count"]
         if (

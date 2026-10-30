@@ -354,6 +354,36 @@ def _lookup_collectable_built_avg(
     return built
 
 
+def _collect_piece_dispatch_series(
+    df: pd.DataFrame,
+    piece_name: str,
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
+) -> Optional[pd.Series]:
+    """Per-dispatch values for one _collect piece, using the COLLECT_SUM lookup.
+
+    The built expression is the same string COLLECT_SUM evaluates. It is run
+    per dispatch so a later min or max is the extremum of the combined pieces.
+    Returns None when the frame has no Dispatch_ID: only scalar piece averages
+    exist then, and those averages are not an extent.
+    """
+    if "Dispatch_ID" not in raw_pmc_df.columns:
+        return None
+    avg_col = _avg_column_name(df)
+    if avg_col is None:
+        return None
+    return _collectable_series(
+        df,
+        piece_name,
+        avg_col,
+        raw_pmc_df,
+        sys_vars,
+        empirical_peaks,
+        "collect extent",
+    )
+
+
 def _collectable_series(
     df: pd.DataFrame,
     ref_name: str,

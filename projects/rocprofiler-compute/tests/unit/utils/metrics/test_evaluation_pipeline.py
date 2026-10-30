@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from utils.metrics.collectable import COLLECT_SUM_SPECS_ATTR
 from utils.metrics.evaluation_pipeline import (
     _gui_active_zero_detected,
     calc_builtin_vars,
@@ -18,6 +19,7 @@ from utils.metrics.evaluation_pipeline import (
     evaluate_metric_composites,
     validate_dual_issue_metrics,
 )
+from utils.metrics.expression import build_eval_string
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -26,6 +28,51 @@ from utils.metrics.noise_clamper import (
 # =============================================================================
 # Tests for utils.metrics.evaluation_pipeline
 # =============================================================================
+
+
+def _ipc_collect_table() -> pd.DataFrame:
+    """IPC (Issued) parent plus the two collect pieces."""
+    piece_a = "to_sum(raw_pmc_df['INST_A']) / to_sum(raw_pmc_df['CYCLES'])"
+    piece_b = "to_sum(raw_pmc_df['INST_B']) / to_sum(raw_pmc_df['CYCLES'])"
+    min_expr = build_eval_string("MIN(_collect.ipc_issued_a + _collect.ipc_issued_b)")
+    max_expr = build_eval_string("MAX(_collect.ipc_issued_a + _collect.ipc_issued_b)")
+    table = pd.DataFrame(
+        [
+            ["1", "_collect.ipc_issued_a", piece_a, "", ""],
+            ["2", "_collect.ipc_issued_b", piece_b, "", ""],
+            ["3", "IPC (Issued)", "", min_expr, max_expr],
+        ],
+        columns=["Metric_ID", "Metric", "Avg", "Min", "Max"],
+    ).set_index("Metric_ID")
+    table.attrs[COLLECT_SUM_SPECS_ATTR] = {
+        "3": ["_collect.ipc_issued_a", "_collect.ipc_issued_b"],
+    }
+    return table
+
+
+def _eval_ipc_collect_table(raw: pd.DataFrame) -> pd.DataFrame:
+    table = _ipc_collect_table()
+    sys_info = pd.Series(TestEvaluationPipeline.sys_info_fields)
+    expressions = [
+        value
+        for column in ("Avg", "Min", "Max")
+        for value in table[column].tolist()
+        if isinstance(value, str) and value
+    ]
+    with patch(
+        "utils.metrics.evaluation_pipeline.get_build_in_vars",
+        return_value={},
+    ):
+        eval_metric(
+            {1: table},
+            {1: "metric_table"},
+            {1: expressions},
+            sys_info,
+            pd.DataFrame(),
+            raw,
+            debug=False,
+        )
+    return table
 
 
 class TestEvaluationPipeline:
@@ -622,3 +669,39 @@ def test_evaluate_metric_composites_fills_parent_without_mutating_source():
     )
     assert filled[("3", "Value")] == pytest.approx((10.0 + 30.0) / (2.0 + 6.0))
     assert df.at["3", "Value"] == source_parent
+
+
+@pytest.mark.misc
+def test_collect_piece_min_is_the_per_dispatch_extremum() -> None:
+    """MIN(a + b) is min over dispatches, not the sum of piece averages.
+
+    Dispatch 1 is 2/4 + 1/4 = 0.75. Dispatch 2 is 6/4 + 1/4 = 1.75.
+    The COLLECT_SUM average is (2+6)/(4+4) + (1+1)/(4+4) = 1.25.
+    """
+    raw = pd.DataFrame({
+        "Dispatch_ID": [1, 2],
+        "INST_A": [2.0, 6.0],
+        "INST_B": [1.0, 1.0],
+        "CYCLES": [4.0, 4.0],
+    })
+    table = _eval_ipc_collect_table(raw)
+    assert table.at["3", "Avg"] == pytest.approx(1.25)
+    assert table.at["3", "Min"] == pytest.approx(0.75)
+    assert table.at["3", "Max"] == pytest.approx(1.75)
+
+
+@pytest.mark.misc
+def test_collect_piece_min_stays_unset_without_dispatch_series() -> None:
+    """Scalar piece averages are not reported as Min or Max.
+
+    The same pooled ratios still add for the COLLECT_SUM average.
+    """
+    raw = pd.DataFrame({
+        "INST_A": [2.0, 6.0],
+        "INST_B": [1.0, 1.0],
+        "CYCLES": [4.0, 4.0],
+    })
+    table = _eval_ipc_collect_table(raw)
+    assert table.at["3", "Avg"] == pytest.approx(1.25)
+    assert table.at["3", "Min"] == "N/A"
+    assert table.at["3", "Max"] == "N/A"
