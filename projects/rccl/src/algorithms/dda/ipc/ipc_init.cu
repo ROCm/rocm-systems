@@ -8,6 +8,7 @@
 
 #include "alloc.h"
 #include "archinfo.h"
+#include "bootstrap.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -15,6 +16,8 @@
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 
 #include <cuda_runtime.h>
+
+#include <vector>
 
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
@@ -29,10 +32,7 @@ using nccl_dda_detail::kDdaNranks;
     } \
   } while (0)
 
-ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
-  if (comm == nullptr) {
-    return ncclSuccess;
-  }
+static bool ddaIpcCommEligible(ncclComm* comm) {
   // Skip DDA if:
   // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
   // - multi-node runs
@@ -48,7 +48,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
   if (comm->nRanks != kDdaNranks || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
       comm->MNNVL || !ddaArchSupported) {
-    return ncclSuccess;
+    return false;
   }
 
   // DDA IPC requires cross-GPU IPC memory mapping (hipIpcOpenMemHandle).
@@ -63,16 +63,16 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
       if (err != hipSuccess || !canAccess) {
         INFO(NCCL_INIT, "ncclDdaIpcCommInit: no P2P between GPU %d and GPU %d, skipping DDA IPC",
              comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
-        return ncclSuccess;
+        return false;
       }
     }
   }
+  return DDA_IPC_BUFFER_SIZE != 0;
+}
 
+// Failures are not fatal: they leave comm->ddaIpcBarrierState null on this rank only.
+static ncclResult_t ddaIpcCommInitLocal(ncclComm* comm) {
   size_t bytes = DDA_IPC_BUFFER_SIZE;
-  if (bytes == 0) {
-    return ncclSuccess;
-  }
-
   void* scratch = nullptr;
 #if defined(HIP_UNCACHED_MEMORY)
   HIP_CALL(hipExtMallocWithFlags((void**)&scratch, bytes, hipDeviceMallocUncached));
@@ -194,6 +194,36 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   comm->ddaIpcBarrierState = barrierState;
   INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
        nBlocksMax);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
+  if (comm == nullptr || !ddaIpcCommEligible(comm)) {
+    return ncclSuccess;
+  }
+  (void)ddaIpcCommInitLocal(comm);
+
+  // DDA dispatch is decided per rank from ddaIpcBarrierState, so a rank whose
+  // IPC setup failed must not leave its peers selecting DDA. The failed HIP
+  // calls also stay latched in cudaGetLastError and would surface in the
+  // application's next launch check.
+  const int localOk = comm->ddaIpcBarrierState != nullptr ? 1 : 0;
+  if (!localOk) {
+    (void)cudaGetLastError();
+  }
+  std::vector<int> allOk(static_cast<size_t>(comm->nRanks), 0);
+  allOk[static_cast<size_t>(comm->rank)] = localOk;
+  NCCLCHECK(bootstrapAllGather(comm->bootstrap, allOk.data(), sizeof(int)));
+  for (int r = 0; r < comm->nRanks; ++r) {
+    if (allOk[static_cast<size_t>(r)] == 0) {
+      if (localOk) {
+        NCCLCHECK(ncclDdaIpcCommFini(comm));
+        (void)cudaGetLastError();
+      }
+      WARN("ncclDdaIpcCommInit: DDA IPC setup failed on rank %d, disabling DDA for this communicator", r);
+      break;
+    }
+  }
   return ncclSuccess;
 }
 
