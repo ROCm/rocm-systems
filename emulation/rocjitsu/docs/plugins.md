@@ -554,10 +554,9 @@ elements merged. A load writes every element of its tile, zero-filling those
 outside the tensor, so a load whose tile lies wholly outside the tensor has LDS
 ranges but no global requests; consumers must accept an empty `addresses`. A
 store reads only in-bounds elements. Transfers with neither global requests nor
-LDS ranges, such as disabled descriptors, produce no callback. `pc` is the issuing
-wavefront's PC when the callback runs, and `instruction_pc` is the tensor
-instruction's PC; they differ when a deferred transfer completes after the
-wavefront has moved past the instruction.
+LDS ranges, such as disabled descriptors, produce no callback. `pc` is the tensor
+instruction's PC, also when a deferred transfer completes after the wavefront
+has moved past the instruction.
 Consumers must opt in through `observes_tensor_dma_memory_access()`. A consumer
 that retains addresses must use `size()` to budget and allocate the event, then
 call `copy_to()` during the callback; a failed copy means the observation is

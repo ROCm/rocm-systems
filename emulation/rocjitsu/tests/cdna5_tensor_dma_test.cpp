@@ -24,7 +24,6 @@ using namespace rocjitsu::test::cdna5;
 struct CapturedTensorDmaAccess {
   std::string mnemonic;
   uint64_t pc = 0;
-  uint64_t instruction_pc = 0;
   uint32_t compute_unit_id = 0;
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
@@ -57,7 +56,6 @@ public:
     auto &captured = accesses.emplace_back(CapturedTensorDmaAccess{
         .mnemonic = std::string(access.mnemonic),
         .pc = access.pc,
-        .instruction_pc = access.instruction_pc,
         .compute_unit_id = access.compute_unit_id,
         .dispatch_id = access.dispatch_id,
         .queue_id = access.queue_id,
@@ -647,7 +645,6 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   const auto &load_access = observer.accesses[0];
   EXPECT_EQ(load_access.mnemonic, "tensor_load_to_lds");
   EXPECT_EQ(load_access.pc, kPc);
-  EXPECT_EQ(load_access.instruction_pc, kPc);
   EXPECT_EQ(load_access.compute_unit_id, cu->id());
   EXPECT_EQ(load_access.dispatch_id, kDispatchId);
   EXPECT_EQ(load_access.queue_id, kQueueId);

@@ -386,7 +386,7 @@ public:
   std::size_t next_element = 0;
   /// PC of the tensor DMA instruction. A deferred transfer completes after the
   /// wave's PC has advanced past it.
-  uint64_t instruction_pc = 0;
+  uint64_t pc = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   bool store_from_lds = false;
   bool completion_committed = false;
@@ -734,7 +734,7 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
 
   const TensorDmaMemoryAccessObservation access{
       .mnemonic = inst.mnemonic(),
-      .pc = wf.pc,
+      .pc = state.pc,
       .compute_unit_id = wf.cu().id(),
       .dispatch_id = wf.dispatch_id(),
       .queue_id = wf.queue_id(),
@@ -753,7 +753,6 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
       .tensor_dim1_stride =
           static_cast<int64_t>(state.desc.global_strides[1] * state.desc.elem_size),
       .lds_ranges = lds_ranges,
-      .instruction_pc = state.instruction_pc,
   };
   wf.cu().report_tensor_dma_memory_access(access);
 }
@@ -939,7 +938,7 @@ util::Result execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) 
       return util::Result::failure();
     std::unique_ptr<TensorDmaState> state =
         std::make_unique<TensorDmaState>(desc.value(), store_from_lds);
-    state->instruction_pc = wf.pc;
+    state->pc = wf.pc;
     if (desc.value().active() && prepare_tensor(*state, wf).failed()) [[unlikely]]
       return util::Result::failure();
     inst.set_data(std::move(state));
