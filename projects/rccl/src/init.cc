@@ -4508,7 +4508,6 @@ fail:
 }
 
 static void persistentPlanReaper(ncclComm_t comm) {
-  struct ncclDeferredCleanup* deferred = comm->deferredCleanup;
   cudaError_t devErr = cudaSetDevice(comm->cudaDev);
   if (devErr != cudaSuccess) {
     WARN("persistentPlanReaper: comm %p rank %d cudaSetDevice(%d) failed", comm, comm->rank, comm->cudaDev);
@@ -4527,7 +4526,6 @@ static void persistentPlanReaper(ncclComm_t comm) {
   if (ret != ncclSuccess) {
     ATTN("cleanup comm 0x%" PRIx64 " rank %d failed in destroy/abort, error %d", commHash, rank, ret);
   }
-  if (deferred != nullptr) ncclDeferredCleanupFinish(deferred);
 }
 
 static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
@@ -4613,20 +4611,14 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
 
         int deferCleanup = curIntraComm->localPersistentRefs != 0;
         if (deferCleanup) {
-          struct ncclDeferredCleanup* deferred = ncclDeferredCleanupCreate();
-          if (deferred != nullptr) {
-            int pending = 0;
-            ncclPersistentPlanRefsLock(curIntraComm);
-            for (struct ncclPersistentPlanRef* ref = curIntraComm->persistentPlanRefs; ref != nullptr;
-                 ref = ref->next) {
-              if (COMPILER_ATOMIC_LOAD(&ref->refCount, std::memory_order_acquire) == 2) pending++;
-            }
-            deferred->destructorsLeft = pending;
-            curIntraComm->deferredCleanup = deferred;
-            ncclPersistentPlanRefsUnlock(curIntraComm);
-          }
           std::thread reaperThread;
-          STDTHREADCREATE_GOTO(reaperThread, persistentPlanReaper, ret, exit, curIntraComm);
+          try {
+            reaperThread = std::thread(persistentPlanReaper, curIntraComm);
+          } catch (const std::exception& e) {
+            WARN("Thread creation failed: %s", e.what());
+            ret = ncclSystemError;
+            continue;
+          }
           reaperThread.detach();
         } else {
           ncclCommDropPersistentPlanRefs(curIntraComm);
@@ -4749,6 +4741,11 @@ static ncclResult_t commRevokeAsync(struct ncclAsyncJob* job_) {
 
   if (comm->localPersistentRefs == 0) {
     NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+  } else {
+    if (comm->childAbortFlag != nullptr) {
+      COMPILER_ATOMIC_STORE(comm->childAbortFlag, 0u, std::memory_order_release);
+    }
+    COMPILER_ATOMIC_STORE(comm->abortFlag, 0u, std::memory_order_release);
   }
 
 exit:

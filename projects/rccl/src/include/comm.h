@@ -40,9 +40,6 @@
 #include "enqueue/task_posttuning.h"
 #include "enqueue/mgmt_task_enq.h"
 
-#include <pthread.h>
-#include <stdlib.h>
-
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
@@ -945,7 +942,6 @@ struct ncclComm {
   int localPersistentRefs;
   int persistentPlanRefsLock;
   struct ncclPersistentPlanRef* persistentPlanRefs;
-  struct ncclDeferredCleanup* deferredCleanup;
   struct P2pSchedulePair {
     int sendRank;
     int recvRank;
@@ -1181,61 +1177,6 @@ inline void ncclPersistentPlanRefsLock(struct ncclComm* comm) {
 
 inline void ncclPersistentPlanRefsUnlock(struct ncclComm* comm) {
   COMPILER_ATOMIC_STORE(&comm->persistentPlanRefsLock, 0, std::memory_order_release);
-}
-
-struct ncclDeferredCleanup {
-  pthread_mutex_t mu;
-  pthread_cond_t cv;
-  int destructorsLeft;
-  int waiters;
-  int cleaned;
-};
-
-inline struct ncclDeferredCleanup* ncclDeferredCleanupCreate() {
-  struct ncclDeferredCleanup* d = (struct ncclDeferredCleanup*)calloc(1, sizeof(*d));
-  if (d == nullptr) return nullptr;
-  pthread_mutex_init(&d->mu, nullptr);
-  pthread_cond_init(&d->cv, nullptr);
-  return d;
-}
-
-inline bool ncclDeferredCleanupArrive(struct ncclDeferredCleanup* d) {
-  if (d == nullptr) return false;
-  pthread_mutex_lock(&d->mu);
-  bool last = false;
-  if (d->destructorsLeft > 0) {
-    d->destructorsLeft -= 1;
-    last = d->destructorsLeft == 0;
-    if (last) d->waiters += 1;
-  }
-  pthread_mutex_unlock(&d->mu);
-  return last;
-}
-
-inline void ncclDeferredCleanupWait(struct ncclDeferredCleanup* d) {
-  pthread_mutex_lock(&d->mu);
-  while (d->cleaned == 0) pthread_cond_wait(&d->cv, &d->mu);
-  d->waiters -= 1;
-  int freeIt = d->waiters == 0;
-  pthread_mutex_unlock(&d->mu);
-  if (freeIt) {
-    pthread_mutex_destroy(&d->mu);
-    pthread_cond_destroy(&d->cv);
-    free(d);
-  }
-}
-
-inline void ncclDeferredCleanupFinish(struct ncclDeferredCleanup* d) {
-  pthread_mutex_lock(&d->mu);
-  d->cleaned = 1;
-  int freeIt = d->waiters == 0;
-  pthread_cond_broadcast(&d->cv);
-  pthread_mutex_unlock(&d->mu);
-  if (freeIt) {
-    pthread_mutex_destroy(&d->mu);
-    pthread_cond_destroy(&d->cv);
-    free(d);
-  }
 }
 
 inline ncclResult_t ncclCommOrphanPersistentPlans(struct ncclComm* comm) {

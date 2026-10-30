@@ -2268,23 +2268,9 @@ static void persistentDestructor(void* ref_) {
   struct ncclPersistentPlanRef* ref = (struct ncclPersistentPlanRef*)ref_;
   struct ncclComm* comm = ref->comm;
   struct ncclKernelPlan* plan = ref->planHead;
-
-  ncclPersistentPlanRefsLock(comm);
-  struct ncclDeferredCleanup* deferred = comm->deferredCleanup;
-  if (deferred == nullptr) {
-    bool reclaim = claimPersistentPlanRef(ref);
-    ncclPersistentPlanRefDrop(ref);
-    ncclPersistentPlanRefsUnlock(comm);
-    if (reclaim) enqueuePlanChain(comm, plan);
-    return;
-  }
-  bool waitCleanup = ncclDeferredCleanupArrive(deferred);
-  ncclPersistentPlanRefsUnlock(comm);
-
   bool reclaim = claimPersistentPlanRef(ref);
   ncclPersistentPlanRefDrop(ref);
   if (reclaim) enqueuePlanChain(comm, plan);
-  if (waitCleanup) ncclDeferredCleanupWait(deferred);
 }
 
 static ncclResult_t addPersistentPlanRef(struct ncclComm* comm, struct ncclCudaGraph graph,

@@ -22,7 +22,6 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "../common/LogCapture.hpp"
@@ -4219,35 +4218,4 @@ TEST_F(EnqueueMicrotest, AddPersistentPlanRef_DropsNonLiveRefsAndKeepsLiveOnes) 
   ncclPersistentPlanRefDrop(live);
   ncclPersistentPlanRefDrop(registered);
   ncclPersistentPlanRefDrop(registered);
-}
-
-TEST_F(EnqueueMicrotest, PersistentDestructor_LastHeldGraph_WaitsUntilCleanupFinishes) {
-  ncclComm comm{};
-  ncclDeferredCleanup* deferred = ncclDeferredCleanupCreate();
-  ASSERT_NE(nullptr, deferred);
-  deferred->destructorsLeft = 1;
-  comm.deferredCleanup = deferred;
-
-  ncclKernelPlan plan{};
-  ncclPersistentPlanRef ref{};
-  ref.comm = &comm;
-  ref.planHead = &plan;
-  ref.state = ncclPersistentPlanRefLive;
-  ref.refCount = 2;
-
-  std::thread finisher([deferred] {
-    for (;;) {
-      pthread_mutex_lock(&deferred->mu);
-      int waiters = deferred->waiters;
-      pthread_mutex_unlock(&deferred->mu);
-      if (waiters == 1) break;
-    }
-    ncclDeferredCleanupFinish(deferred);
-  });
-  persistentDestructor(&ref);
-  finisher.join();
-
-  EXPECT_EQ(ncclPersistentPlanRefReleased, ref.state);
-  ncclCommCallback* cb = ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false);
-  EXPECT_EQ(&plan.reclaimer, cb);
 }
