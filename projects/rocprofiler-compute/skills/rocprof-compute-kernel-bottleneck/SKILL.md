@@ -148,8 +148,8 @@ Resolve block names with aliases, which are stable across releases, instead of
 numeric ids, which are architecture-specific:
 
 ```bash
-rocprof-compute --list-blocks <arch>
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-available-metrics
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-metrics
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-metrics sol
 ```
 
 Where to go next:

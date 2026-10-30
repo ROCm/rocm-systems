@@ -44,10 +44,12 @@ NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
 NATIVE_AGENTS_PREFIX = "agents"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
+# Panel id of block 4, Roofline
+ROOFLINE_PANEL_ID: int = 400
 
-# Shared suffix for the invalid --block error in the profile and analyze paths.
+# Shared suffix for invalid --block errors.
 INVALID_BLOCK_HINT = (
-    "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
+    "\n\tRun rocprof-compute --list-metrics to see all block ids/aliases."
 )
 
 
@@ -607,6 +609,11 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     return jobs[0].get("pmc") or []
 
 
+def is_pc_sampling_collected(filter_blocks: list[str]) -> bool:
+    """Return True if the requested blocks include PC sampling."""
+    return any(block in PC_SAMPLING_BLOCK_IDS for block in filter_blocks)
+
+
 def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
     """Return True if all requested blocks are PC sampling (block 21 or the
     ``pc_sampling`` alias)."""
@@ -753,42 +760,85 @@ def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
     return False
 
 
+def _iter_metric_list_rows(
+    panel_configs: OrderedDict[int, dict[str, Any]],
+) -> Generator[tuple[str, tuple[str, str, str]], None, None]:
+    """Yield (id, (name, unit, description)) for each block, table and metric."""
+    for panel in panel_configs.values():
+        for data_source in panel["data source"]:
+            for type_key, data_config in data_source.items():
+                if type_key == "metric_table":
+                    yield from _iter_metric_table_rows(panel, data_config)
+                elif type_key in ("raw_csv_table", "pc_sampling_table"):
+                    yield str(data_config["id"] // 100), (panel["title"], "", "")
+
+
+def _iter_metric_table_rows(
+    panel: dict[str, Any], data_config: dict[str, Any]
+) -> Generator[tuple[str, tuple[str, str, str]], None, None]:
+    """Yield the block, table and metric rows of one metric_table."""
+    block_id = str(data_config["id"] // 100)
+    if block_id != "0":
+        yield block_id, (panel["title"], "", "")
+
+    table_id = format_table_id(data_config["id"])
+    yield table_id, (data_config["title"], "", "")
+
+    descriptions = panel.get("metrics_description") or {}
+    for index, (name, entries) in enumerate(data_config["metric"].items()):
+        if not _metric_has_valid_expr(entries, data_config):
+            continue
+        unit = entries.get("unit")
+        description = " ".join(str(descriptions.get(name) or "").split())
+        yield f"{table_id}.{index}", (name, str(unit or ""), description)
+
+
+def format_table_id(config_id: int) -> str:
+    """Return the "block.table" id of a metric_table config id, e.g. 1802 -> "18.2"."""
+    return f"{config_id // 100}.{config_id % 100}"
+
+
+def build_metric_details(
+    panel_configs: OrderedDict[int, dict[str, Any]],
+    sys_info: Optional[dict[str, Any]],
+) -> dict[str, tuple[str, str, str]]:
+    """Map panel/table/metric IDs to (name, unit, description).
+
+    Without sys_info, per-channel tables list no metrics.
+    """
+    expanded_configs = expand_placeholder_ranges(panel_configs, sys_info)
+    return dict(_iter_metric_list_rows(expanded_configs))
+
+
 def build_metric_list(
     panel_configs: OrderedDict[int, dict[str, Any]],
     sys_info: Optional[dict[str, Any]],
 ) -> dict[str, str]:
-    """
-    Build metric_list from the panel configs.
+    """Map panel/table/metric IDs to names. Used by the deprecated list options."""
+    return {
+        metric_id: details[0]
+        for metric_id, details in build_metric_details(panel_configs, sys_info).items()
+    }
 
-    Returns a mapping of (panel/table/metric IDs -> display names)
-    without constructing DataFrames. Use this directly when
-    only the metric listing is needed (e.g. --list-metrics, --list-blocks).
-    """
-    metric_list: dict[str, str] = {}
 
-    expanded_configs = expand_placeholder_ranges(panel_configs, sys_info)
+def resolve_block_token(token: str, alias_map: dict[str, str]) -> Optional[str]:
+    """Return the metric id for a block or metric id or alias, or None if unknown."""
+    if METRIC_ID_RE.match(token):
+        return token
+    return alias_map.get(token)
 
-    for panel_id, panel in expanded_configs.items():
-        for data_source in panel["data source"]:
-            for type_key, data_config in data_source.items():
-                if type_key == "metric_table":
-                    data_source_idx = str(data_config["id"] // 100)
-                    if data_source_idx != "0":
-                        metric_list[data_source_idx] = panel["title"]
 
-                    table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-                    metric_list[table_idx] = data_config["title"]
-
-                    for i, (key, entries) in enumerate(data_config["metric"].items()):
-                        metric_idx = f"{table_idx}.{i}"
-                        if _metric_has_valid_expr(entries, data_config):
-                            metric_list[metric_idx] = key
-
-                elif type_key in ("raw_csv_table", "pc_sampling_table"):
-                    data_source_idx = str(data_config["id"] // 100)
-                    metric_list[data_source_idx] = panel["title"]
-
-    return metric_list
+def placeholder_table_ids(panel_configs: OrderedDict[int, dict[str, Any]]) -> set[str]:
+    """Return the ids of the metric tables that expand a placeholder range, such
+    as the per-channel L2 tables. Call before expand_placeholder_ranges."""
+    return {
+        format_table_id(data_config["id"])
+        for panel in panel_configs.values()
+        for data_source in panel["data source"]
+        for type_key, data_config in data_source.items()
+        if type_key == "metric_table"
+        and "placeholder_range" in (data_config.get("metric") or {})
+    }
 
 
 def get_uuid() -> str:
@@ -810,12 +860,10 @@ def convert_filter_blocks_to_panel_ids(
     )
     resolved: set[int] = set()
     for bid in filter_blocks:
-        token = str(bid)
-        if not METRIC_ID_RE.match(token):
-            if token not in alias_map:
-                console_error(f"Invalid --block value {token!r}.{INVALID_BLOCK_HINT}")
-            token = alias_map[token]
-        resolved.add(int(convert_metric_id_to_panel_info(token)[0]))
+        metric_id = resolve_block_token(str(bid), alias_map)
+        if metric_id is None:
+            console_error(f"Invalid --block value {str(bid)!r}.{INVALID_BLOCK_HINT}")
+        resolved.add(int(convert_metric_id_to_panel_info(metric_id)[0]))
     return resolved
 
 
@@ -865,6 +913,40 @@ def convert_metric_id_to_panel_info(
         metric_id_int = int(tokens[2])
 
     return (file_id, panel_id, metric_id_int)
+
+
+def metric_passes_filter(
+    metric_id: str,
+    panel_id: int,
+    data_source_idx: str,
+    user_metric_filter: Optional[list[str]],
+    profile_panel_filter: set[int],
+) -> bool:
+    """Return True if a metric or table identified by metric_id passes the
+    active filter. metric_id is the file-level id for raw_csv / pc_sampling
+    tables, or the per-metric id (e.g. "2.1.0") for metric_table rows.
+    """
+    if panel_id <= 100 or data_source_idx == "0":
+        return True
+    if user_metric_filter is None and not profile_panel_filter:
+        return True
+    if user_metric_filter and (
+        metric_id in user_metric_filter
+        or data_source_idx in user_metric_filter
+        or str(panel_id // 100) in user_metric_filter
+    ):
+        return True
+    if profile_panel_filter:
+        file_id, _, _ = convert_metric_id_to_panel_info(metric_id)
+        return int(file_id) in profile_panel_filter
+    return False
+
+
+def is_membw_panel_unprofiled(panel_id: int, profiling_config: dict[str, Any]) -> bool:
+    """Return True for block 30, which profile only collects with --membw-analysis."""
+    return panel_id == MEMBW_ANALYSIS_PANEL_ID and not profiling_config.get(
+        "membw_analysis", False
+    )
 
 
 def load_yaml(filepath: Union[str, os.PathLike]) -> dict[str, Any]:
