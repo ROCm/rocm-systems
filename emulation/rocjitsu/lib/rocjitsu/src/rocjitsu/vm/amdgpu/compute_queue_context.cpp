@@ -150,64 +150,76 @@ private:
   std::span<const uint8_t> bytes_;
 };
 
-template <typename Archive, typename Entry> bool dispatch_fields(Archive &a, Entry &e) {
-  return a(e.dispatch_id, e.queue_packet_id, e.aql_packet_id, e.aql_packet_address,
-           e.owns_aql_ring_slot, e.kernel_entry_pc, e.code_load_bias, e.wfs_per_workgroup,
-           e.sgprs_per_wf, e.vgprs_per_wf, e.kernarg_addr, e.kernarg_size, e.num_user_sgprs,
-           e.kernel_code_properties, e.num_named_barriers, e.kernel_wave_size, e.kernarg_preload,
-           e.initial_mode_raw, e.dispatch_ptr, e.queue_ptr, e.workgroup_id_offset, e.grid_size_x,
-           e.grid_size_y, e.grid_size_z, e.workgroup_origin, e.grid_wgs_x, e.grid_wgs_y,
-           e.grid_wgs_z, e.grid_yz_valid, e.cluster_count_x, e.cluster_count_y, e.cluster_count_z,
-           e.cluster_size_x, e.cluster_size_y, e.cluster_size_z, e.wgp_mode, e.enable_wg_id_x,
-           e.enable_wg_id_y, e.enable_wg_id_z, e.enable_wg_info, e.enable_vgpr_workitem_id,
-           e.workgroup_size_x, e.workgroup_size_y, e.workgroup_size_z, e.scratch_backing_addr,
-           e.private_segment_fixed_size, e.scratch_wave_limit_per_se, e.scratch_wave_stride_per_se,
-           e.scratch_wave_bytes, e.group_segment_fixed_size, e.scratch_use_once, e.total_wgs,
-           e.dispatched_wgs, e.completed_wgs, e.completion_signal, e.profiling_start_timestamp,
-           e.kind, e.host_signal, e.wait_for_predecessors, e.blocks_following, e.aql_pm4_ib_address,
-           e.aql_pm4_ib_dwords, e.completion_notified, e.execution_begun, e.acquire_invalidate,
-           e.terminal_faulted, e.completion_publication.phase);
+template <typename Archive, typename Entry> bool dispatch_fields(Archive &archive, Entry &entry) {
+  return archive(
+      entry.dispatch_id, entry.queue_packet_id, entry.aql_packet_id, entry.aql_packet_address,
+      entry.owns_aql_ring_slot, entry.kernel_entry_pc, entry.code_load_bias,
+      entry.wfs_per_workgroup, entry.sgprs_per_wf, entry.vgprs_per_wf, entry.kernarg_addr,
+      entry.kernarg_size, entry.num_user_sgprs, entry.kernel_code_properties,
+      entry.num_named_barriers, entry.kernel_wave_size, entry.kernarg_preload,
+      entry.initial_mode_raw, entry.dispatch_ptr, entry.queue_ptr, entry.workgroup_id_offset,
+      entry.grid_size_x, entry.grid_size_y, entry.grid_size_z, entry.workgroup_origin,
+      entry.grid_wgs_x, entry.grid_wgs_y, entry.grid_wgs_z, entry.grid_yz_valid,
+      entry.cluster_count_x, entry.cluster_count_y, entry.cluster_count_z, entry.cluster_size_x,
+      entry.cluster_size_y, entry.cluster_size_z, entry.wgp_mode, entry.enable_wg_id_x,
+      entry.enable_wg_id_y, entry.enable_wg_id_z, entry.enable_wg_info,
+      entry.enable_vgpr_workitem_id, entry.workgroup_size_x, entry.workgroup_size_y,
+      entry.workgroup_size_z, entry.scratch_backing_addr, entry.private_segment_fixed_size,
+      entry.scratch_wave_limit_per_se, entry.scratch_wave_stride_per_se, entry.scratch_wave_bytes,
+      entry.group_segment_fixed_size, entry.scratch_use_once, entry.total_wgs, entry.dispatched_wgs,
+      entry.completed_wgs, entry.completion_signal, entry.profiling_start_timestamp, entry.kind,
+      entry.host_signal, entry.wait_for_predecessors, entry.blocks_following,
+      entry.aql_pm4_ib_address, entry.aql_pm4_ib_dwords, entry.completion_notified,
+      entry.execution_begun, entry.acquire_invalidate, entry.terminal_faulted,
+      entry.completion_publication.phase);
 }
 
-template <typename Archive, typename Queue> bool queue_fields(Archive &a, Queue &q) {
-  return a(q.ring_base_va, q.ring_size, q.read_ptr_va, q.write_ptr_va, q.doorbell_offset,
-           q.packet_format, q.scheduling_percentage, q.process_id, q.queue_desc_va,
-           q.uses_kfd_queue_abi, q.fetch_cursor, q.next_dispatch_idx, q.implicit_barrier_next,
-           q.last_doorbell, q.runtime_suspended, q.exception_suspended, q.faulted,
-           q.activity_generation, q.commands.indirect_base, q.commands.predicate_pass) &&
-         a.sparse(q.commands.sh_registers) && a.sparse(q.commands.context_registers) &&
-         a.sparse(q.commands.uconfig_registers) &&
-         a(q.scratch_request.phase, q.scratch_request.packet_index, q.scratch_request.status,
-           q.scratch_request.signal_address, q.scratch_request.mailbox_pointer,
-           q.scratch_request.event_id, q.scratch_reclaim.phase, q.scratch_reclaim.signal_address,
-           q.scratch_reclaim.mailbox_pointer, q.scratch_reclaim.event_id);
+template <typename Archive, typename Queue> bool queue_fields(Archive &archive, Queue &queue) {
+  return archive(queue.ring_base_va, queue.ring_size, queue.read_ptr_va, queue.write_ptr_va,
+                 queue.doorbell_offset, queue.packet_format, queue.scheduling_percentage,
+                 queue.process_id, queue.queue_desc_va, queue.uses_kfd_queue_abi,
+                 queue.fetch_cursor, queue.next_dispatch_idx, queue.implicit_barrier_next,
+                 queue.last_doorbell, queue.runtime_suspended, queue.exception_suspended,
+                 queue.faulted, queue.activity_generation, queue.commands.indirect_base,
+                 queue.commands.predicate_pass) &&
+         archive.sparse(queue.commands.sh_registers) &&
+         archive.sparse(queue.commands.context_registers) &&
+         archive.sparse(queue.commands.uconfig_registers) &&
+         archive(queue.scratch_request.phase, queue.scratch_request.packet_index,
+                 queue.scratch_request.status, queue.scratch_request.signal_address,
+                 queue.scratch_request.mailbox_pointer, queue.scratch_request.event_id,
+                 queue.scratch_reclaim.phase, queue.scratch_reclaim.signal_address,
+                 queue.scratch_reclaim.mailbox_pointer, queue.scratch_reclaim.event_id);
 }
 
-template <typename Archive, typename Group> bool group_fields(Archive &a, Group &g) {
-  if (!a(g.dispatch, g.wg, g.lds_bytes, g.remaining_waves, g.has_barriers))
+template <typename Archive, typename Group> bool group_fields(Archive &archive, Group &group) {
+  if (!archive(group.dispatch, group.wg, group.lds_bytes, group.remaining_waves,
+               group.has_barriers))
     return false;
-  if (!g.has_barriers)
+  if (!group.has_barriers)
     return true;
-  if (!a(g.barriers.allocated_count))
+  if (!archive(group.barriers.allocated_count))
     return false;
-  for (auto &counter : g.barriers.named)
-    if (!a(counter.member_count, counter.signal_count))
+  for (auto &counter : group.barriers.named)
+    if (!archive(counter.member_count, counter.signal_count))
       return false;
-  for (auto &counter : g.barriers.workgroup)
-    if (!a(counter.member_count, counter.signal_count))
+  for (auto &counter : group.barriers.workgroup)
+    if (!archive(counter.member_count, counter.signal_count))
       return false;
   return true;
 }
 
-template <typename Archive, typename Wave> bool wave_fields(Archive &a, Wave &w) {
-  return a(w.group, w.sgprs, w.vgprs, w.width, w.packet, w.wave_in_group, w.scratch_lane_size,
-           w.scratch_backing_base, w.scratch_backing_bytes, w.debug_id, w.code_bias, w.coordinates,
-           w.state, w.sleep_cycles, w.sched_mode, w.vgpr_msb_hazard, w.runtime_suspended,
-           w.barrier.named_barrier_id, w.barrier.complete, w.barrier.waiting_bit, w.stop.trapsts,
-           w.stop.mode_raw, w.stop.gfx12_trap_ctrl_raw, w.stop.trap_id, w.stop.debug_halted,
-           w.stop.single_step, w.stop.fatal_exception_pending, w.stop.fatal_exception_cwsr_valid,
-           w.queue_exceptions, w.runtime_exceptions, w.trap_saved_status, w.trap_saved_exec,
-           w.interrupt_sent, w.self_halted);
+template <typename Archive, typename Wave> bool wave_fields(Archive &archive, Wave &wave) {
+  return archive(wave.group, wave.sgprs, wave.vgprs, wave.width, wave.packet, wave.wave_in_group,
+                 wave.scratch_lane_size, wave.scratch_backing_base, wave.scratch_backing_bytes,
+                 wave.debug_id, wave.code_bias, wave.coordinates, wave.state, wave.sleep_cycles,
+                 wave.sched_mode, wave.vgpr_msb_hazard, wave.runtime_suspended,
+                 wave.barrier.named_barrier_id, wave.barrier.complete, wave.barrier.waiting_bit,
+                 wave.stop.trapsts, wave.stop.mode_raw, wave.stop.gfx12_trap_ctrl_raw,
+                 wave.stop.trap_id, wave.stop.debug_halted, wave.stop.single_step,
+                 wave.stop.fatal_exception_pending, wave.stop.fatal_exception_cwsr_valid,
+                 wave.queue_exceptions, wave.runtime_exceptions, wave.trap_saved_status,
+                 wave.trap_saved_exec, wave.interrupt_sent, wave.self_halted);
 }
 
 bool supported_dispatch(const DispatchEntry &entry) {
@@ -225,7 +237,7 @@ bool supported_dispatch(const DispatchEntry &entry) {
 VmAccessOutcome CommandProcessor::suspend_queue_context(const QueueIdentity &identity) {
   std::unique_lock structure_lock(queue_structure_mutex_);
   std::lock_guard lock(hw_queue_mutex_);
-  auto *queue = find_compute_queue(identity.queue_id, identity.process_id);
+  ComputeQueueRecord *queue = find_compute_queue(identity.queue_id, identity.process_id);
   if (!queue || queue->address_space != identity.address_space)
     return VmAccessOutcome::Malformed;
   if (!queue->context_save_suspension)
@@ -258,7 +270,7 @@ VmAccessOutcome CommandProcessor::suspend_queue_context(const QueueIdentity &ide
 void CommandProcessor::cancel_queue_context_save(const QueueIdentity &identity) {
   std::unique_lock structure_lock(queue_structure_mutex_);
   std::lock_guard lock(hw_queue_mutex_);
-  auto *queue = find_compute_queue(identity.queue_id, identity.process_id);
+  ComputeQueueRecord *queue = find_compute_queue(identity.queue_id, identity.process_id);
   if (!queue || queue->address_space != identity.address_space || !queue->context_save_suspension)
     return;
   auto suspension = std::move(*queue->context_save_suspension);
@@ -281,7 +293,7 @@ QueueContextSaveOutcome CommandProcessor::save_queue_context(const QueueIdentity
                                                              std::vector<uint8_t> &context) {
   std::unique_lock structure_lock(queue_structure_mutex_);
   std::lock_guard lock(hw_queue_mutex_);
-  auto *queue = find_compute_queue(identity.queue_id, identity.process_id);
+  ComputeQueueRecord *queue = find_compute_queue(identity.queue_id, identity.process_id);
   if (!queue || queue->address_space != identity.address_space || !queue->debug_suspended)
     return VmAccessOutcome::Malformed;
   if (queue->xcd_fanout || queue->fanout_replica || !queue->commands.submissions.empty() ||
@@ -336,57 +348,57 @@ QueueContextSaveOutcome CommandProcessor::save_queue_context(const QueueIdentity
         if (wave->state() == WfState::GWS_WAIT || wave->cluster_size() != 1 ||
             &wave->lds() != &cu->lds())
           return Unsupported{};
-        auto group = std::ranges::find_if(saved.groups, [&](const auto &g) {
-          return g.dispatch == wave->dispatch_id() && g.wg == wave->wg_id();
+        auto group = std::ranges::find_if(saved.groups, [&](const auto &saved_group) {
+          return saved_group.dispatch == wave->dispatch_id() && saved_group.wg == wave->wg_id();
         });
         if (group == saved.groups.end()) {
-          QueueContext::Group g{
+          QueueContext::Group saved_group{
               .dispatch = wave->dispatch_id(), .wg = wave->wg_id(), .lds_bytes = wave->lds_size()};
-          const auto key = wg_key(g.dispatch, g.wg);
+          const auto key = wg_key(saved_group.dispatch, saved_group.wg);
           if (const auto remaining = cu->active_wgs_.find(key); remaining != cu->active_wgs_.end())
-            g.remaining_waves = remaining->second;
+            saved_group.remaining_waves = remaining->second;
           if (const auto barriers = cu->barrier_wgs_.find(key);
               barriers != cu->barrier_wgs_.end()) {
-            g.has_barriers = true;
-            g.barriers = barriers->second;
+            saved_group.has_barriers = true;
+            saved_group.barriers = barriers->second;
           }
-          saved.groups.push_back(g);
+          saved.groups.push_back(saved_group);
           group = std::prev(saved.groups.end());
         }
-        QueueContext::Wave w;
-        w.group = std::distance(saved.groups.begin(), group);
-        w.sgprs = wave->num_sgprs();
-        w.vgprs = wave->num_vgprs();
-        w.width = wave->wf_size();
-        w.packet = wave->queue_packet_id();
-        w.wave_in_group = wave->wave_in_group();
-        w.scratch_lane_size = wave->scratch_lane_size();
+        QueueContext::Wave saved_wave;
+        saved_wave.group = std::distance(saved.groups.begin(), group);
+        saved_wave.sgprs = wave->num_sgprs();
+        saved_wave.vgprs = wave->num_vgprs();
+        saved_wave.width = wave->wf_size();
+        saved_wave.packet = wave->queue_packet_id();
+        saved_wave.wave_in_group = wave->wave_in_group();
+        saved_wave.scratch_lane_size = wave->scratch_lane_size();
         if (const auto &scratch = wave->scratch_lease()) {
-          w.scratch_backing_base = scratch->base();
-          w.scratch_backing_bytes = scratch->size();
-        } else if (w.scratch_lane_size != 0) {
+          saved_wave.scratch_backing_base = scratch->base();
+          saved_wave.scratch_backing_bytes = scratch->size();
+        } else if (saved_wave.scratch_lane_size != 0) {
           return VmAccessOutcome::Faulted;
         }
-        w.debug_id = wave->debug_wave_id();
-        w.code_bias = wave->code_load_bias();
-        w.coordinates = wave->wg_coord();
-        w.state = wave->state();
+        saved_wave.debug_id = wave->debug_wave_id();
+        saved_wave.code_bias = wave->code_load_bias();
+        saved_wave.coordinates = wave->wg_coord();
+        saved_wave.state = wave->state();
         // Quiesced memory has no pipeline to wait on after reallocation.
-        if (w.state == WfState::WAITCNT || w.state == WfState::VM_RETRY)
-          w.state = WfState::RUNNING;
-        w.sleep_cycles = wave->sleep_cycles();
-        w.sched_mode = wave->wave_sched_mode_raw();
-        w.vgpr_msb_hazard = wave->setreg_vgpr_msb_hazard();
-        w.runtime_suspended = wave->runtime_suspended();
-        w.barrier = wave->barrier_wait_state();
-        w.stop = wave->debug_stop_state();
-        w.queue_exceptions = wave->trap_queue_exception_status();
-        w.runtime_exceptions = wave->trap_runtime_exception_status();
-        w.trap_saved_status = wave->trap_saved_status();
-        w.trap_saved_exec = wave->trap_saved_exec();
-        w.interrupt_sent = wave->trap_interrupt_sent();
-        w.self_halted = wave->self_halted();
-        saved.waves.push_back(w);
+        if (saved_wave.state == WfState::WAITCNT || saved_wave.state == WfState::VM_RETRY)
+          saved_wave.state = WfState::RUNNING;
+        saved_wave.sleep_cycles = wave->sleep_cycles();
+        saved_wave.sched_mode = wave->wave_sched_mode_raw();
+        saved_wave.vgpr_msb_hazard = wave->setreg_vgpr_msb_hazard();
+        saved_wave.runtime_suspended = wave->runtime_suspended();
+        saved_wave.barrier = wave->barrier_wait_state();
+        saved_wave.stop = wave->debug_stop_state();
+        saved_wave.queue_exceptions = wave->trap_queue_exception_status();
+        saved_wave.runtime_exceptions = wave->trap_runtime_exception_status();
+        saved_wave.trap_saved_status = wave->trap_saved_status();
+        saved_wave.trap_saved_exec = wave->trap_saved_exec();
+        saved_wave.interrupt_sent = wave->trap_interrupt_sent();
+        saved_wave.self_halted = wave->self_halted();
+        saved.waves.push_back(saved_wave);
       }
       return VmAccessOutcome::Complete;
     });
@@ -406,7 +418,7 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
                                                         std::span<const uint8_t> context) {
   std::unique_lock structure_lock(queue_structure_mutex_);
   std::lock_guard lock(hw_queue_mutex_);
-  auto *queue = find_compute_queue(identity.queue_id, identity.process_id);
+  ComputeQueueRecord *queue = find_compute_queue(identity.queue_id, identity.process_id);
   if (!queue || queue->address_space != identity.address_space || !queue->debug_suspended ||
       queue->has_pending_commands() || queue->idle_publication.active() ||
       queue->scratch_request.active() || queue->scratch_reclaim.active())
@@ -546,10 +558,11 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
     const uint32_t count = std::ranges::count(saved.waves, i, &QueueContext::Wave::group);
     const auto placement = std::ranges::find_if(cus_, [&](const auto *cu) {
       return cu->can_accept_workgroup(count, group.lds_bytes) &&
-             std::ranges::all_of(saved.waves, [&](const auto &w) {
-               return w.group != i || (w.sgprs <= cu->config().sgprs_per_wf &&
-                                       w.vgprs <= cu->config().vgprs_per_wf &&
-                                       w.width <= isa_properties(cu->config().arch).wave_size_max);
+             std::ranges::all_of(saved.waves, [&](const auto &saved_wave) {
+               return saved_wave.group != i ||
+                      (saved_wave.sgprs <= cu->config().sgprs_per_wf &&
+                       saved_wave.vgprs <= cu->config().vgprs_per_wf &&
+                       saved_wave.width <= isa_properties(cu->config().arch).wave_size_max);
              });
     });
     if (placement == cus_.end()) {
@@ -560,10 +573,11 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
     group_cus.push_back(cu);
     lds_bases.push_back(cu->allocate_lds(group.lds_bytes));
     for (size_t index = 0; index < saved.waves.size(); ++index) {
-      const auto &w = saved.waves[index];
-      if (w.group != i)
+      const auto &saved_wave = saved.waves[index];
+      if (saved_wave.group != i)
         continue;
-      auto *wave = cu->dispatch_wf(group.wg, 0, w.sgprs, w.vgprs, w.width);
+      auto *wave =
+          cu->dispatch_wf(group.wg, 0, saved_wave.sgprs, saved_wave.vgprs, saved_wave.width);
       if (!wave) {
         rollback();
         return VmAccessOutcome::Unavailable;
@@ -571,9 +585,10 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
       wave->set_debug_suspended(true);
       waves[index] = wave;
       reserved.emplace_back(cu, wave);
-      if (w.scratch_backing_bytes != 0) {
-        auto scratch = scratch_reservations_->try_reserve(
-            identity.address_space, w.scratch_backing_base, w.scratch_backing_bytes);
+      if (saved_wave.scratch_backing_bytes != 0) {
+        auto scratch = scratch_reservations_->try_reserve(identity.address_space,
+                                                          saved_wave.scratch_backing_base,
+                                                          saved_wave.scratch_backing_bytes);
         if (!scratch) {
           rollback();
           return VmAccessOutcome::Unavailable;
@@ -600,16 +615,17 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
         cu->barrier_wgs_[wg_key(dispatch, group.wg)] = group.barriers;
     }
     for (size_t index = 0; index < saved.waves.size(); ++index) {
-      const auto &w = saved.waves[index];
-      if (w.group != i)
+      const auto &saved_wave = saved.waves[index];
+      if (saved_wave.group != i)
         continue;
       auto *wave = waves[index];
       wave->set_dispatch_id(dispatch);
-      wave->set_queue_packet_id(w.packet);
-      wave->set_wave_in_group(w.wave_in_group);
-      wave->set_debug_wave_id(w.debug_id);
-      wave->set_code_load_bias(w.code_bias);
-      wave->set_wg_coord(w.coordinates[0], w.coordinates[1], w.coordinates[2]);
+      wave->set_queue_packet_id(saved_wave.packet);
+      wave->set_wave_in_group(saved_wave.wave_in_group);
+      wave->set_debug_wave_id(saved_wave.debug_id);
+      wave->set_code_load_bias(saved_wave.code_bias);
+      wave->set_wg_coord(saved_wave.coordinates[0], saved_wave.coordinates[1],
+                         saved_wave.coordinates[2]);
       wave->set_queue_id(identity.queue_id);
       wave->set_process_id(identity.process_id);
       wave->set_address_space(identity.address_space);
@@ -617,21 +633,21 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
       wave->set_doorbell_id((restored.doorbell_offset / sizeof(uint64_t)) & 0x3ffu);
       wave->set_lds_base(lds_bases[i]);
       wave->set_lds_size(group.lds_bytes);
-      wave->set_scratch_lane_size(w.scratch_lane_size);
-      wave->set_wave_sched_mode_raw(w.sched_mode);
-      wave->set_sleep_cycles(w.sleep_cycles);
-      if (w.vgpr_msb_hazard)
+      wave->set_scratch_lane_size(saved_wave.scratch_lane_size);
+      wave->set_wave_sched_mode_raw(saved_wave.sched_mode);
+      wave->set_sleep_cycles(saved_wave.sleep_cycles);
+      if (saved_wave.vgpr_msb_hazard)
         wave->arm_setreg_vgpr_msb_hazard();
-      wave->set_runtime_suspended(w.runtime_suspended);
-      wave->restore_barrier_wait_state(w.barrier);
-      wave->restore_debug_stop_state(w.stop);
-      wave->add_trap_queue_exception_status(w.queue_exceptions);
-      wave->add_trap_runtime_exception_status(w.runtime_exceptions);
-      wave->set_trap_saved_status(w.trap_saved_status);
-      wave->set_trap_saved_exec(w.trap_saved_exec);
-      wave->set_trap_interrupt_sent(w.interrupt_sent);
-      wave->set_self_halted(w.self_halted);
-      wave->set_state(w.state);
+      wave->set_runtime_suspended(saved_wave.runtime_suspended);
+      wave->restore_barrier_wait_state(saved_wave.barrier);
+      wave->restore_debug_stop_state(saved_wave.stop);
+      wave->add_trap_queue_exception_status(saved_wave.queue_exceptions);
+      wave->add_trap_runtime_exception_status(saved_wave.runtime_exceptions);
+      wave->set_trap_saved_status(saved_wave.trap_saved_status);
+      wave->set_trap_saved_exec(saved_wave.trap_saved_exec);
+      wave->set_trap_interrupt_sent(saved_wave.interrupt_sent);
+      wave->set_self_halted(saved_wave.self_halted);
+      wave->set_state(saved_wave.state);
     }
   }
   if (restored.scratch_reclaim.active())
@@ -653,7 +669,7 @@ VmAccessOutcome CommandProcessor::restore_queue_context(const QueueIdentity &ide
 void CommandProcessor::release_queue_context(const QueueIdentity &identity) {
   std::unique_lock structure_lock(queue_structure_mutex_);
   std::lock_guard lock(hw_queue_mutex_);
-  if (auto *queue = find_compute_queue(identity.queue_id, identity.process_id);
+  if (ComputeQueueRecord *queue = find_compute_queue(identity.queue_id, identity.process_id);
       queue && queue->address_space == identity.address_space)
     queue->context_save_suspension.reset();
   for (auto *cu : cus_)

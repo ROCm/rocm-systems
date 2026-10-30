@@ -43,11 +43,11 @@ public:
     const uint64_t bytes = aligned_size(requested_bytes);
     if (bytes == 0)
       return 0;
-    const auto range =
-        std::ranges::find_if(free_ranges_, [bytes](const auto &r) { return r.second >= bytes; });
-    if (range == free_ranges_.end())
+    const auto candidate = std::ranges::find_if(
+        free_ranges_, [bytes](const auto &free_range) { return free_range.second >= bytes; });
+    if (candidate == free_ranges_.end())
       return std::nullopt;
-    auto node = free_ranges_.extract(range);
+    auto node = free_ranges_.extract(candidate);
     const uint32_t offset = node.key();
     if (node.mapped() > bytes) {
       node.key() += static_cast<uint32_t>(bytes);

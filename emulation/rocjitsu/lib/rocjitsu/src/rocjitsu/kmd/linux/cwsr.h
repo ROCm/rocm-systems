@@ -54,6 +54,11 @@ constexpr bool cwsr_capacity_eligible_device(const config::KfdDeviceConfig &devi
              gc_ip_version_for_gfx_target_version(device.gfx_target_version)) == arch;
 }
 
+/// @brief Return CU and resident-wave bounds for one XCC's CWSR producer.
+/// @details num_xcc divides the device-wide KFD CU count, rounding up. Each XCC is also bounded
+/// by the simulator's configured CU topology and wave slots; num_xcc does not divide that topology.
+/// Returns empty limits if num_xcc or required SIMD properties are zero, or computed CU/wave bounds
+/// are zero or exceed the representable CWSR size bounds.
 [[nodiscard]] constexpr amdgpu::CwsrProducerLimits
 cwsr_producer_limits_for_device(const config::KfdDeviceConfig &device, uint32_t num_xcc) {
   const rj_code_arch_t arch =

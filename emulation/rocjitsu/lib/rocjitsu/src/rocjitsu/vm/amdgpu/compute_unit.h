@@ -738,7 +738,8 @@ public:
     return *base;
   }
 
-  /// @brief Query count separate CU-local LDS reservations without mutation.
+  /// @brief Whether count separate CU-local LDS reservations of size_bytes each fit.
+  /// @details Checks availability without allocating or changing the allocator state.
   bool can_allocate_lds(uint32_t size_bytes, uint32_t count = 1) const {
     std::lock_guard lock(wave_state_mutex_);
     return lds_allocator_.can_allocate(size_bytes, count);

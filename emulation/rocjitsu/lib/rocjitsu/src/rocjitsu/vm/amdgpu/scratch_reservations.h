@@ -5,13 +5,13 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 
+#include <compare>
 #include <cstdint>
 #include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <tuple>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -31,7 +31,14 @@ public:
 
 private:
   friend class ScratchReservation;
-  using Key = std::tuple<uint32_t, uint64_t, uint64_t>; // Address-space slot, generation, base.
+  class Key {
+  public:
+    uint32_t slot;
+    uint64_t generation;
+    uint64_t base;
+
+    auto operator<=>(const Key &) const = default;
+  };
   struct State {
     std::mutex mutex;
     std::map<Key, uint64_t> occupied; // Lengths; keys and lengths never change while reserved.
@@ -49,7 +56,7 @@ public:
   ScratchReservation(const ScratchReservation &) = delete;
   ScratchReservation &operator=(const ScratchReservation &) = delete;
 
-  uint64_t base() const { return std::get<2>(region_->first); }
+  uint64_t base() const { return region_->first.base; }
   uint64_t size() const { return region_->second; }
 
 private:
@@ -72,18 +79,17 @@ ScratchReservations::try_reserve(AddressSpaceHandle space, uint64_t base, uint64
     return {};
   const Key key{space.slot, space.generation, base};
   const auto same_space = [&](const auto &entry) {
-    return std::get<0>(entry.first) == space.slot && std::get<1>(entry.first) == space.generation;
+    return entry.first.slot == space.slot && entry.first.generation == space.generation;
   };
   std::map<Key, uint64_t>::iterator region;
   {
     std::lock_guard lock(state_->mutex);
     const auto next = state_->occupied.lower_bound(key);
-    if (next != state_->occupied.end() && same_space(*next) &&
-        std::get<2>(next->first) - base < bytes)
+    if (next != state_->occupied.end() && same_space(*next) && next->first.base - base < bytes)
       return {};
     if (next != state_->occupied.begin()) {
       const auto previous = std::prev(next);
-      if (same_space(*previous) && base - std::get<2>(previous->first) < previous->second)
+      if (same_space(*previous) && base - previous->first.base < previous->second)
         return {};
     }
     region = state_->occupied.emplace_hint(next, key, bytes);
