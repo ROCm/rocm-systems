@@ -523,10 +523,10 @@ if [[ "${build_rocshmem_support}" == true ]]; then
         cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
     fi
 elif [[ "${build_rocshmem_gin}" == true ]]; then
+    # GIN compiles its host code from rocSHMEM *source* and links no library, so
+    # it needs only ROCSHMEM_SOURCE_DIR; ROCSHMEM_INSTALL_DIR has no GIN consumer.
     cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF -DENABLE_ROCSHMEM_GIN=ON"
-    if [[ -n "${ROCSHMEM_INSTALL_DIR}" ]]; then
-        cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
-    elif [[ -n "${rocshmem_source_dir}" ]] && [[ "${rocshmem_is_monorepo}" == false ]]; then
+    if [[ -n "${rocshmem_source_dir}" ]] && [[ "${rocshmem_is_monorepo}" == false ]]; then
         cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
     fi
 else

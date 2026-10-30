@@ -143,11 +143,8 @@ function(add_rocshmem_targets)
 
     # -----------------------------------------------------------------
     # Path 2: Build from source when no pre-built install is available.
-    # Both ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN need the built headers
-    # (rocshmem_config.h) and device bitcode; ENABLE_ROCSHMEM additionally
-    # links librocshmem.a into librccl.so.
     # -----------------------------------------------------------------
-    if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
+    if(ENABLE_ROCSHMEM)
         set(_rccl_root           "${CMAKE_SOURCE_DIR}")
         set(ROCSHMEM_INSTALL_DIR "${_rccl_root}/ext/rocshmem")
         # Convert cmake list separators for shell command safety.
@@ -156,11 +153,6 @@ function(add_rocshmem_targets)
         # cmake converts commas back to semicolons.
         string(REPLACE ";" " " _rocshmem_cmake_opts "${ROCSHMEM_CMAKE_OPTIONS}")
         string(REPLACE ";" "," _rocshmem_gpu_targets "${GPU_TARGETS}")
-        # SDMA only needed for --rocshmem-gin (GIN SDMA plugin)
-        set(_rocshmem_sdma_opt "")
-        if(ENABLE_ROCSHMEM_GIN)
-            set(_rocshmem_sdma_opt "-DUSE_SDMA=ON")
-        endif()
         # librocshmem.a is linked into librccl.so, so without this an ASAN
         # build gets an uninstrumented rocSHMEM inside an instrumented library.
         set(_rocshmem_asan_opt "")
@@ -190,7 +182,7 @@ function(add_rocshmem_targets)
             CONFIGURE_COMMAND   ""
             BUILD_COMMAND
                 ${CMAKE_COMMAND} -E make_directory build
-                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts} "
+                && ${CMAKE_COMMAND} -E chdir build bash -lc "INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} ../scripts/build_configs/gda -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_EXTERNAL_MPI=OFF -DGDA_MLX5=ON -DGDA_BNXT=ON -DGDA_IONIC=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUNCTIONAL_TESTS=OFF -DBUILD_UNIT_TESTS=OFF -DBUILD_CTESTS=OFF -DBUILD_TOOLS=OFF -DGPU_TARGETS=${_rocshmem_gpu_targets} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts} "
             INSTALL_COMMAND ""
         )
 
@@ -199,7 +191,7 @@ function(add_rocshmem_targets)
         # so the other config tree overwriting librocshmem.a invalidates it too.
         set(_rocshmem_opts_stamp "${ROCSHMEM_INSTALL_DIR}/rccl_build_options.txt")
         file(GENERATE OUTPUT "${_rocshmem_opts_stamp}"
-             CONTENT "${CMAKE_BUILD_TYPE} ${_rocshmem_gpu_targets} ${_rocshmem_sdma_opt} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts}\n")
+             CONTENT "${CMAKE_BUILD_TYPE} ${_rocshmem_gpu_targets} ${_rocshmem_asan_opt} ${_rocshmem_cmake_opts}\n")
         ExternalProject_Add_StepDependencies(rocshmem_ext build "${_rocshmem_opts_stamp}")
 
         set(ROCSHMEM_INSTALL_DIR "${ROCSHMEM_INSTALL_DIR}"          PARENT_SCOPE)
