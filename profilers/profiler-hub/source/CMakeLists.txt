@@ -26,8 +26,14 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/common/connection.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common/connection_pool.cpp
     ${CMAKE_CURRENT_LIST_DIR}/common/connection_pool.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/category_class.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/category_class.hpp
     ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_format.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_format.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_loader.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_loader.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/host_tree.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/host_tree.hpp
 )
 target_sources(profiler-hub-objects PRIVATE ${profiler-hub_sources})
 
