@@ -329,7 +329,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   the production source include, after system headers and before test
   helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
 - **`rccl-UnitTestsMicroDdaColl`**: the DDA launchers
-  `algorithms/dda/{all_gather,alltoall,reduce_scatter}/dda_*.cu` and the fabric
+  `algorithms/dda/{all_gather,alltoall,broadcast,reduce_scatter}/dda_*.cu` and the fabric
   `all_reduce/dda_all_reduce_fabric*.cu` (each via `DDA_<UNIT>_CC_PATH`, from
   `algorithms/dda/<coll>/<unit>-test.cc`); suites `Dda<Unit>Microtest`. Launches are recorded
   through `DdaCollSeams.h`, not run. Its own binary: `rccl-UnitTestsMicro` links
