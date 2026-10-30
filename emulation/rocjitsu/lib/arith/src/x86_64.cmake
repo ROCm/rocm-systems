@@ -7,10 +7,23 @@
 include(CheckCXXCompilerFlag)
 
 set(rj_arith_x86_64_v3_flags "-march=x86-64-v3")
+set(rj_arith_x86_64_v4_flags "-march=x86-64-v4")
+set(rj_arith_x86_64_v4_bf16_flags ${rj_arith_x86_64_v4_flags} "-mavx512bf16")
+
+# Format the feature flag lists as command-line strings for the compiler checks.
+list(JOIN rj_arith_x86_64_v4_bf16_flags " " rj_arith_x86_64_v4_bf16_check_flags)
 
 check_cxx_compiler_flag(
     "${rj_arith_x86_64_v3_flags}"
     RJ_ARITH_COMPILER_X86_64_V3
+)
+check_cxx_compiler_flag(
+    "${rj_arith_x86_64_v4_flags}"
+    RJ_ARITH_COMPILER_X86_64_V4
+)
+check_cxx_compiler_flag(
+    "${rj_arith_x86_64_v4_bf16_check_flags}"
+    RJ_ARITH_COMPILER_X86_64_V4_BF16
 )
 
 set(rj_arith_x86_64_v3_sources
@@ -21,6 +34,18 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_exact_x86_64_v3.cpp
+)
+
+set(rj_arith_x86_64_v4_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_exact_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_exact_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_exact_x86_64_v4.cpp
+)
+
+set(rj_arith_x86_64_v4_bf16_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v4_bf16.cpp
 )
 
 # Keep source selection, compile flags and feature definitions together for each ISA.
@@ -40,6 +65,6 @@ function(rj_arith_add_x86_64_backend feature)
     target_compile_definitions(rj_arith PRIVATE RJ_ARITH_HAVE_${feature}=1)
 endfunction()
 
-foreach(feature IN ITEMS X86_64_V3)
+foreach(feature IN ITEMS X86_64_V3 X86_64_V4 X86_64_V4_BF16)
     rj_arith_add_x86_64_backend(${feature})
 endforeach()
