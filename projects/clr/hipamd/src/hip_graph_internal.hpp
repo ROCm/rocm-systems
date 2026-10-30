@@ -3220,9 +3220,10 @@ class GraphMemsetNode : public GraphNode {
     std::memcpy(params, &memsetParams_, sizeof(hipMemsetParams));
   }
 
-  hipError_t SetParamsInternal(const hipMemsetParams* params, bool isExec, size_t depth = 1) {
+  hipError_t SetParamsInternal(const hipMemsetParams* params, bool isExec, size_t depth,
+                               size_t arrHeight) {
     hipError_t hip_error = hipSuccess;
-    hip_error = ihipGraphMemsetParams_validate(params);
+    hip_error = ihipGraphMemsetParams_validate(params, depth);
     if (hip_error != hipSuccess) {
       return hip_error;
     }
@@ -3242,7 +3243,7 @@ class GraphMemsetNode : public GraphNode {
       }
     }
     size_t sizeBytes;
-    if (params->height == 1) {
+    if (params->height == 1 && depth == 1) {
       // 1D - for hipGraphMemsetNodeSetParams & hipGraphExecMemsetNodeSetParams, They return
       // invalid value if new width is more than actual allocation.
       size_t offset = 0;
@@ -3251,9 +3252,6 @@ class GraphMemsetNode : public GraphNode {
         return hipErrorInvalidValue;
       }
 
-      if (params->width * params->elementSize > memObj->getSize()) {
-        return hipErrorInvalidValue;
-      }
       sizeBytes = params->width * params->elementSize;
       hip_error =
           ihipMemset_validate(memObj, params->value, params->elementSize, sizeBytes, offset);
@@ -3288,9 +3286,10 @@ class GraphMemsetNode : public GraphNode {
         return hipErrorInvalidValue;
       }
       hip_error = ihipMemset3D_validate(
-          {params->dst, params->pitch, params->width * params->elementSize, params->height}, memObj,
-          offset, params->value, {params->width * params->elementSize, params->height, depth},
-          sizeBytes);
+          {params->dst, params->pitch, params->width * params->elementSize,
+           depth > 1 ? arrHeight : params->height},
+          memObj, offset, params->value,
+          {params->width * params->elementSize, params->height, depth}, sizeBytes);
     }
     if (hip_error != hipSuccess) {
       return hip_error;
@@ -3301,7 +3300,7 @@ class GraphMemsetNode : public GraphNode {
   }
 
   hipError_t SetParams(const hipMemsetParams* params, bool isExec = false, size_t depth = 1) {
-    return SetParamsInternal(params, isExec, depth);
+    return SetParamsInternal(params, isExec, depth, arrHeight_);
   }
 
   bool HasSameParams(const GraphNode* node) const override {
@@ -3316,7 +3315,8 @@ class GraphMemsetNode : public GraphNode {
 
   hipError_t SetParams(GraphNode* node) override {
     const GraphMemsetNode* memsetNode = static_cast<GraphMemsetNode const*>(node);
-    hipError_t status = SetParams(&memsetNode->memsetParams_, true, memsetNode->depth_);
+    hipError_t status = SetParamsInternal(&memsetNode->memsetParams_, true, memsetNode->depth_,
+                                          memsetNode->arrHeight_);
     if (status == hipSuccess) {
       arrWidth_ = memsetNode->arrWidth_;
       arrHeight_ = memsetNode->arrHeight_;

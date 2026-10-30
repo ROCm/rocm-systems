@@ -276,6 +276,14 @@ graph:
   Unit_hipGraphExecUpdate_3DMemset_AllocationExtent: *level_default
   Unit_hipGraphExecMemsetNodeSetParams_FlatAlloc_2D: *level_default
   Unit_hipGraphExecNodeSetParams_Memset_FlatAlloc_2D: *level_default
+  Unit_hipGraphExecUpdate_MemsetSliceHeight:
+    <<: *level_default
+  Unit_hipGraphMemsetNodeFlatAlloc_InvalidGeometry:
+    <<: *level_default
+  Unit_hipGraphMemsetNode_SingleRowIgnoresPitch:
+    <<: *level_default
+  Unit_hipGraphMemsetNode_SpansVmmMappings:
+    <<: *level_default
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative:
     <<: *level_default
     tags: [node]

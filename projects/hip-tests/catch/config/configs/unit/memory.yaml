@@ -561,6 +561,12 @@ memory:
   Unit_hipMemset3D_BasicFunctional:
     <<: *level_default
     tags: [memset, P1]
+  Unit_hipMemset3D_FullRowSubvolumePadding:
+    <<: *level_default
+    tags: [memset, P1]
+  Unit_hipMemset3D_OverflowingExtent:
+    <<: *level_default
+    tags: [memset, P1]
   Unit_hipMemset3DAsync_BasicFunctional:
     <<: *level_default
     tags: [memset, P1]
@@ -578,6 +584,9 @@ memory:
   Unit_hipMemset2DAsync_BasicFunctional:
     <<: *level_default
     tags: [memset, P0]
+  Unit_hipMemset2DAsync_EmptyCapture:
+    <<: *level_default
+    tags: [memset, P1]
   Unit_hipMemset2D_UniqueWidthHeight:
     <<: *level_default
     tags: [memset, P1]
@@ -748,6 +757,9 @@ memory:
   Unit_hipMemsetD32_ValidBuffer:
     <<: *level_default
     tags: [memset, P1]
+  Unit_hipMemsetD32_OverflowingElementCount:
+    <<: *level_default
+    tags: [memset, P1]
   Unit_hipMemsetD32_InvalidArg:
     <<: *level_default
     tags: [memset, P1]
@@ -756,6 +768,9 @@ memory:
     tags: [memset, P1]
   Unit_hipMemsetD32_Capture: *level_default
   Unit_hipMemsetD16_ValidBuffer:
+    <<: *level_default
+    tags: [memset, P1]
+  Unit_hipMemsetD16_OverflowingElementCount:
     <<: *level_default
     tags: [memset, P1]
   Unit_hipMemsetD16_InvalidArg:
@@ -768,6 +783,9 @@ memory:
   Unit_hipMemsetD16Async_ValidBuffer:
     <<: *level_default
     tags: [memset, P1]
+  Unit_hipMemsetD16Async_OverflowingElementCount:
+    <<: *level_default
+    tags: [memset, P1]
   Unit_hipMemsetD16Async_InvalidArg:
     <<: *level_default
     tags: [memset, P1]
@@ -775,6 +793,9 @@ memory:
     <<: *level_default
     tags: [memset, P1]
   Unit_hipMemsetD32Async_ValidBuffer:
+    <<: *level_default
+    tags: [memset, P1]
+  Unit_hipMemsetD32Async_OverflowingElementCount:
     <<: *level_default
     tags: [memset, P1]
   Unit_hipMemsetD32Async_InvalidArg:
@@ -1025,6 +1046,12 @@ memory:
   Unit_hipMemsetD2D16_BasicFunctional:
     <<: *level_default
     tags: [memset]
+  Unit_hipMemsetD2D16_ElementCountsAndPadding:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D16_InvalidGeometry:
+    <<: *level_default
+    tags: [memset]
   Unit_hipMemsetD2D16_UnEvenRowsCols:
     <<: *level_default
     tags: [memset]
@@ -1032,6 +1059,15 @@ memory:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D16Async_BasicFunctional:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D16Async_ElementCountsAndPadding:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D16Async_EmptyCapture:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D16Async_InvalidGeometry:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D16Async_UnEvenRowsCols:
@@ -1043,6 +1079,12 @@ memory:
   Unit_hipMemsetD2D32_BasicFunctional:
     <<: *level_default
     tags: [memset]
+  Unit_hipMemsetD2D32_ElementCountsAndPadding:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D32_InvalidGeometry:
+    <<: *level_default
+    tags: [memset]
   Unit_hipMemsetD2D32_UnEvenRowsCols:
     <<: *level_default
     tags: [memset]
@@ -1050,6 +1092,15 @@ memory:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D32Async_BasicFunctional:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D32Async_ElementCountsAndPadding:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D32Async_EmptyCapture:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D32Async_InvalidGeometry:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D32Async_UnEvenRowsCols:

@@ -95,7 +95,7 @@ hipError_t capturehipMemsetAsync(hipStream_t& stream, void*& dst, int& value, si
                                  size_t& sizeBytes);
 
 hipError_t capturehipMemset2DAsync(hipStream_t& stream, void*& dst, size_t& pitch, int& value,
-                                   size_t& width, size_t& height);
+                                   size_t& elementSize, size_t& width, size_t& height);
 
 hipError_t capturehipMemset3DAsync(hipStream_t& stream, hipPitchedPtr& pitchedDevPtr, int& value,
                                    hipExtent& extent);

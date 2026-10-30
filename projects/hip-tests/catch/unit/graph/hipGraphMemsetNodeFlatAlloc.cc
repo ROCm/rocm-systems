@@ -23,7 +23,14 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
+#include <algorithm>
+#include <limits>
+#include <vector>
+
 namespace {
+
+enum class VmmFillMode { CaptureBytes, CaptureTyped, Graph };
+enum class InvalidGeometry { WidthOverflow, AreaOverflow, Misaligned, OutsideSpan };
 
 // Allocates `pitch * height` bytes via plain hipMalloc, with `pitch` chosen
 // independently of any device alignment requirement -- so the 2D extent
@@ -502,6 +509,223 @@ HIP_TEST_CASE(Unit_hipGraphExecNodeSetParams_Memset_FlatAlloc_2D) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 #endif  // HT_AMD
+
+
+/**
+ * Test Description
+ * ------------------------
+ *  - A single-row graph node ignores pitch and retains the 1D fill alignment behavior.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphMemsetNodeFlatAlloc.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphMemsetNode_SingleRowIgnoresPitch) {
+  LinearAllocGuard<uint8_t> device(LinearAllocs::hipMalloc, 512);
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  std::vector<uint8_t> expected(512, 0xa5);
+  std::vector<uint8_t> output(512);
+  HIP_CHECK(hipMemcpy(device.ptr(), expected.data(), expected.size(), hipMemcpyHostToDevice));
+  hipMemsetParams params{};
+  params.dst = device.ptr() + 65;
+  params.pitch = 2;
+  params.value = 0x31313131;
+  params.elementSize = 4;
+  params.width = 3;
+  params.height = 1;
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t node = nullptr;
+  hipGraphExec_t executable = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(executable, stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipGraphExecDestroy(executable));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipMemcpy(output.data(), device.ptr(), output.size(), hipMemcpyDeviceToHost));
+  std::fill_n(expected.begin() + 65, 12, 0x31);
+  REQUIRE(output == expected);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Captured and explicit graph fills span multiple adjacent VMM physical mappings.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphMemsetNodeFlatAlloc.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphMemsetNode_SpansVmmMappings) {
+  const auto mode =
+      GENERATE(VmmFillMode::CaptureBytes, VmmFillMode::CaptureTyped, VmmFillMode::Graph);
+  int device = 0;
+  int supported = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeVirtualMemoryManagementSupported,
+                                  device));
+  if (!supported) HIP_SKIP_TEST("Virtual memory management is unavailable");
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+  size_t granularity = 0;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  void* ptr = nullptr;
+  hipMemGenericAllocationHandle_t handles[2]{};
+  HIP_CHECK(hipMemAddressReserve(&ptr, 2 * granularity, 0, nullptr, 0));
+  for (size_t chunk = 0; chunk < 2; ++chunk) {
+    HIP_CHECK(hipMemCreate(&handles[chunk], granularity, &prop, 0));
+    HIP_CHECK(hipMemMap(static_cast<uint8_t*>(ptr) + chunk * granularity, granularity, 0,
+                        handles[chunk], 0));
+  }
+  hipMemAccessDesc access{};
+  access.location = prop.location;
+  access.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(ptr, 2 * granularity, &access, 1));
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  std::vector<uint8_t> output(2 * granularity, 0);
+  HIP_CHECK(hipMemcpy(ptr, output.data(), output.size(), hipMemcpyHostToDevice));
+  hipMemsetParams params{};
+  params.dst = ptr;
+  params.value = 0x5a5a5a5a;
+  params.elementSize = 4;
+  params.width = output.size() / 4;
+  params.height = 1;
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t node = nullptr;
+  if (mode == VmmFillMode::Graph) {
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params));
+    HIP_CHECK(hipGraphMemsetNodeSetParams(node, &params));
+  } else {
+    HIP_CHECK(hipStreamBeginCapture(stream.stream(), hipStreamCaptureModeGlobal));
+    if (mode == VmmFillMode::CaptureBytes) {
+      HIP_CHECK(hipMemsetAsync(ptr, 0x5a, output.size(), stream.stream()));
+    } else {
+      HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(ptr), 0x5a5a5a5a,
+                                  output.size() / 4, stream.stream()));
+    }
+    HIP_CHECK(hipStreamEndCapture(stream.stream(), &graph));
+  }
+  hipGraphExec_t executable = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+  if (mode == VmmFillMode::Graph) {
+    HIP_CHECK(hipGraphExecMemsetNodeSetParams(executable, node, &params));
+  }
+  HIP_CHECK(hipGraphLaunch(executable, stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipGraphExecDestroy(executable));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipMemcpy(output.data(), ptr, output.size(), hipMemcpyDeviceToHost));
+  for (size_t chunk = 0; chunk < 2; ++chunk) {
+    HIP_CHECK(hipMemUnmap(static_cast<uint8_t*>(ptr) + chunk * granularity, granularity));
+    HIP_CHECK(hipMemRelease(handles[chunk]));
+  }
+  HIP_CHECK(hipMemAddressFree(ptr, output.size()));
+  REQUIRE(std::all_of(output.begin(), output.end(), [](uint8_t value) { return value == 0x5a; }));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Reject overflowing, misaligned and out-of-allocation graph fill geometry.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphMemsetNodeFlatAlloc.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphMemsetNodeFlatAlloc_InvalidGeometry) {
+  constexpr size_t max_size = std::numeric_limits<size_t>::max();
+  LinearAllocGuard<uint8_t> device(LinearAllocs::hipMalloc, 2048);
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t node = nullptr;
+  hipGraphExec_t executable = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipMemsetParams params{};
+  params.dst = device.ptr();
+  params.pitch = 512;
+  params.value = 7;
+  params.elementSize = 4;
+  params.width = 17;
+  params.height = 2;
+  HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params));
+  HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+  const auto valid_params = params;
+  const auto invalid = GENERATE(InvalidGeometry::WidthOverflow, InvalidGeometry::AreaOverflow,
+                                InvalidGeometry::Misaligned, InvalidGeometry::OutsideSpan);
+  {
+    params = valid_params;
+    if (invalid == InvalidGeometry::WidthOverflow) params.width = max_size / 4 + 1;
+    if (invalid == InvalidGeometry::AreaOverflow) {
+      params.width = max_size / 8 + 1;
+      params.height = 4;
+    }
+    if (invalid == InvalidGeometry::Misaligned) params.dst = device.ptr() + 1;
+    if (invalid == InvalidGeometry::OutsideSpan) params.dst = device.ptr() + 1536;
+    hipGraphNode_t rejected = nullptr;
+    HIP_CHECK_ERROR(hipGraphAddMemsetNode(&rejected, graph, nullptr, 0, &params),
+                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphMemsetNodeSetParams(node, &params), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphExecMemsetNodeSetParams(executable, node, &params),
+                    hipErrorInvalidValue);
+  }
+  HIP_CHECK(hipGraphExecDestroy(executable));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Update a captured fill to a different slice pitch and validate the incoming span.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphMemsetNodeFlatAlloc.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_MemsetSliceHeight) {
+  constexpr size_t pitch = 256;
+  constexpr size_t width = 64;
+  constexpr size_t height = 4;
+  constexpr size_t depth = 3;
+  const size_t new_height = GENERATE(4, 8);
+  const size_t old_height = new_height == 4 ? 8 : 4;
+  const auto span = [](size_t slice_height) {
+    return (depth - 1) * pitch * slice_height + (height - 1) * pitch + width;
+  };
+  LinearAllocGuard<uint8_t> original(LinearAllocs::hipMalloc, span(old_height));
+  LinearAllocGuard<uint8_t> replacement(LinearAllocs::hipMalloc, span(new_height));
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  std::vector<uint8_t> expected(span(new_height), 0xa5);
+  std::vector<uint8_t> output(expected.size());
+  HIP_CHECK(hipMemcpy(replacement.ptr(), expected.data(), expected.size(), hipMemcpyHostToDevice));
+  const auto capture = [&](void* ptr, size_t slice_height) {
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipStreamBeginCapture(stream.stream(), hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipMemset3DAsync(make_hipPitchedPtr(ptr, pitch, width, slice_height), 0x22,
+                               make_hipExtent(width, height, depth), stream.stream()));
+    HIP_CHECK(hipStreamEndCapture(stream.stream(), &graph));
+    return graph;
+  };
+  hipGraph_t first = capture(original.ptr(), old_height);
+  hipGraph_t second = capture(replacement.ptr(), new_height);
+  hipGraphExec_t executable = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&executable, first, nullptr, nullptr, 0));
+  hipGraphNode_t error_node = nullptr;
+  hipGraphExecUpdateResult update_result{};
+  HIP_CHECK(hipGraphExecUpdate(executable, second, &error_node, &update_result));
+  HIP_CHECK(hipGraphLaunch(executable, stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  HIP_CHECK(hipGraphExecDestroy(executable));
+  HIP_CHECK(hipGraphDestroy(first));
+  HIP_CHECK(hipGraphDestroy(second));
+  HIP_CHECK(hipMemcpy(output.data(), replacement.ptr(), output.size(), hipMemcpyDeviceToHost));
+  for (size_t z = 0; z < depth; ++z) {
+    for (size_t y = 0; y < height; ++y) {
+      std::fill_n(expected.begin() + z * pitch * new_height + y * pitch, width, 0x22);
+    }
+  }
+  REQUIRE(update_result == hipGraphExecUpdateSuccess);
+  REQUIRE(output == expected);
+}
 
 /**
  * End doxygen group GraphTest.

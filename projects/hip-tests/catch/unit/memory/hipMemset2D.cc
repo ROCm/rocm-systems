@@ -13,6 +13,7 @@
 
 
 #include <hip_test_common.hh>
+#include "hipMemsetD2D_common.hh"
 
 
 // Table with unique width/height and memset values.
@@ -241,4 +242,20 @@ HIP_TEST_CASE(Unit_hipMemset2D_Capture) {
   END_CAPTURE_SYNC(memcpy_err);
 
   HIP_CHECK(hipFree(dst));
+}
+/**
+ * Test Description
+ * ------------------------
+ * - Empty asynchronous fills preserve capture status and add no graph node.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemset2D.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemset2DAsync_EmptyCapture) {
+  empty2DCapture([](void* dst, size_t pitch, size_t width, size_t height, hipStream_t stream) {
+    return hipMemset2DAsync(dst, pitch, 7, width, height, stream);
+  });
 }

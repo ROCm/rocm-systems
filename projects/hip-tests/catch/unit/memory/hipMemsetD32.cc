@@ -7,6 +7,9 @@
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <resource_guards.hh>
+
+#include <limits>
 #include <array>
 
 /**
@@ -205,4 +208,22 @@ HIP_TEST_CASE(Unit_hipMemsetD32_Capture) {
   END_CAPTURE_SYNC(memcpy_err);
 
   HIP_CHECK(hipFree(dst));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Reject an element count whose byte size wraps to zero.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemsetD32.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemsetD32_OverflowingElementCount) {
+  LinearAllocGuard<uint8_t> device(LinearAllocs::hipMalloc, 512);
+  HIP_CHECK_ERROR(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(device.ptr()), 7,
+                               std::numeric_limits<size_t>::max() / sizeof(uint32_t) + 1),
+                  hipErrorInvalidValue);
 }

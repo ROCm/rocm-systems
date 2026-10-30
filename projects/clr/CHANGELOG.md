@@ -4,6 +4,12 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 7.18.0 for ROCm 10.3.0
 
+### Resolved issues
+
+* Fixed `hipMemsetD2D16/32` and their asynchronous variants to interpret width as an element count and preserve the pattern size during stream capture. Callers that compensated for the old byte-width behavior must pass element counts instead. Typed 2D fills and graph memset nodes now preserve row padding, reject overflowing extents, and validate the full pitched allocation span. Typed 2D APIs and multi-row graph nodes reject invalid typed alignment; single-row graph nodes retain their 1D behavior.
+* Zero-width or zero-height asynchronous 2D fills during active stream capture now return `hipSuccess` and add no graph node, matching uncaptured calls and `hipMemset3DAsync`; previously they returned `hipErrorInvalidValue`. Explicit zero-width memset graph nodes remain invalid.
+* Fixed `hipMemset3D` and its asynchronous variant to preserve slice padding when filling a subvolume with full-width rows and a cropped height.
+
 ## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added

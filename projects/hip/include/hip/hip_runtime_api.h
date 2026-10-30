@@ -1662,12 +1662,13 @@ typedef struct hipKernelNodeParams {
   unsigned int sharedMemBytes;
 } hipKernelNodeParams;
 typedef struct hipMemsetParams {
-  void* dst;
+  void* dst; /**< For multi-row fills, aligned to elementSize bytes. */
   unsigned int elementSize;
   size_t height;
-  size_t pitch;
+  size_t pitch; /**< Row stride in bytes, aligned to elementSize for multi-row fills; ignored for 1D
+                   fills. */
   unsigned int value;
-  size_t width;
+  size_t width; /**< Width of each row in elements of elementSize bytes. */
 } hipMemsetParams;
 
 typedef struct hipMemAllocNodeParams {
@@ -5861,7 +5862,7 @@ hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value, hipExtent ex
  *  @param[in] dst       Pointer to device memory
  *  @param[in] dstPitch  Pitch of dst device pointer
  *  @param[in] value     value to set
- *  @param[in] width     Width of row
+ *  @param[in] width     Width of the row in elements
  *  @param[in] height    Number of rows
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
@@ -5874,7 +5875,7 @@ hipError_t hipMemsetD2D8(hipDeviceptr_t dst, size_t dstPitch, unsigned char valu
  *  @param[in] dst       Pointer to device memory
  *  @param[in] dstPitch  Pitch of dst device pointer
  *  @param[in] value     value to set
- *  @param[in] width     Width of row
+ *  @param[in] width     Width of the row in elements
  *  @param[in] height    Number of rows
  *  @param[in] stream    Stream Identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue
@@ -5886,10 +5887,10 @@ hipError_t hipMemsetD2D8Async(hipDeviceptr_t dst, size_t dstPitch, unsigned char
  *  @brief Fills 2D memory range of 'width' 16-bit values synchronously to the specified short
  * value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
  * between each row.
- *  @param[in] dst       Pointer to device memory
- *  @param[in] dstPitch  Pitch of dst device pointer
+ *  @param[in] dst       Pointer to device memory, aligned to 2 bytes
+ *  @param[in] dstPitch  Pitch of dst device pointer in bytes, a multiple of 2
  *  @param[in] value     value to set
- *  @param[in] width     Width of row
+ *  @param[in] width     Width of the row in elements
  *  @param[in] height    Number of rows
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
@@ -5899,10 +5900,10 @@ hipError_t hipMemsetD2D16(hipDeviceptr_t dst, size_t dstPitch, unsigned short va
  *  @brief Fills 2D memory range of 'width' 16-bit values asynchronously to the specified short
  * value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
  * between each row.
- *  @param[in] dst       Pointer to device memory
- *  @param[in] dstPitch  Pitch of dst device pointer
+ *  @param[in] dst       Pointer to device memory, aligned to 2 bytes
+ *  @param[in] dstPitch  Pitch of dst device pointer in bytes, a multiple of 2
  *  @param[in] value     value to set
- *  @param[in] width     Width of row
+ *  @param[in] width     Width of the row in elements
  *  @param[in] height    Number of rows
  *  @param[in] stream    Stream Identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue
@@ -5913,10 +5914,10 @@ hipError_t hipMemsetD2D16Async(hipDeviceptr_t dst, size_t dstPitch, unsigned sho
  *  @brief Fills 2D memory range of 'width' 32-bit values synchronously to the specified int value.
  * Height specifies numbers of rows to set and dstPitch speicifies the number of bytes between each
  * row.
- *  @param[in] dst       Pointer to device memory
- *  @param[in] dstPitch  Pitch of dst device pointer
+ *  @param[in] dst       Pointer to device memory, aligned to 4 bytes
+ *  @param[in] dstPitch  Pitch of dst device pointer in bytes, a multiple of 4
  *  @param[in] value     value to set
- *  @param[in] width     Width of row
+ *  @param[in] width     Width of the row in elements
  *  @param[in] height    Number of rows
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
@@ -5926,10 +5927,10 @@ hipError_t hipMemsetD2D32(hipDeviceptr_t dst, size_t dstPitch, unsigned int valu
  *  @brief Fills 2D memory range of 'width' 32-bit values asynchronously to the specified int
  * value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
  * between each row.
- *  @param[in] dst       Pointer to device memory
- *  @param[in] dstPitch  Pitch of dst device pointer
+ *  @param[in] dst       Pointer to device memory, aligned to 4 bytes
+ *  @param[in] dstPitch  Pitch of dst device pointer in bytes, a multiple of 4
  *  @param[in] value     value to set
- *  @param[in] width     Width of row
+ *  @param[in] width     Width of the row in elements
  *  @param[in] height    Number of rows
  *  @param[in] stream    Stream Identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue

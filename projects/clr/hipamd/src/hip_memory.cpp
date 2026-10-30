@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <type_traits>
+#include <limits>
 
 #include <hip/hip_runtime.h>
 #include "device.hpp"
@@ -3607,7 +3608,23 @@ hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t val
   return hipSuccess;
 }
 
-hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams) {
+// Width is an element count at API boundaries; the fill commands use bytes.
+static bool ihipMemsetExtent(size_t width, size_t elementSize, size_t height, size_t depth,
+                             size_t& widthBytes, size_t& sizeBytes) {
+  constexpr size_t maxSize = std::numeric_limits<size_t>::max();
+  if (elementSize == 0 || width > maxSize / elementSize) {
+    return false;
+  }
+  widthBytes = width * elementSize;
+  if ((height != 0 && widthBytes > maxSize / height) ||
+      (depth != 0 && widthBytes * height > maxSize / depth)) {
+    return false;
+  }
+  sizeBytes = widthBytes * height * depth;
+  return true;
+}
+
+hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams, size_t depth) {
   if (pNodeParams == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -3625,17 +3642,23 @@ hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams) {
     return hipErrorInvalidValue;
   }
 
+  size_t widthBytes = 0;
+  size_t sizeBytes = 0;
+  if (depth == 0 || !ihipMemsetExtent(pNodeParams->width, pNodeParams->elementSize,
+                                      pNodeParams->height, depth, widthBytes, sizeBytes)) {
+    return hipErrorInvalidValue;
+  }
+  // Single-row graph nodes have 1D semantics and ignore pitch.
+  if ((pNodeParams->height > 1 || depth > 1) &&
+      (widthBytes > pNodeParams->pitch || pNodeParams->pitch % pNodeParams->elementSize != 0 ||
+       reinterpret_cast<uintptr_t>(pNodeParams->dst) % pNodeParams->elementSize != 0)) {
+    return hipErrorInvalidValue;
+  }
   size_t discardOffset = 0;
   amd::Memory* memObj = getMemoryObject(hip::getCurrentDevice(), pNodeParams->dst, discardOffset);
   if (memObj != nullptr) {
-    // Validate Mem Access in case of VMM Memory
-    if (!memObj->ValidateMemAccess(*hip::getCurrentDevice()->devices()[0], true)) {
-      return hipErrorUnknown;
-    }
-
-    if ((pNodeParams->pitch * pNodeParams->height) > memObj->getSize()) {
-      return hipErrorInvalidValue;
-    }
+    return ihipMemset_validate(memObj, pNodeParams->value, pNodeParams->elementSize, sizeBytes,
+                               discardOffset);
   }
 
   return hipSuccess;
@@ -3777,7 +3800,11 @@ hipError_t hipMemsetD8Async(hipDeviceptr_t dst, unsigned char value, size_t coun
 hipError_t hipMemsetD16(hipDeviceptr_t dst, unsigned short value, size_t count) {
   HIP_INIT_API(hipMemsetD16, dst, value, count);
   CHECK_STREAM_CAPTURING();
-  HIP_RETURN(ihipMemset(dst, value, sizeof(int16_t), count * sizeof(int16_t), nullptr));
+  size_t valueSize = sizeof(int16_t);
+  if (count > std::numeric_limits<size_t>::max() / valueSize) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_RETURN(ihipMemset(dst, value, valueSize, count * valueSize, nullptr));
 }
 
 hipError_t hipMemsetD16Async(hipDeviceptr_t dst, unsigned short value, size_t count,
@@ -3786,7 +3813,10 @@ hipError_t hipMemsetD16Async(hipDeviceptr_t dst, unsigned short value, size_t co
   CHECK_STREAM_DETACHED_API(stream);
   int iValue = value;
   size_t valueSize = sizeof(int16_t);
-  size_t sizeBytes = count * sizeof(int16_t);
+  if (count > std::numeric_limits<size_t>::max() / valueSize) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  size_t sizeBytes = count * valueSize;
   STREAM_CAPTURE(hipMemsetAsync, stream, dst, iValue, valueSize, sizeBytes);
   HIP_RETURN(ihipMemset(dst, value, valueSize, sizeBytes, stream, true));
 }
@@ -3794,7 +3824,11 @@ hipError_t hipMemsetD16Async(hipDeviceptr_t dst, unsigned short value, size_t co
 hipError_t hipMemsetD32(hipDeviceptr_t dst, int value, size_t count) {
   HIP_INIT_API(hipMemsetD32, dst, value, count);
   CHECK_STREAM_CAPTURING();
-  HIP_RETURN(ihipMemset(dst, value, sizeof(int32_t), count * sizeof(int32_t), nullptr));
+  size_t valueSize = sizeof(int32_t);
+  if (count > std::numeric_limits<size_t>::max() / valueSize) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_RETURN(ihipMemset(dst, value, valueSize, count * valueSize, nullptr));
 }
 
 hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count, hipStream_t stream) {
@@ -3802,7 +3836,10 @@ hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count, hipStr
   CHECK_STREAM_DETACHED_API(stream);
   int iValue = value;
   size_t valueSize = sizeof(int32_t);
-  size_t sizeBytes = count * sizeof(int32_t);
+  if (count > std::numeric_limits<size_t>::max() / valueSize) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  size_t sizeBytes = count * valueSize;
   STREAM_CAPTURE(hipMemsetAsync, stream, dst, iValue, valueSize, sizeBytes);
   HIP_RETURN(ihipMemset(dst, value, valueSize, sizeBytes, stream, true));
 }
@@ -3812,9 +3849,32 @@ hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memor
   if (memory == nullptr) {
     return hipErrorInvalidValue;
   }
-  // Return error if sizeBytes passed to memcpy is more than the actual size allocated
-  if (sizeBytes > (memory->getSize() - offset)) {
+  // Validate the last touched byte, including row and slice gaps, without wrapping.
+  if (extent.width > pitchedDevPtr.pitch ||
+      (extent.depth > 1 && extent.height > pitchedDevPtr.ysize)) {
     return hipErrorInvalidValue;
+  }
+  size_t span = extent.width;
+  constexpr size_t maxSize = std::numeric_limits<size_t>::max();
+  if (extent.height > 1) {
+    if (pitchedDevPtr.pitch > (maxSize - span) / (extent.height - 1)) {
+      return hipErrorInvalidValue;
+    }
+    span += pitchedDevPtr.pitch * (extent.height - 1);
+  }
+  if (extent.depth > 1) {
+    if (pitchedDevPtr.ysize == 0 || pitchedDevPtr.pitch > maxSize / pitchedDevPtr.ysize) {
+      return hipErrorInvalidValue;
+    }
+    const size_t slicePitch = pitchedDevPtr.pitch * pitchedDevPtr.ysize;
+    if (slicePitch > (maxSize - span) / (extent.depth - 1)) {
+      return hipErrorInvalidValue;
+    }
+    span += slicePitch * (extent.depth - 1);
+  }
+  hipError_t status = ihipMemset_validate(memory, value, 1, std::max(span, sizeBytes), offset);
+  if (status != hipSuccess) {
+    return status;
   }
   if (pitchedDevPtr.pitch == memory->getUserData().pitch_) {
     if (extent.height > memory->getUserData().height_) {
@@ -3829,7 +3889,8 @@ hipError_t ihipMemset3DCommand(amd::Command*& command, hipPitchedPtr pitchedDevP
                                amd::Memory* memory, size_t offset, int value, hipExtent extent,
                                hip::Stream* stream, size_t elementSize = 1) {
   auto sizeBytes = extent.width * extent.height * extent.depth;
-  if (pitchedDevPtr.pitch == extent.width) {
+  if (pitchedDevPtr.pitch == extent.width &&
+      (extent.depth == 1 || pitchedDevPtr.ysize == extent.height)) {
     return ihipMemsetCommand(command, memory, value, elementSize, static_cast<size_t>(sizeBytes),
                              stream, offset);
   }
@@ -3858,12 +3919,15 @@ hipError_t ihipMemset3DCommand(amd::Command*& command, hipPitchedPtr pitchedDevP
 
 hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent,
                         hipStream_t stream, bool isAsync = false, size_t elementSize = 1) {
-  auto sizeBytes = extent.width * extent.height * extent.depth;
-
-  if (sizeBytes == 0) {
-    // sizeBytes is zero hence returning early as nothing to be set
+  if (extent.width == 0 || extent.height == 0 || extent.depth == 0) {
     return hipSuccess;
   }
+  size_t widthBytes = 0;
+  size_t sizeBytes = 0;
+  if (!ihipMemsetExtent(extent.width, 1, extent.height, extent.depth, widthBytes, sizeBytes)) {
+    return hipErrorInvalidValue;
+  }
+
   size_t offset = 0;
   amd::Memory* memory = getMemoryObject(hip::getCurrentDevice(), pitchedDevPtr.ptr, offset, sizeBytes);
   if (memory == nullptr) {
@@ -3899,11 +3963,30 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
   return hipSuccess;
 }
 
+hipError_t ihipMemset2D_validate(void* dst, size_t pitch, size_t width, size_t height,
+                                 size_t elementSize, size_t& widthBytes) {
+  size_t sizeBytes = 0;
+  if (!ihipMemsetExtent(width, elementSize, height, 1, widthBytes, sizeBytes) ||
+      widthBytes > pitch || pitch % elementSize != 0 ||
+      reinterpret_cast<uintptr_t>(dst) % elementSize != 0) {
+    return hipErrorInvalidValue;
+  }
+  return hipSuccess;
+}
+
 hipError_t hipMemset2D_common(void* dst, size_t pitch, int value, size_t width, size_t height,
                               hipStream_t stream = nullptr, size_t elementSize = 1) {
   CHECK_STREAM_CAPTURING();
-  return ihipMemset3D({dst, pitch, width, height}, value, {width, height, 1}, stream, false,
-                      elementSize);
+  if (width == 0 || height == 0) {
+    return hipSuccess;
+  }
+  size_t widthBytes = 0;
+  hipError_t status = ihipMemset2D_validate(dst, pitch, width, height, elementSize, widthBytes);
+  if (status != hipSuccess) {
+    return status;
+  }
+  return ihipMemset3D({dst, pitch, widthBytes, height}, value, {widthBytes, height, 1}, stream,
+                      false, elementSize);
 }
 
 hipError_t hipMemset2D_spt(void* dst, size_t pitch, int value, size_t width, size_t height) {
@@ -3920,9 +4003,17 @@ hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width, size_t 
 hipError_t hipMemset2DAsync_common(void* dst, size_t pitch, int value, size_t width, size_t height,
                                    hipStream_t stream, size_t elementSize = 1) {
   CHECK_STREAM_DETACHED(stream);
-  STREAM_CAPTURE(hipMemset2DAsync, stream, dst, pitch, value, width, height);
-  return ihipMemset3D({dst, pitch, width, height}, value, {width, height, 1}, stream, true,
-                      elementSize);
+  STREAM_CAPTURE(hipMemset2DAsync, stream, dst, pitch, value, elementSize, width, height);
+  if (width == 0 || height == 0) {
+    return hipSuccess;
+  }
+  size_t widthBytes = 0;
+  hipError_t status = ihipMemset2D_validate(dst, pitch, width, height, elementSize, widthBytes);
+  if (status != hipSuccess) {
+    return status;
+  }
+  return ihipMemset3D({dst, pitch, widthBytes, height}, value, {widthBytes, height, 1}, stream,
+                      true, elementSize);
 }
 
 hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value, size_t width, size_t height,

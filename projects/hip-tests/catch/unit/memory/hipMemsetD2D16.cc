@@ -8,6 +8,7 @@
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_defgroups.hh>
+#include "hipMemsetD2D_common.hh"
 /**
  * @addtogroup hipMemsetD2D16 hipMemsetD2D16
  * @{
@@ -43,7 +44,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D16_BasicFunctional) {
                              2 * sizeof(uint16_t)));
   std::vector<uint16_t>A_h(sizeElements, 1);
 
-  HIP_CHECK(hipMemsetD2D16(A_d, pitch_A, memsetval, width, numH));
+  HIP_CHECK(hipMemsetD2D16(A_d, pitch_A, memsetval, numW, numH));
   HIP_CHECK(hipMemcpy2D(A_h.data(), width, reinterpret_cast<void *>(A_d), pitch_A, width, numH, hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < sizeElements; i++) {
@@ -80,7 +81,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D16_UnEvenRowsCols) {
   HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, sizeof(uint16_t) * cols,
                              rows, 2 * sizeof(uint16_t)));
 
-  HIP_CHECK(hipMemsetD2D16(A_d, devPitch, memsetVal, sizeof(uint16_t) * cols, rows));
+  HIP_CHECK(hipMemsetD2D16(A_d, devPitch, memsetVal, cols, rows));
   HIP_CHECK(hipMemcpy2D(B_h.data(), sizeof(uint16_t) * cols, reinterpret_cast<void*>(A_d), devPitch, sizeof(uint16_t) * cols, rows,
                         hipMemcpyDeviceToHost));
 
@@ -133,6 +134,35 @@ HIP_TEST_CASE(Unit_hipMemsetD2D16_NegTsts) {
   }
   HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
 }
+/**
+ * Test Description
+ * ------------------------
+ * - Check element widths, row padding, offset destinations and graph patterns.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemsetD2D16.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemsetD2D16_ElementCountsAndPadding) {
+  const auto mode = GENERATE(TypedFillMode::Direct, TypedFillMode::Graph);
+  typed2DPadding<uint16_t, false>(mode);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Reject overflowing, misaligned and out-of-allocation pitched fills.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemsetD2D16.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemsetD2D16_InvalidGeometry) { typed2DInvalidGeometry<uint16_t, false>(); }
+
 /**
  * End doxygen group MemoryTest.
  * @}

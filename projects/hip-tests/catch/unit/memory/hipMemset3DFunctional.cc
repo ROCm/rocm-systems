@@ -41,9 +41,17 @@ Testcase Scenarios :
  portion with hipMemset3D api.
  14) Seek device pitched ptr to desired portion of 3d array and memset the
  portion with hipMemset3DAsync api.
+
+ 15) Preserve row and slice padding in cropped full-row subvolumes for sync,
+ async and captured fills.
+ 16) Reject overflowing 3D fill extents and pitched spans.
 */
 
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
+
+#include <limits>
+#include <vector>
 
 /*
  * Defines
@@ -498,4 +506,89 @@ HIP_TEST_CASE(Unit_hipMemset3D_SeekSetArrayPortion) {
 HIP_TEST_CASE(Unit_hipMemset3DAsync_SeekSetArrayPortion) {
 
   seekAndSet3DArrayPortion(1);
+}
+
+enum class SubvolumeFillMode { Direct, Async, Captured };
+
+/**
+ * Test Description
+ * ------------------------
+ * - Fill full-width rows of a cropped subvolume and preserve slice and row gaps.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemset3DFunctional.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemset3D_FullRowSubvolumePadding) {
+  const auto mode =
+      GENERATE(SubvolumeFillMode::Direct, SubvolumeFillMode::Async, SubvolumeFillMode::Captured);
+  const size_t fillHeight = GENERATE(1, 5);
+  constexpr size_t pitch = 256;
+  constexpr size_t height = 7;
+  constexpr size_t depth = 5;
+  constexpr size_t bytes = pitch * height * depth;
+  constexpr size_t offset = pitch * (height + 1);
+  LinearAllocGuard<uint8_t> device(LinearAllocs::hipMalloc, bytes);
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  std::vector<uint8_t> poison(bytes, 0xa5);
+  std::vector<uint8_t> expected(poison);
+  std::vector<uint8_t> output(bytes);
+  HIP_CHECK(hipMemcpy(device.ptr(), poison.data(), bytes, hipMemcpyHostToDevice));
+  for (size_t z = 0; z < 3; ++z) {
+    for (size_t y = 0; y < fillHeight; ++y) {
+      for (size_t x = 0; x < pitch; ++x) {
+        expected[offset + z * pitch * height + y * pitch + x] = 0x31;
+      }
+    }
+  }
+  const auto dst = make_hipPitchedPtr(device.ptr() + offset, pitch, pitch, height);
+  const auto extent = make_hipExtent(pitch, fillHeight, 3);
+  if (mode == SubvolumeFillMode::Direct) {
+    HIP_CHECK(hipMemset3D(dst, 0x31, extent));
+    HIP_CHECK(hipDeviceSynchronize());
+  } else {
+    if (mode == SubvolumeFillMode::Captured) {
+      HIP_CHECK(hipStreamBeginCapture(stream.stream(), hipStreamCaptureModeGlobal));
+    }
+    HIP_CHECK(hipMemset3DAsync(dst, 0x31, extent, stream.stream()));
+    if (mode == SubvolumeFillMode::Captured) {
+      hipGraph_t graph = nullptr;
+      hipGraphExec_t executable = nullptr;
+      HIP_CHECK(hipStreamEndCapture(stream.stream(), &graph));
+      HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+      HIP_CHECK(hipGraphLaunch(executable, stream.stream()));
+      HIP_CHECK(hipStreamSynchronize(stream.stream()));
+      HIP_CHECK(hipGraphExecDestroy(executable));
+      HIP_CHECK(hipGraphDestroy(graph));
+    } else {
+      HIP_CHECK(hipStreamSynchronize(stream.stream()));
+    }
+  }
+  HIP_CHECK(hipMemcpy(output.data(), device.ptr(), bytes, hipMemcpyDeviceToHost));
+  REQUIRE(output == expected);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Reject overflowing 3D fill extents and pitched spans.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemset3DFunctional.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemset3D_OverflowingExtent) {
+  constexpr size_t maxSize = std::numeric_limits<size_t>::max();
+  LinearAllocGuard<uint8_t> device(LinearAllocs::hipMalloc, 2048);
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  const auto pitched = make_hipPitchedPtr(device.ptr(), 512, 512, 4);
+  for (const auto extent : {make_hipExtent(maxSize / 2 + 1, 4, 1),
+                            make_hipExtent(1, 1, maxSize / 2 + 1), make_hipExtent(512, 3, 2)}) {
+    HIP_CHECK_ERROR(hipMemset3D(pitched, 7, extent), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemset3DAsync(pitched, 7, extent, stream.stream()), hipErrorInvalidValue);
+  }
 }

@@ -42,6 +42,9 @@ hipError_t ihipResolveGraphClusterDimensions(hipFunction_t f, int deviceId, dim3
 hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t valueSize,
                                size_t sizeBytes, size_t offset);
 
+hipError_t ihipMemset2D_validate(void* dst, size_t pitch, size_t width, size_t height,
+                                 size_t elementSize, size_t& widthBytes);
+
 hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memory, size_t offset,
                                  int value, hipExtent extent, size_t sizeBytes);
 
@@ -143,7 +146,7 @@ hipError_t ihipMemcpyAtoHValidate(hipArray_t srcArray, void* dstHost, amd::Coord
                                   size_t dstRowPitch, size_t dstSlicePitch, amd::Image*& srcImage,
                                   size_t& start);
 
-hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams);
+hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams, size_t depth = 1);
 
 constexpr hip::MemcpyType ihipGetMemcpyType(const void* src, void* dst) {
   return hipHostToHost;

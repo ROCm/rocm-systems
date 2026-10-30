@@ -8,6 +8,7 @@
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_defgroups.hh>
+#include "hipMemsetD2D_common.hh"
 /**
  * @addtogroup hipMemsetD2D32Async hipMemsetD2D32Async
  * @{
@@ -43,7 +44,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D32Async_BasicFunctional) {
   HIP_CHECK(hipMemAllocPitch(&A_d, &pitch_A, width, numH, sizeof(int)));
   std::vector<int>A_h(sizeElements, 1);
 
-  HIP_CHECK(hipMemsetD2D32Async(A_d, pitch_A, memsetval, width, numH, stream));
+  HIP_CHECK(hipMemsetD2D32Async(A_d, pitch_A, memsetval, numW, numH, stream));
   HIP_CHECK(hipMemcpy2DAsync(A_h.data(), width, reinterpret_cast<void*>(A_d), pitch_A, width, numH, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   for (size_t i = 0; i < sizeElements; i++) {
@@ -83,7 +84,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D32Async_UnEvenRowsCols) {
   HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, sizeof(int) * cols, rows,
                              sizeof(int)));
 
-  HIP_CHECK(hipMemsetD2D32Async(A_d, devPitch, memsetval, sizeof(int) * cols, rows, stream));
+  HIP_CHECK(hipMemsetD2D32Async(A_d, devPitch, memsetval, cols, rows, stream));
   HIP_CHECK(hipMemcpy2DAsync(B_h.data(), sizeof(int) * cols, reinterpret_cast<void*>(A_d), devPitch, sizeof(int) * cols, rows,
                              hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -149,6 +150,55 @@ HIP_TEST_CASE(Unit_hipMemsetD2D32Async_NegTsts) {
   HIP_CHECK(hipFree(reinterpret_cast<void *>(A_d)));
   HIP_CHECK(hipStreamDestroy(stream));
 }
+/**
+ * Test Description
+ * ------------------------
+ * - Check element widths, row padding, offset destinations and graph patterns.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemsetD2D32Async.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemsetD2D32Async_ElementCountsAndPadding) {
+  const auto mode = GENERATE(TypedFillMode::Direct, TypedFillMode::Captured);
+  typed2DPadding<uint32_t, true>(mode);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Reject overflowing, misaligned and out-of-allocation pitched fills.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemsetD2D32Async.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemsetD2D32Async_InvalidGeometry) {
+  typed2DInvalidGeometry<uint32_t, true>();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Empty fills preserve capture status and leave an active capture empty.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemsetD2D32Async.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemsetD2D32Async_EmptyCapture) {
+  empty2DCapture([](void* dst, size_t pitch, size_t width, size_t height, hipStream_t stream) {
+    return hipMemsetD2D32Async(reinterpret_cast<hipDeviceptr_t>(dst), pitch, 7, width, height,
+                               stream);
+  });
+}
+
 /**
  * End doxygen group MemoryTest.
  * @}
