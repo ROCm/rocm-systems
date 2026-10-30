@@ -92,6 +92,7 @@ foreach(
     mnemonic
     IN
     ITEMS
+        v_add_sub
         v_round_f64
         v_fma_dx9_zero
         v_fma
@@ -99,6 +100,10 @@ foreach(
         v_fmaak
         v_fmac
         v_fmamk
+        v_exponent
+        v_mul_dx9_zero_f32
+        v_mul
+        v_pk_add_mul_f16
         v_pk_fma_f16
         v_pk_fmac_f16
         v_rcp_rsq_sqrt_f64
