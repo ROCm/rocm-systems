@@ -4348,6 +4348,7 @@
     "rccl_ep_python_dispatch": {
       "extends": "default",
       "is_pytest": true,
+      "setup_venv": true,
       "test_dir": "test/rccl_ep",
       "num_ranks": 1,
       "num_nodes": 1,

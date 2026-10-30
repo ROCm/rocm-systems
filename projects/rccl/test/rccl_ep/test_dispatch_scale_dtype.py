@@ -16,7 +16,7 @@ if not torch.cuda.is_available():
 sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "..", "src", "algorithms", "rccl_ep", "python")
 )
-rccl_ep = pytest.importorskip("rccl_ep")
+import rccl_ep  # noqa: E402
 
 TOKENS, HIDDEN, TOPK = 4, 256, 2
 
