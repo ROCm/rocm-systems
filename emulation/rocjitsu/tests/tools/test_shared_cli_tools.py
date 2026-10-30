@@ -52,6 +52,12 @@ assert b"memory-backend=mem" in launcher_help
 assert b"application arguments must follow --" in invoke(
     launcher, "bare-application", status=1
 )
+assert b"application arguments must follow --" in invoke(
+    launcher, "bare-application", "--", "app", status=1
+)
+assert b"application arguments must follow --" in invoke(
+    launcher, "bare-application", "--config", "missing.json", "--", "app", status=1
+)
 assert b"requires a value" in invoke(launcher, "--config", status=1)
 assert b"nonempty path" in invoke(launcher, "--vfio-socket=", status=1)
 assert b"requires a value" in invoke(pretranslate, "--store-root", status=2)

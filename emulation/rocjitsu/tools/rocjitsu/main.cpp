@@ -407,6 +407,7 @@ int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
 
   ucli::Command command{"rocjitsu"};
+  command.set_positional_usage("-- APP [ARGS...]");
   launcher::LaunchFlags flags;
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
   util::DiagnosticEmitter diagnostic(report);
@@ -449,7 +450,8 @@ int main(int argc, char *argv[]) {
   const bool attach_mode = flags.attach->value();
   const bool has_app = !parsed.value().positional.empty();
 
-  if (has_app && !parsed.value().saw_separator) {
+  if (has_app &&
+      (!parsed.value().saw_separator || parsed.value().positionals_before_separator != 0)) {
     std::cerr << "rocjitsu: application arguments must follow --\n";
     print_usage(command);
     return 1;
