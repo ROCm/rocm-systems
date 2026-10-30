@@ -25,6 +25,9 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/buffer.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
@@ -326,6 +329,42 @@ quiesce_budget_ns()
         return static_cast<uint64_t>(_ms) * 1'000'000ull;
     }();
     return _v;
+}
+
+rocprofiler_status_t
+flush_signal_less_records(rocprofiler_buffer_id_t buffer_id)
+{
+    if(g_child_stale.load(std::memory_order_acquire) || registration::get_fini_status() != 0 ||
+       !kfd_reader_state_constructed() || !signal_less_feature_enabled())
+        return ROCPROFILER_STATUS_SUCCESS;
+
+    auto* buffer = buffer::get_buffer(buffer_id);
+    if(!buffer) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
+    auto                    contexts = context::get_registered_contexts_snapshot();
+    const context::context* owner    = nullptr;
+    for(const auto* candidate : contexts)
+    {
+        if(candidate && candidate->context_idx == buffer->context_id)
+        {
+            owner = candidate;
+            break;
+        }
+    }
+    if(!owner || !owner->buffered_tracer ||
+       owner->buffered_tracer->buffer_data.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) !=
+           buffer_id)
+        return ROCPROFILER_STATUS_SUCCESS;
+
+    if(internal_threading::is_task_group_thread()) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+
+    const auto budget  = quiesce_budget_ns();
+    const auto started = steady_now_ns();
+    if(!wait_for_reader_quiesce(budget)) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+    const auto elapsed = steady_now_ns() - started;
+    if(elapsed >= budget || !fence_signal_less_tasks(budget - elapsed))
+        return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 void
