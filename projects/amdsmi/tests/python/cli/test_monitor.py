@@ -8,6 +8,14 @@ from cli.base import TestCliBase
 
 
 class TestMonitor(TestCliBase):
+    def test_requested_monitor_arguments(self) -> None:
+        for arguments in ("", "-p -t -u -m -q -w 1 -i 2"):
+            with self.subTest(arguments=arguments):
+                cmd = f"amd-smi monitor {arguments}".strip()
+                rc, output, stderr = self.util.RunCmdSync(cmd, time_out=30)
+                self.assertEqual(rc, self.PASS, f"{cmd}: {stderr}")
+                self.assertTrue(output.strip(), cmd)
+
     def test_command(self):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi monitor"
