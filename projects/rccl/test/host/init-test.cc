@@ -8216,6 +8216,18 @@ TEST_F(InitMicrotest, CommInitRankFunc_SplitNoColor_ReturnsSuccessWithoutAllocat
   EXPECT_EQ(s.comm(), s.published());
 }
 
+TEST_F(InitMicrotest, CommInitRankFunc_SplitNoColorSetDeviceFails_ReturnsTheErrorWithoutAComm) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  s.job()->parent = parent.get();
+  s.job()->color = NCCL_SPLIT_NOCOLOR;
+  s.job()->comm = nullptr;
+  ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
+
+  EXPECT_EQ(ncclUnhandledCudaError, s.Run()) << "fail: must not touch the absent NCCL_SPLIT_NOCOLOR comm";
+  EXPECT_EQ(nullptr, s.published());
+}
+
 TEST_F(InitMicrotest, CommInitRankFunc_SplitWithColor_DerivesChildHashAndHandsItToBootstrapSplit) {
   Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
   auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);

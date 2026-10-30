@@ -3466,11 +3466,11 @@ fail:
   // If failure occurs after that assignment, commFree() will free comm->archName,
   // so freeing archName here as well would be a double free. Null it out so that
   // commFree handles cleanup exclusively.
-  if (archName == comm->archName) {
+  if (comm && archName == comm->archName) {
     archName = NULL;
   }
   free(archName);
-  COMPILER_ATOMIC_STORE(&comm->initState, res, std::memory_order_release);
+  if (comm) COMPILER_ATOMIC_STORE(&comm->initState, res, std::memory_order_release);
   goto exit;
 }
 
