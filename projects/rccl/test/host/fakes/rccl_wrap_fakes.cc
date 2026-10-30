@@ -435,12 +435,6 @@ void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rc
 void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
 }
-bool rcclCeAllReduceEnabled(const ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAllReduceEnabled");
-}
-bool rcclForceCeAllReduceEnabled(const ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeAllReduceEnabled");
-}
 bool rcclForceCeScratchEnabled(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
 }

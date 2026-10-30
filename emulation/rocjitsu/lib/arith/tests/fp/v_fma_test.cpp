@@ -8,9 +8,11 @@
 #include "common/semantics.h"
 #include "fp/elementwise.h"
 #include "fp/fma_reference.h"
+#include "fp/fma_simd_test.h"
 #include "fp/half_fma_test.h"
 #include "fp/reference.h"
 #include "rj_arith/rj_arith.h"
+#include <array>
 #include <bit>
 #include <gtest/gtest.h>
 #include <stdint.h>
@@ -23,6 +25,13 @@ namespace rocjitsu::arith::test {
 template <int Lanes, typename Call> void check_fma(Call call, bool gfx12) {
   constexpr int Width = 32;
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  check_fma_simd<32, Lanes>(call, {0, RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_ABS_B, RJ_ARITH_ALU_CLAMP,
+                                   RJ_ARITH_ALU_OMOD_2, RJ_ARITH_ALU_OMOD_4, RJ_ARITH_ALU_OMOD_HALF,
+                                   RJ_ARITH_DPP8,
+                                   RJ_ARITH_DPP16 | (0x1bULL << RJ_ARITH_DPP_CTRL_SHIFT) |
+                                       RJ_ARITH_DPP_ROW_MASK | RJ_ARITH_DPP_BANK_MASK,
+                                   RJ_ARITH_DPP16 | (0x101ULL << RJ_ARITH_DPP_CTRL_SHIFT) |
+                                       RJ_ARITH_DPP_ROW_MASK | RJ_ARITH_DPP_BANK_MASK});
   using Registers = rocjitsu::arith::test::Registers<10, Lanes>;
   Registers input = make_fp_inputs<Width, Lanes>();
 
@@ -60,6 +69,22 @@ template <int Lanes, typename Call> void check_fma(Call call, bool gfx12) {
 
   const auto cpu_levels = rocjitsu::arith::test::supported_cpu_levels();
   for (uint64_t cpu : cpu_levels) {
+    // Independent OMOD witnesses cover x4 and signed tiny results under x0.5.
+    for (auto sample : {std::array<uint32_t, 3>{0x00ffffffU, RJ_ARITH_ALU_OMOD_HALF, 0U},
+                        std::array<uint32_t, 3>{0x80ffffffU, RJ_ARITH_ALU_OMOD_HALF, 0x80000000U},
+                        std::array<uint32_t, 3>{0x3fc00000U, RJ_ARITH_ALU_OMOD_4, 0x40c00000U}}) {
+      for (uint64_t semantics :
+           {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+        Registers r{};
+        r.v[0][0] = sample[0];
+        r.v[2][0] = 0x3f800000U;
+        r.v[4][0] = 0;
+        uint64_t flags = cpu | semantics | (gfx12 ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+        ASSERT_EQ(call(flags, Mask(1), sample[1], r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[6][0], sample[2]);
+      }
+    }
     for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
       for (uint64_t instruction_flags : instruction_flag_cases) {
         for (Mask exec_mask :
@@ -314,14 +339,16 @@ template <bool Half, typename Call> static void check_guest_controls(Call call) 
     }
     for (uint64_t flushing :
          {uint64_t(0), RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
-      Registers<4, 32> r;
-      r.v[0][0] = 1;
-      r.v[1][0] = one;
-      r.v[2][0] = r.v[3][0] = 0;
-      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS | flushing, 1, 0,
-                     r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
-                RJ_ARITH_SUCCESS);
-      EXPECT_EQ(r.v[3][0], flushing ? 0U : 1U);
+      for (uint64_t semantics :
+           {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+        Registers<4, 32> r;
+        r.v[0][0] = 1;
+        r.v[1][0] = one;
+        r.v[2][0] = r.v[3][0] = 0;
+        ASSERT_EQ(call(cpu | semantics | flushing, 1, 0, r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[3][0], flushing ? 0U : 1U);
+      }
     }
   }
 }
@@ -506,9 +533,10 @@ void check_fma16_exact_encodings(Call call) {
       {1, 0x3c00, 0, 1, 0},                              // Exact subnormal result.
   };
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
-                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
-                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+          RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+          RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
       if (Rdna3 && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
         continue;
       }
@@ -807,6 +835,32 @@ TEST(FpFmaF32W32Gfx11, LooseNanClamp) {
         EXPECT_GT(r.v[3][0] & 0x7fffffffU, 0x7f800000U);
       } else {
         EXPECT_EQ(r.v[3][0], 0U);
+      }
+    }
+  }
+}
+
+// Tiny loose results need raw-bit checks: fuzzy tolerances also accept minimum normal.
+TEST(FpFmaF16, LooseTinyResults) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    uint32_t a, b, instruction_flags, expected;
+  } cases[] = {{0x07ff, 0x3c00, RJ_ARITH_ALU_OMOD_HALF, 0},
+               {0x87ff, 0x3c00, RJ_ARITH_ALU_OMOD_HALF, 0x8000},
+               {0x0400, 0x3bff, RJ_ARITH_ALU_OMOD_2, 0},
+               {0x0400, 0x3bff, 0, 0},
+               {0x8400, 0x3bff, 0, 0x8000}};
+  for (auto call : {rj_arith_v_fma_f16_w32, rj_arith_v_fma_f16_w32_gfx12}) {
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (const auto &sample : cases) {
+        Registers<4, 32> r;
+        r.v[0][0] = sample.a;
+        r.v[1][0] = sample.b;
+        r.v[2][0] = 0;
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_LOOSE | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 1,
+                       sample.instruction_flags, r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[3][0] & 0xffffU, sample.expected);
       }
     }
   }
