@@ -1341,26 +1341,6 @@ def test_build_operator_summary_empty_input_returns_empty_with_full_schema():
     assert summary.empty
 
 
-# get_matrix_ops_type Tests
-##############################################################################
-
-
-def test_get_matrix_ops_type():
-    """
-    CDNA2/3/4 GPU series should return MFMA.
-    Non-CDNA GPU series should return WMMA, including unknown series or empty str.
-    """
-    from utils.utils_analysis import get_matrix_ops_type
-
-    assert get_matrix_ops_type("MI200") == "MFMA"
-    assert get_matrix_ops_type("MI300") == "MFMA"
-    assert get_matrix_ops_type("MI350") == "MFMA"
-
-    assert get_matrix_ops_type("navi3") == "WMMA"
-    assert get_matrix_ops_type("unknown_series") == "WMMA"
-    assert get_matrix_ops_type("") == "WMMA"
-
-
 # =============================================================================
 # TESTS FOR COUNTER IMPUTATION
 # =============================================================================

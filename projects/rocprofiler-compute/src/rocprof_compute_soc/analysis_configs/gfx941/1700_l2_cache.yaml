@@ -225,8 +225,6 @@ Panel Config:
         min: Min
         max: Max
         unit: Unit
-      style:
-        type: simple_multi_bar
       metric:
         Write - Credit Starvation:
           type: Credit Starvation

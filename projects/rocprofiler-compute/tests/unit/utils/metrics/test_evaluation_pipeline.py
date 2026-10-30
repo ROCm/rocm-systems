@@ -12,6 +12,7 @@ import pytest
 from utils.metrics.evaluation_pipeline import (
     calc_builtin_vars,
     compute_pct_of_peak,
+    create_empirical_peaks_dict,
     create_sys_vars,
     eval_metric,
     validate_dual_issue_metrics,
@@ -89,6 +90,13 @@ class TestEvaluationPipeline:
             "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
         })
         return metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df
+
+    def test_empirical_peaks_without_roofline_csv_are_nan(self):
+        peaks = create_empirical_peaks_dict(pd.DataFrame())
+        # Ceilings only the gfx9 and only the gfx11 benchmarks measure.
+        for name in ("MFMAF8Flops", "BF16Flops"):
+            assert np.isnan(peaks[f"ammolite__{name}_empirical_peak"])
+        assert all(np.isnan(value) for value in peaks.values())
 
     def test_eval_metric_in_debug_mode(self):
         """eval_metric with debug=True invokes debug_row_tracker and writes back."""

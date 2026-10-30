@@ -13,13 +13,13 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     CallTreeNode,
     build_operator_summary,
     copy_matched_operator_subtree,
     filter_forest_by_backends,
-    get_matrix_ops_type,
     iter_call_tree_paths,
     process_ml_api_trace_output,
     rollup_node_stats,
@@ -391,8 +391,8 @@ class cli_analysis(OmniAnalyze_Base):
                                 "iteration_multiplexing": self._profiling_config.get(
                                     "iteration_multiplexing"
                                 ),
-                                "matrix_ops_type": get_matrix_ops_type(
-                                    workload.sys_info.iloc[0]["gpu_series"]
+                                "matrix_ops_type": (
+                                    mi_gpu_specs.get_roofline_matrix_type(gpu_arch)
                                 ),
                             },
                         )

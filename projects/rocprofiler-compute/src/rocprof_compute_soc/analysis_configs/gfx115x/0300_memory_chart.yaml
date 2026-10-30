@@ -16,18 +16,6 @@
 Panel Config:
   id: 300
   title: Memory Chart
-  description: >-
-    Detailed memory hierarchy metrics for RDNA3.5, showing request counts,
-    bandwidth, hit rates, and utilization at each cache level.
-    Memory hierarchy: LDS/TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory via GCEA
-    (Graphics Core Efficiency Arbiter).
-
-    Use this panel as the reference for **where** bandwidth is measured: GL2C Read/Write
-    Bandwidth use **client-side** GL2 counters; GCEA (Graphics Core Efficiency Arbiter)
-    tables use **DRAM interface** counters.
-    System Speed-of-Light lists separate **L2->fabric (EA)** and **memory controller** rates;
-    those are kernel-summary views and are not the same rows as GL2C client read BW here.
-
   data source:
 
   # =========================================================================
@@ -37,7 +25,6 @@ Panel Config:
       id: 301
       title: "Instruction Cache"
       cli_style: mem_chart
-      comparable: false
       header:
         metric: Metric
         value: Value
@@ -60,7 +47,6 @@ Panel Config:
       id: 302
       title: "Scalar Data Cache"
       cli_style: mem_chart
-      comparable: false
       header:
         metric: Metric
         value: Value
@@ -83,7 +69,6 @@ Panel Config:
       id: 303
       title: "TCP Cache (GL0 Vector Cache)"
       cli_style: mem_chart
-      comparable: false
       header:
         metric: Metric
         value: Value
@@ -110,7 +95,6 @@ Panel Config:
       id: 304
       title: "LDS (Local Data Share)"
       cli_style: mem_chart
-      comparable: false
       header:
         metric: Metric
         value: Value
@@ -136,7 +120,6 @@ Panel Config:
       id: 305
       title: "TCP-GL1 Interface"
       cli_style: mem_chart
-      comparable: false
       header:
         metric: Metric
         value: Value
@@ -156,7 +139,6 @@ Panel Config:
       id: 306
       title: "GL1 Cache (L1)"
       cli_style: mem_chart
-      comparable: false
       header:
         metric: Metric
         value: Value
@@ -179,7 +161,6 @@ Panel Config:
       id: 307
       title: "GL1-GL2 Interface"
       cli_style: mem_chart
-      comparable: false
       header:
         metric: Metric
         value: Value
@@ -199,7 +180,6 @@ Panel Config:
       id: 308
       title: "GL2 Cache (L2)"
       cli_style: mem_chart
-      comparable: false
       header:
         metric: Metric
         value: Value
@@ -225,7 +205,6 @@ Panel Config:
       id: 309
       title: "Graphics Core Efficiency Arbiter (GCEA) to System Memory"
       cli_style: mem_chart
-      comparable: false
       header:
         metric: Metric
         value: Value
@@ -251,7 +230,6 @@ Panel Config:
       id: 310
       title: "Workgroup Processors (WGPs)"
       cli_style: mem_chart
-      comparable: false
       header:
         metric: Metric
         value: Value

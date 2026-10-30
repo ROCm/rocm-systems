@@ -20,7 +20,11 @@ import pytest
 from sqlalchemy import text
 
 from memory_chart.loader import Layouts
-from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
+from pc_sampling import (
+    per_kernel_isa_export,
+    per_source_line_export,
+    source_snapshot_analysis,
+)
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
 from rocprof_compute_analyze.analysis_db import (
@@ -247,6 +251,23 @@ def run_analysis_with_existing_database(analyzer):
             )
         )
         analyzer.run_analysis()
+
+
+def query_instruction_sample_states(session):
+    """Query the sample states of instruction lines, leaving out source lines."""
+    return session.query(orm.PCSampleState).filter(
+        orm.PCSampleState.instruction_uuid.is_not(None)
+    )
+
+
+def query_instruction_stall_reasons(session):
+    """Query the stall-reason counts of instruction lines, leaving out source lines."""
+    return (
+        session
+        .query(orm.PCSampleStallReason)
+        .join(orm.PCSampleStallReason.pc_sample_state)
+        .filter(orm.PCSampleState.instruction_uuid.is_not(None))
+    )
 
 
 def run_analysis_with_materialized_views(analyzer):
@@ -1709,8 +1730,8 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
         )
         assert instruction_line.kernel_symbol.code_object_store.code_object_id == 5
 
-    sample_states = db_session.query(orm.PCSampleState).all()
-    stall_reasons = db_session.query(orm.PCSampleStallReason).all()
+    sample_states = query_instruction_sample_states(db_session).all()
+    stall_reasons = query_instruction_stall_reasons(db_session).all()
     instruction_samples = db_session.query(orm.InstructionSample).all()
     assert len(sample_states) == 2
     assert {state.total_count for state in sample_states} == {1, 2}
@@ -1742,12 +1763,15 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
                 ON kernel_symbol.code_object_uuid = code_object.code_object_uuid
             WHERE code_object.code_object_uuid IS NULL
         """,
-        "sample_state_to_instruction_line": """
+        "sample_state_to_instruction_or_source_line": """
             SELECT COUNT(*)
             FROM compute_pc_sample_state AS sample_state
             LEFT JOIN compute_instruction_line AS instruction_line
                 ON sample_state.instruction_uuid = instruction_line.instruction_uuid
+            LEFT JOIN compute_source_line AS source_line
+                ON sample_state.source_line_uuid = source_line.source_line_uuid
             WHERE instruction_line.instruction_uuid IS NULL
+                AND source_line.source_line_uuid IS NULL
         """,
         "stall_reason_to_state_and_lookup": """
             SELECT COUNT(*)
@@ -2037,13 +2061,13 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
     assert aggregate_kernel.metric_values
     assert aggregate_kernel.roofline_data_points
 
-    sample_states = db_session.query(orm.PCSampleState).all()
+    sample_states = query_instruction_sample_states(db_session).all()
     assert len(sample_states) == 2
     assert all(
         state.instruction_line.kernel_symbol.kernel_uuid == aggregate_kernel.kernel_uuid
         for state in sample_states
     )
-    assert db_session.query(orm.PCSampleStallReason).count() == 2
+    assert query_instruction_stall_reasons(db_session).count() == 2
     assert db_session.query(orm.InstructionSample).count() == 2
     assert db_session.query(orm.InstructionLine).count() == 4
 
@@ -2077,8 +2101,8 @@ def test_run_analysis_does_not_register_filtered_pc_sampling_symbols(
     assert sampled_line.kernel_symbol.code_object_store.pid == 42
     assert sampled_line.kernel_symbol.kernel_uuid == dispatch.kernel_uuid
     assert sampled_line.pc_sample_state.total_count == 1
-    assert db_session.query(orm.PCSampleState).count() == 1
-    assert db_session.query(orm.PCSampleStallReason).count() == 1
+    assert query_instruction_sample_states(db_session).count() == 1
+    assert query_instruction_stall_reasons(db_session).count() == 1
     assert db_session.query(orm.InstructionSample).count() == 1
 
 
@@ -2216,6 +2240,10 @@ def read_exported_source_files(result_path):
         exported_path: contents
         for exported_path, contents in exported_files.items()
         if source_snapshot_analysis.SOURCE_EXPORT_DIRECTORY_NAME in exported_path.parts
+        # The per-source-line files beside each copy have their own test.
+        and not exported_path.name.endswith(
+            per_source_line_export.SOURCE_LINE_FILE_SUFFIX
+        )
     }
 
 
@@ -3025,10 +3053,10 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
     retained_line = lines[0]
     assert retained_line.kernel_symbol.kernel is kernel_objs["vecCopy"]
 
-    retained_sample_state = db_session.query(orm.PCSampleState).one()
+    retained_sample_state = query_instruction_sample_states(db_session).one()
     assert retained_line.pc_sample_state is retained_sample_state
 
-    stall_reason_count = db_session.query(orm.PCSampleStallReason).one()
+    stall_reason_count = query_instruction_stall_reasons(db_session).one()
     assert stall_reason_count.pc_sample_state is retained_sample_state
     assert retained_sample_state.stall_reasons == [stall_reason_count]
     assert stall_reason_count.stall_reason_lookup.text == "WAITCNT"
@@ -3069,6 +3097,48 @@ def test_run_analysis_keeps_sampled_row_without_a_comment(db_session, tmp_path):
         )
     }
     assert rebuilt_sources == {0x10: "/home/u/app/vcopy.cpp:1", 0x20: None}
+
+
+def test_run_analysis_aggregates_each_source_line_over_all_processes(
+    db_session, tmp_path
+):
+    """Each source line aggregates the instructions of all processes.
+
+    An instruction counts once toward each distinct source line of its inline
+    stack, even if a one-line lambda puts a source line twice in that stack.
+    """
+    workload_path = tmp_path / "workload"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/s/a.cpp": "int first;\nint second;\n"},
+        ["/s/a.cpp:1 -> /s/a.cpp:2", "/s/a.cpp:2 -> /s/a.cpp:2"],
+    )
+    second_process_tool_data = copy.deepcopy(tool_data_records[0])
+    second_process_tool_data["metadata"]["pid"] = 43
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): [*tool_data_records, second_process_tool_data]
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    line_states = {
+        sample_state.source_line.line_number: (
+            sample_state.total_count,
+            sample_state.issue_count,
+            sample_state.stall_count,
+            {
+                stall_reason.stall_reason_lookup.text: stall_reason.count
+                for stall_reason in sample_state.stall_reasons
+            },
+        )
+        for sample_state in db_session.query(orm.PCSampleState).filter(
+            orm.PCSampleState.source_line_uuid.is_not(None)
+        )
+    }
+    assert line_states == {
+        1: (2, 0, 2, {"WAITCNT": 2}),
+        2: (4, 2, 2, {"WAITCNT": 2}),
+    }
 
 
 def make_csv_run_analyzer(tmp_path, tool_data_per_workload, **filters):
@@ -3297,6 +3367,81 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
     assert stall_reason_columns(header) == []
     # host_trap knows the sample landed, but not whether the wave issued.
     assert rows[0][4:7] == ["1", "", ""]
+
+
+def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path):
+    """The per-source-line file sits beside the source copy and has ISA references.
+
+    The instruction without a source line number goes to the unattributable
+    row, which comes first.
+    """
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/s/a.cpp": "int first;\nint second;\nint third;\n"},
+        ["/s/a.cpp:1", "/s/a.cpp:?"],
+    )
+    # Both offsets belong to one kernel, so both ISA references point into the
+    # ISA file of that kernel.
+    tool_data = tool_data_records[0]
+    tool_data["kernel_symbols"][1]["kernel_id"] = 100
+    tool_data["buffer_records"]["kernel_dispatch"][1]["dispatch_info"]["kernel_id"] = (
+        100
+    )
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path, {str(workload_path): tool_data_records}
+    )
+    run_source_export_analysis(analyzer)
+
+    source_directory = (
+        result_path
+        / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
+        / ISA_WORKLOAD_NAME
+        / ISA_WORKLOAD_SUB_NAME
+        / source_snapshot_analysis.SOURCE_EXPORT_DIRECTORY_NAME
+        / "s"
+    )
+    assert sorted(path.name for path in source_directory.iterdir()) == [
+        "a.cpp",
+        "a.cpp_pc_sampling.csv",
+    ]
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    isa_file = (
+        f"{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
+        "/isa_code_object_id_5_pid_42.csv"
+    )
+    with (source_directory / "a.cpp_pc_sampling.csv").open(
+        newline="", encoding="utf-8"
+    ) as source_line_file:
+        header, *rows = list(csv.reader(source_line_file))
+
+    assert header == [
+        "Source line number",
+        "Source line",
+        "Total count",
+        "Active count",
+        "Stall count",
+        "Wave occupancy percent",
+        "Active thread percent",
+        "Stall WAITCNT",
+        "ISA references",
+    ]
+    assert rows == [
+        ["", "Unattributable instructions", "1", "", "", "", "", "", f"{isa_file}:2"],
+        [
+            "1",
+            "int first;",
+            "1",
+            "0",
+            "1",
+            "",
+            "",
+            "1",
+            f"{isa_file}:1",
+        ],
+        ["2", "int second;", "", "", "", "", "", "", ""],
+        ["3", "int third;", "", "", "", "", "", "", ""],
+    ]
 
 
 def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
