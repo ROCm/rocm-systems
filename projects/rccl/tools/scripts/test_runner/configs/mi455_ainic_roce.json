@@ -6752,6 +6752,11 @@
           "name": "DDA_Fabric_AllReduce_LL128_OneShot_BitIdentical",
           "description": "DDA fabric AllReduce LL128 one-shot tier folds in rank order, so every rank gets the same bits back; own process",
           "test_filter": "DdaMPI_AllReduce.LL128OneShotBitIdenticalAcrossRanks"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_FreshComm_NonBlockingStream",
+          "description": "32 fresh comms with staggered rank arrival, each running two LL one-shot AllReduces on a non-blocking stream right after init; catches the init zero fills landing after a rank's first LL kernel (about 35 s at 8 ranks)",
+          "test_filter": "DdaMPI_AllReduce.LLFreshCommNonBlockingStream"
         }
       ]
     },
