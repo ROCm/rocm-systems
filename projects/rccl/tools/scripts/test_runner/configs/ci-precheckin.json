@@ -108,6 +108,7 @@
         {"name": "Teardown.FailedCollectiveStopsBlockedPeers", "description": "A failed collective stops peers blocked on the failed rank instead of waiting for their timeout", "test_filter": "Teardown.FailedCollectiveStopsBlockedPeers"},
         {"name": "Teardown.FailedInitStopsWaitingPeers", "description": "A failed InitComms stops peers waiting in ncclCommInitRank", "test_filter": "Teardown.FailedInitStopsWaitingPeers"},
         {"name": "Teardown.DestroyCommsAbortsPeersAfterValidationFailure", "description": "After one rank fails validation, DestroyComms aborts healthy peers instead of finalizing", "test_filter": "Teardown.DestroyCommsAbortsPeersAfterValidationFailure"},
+        {"name": "Teardown.FinalizeAbortsPeersAfterValidationFailure", "description": "Finalize without DestroyComms after one rank fails validation aborts healthy peers instead of finalizing", "test_filter": "Teardown.FinalizeAbortsPeersAfterValidationFailure"},
         {"name": "Teardown.WarmedPoolWorkerIsReused", "description": "InitComms collects a warming pool worker's reply and reuses it", "test_filter": "Teardown.WarmedPoolWorkerIsReused"},
         {"name": "Teardown.FinalizeReportsLostWarmupWorker", "description": "Finalize collects pending warm-ups and reports a worker that died while warming", "test_filter": "Teardown.FinalizeReportsLostWarmupWorker", "timeout": 60},
         {"name": "Teardown.HungWarmupsShareOneDeadline", "description": "Hung warming workers share one reply deadline", "test_filter": "Teardown.HungWarmupsShareOneDeadline", "timeout": 60},

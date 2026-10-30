@@ -192,8 +192,14 @@ namespace RcclUnitTesting
       }
     }
   stop:
-    // Ensure communicators are destroyed before child process exits
-    if (!this->comms.empty()) DestroyComms();
+    // Comms still live here mean the parent skipped DestroyComms (a test that
+    // stopped early, or a lost parent), so a peer may have failed: abort rather
+    // than finalize, which would wait on that peer until the teardown deadline.
+    if (!this->comms.empty())
+    {
+      this->commsFailed = true;
+      DestroyComms();
+    }
 
     if (verbose) TEST_INFO("Child %d exiting execution loop", this->childId);
 

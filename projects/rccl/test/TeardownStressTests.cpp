@@ -12,6 +12,7 @@
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <functional>
 #include <optional>
 #include <poll.h>
 #include <sys/wait.h>
@@ -253,26 +254,35 @@ namespace RcclUnitTesting
 
   // A worker that never replies must fail the current test once
   // UT_CHILD_TIMEOUT_S expires, and be killed and reaped, instead of hanging
-  // the whole binary.
+  // the whole binary. DestroyComms collects acks from all children at once;
+  // QuerySymmetricSupport reads one child at a time (WaitForChild).
   TEST(Teardown, SilentChildFailsAfterReplyTimeout)
   {
-    TestBed testBed;
-    TestBedChild* const child = InstallHungChild(testBed);
-    ASSERT_NE(child, nullptr);
-    pid_t const childPid = child->pid;
+    std::pair<char const*, std::function<void(TestBed&)>> const commands[] = {
+      {"DestroyComms", [](TestBed& testBed) { testBed.DestroyComms(); }},
+      {"QuerySymmetricSupport", [](TestBed& testBed) { bool supported = false; testBed.QuerySymmetricSupport(supported); }},
+    };
+    for (auto const& command : commands)
+    {
+      SCOPED_TRACE(command.first);
+      TestBed testBed;
+      TestBedChild* const child = InstallHungChild(testBed);
+      ASSERT_NE(child, nullptr);
+      pid_t const childPid = child->pid;
 
-    ::testing::TestPartResultArray failures;
-    auto const elapsed = CaptureFailures(failures, [&]() { testBed.DestroyComms(); });
+      ::testing::TestPartResultArray failures;
+      auto const elapsed = CaptureFailures(failures, [&]() { command.second(testBed); });
 
-    EXPECT_EQ(failures.size(), 1);
-    EXPECT_TRUE(AnyFailureMentions(failures, "stopped responding"));
-    EXPECT_LT(elapsed, std::chrono::seconds(30));
-    EXPECT_TRUE(testBed.childList.empty());
-    EXPECT_EQ(testBed.NumActiveRanks(), 0);
-    EXPECT_FALSE(testBed.childFailed);
-    errno = 0;
-    EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
-    EXPECT_EQ(errno, ECHILD);
+      EXPECT_EQ(failures.size(), 1);
+      EXPECT_TRUE(AnyFailureMentions(failures, "stopped responding"));
+      EXPECT_LT(elapsed, std::chrono::seconds(30));
+      EXPECT_TRUE(testBed.childList.empty());
+      EXPECT_EQ(testBed.NumActiveRanks(), 0);
+      EXPECT_FALSE(testBed.childFailed);
+      errno = 0;
+      EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
+      EXPECT_EQ(errno, ECHILD);
+    }
   }
 
   // A worker that ignores CHILD_STOP (e.g. stuck in comm teardown) must be
@@ -550,6 +560,33 @@ namespace RcclUnitTesting
     EXPECT_TRUE(testBed.poolChildren.empty());
   }
 
+  namespace
+  {
+    // Runs a 2-process broadcast whose validation fails on rank 1 only, which
+    // leaves rank 1's comms marked failed and rank 0's healthy.
+    void FailValidationOnRank1(TestBed& testBed)
+    {
+      testBed.ev.childTimeoutSec = 20;
+      testBed.InitComms(TestBed::GetDeviceIdsList(2, 2, testBed.ev.GetGpuPriorityOrder()));
+      ASSERT_FALSE(testing::Test::HasFailure());
+      OptionalColArgs options;
+      options.root = 0;
+      testBed.SetCollectiveArgs(ncclCollBroadcast, ncclFloat32, 4096, 4096, options);
+      testBed.AllocateMem(/*inPlace*/ false, /*useManagedMem*/ false);
+      testBed.PrepareData(-1, -1, -1, WrongExpectedOnRank1);
+      testBed.ExecuteCollectives();
+      ASSERT_FALSE(testing::Test::HasFailure());
+
+      bool isCorrect = true;
+      ::testing::TestPartResultArray validateFailures;
+      CaptureFailures(validateFailures, [&]() { testBed.ValidateResults(isCorrect); });
+      ASSERT_FALSE(isCorrect) << "Rank 1 did not detect its corrupted expected value";
+      ASSERT_TRUE(testBed.childFailed);
+      testBed.DeallocateMem();
+      ASSERT_FALSE(testing::Test::HasFailure());
+    }
+  }
+
   // When one rank fails ValidateResults it aborts its comms, so DestroyComms must
   // abort its healthy peers too: finalizing would leave them waiting on that rank.
   TEST(Teardown, DestroyCommsAbortsPeersAfterValidationFailure)
@@ -557,25 +594,8 @@ namespace RcclUnitTesting
     TestBed testBed;
     std::string const skipReason = MultiProcessSkipReason(testBed);
     if (!skipReason.empty()) GTEST_SKIP() << skipReason;
-    testBed.ev.childTimeoutSec = 20;
-
-    testBed.InitComms(TestBed::GetDeviceIdsList(2, 2, testBed.ev.GetGpuPriorityOrder()));
-    ASSERT_FALSE(testing::Test::HasFailure());
-    OptionalColArgs options;
-    options.root = 0;
-    testBed.SetCollectiveArgs(ncclCollBroadcast, ncclFloat32, 4096, 4096, options);
-    testBed.AllocateMem(/*inPlace*/ false, /*useManagedMem*/ false);
-    testBed.PrepareData(-1, -1, -1, WrongExpectedOnRank1);
-    testBed.ExecuteCollectives();
-    ASSERT_FALSE(testing::Test::HasFailure());
-
-    bool isCorrect = true;
-    ::testing::TestPartResultArray validateFailures;
-    CaptureFailures(validateFailures, [&]() { testBed.ValidateResults(isCorrect); });
-    ASSERT_FALSE(isCorrect) << "Rank 1 did not detect its corrupted expected value";
-    ASSERT_TRUE(testBed.childFailed);
-    testBed.DeallocateMem();
-    ASSERT_FALSE(testing::Test::HasFailure());
+    FailValidationOnRank1(testBed);
+    if (testing::Test::HasFatalFailure()) return;
 
     ::testing::TestPartResultArray failures;
     auto const elapsed = CaptureFailures(failures, [&]() { testBed.DestroyComms(); });
@@ -584,6 +604,26 @@ namespace RcclUnitTesting
     EXPECT_LT(elapsed, std::chrono::seconds(testBed.ev.childTimeoutSec));
     EXPECT_FALSE(testBed.childFailed);
     testBed.Finalize();
+  }
+
+  // A test that stops early skips DestroyComms, so Finalize stops workers whose
+  // comms are still live. The healthy rank must abort them too, not wait in
+  // finalize on the failed rank until the teardown deadline kills it.
+  TEST(Teardown, FinalizeAbortsPeersAfterValidationFailure)
+  {
+    TestBed testBed;
+    std::string const skipReason = MultiProcessSkipReason(testBed);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
+    FailValidationOnRank1(testBed);
+    if (testing::Test::HasFatalFailure()) return;
+
+    ::testing::TestPartResultArray failures;
+    auto const elapsed = CaptureFailures(failures, [&]() { testBed.Finalize(); });
+
+    EXPECT_EQ(failures.size(), 0) << (failures.size() > 0 ? failures.GetTestPartResult(0).message() : "");
+    EXPECT_LT(elapsed, std::chrono::seconds(testBed.ev.childTimeoutSec));
+    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_TRUE(testBed.poolChildren.empty());
   }
 
   // A rank, group or collective outside the config must fail the command rather

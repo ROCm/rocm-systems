@@ -136,8 +136,12 @@ namespace RcclUnitTesting
         // In one of the last two full loads; wraps past n (skipped) when n is that small.
         size_t const elemsPerLoad = 16 / elemBytes;
         size_t const nearLastLoadElem = n / elemsPerLoad * elemsPerLoad - 2;
+        // First element read by thread 64 of block 0 (offset 0 takes the vector path), which
+        // is past wave 0 for both wave sizes: with no mismatch in wave 0, the earliest one
+        // only reaches the result through the cross-wave merge.
+        size_t const laterWaveElem = 64 * (offset == 0 ? elemsPerLoad : 1);
         std::set<size_t> corrupted;
-        for (size_t const idx : {n - 1, n / 2, nearLastLoadElem, size_t{3}})
+        for (size_t const idx : {n - 1, n / 2, nearLastLoadElem, laterWaveElem})
         {
           if (idx < n && idx % 256 != 255) corrupted.insert(idx);
         }
