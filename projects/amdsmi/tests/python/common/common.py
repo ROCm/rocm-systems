@@ -21,6 +21,7 @@ Imported by every functional/unit leaf test and by all three runners
 """
 
 import contextlib
+import fnmatch
 import importlib.util
 import inspect
 import io
@@ -756,19 +757,24 @@ def _parse_x_pattern(argv=None):
     return None
 
 
+def _filter_suite(suite, keep):
+    """Return a copy of *suite* holding only the tests whose id satisfies *keep*."""
+    filtered = unittest.TestSuite()
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            filtered.addTest(_filter_suite(test, keep))
+        elif keep(test.id()):
+            filtered.addTest(test)
+    return filtered
+
+
 def _filter_suite_exclude(suite, pattern):
     """Return a copy of *suite* with every test whose id contains *pattern* removed.
 
     unittest's ``-k`` can only include matching tests; this provides the inverse so
     callers can run everything except, e.g., the performance suites (``-x performance``).
     """
-    filtered = unittest.TestSuite()
-    for test in suite:
-        if isinstance(test, unittest.TestSuite):
-            filtered.addTest(_filter_suite_exclude(test, pattern))
-        elif pattern not in test.id():
-            filtered.addTest(test)
-    return filtered
+    return _filter_suite(suite, lambda test_id: pattern not in test_id)
 
 
 def run_test_dir(subdir, title, top_level_dir):
@@ -800,6 +806,9 @@ def run_test_dir(subdir, title, top_level_dir):
         pattern="test_*.py",
         top_level_dir=top_level_dir,
     )
+    # testNamePatterns is Python 3.7+; 3.6 ignores it and would run every test.
+    if k_pattern and sys.version_info < (3, 7):
+        suite = _filter_suite(suite, lambda test_id: fnmatch.fnmatchcase(test_id, f"*{k_pattern}*"))
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of
     # -k), e.g. run everything but the perf suites with `-x performance`.

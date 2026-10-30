@@ -2269,7 +2269,7 @@ class AMDSMIHelpers:
 
     def get_pci_device_ids(self) -> Set[str]:
         pci_devices_path = "/sys/bus/pci/devices"
-        pci_devices: set[str] = set()
+        pci_devices: Set[str] = set()
         for device in os.listdir(pci_devices_path):
             device_path = os.path.join(pci_devices_path, device, "device")
             try:
