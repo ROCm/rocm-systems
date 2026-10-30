@@ -513,6 +513,10 @@ class db_analysis(OmniAnalyze_Base):
         self._workload_total_duration_per_workload = self.calc_workload_total_durations(
             self._pc_sampling_trace_per_workload
         )
+        # Also before apply_pmc_filters: the -k ids index this full ranking
+        self._kernel_rankings_per_workload = self.calc_kernel_rankings(
+            self._pc_sampling_trace_per_workload
+        )
         self._pmc_df_per_workload = self.apply_pmc_filters()
         # Same guard as the CLI, on the filtered counters, before anything is written.
         for workload_path, pmc_df in self._pmc_df_per_workload.items():
@@ -1825,6 +1829,41 @@ class db_analysis(OmniAnalyze_Base):
         console_debug("Calculated workload total durations")
 
         return total_duration_per_workload
+
+    def calc_kernel_rankings(
+        self,
+        pc_sampling_traces: dict[str, pd.DataFrame],
+    ) -> dict[str, list[str]]:
+        """Kernel names of each workload in top-stats order, before the ``-k`` filter.
+
+        A name's position is the kernel id that ``-k`` selects. The ranking applies
+        the gpu and dispatch filters the way apply_pmc_filters does, so the ids match.
+        Call it while the counter frames are still unfiltered, as for the totals.
+        """
+        rankings_per_workload: dict[str, list[str]] = {}
+
+        for workload_path, workload in self._runs.items():
+            if self.pc_sampling_only():
+                dispatch_frame = pc_sampling_traces.get(workload_path, pd.DataFrame())
+            else:
+                dispatch_frame = self._pmc_df_per_workload.get(
+                    workload_path, pd.DataFrame()
+                )
+            if dispatch_frame.empty:
+                rankings_per_workload[workload_path] = []
+                continue
+            rankings_per_workload[workload_path] = rank_kernels_by_total_duration(
+                filter_dispatch_frame(
+                    dispatch_frame,
+                    workload.filter_gpu_ids,
+                    None,
+                    workload.filter_dispatch_ids,
+                )
+            )
+
+        console_debug("Calculated kernel rankings")
+
+        return rankings_per_workload
 
     @staticmethod
     def _kernel_by_symbol(
