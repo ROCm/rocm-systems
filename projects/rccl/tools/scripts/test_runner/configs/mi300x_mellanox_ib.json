@@ -5352,6 +5352,14 @@
           "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
         },
         {
+          "name": "Symk_AllReduceLLTailWave",
+          "description": "Forced AllReduce_AGxLL_R at 1 CTA: multi-epoch counts with a short last epoch, odd counts and a one-float input skew (unaligned arm), guard elements, bounded wait",
+          "test_filter": "SymmetricKernelCorruptionTest.AllReduceLL_PinnedTailWave",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "1"
+          }
+        },
+        {
           "name": "Symk_GroupedAllGatherVaryingSizes",
           "description": "Four AllGathers of different sizes fused in one group, exercising the work-range split; skips without cuMem",
           "test_filter": "SymmetricKernelCorruptionTest.GroupedAllGather_VaryingSizes"
