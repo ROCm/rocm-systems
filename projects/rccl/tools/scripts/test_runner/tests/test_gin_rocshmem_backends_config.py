@@ -4,9 +4,11 @@
 # See LICENSE.txt for license information
 """Guards for the 2-node mixed-backend suite in gin_rocshmem_backends_mellanox.json.
 
-GinMPIDeviceTests.MixedBackends_TwoNodeUnsetType skips unless NCCL_GIN_TYPE is
-unset (an empty value also disables Anvil SDMA) and the run is 2 ranks on 2
-hosts. A skip still reports green, so lock the launch shape here (AICOMRCCL-3450).
+Both cases skip unless NCCL_GIN_TYPE is unset (an empty value also disables
+Anvil SDMA) and the launch shape matches. MixedBackends_TwoNodeUnsetType needs
+2 ranks on 2 hosts (AICOMRCCL-3450). MixedBackends_TwoNodePerHostSplitKeepsAnvil
+needs 2 ranks on each of 2 hosts (AICOMRCCL-3501). A skip still reports green,
+so lock the launch shapes here.
 """
 
 import unittest
@@ -16,6 +18,12 @@ from lib.test_config import TestConfigProcessor
 
 _CONFIG = Path(__file__).resolve().parents[1] / "configs" / "gin_rocshmem_backends_mellanox.json"
 _SUITE = "gin_devmpi_mixed_2node"
+
+# test_filter -> (num_ranks, num_nodes, num_gpus per node)
+_EXPECTED_SHAPES = {
+    "GinMPIDeviceTests.MixedBackends_TwoNodeUnsetType": (2, 2, 1),
+    "GinMPIDeviceTests.MixedBackends_TwoNodePerHostSplitKeepsAnvil": (4, 2, 2),
+}
 
 
 class MixedBackendsTwoNodeSuiteTest(unittest.TestCase):
@@ -38,13 +46,13 @@ class MixedBackendsTwoNodeSuiteTest(unittest.TestCase):
         for test in suite["tests"]:
             self.assertNotIn("NCCL_GIN_TYPE", test.get("env_variables", {}), test["name"])
 
-    def test_runs_only_the_two_host_case(self):
+    def test_runs_only_the_two_host_cases(self):
         tests = self.suites[0]["tests"]
-        self.assertEqual([t["test_filter"] for t in tests],
-                         ["GinMPIDeviceTests.MixedBackends_TwoNodeUnsetType"])
-        test = tests[0]
-        self.assertEqual((test["num_ranks"], test["num_nodes"], test["num_gpus"]), (2, 2, 1))
-        self.assertEqual(test["binary"], "rccl-UnitTestsMPI")
+        self.assertEqual([t["test_filter"] for t in tests], list(_EXPECTED_SHAPES))
+        for test in tests:
+            self.assertEqual((test["num_ranks"], test["num_nodes"], test["num_gpus"]),
+                             _EXPECTED_SHAPES[test["test_filter"]], test["name"])
+            self.assertEqual(test["binary"], "rccl-UnitTestsMPI", test["name"])
 
     def test_build_enables_rocshmem_gin(self):
         self.assertIn("--rocshmem-gin", self.proc.get_build_config()["install_flags"])
