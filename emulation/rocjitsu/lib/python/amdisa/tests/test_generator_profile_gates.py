@@ -7713,6 +7713,58 @@ def test_hwreg_descriptor_tables_cover_checked_in_xml(
         assert cpp_values.get(value) == name
 
 
+@pytest.mark.parametrize(
+    ('arch_name', 'profile'),
+    [
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+    ],
+)
+def test_vopd_execution_failure_stops_before_either_slot_commits(
+    tmp_path, arch_name, profile
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch_name,
+        generated_dir_name=arch_name,
+        cpp_namespace=arch_name,
+        profile=profile,
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+    codegen.gen_vopd()
+    cpp = (tmp_path / arch_name / 'vopd_exec.cpp').read_text()
+    assert 'throw ' not in cpp
+    helpers, body = cpp.split('void Vopd::execute_impl', 1)
+    # Each defensive non-void failure reports the reason and returns a placeholder.
+    failures = helpers.split('wf.report_instruction_execution_error(')[1:]
+    assert len(failures) == (2 if arch_name == 'cdna5' else 1)
+    for failure in failures:
+        assert failure.lstrip().startswith(
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
+        )
+        assert failure.split(';', 2)[1].strip() == 'return 0'
+    wave_check, probes = body.split('try_execute_vopd_integer_pair_simd', 1)
+    assert 'if (wf.wf_size() != 32)' in wave_check
+    if arch_name in ('rdna3', 'rdna3_5'):
+        assert 'report_instruction_execution_error' not in wave_check
+    else:
+        assert 'InvalidInstructionEncoding' in wave_check
+    assert 'return;' in wave_check
+    evaluations = list(
+        re.finditer(r'uint(?:32|64)_t \w+_result\w* = [^;]*execute_slot[^;]*;', probes)
+    )
+    assert len(evaluations) == (4 if arch_name == 'cdna5' else 2)
+    first_store = probes.index('amdgpu::RegisterAccess(wf).write_lane')
+    for evaluation in evaluations:
+        following = probes[evaluation.end() :].lstrip()
+        assert following.startswith('if (wf.instruction_execution_failed()) return;')
+        assert evaluation.end() < first_store
+
+
 def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(

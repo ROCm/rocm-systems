@@ -1443,9 +1443,9 @@
           "test_filter": "RcclAlltoAllDecision.*"
         },
         {
-          "name": "RcclCeAr2ShotMax",
+          "name": "RcclCeNonRegMax",
           "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
-          "test_filter": "RcclCeAr2ShotMax.*"
+          "test_filter": "RcclCeNonRegMax.*"
         },
         {
           "name": "RcclCeArGrownBuffer",
@@ -6215,7 +6215,7 @@
       "num_nodes": 1,
       "num_gpus": 2,
       "timeout": 180,
-      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (kernel >= 6.8, ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
+      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "NCCL_CUMEM_ENABLE": "1"
@@ -6752,6 +6752,11 @@
           "name": "DDA_Fabric_AllReduce_LL128_OneShot_BitIdentical",
           "description": "DDA fabric AllReduce LL128 one-shot tier folds in rank order, so every rank gets the same bits back; own process",
           "test_filter": "DdaMPI_AllReduce.LL128OneShotBitIdenticalAcrossRanks"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_FreshComm_NonBlockingStream",
+          "description": "32 fresh comms with staggered rank arrival, each running two LL one-shot AllReduces on a non-blocking stream right after init; catches the init zero fills landing after a rank's first LL kernel (about 35 s at 8 ranks)",
+          "test_filter": "DdaMPI_AllReduce.LLFreshCommNonBlockingStream"
         }
       ]
     },
