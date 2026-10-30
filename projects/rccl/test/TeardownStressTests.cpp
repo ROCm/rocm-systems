@@ -140,9 +140,6 @@ namespace RcclUnitTesting
   TEST(Teardown, AlreadyExitedChildCleanup)
   {
     TestBed testBed;
-    testBed.poolMode = false;
-    testBed.configUsedPool = false;
-
     TestBedChild* child = new TestBedChild(0, false, 0, false);
     ASSERT_EQ(child->InitPipes(), TEST_SUCCESS);
     child->pid = fork();
@@ -160,8 +157,7 @@ namespace RcclUnitTesting
     close(child->childReadFd);
     child->childWriteFd = -1;
     child->childReadFd = -1;
-    testBed.childList = {child};
-    testBed.rankToChildMap = {0};
+    testBed.AdoptChildren({child});
 
     // Wait until the worker has exited, but leave it for TestBed to reap.
     siginfo_t childInfo{};
@@ -196,9 +192,10 @@ namespace RcclUnitTesting
     }
 
     // Forks a worker that keeps its pipes open but never answers, as a worker
-    // wedged in a collective would. With a reply, it first reads one two-int
-    // command (such as LaunchGraphs) and answers it with that reply.
-    TestBedChild* ForkHungChild(int const childId, std::optional<int> const reply = std::nullopt)
+    // wedged in a collective would. With a status, it first reads one two-int
+    // command (such as LaunchGraphs) and answers it as reply number seq.
+    TestBedChild* ForkHungChild(int const childId, std::optional<int> const status = std::nullopt,
+                                uint32_t const seq = 1)
     {
       TestBedChild* child = new TestBedChild(childId, false, 0, false);
       if (child->InitPipes() != TEST_SUCCESS)
@@ -213,9 +210,12 @@ namespace RcclUnitTesting
         close(child->parentWriteFd);
         close(child->parentReadFd);
         int command[2];
-        if (reply && safe_pipe_read(child->childReadFd, command, sizeof(command)) ==
-                     static_cast<ssize_t>(sizeof(command)))
-          (void)safe_pipe_write(child->childWriteFd, &*reply, sizeof(*reply));
+        if (status && safe_pipe_read(child->childReadFd, command, sizeof(command)) ==
+                      static_cast<ssize_t>(sizeof(command)))
+        {
+          TestBedChild::Reply const reply = {command[0], seq, *status};
+          (void)safe_pipe_write(child->childWriteFd, &reply, sizeof(reply));
+        }
         while (true) pause();
       }
       if (child->pid < 0)
@@ -234,13 +234,10 @@ namespace RcclUnitTesting
     // Makes a hung worker testBed's only (non-pool) child, with 1 s parent waits.
     TestBedChild* InstallHungChild(TestBed& testBed)
     {
-      testBed.poolMode = false;
-      testBed.configUsedPool = false;
       LimitParentWaitsToOneSecond(testBed);
       TestBedChild* const child = ForkHungChild(0);
       if (child == nullptr) return nullptr;
-      testBed.childList = {child};
-      testBed.rankToChildMap = {0};
+      testBed.AdoptChildren({child});
       return child;
     }
 
@@ -305,17 +302,16 @@ namespace RcclUnitTesting
   TEST(Teardown, FailedGraphLaunchStopsAllWorkers)
   {
     TestBed testBed;
-    testBed.poolMode = false;
-    testBed.configUsedPool = false;
     LimitParentWaitsToOneSecond(testBed);
-    for (int const reply : {static_cast<int>(TEST_FAIL), static_cast<int>(TEST_SUCCESS)})
+    std::vector<TestBedChild*> children;
+    for (int const status : {static_cast<int>(TEST_FAIL), static_cast<int>(TEST_SUCCESS)})
     {
-      TestBedChild* const child = ForkHungChild(testBed.NumActiveChildren(), reply);
-      ASSERT_NE(child, nullptr);
-      testBed.childList.push_back(child);
-      testBed.rankToChildMap.push_back(child->childId);
+      TestBedChild* const child = ForkHungChild(static_cast<int>(children.size()), status);
+      if (child != nullptr) children.push_back(child);
     }
-    std::vector<pid_t> const pids = {testBed.childList[0]->pid, testBed.childList[1]->pid};
+    testBed.AdoptChildren(children);
+    ASSERT_EQ(testBed.NumActiveChildren(), 2);
+    std::vector<pid_t> const pids = {children[0]->pid, children[1]->pid};
     testBed.numGroupCalls = 1;
 
     ::testing::TestPartResultArray failures;
@@ -331,6 +327,31 @@ namespace RcclUnitTesting
       EXPECT_EQ(waitpid(pid, nullptr, WNOHANG), -1);
       EXPECT_EQ(errno, ECHILD);
     }
+  }
+
+  // A reply the parent never read would shift every later status onto the wrong
+  // command. A reply whose sequence number skips ahead must stop the workers at
+  // that command, even though it reports success.
+  TEST(Teardown, OutOfSequenceReplyStopsAllWorkers)
+  {
+    TestBed testBed;
+    LimitParentWaitsToOneSecond(testBed);
+    TestBedChild* const child = ForkHungChild(0, TEST_SUCCESS, /*seq*/ 2);
+    ASSERT_NE(child, nullptr);
+    testBed.AdoptChildren({child});
+    pid_t const childPid = child->pid;
+    testBed.numGroupCalls = 1;
+
+    ::testing::TestPartResultArray failures;
+    auto const elapsed = CaptureFailures(failures, [&]() { testBed.LaunchGraphs(0); });
+
+    EXPECT_EQ(failures.size(), 1);
+    EXPECT_TRUE(AnyFailureMentions(failures, "out-of-sequence reply"));
+    EXPECT_LT(elapsed, std::chrono::seconds(30));
+    EXPECT_TRUE(testBed.childList.empty());
+    errno = 0;
+    EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
+    EXPECT_EQ(errno, ECHILD);
   }
 
   // Pool workers must start from a fresh process image even when an earlier
@@ -376,8 +397,8 @@ namespace RcclUnitTesting
       return worker;
     }
 
-    // Every reply is a TEST_SUCCESS int, so a reply the parent never read just
-    // shifts later acks by one; only the leftover bytes in the pipe show it.
+    // A reply the parent never read only fails the next command to that worker;
+    // the leftover bytes in the pipe show it right away.
     bool HasUnreadReply(TestBedChild const* worker, int const waitMs)
     {
       pollfd fd = {worker->parentReadFd, POLLIN, 0};

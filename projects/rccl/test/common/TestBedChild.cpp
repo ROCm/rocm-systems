@@ -149,8 +149,7 @@ namespace RcclUnitTesting
         // The payload length is unknown, so the stream cannot be resynchronized:
         // report the failure to the parent, then stop.
         TEST_ERROR("Child %d received invalid command ID: %d", this->childId, command);
-        status = TEST_FAIL;
-        RcclUnitTesting::safe_pipe_write(childWriteFd, &status, sizeof(status));
+        SendReply(command, TEST_FAIL);
         goto stop;
       }
 
@@ -176,8 +175,7 @@ namespace RcclUnitTesting
       case CHILD_STOP            : goto stop;
       default:
         TEST_ERROR("Child %d received unknown command ID: %d", this->childId, command);
-        status = TEST_FAIL;
-        RcclUnitTesting::safe_pipe_write(childWriteFd, &status, sizeof(status));
+        SendReply(command, TEST_FAIL);
         goto stop;
       }
 
@@ -186,10 +184,7 @@ namespace RcclUnitTesting
         TEST_ERROR("Child %d failed on command [%s]:", this->childId, ChildCommandNames[command]);
       if (status != TEST_SUCCESS && !this->comms.empty())
         this->commsFailed = true;
-      if (RcclUnitTesting::safe_pipe_write(childWriteFd, &status, sizeof(status)) < 0) {
-        TEST_ERROR("Child %d write to parent failed: %s", this->childId, strerror(errno));
-        break;
-      }
+      if (!SendReply(command, status)) break;
       if (retValBuf.size() > 0 &&
           RcclUnitTesting::safe_pipe_write(childWriteFd, retValBuf.data(), retValBuf.size()) < 0) {
         TEST_ERROR("Child %d write return value to parent failed: %s", this->childId, strerror(errno));
@@ -213,6 +208,17 @@ namespace RcclUnitTesting
 #else
     exit(0);
 #endif
+  }
+
+  bool TestBedChild::SendReply(int const command, ErrCode const status)
+  {
+    Reply const reply = {command, ++this->replySeq, status};
+    if (RcclUnitTesting::safe_pipe_write(childWriteFd, &reply, sizeof(reply)) < 0)
+    {
+      TEST_ERROR("Child %d write to parent failed: %s", this->childId, strerror(errno));
+      return false;
+    }
+    return true;
   }
 
   ErrCode TestBedChild::GetUniqueId(std::vector<char>& retValBuf)

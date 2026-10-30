@@ -149,6 +149,10 @@ namespace RcclUnitTesting
     void TeardownOwnedChildList();
     void TeardownPool();
 
+    // Test hook: makes already-forked children the active fork-fresh config, with
+    // one rank per child (rank i on children[i]), as InitComms would.
+    void AdoptChildren(std::vector<TestBedChild*> const& children);
+
     // Destructor - Calls Finalize() to release all child processes
     ~TestBed();
 
@@ -249,9 +253,10 @@ namespace RcclUnitTesting
       StopAlways,   // peers' queued GPU work waits on the failed child: always stop every worker
     };
 
-    // Reads one ack per listed child id (a child listed n times owes n acks) and fails
-    // the test, naming command, if any reported failure.
-    void CollectAcks(char const* command, std::vector<int> const& childIds,
+    // Reads one ack to command (a TestBedChild::CHILD_* id) per listed child id (a child
+    // listed n times owes n acks) and fails the test, naming command, if any reported
+    // failure. An ack to another command, or out of order, stops all workers.
+    void CollectAcks(int command, std::vector<int> const& childIds,
                      OnChildFailure onFailure = OnChildFailure::Report, bool* allSucceeded = nullptr);
 
     // Forgets the active config's children, ranks and failure flag; owned children

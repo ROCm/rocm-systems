@@ -66,17 +66,23 @@
       FAIL() << AbandonChildren(childId);                                               \
     }                                                                                   \
   }
-#define PIPE_CHECK(childId)                         \
-  {                                                 \
-    int response = 0;                               \
-    PIPE_READ(childId, response);                   \
-    if (response != TEST_SUCCESS)                   \
-    {                                               \
-      TEST_ERROR("Child %d reports failure", childId); \
-      this->childFailed = true;                     \
-      ASSERT_EQ(response, TEST_SUCCESS);            \
-      FAIL();                                       \
-    }                                               \
+#define PIPE_CHECK(childId, command)                                                    \
+  {                                                                                     \
+    TestBedChild::Reply reply = {};                                                     \
+    PIPE_READ(childId, reply);                                                          \
+    std::string const mismatch = ReplyMismatch(*childList[childId], reply, command);    \
+    if (!mismatch.empty())                                                              \
+    {                                                                                   \
+      TEST_ERROR("Child %d %s", childId, mismatch.c_str());                             \
+      FAIL() << AbandonChildren(childId, /*waitForExit=*/false, kOutOfSequence);        \
+    }                                                                                   \
+    if (reply.status != TEST_SUCCESS)                                                   \
+    {                                                                                   \
+      TEST_ERROR("Child %d reports failure", childId);                                  \
+      this->childFailed = true;                                                         \
+      ASSERT_EQ(reply.status, TEST_SUCCESS);                                            \
+      FAIL();                                                                           \
+    }                                                                                   \
   }
 
 namespace RcclUnitTesting
@@ -113,6 +119,20 @@ namespace RcclUnitTesting
         waitResult = waitpid(pid, status, 0);
       } while (waitResult == -1 && errno == EINTR);
       return waitResult;
+    }
+
+    char const* const kOutOfSequence = "sent an out-of-sequence reply";
+
+    // Consumes the next reply sequence number of child. Empty if reply answers
+    // command in order; otherwise describes the mismatch. A mismatch means the
+    // pipe is out of step and cannot be resynchronized.
+    std::string ReplyMismatch(TestBedChild& child, TestBedChild::Reply const& reply, int const command)
+    {
+      uint32_t const expectedSeq = ++child.replySeq;
+      if (reply.command == command && reply.seq == expectedSeq) return "";
+      return "sent reply #" + std::to_string(reply.seq) + " to " + TestBedChild::CommandName(reply.command) +
+             " where reply #" + std::to_string(expectedSeq) + " to " + TestBedChild::CommandName(command) +
+             " was expected";
     }
 
     // poll() timeout for the time left until deadline; -1 (no limit) when timeoutSec is 0.
@@ -364,6 +384,15 @@ namespace RcclUnitTesting
     this->childFailed = false;
   }
 
+  void TestBed::AdoptChildren(std::vector<TestBedChild*> const& children)
+  {
+    this->poolMode = false;
+    this->configUsedPool = false;
+    ResetActiveConfig();
+    this->childList = children;
+    for (int childId = 0; childId < NumActiveChildren(); ++childId) this->rankToChildMap.push_back(childId);
+  }
+
   bool TestBed::SelectRanks(int const rank, std::vector<int>& ranks) const
   {
     ranks.clear();
@@ -468,19 +497,20 @@ namespace RcclUnitTesting
     } while (pollResult < 0 && errno == EINTR);
 
     std::string problem;
-    int response = TEST_FAIL;
+    TestBedChild::Reply reply = {};
     if (pollResult == 0)
     {
       problem = "did not reply within " + std::to_string(timeoutSec) + " s (UT_CHILD_TIMEOUT_S)";
     }
-    else if (RcclUnitTesting::safe_pipe_read(child->parentReadFd, &response, sizeof(response)) !=
-             static_cast<ssize_t>(sizeof(response)))
+    else if (RcclUnitTesting::safe_pipe_read(child->parentReadFd, &reply, sizeof(reply)) !=
+             static_cast<ssize_t>(sizeof(reply)))
     {
       problem = "pipe closed";
     }
-    else if (response != TEST_SUCCESS)
+    else
     {
-      problem = "reported failure";
+      problem = ReplyMismatch(*child, reply, TestBedChild::CHILD_WARMUP);
+      if (problem.empty() && reply.status != TEST_SUCCESS) problem = "reported failure";
     }
     if (problem.empty()) return true;
 
@@ -645,7 +675,7 @@ namespace RcclUnitTesting
     // Tell first rank to get ncclUniqueId
     int getIdCmd = TestBedChild::CHILD_GET_UNIQUE_ID;
     PIPE_WRITE(0, getIdCmd);
-    PIPE_CHECK(0);
+    PIPE_CHECK(0, TestBedChild::CHILD_GET_UNIQUE_ID);
 
     // Receive back unique ID from first rank
     ncclUniqueId id;
@@ -699,7 +729,7 @@ namespace RcclUnitTesting
 
     // Wait for child acknowledgement
     // This is done after previous loop to avoid deadlock as every rank needs to enter ncclInitCommRank
-    CollectAcks("InitComms", AllChildIds(), OnChildFailure::StopIfOwed);
+    CollectAcks(TestBedChild::CHILD_INIT_COMMS, AllChildIds(), OnChildFailure::StopIfOwed);
     InteractiveWait("Finishing InitComms");
   }
 
@@ -773,14 +803,15 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, streamIdx);
       PIPE_WRITE(childId, optionalArgs);
     }
-    CollectAcks("SetCollectiveArgs", ackChildIds);
+    CollectAcks(TestBedChild::CHILD_SET_COLL_ARGS, ackChildIds);
     InteractiveWait("Finishing SetCollectiveArgs");
   }
 
-  void TestBed::CollectAcks(char const* const command, std::vector<int> const& childIds,
+  void TestBed::CollectAcks(int const command, std::vector<int> const& childIds,
                             OnChildFailure const onFailure, bool* allSucceeded)
   {
     if (allSucceeded) *allSucceeded = false;
+    char const* const commandName = TestBedChild::CommandName(command);
 
     // Drain every ack before failing, or the next command reads a stale one. Arrival
     // order lets a failure be seen while an earlier child is blocked on the failed one.
@@ -833,15 +864,21 @@ namespace RcclUnitTesting
           TEST_ERROR("Child %d pipe closed while waiting for child %d", childId, pendingAcks.begin()->first);
           FAIL() << AbandonChildren(childId);
         }
-        int response = 0;
-        ssize_t const retval = RcclUnitTesting::safe_pipe_read(fds[i].fd, &response, sizeof(response));
-        if (retval != static_cast<ssize_t>(sizeof(response)))
+        TestBedChild::Reply reply = {};
+        ssize_t const retval = RcclUnitTesting::safe_pipe_read(fds[i].fd, &reply, sizeof(reply));
+        if (retval != static_cast<ssize_t>(sizeof(reply)))
         {
-          ReportReadFailure(childId, retval, sizeof(response));
+          ReportReadFailure(childId, retval, sizeof(reply));
           FAIL() << AbandonChildren(childId);
         }
+        std::string const mismatch = ReplyMismatch(*childList[childId], reply, command);
+        if (!mismatch.empty())
+        {
+          TEST_ERROR("Child %d %s", childId, mismatch.c_str());
+          FAIL() << AbandonChildren(childId, /*waitForExit=*/false, kOutOfSequence);
+        }
         if (--pendingAcks[childId] == 0) pendingAcks.erase(childId);
-        if (response != TEST_SUCCESS)
+        if (reply.status != TEST_SUCCESS)
         {
           TEST_ERROR("Child %d reports failure", childId);
           if (numFailed++ == 0) firstFailedChild = childId;
@@ -862,13 +899,13 @@ namespace RcclUnitTesting
     }
     if (numFailed > 0 && onFailure == OnChildFailure::StopAlways)
     {
-      TEST_ERROR("%s: work queued on the other children waits on child %d", command, firstFailedChild);
+      TEST_ERROR("%s: work queued on the other children waits on child %d", commandName, firstFailedChild);
       FAIL() << AbandonChildren(firstFailedChild, /*waitForExit=*/false, "reported failure");
     }
     if (numFailed > 0)
     {
       this->childFailed = true;
-      FAIL() << command << ": " << numFailed << " of " << childIds.size()
+      FAIL() << commandName << ": " << numFailed << " of " << childIds.size()
              << " child acknowledgements reported failure";
     }
     if (allSucceeded) *allSucceeded = true;
@@ -908,7 +945,7 @@ namespace RcclUnitTesting
       }
       // Each CHILD_ALLOCATE_MEM command produces one acknowledgement. Read one
       // acknowledgement from the child that received that command.
-      CollectAcks("AllocateMem", ackChildIds, OnChildFailure::Report, &allocated);
+      CollectAcks(TestBedChild::CHILD_ALLOCATE_MEM, ackChildIds, OnChildFailure::Report, &allocated);
     }();
     InteractiveWait("Finishing AllocateMemInternal");
     return allocated;
@@ -945,7 +982,7 @@ namespace RcclUnitTesting
       }
 
       bool allAcked = false;
-      CollectAcks("RegisterMem", childIds, registrationFailure, &allAcked);
+      CollectAcks(TestBedChild::CHILD_REGISTER_MEM, childIds, registrationFailure, &allAcked);
       if (!allAcked) return;
     }
     InteractiveWait("Finishing RegisterMemInternal");
@@ -999,7 +1036,7 @@ namespace RcclUnitTesting
         ackChildIds.push_back(childId);
       }
     }
-    CollectAcks("PrepareData", ackChildIds);
+    CollectAcks(TestBedChild::CHILD_PREPARE_DATA, ackChildIds);
     InteractiveWait("Finishing PrepareData");
   }
 
@@ -1042,7 +1079,7 @@ namespace RcclUnitTesting
       }
 
       bool allAcked = false;
-      CollectAcks("ExecuteCollectives", childIds, OnChildFailure::StopIfOwed, &allAcked);
+      CollectAcks(TestBedChild::CHILD_EXECUTE_COLL, childIds, OnChildFailure::StopIfOwed, &allAcked);
       if (!allAcked) return;
     }
 
@@ -1071,7 +1108,7 @@ namespace RcclUnitTesting
         ackChildIds.push_back(childId);
       }
     }
-    CollectAcks("ValidateResults", ackChildIds, OnChildFailure::Report, &isCorrect);
+    CollectAcks(TestBedChild::CHILD_VALIDATE_RESULTS, ackChildIds, OnChildFailure::Report, &isCorrect);
 
     InteractiveWait("Finishing ValidateResults");
   }
@@ -1094,7 +1131,7 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, currGroup);
       }
       bool allLaunched = false;
-      CollectAcks("LaunchGraphs", AllChildIds(), OnChildFailure::StopAlways, &allLaunched);
+      CollectAcks(TestBedChild::CHILD_LAUNCH_GRAPHS, AllChildIds(), OnChildFailure::StopAlways, &allLaunched);
       if (!allLaunched) return;
     }
 
@@ -1132,7 +1169,7 @@ namespace RcclUnitTesting
       }
 
       bool allDeregistered = false;
-      CollectAcks("DeregisterMem", childIds, registrationFailure, &allDeregistered);
+      CollectAcks(TestBedChild::CHILD_DEREGISTER_MEM, childIds, registrationFailure, &allDeregistered);
       if (!allDeregistered) return;
 
       // Phase 2: now no selected communicator retains a window/registration
@@ -1149,7 +1186,7 @@ namespace RcclUnitTesting
       }
 
       // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
-      CollectAcks("DeallocateMem", deallocAckChildIds);
+      CollectAcks(TestBedChild::CHILD_DEALLOCATE_MEM, deallocAckChildIds);
     }
 
     InteractiveWait("Finishing DeallocateMem");
@@ -1163,7 +1200,7 @@ namespace RcclUnitTesting
     for (int childId = 0; childId < NumActiveChildren(); ++childId)
     {
       PIPE_WRITE(childId, cmd);
-      PIPE_CHECK(childId);
+      PIPE_CHECK(childId, TestBedChild::CHILD_QUERY_SYMMETRIC);
       int childSupported = 0;
       PIPE_READ(childId, childSupported);
       if (!childSupported) allSupported = false;
@@ -1204,7 +1241,7 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, abortComms);
       }
       if (ev.verbose) waitStart = Clock::now();
-      CollectAcks("DestroyComms", AllChildIds(), OnChildFailure::StopIfOwed);
+      CollectAcks(TestBedChild::CHILD_DESTROY_COMMS, AllChildIds(), OnChildFailure::StopIfOwed);
 
       if (ev.verbose)
       {
@@ -1249,7 +1286,7 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, currGroup);
       }
       bool allAcked = false;
-      CollectAcks("DestroyGraphs", AllChildIds(), OnChildFailure::Report, &allAcked);
+      CollectAcks(TestBedChild::CHILD_DESTROY_GRAPHS, AllChildIds(), OnChildFailure::Report, &allAcked);
       if (!allAcked) return;
     }
 
