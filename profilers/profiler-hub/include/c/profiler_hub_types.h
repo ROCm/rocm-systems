@@ -210,6 +210,15 @@ extern "C"
     /** @brief Callback signature for ph_future_get(). */
     typedef void (*ph_task_fn)(void* user_data);
 
+    /** @brief Trace file formats recognised by ph_probe_trace_format(). */
+    typedef enum
+    {
+        PH_TRACE_FORMAT_UNKNOWN = 0, /**< Not recognised as a supported trace file. */
+        PH_TRACE_FORMAT_SQLITE  = 1, /**< Profiler-hub / rocpd SQLite database. */
+        PH_TRACE_FORMAT_PYTORCH_KINETO =
+            2, /**< PyTorch profiler (Kineto) Chrome JSON, plain or .gz. */
+    } ph_trace_format_t;
+
     // NOLINTEND
 
 #ifdef __cplusplus

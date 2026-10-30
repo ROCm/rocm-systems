@@ -18,12 +18,16 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_ctx.hpp
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_future.hpp
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_c_api.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/trace_format.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/trace_format.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common/thread_pool.cpp
     ${CMAKE_CURRENT_LIST_DIR}/common/thread_pool.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common/connection.cpp
     ${CMAKE_CURRENT_LIST_DIR}/common/connection.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common/connection_pool.cpp
     ${CMAKE_CURRENT_LIST_DIR}/common/connection_pool.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_format.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/pytorch/kineto_format.hpp
 )
 target_sources(profiler-hub-objects PRIVATE ${profiler-hub_sources})
 
@@ -37,6 +41,9 @@ target_include_directories(
 
 find_package(Threads REQUIRED)
 target_link_libraries(profiler-hub-objects PRIVATE Threads::Threads)
+
+find_package(ZLIB REQUIRED)
+target_link_libraries(profiler-hub-objects PRIVATE ZLIB::ZLIB)
 
 add_subdirectory(queries)
 add_subdirectory(data_storage)
