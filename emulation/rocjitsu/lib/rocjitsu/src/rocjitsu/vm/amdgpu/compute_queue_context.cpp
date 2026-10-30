@@ -56,9 +56,8 @@ struct CommandProcessor::QueueContext {
 
 namespace {
 
-// MODEL ASSUMPTION: AMD's public MQD definitions do not specify a complete CP
-// firmware checkpoint encoding. This is a rocjitsu-private, versioned format,
-// NOT an AMD register layout: each scalar occupies one little-endian uint64.
+// Internal CP snapshot encoding, retained only in host memory. This is not
+// an AMD firmware format: each scalar occupies one little-endian uint64.
 // The field visitors below are shared by writing and reading. Host pointers,
 // callbacks, and address-space leases never enter the saved image.
 constexpr uint64_t kQueueContextPayloadMagic = 0x3158544350434a52ULL; // "RJCPCTX1"

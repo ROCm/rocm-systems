@@ -215,7 +215,8 @@ public:
   /// @brief Save progress and resource requirements of a suspended, non-fanned-out queue.
   /// @details The encoding is rocjitsu-private: public AMD documentation does not
   /// specify the complete CP firmware checkpoint format. No host pointers or VM
-  /// leases are encoded. Wave/register state is saved separately through CWSR.
+  /// leases are encoded. These bytes stay in host memory; wave/register state
+  /// is saved separately through the guest-visible public CWSR image.
   /// The caller must quiesce waves and their memory accesses first. Host-owned
   /// PM4 submissions, cross-XCD state, workgroup clusters, WGP LDS and GWS waits
   /// are unsupported. Unsupported live dispatch/wave state requires draining;

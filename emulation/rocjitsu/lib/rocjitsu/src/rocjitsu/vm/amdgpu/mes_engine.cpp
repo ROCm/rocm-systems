@@ -277,6 +277,7 @@ bool MesEngine::teardown_queues() {
   // no pre-reset semantic may later publish success through a retained snapshot,
   // even if destruction makes partial progress and the caller reports failure.
   pending_mes_frames_.clear();
+  compute_bindings_.clear_saved_contexts();
 
   bool complete = true;
   for (std::vector<Queue>::iterator queue = mapped_queues_.begin();
@@ -773,6 +774,7 @@ VmAccessOutcome MesEngine::remove_queue(uint64_t doorbell_offset, const GpuVmAcc
       const auto outcome = publish_offsets(queue->control_stack_size, queue->control_stack_size);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
+      compute_bindings_.discard_saved_context(identity, queue->context_save_address);
     }
     // MQD now names either a durable image or a fresh queue. Drop resident
     // resources without completing work, then remove the execution binding.
@@ -920,10 +922,15 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
                                      mapped.doorbell_offset));
       return committed;
     }
-    if (mapped.kind == QueueKind::Compute)
+    if (mapped.kind == QueueKind::Compute) {
+      compute_bindings_.discard_saved_context({.address_space = mapped.address_space,
+                                               .process_id = mapped.process_id,
+                                               .queue_id = mapped.queue_id},
+                                              mapped.context_save_address);
       compute_bindings_.resume_context({.address_space = mapped.address_space,
                                         .process_id = mapped.process_id,
                                         .queue_id = mapped.queue_id});
+    }
   } else if (opcode == kMesApiMisc && dword(frame, 1) == kMesMiscSetShaderDebugger) {
     // MESAPI_MISC__SET_SHADER_DEBUGGER programs one process context, including
     // contexts whose first queue has not been added yet.

@@ -4,7 +4,7 @@
 /// @file cwsr.h
 /// @brief AMDGPU CWSR record formats and wave helpers shared by KFD and MES.
 /// @details Models the gfx9.4 and gfx12.5 layouts parsed by ROCdbgapi, including
-/// public wave records and rocjitsu-private queue progress storage. Frontends
+/// public wave records. Private CP snapshots remain host-owned. Frontends
 /// own the save-area mapping and queue suspension/resumption.
 
 #pragma once
@@ -359,18 +359,14 @@ struct CwsrLayout {
 ///        supplied, only the first four wave-state header words are published;
 ///        DebugOffset, DebugSize and the runtime error channel are left untouched.
 ///        Without it, the serializer initializes a standalone synthetic test header.
-/// @param queue_context Optional rocjitsu-private CP progress and resource data. Stored
-///        after the public wave image, before the runtime debugger region.
-///        This placement and encoding are not an AMD firmware ABI.
-///        It permits a save with zero resident waves but outstanding CP work.
+/// Empty wave lists produce a public image with no resident wave records.
 /// @returns The chosen layout; @ref CwsrLayout::ok is false if the waves do not
 ///          fit, in which case nothing is written.
 CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
                                 const std::function<void(uint64_t, uint32_t)> &write32,
                                 rj_code_arch_t arch, uint32_t control_stack_capacity = 0,
-                                std::optional<CwsrDebugRegion> runtime_debug_region = {},
-                                std::span<const uint8_t> queue_context = {});
+                                std::optional<CwsrDebugRegion> runtime_debug_region = {});
 
 /// @brief Serialize a queue using two block writes: payload first, then header.
 ///
@@ -391,17 +387,7 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 CwsrLayout serialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
     const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block, rj_code_arch_t arch,
-    uint32_t control_stack_capacity = 0, std::optional<CwsrDebugRegion> runtime_debug_region = {},
-    std::span<const uint8_t> queue_context = {});
-
-/// @brief Read rocjitsu's private context after the public wave image in blocks.
-/// @details This is a simulator-owned encoding, not an AMD firmware format.
-/// The wave/register layout is unchanged; the runtime debugger area is excluded.
-/// An invalid or missing record leaves the output unchanged.
-bool deserialize_queue_cwsr_context(
-    uint64_t ctx_base, uint32_t area_size, std::vector<uint8_t> &context,
-    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block,
-    uint32_t control_stack_capacity);
+    uint32_t control_stack_capacity = 0, std::optional<CwsrDebugRegion> runtime_debug_region = {});
 
 /// @brief Read wave register state back from a serialized CWSR area.
 ///

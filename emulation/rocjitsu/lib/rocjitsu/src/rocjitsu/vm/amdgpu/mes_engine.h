@@ -77,6 +77,10 @@ public:
   /// @details Used after publishing a successful save, invalidating a failed
   /// save, or to roll back a failed restore. Queue deregistration belongs to MES.
   virtual void release_context(const QueueIdentity &identity) = 0;
+  /// @brief Discard a private CP snapshot after a committed ADD or failed REMOVE.
+  virtual void discard_saved_context(const QueueIdentity &identity, uint64_t address) = 0;
+  /// @brief Drop private snapshots and their address-space references during teardown/reset.
+  virtual void clear_saved_contexts() = 0;
 
   /// @brief Apply saved state into a new binding, keeping execution suspended.
   /// @details identity names the new suspended binding; address, area_size and

@@ -19,8 +19,6 @@ namespace rocjitsu::amdgpu {
 
 namespace {
 
-constexpr uint32_t kCwsrPrivateContextMagic = 0x50434a52u; // "RJCP"
-
 // Layout constants matching the gfx9.4 and gfx12.5 cwsr_record_t definitions
 // in rocdbgapi.
 constexpr uint32_t kGfx94HwregCount = 32;
@@ -155,12 +153,10 @@ struct CwsrGeometry {
 
 CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveState> &waves,
                               rj_code_arch_t arch, uint32_t control_stack_capacity,
-                              std::optional<CwsrDebugRegion> runtime_debug_region = {},
-                              size_t context_bytes = 0) {
+                              std::optional<CwsrDebugRegion> runtime_debug_region = {}) {
   CwsrGeometry geometry{};
   const CwsrAbiProperties abi = cwsr_abi_properties(arch);
   if (abi.layout_kind == CwsrLayoutKind::Unsupported || abi.lds_granule_bytes == 0 ||
-      (waves.empty() && context_bytes == 0) || context_bytes > UINT32_MAX ||
       waves.size() > std::numeric_limits<uint32_t>::max())
     return geometry;
 
@@ -231,16 +227,11 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
       wave_state_offset > std::numeric_limits<uint32_t>::max() || wave_state_offset > area_size)
     return geometry;
 
-  const uint64_t image_end =
-      wave_state_offset + (context_bytes == 0 ? 0 : 8 + ((uint64_t{context_bytes} + 3) / 4) * 4);
-  if (image_end > area_size)
-    return geometry;
-
   const uint64_t debug_size_64 =
       ((num_waves + kDebuggerReserveChunks) * kDebuggerBytesPerWave + kDebuggerBytesAlign - 1) /
       kDebuggerBytesAlign * kDebuggerBytesAlign;
   const uint64_t debug_offset_64 =
-      (image_end + kDebuggerBytesAlign - 1) / kDebuggerBytesAlign * kDebuggerBytesAlign;
+      (wave_state_offset + kDebuggerBytesAlign - 1) / kDebuggerBytesAlign * kDebuggerBytesAlign;
   const bool debug_fits = debug_offset_64 <= std::numeric_limits<uint32_t>::max() &&
                           debug_size_64 <= std::numeric_limits<uint32_t>::max() &&
                           debug_offset_64 + debug_size_64 <= area_size;
@@ -252,7 +243,7 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
   if (runtime_debug_region) {
     // libhsakmt may place this region beyond all per-XCC save areas. When it
     // lies inside this area, the wave payload must not overwrite it.
-    if (runtime_debug_region->size != 0 && runtime_debug_region->offset < image_end)
+    if (runtime_debug_region->size != 0 && runtime_debug_region->offset < wave_state_offset)
       return geometry;
     geometry.layout.debug_offset = runtime_debug_region->offset;
     geometry.layout.debug_size = runtime_debug_region->size;
@@ -360,17 +351,15 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
                                 const std::function<void(uint64_t, uint32_t)> &write32,
                                 rj_code_arch_t arch, uint32_t control_stack_capacity,
-                                std::optional<CwsrDebugRegion> runtime_debug_region,
-                                std::span<const uint8_t> queue_context) {
+                                std::optional<CwsrDebugRegion> runtime_debug_region) {
   CwsrLayout layout{};
-  if (!cwsr_layout_modelled(arch) || (waves.empty() && queue_context.empty()) || !write32 ||
-      (ctx_base & (alignof(uint32_t) - 1)) != 0)
+  if (!cwsr_layout_modelled(arch) || !write32 || (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return layout;
 
   // Registers retain one queue-wide stride; ACC-VGPRs are not modeled.
   // A state change before a workgroup leader selects that group's LDS size.
-  const CwsrGeometry geometry = compute_geometry(area_size, waves, arch, control_stack_capacity,
-                                                 runtime_debug_region, queue_context.size());
+  const CwsrGeometry geometry =
+      compute_geometry(area_size, waves, arch, control_stack_capacity, runtime_debug_region);
   if (!geometry.layout.ok)
     return layout;
   layout = geometry.layout;
@@ -530,21 +519,6 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     last_wave_area = vgprs_addr; // == register_address(v0_64)
   }
 
-  // MODEL ASSUMPTION: the private CP checkpoint occupies unused space after
-  // the public wave records, bounded above by the runtime debugger region.
-  // This placement/encoding is rocjitsu-owned, not an AMD firmware format.
-  if (!queue_context.empty()) {
-    const uint64_t base = ctx_base + wave_state_offset;
-    write32(base, kCwsrPrivateContextMagic);
-    write32(base + 4, static_cast<uint32_t>(queue_context.size()));
-    for (size_t offset = 0; offset < queue_context.size(); offset += sizeof(uint32_t)) {
-      uint32_t word = 0;
-      std::memcpy(&word, queue_context.data() + offset,
-                  std::min(sizeof(word), queue_context.size() - offset));
-      write32(base + 8 + offset, word);
-    }
-  }
-
   // Publish the ABI header after the complete payload. A caller that permits a
   // debugger to read concurrently must still provide the required exclusion.
   write32(ctx_base + 0, layout.control_stack_offset);
@@ -566,8 +540,7 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 CwsrLayout serialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
     const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block, rj_code_arch_t arch,
-    uint32_t control_stack_capacity, std::optional<CwsrDebugRegion> runtime_debug_region,
-    std::span<const uint8_t> queue_context) {
+    uint32_t control_stack_capacity, std::optional<CwsrDebugRegion> runtime_debug_region) {
   if (!write_block)
     return {};
 
@@ -580,7 +553,7 @@ CwsrLayout serialize_queue_cwsr_bulk(
           image.resize(static_cast<size_t>(offset + sizeof(value)));
         std::memcpy(image.data() + offset, &value, sizeof(value));
       },
-      arch, control_stack_capacity, runtime_debug_region, queue_context);
+      arch, control_stack_capacity, runtime_debug_region);
   if (!layout.ok)
     return layout;
 
@@ -591,39 +564,6 @@ CwsrLayout serialize_queue_cwsr_bulk(
   write_block(ctx_base, bytes.first(runtime_debug_region ? cwsr_debug_fields_offset()
                                                          : cwsr_header_size_bytes()));
   return layout;
-}
-
-bool deserialize_queue_cwsr_context(
-    uint64_t ctx_base, uint32_t area_size, std::vector<uint8_t> &context,
-    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block,
-    uint32_t control_stack_capacity) {
-  if (!read_block || area_size < cwsr_header_size_bytes() || (ctx_base & 3u) != 0 ||
-      ctx_base > UINT64_MAX - area_size)
-    return false;
-  constexpr size_t debug_fields_word = cwsr_debug_fields_offset() / sizeof(uint32_t);
-  std::array<uint32_t, debug_fields_word + 2> header{};
-  read_block(ctx_base, {reinterpret_cast<uint8_t *>(header.data()), sizeof(header)});
-  const auto layout = decode_cwsr_header({header[0], header[1], header[2], header[3]}, area_size,
-                                         control_stack_capacity);
-  if (!layout)
-    return false;
-  const uint32_t debug_offset = header[debug_fields_word];
-  const uint32_t debug_size = header[debug_fields_word + 1];
-  const uint64_t limit = debug_size != 0 ? std::min(area_size, debug_offset) : area_size;
-  const uint64_t offset = layout->wave_state_offset;
-  if (offset + 8 > limit)
-    return false;
-  std::array<uint32_t, 2> prefix{};
-  read_block(ctx_base + offset, {reinterpret_cast<uint8_t *>(prefix.data()), sizeof(prefix)});
-  if (prefix[0] != kCwsrPrivateContextMagic)
-    return false;
-  const uint64_t size = prefix[1];
-  if (size == 0 || offset + 8 + ((size + 3) / 4) * 4 > limit)
-    return false;
-  std::vector<uint8_t> decoded(size);
-  read_block(ctx_base + offset + 8, decoded);
-  context = std::move(decoded);
-  return true;
 }
 
 bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,

@@ -364,9 +364,16 @@ amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &id
   };
   const amdgpu::CwsrLayout layout = amdgpu::serialize_queue_cwsr_bulk(
       address, area_size, states, write, arch_, control_stack_size,
-      amdgpu::CwsrDebugRegion{debug_region[0], debug_region[1]}, queue_context);
+      amdgpu::CwsrDebugRegion{debug_region[0], debug_region[1]});
   if (!layout.ok)
     return {};
+  if (status != VmAccessOutcome::Complete)
+    return {.outcome = status};
+  auto lease = gpu_vm_.retain_binding(identity.address_space);
+  if (!lease)
+    return {};
+  saved_contexts_.insert_or_assign(SavedContextKey{identity, address},
+                                   SavedContext{std::move(*lease), std::move(queue_context)});
   return {.outcome = status,
           .control_stack_offset = layout.control_stack_offset,
           .wave_state_offset = layout.wave_state_offset};
@@ -382,6 +389,12 @@ void SoC::release_context(const amdgpu::QueueIdentity &identity) {
     mes_queue_owner_->release_queue_context(identity);
 }
 
+void SoC::discard_saved_context(const amdgpu::QueueIdentity &identity, uint64_t address) {
+  saved_contexts_.erase(SavedContextKey{identity, address});
+}
+
+void SoC::clear_saved_contexts() { saved_contexts_.clear(); }
+
 amdgpu::VmAccessOutcome SoC::restore_context(const amdgpu::QueueIdentity &identity,
                                              uint64_t address, uint32_t area_size,
                                              uint32_t control_stack_size) {
@@ -396,18 +409,18 @@ amdgpu::VmAccessOutcome SoC::restore_context(const amdgpu::QueueIdentity &identi
     if (status == VmAccessOutcome::Complete)
       status = access->read(source, std::as_writable_bytes(bytes));
   };
-  std::vector<uint8_t> queue_context;
+  const auto saved = saved_contexts_.find(SavedContextKey{identity, address});
+  if (saved == saved_contexts_.end())
+    return VmAccessOutcome::Malformed;
   std::vector<amdgpu::CwsrWaveState> states;
-  const bool decoded = amdgpu::deserialize_queue_cwsr_context(address, area_size, queue_context,
-                                                              read, control_stack_size) &&
-                       amdgpu::deserialize_queue_cwsr_bulk(address, area_size, states, read, arch_,
+  const bool decoded = amdgpu::deserialize_queue_cwsr_bulk(address, area_size, states, read, arch_,
                                                            control_stack_size);
   if (status != VmAccessOutcome::Complete)
     return status;
   if (!decoded)
     return VmAccessOutcome::Malformed;
   mes_queue_owner_->set_queue_debug_suspended(identity.queue_id, identity.process_id, true);
-  const auto restored = mes_queue_owner_->restore_queue_context(identity, queue_context);
+  const auto restored = mes_queue_owner_->restore_queue_context(identity, saved->second.bytes);
   if (restored != VmAccessOutcome::Complete)
     return restored;
   std::vector<amdgpu::Wavefront *> waves;

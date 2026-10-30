@@ -54,6 +54,8 @@ public:
 
   void cancel_context_save(const rocjitsu::amdgpu::QueueIdentity &) override {}
   void release_context(const rocjitsu::amdgpu::QueueIdentity &) override {}
+  void discard_saved_context(const rocjitsu::amdgpu::QueueIdentity &, uint64_t) override {}
+  void clear_saved_contexts() override {}
   void resume_context(const rocjitsu::amdgpu::QueueIdentity &) override {}
 };
 
@@ -135,6 +137,8 @@ public:
 
   void cancel_context_save(const rocjitsu::amdgpu::QueueIdentity &) override {}
   void release_context(const rocjitsu::amdgpu::QueueIdentity &) override {}
+  void discard_saved_context(const rocjitsu::amdgpu::QueueIdentity &, uint64_t) override {}
+  void clear_saved_contexts() override {}
   void resume_context(const rocjitsu::amdgpu::QueueIdentity &) override {}
 
   std::shared_ptr<RecordingBindingState> aql = std::make_shared<RecordingBindingState>();

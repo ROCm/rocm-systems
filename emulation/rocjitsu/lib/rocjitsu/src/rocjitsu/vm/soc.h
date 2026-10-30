@@ -26,7 +26,9 @@
 
 #include <atomic>
 #include <cassert>
+#include <compare>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -293,6 +295,8 @@ private:
                                                             uint32_t control_stack_size) override;
   void cancel_context_save(const amdgpu::QueueIdentity &identity) override;
   void release_context(const amdgpu::QueueIdentity &identity) override;
+  void discard_saved_context(const amdgpu::QueueIdentity &identity, uint64_t address) override;
+  void clear_saved_contexts() override;
   void resume_context(const amdgpu::QueueIdentity &identity) override;
   [[nodiscard]] amdgpu::VmAccessOutcome restore_context(const amdgpu::QueueIdentity &identity,
                                                         uint64_t address, uint32_t area_size,
@@ -315,6 +319,26 @@ private:
   amdgpu::GpuQueueRegistry queue_registry_;
   amdgpu::MesEngine mes_engine_;
   amdgpu::CommandProcessor *mes_queue_owner_ = nullptr; ///< CP whose CU hooks MES owns.
+  class SavedContextKey {
+  public:
+    SavedContextKey(const amdgpu::QueueIdentity &identity, uint64_t save_address)
+        : slot_(identity.address_space.slot), generation_(identity.address_space.generation),
+          process_id_(identity.process_id), address_(save_address) {}
+    auto operator<=>(const SavedContextKey &) const = default;
+
+  private:
+    uint32_t slot_;
+    uint64_t generation_;
+    uint32_t process_id_;
+    uint64_t address_;
+  };
+  struct SavedContext {
+    amdgpu::GpuVmBindingLease address_space;
+    std::vector<uint8_t> bytes;
+  };
+  // CP owns the private encoding. SoC retains opaque host-only data across
+  // REMOVE; the lease preserves its address-space identity until ADD or reset.
+  std::map<SavedContextKey, SavedContext> saved_contexts_;
   std::vector<amdgpu::Xcd *> xcds_;
   std::vector<amdgpu::Iod *> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;

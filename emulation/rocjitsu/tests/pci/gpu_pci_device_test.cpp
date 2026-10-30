@@ -1454,6 +1454,7 @@ TEST_F(GpuDeviceMes, RemoveSavesProgressAndReleasesQueuesWithoutResidentWaves) {
     ASSERT_TRUE(soc_.gpu_vm().invalidate(*address_space));
     for (uint32_t word = 0; word < 4; ++word)
       store_dword(kContextPhysical + word * sizeof(uint32_t), 0xfeedface);
+    store_dword(kContextPhysical + kControlStack, 0xfeedface);
 
     if (pending_dispatch) {
       // No resident wave: this dispatch has been accepted but not launched.
@@ -1484,18 +1485,155 @@ TEST_F(GpuDeviceMes, RemoveSavesProgressAndReleasesQueuesWithoutResidentWaves) {
     EXPECT_EQ(transport_.dword_at(kContextPhysical), cs_offset);
     EXPECT_EQ(transport_.dword_at(kContextPhysical + 8), kControlStack);
     EXPECT_EQ(transport_.dword_at(kContextPhysical + 12), 0u); // No resident wave payload.
-    std::vector<uint8_t> queue_context;
-    ASSERT_TRUE(rocjitsu::amdgpu::deserialize_queue_cwsr_context(
-        kContext, 0x20000, queue_context,
-        [&](uint64_t address, std::span<uint8_t> bytes) {
-          EXPECT_TRUE(transport_.read(kContextPhysical + address - kContext,
-                                      std::as_writable_bytes(bytes)));
-        },
-        kControlStack));
+    EXPECT_EQ(transport_.dword_at(kContextPhysical + kControlStack), 0xfeedfaceu)
+        << "Private CP state must not be appended to the guest CWSR image";
     EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
     EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
     EXPECT_FALSE(command_processor_.has_registered_queues());
-    EXPECT_FALSE(soc_.mes_engine().process_address_space_for_test(3));
+    EXPECT_TRUE(
+        soc_.mes_engine().process_address_space_for_test(3)); // Retained by the private snapshot.
+    device_.reset(simdojo::ResetKind::FunctionLevel);
+    configure_gart();
+  }
+}
+
+TEST_F(GpuDeviceMes, GuestSaveAreaCannotChangePrivateDispatchState) {
+  constexpr uint64_t kContext = 0x20000, kPhysical = 0x300000;
+  constexpr uint32_t kSize = 0x20000, kStack = 0x1000;
+  constexpr uint32_t kQueue = uint32_t{1} << 31;
+  configure_compute_unit(2);
+  command_processor_.startup();
+  store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+  store_dword(kSchedulerMqdPhysical + 175 * 4, kStack);
+  store_dword(kSchedulerMqdPhysical + 177 * 4, kSize);
+  store_dword(kDefaultComputeSecondPagePhysical + 0xff8 - offsetof(amd_queue_t, write_dispatch_id) +
+                  offsetof(amd_queue_v2_t, caps),
+              AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM);
+  submit_default_compute_queue(true);
+  for (uint64_t offset = 0; offset < kSize; offset += 0x1000)
+    store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * 8,
+                     (kPhysical + offset) | kGfx12SystemLeafPteFlags);
+  store_vram_qword(kDefaultProcessPtb + (kDefaultComputeRingGpu >> 12) * 8,
+                   kDefaultComputeRingPhysical | kGfx12SystemLeafPteFlags | (1u << 4));
+  store_dword(kDefaultComputeRingPhysical + 0x80,
+              rocjitsu::cdna5::build_sopp(rocjitsu::cdna5::kSEndpgmSopp)[0]);
+  const auto space = soc_.mes_engine().process_address_space_for_test(3);
+  ASSERT_TRUE(space);
+  ASSERT_TRUE(soc_.gpu_vm().invalidate(*space));
+  rocjitsu::amdgpu::DispatchEntry entry{};
+  entry.kind = rocjitsu::amdgpu::DispatchPacketKind::Kernel;
+  entry.dispatch_id = 1;
+  entry.queue_id = kQueue;
+  entry.process_id = 3;
+  entry.address_space = *space;
+  entry.kernel_entry_pc = kDefaultComputeRingGpu + 0x80;
+  entry.wfs_per_workgroup = 1;
+  entry.sgprs_per_wf = 106;
+  entry.vgprs_per_wf = 64;
+  entry.kernel_wave_size = 32;
+  entry.workgroup_size_x = 32;
+  entry.workgroup_size_y = entry.workgroup_size_z = 1;
+  entry.grid_size_x = 64;
+  entry.grid_size_y = entry.grid_size_z = 1;
+  entry.grid_wgs_x = entry.total_wgs = 2;
+  entry.grid_wgs_y = entry.grid_wgs_z = 1;
+
+  command_processor_.accept_fanout_shard(std::move(entry));
+  command_processor_.drain_fanout_inbox_for_test();
+  command_processor_.set_queue_debug_suspended(kQueue, 3, true);
+  constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+  store_dword(kRemove, 0x00040031);
+  store_dword(kRemove + 4, kDefaultComputeDoorbell / 4);
+  store_qword(kRemove + 6 * 4, kApiStatusGpu);
+  store_qword(kRemove + 8 * 4, 2);
+  auto bell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, bell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+  ASSERT_EQ(transport_.dword_at(kPhysical + 12), 0u); // No resident wave payload.
+  const uint32_t wave_state_offset = transport_.dword_at(kPhysical + 8);
+  ASSERT_LT(wave_state_offset, kSize);
+  // With no resident waves, the bytes after the control stack are unused.
+  // Changing them must not change the host-owned dispatch state.
+  const std::vector<std::byte> padding(kSize - wave_state_offset, std::byte{0xa5});
+  ASSERT_TRUE(transport_.write(kPhysical + wave_state_offset, std::span(padding)));
+  for (uint32_t word = 0; word < 64; ++word)
+    store_dword(kRingPhysical + 128 * 4 + word * 4, transport_.dword_at(kRingPhysical + word * 4));
+  store_qword(kRingPhysical + 128 * 4 + 40 * 4, 3);
+  bell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+  ring_doorbell(0x60, bell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 3u);
+  const auto issued = command_processor_.dispatched_workgroups();
+  for (unsigned step = 0; step < 16; ++step) {
+    command_processor_.step();
+    compute_unit_->step();
+  }
+  EXPECT_EQ(command_processor_.dispatched_workgroups() - issued, 2u);
+  EXPECT_FALSE(compute_unit_->has_active_wfs());
+  device_.reset(simdojo::ResetKind::FunctionLevel);
+  configure_gart();
+  command_processor_.shutdown();
+}
+
+TEST_F(GpuDeviceMes, PrivateContextIsDiscardedOnResetFreshAddAndSuccessfulRestore) {
+  constexpr uint64_t kContext = 0x20000, kPhysical = 0x300000;
+  constexpr uint32_t kSize = 0x20000, kStack = 0x1000;
+  enum class Action { Reset, FreshAdd, Restore };
+  configure_compute_unit();
+  for (const auto action : {Action::Reset, Action::FreshAdd, Action::Restore}) {
+    SCOPED_TRACE(static_cast<int>(action));
+    store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+    store_dword(kSchedulerMqdPhysical + 175 * 4, kStack);
+    store_dword(kSchedulerMqdPhysical + 177 * 4, kSize);
+    store_dword(kDefaultComputeSecondPagePhysical + 0xff8 -
+                    offsetof(amd_queue_t, write_dispatch_id) + offsetof(amd_queue_v2_t, caps),
+                AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM);
+    submit_default_compute_queue(true);
+    for (uint64_t offset = 0; offset < kSize; offset += 0x1000)
+      store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * 8,
+                       (kPhysical + offset) | kGfx12SystemLeafPteFlags);
+    const auto space = soc_.mes_engine().process_address_space_for_test(3);
+    ASSERT_TRUE(space);
+    ASSERT_TRUE(soc_.gpu_vm().invalidate(*space));
+    constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+    store_dword(kRemove, 0x00040031);
+    store_dword(kRemove + 4, kDefaultComputeDoorbell / 4);
+    store_qword(kRemove + 6 * 4, kApiStatusGpu);
+    store_qword(kRemove + 8 * 4, 2);
+    auto bell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+    ring_doorbell(0x60, bell);
+    ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+    const auto saved_offset = transport_.dword_at(kSchedulerMqdPhysical + 174 * 4);
+    if (action == Action::Reset) {
+      device_.reset(simdojo::ResetKind::FunctionLevel);
+      configure_gart();
+      store_qword(kReadPointerPhysical, 0);
+      store_dword(kApiStatusPhysical, 0);
+      bell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+      ring_doorbell(0x60, bell);
+      EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 0u);
+      EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+    } else {
+      if (action == Action::FreshAdd)
+        store_dword(kSchedulerMqdPhysical + 174 * 4, kStack);
+      for (uint32_t word = 0; word < 64; ++word)
+        store_dword(kRingPhysical + 128 * 4 + word * 4,
+                    transport_.dword_at(kRingPhysical + word * 4));
+      store_qword(kRingPhysical + 128 * 4 + 40 * 4, 3);
+      bell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+      ring_doorbell(0x60, bell);
+      ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 3u);
+      store_dword(kSchedulerMqdPhysical + 174 * 4, saved_offset);
+      for (uint32_t word = 0; word < 64; ++word)
+        store_dword(kRingPhysical + 192 * 4 + word * 4,
+                    transport_.dword_at(kRingPhysical + word * 4));
+      store_qword(kRingPhysical + 192 * 4 + 40 * 4, 4);
+      bell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{256});
+      ring_doorbell(0x60, bell);
+      EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 3u);
+      EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 192u);
+      EXPECT_EQ(soc_.queue_registry().active_queues(), 1u);
+      EXPECT_FALSE(compute_unit_->has_active_wfs());
+    }
     device_.reset(simdojo::ResetKind::FunctionLevel);
     configure_gart();
   }
@@ -1965,23 +2103,15 @@ TEST_F(GpuDeviceMes, RemoveAndReaddSaveAndRestoreAnUnfinishedWave) {
     EXPECT_EQ(states[0].sgprs[4], kLoadedValue);
     EXPECT_EQ(states[0].vgprs[0], 0xabcdef01u);
     EXPECT_EQ(states[0].trap_id, 2u);
-    std::vector<uint8_t> queue_context;
-    ASSERT_TRUE(rocjitsu::amdgpu::deserialize_queue_cwsr_context(
-        kContext, kContextSize, queue_context,
-        [&](uint64_t address, std::span<uint8_t> bytes) {
-          EXPECT_TRUE(transport_.read(kContextPhysical + address - kContext,
-                                      std::as_writable_bytes(bytes)));
-        },
-        kControlStack));
     states[0].sgprs[0] = 0x44444444;
     states[0].vgprs[0] = 0x88888888;
     states[0].wave_stopped = false;
     auto write = [&](uint64_t address, uint32_t value) {
       store_dword(kContextPhysical + address - kContext, value);
     };
-    ASSERT_TRUE(rocjitsu::amdgpu::serialize_queue_cwsr(
-                    kContext, kContextSize, states, write, ROCJITSU_CODE_ARCH_CDNA5, kControlStack,
-                    rocjitsu::amdgpu::CwsrDebugRegion{}, queue_context)
+    ASSERT_TRUE(rocjitsu::amdgpu::serialize_queue_cwsr(kContext, kContextSize, states, write,
+                                                       ROCJITSU_CODE_ARCH_CDNA5, kControlStack,
+                                                       rocjitsu::amdgpu::CwsrDebugRegion{})
                     .ok);
     compute_unit_->lds().zero_range(0, lds_bytes);
     for (uint64_t word = 0; word < 64; ++word)
@@ -1990,9 +2120,7 @@ TEST_F(GpuDeviceMes, RemoveAndReaddSaveAndRestoreAnUnfinishedWave) {
     store_qword(kRingPhysical + 128 * 4 + 40 * 4, 3);
     doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
     const uint64_t unavailable_at =
-        lds_bytes == 0     ? kContextPhysical
-        : lds_bytes == 256 ? kContextPhysical + read(kContext + 8) + (pending_dispatch ? 0 : 8)
-                           : kContextPhysical + kControlStack;
+        lds_bytes == 0 ? kContextPhysical : kContextPhysical + read(kContext);
     transport_.fail_next_read(unavailable_at, simdojo::DmaAccessOutcome::Unavailable);
     ring_doorbell(0x60, doorbell);
     EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
@@ -2451,14 +2579,6 @@ TEST_F(GpuDeviceMes, RemoveAndReaddMatchesEveryWaveBeforeRestoringState) {
     ASSERT_FALSE(compute_unit_->has_active_wfs());
     EXPECT_FALSE(command_processor_.has_registered_queues());
     std::vector<rocjitsu::amdgpu::CwsrWaveState> states;
-    std::vector<uint8_t> queue_context;
-    ASSERT_TRUE(rocjitsu::amdgpu::deserialize_queue_cwsr_context(
-        kContext, kContextSize, queue_context,
-        [&](uint64_t address, std::span<uint8_t> bytes) {
-          EXPECT_TRUE(transport_.read(kContextPhysical + address - kContext,
-                                      std::as_writable_bytes(bytes)));
-        },
-        kControlStack));
     ASSERT_TRUE(rocjitsu::amdgpu::deserialize_queue_cwsr(
         kContext, kContextSize, states,
         [&](uint64_t address) {
@@ -2486,7 +2606,7 @@ TEST_F(GpuDeviceMes, RemoveAndReaddMatchesEveryWaveBeforeRestoringState) {
                     [&](uint64_t address, uint32_t value) {
                       store_dword(kContextPhysical + address - kContext, value);
                     },
-                    soc_.arch(), kControlStack, rocjitsu::amdgpu::CwsrDebugRegion{}, queue_context)
+                    soc_.arch(), kControlStack, rocjitsu::amdgpu::CwsrDebugRegion{})
                     .ok);
 
     for (uint64_t word = 0; word < 64; ++word)
