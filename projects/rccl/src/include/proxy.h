@@ -367,6 +367,7 @@ struct ncclProxyState {
   int p2pChunkSize;
   int nChannels;
   int buffSizes[NCCL_NUM_PROTOCOLS];
+  int p2pLl128BuffSize;
   bool allocP2pNetLLBuffers;
   bool dmaBufSupport;
   ncclNet_t* ncclNet;

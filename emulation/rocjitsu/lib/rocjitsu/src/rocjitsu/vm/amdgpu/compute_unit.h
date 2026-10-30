@@ -30,6 +30,7 @@
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
+#include "util/except.h"
 #include "util/log.h"
 #include "util/result.h"
 
@@ -115,8 +116,9 @@ struct FunctionalQuantumResult {
 /// hardware reclaims a wave's resources at termination (there is no separate lazy
 /// retirement pass).
 ///
-/// Each step() call picks the next active wavefront (round-robin) and executes
-/// one instruction using the ISA-specific decoder.
+/// Each step() call issues one instruction from every RUNNING wavefront, in slot
+/// order, using the ISA-specific decoder. A clocked driver that issues from only
+/// some of them uses run_issue_cycle().
 ///
 /// The execution shell (event scheduling, activation, idle detection) is
 /// provided by ExecComputeUnit<Mode> below. ISA-specific parts (VGPR register
@@ -242,6 +244,37 @@ public:
   /// @retval false No wavefronts remain resident (the CU is idle).
   bool step() override;
 
+  /// @brief Run one cycle for a clocked driver that chooses which waves issue.
+  /// @details Does what step() does each cycle -- retries pipeline work,
+  /// applies WAITCNT, barrier, and ending transitions, and counts down every
+  /// running wave's S_SLEEP -- but issues an instruction only from the waves in
+  /// @p selected_slots, in slot order. A selected wave that is not RUNNING, is
+  /// debug-paused, or spends this cycle sleeping does not issue. Nor does one
+  /// whose instruction fetch must be retried, or whose vector instruction VSKIP
+  /// skips. A driver with nothing to issue still runs the cycle so waiting waves
+  /// can wake. Call on this CU's engine thread. Completions reach the CP once
+  /// the cycle releases the wave-state lock.
+  ///
+  /// The driver must own this CU's execution: neither the CU's serial tick nor
+  /// the command processor's dispatch pool may issue for it while the driver
+  /// calls this. To take ownership, call set_pool_driven(true), which retires
+  /// the serial tick and routes the CU's wakeups to its pool-ready callback,
+  /// then replace that callback with set_on_pool_ready(). Do both after
+  /// CommandProcessor::add_compute_unit(), which sets both itself. This holds
+  /// only while the command processor keeps one dispatch thread: with more, its
+  /// dispatch pool can run run_quantum() on pool-driven CUs, and changing the
+  /// count with set_dispatch_threads() rewrites every CU's pool-driven mode.
+  /// Debug builds assert both conditions; the replaced callback and the
+  /// deferred cycle below remain the driver's responsibility.
+  ///
+  /// Dispatch invokes the pool-ready callback synchronously, before the command
+  /// processor has finished initializing the wave, so the callback must only
+  /// schedule a later cycle and return. Calling this from it can execute a wave
+  /// whose EXEC, identity and initial registers are not yet set.
+  /// @param selected_slots Bit i selects the wave in slot i.
+  /// @returns The selected slots whose wave issued an instruction.
+  uint64_t run_issue_cycle(uint64_t selected_slots);
+
   /// @brief Free a halted wavefront's register allocations and reset its slot.
   /// @details Called from Wavefront::halt() at s_endpgm so a terminated wave
   /// releases its SGPR/VGPR blocks immediately, exactly as hardware reclaims
@@ -299,7 +332,7 @@ public:
   /// @brief Execute up to one functional quantum of step() iterations on this CU.
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
-    const GpuVmAccessBatchGuard vm_access_batch;
+    const InstructionFetchScope fetch_scope(*this);
     // Publish progress once per process per quantum, outside the instruction hot path.
     class ProgressBatch {
     public:
@@ -317,11 +350,6 @@ public:
       ComputeUnitCore &cu_;
       bool nested_;
     } progress_batch{*this};
-    // Reuse instruction-fetch snapshots only within this execution quantum.
-    // Restore the outer scope on exceptions and nested quantum execution too.
-    InstructionVmSnapshot snapshot;
-    snapshot.compute_unit = this;
-    ScopedInstructionVmSnapshot scope(&snapshot);
     // A request left by direct step() execution must not shorten this quantum.
     functional_yield_requested_ = false;
     gws_wait_yield_requested_ = false;
@@ -430,13 +458,39 @@ public:
     execution_failure_handler_ = std::move(cb);
   }
 
+  /// @brief Offer an architectural memory fault to its runtime or debugger owner.
+  /// @details Fetch and debugger probes supply the access address and direction.
+  /// Deferred data and tensor-DMA faults supply zero/false when lane metadata is
+  /// unavailable. The issue PC identifies the faulting instruction in all cases;
+  /// data-fault callbacks see the advanced resume PC and may rewind it for XNACK.
+  /// @returns True if the frontend owns the fault and retains the wave.
   using MemoryViolationHandler =
-      std::function<bool(Wavefront &wf, uint64_t address, bool is_write)>;
+      std::function<bool(Wavefront &wf, uint64_t address, bool is_write, uint64_t issue_pc)>;
   void set_memory_violation_handler(MemoryViolationHandler cb) {
     memory_violation_handler_ = std::move(cb);
   }
   using AluExceptionHandler = std::function<bool(Wavefront &wf)>;
   void set_alu_exception_handler(AluExceptionHandler cb) { alu_exception_handler_ = std::move(cb); }
+
+  /// @brief Notify a clocked driver when a dispatch reserves a wave slot.
+  /// @details Install before execution. Called on the dispatching engine thread,
+  /// under the CU wave-state lock, before the CU schedules work. The wave's slot,
+  /// PC, wave size, register allocation and dispatch generation are set. Its
+  /// dispatch and process identity, EXEC, MODE, address space and initial
+  /// registers are not: the command processor and checkpoint restore apply them
+  /// after this returns.
+  ///
+  /// A reservation is not a launch. A command-processor dispatch that fails
+  /// after this call frees the slot without halting the wave, and a wave in
+  /// ENDING can retire in a cycle that selects nothing. Track occupancy from
+  /// each slot's state and dispatch generation after dispatch and after every
+  /// cycle, not from this callback, halts or issued bits. The handler must not
+  /// take locks or dispatch.
+  using WaveReservationHandler = std::function<void(Wavefront &wf)>;
+  void set_wave_reservation_handler(WaveReservationHandler cb) {
+    wave_reservation_handler_ = std::move(cb);
+  }
+
   /// @brief Mark a debug session as attached to or detached from this CU.
   /// @details Every transition publishes an I$ invalidation. A debugger writes
   /// breakpoints straight into code memory with none of the maintenance that
@@ -637,17 +691,26 @@ public:
   /// @param shader_engine_id Zero-based shader-engine index within the XCC.
   /// @param cu_index Zero-based CU index within the shader engine.
   /// @param cus_per_shader_array Width of each shader array in CU order; zero means unknown.
+  /// @param shader_engine_cu_count Total CUs in the shader engine; zero means unknown.
   void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index,
-                                  uint32_t cus_per_shader_array = 0) {
+                                  uint32_t cus_per_shader_array = 0,
+                                  uint32_t shader_engine_cu_count = 0) {
     shader_engine_id_ = shader_engine_id;
     shader_engine_cu_index_ = cu_index;
     scratch_scoreboard_base_ = shader_engine_cu_index_ * scratch_slots_per_cu_;
     cus_per_shader_array_ = cus_per_shader_array;
+    shader_engine_cu_count_ = shader_engine_cu_count;
     shader_array_cu_id_ = cus_per_shader_array ? cu_index % cus_per_shader_array : 0;
   }
 
   /// @brief Return this CU's physical shader-engine index.
   uint32_t shader_engine_id() const { return shader_engine_id_; }
+
+  /// @brief Return the physical XCC rank, or nullopt without an assigned CP topology.
+  std::optional<uint32_t> xcc_id() const;
+
+  /// @brief Return the shader engine CU count, or zero when unknown.
+  uint32_t shader_engine_cu_count() const { return shader_engine_cu_count_; }
 
   /// @brief Return the shader-array width, or zero when the geometry is unknown.
   uint32_t cus_per_shader_array() const { return cus_per_shader_array_; }
@@ -835,6 +898,11 @@ public:
     WaveStateGuard lock(*this);
     return std::forward<F>(fn)();
   }
+
+  /// @brief Retry retained memory of a paused queue without issuing instructions.
+  /// @details Flushes resulting fault notifications before returning. Snapshot
+  /// callers must still reject memory that remains unavailable after this pass.
+  void retry_paused_queue_memory(uint32_t process_id, uint32_t queue_id, bool replay_loads = false);
 
   /// @brief Pause once after releasing the wave-state lock but before flushing
   /// command-processor notifications.
@@ -1142,9 +1210,19 @@ public:
   /// @details This deliberately bypasses plugin observation and is reserved
   /// for VM storage operations. Instruction code receives
   /// `InstructionComputeUnitView`, which does not expose this API.
+  /// @pre @p reg_idx identifies an existing physical VGPR and @p lane is less
+  /// than vgpr_storage_lane_count().
+  /// @see read_vgpr_storage_bounded() for reads with bounds checks.
   uint32_t read_vgpr_storage(uint32_t reg_idx, uint32_t lane) const {
     return reinterpret_cast<const uint32_t *>(raw_vgpr_data(reg_idx))[lane];
   }
+
+  /// @brief Read physical VGPR storage without producing an observation callback.
+  /// @details Suitable for debugger and VM inspection; checks physical-register
+  /// and lane bounds before reading storage.
+  /// @returns Lane value, or zero outside the physical register or lane bounds.
+  /// @see read_vgpr_storage() for unchecked reads requiring valid indices.
+  virtual uint32_t read_vgpr_storage_bounded(uint32_t reg_idx, uint32_t lane) const = 0;
 
   /// @brief Number of physical VGPR registers in one allocation block.
   uint32_t vgpr_allocation_block_size() const { return vgpr_allocation_block_size_; }
@@ -1182,6 +1260,11 @@ public:
   /// @returns Const pointer to the ISA decoder.
   const Decoder *decoder() const { return decoder_.get(); }
 
+  /// @brief Create a decoder for the ISA a CU with @p config executes.
+  /// @details For components that decode the CU's code themselves, such as a
+  /// timing model looking ahead, so both decode the same target.
+  static std::unique_ptr<Decoder> create_decoder(const Config &config);
+
   /// @brief Replace the concrete decoder in scheduler-level tests.
   /// @details Some concrete targets intentionally remain unavailable to full
   /// simulator configuration while individual instructions acquire execution
@@ -1209,11 +1292,14 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
+  /// @param failure_detail Receives `UnimplementedInst::what()` when that legacy
+  /// exception is translated; otherwise the pointed-to string is unchanged.
   /// @returns Failure for an unimplemented instruction stub or a reported operand
   /// failure. The wavefront retains the reason for caller-owned diagnostics.
   /// Each call clears the previous error; a failed call does not halt the wavefront.
-  /// Validation inside implemented instructions can still raise exceptions.
-  util::Result execute_instruction(Instruction *inst, Wavefront &wf) {
+  /// Other host failures inside implemented instructions still raise exceptions.
+  util::Result execute_instruction(Instruction *inst, Wavefront &wf,
+                                   std::string *failure_detail = nullptr) {
     assert(inst->execute && "instruction execution backend is not linked");
     wf.clear_instruction_execution_error();
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
@@ -1221,7 +1307,16 @@ public:
       return util::Result::success();
     check_static_isa_diagnostics(*inst, wf);
     // The decoded instruction already selects its ISA execution callback.
-    inst->execute(*inst, &wf);
+    try {
+      inst->execute(*inst, &wf);
+    } catch (const util::UnimplementedInst &error) {
+      // Some implemented instructions reject particular operand or mode
+      // combinations through the legacy exception path. Treat those guest
+      // encodings like generated unimplemented stubs at the CU boundary.
+      wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+      if (failure_detail)
+        *failure_detail = error.what();
+    }
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
   }
 
@@ -1266,23 +1361,38 @@ protected:
   /// @brief Update wavefront states (WAITCNT, BARRIER, ENDING transitions).
   void update_wf_states();
 
+  /// @brief Whether issue_instruction() issued an instruction. One that issues
+  /// and then fails, faults or halts the wave still issued.
+  enum class IssueOutcome : uint8_t {
+    /// None was fetched and decoded, or VSKIP skipped it.
+    NotIssued,
+    Issued,
+  };
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
-  void issue_instruction(Wavefront *wf);
+  IssueOutcome issue_instruction(Wavefront *wf);
   /// @brief Try the diagnostic adjacent-MMA batch modes before ordinary issue.
   /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
   void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
                                bool has_accvgprs);
+  /// @brief Convert a guest instruction execution failure into wave termination.
+  void fail_wave_instruction(Wavefront &wf, std::string_view instruction, uint64_t pc,
+                             InstructionExecutionError error, std::string_view failure_detail = {});
   struct NoAsyncWindow {};
   /// @brief Share ordinary instruction execution with the optional scoreboard adapter.
+  /// @returns Whether an instruction issued, as for issue_instruction().
   template <bool EnableAsync>
-  void issue_instruction_impl(
+  IssueOutcome issue_instruction_impl(
       Wavefront *wf,
       std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {},
       std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
   /// @brief Advance CU scheduling with compile-time selection of the issue adapter.
+  /// @param selected_slots Slots whose running wave may issue; every slot by default.
+  /// @param issued If set, receives the selected slots that issued an instruction.
+  /// Only the ordinary issue path reports them.
   template <bool EnableAsync>
   bool step_impl(MmaAdmissionCache *admission = nullptr, uint32_t async_wave_size = 0,
-                 bool has_accvgprs = false);
+                 bool has_accvgprs = false, uint64_t selected_slots = ~uint64_t{0},
+                 uint64_t *issued = nullptr);
 
   /// @brief Apply any I$ invalidation a debug attach or detach published.
   /// @details Runs on this CU's own thread, which is the I$'s sole accessor.
@@ -1344,6 +1454,7 @@ protected:
   uint32_t shader_engine_cu_index_ = 0;
   uint32_t scratch_slots_per_cu_ = 1;
   uint32_t cus_per_shader_array_ = 0;
+  uint32_t shader_engine_cu_count_ = 0;
   uint32_t shader_array_cu_id_ = 0;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
@@ -1420,7 +1531,10 @@ protected:
     QueueExceptionDeliveryPolicy delivery_policy;
   };
 
-  /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
+  /// @brief Offer an architectural data fault to its owner, otherwise cancel it.
+  /// @param issue_pc Original instruction PC, before advancing to the resume PC.
+  void handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc);
+  /// @brief Cancel a terminal VM failure and notify the CP without offering it again.
   void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
   void fail_gws_wait(Wavefront &wf, std::string_view reason);
@@ -1490,21 +1604,24 @@ protected:
   ExecutionFailureHandler execution_failure_handler_;
   MemoryViolationHandler memory_violation_handler_;
   AluExceptionHandler alu_exception_handler_;
+  WaveReservationHandler wave_reservation_handler_;
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
   GpuVm *gpu_vm_ = nullptr;
 
-  /// @brief Instruction-fetch access retained for one CU's functional quantum.
+  /// @brief Instruction-fetch access retained for one run of issue: a CU's
+  /// functional quantum or clocked issue cycle.
   /// @details CU, VM and address-space identity prevent reuse across nested dispatches.
   struct InstructionVmSnapshot {
     ComputeUnitCore *compute_unit = nullptr;
     GpuVm *owner = nullptr;
-    AddressSpaceHandle address_space;
+    AddressSpaceHandle address_space{};
     uint32_t vmid = 0;
-    std::optional<GpuVmAccess> access;
+    std::optional<GpuVmAccess> access{};
   };
-  /// Only the scope pointer is thread-local; the snapshot itself lives on the
-  /// quantum's stack and releases all backing references before returning.
+  /// Only the scope pointer is thread-local; the snapshot itself lives in the
+  /// InstructionFetchScope of the running quantum or issue cycle and releases
+  /// all backing references before that returns.
   static constinit thread_local InstructionVmSnapshot *instruction_vm_snapshot_;
   /// @brief Restore the enclosing fetch scope after a quantum or nested issue.
   /// @details A null scope prevents nested memory requests from borrowing fetch access.
@@ -1518,6 +1635,19 @@ protected:
 
   private:
     InstructionVmSnapshot *previous_;
+  };
+  /// @brief Batch VM accesses and reuse instruction-fetch snapshots for one run
+  /// of issue: a functional quantum or a clocked issue cycle. Restores the outer
+  /// scope on exceptions and nested runs too.
+  class InstructionFetchScope {
+  public:
+    explicit InstructionFetchScope(ComputeUnitCore &cu)
+        : snapshot_{.compute_unit = &cu}, scope_(&snapshot_) {}
+
+  private:
+    const GpuVmAccessBatchGuard vm_access_batch_;
+    InstructionVmSnapshot snapshot_;
+    ScopedInstructionVmSnapshot scope_;
   };
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
@@ -1657,6 +1787,15 @@ inline uint32_t InstructionComputeUnitView::cus_per_shader_array() const {
 }
 inline uint32_t InstructionComputeUnitView::shader_array_cu_id() const {
   return raw_cu().shader_array_cu_id();
+}
+inline uint32_t InstructionComputeUnitView::shader_engine_id() const {
+  return raw_cu().shader_engine_id();
+}
+inline uint32_t InstructionComputeUnitView::shader_engine_cu_count() const {
+  return raw_cu().shader_engine_cu_count();
+}
+inline std::optional<uint32_t> InstructionComputeUnitView::xcc_id() const {
+  return raw_cu().xcc_id();
 }
 inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
@@ -1876,6 +2015,12 @@ public:
     if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX)
       return 0;
     notify_vgpr_read_by_reg(reg_idx, uint64_t{1} << lane);
+    return vgpr_file_[reg_idx][lane];
+  }
+
+  uint32_t read_vgpr_storage_bounded(uint32_t reg_idx, uint32_t lane) const override {
+    if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX)
+      return 0;
     return vgpr_file_[reg_idx][lane];
   }
 

@@ -16,6 +16,10 @@ rj_add_object_library(
     race_detector/core/race_detector.cpp
     race_detector/core/wave_race_state.cpp
 )
+target_link_libraries(
+    rocjitsu_plugin_race_detector
+    INTERFACE $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+)
 
 rj_add_object_library(
     rocjitsu_plugin_throughput
@@ -86,21 +90,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
                 $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
         )
-        # GCC's vptr sanitizer adds references to the key-function-owned RTTI of
-        # simulator classes used by inline accessors. Standalone plugin modules
-        # do not link that simulator image. Compile separate module objects with
-        # only vptr checks disabled; the original objects retain full UBSan
-        # coverage in rocjitsu_tests, which links the simulator objects.
-        set(plugin_objects ${object_lib})
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND RJ_ENABLE_UBSAN)
-            set(plugin_objects ${object_lib}_standalone)
-            get_target_property(plugin_sources ${object_lib} SOURCES)
-            rj_add_object_library(${plugin_objects} ${plugin_sources})
+        # Plugin logic uses inline simulator accessors whose vptr checks need
+        # simulator RTTI that standalone modules do not link.
+        rj_vptr_free_object_library(plugin_objects ${object_lib})
+        if(name STREQUAL "race" AND NOT plugin_objects STREQUAL object_lib)
+            # The race detector exposes the shared wait decoder through its
+            # interface, and that decoder needs the same vptr exemption.
+            rj_vptr_free_object_library(
+                wait_policy_objects
+                rocjitsu_wait_counter_policy
+            )
             target_link_libraries(
                 ${plugin_objects}
-                PRIVATE $<TARGET_PROPERTY:${object_lib},LINK_LIBRARIES>
+                INTERFACE $<TARGET_OBJECTS:${wait_policy_objects}>
             )
-            target_compile_options(${plugin_objects} PRIVATE -fno-sanitize=vptr)
         endif()
         # Link the plugin's own logic. Any simulator code it references is
         # bundled statically through the object library; the plugin does not

@@ -15,6 +15,7 @@ struct Context {
     live: Mutex<HashMap<usize, Layout>>,
     allocations: AtomicUsize,
     frees: AtomicUsize,
+    resizes: AtomicUsize,
     fail_allocate: AtomicBool,
 }
 
@@ -77,6 +78,34 @@ unsafe extern "C" fn free(data: *mut c_void, pointer: *mut c_void) {
     unsafe { std::alloc::dealloc(pointer.cast(), layout) };
 }
 
+unsafe extern "C" fn resize(
+    data: *mut c_void,
+    pointer: *mut c_void,
+    old_length: u64,
+    new_length: u64,
+    alignment: u64,
+) -> *mut c_void {
+    // SAFETY: The test context owns the original block and both callbacks.
+    let replacement = unsafe { allocate(data, new_length, alignment) };
+    if replacement.is_null() {
+        return ptr::null_mut();
+    }
+    let Ok(copy_length) = usize::try_from(old_length.min(new_length)) else {
+        // SAFETY: This callback just allocated the replacement block.
+        unsafe { free(data, replacement) };
+        return ptr::null_mut();
+    };
+    // SAFETY: The callback contract provides both nonoverlapping live extents.
+    unsafe {
+        ptr::copy_nonoverlapping(pointer.cast::<u8>(), replacement.cast::<u8>(), copy_length);
+        free(data, pointer);
+        (*data.cast::<Context>())
+            .resizes
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    replacement
+}
+
 struct DropValue<'a>(&'a AtomicUsize);
 
 impl Drop for DropValue<'_> {
@@ -90,11 +119,88 @@ struct PanicValue<'a> {
     panic: bool,
 }
 
+#[test]
+fn owner_vector_uses_its_retained_allocator_across_growth_and_scope_exit() {
+    let context = Context::default();
+    let allocator = context.allocator();
+    let mut values = OwnerVec::try_with_allocator(allocator, 1).unwrap();
+    values.try_push(11_u64).unwrap();
+    values.try_push(22).unwrap();
+    values.try_push(33).unwrap();
+    assert_eq!(values.as_slice(), &[11, 22, 33]);
+    assert_eq!(values.pop(), Some(33));
+    drop(values);
+    assert_eq!(context.live_count(), 0);
+    assert_eq!(
+        context.allocations.load(Ordering::Relaxed),
+        context.frees.load(Ordering::Relaxed)
+    );
+}
+
+#[test]
+fn owner_vector_failed_growth_preserves_live_elements() {
+    let context = Context::default();
+    let mut values = OwnerVec::try_with_allocator(context.allocator(), 1).unwrap();
+    values.try_push(7_u64).unwrap();
+    context.fail_allocate.store(true, Ordering::Relaxed);
+    assert_eq!(values.try_push(8), Err(AllocationError));
+    assert_eq!(values.as_slice(), &[7]);
+    context.fail_allocate.store(false, Ordering::Relaxed);
+    drop(values);
+    assert_eq!(context.live_count(), 0);
+}
+
+#[test]
+fn owner_vector_uses_supplied_resize_callback() {
+    let context = Context::default();
+    // SAFETY: The context and callbacks live through vector destruction.
+    let allocator = unsafe {
+        Allocator::from_callbacks_with_resize(
+            ptr::from_ref(&context).cast_mut().cast(),
+            Some(allocate),
+            Some(resize),
+            Some(free),
+        )
+        .unwrap()
+    };
+    let mut values = OwnerVec::try_with_allocator(allocator, 1).unwrap();
+    values.try_push(3_u64).unwrap();
+    values.try_push(5).unwrap();
+    assert_eq!(values.as_slice(), &[3, 5]);
+    assert_eq!(context.resizes.load(Ordering::Relaxed), 1);
+    values.try_push(7).unwrap();
+    values.try_push(9).unwrap();
+    context.fail_allocate.store(true, Ordering::Relaxed);
+    assert_eq!(values.try_push(11), Err(AllocationError));
+    assert_eq!(values.as_slice(), &[3, 5, 7, 9]);
+    context.fail_allocate.store(false, Ordering::Relaxed);
+    drop(values);
+    assert_eq!(context.live_count(), 0);
+}
+
 impl Drop for PanicValue<'_> {
     fn drop(&mut self) {
         self.drops.fetch_add(1, Ordering::Relaxed);
         assert!(!self.panic, "intentional destructor panic");
     }
+}
+
+#[test]
+fn nested_allocator_callbacks_restore_the_previous_policy() {
+    let outer = Context::default();
+    let inner = Context::default();
+    outer.allocator().with_scope(|| {
+        drop(Owned::new(1_u32).unwrap());
+        inner.allocator().with_scope(|| {
+            drop(Owned::new(2_u32).unwrap());
+        });
+        drop(Owned::new(3_u32).unwrap());
+    });
+    drop(Owned::new(4_u32).unwrap());
+    assert_eq!(outer.allocations.load(Ordering::Relaxed), 2);
+    assert_eq!(inner.allocations.load(Ordering::Relaxed), 1);
+    assert_eq!(outer.live_count(), 0);
+    assert_eq!(inner.live_count(), 0);
 }
 
 #[test]
@@ -124,76 +230,80 @@ fn callback_combinations_are_validated_without_allocation() {
 #[test]
 fn preallocated_owner_publishes_and_recovers_without_allocating() {
     let context = Context::default();
-    let _scope = context.allocator().scope();
-    let drops = AtomicUsize::new(0);
-    let guard = Owned::<DropValue<'_>>::try_new_uninit().unwrap();
-    assert_eq!(context.live_count(), 1);
-    context.fail_allocate.store(true, Ordering::Relaxed);
-    let owner = guard.write(DropValue(&drops));
-    let pointer = owner.into_raw();
-    assert_eq!(drops.load(Ordering::Relaxed), 0);
-    // SAFETY: This is the unconsumed pointer returned just above for this T.
-    let recovered = unsafe { Owned::<DropValue<'_>>::from_raw(pointer) };
-    assert_eq!(context.allocations.load(Ordering::Relaxed), 1);
-    drop(recovered);
-    assert_eq!(drops.load(Ordering::Relaxed), 1);
-    assert_eq!(context.live_count(), 0);
-    assert_eq!(context.frees.load(Ordering::Relaxed), 1);
+    context.allocator().with_scope(|| {
+        let drops = AtomicUsize::new(0);
+        let guard = Owned::<DropValue<'_>>::try_new_uninit().unwrap();
+        assert_eq!(context.live_count(), 1);
+        context.fail_allocate.store(true, Ordering::Relaxed);
+        let owner = guard.write(DropValue(&drops));
+        let pointer = owner.into_raw();
+        assert_eq!(drops.load(Ordering::Relaxed), 0);
+        // SAFETY: This is the unconsumed pointer returned just above for this T.
+        let recovered = unsafe { Owned::<DropValue<'_>>::from_raw(pointer) };
+        assert_eq!(context.allocations.load(Ordering::Relaxed), 1);
+        drop(recovered);
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(context.live_count(), 0);
+        assert_eq!(context.frees.load(Ordering::Relaxed), 1);
+    });
 }
 
 #[test]
 fn abandoned_preallocation_releases_only_storage() {
     let context = Context::default();
-    let _scope = context.allocator().scope();
-    let guard = Owned::<DropValue<'_>>::try_new_uninit().unwrap();
-    drop(guard);
-    assert_eq!(context.live_count(), 0);
-    assert_eq!(context.frees.load(Ordering::Relaxed), 1);
+    context.allocator().with_scope(|| {
+        let guard = Owned::<DropValue<'_>>::try_new_uninit().unwrap();
+        drop(guard);
+        assert_eq!(context.live_count(), 0);
+        assert_eq!(context.frees.load(Ordering::Relaxed), 1);
+    });
 }
 
 #[test]
 fn owner_failure_and_extraction_drop_values_exactly_once() {
     let context = Context::default();
-    let _scope = context.allocator().scope();
-    let drops = AtomicUsize::new(0);
-    context.fail_allocate.store(true, Ordering::Relaxed);
-    assert!(Owned::new(DropValue(&drops)).is_err());
-    assert_eq!(drops.load(Ordering::Relaxed), 1);
-    assert_eq!(context.live_count(), 0);
-    context.fail_allocate.store(false, Ordering::Relaxed);
-    let owner = Owned::new(DropValue(&drops)).unwrap();
-    let value = owner.into_inner();
-    assert_eq!(drops.load(Ordering::Relaxed), 1);
-    assert_eq!(context.live_count(), 0);
-    drop(value);
-    assert_eq!(drops.load(Ordering::Relaxed), 2);
-    assert_eq!(
-        crate::Error::from(AllocationError).kind(),
-        crate::error::ErrorKind::ResourceExhausted
-    );
+    context.allocator().with_scope(|| {
+        let drops = AtomicUsize::new(0);
+        context.fail_allocate.store(true, Ordering::Relaxed);
+        assert!(Owned::new(DropValue(&drops)).is_err());
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(context.live_count(), 0);
+        context.fail_allocate.store(false, Ordering::Relaxed);
+        let owner = Owned::new(DropValue(&drops)).unwrap();
+        let value = owner.into_inner();
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(context.live_count(), 0);
+        drop(value);
+        assert_eq!(drops.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            crate::Error::from(AllocationError).kind(),
+            crate::error::ErrorKind::ResourceExhausted
+        );
+    });
 }
 
 #[test]
 fn panicking_destructors_release_storage_without_double_drop() {
     let context = Context::default();
-    let _scope = context.allocator().scope();
-    let drops = AtomicUsize::new(0);
-    let value = |panic| PanicValue {
-        drops: &drops,
-        panic,
-    };
+    context.allocator().with_scope(|| {
+        let drops = AtomicUsize::new(0);
+        let value = |panic| PanicValue {
+            drops: &drops,
+            panic,
+        };
 
-    let owner = Owned::new(value(true)).unwrap();
-    assert!(std::panic::catch_unwind(|| drop(owner)).is_err());
-    assert_eq!(drops.load(Ordering::Relaxed), 1);
-    assert_eq!(context.live_count(), 0);
+        let owner = Owned::new(value(true)).unwrap();
+        assert!(std::panic::catch_unwind(|| drop(owner)).is_err());
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(context.live_count(), 0);
 
-    let shared = Shared::new(value(true)).unwrap();
-    let clone = shared.clone();
-    drop(clone);
-    assert!(std::panic::catch_unwind(|| drop(shared)).is_err());
-    assert_eq!(drops.load(Ordering::Relaxed), 2);
-    assert_eq!(context.live_count(), 0);
+        let shared = Shared::new(value(true)).unwrap();
+        let clone = shared.clone();
+        drop(clone);
+        assert!(std::panic::catch_unwind(|| drop(shared)).is_err());
+        assert_eq!(drops.load(Ordering::Relaxed), 2);
+        assert_eq!(context.live_count(), 0);
+    });
 }
 
 #[test]
@@ -201,120 +311,125 @@ fn overaligned_owner_keeps_its_alignment() {
     #[repr(align(128))]
     struct Aligned(u8);
     let context = Context::default();
-    let _scope = context.allocator().scope();
-    let owner = Owned::new(Aligned(7)).unwrap();
-    assert_eq!(owner.as_ptr() as usize % 128, 0);
-    assert_eq!(owner.0, 7);
-    drop(owner);
-    assert_eq!(context.live_count(), 0);
+    context.allocator().with_scope(|| {
+        let owner = Owned::new(Aligned(7)).unwrap();
+        assert_eq!(owner.as_ptr() as usize % 128, 0);
+        assert_eq!(owner.0, 7);
+        drop(owner);
+        assert_eq!(context.live_count(), 0);
+    });
 }
 
 #[test]
 fn shared_clone_is_allocation_free_and_final_owner_destroys_the_value() {
     let context = Context::default();
-    let _scope = context.allocator().scope();
-    let drops = AtomicUsize::new(0);
-    let mut shared = Shared::new(DropValue(&drops)).unwrap();
-    let clone = shared.clone();
-    assert!(Shared::ptr_eq(&shared, &clone));
-    assert!(Shared::get_mut(&mut shared).is_none());
-    assert_eq!(Shared::strong_count(&shared), 2);
-    assert_eq!(context.allocations.load(Ordering::Relaxed), 1);
-    std::thread::scope(|scope| {
-        scope.spawn(move || {
-            let another = clone.clone();
-            drop(clone);
-            drop(another);
+    context.allocator().with_scope(|| {
+        let drops = AtomicUsize::new(0);
+        let mut shared = Shared::new(DropValue(&drops)).unwrap();
+        let clone = shared.clone();
+        assert!(Shared::ptr_eq(&shared, &clone));
+        assert!(Shared::get_mut(&mut shared).is_none());
+        assert_eq!(Shared::strong_count(&shared), 2);
+        assert_eq!(context.allocations.load(Ordering::Relaxed), 1);
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let another = clone.clone();
+                drop(clone);
+                drop(another);
+            });
         });
+        assert_eq!(drops.load(Ordering::Relaxed), 0);
+        assert_eq!(Shared::strong_count(&shared), 1);
+        assert!(Shared::get_mut(&mut shared).is_some());
+        drop(shared);
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(context.live_count(), 0);
     });
-    assert_eq!(drops.load(Ordering::Relaxed), 0);
-    assert_eq!(Shared::strong_count(&shared), 1);
-    assert!(Shared::get_mut(&mut shared).is_some());
-    drop(shared);
-    assert_eq!(drops.load(Ordering::Relaxed), 1);
-    assert_eq!(context.live_count(), 0);
 }
 
 #[test]
 fn shared_callbacks_release_once_after_concurrent_clone_and_drop() {
     let context = Context::default();
-    let _scope = context.allocator().scope();
-    let drops = AtomicUsize::new(0);
-    let mut shared = Shared::new(DropValue(&drops)).unwrap();
-    let barrier = std::sync::Barrier::new(9);
-    std::thread::scope(|scope| {
-        for _ in 0..8 {
-            let worker = shared.clone();
-            let ready = &barrier;
-            scope.spawn(move || {
-                ready.wait();
-                for _ in 0..128 {
-                    let transient = worker.clone();
-                    assert!(Shared::ptr_eq(&worker, &transient));
-                    drop(transient);
-                }
-            });
-        }
-        barrier.wait();
-        for _ in 0..128 {
-            drop(shared.clone());
-        }
-    });
-    assert_eq!(Shared::strong_count(&shared), 1);
-    assert_eq!(drops.load(Ordering::Acquire), 0);
-    assert!(Shared::get_mut(&mut shared).is_some());
+    context.allocator().with_scope(|| {
+        let drops = AtomicUsize::new(0);
+        let mut shared = Shared::new(DropValue(&drops)).unwrap();
+        let barrier = std::sync::Barrier::new(9);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let worker = shared.clone();
+                let ready = &barrier;
+                scope.spawn(move || {
+                    ready.wait();
+                    for _ in 0..128 {
+                        let transient = worker.clone();
+                        assert!(Shared::ptr_eq(&worker, &transient));
+                        drop(transient);
+                    }
+                });
+            }
+            barrier.wait();
+            for _ in 0..128 {
+                drop(shared.clone());
+            }
+        });
+        assert_eq!(Shared::strong_count(&shared), 1);
+        assert_eq!(drops.load(Ordering::Acquire), 0);
+        assert!(Shared::get_mut(&mut shared).is_some());
 
-    // All workers hold a strong reference before the original owner is
-    // dropped. The final release may now happen on any worker thread.
-    let final_release = std::sync::Barrier::new(9);
-    std::thread::scope(|scope| {
-        for _ in 0..8 {
-            let worker = shared.clone();
-            let ready = &final_release;
-            scope.spawn(move || {
-                ready.wait();
-                for _ in 0..32 {
-                    drop(worker.clone());
-                }
-            });
-        }
-        final_release.wait();
-        drop(shared);
+        // All workers hold a strong reference before the original owner is
+        // dropped. The final release may now happen on any worker thread.
+        let final_release = std::sync::Barrier::new(9);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let worker = shared.clone();
+                let ready = &final_release;
+                scope.spawn(move || {
+                    ready.wait();
+                    for _ in 0..32 {
+                        drop(worker.clone());
+                    }
+                });
+            }
+            final_release.wait();
+            drop(shared);
+        });
+        assert_eq!(drops.load(Ordering::Acquire), 1);
+        assert_eq!(context.live_count(), 0);
     });
-    assert_eq!(drops.load(Ordering::Acquire), 1);
-    assert_eq!(context.live_count(), 0);
 }
 
 #[test]
 fn preallocated_shared_owner_publishes_without_another_allocation() {
     let context = Context::default();
-    let _scope = context.allocator().scope();
-    let drops = AtomicUsize::new(0);
-    let unused = Shared::<DropValue<'_>>::try_new_uninit().unwrap();
-    drop(unused);
-    assert_eq!(context.live_count(), 0);
-    assert_eq!(drops.load(Ordering::Relaxed), 0);
+    context.allocator().with_scope(|| {
+        let drops = AtomicUsize::new(0);
+        let unused = Shared::<DropValue<'_>>::try_new_uninit().unwrap();
+        drop(unused);
+        assert_eq!(context.live_count(), 0);
+        assert_eq!(drops.load(Ordering::Relaxed), 0);
 
-    let guard = Shared::try_new_uninit().unwrap();
-    context.fail_allocate.store(true, Ordering::Relaxed);
-    let shared = guard.write(DropValue(&drops));
-    assert_eq!(context.allocations.load(Ordering::Relaxed), 2);
-    drop(shared);
-    assert_eq!(drops.load(Ordering::Relaxed), 1);
-    assert_eq!(context.live_count(), 0);
+        let guard = Shared::try_new_uninit().unwrap();
+        context.fail_allocate.store(true, Ordering::Relaxed);
+        let shared = guard.write(DropValue(&drops));
+        assert_eq!(context.allocations.load(Ordering::Relaxed), 2);
+        drop(shared);
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(context.live_count(), 0);
+    });
 }
 
 #[test]
 fn vector_growth_failure_preserves_initialized_elements() {
     let context = Context::default();
-    let _scope = context.allocator().scope();
-    let mut values = try_vec_with_capacity(1).unwrap();
-    values.try_push(7_u64).unwrap();
-    context.fail_allocate.store(true, Ordering::Relaxed);
-    assert_eq!(values.try_push(9), Err(AllocationError));
-    assert_eq!(values.as_slice(), &[7]);
-    assert_eq!(values.len(), 1);
-    assert_eq!(context.live_count(), 0);
+    context.allocator().with_scope(|| {
+        let mut values = try_vec_with_capacity(1).unwrap();
+        values.try_push(7_u64).unwrap();
+        context.fail_allocate.store(true, Ordering::Relaxed);
+        assert_eq!(values.try_push(9), Err(AllocationError));
+        assert_eq!(values.as_slice(), &[7]);
+        assert_eq!(values.len(), 1);
+        assert_eq!(context.live_count(), 0);
+    });
 }
 
 #[test]

@@ -73,6 +73,22 @@ option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(RJ_ENABLE_MSAN "Enable MemorySanitizer" OFF)
+# UBSan's vptr check caches verified type pairs in a small direct-mapped table
+# shared by all threads. When hot simulator types share a slot, every member
+# access repeats the full RTTI check and threads keep rewriting that slot, which
+# can slow multi-threaded emulation several-fold. GCC UBSan builds omit the
+# check by default; Clang UBSan builds enable it explicitly.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(_rj_ubsan_vptr_default OFF)
+else()
+    set(_rj_ubsan_vptr_default ON)
+endif()
+option(
+    RJ_UBSAN_VPTR
+    "Enable UBSan's dynamic-type (vptr) check when RJ_ENABLE_UBSAN is ON"
+    ${_rj_ubsan_vptr_default}
+)
+unset(_rj_ubsan_vptr_default)
 set(RJ_SANITIZER_RUNTIME
     "AUTO"
     CACHE STRING
@@ -245,6 +261,16 @@ if(_rj_sanitizer_count GREATER 0)
             -fsanitize=${_rj_sanitizer_arg}
         )
         list(APPEND RJ_SANITIZER_LINK_OPTIONS -fsanitize=${_rj_sanitizer_arg})
+        if(undefined IN_LIST _rj_sanitizer_kinds)
+            message(STATUS "UBSan vptr checks: ${RJ_UBSAN_VPTR}")
+            if(RJ_UBSAN_VPTR)
+                # Clang does not include vptr in -fsanitize=undefined.
+                list(APPEND RJ_SANITIZER_COMPILE_OPTIONS -fsanitize=vptr)
+                list(APPEND RJ_SANITIZER_LINK_OPTIONS -fsanitize=vptr)
+            else()
+                list(APPEND RJ_SANITIZER_COMPILE_OPTIONS -fno-sanitize=vptr)
+            endif()
+        endif()
         if(
             address IN_LIST _rj_sanitizer_kinds
             OR undefined IN_LIST _rj_sanitizer_kinds
@@ -363,6 +389,14 @@ if(ROCJITSU_ENABLE_VFIO)
     include(rj_libvfio_user)
 endif()
 
+# Configure arithmetic before applying the parent host CPU flags.
+if(BUILD_TESTING)
+    include(rj_test_registration)
+endif()
+
+# Keep library and tests ahead of rj_host_cpu to avoid inheriting its -march policy.
+add_subdirectory(lib/arith)
+
 # Apply the host CPU policy to rocjitsu targets, after configuring dependencies.
 include(rj_host_cpu)
 
@@ -385,6 +419,7 @@ target_link_libraries(
         rocjitsu_analysis
         rocjitsu_code
         rocjitsu_code_object
+        rocjitsu_executable
         rocjitsu_isa
         rocjitsu_isa_registry
         simdojo
@@ -429,6 +464,9 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 add_subdirectory(tools)
 add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
+add_subdirectory(fuzz/code_object)
+add_subdirectory(fuzz/execution)
+add_subdirectory(fuzz/multiplexer)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)

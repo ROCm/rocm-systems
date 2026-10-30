@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_metrics.hpp"
+#include "common/clocks.hpp"
 #include "common/units/data_size.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
@@ -15,6 +16,7 @@
 #include "library/tracing.hpp"
 #include <cstdint>
 
+#include <fmt/format.h>
 #include <functional>
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
@@ -25,7 +27,6 @@
 #include <timemory/components/papi/papi_vector.hpp>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/rusage/types.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/trip_count/extern.hpp>
 #include <timemory/macros.hpp>
 #include <timemory/math.hpp>
@@ -44,11 +45,11 @@
 #include <array>
 #include <chrono>
 #include <cstring>
-#include <ctime>
 #include <initializer_list>
 #include <mutex>
 #include <regex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -56,6 +57,7 @@
 
 #include <pthread.h>
 #include <signal.h>
+#include <unistd.h>
 
 using rocprofsys::common::units::bytes;
 using rocprofsys::common::units::data_size_cast;
@@ -204,20 +206,25 @@ template <typename Category>
 void
 metadata_init_tracks(std::int64_t _tid)
 {
-    const auto& t_info    = thread_info::get(_tid, SequentTID);
-    auto        thread_id = static_cast<std::uint64_t>(t_info->index_data->system_value);
+    const auto& t_info = thread_info::get(_tid, SequentTID);
+    if(!t_info || !t_info->index_data)
+    {
+        throw std::logic_error(
+            fmt::format("thread_info with index data for tid {} not found", _tid));
+    }
+    auto thread_id = static_cast<std::uint64_t>(t_info->index_data->system_value);
 
-    trace_cache::get_metadata_registry().add_thread_info(
-        { .parent_process_id = getppid(),
-          .process_id        = getpid(),
-          .thread_id         = thread_id,
-          .start             = static_cast<std::uint32_t>(t_info->get_start()),
-          .end               = static_cast<std::uint32_t>(t_info->get_stop()),
-          .extdata           = "{}" });
+    trace_cache::get_metadata_registry().ensure_thread(thread_id, [&] {
+        return trace_cache::info::thread{ .parent_process_id = getppid(),
+                                          .process_id        = getpid(),
+                                          .thread_id         = thread_id,
+                                          .start             = t_info->get_start(),
+                                          .end               = t_info->get_stop(),
+                                          .extdata           = "{}" };
+    });
 
     apply_for_all_thread_names<Category>(_tid, [&](const std::string& _track_name) {
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = _track_name, .thread_id = thread_id, .extdata = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(_track_name, thread_id);
     });
 }
 
@@ -313,7 +320,7 @@ backtrace_metrics::sample(int)
     }
 
     auto const _cache = tim::rusage_cache{ RUSAGE_THREAD };
-    m_cpu             = tim::get_clock_thread_now<std::int64_t, std::nano>();
+    m_cpu_time        = clocks::thread_cpu::now();
     m_mem_peak        = _cache.get_peak_rss();
     m_ctx_swch        = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();
@@ -422,7 +429,7 @@ backtrace_metrics::operator-=(const backtrace_metrics& _rhs)
 
     if(_lhs(category::thread_cpu_time{}))
     {
-        _lhs.m_cpu -= _rhs.m_cpu;
+        _lhs.m_cpu_time -= _rhs.m_cpu_time;
     }
 
     if(_lhs(category::thread_peak_memory{}))
@@ -461,9 +468,7 @@ backtrace_metrics::cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) co
     if(is_category_enabled(category::thread_cpu_time{}))
     {
         cache_backtrace_metrics_events<category::thread_cpu_time, double>(
-            0, _ts,
-            std::chrono::duration<double>{ std::chrono::nanoseconds{ m_cpu } }.count(),
-            _tid);
+            0, _ts, std::chrono::duration<double>{ m_cpu_time }.count(), _tid);
     }
 
     if(is_category_enabled(category::thread_peak_memory{}))

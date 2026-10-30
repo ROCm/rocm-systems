@@ -19,16 +19,20 @@ mod types;
 mod virtual_memory;
 
 pub use access::DeviceAccess;
-pub use allocation::Allocation;
+pub(crate) use allocation::record_rollback;
+pub use allocation::{Allocation, RollbackReport, with_rollback_report};
 pub use registered_host::{RegisteredHostAllocation, RegisteredHostMemory};
 pub use types::{
     AllocationInfo, HostCacheability, HostMappingPolicy, MemoryKind, VirtualAddressInfo,
-    VirtualMemoryInfo, VirtualMemoryPlacement,
+    VirtualMemoryInfo, VirtualMemoryOptions, VirtualMemoryPlacement,
 };
 pub use virtual_memory::{VirtualAddress, VirtualDeviceMapping, VirtualHostMapping, VirtualMemory};
 
 pub(crate) use allocation::{DriverAllocation, set_device_access_for};
-pub(crate) use types::{AllocationDesc, AllocationLimits, HostRegistration, VirtualMapRequest};
+pub(crate) use types::{
+    AllocationDesc, AllocationLimits, HostRegistration, VirtualMapRequest,
+    registered_host_page_cover,
+};
 #[cfg(test)]
 pub(crate) use virtual_memory::{DeviceIntervals, HostIntervals};
 pub(crate) use virtual_memory::{

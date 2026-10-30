@@ -222,36 +222,20 @@ static inline ncclResult_t ncclAlltoAllConfigImpl(const void* sendbuff, void* re
 // rcclDdaEnabled() is now in rccl_wrap.cc (declared in rccl_common.h)
 
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Kept as a small named helper
-// (rather than an inline expression) so the dispatch decision is reachable from host unit tests; the
-// logic is identical to the guard at the AllReduce call site below.
-//
-// `ceAllReduceAllowed` is the caller's single source of truth for "will CE AllReduce actually service
-// this call" -- computed once at the call site from rcclUseCeAr2Shot() plus whatever additional
-// gating the CE AllReduce implementation requires (graph latch, ncclGroupDepth, force/symReg
-// eligibility, etc). This helper does not re-derive CE eligibility itself: threading the same boolean
-// through both the early CE return and this guard keeps the two decisions from silently drifting apart
-// as CE AllReduce's own eligibility rules evolve.
+// (rather than an inline expression) so the dispatch decision is reachable from host unit tests.
+// DDA and CE 2-shot are now both candidates in rcclCandSearch; the preferred-backend mask and probe
+// order arbitrate between them. This helper gates DDA entry on symk eligibility and rcclDdaEnabled
+// only -- CE yield logic is no longer needed here.
 bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclDataType_t datatype, bool symEligible,
-                                    bool ceAllReduceAllowed, bool query) {
+                                    bool query) {
   const size_t msgBytes = count * ncclTypeSize(datatype);
-  // !symEligible is required on every arch: gfx1250 fabric does not override it.
-  // ddaFabricArch1250 only skips the CE yield -- fabric AR may still run when CE
-  // would also be eligible, bounded by rcclDdaEnabled (widest arch tier cap,
-  // else RCCL_DDA_THRESHOLD) and the per-tier thresholds. On other arches, yield to
-  // DDA whenever CE will not service this call; yielding on message size alone
-  // left comms without CE's prerequisites (e.g. gfx950 with symmetricSupport off)
-  // with no DDA and no CE, falling back to the generic ring/tree kernel across
-  // the whole 4 MiB+ range that DDA still wins.
-  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  const bool result = !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) &&
+  const bool result = !symEligible &&
                       rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
   if (!result && !query) {
     if (symEligible)
       INFO(NCCL_TUNING, "AR DDA disqualified: symk eligible");
     else if (!rcclParamDdaEnable())
       INFO(NCCL_TUNING, "AR DDA disqualified: RCCL_DDA_ENABLE=0");
-    else if (ceAllReduceAllowed && !ddaFabricArch1250)
-      INFO(NCCL_TUNING, "AR DDA disqualified: ceAllReduceAllowed=1 on non-gfx1250");
     else
       INFO(NCCL_TUNING, "AR DDA disqualified: msgBytes=%zu > entryThreshold=%zu",
            msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
@@ -260,9 +244,10 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
 }
 
 // Addon backends (DDA / CE 2-shot / GIN-SDMA) return from the collective impl
-// without ncclEnqueueCheck, which is where NCCL_CHECK_MODE pointer checks and the
-// suspend-while-collective guard live. Divert those calls through enqueue so the
-// guards still fire; debug-mode collectives then use the native/CE path.
+// without ncclEnqueueCheck, which is where NCCL_CHECK_MODE pointer checks, the
+// suspend-while-collective guard and the revoked-comm rejection live. Divert those
+// calls through enqueue so the guards still fire; debug-mode collectives then use
+// the native/CE path.
 bool ncclCommIsSuspended(ncclComm* comm) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (comm == nullptr || comm->memManager == nullptr) return false;
@@ -279,6 +264,7 @@ bool rcclCollectiveMustUseEnqueuePath(ncclComm* comm) {
   if (comm == nullptr) return true;
   if (comm->checkMode != ncclCheckModeDefault) return true;
   if (ncclCommIsSuspended(comm)) return true;
+  if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) return true;
   return false;
 }
 
@@ -1209,15 +1195,17 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   // Select once in rccl_wrap.cc; the same function backs rcclGetCollImplInfo.
   // Carry the decision into taskAppend() so RCCL_SYMMETRIC vs ring is not
   // re-derived (NCCL_ALGO=Ring must not still extract the symmetric kernel).
-  struct rcclCollDecision decision;
-  NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, /*query=*/false, &decision));
-  // rcclSelectReduceScatter has no stream parameter (RS has no CE paths), so
-  // probe capture state here so enqueue.cc reads a valid ceCapturing.
+  // Tick the shared CE graph latch before selection so CE ReduceScatter sees capture.
+  bool ceCapturing = false;
   {
     struct ncclCudaGraph ceGraph;
     NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
-    decision.ceCapturing = ncclCudaGraphValid(ceGraph);
+    ceCapturing = ncclCudaGraphValid(ceGraph);
+    rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   }
+  struct rcclCollDecision decision;
+  NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, /*query=*/false, &decision));
+  decision.ceCapturing = ceCapturing;
   info.decision = decision;
   info.decisionValid = true;
 
@@ -1233,6 +1221,28 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   }
 
   switch (decision.algo) {
+  case RCCL_CE_2SHOT: {
+    if (recvcount == 0) return ncclSuccess;
+    INFO(NCCL_COLL, "CE ReduceScatter: recvcount=%zu datatype=%d op=%d rank=%d/%d", recvcount, (int)datatype, (int)op,
+         comm->rank, comm->nRanks);
+    // This path bypasses ncclLaunchCeColl, so start the CeColl event here instead.
+    struct ncclCeCollArgs ceArgs = {};
+    ceArgs.func = ncclFuncReduceScatter;
+    ceArgs.datatype = datatype;
+    ceArgs.redOp = op;
+    ceArgs.nElts = recvcount;
+    ceArgs.eltSize = ncclTypeSize(datatype);
+    ceArgs.sendBuff = (uint8_t*)sendbuff;
+    ceArgs.recvBuff = (uint8_t*)recvbuff;
+    // No CollApi parent: this path returns before ncclEnqueueCheck, so the
+    // thread-local handle still names a previous collective.
+    NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
+    ncclResult_t ceRet = rcclAddonLaunch(comm, stream, [&] {
+      return ncclCeReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, stream, nullptr, &ceArgs);
+    });
+    ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);
+    return ceRet;
+  }
   case RCCL_DDA_FABRIC_LL:
     INFO(NCCL_COLL, "ReduceScatter: taking DDA fabric LL path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
@@ -1267,7 +1277,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
          "sendbuff=%p recvbuff=%p",
          recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
     return rcclDirectReduceScatter(sendbuff, recvbuff, recvcount, datatype, op, comm, stream, chunkSteps, sliceSteps);
-  default: // RCCL_SYMMETRIC / native: enqueue; taskAppend honors info->decision.
+  default: // RCCL_SYMMETRIC / RCCL_CE_REGISTERED / native: enqueue; taskAppend honors info->decision.
     return ncclEnqueueCheck(&info);
   }
 }
