@@ -15,6 +15,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "FailWhen.h"
@@ -667,6 +668,34 @@ TEST_P(FabricInitFailMicrotest, CommInit_StepFails_FallsBackWithoutFabricStateOr
 constexpr size_t kPeerTableBytes = kNRanks * sizeof(void*);
 constexpr size_t kEpochBytes = kCuCount * sizeof(uint32_t);
 
+// ncclCuMemAlloc also creates and syncs a stream for the scratch and the
+// barrier's flag buffer. Init's create is the first after the barrier's
+// synchronous flag memset; init's sync is the first after the epoch fill.
+void FailFabricZeroStreamCreate() {
+  auto flagsZeroed = std::make_shared<bool>(false);
+  auto memset = g_hipMemset;
+  g_hipMemset = [flagsZeroed, memset](void* dst, int value, size_t bytes) {
+    *flagsZeroed = true;
+    return memset(dst, value, bytes);
+  };
+  FailWhen(
+      g_hipStreamCreateWithFlags,
+      [flagsZeroed](hipStream_t*, unsigned) { return std::exchange(*flagsZeroed, false); },
+      hipErrorOutOfMemory);
+}
+
+void FailFabricZeroFillSync() {
+  auto epochFilled = std::make_shared<bool>(false);
+  auto memsetAsync = g_hipMemsetAsync;
+  g_hipMemsetAsync = [epochFilled, memsetAsync](void* dst, int value, size_t bytes, hipStream_t stream) {
+    if (bytes == kEpochBytes) *epochFilled = true;
+    return memsetAsync(dst, value, bytes, stream);
+  };
+  FailWhen(
+      g_hipStreamSynchronize, [epochFilled](hipStream_t) { return std::exchange(*epochFilled, false); },
+      hipErrorInvalidValue);
+}
+
 INSTANTIATE_TEST_SUITE_P(
     FabricInitStep, FabricInitFailMicrotest,
     ::testing::Values(
@@ -731,6 +760,7 @@ INSTANTIATE_TEST_SUITE_P(
                        hipErrorOutOfMemory);
                  },
                  true},
+        FailCase{"ZeroStreamCreate", [] { FailFabricZeroStreamCreate(); }, true},
         FailCase{"ScratchZeroing", [] { FailFabricScratchZeroing(); }, true},
         FailCase{"EpochAlloc",
                  [] {
@@ -745,7 +775,8 @@ INSTANTIATE_TEST_SUITE_P(
                        [](void*, int, size_t bytes, hipStream_t) { return bytes == kEpochBytes; },
                        hipErrorInvalidValue);
                  },
-                 true}),
+                 true},
+        FailCase{"ZeroFillSync", [] { FailFabricZeroFillSync(); }, true}),
     ParamName<FailCase>);
 
 // ---------------------------------------------------------------------------
