@@ -805,25 +805,19 @@ These variables only take effect when the IB-CAST net plugin is loaded
 
     * - | ``RCCL_IB_QP_SCHED_ENABLE``
         | Enables the CAST QP scheduler.
-      - | ``-1``: Auto (default). Enabled by default when
-          ``NCCL_NET=IB-CAST`` is set explicitly. Disabled by default
-          otherwise — on AINIC with ``NCCL_NET`` unset, or with
-          ``NCCL_NET=ROCM-IB`` — override either with
-          ``RCCL_IB_QP_SCHED_ENABLE=1``. Independent of that rule, disabled
-          whenever the connection resolves to ``BY_ORDER`` receive matching.
-          ``BY_ORDER`` is AINIC's default scheme for two reasons: CTS
-          offload (on by default for non-P2P AINIC connections) forces it,
-          and it's also the AINIC RoCE fallback even without CTS offload —
-          unless QP sharing, out-of-order receive queues, or port
-          failover/recovery force ``BY_ID`` instead, or
-          ``NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME`` is set explicitly.
+      - | ``-1``: Auto (default).
         | ``0``: Force off.
-        | ``1``: Force on. On a ``BY_ORDER`` connection the scheduler still
-          reports "enabled", but WRR and split-data are no-ops there either
-          way, so it can't actually rebalance traffic — an unsupported
-          combination, flagged with a ``WARN`` instead of failing silently.
-        | Independent of the value above, the scheduler is always disabled
-          (``INFO`` log, not a ``WARN``) when port failover/recovery
+        | ``1``: Force on.
+        | Auto resolves to enabled only when ``NCCL_NET=IB-CAST`` is set
+          explicitly. Everywhere else — AINIC with ``NCCL_NET`` unset, or
+          ``NCCL_NET=ROCM-IB`` — auto resolves to disabled; use
+          ``RCCL_IB_QP_SCHED_ENABLE=1`` to override.
+        | On AINIC, the scheduler only has an effect once ID-based receive
+          matching (``NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1``) is
+          enabled. Without it, forcing the scheduler on (``1``) reports
+          "enabled", but WRR and split-data are no-ops, so nothing is
+          actually rebalanced.
+        | Always disabled when port failover/recovery
           (``NCCL_IB_RESILIENCY_PORT_FAILOVER``/``_PORT_RECOVERY``) or QP
           sharing (``RCCL_IB_QP_SHARING_ENABLE``) is active — load-balancer
           integration with those features is still pending.
