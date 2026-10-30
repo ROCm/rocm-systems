@@ -5,6 +5,7 @@
 /// @brief Shared wait-retirement and register-readiness tests for the core
 /// scoreboard and race plugin.
 
+#include "race-detector/race_test_instruction.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -131,15 +132,13 @@ public:
     const uint64_t pc = 0x100 + reg * 4;
     const auto order = unordered ? MemoryOrderClass::UNORDERED : MemoryOrderClass::VMEM;
     const std::array obligations{MemoryCounterObligation{*domain.race, order}};
-    const InstructionSnapshot instruction{pc, std::array{kProbeWord}};
-    state_->registerEvent(instruction, MemoryEventType::GLOBAL_TO_VGPR, {reg}, lanes, bytes,
-                          obligations, order);
+    state_->registerEvent(testInstruction(pc, kProbeWord), MemoryEventType::GLOBAL_TO_VGPR, {reg},
+                          lanes, bytes, obligations, order);
   }
   void counter_only(CounterDomain domain) {
     const std::array obligations{MemoryCounterObligation{*domain.race, MemoryOrderClass::VMEM}};
-    const InstructionSnapshot instruction{0x800, std::array{kProbeWord}};
-    state_->registerEvent(instruction, MemoryEventType::VGPR_TO_GLOBAL, {}, 1, 0xf, obligations,
-                          MemoryOrderClass::VMEM);
+    state_->registerEvent(testInstruction(0x800, kProbeWord), MemoryEventType::VGPR_TO_GLOBAL, {},
+                          1, 0xf, obligations, MemoryOrderClass::VMEM);
   }
   void wait(uint32_t word) { wait(std::span<const uint32_t>(&word, 1)); }
   void wait(std::span<const uint32_t> words) {
