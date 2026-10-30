@@ -406,7 +406,7 @@ ncclResult_t cacheDevComm(const ReshardDevCommCacheKey& key, const ncclDevComm* 
  * Staging buffer pool -- per-comm entries, mirroring TransposeBufferEntry.
  * ====================================================================*/
 
-static StagingBufferPoolEntry gStagingPool[MAX_STAGING_BUFFER_ENTRIES];
+static StagingBufferPoolEntry gStagingPool[MAX_STAGING_POOL_ENTRIES];
 static int gStagingPoolCount = 0;
 
 #ifdef NCCL_M2N_TESTING
@@ -457,10 +457,21 @@ ncclResult_t ensureStagingBufferPool(ncclComm_t comm, uint64_t poolKey, cudaStre
     *outState = entry->state;
     return ncclSuccess;
   }
-  if (gStagingPoolCount >= MAX_STAGING_BUFFER_ENTRIES) {
+  int commEntryCount = 0;
+  for (int i = 0; i < gStagingPoolCount; i++) {
+    if (gStagingPool[i].comm == comm && gStagingPool[i].allocated) {
+      commEntryCount++;
+    }
+  }
+  if (commEntryCount >= MAX_STAGING_BUFFER_ENTRIES) {
     NCCL_M2N_FAIL(ncclSystemError, -1,
-                  "Staging buffer pool full (%d entries); increase MAX_STAGING_BUFFER_ENTRIES",
-                  MAX_STAGING_BUFFER_ENTRIES);
+                  "Staging buffer pool full for communicator %p (%d entries); increase MAX_STAGING_BUFFER_ENTRIES",
+                  (void*)comm, MAX_STAGING_BUFFER_ENTRIES);
+  }
+  if (gStagingPoolCount >= MAX_STAGING_POOL_ENTRIES) {
+    NCCL_M2N_FAIL(ncclSystemError, -1,
+                  "Staging buffer pool full (%d entries across all communicators); increase MAX_STAGING_POOL_COMMS",
+                  MAX_STAGING_POOL_ENTRIES);
   }
 
   cudaEvent_t event = nullptr;

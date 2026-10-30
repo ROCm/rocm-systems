@@ -111,7 +111,12 @@ inline constexpr size_t CTRL_FIELD_CURSOR_HEAD = 40;
 inline constexpr size_t CTRL_FIELD_PIPE_READY = 48;
 inline constexpr size_t CTRL_FIELD_PIPE_READY_SHADOW = 56;
 
+/* MAX_STAGING_BUFFER_ENTRIES bounds the pool per communicator. The pool is
+ * process-global, so it is sized for single-process multi-rank runs that
+ * drive up to MAX_STAGING_POOL_COMMS communicators from one address space. */
 inline constexpr int MAX_STAGING_BUFFER_ENTRIES = 16;
+inline constexpr int MAX_STAGING_POOL_COMMS = 8;
+inline constexpr int MAX_STAGING_POOL_ENTRIES = MAX_STAGING_BUFFER_ENTRIES * MAX_STAGING_POOL_COMMS;
 
 /* Placement classifiers — operate on the int placement value stored
  * in ncclDistTensor_t::placements[i] (NCCL_RESHARD_REPLICATE or
