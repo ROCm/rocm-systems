@@ -6432,5 +6432,152 @@ TEST(ArithBridgeTest, VectorMovesAndSelectionsPreservePayloadsHalvesAndMaskedAli
                 }
               }
 }
+
+TEST(ArithBridgeTest, MullitPoliciesNanClampAndMaskedAlias) {
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32u, 64u})
+      for (bool dx10 : {false, true})
+        for (unsigned rounding = 0; rounding < 4; ++rounding)
+          for (unsigned policy_kind = 0; policy_kind < 3; ++policy_kind) {
+            ArithmeticPolicy policy{};
+            if (policy_kind == 1) {
+              policy.semantics = ArithmeticSemantics::Loose;
+            }
+            if (policy_kind == 2) {
+              policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+            }
+            BridgeFixture fixture(rdna3, lanes, policy);
+            const uint64_t exec_mask = 1ULL << (lanes - 1);
+            fixture.wave->set_exec(exec_mask);
+            fixture.wave->set_mode_raw(0xf0 | rounding | (dx10 ? 0x100 : 0));
+            fixture.wave->set_trapsts(0x20);
+            fixture.cu->write_vgpr(fixture.base(), lanes - 1, 0x7fc12345);
+            fixture.cu->write_vgpr(fixture.base() + 1, lanes - 1, 0x3f800000);
+            fixture.cu->write_vgpr(fixture.base() + 2, lanes - 1, 0x3f800000);
+            const auto words =
+                rdna3 ? rdna3::build_vop3(
+                            rdna3::kVMullitF32Vop3,
+                            {.vdst = 0, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258})
+                      : rdna4::build_vop3(
+                            rdna4::kVMullitF32Vop3,
+                            {.vdst = 0, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258});
+            auto instruction = fixture.decoder->decode_window(words);
+            ASSERT_TRUE(instruction.succeeded());
+            fixture.recorder->writes.clear();
+            const bool success =
+                fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                    .succeeded();
+            ASSERT_EQ(success, policy_kind != 2);
+            if (success) {
+              ASSERT_EQ(fixture.recorder->writes.size(), 1U);
+              EXPECT_EQ(fixture.recorder->writes[0].lanes, exec_mask);
+            } else {
+              EXPECT_TRUE(fixture.recorder->writes.empty());
+            }
+            const uint32_t result = fixture.cu->read_vgpr(fixture.base(), lanes - 1);
+            if (!success) {
+              EXPECT_EQ(result, 0x7fc12345U);
+            } else if (rdna3 && !dx10) {
+              EXPECT_GT(result & 0x7fffffffU, 0x7f800000U);
+            } else {
+              EXPECT_EQ(result, 0U);
+            }
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), 0x3c003c00U);
+            EXPECT_EQ(fixture.wave->trapsts(), 0x20U);
+          }
+}
+
+TEST(ArithBridgeTest, InterpolationQuadReadsModesAliasesAndPartialWrites) {
+  const uint16_t opcodes[2][6] = {
+      {rdna3::kVInterpP10F32Vinterp, rdna3::kVInterpP2F32Vinterp, rdna3::kVInterpP10F16F32Vinterp,
+       rdna3::kVInterpP2F16F32Vinterp, rdna3::kVInterpP10RtzF16F32Vinterp,
+       rdna3::kVInterpP2RtzF16F32Vinterp},
+      {rdna4::kVInterpP10F32Vinterp, rdna4::kVInterpP2F32Vinterp, rdna4::kVInterpP10F16F32Vinterp,
+       rdna4::kVInterpP2F16F32Vinterp, rdna4::kVInterpP10RtzF16F32Vinterp,
+       rdna4::kVInterpP2RtzF16F32Vinterp}};
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32u, 64u})
+      for (unsigned op = 0; op < 6; ++op)
+        for (bool high : {false, true})
+          for (bool alias : {false, true})
+            for (unsigned controls = 0; controls < 4; ++controls) {
+              BridgeFixture fixture(rdna3, lanes);
+              bool half = op >= 2, p2 = op & 1;
+              uint8_t dest = alias ? 0 : 3;
+              const uint64_t exec_mask = lanes == 32 ? 0x88888888ULL : 0x8888888888888888ULL;
+              fixture.wave->set_exec(exec_mask);
+              // Fixed instruction rounding must not inherit these guest settings.
+              fixture.wave->set_mode_raw(0xf);
+              fixture.wave->set_trapsts(0x20);
+              uint32_t initial[4][64] = {};
+              for (unsigned lane = 0; lane < lanes; ++lane) {
+                uint32_t value = std::bit_cast<uint32_t>(float(lane + 1));
+                uint32_t packed = high ? uint32_t(util::f32_to_f16(float(lane + 1))) << 16 | 0x3555
+                                       : 0x35550000 | util::f32_to_f16(float(lane + 1));
+                initial[0][lane] = half ? packed : value;
+                initial[1][lane] = 0x3f000000;
+                initial[2][lane] = half && !p2 ? packed : value;
+                initial[3][lane] = 0xa55a5aa5;
+                for (unsigned reg = 0; reg < 4; ++reg)
+                  fixture.cu->write_vgpr(fixture.base() + reg, lane, initial[reg][lane]);
+              }
+              const uint8_t opsel = half && high ? (p2 ? 9 : 5) : 0;
+              const uint8_t neg = controls & 1 ? 7 : 0;
+              const auto words =
+                  rdna3
+                      ? rdna3::build_vinterp(opcodes[0][op], {.vdst = dest,
+                                                              .wait_exp = 7,
+                                                              .op_sel = opsel,
+                                                              .clamp = uint8_t((controls >> 1) & 1),
+                                                              .src0 = 256,
+                                                              .src1 = 257,
+                                                              .src2 = 258,
+                                                              .neg = neg})
+                      : rdna4::build_vinterp(opcodes[1][op], {.vdst = dest,
+                                                              .wait_exp = 7,
+                                                              .opsel = opsel,
+                                                              .clamp = uint8_t((controls >> 1) & 1),
+                                                              .src0 = 256,
+                                                              .src1 = 257,
+                                                              .src2 = 258,
+                                                              .neg = neg});
+              auto instruction = fixture.decoder->decode_window(words);
+              ASSERT_TRUE(instruction.succeeded());
+              ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                              .succeeded());
+              const uint64_t quads = exec_mask >> 3;
+              ASSERT_EQ(fixture.recorder->reads.size(), 3U);
+              EXPECT_EQ(fixture.recorder->reads[0].lanes, quads << (p2 ? 2 : 1));
+              EXPECT_EQ(fixture.recorder->reads[0].bytes, half ? (high ? 0xc : 3) : 0xf);
+              EXPECT_EQ(fixture.recorder->reads[1].lanes, exec_mask);
+              EXPECT_EQ(fixture.recorder->reads[2].lanes, p2 ? exec_mask : quads);
+              EXPECT_EQ(fixture.recorder->reads[2].bytes, half && !p2 ? (high ? 0xc : 3) : 0xf);
+              ASSERT_EQ(fixture.recorder->writes.size(), 1U);
+              EXPECT_EQ(fixture.recorder->writes[0].lanes, exec_mask);
+              EXPECT_EQ(fixture.recorder->writes[0].bytes, half && p2 ? (high ? 0xc : 3) : 0xf);
+              for (unsigned lane = 0; lane < lanes; ++lane) {
+                uint32_t expected = initial[dest][lane];
+                if ((exec_mask >> lane) & 1) {
+                  unsigned quad = lane & ~3U;
+                  float value = float(quad + (p2 ? 3 : 2)) * 0.5f +
+                                (neg ? -1 : 1) * float((p2 ? lane : quad) + 1);
+                  if (controls & 2)
+                    value = std::clamp(value, 0.0f, 1.0f);
+                  if (half && p2) {
+                    unsigned shift = high ? 16 : 0;
+                    expected = (expected & ~(0xffffU << shift)) | uint32_t(util::f32_to_f16(value))
+                                                                      << shift;
+                  } else {
+                    expected = std::bit_cast<uint32_t>(value);
+                  }
+                }
+                EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + dest, lane), expected)
+                    << rdna3 << '/' << lanes << '/' << op << '/' << high << '/' << alias << '/'
+                    << controls << '/' << lane;
+              }
+              EXPECT_EQ(fixture.wave->trapsts(), 0x20U);
+            }
+}
+
 } // namespace
 } // namespace rocjitsu::amdgpu
