@@ -41,7 +41,7 @@ def test_path(binary_handler_profile_rocprof_compute):
 def test_path_rocflop(binary_handler_profile_rocprof_compute):
     # Test whether multiprocess workloads like rocflop are handled correctly
     workload_dir = common.get_output_dir()
-    options = ["--block", "2.1.0"]
+    options = ["--set", "launch_stats"]
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -50,7 +50,7 @@ def test_path_rocflop(binary_handler_profile_rocprof_compute):
         roof=False,
         app_name="rocflop",
     )
-    integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
+    integration_common.check_csv_files(workload_dir, num_devices, num_kernels=1)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 

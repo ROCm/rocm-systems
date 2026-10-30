@@ -24,7 +24,10 @@ import pytest
 import yaml
 from common import SUPPORTED_ARCHS
 
-from utils.utils_common import canonical_config_arch
+from config import analysis_configs_dir
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import canonical_config_arch, load_yaml
+from utils.utils_counter_defs import extract_counters_and_variables, metric_expressions
 
 # Runtime config options
 config = {}
@@ -58,6 +61,14 @@ ROOF_ONLY_FILES = sorted([
     "sysinfo.csv",
 ])
 
+
+LIVE_ATTACH_SET = "launch_stats"
+
+MEMORY_CHART_COUNTERS = frozenset({
+    "SQC_TC_DATA_READ_REQ",
+    "SQC_TC_DATA_READ_REQ_sum",
+})
+SPI_BUSY_COUNTERS = frozenset({"GRBM_SPI_BUSY", "SPI_BUSY_sum"})
 
 # Shared constants for output directory tests.
 GPU_MODEL = "MIXXX"
@@ -112,6 +123,61 @@ def read_counter_results(workload_dir):
     """Load the long-form rocpd counter artifacts of a workload into one frame."""
     result_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     return pd.concat([pd.read_csv(result_file) for result_file in result_files])
+
+
+def metric_table_counters(gpu_arch, block_number):
+    """Read each table's counters without using the profiling block selector."""
+    config_root = analysis_configs_dir / canonical_config_arch(gpu_arch)
+    config_paths = sorted(config_root.glob(f"{block_number * 100:04d}_*.yaml"))
+    assert len(config_paths) == 1, (
+        f"{gpu_arch}: expected one block {block_number} config"
+    )
+    panel = load_yaml(config_paths[0])["Panel Config"]
+    gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
+    return extract_metric_table_counters(panel, gpu_series)
+
+
+def extract_metric_table_counters(panel, gpu_series):
+    """Resolve counters from loaded tables, independently of selector matching."""
+    counters_by_table = {}
+    for source in panel["data source"]:
+        table = source.get("metric_table")
+        if table is None:
+            continue
+        expressions = [
+            expression
+            for metric in (table["metric"] or {}).values()
+            for expression in metric_expressions(table, metric)
+        ]
+        counters, _ = extract_counters_and_variables("\n".join(expressions), gpu_series)
+        counters_by_table[table["id"]] = counters
+    return counters_by_table
+
+
+def assert_selected_counters(
+    counter_names, expected_counters, selection, profiler_output
+):
+    """Require selected counters except those the runtime explicitly cannot collect."""
+    unexpected_counters = counter_names - expected_counters
+    assert not unexpected_counters, (
+        f"{selection} collected counters outside the selected block: "
+        f"{sorted(unexpected_counters)}"
+    )
+
+    # Native warnings may be colorized and forwarded through the profiler logger.
+    profiler_output = re.sub(r"\x1b\[[0-9;]*m", "", profiler_output)
+    warnings = re.findall(
+        r"\[rocprofiler-compute\] \[[^\]\r\n]+\] WARNING: "
+        r"Requested counters not available: ([^\r\n]+)",
+        profiler_output,
+    )
+    unsupported_counters = {
+        name.strip() for warning in warnings for name in warning.split(",")
+    }
+    missing_counters = expected_counters - unsupported_counters - counter_names
+    assert not missing_counters, (
+        f"{selection} did not collect selected counters: {sorted(missing_counters)}"
+    )
 
 
 def check_csv_files(output_dir, num_devices, num_kernels):
@@ -553,19 +619,6 @@ def skip_unsupported_roofline_soc():
     _, soc = gpu_soc()
     if soc == "MI100":
         pytest.skip(f"Roofline is not supported on {soc}")
-
-
-def is_gfx115x_soc():
-    return gpu_soc()[1] in {
-        "RDNA35_POINT_1",
-        "RDNA35_HALO",
-        "RDNA35_POINT_2",
-        "RDNA35_GORGON_POINT",
-    }
-
-
-def is_gfx1250_soc():
-    return gpu_soc()[1] == "GFX1250_SERIES"
 
 
 # --
