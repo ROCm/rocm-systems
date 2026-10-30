@@ -413,6 +413,12 @@ void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
 }
 void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
+bool rcclCeAllReduceEnabled(const struct ncclComm*) {
+  if (g_rcclParamCeAllReduce >= 0) return g_rcclParamCeAllReduce != 0;
+  return true;  // arch default: enabled
+}
+bool rcclForceCeAllReduceEnabled(const struct ncclComm*) { return false; }
+
 // ===========================================================================
 // Fail-loud floor -- rccl_wrap.cc entry points no host-only microtest executes.
 // Reaching one aborts AND names itself on stderr, which is the point: an unfaked
@@ -429,12 +435,6 @@ void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rc
 void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
 }
-bool rcclCeAllReduceEnabled(const ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAllReduceEnabled");
-}
-bool rcclForceCeAllReduceEnabled(const ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeAllReduceEnabled");
-}
 bool rcclForceCeScratchEnabled(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
 }
@@ -443,6 +443,9 @@ size_t rcclCeAr2ShotMax(const ncclComm*) {
 }
 size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
+}
+size_t rcclCeArNonRegCap(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
 }
 bool rcclNcclAlgoEnvIsSet() {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
