@@ -114,8 +114,8 @@
 static const uint32_t kNumBufferElements = 256;
 
 // Upper bound on waiting for the peer to advance the handshake. A healthy run
-// takes ~0.5 s, so this is headroom for a loaded CI machine.
-static const int kPeerWaitTimeoutMs = 30000;
+// takes ~0.5 s, so 10 s is ~20x headroom for a loaded CI machine.
+static const int kPeerWaitTimeoutMs = 10000;
 
 // How often the parent re-checks a pending condition while waiting.
 static const int kPollMs = 10;
@@ -510,8 +510,24 @@ void IPCTest::ChildProcessImpl() {
   // Yield until shared token value changes i.e. is updated by parent.
   // Validate parent's update is per expectation
   PROCESS_LOG("Child: Waiting for parent process to signal\n");
-  while (shared_->token == 0) {
-    sched_yield();
+  {
+    const auto token_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(kPeerWaitTimeoutMs);
+    while (shared_->token == 0) {
+      if (getppid() != parent_pid_) {
+        PROCESS_LOG("Child: Parent (pid %d) is gone while waiting for initial token; exiting\n",
+                    static_cast<int>(parent_pid_));
+        shared_->child_status = -1;
+        return;
+      }
+      if (std::chrono::steady_clock::now() >= token_deadline) {
+        PROCESS_LOG("Child: Timed out after %d ms waiting for initial token\n",
+                    kPeerWaitTimeoutMs);
+        shared_->child_status = -1;
+        return;
+      }
+      sched_yield();
+    }
   }
   if (shared_->token != 1) {
     shared_->token = -1;
@@ -571,8 +587,25 @@ void IPCTest::ChildProcessImpl() {
   hsa_signal_store_release(ipc_signal, 2);
 
   // Wait for SignalCallbackHandler to be called
-  while (child_cb_data.token <= 0)
-    sched_yield();
+  {
+    const auto cb_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(kPeerWaitTimeoutMs);
+    while (child_cb_data.token <= 0) {
+      if (getppid() != parent_pid_) {
+        PROCESS_LOG("Child: Parent (pid %d) is gone while waiting for async callback; exiting\n",
+                    static_cast<int>(parent_pid_));
+        shared_->child_status = -1;
+        return;
+      }
+      if (std::chrono::steady_clock::now() >= cb_deadline) {
+        PROCESS_LOG("Child: Timed out after %d ms waiting for async callback\n",
+                    kPeerWaitTimeoutMs);
+        shared_->child_status = -1;
+        return;
+      }
+      sched_yield();
+    }
+  }
 
   PROCESS_LOG("Child: Confirmed DWord's of IPC buffer has: %d\n", third_val_);
   PROCESS_LOG("Child: Updated DWord's of IPC buffer to: %d\n", fourth_val_);
@@ -583,6 +616,7 @@ void IPCTest::ChildProcessImpl() {
   hsa_signal_value_t ret = 1;
   if (!WaitForParentSignal(ipc_signal, HSA_SIGNAL_CONDITION_LT, 0,
                            "waiting for the parent to release the IPC signal", &ret)) {
+    shared_->child_status = -1;
     return;
   }
   USR_TRIGGERED_FAILURE(ret, HSA_STATUS_ERROR, 203);
