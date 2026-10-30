@@ -56,8 +56,8 @@ inline std::vector<uint32_t> make_barrier_words(const DropTargetRow &row) {
 }
 
 inline std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row,
-                                                 std::vector<uint32_t> words,
-                                                 bool siblings = false) {
+                                                        std::vector<uint32_t> words,
+                                                        bool siblings = false) {
   constexpr uint32_t kSecondEntryByteOffset = 256;
   const IsaGpuTargetDescription *binding =
       default_isa_target_registry().find_gpu_target(row.target);
