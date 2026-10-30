@@ -47,8 +47,7 @@ public:
         uint32_t postcmds_size;
     };
 
-    CommandBufferMgr(void* ptr, const uint32_t& size) { Init(descriptor_t{ptr, size}, false); }
-    explicit CommandBufferMgr(const profile_t* profile) { Init(profile->command_buffer, true); }
+    CommandBufferMgr(void* ptr, const uint32_t& size) { Init(descriptor_t{ptr, size}); }
 
     char* GetPrefix() { return reinterpret_cast<char*>(buffer_.ptr); }
     char* GetPrefix1() { return reinterpret_cast<char*>(buffer_.ptr) + sizeof(info_t); }
@@ -175,28 +174,21 @@ public:
     static uint32_t Align(const uint32_t& size) { return (size + align_mask_) & ~align_mask_; }
 
 private:
-    void Init(const descriptor_t& buffer, const bool& import)
+    void Init(const descriptor_t& buffer)
     {
         buffer_    = buffer;
         info_      = {};
         info_slot_ = NULL;
 
-        uint32_t prefix_size = sizeof(info_t);
         if(buffer_.ptr != NULL)
         {
             info_slot_ = reinterpret_cast<info_t*>(GetPrefix());
-            if(import)
-            {
-                prefix_size       = info_slot_->prefix_size;
-                info_             = *info_slot_;
-                info_.prefix_size = 0;
-            }
         }
         else
         {
             buffer_.size = UINT_MAX;
         }
-        AddPrefix(prefix_size);
+        AddPrefix(sizeof(info_t));
     }
 
     uint32_t GetRdOffset() const { return Align(info_.prefix_size); }

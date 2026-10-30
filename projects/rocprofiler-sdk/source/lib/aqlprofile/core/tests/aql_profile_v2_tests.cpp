@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/aqlprofile/core/amd_aql_pm4_ib_packet.h"
 #include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 
@@ -910,5 +911,84 @@ TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedNonSqDepthOptions)
 
     event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_32_BITS;
     EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+namespace
+{
+aqlprofile_pmc_profile_t
+make_control_packet_profile(const char* gfxip)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = gfxip;
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    return aqlprofile_pmc_profile_t{
+        .agent = aql_profile::RegisterAgent(&info), .events = nullptr, .event_count = 0};
+}
+}  // namespace
+
+TEST_F(AqlProfileV2ApiTest, PmcControlPacketEnableDisable)
+{
+    for(const char* gfxip : {"gfx900", "gfx942", "gfx1100", "gfx1200"})
+    {
+        SCOPED_TRACE(gfxip);
+        auto profile = make_control_packet_profile(gfxip);
+
+        std::vector<std::vector<uint32_t>> commands{};
+        commands.reserve(2);
+        for(auto attribute : {AQLPROFILE_INFO_ENABLE_CMD, AQLPROFILE_INFO_DISABLE_CMD})
+        {
+            auto control = aqlprofile_pmc_control_packet_t{};
+            ASSERT_EQ(aqlprofile_get_pmc_info(&profile, attribute, &control), HSA_STATUS_SUCCESS);
+            ASSERT_GT(control.command_buffer_size, 0u);
+            ASSERT_EQ(control.command_buffer_size % sizeof(uint32_t), 0u);
+
+            auto& buffer = commands.emplace_back(control.command_buffer_size / sizeof(uint32_t));
+            control.command_buffer = buffer.data();
+            ASSERT_EQ(aqlprofile_get_pmc_info(&profile, attribute, &control), HSA_STATUS_SUCCESS);
+
+            const auto* packet = reinterpret_cast<const amd_aql_pm4_ib_packet_t*>(&control.packet);
+            EXPECT_EQ(packet->pm4_ib_format, AMD_AQL_PM4_IB_FORMAT);
+            EXPECT_EQ(packet->dw_count_remain, AMD_AQL_PM4_IB_DW_COUNT_REMAIN);
+            const auto ib_addr =
+                (uint64_t{packet->pm4_ib_command[2]} << 32) | packet->pm4_ib_command[1];
+            EXPECT_EQ(ib_addr, reinterpret_cast<uintptr_t>(buffer.data()));
+        }
+        EXPECT_NE(commands.at(0), commands.at(1));
+    }
+}
+
+TEST_F(AqlProfileV2ApiTest, PmcControlPacketRejectsSmallBuffer)
+{
+    auto profile = make_control_packet_profile("gfx942");
+    auto control = aqlprofile_pmc_control_packet_t{};
+    ASSERT_EQ(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_ENABLE_CMD, &control),
+              HSA_STATUS_SUCCESS);
+    ASSERT_GT(control.command_buffer_size, sizeof(uint32_t));
+
+    auto buffer = std::vector<uint32_t>(control.command_buffer_size / sizeof(uint32_t), 0);
+    control.command_buffer = buffer.data();
+    control.command_buffer_size -= sizeof(uint32_t);
+    EXPECT_EQ(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_ENABLE_CMD, &control),
+              HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+    EXPECT_EQ(buffer, std::vector<uint32_t>(buffer.size(), 0));
+}
+
+TEST_F(AqlProfileV2ApiTest, PmcControlPacketRejectsInvalidArguments)
+{
+    auto profile = make_control_packet_profile("gfx942");
+    EXPECT_EQ(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_ENABLE_CMD, nullptr),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_DISABLE_CMD, nullptr),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+
+    profile.agent.handle = 99999;
+    auto control         = aqlprofile_pmc_control_packet_t{};
+    EXPECT_NE(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_ENABLE_CMD, &control),
+              HSA_STATUS_SUCCESS);
 }
 }  // namespace aql_profile_v2_tests
