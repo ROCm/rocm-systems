@@ -65,6 +65,7 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <numa.h>
 #if defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
 #endif
@@ -89,6 +90,43 @@ void* __stdcall ThreadTrampoline(void* arg) {
   void* Data = ar->entry_args;
   CallMe(Data);
   return nullptr;
+}
+
+// Adds to cpuset every CPU of each NUMA node the calling thread is allowed to run on, so helper
+// threads stay in the NUMA domain(s) the application bound itself to. A caller that may run on
+// every node therefore yields every CPU. Returns false if no CPU could be added, e.g. when NUMA
+// is unsupported by the kernel or the node topology in sysfs is unreadable.
+static bool FillCpuSetFromCallerNumaNodes(cpu_set_t* cpuset, int cores) {
+  if (numa_available() == -1) return false;
+
+  struct bitmask* caller_cpus = numa_allocate_cpumask();
+  struct bitmask* node_cpus = numa_allocate_cpumask();
+  MAKE_SCOPE_GUARD([&]() {
+    numa_free_cpumask(caller_cpus);
+    numa_free_cpumask(node_cpus);
+  });
+
+  if (numa_sched_getaffinity(0, caller_cpus) < 0) return false;
+
+  const size_t cpuset_size = CPU_ALLOC_SIZE(cores);
+  const int num_cpus = Min(numa_num_possible_cpus(), cores);
+  const int max_node = numa_max_node();
+  for (int node = 0; node <= max_node; node++) {
+    // Node ids may be sparse; nonexistent nodes fail here.
+    if (numa_node_to_cpus(node, node_cpus) != 0) continue;
+
+    bool caller_on_node = false;
+    for (int cpu = 0; cpu < num_cpus && !caller_on_node; cpu++) {
+      caller_on_node =
+          numa_bitmask_isbitset(node_cpus, cpu) && numa_bitmask_isbitset(caller_cpus, cpu);
+    }
+    if (!caller_on_node) continue;
+
+    for (int cpu = 0; cpu < num_cpus; cpu++) {
+      if (numa_bitmask_isbitset(node_cpus, cpu)) CPU_SET_S(cpu, cpuset_size, cpuset);
+    }
+  }
+  return CPU_COUNT_S(cpuset_size, cpuset) != 0;
 }
 
 // Thread container allows multiple waits and separate close (destroy).
@@ -139,8 +177,10 @@ class os_thread {
         return;
       }
       CPU_ZERO_S(CPU_ALLOC_SIZE(cores), cpuset);
-      for (int i = 0; i < cores; i++) {
-        CPU_SET_S(i, CPU_ALLOC_SIZE(cores), cpuset);
+      if (!FillCpuSetFromCallerNumaNodes(cpuset, cores)) {
+        for (int i = 0; i < cores; i++) {
+          CPU_SET_S(i, CPU_ALLOC_SIZE(cores), cpuset);
+        }
       }
 #ifdef HAVE_PTHREAD_ATTR_SETAFFINITY_NP
       err = pthread_attr_setaffinity_np(&attrib, CPU_ALLOC_SIZE(cores), cpuset);
