@@ -15,6 +15,7 @@ on:
     paths:
       - "emulation/mirage/**"
       - "emulation/rocjitsu/**"
+      - "projects/rocr-runtime/**"
       - ".github/workflows/rocjitsu-*.yml"
       - ".pre-commit-config.yaml"
 
@@ -38,6 +39,7 @@ jobs:
           sparse-checkout: |
             emulation/mirage
             emulation/rocjitsu
+            projects/rocr-runtime
             .github
 
       - uses: actions/setup-python@v5
