@@ -9,10 +9,15 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/target_registry.h"
 
-#include <algorithm>
 #include <cstring>
+#include <vector>
 
 namespace rocjitsu::test {
+constexpr uint32_t kSignal = 0xbe804ec1u;
+constexpr uint32_t kWait = 0xbf94ffffu;
+constexpr uint32_t kGuestWait = 0xbfc60000u;
+constexpr uint32_t kMov = 0xbe800081u;
+
 struct DropTargetRow {
   const char *name;
   rj_code_target_id_t target;
@@ -43,14 +48,11 @@ inline std::vector<uint32_t> make_barrier_words(const DropTargetRow &row) {
   // RDNA3 generated test_encodings.h: s_waitcnt and full s_barrier differ
   // from CDNA. Offset 4/16 barriers surround unchanged waits and s_mov_b32.
   if (row.arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return {0xbf890000u, 0xbfbd0000u, 0xbe800081u,
-            0xbf890000u, 0xbfbd0000u, build_s_endpgm(row.arch)};
-  const uint32_t wait = row.split ? 0xbfc60000u : 0xbf8c0000u;
+    return {0xbf890000u, 0xbfbd0000u, kMov, 0xbf890000u, 0xbfbd0000u, build_s_endpgm(row.arch)};
+  const uint32_t wait = row.split ? kGuestWait : 0xbf8c0000u;
   if (row.split)
-    return {wait,        0xbe804ec1u, 0xbe800081u,
-            0xbf94ffffu, wait,        0xbe804ec1u,
-            0xbe800081u, 0xbf94ffffu, build_s_endpgm(row.arch)};
-  return {wait, 0xbf8a0000u, 0xbe800081u, wait, 0xbf8a0000u, build_s_endpgm(row.arch)};
+    return {wait, kSignal, kMov, kWait, wait, kSignal, kMov, kWait, build_s_endpgm(row.arch)};
+  return {wait, 0xbf8a0000u, kMov, wait, 0xbf8a0000u, build_s_endpgm(row.arch)};
 }
 
 inline std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row,

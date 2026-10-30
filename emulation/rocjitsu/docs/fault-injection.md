@@ -284,10 +284,27 @@ refused. There is no overwrite flag. A failed write or close removes the
 incomplete new output. This is single-file I/O, without a multi-file publication
 protocol or a crash-durability guarantee.
 
-Exit status is 0 for successful listing/mutation/help, 2 for argument, read,
-admission, selection or mutation errors, and 3 for output I/O errors. Diagnostics
-go to stderr; successful mutation prints the kind, concrete target, exact
-coordinate, logical/member counts and output byte count. It emits only the
+Exit status is 0 for successful listing/mutation/help/capabilities, 2 for
+argument, read, admission, selection or mutation errors, and 3 for output I/O
+errors. All successful stdout paths flush and check the stream. A completed
+mutant file remains if writing its subsequent assumptions or summary fails;
+status 3 does not guarantee that no output file exists.
+
+Diagnostics go to stderr. Discovery, selection and mutation failures preserve
+the library's typed error as `code=NAME offset=N` before the explanatory message.
+The code names are `BadIdentity`, `UnsupportedTarget`, `UnsupportedForm`,
+`AmbiguousSelection`, `IncompleteSelection`, `InvalidParameters`,
+`ValidationFailure`, `NoCandidates` and `OrdinalOutOfRange`. Runners can classify
+these errors without matching the English message; argument/read diagnostics
+have no typed library code. An invalid `--exact` coordinate reports
+`code=InvalidParameters` with the requested `.text` offset and never falls back.
+
+Successful mutation prints the kind, concrete target, exact coordinate,
+logical/member counts and output byte count to stdout. It also prints each
+returned library assumption to stderr, prefixed by `rj_code_mutate: assumption:`,
+including convergence and execution-qualification limits and the clustered
+dispatch requirement when applicable. Failure to write these assumptions
+returns status 3 before printing a success summary. The CLI emits only the
 mutant file and does not load HSA or a capture plugin. Mutation success and the
 capability listing make no execution or detector qualification claim.
 

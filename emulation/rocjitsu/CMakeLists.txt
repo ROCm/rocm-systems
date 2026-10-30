@@ -502,6 +502,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
+# Ship the standalone host CLI for offline code-object mutation workflows.
+install(TARGETS rj_code_mutate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # rj_pretranslate ships because the tier it fills is only worth having if an
     # image build or a post-install step can fill it.

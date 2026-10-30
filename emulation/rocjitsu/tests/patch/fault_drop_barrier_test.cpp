@@ -40,10 +40,10 @@ static_assert(!std::is_aggregate_v<DropBarrierSelection>);
 
 constexpr rj_code_target_id_t kTarget = ROCJITSU_CODE_TARGET_GFX1250;
 constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
-constexpr uint32_t kSignal = 0xbe804ec1u;
-constexpr uint32_t kWait = 0xbf94ffffu;
-constexpr uint32_t kGuestWait = 0xbfc60000u;
-constexpr uint32_t kMov = 0xbe800081u;
+using test::kGuestWait;
+using test::kMov;
+using test::kSignal;
+using test::kWait;
 constexpr uint32_t kEnd = 0xbfb00000u;
 
 std::vector<uint8_t> make_gfx1250_barrier_elf(std::vector<uint32_t> words = {kGuestWait, kSignal,

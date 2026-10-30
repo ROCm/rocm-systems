@@ -1075,8 +1075,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             -DREQUIRED_MODEL_ARCHES=rdna3,rdna4,cdna3,cdna4,cdna5 -P
             ${CMAKE_CURRENT_SOURCE_DIR}/patch/check_fault_injection_symbols.cmake
     )
-endif()
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(
         NAME FaultDropBarrier.SymbolBoundary
         COMMAND
