@@ -24,6 +24,8 @@ struct MConfiguration : Configuration {
     MOCK_METHOD(unsigned int, statsLevel, (), (const, noexcept, override));
     MOCK_METHOD(bool, unsupportedFileSystems, (), (const, noexcept, override));
     MOCK_METHOD(size_t, asyncBufferSize, (), (const, noexcept, override));
+    MOCK_METHOD(bool, host, (), (const, noexcept, override));
+    MOCK_METHOD(void, host, (bool), (noexcept, override));
 };
 
 }

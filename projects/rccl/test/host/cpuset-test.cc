@@ -9,11 +9,14 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "cpuset.h"
+#include "fmt/format.h"
 #include "os.h"
 
 void ncclOsCpuZero(ncclAffinity& affinity) { CPU_ZERO(&affinity); }
@@ -93,6 +96,38 @@ TEST_F(CpusetMicrotest, StrToCpuset_KnownBug_MoreThan32WordsShiftsTheMask) {
   words[32] = "1";
   ASSERT_EQ(ncclSuccess, ncclStrToCpuset(Words(words).c_str(), &set_));
   EXPECT_EQ((std::vector<int>{1}), Cpus());
+}
+
+// Single-process multi-GPU ranks parse their cpumaps concurrently; distinct per-thread masks expose shared tokenizer state.
+TEST_F(CpusetMicrotest, StrToCpuset_ConcurrentParsesDoNotInterfere) {
+  constexpr int kThreads = 8;
+  constexpr int kIters = 2000;
+  std::vector<std::string> masks(kThreads);
+  std::vector<ncclAffinity> expected(kThreads);
+  for (int t = 0; t < kThreads; t++) {
+    int nWords = 2 + t;
+    std::vector<std::string> words;
+    for (int w = nWords - 1; w >= 0; w--) words.push_back(fmt::format("{:08x}", 1u << ((3 * t + w) % 32)));
+    masks[t] = Words(words);
+    CPU_ZERO(&expected[t]);
+    for (int w = 0; w < nWords; w++) CPU_SET(32 * w + (3 * t + w) % 32, &expected[t]);
+  }
+
+  std::atomic<bool> go{false};
+  std::atomic<int> mismatches{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < kThreads; t++) {
+    threads.emplace_back([&, t] {
+      while (!go.load()) std::this_thread::yield();
+      for (int i = 0; i < kIters; i++) {
+        ncclAffinity set;
+        if (ncclStrToCpuset(masks[t].c_str(), &set) != ncclSuccess || !CPU_EQUAL(&set, &expected[t])) mismatches++;
+      }
+    });
+  }
+  go = true;
+  for (auto& thread : threads) thread.join();
+  EXPECT_EQ(0, mismatches.load()) << "of " << kThreads * kIters << " concurrent parses";
 }
 
 // ncclCpusetToRangeStr
