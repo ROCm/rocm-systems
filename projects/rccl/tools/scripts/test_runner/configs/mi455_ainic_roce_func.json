@@ -220,8 +220,7 @@
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
         "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
-        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
       },
       "tests": [
         {
@@ -247,8 +246,7 @@
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
         "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
-        "RCCL_IB_FAULT_INJECTION": "0",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "RCCL_IB_FAULT_INJECTION": "0"
       },
       "tests": [
         {
@@ -767,8 +765,7 @@
         "RCCL_IB_P2P_DISABLE_CTS": "1",
         "CTS_NUM_CONNS": "16",
         "CTS_QP_DEPTH": "256",
-        "CTS_SNAP_EVERY": "4",
-        "RCCL_IB_QP_SCHED_ENABLE": "1"
+        "CTS_SNAP_EVERY": "4"
       },
       "tests": [
         {
@@ -814,7 +811,8 @@
         "RCCL_IB_QP_SCHED_WEIGHT": "0",
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "50",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "60000",
-        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536"
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
       }
     },
     "cast_wrr_split": {
@@ -822,8 +820,7 @@
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
-        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
       },
       "tests": [
         {
@@ -876,8 +873,7 @@
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
-        "NCCL_IB_SPLIT_DATA_ON_QPS": "0",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
       },
       "tests": [
         {
@@ -916,8 +912,7 @@
       "timeout": 60,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "1",
-        "NCCL_IB_SPLIT_DATA_ON_QPS": "0",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
       },
       "tests": [
         {
@@ -930,9 +925,6 @@
     "cast_grh": {
       "extends": "cast_base",
       "timeout": 60,
-      "env_variables": {
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
-      },
       "tests": [
         {
           "name": "Cast_GrhSetOnRoceQp",
@@ -945,8 +937,7 @@
       "extends": "cast_base",
       "timeout": 60,
       "env_variables": {
-        "NCCL_IB_SUBNET_AWARE_ROUTING": "1",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "NCCL_IB_SUBNET_AWARE_ROUTING": "1"
       },
       "tests": [
         {
@@ -961,8 +952,7 @@
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "4",
-        "NCCL_IB_SPLIT_DATA_ON_QPS": "0",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
       },
       "tests": [
         {
@@ -982,8 +972,7 @@
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "128",
-        "NCCL_IB_SPLIT_DATA_ON_QPS": "0",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
       },
       "tests": [
         {
@@ -998,8 +987,7 @@
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
-        "NCCL_IB_SPLIT_DATA_ON_QPS": "0",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
       },
       "tests": [
         {
@@ -1015,8 +1003,7 @@
       "description": "Runs the shim-leak probe in a plain CAST configuration, where RCCL_IB_FAULT_INJECTION is simply absent. The damage a leak does is process-wide and has nothing to do with threading, so the guard belongs in an ordinary run and not only in the threaded fault suites.",
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
-        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
       },
       "tests": [
         {
@@ -1090,8 +1077,7 @@
         "NCCL_NET": "IB-CAST",
         "NCCL_IB_QPS_PER_CONNECTION": "2",
         "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
-        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1"
       },
       "tests": [
         {
@@ -1148,22 +1134,11 @@
         {
           "name": "Cast_UdmaPinning_SharingVerify",
           "description": "UDMA pinning holds with QP sharing",
-          "test_filter": "NetIbMPITest.CastUdmaPinningSharingVerify"
-        }
-      ]
-    },
-    "cast_gin_error_path_unit": {
-      "extends": "net_ib_base",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 60,
-      "description": "White-box net_ib_cast error paths ported from net_ib (AICOMRCCL-2750); no NIC traffic.",
-      "tests": [
-        {
-          "name": "Cast_GinErrorPath",
-          "description": "IGet name, RMA proxy error CQE, recv wr_id bound, GIN allgather recv polling",
-          "test_filter": "NetIbCast.CastGinErrorPath"
+          "test_filter": "NetIbMPITest.CastUdmaPinningSharingVerify",
+          "env_variables": {
+            "RCCL_IB_QP_SHARING_ENABLE": "1",
+            "RCCL_IB_COMM_NGROUPS": "1"
+          }
         }
       ]
     },
@@ -1178,8 +1153,7 @@
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
         "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
-        "RCCL_IB_FAULT_INJECTION": "1",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
+        "RCCL_IB_FAULT_INJECTION": "1"
       }
     },
     "fault_inject_cast_failover_read": {
@@ -1343,7 +1317,8 @@
         {
           "name": "Resiliency_PostRecoveryPingPongHoldsSync",
           "description": "Ten blocking messages on a recovered connection must not leave the ranks a message apart; skips without UD QPs",
-          "test_filter": "NetIbMPITest.PostRecoveryPingPongHoldsSync"
+          "test_filter": "NetIbMPITest.PostRecoveryPingPongHoldsSync",
+          "command_args": "--net_ib_nthreads=2"
         }
       ]
     },
@@ -5970,7 +5945,7 @@
     {
       "name": "NET IB - CAST GIN Error Path (unit)",
       "description": "White-box net_ib_cast GIN/RMA error paths, single rank, no NIC traffic",
-      "config": "cast_gin_error_path_unit"
+      "config": "net_ib_cast_gin_error_path"
     },
     {
       "name": "NET IB - Fault Injection (CAST path, QPS=4, splitData=1)",

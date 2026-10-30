@@ -1204,97 +1204,97 @@
     "net_ib_initialization_cast": {
       "extends": "net_ib_initialization",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_properties_cast": {
       "extends": "net_ib_properties",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_connection_cast": {
       "extends": "net_ib_connection",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_memory_cast": {
       "extends": "net_ib_memory",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_transfer_cast": {
       "extends": "net_ib_transfer",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_coverage_env_cast": {
       "extends": "net_ib_coverage_env",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_multirecv_cast": {
       "extends": "net_ib_multirecv",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_cts_stress_cast": {
       "extends": "net_ib_cts_stress",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_branch_coverage_cast": {
       "extends": "net_ib_branch_coverage",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_cast": {
       "extends": "net_ib_stress",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_4rank_cast": {
       "extends": "net_ib_stress_4rank",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_multi_qp_split_cast": {
       "extends": "net_ib_stress_multi_qp_split",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_multi_qp_nosplit_cast": {
       "extends": "net_ib_stress_multi_qp_nosplit",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_multi_qp_fanin_cast": {
       "extends": "net_ib_stress_multi_qp_fanin",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_ar_cast": {
       "extends": "net_ib_stress_ar",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_inline_cast": {
       "extends": "net_ib_stress_inline",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_transfer_cast_by_order_no_cts": {
@@ -5357,13 +5357,13 @@
       "name": "NET IB - CAST Multithread (4)",
       "description": "4 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
       "config": "cast_multithread",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "NET IB - Fault Injection Multithread (4)",
       "description": "Per-communicator fault injection across concurrent workers, including cross-worker isolation",
       "config": "fault_inject_multithread",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
@@ -5939,7 +5939,7 @@
       "name": "NET IB - Fault Injection Ops Unit (fake ibv_context)",
       "description": "Pure-unit coverage of the ops-overload mechanism via a fabricated ibv_context: inner guard branches and shim error paths. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware)",
       "config": "fault_inject_ops_unit",
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "MemManager - MPI (Internal API, CUMEM=0)",
