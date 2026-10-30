@@ -357,6 +357,25 @@ def memory_chart_layout_extdata(gpu_arch: str) -> Optional[dict[str, Any]]:
     return json.loads(layout.path.read_text(encoding="utf-8"))
 
 
+def read_roofline_frame(workload_path: str) -> Optional[pd.DataFrame]:
+    """Read a validated roofline.csv; None with a warning if pandas rejects it."""
+    try:
+        return pd.read_csv(Path(workload_path) / "roofline.csv")
+    except Exception as error:
+        console_warning(f"Roofline peaks are NULL for {workload_path}: {error}")
+        return None
+
+
+def roofline_device_id(benchmark_row: dict[str, Any]) -> Optional[int]:
+    """The device id of a roofline.csv row, its first column; None if not whole."""
+    device = next(iter(benchmark_row.values()))
+    if isinstance(device, float) and device.is_integer():
+        return int(device)
+    if isinstance(device, int) and not isinstance(device, bool):
+        return device
+    return None
+
+
 class db_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -400,6 +419,8 @@ class db_analysis(OmniAnalyze_Base):
         Database.init(str(db_path))
         console_debug(f"Initialized database: {db_path}")
 
+        benchmark_rows_per_workload = self.calc_roofline_benchmark_rows()
+
         # Iterate over all workloads
         workload_source_snapshots: list[WorkloadSourceSnapshot] = []
         workload_objs: list[orm.Workload] = []
@@ -410,6 +431,7 @@ class db_analysis(OmniAnalyze_Base):
                 name=workload_path.split("/")[-2],
                 sub_name=workload_path.split("/")[-1],
                 sys_info_extdata=sys_info,
+                # The first roofline.csv row; NULL without a valid file.
                 roofline_bench_extdata=self._roofline_ceilings_per_workload.get(
                     workload_path
                 ),
@@ -420,6 +442,16 @@ class db_analysis(OmniAnalyze_Base):
             )
             Database.get_session().add(workload_obj)
             workload_objs.append(workload_obj)
+
+            # Add every roofline.csv row, one per device; none without a valid file
+            for benchmark_row in benchmark_rows_per_workload.get(workload_path, []):
+                Database.get_session().add(
+                    orm.WorkloadBenchmark(
+                        device_id=roofline_device_id(benchmark_row),
+                        benchmark_extdata=benchmark_row,
+                        workload=workload_obj,
+                    )
+                )
 
             # Add kernel
             kernel_objs: dict[KernelKey, orm.Kernel] = {}
@@ -716,10 +748,12 @@ class db_analysis(OmniAnalyze_Base):
         return pmc_df_per_workload
 
     def calc_roofline_ceilings(self) -> dict[str, dict[str, Any]]:
-        """Read every validated roofline.csv column as an empirical peak.
+        """Read every validated roofline.csv column of the first row.
 
-        Peaks come from the first row. A workload with no entry gets NULL peaks
-        in calc_expressions, so an unsupported or invalid roofline.csv only warns.
+        The row is the workload's benchmark data: each column becomes an empirical
+        peak, and the whole row is stored with the workload. A workload with no
+        entry gets NULL peaks in calc_expressions and NULL benchmark data, so an
+        unsupported or invalid roofline.csv only warns.
         """
         roofline_ceilings_per_workload: dict[str, dict[str, Any]] = {}
 
@@ -737,11 +771,14 @@ class db_analysis(OmniAnalyze_Base):
                 )
                 continue
 
-            roofline_df = pd.read_csv(Path(workload_path) / "roofline.csv")
-            # Keep the roofline.csv column names, as the benchmark data stores them.
+            roofline_df = read_roofline_frame(workload_path)
+            if roofline_df is None:
+                continue
+            # Records keep each column's dtype. A single iloc row would upcast the
+            # integer device id to a float.
             roofline_ceilings_per_workload[workload_path] = roofline_df.iloc[
-                0
-            ].to_dict()
+                :1
+            ].to_dict(orient="records")[0]
 
         if roofline_ceilings_per_workload:
             console_debug("Collected roofline ceilings")
@@ -775,6 +812,24 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
         return ceiling_rows_per_workload
+
+    def calc_roofline_benchmark_rows(self) -> dict[str, list[dict[str, Any]]]:
+        """Read every roofline.csv row of each workload with first-row ceilings.
+
+        Each row is stored with the workload, so no device row is dropped (FR-13).
+        A workload skipped by calc_roofline_ceilings has no rows.
+        """
+        benchmark_rows_per_workload: dict[str, list[dict[str, Any]]] = {}
+
+        for workload_path in self._roofline_ceilings_per_workload.keys():
+            roofline_df = read_roofline_frame(workload_path)
+            if roofline_df is None:
+                continue
+            benchmark_rows_per_workload[workload_path] = roofline_df.to_dict(
+                orient="records"
+            )
+
+        return benchmark_rows_per_workload
 
     def calc_typed_sys_info(self) -> dict[str, dict[str, Any]]:
         """Type each workload's sys.info before evaluation (FR-14).

@@ -83,6 +83,8 @@ class Workload(Base):
     source_files = relationship("SourceFile", back_populates="workload")
     # Workload can have multiple roofline ceilings
     roofline_ceilings = relationship("RooflineCeiling", back_populates="workload")
+    # Workload can have multiple benchmark rows, one per roofline.csv device
+    benchmark_rows = relationship("WorkloadBenchmark", back_populates="workload")
 
 
 class MetricDefinition(Base):
@@ -577,6 +579,20 @@ class WorkloadMetricValue(Base):
     # Relationships
     metric = relationship("MetricDefinition", back_populates="workload_metric_values")
     workload = relationship("Workload", back_populates="workload_metric_values")
+
+
+class WorkloadBenchmark(Base):
+    __tablename__ = f"{PREFIX}workload_benchmark"
+
+    workload_benchmark_uuid = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    device_id = Column(Integer)  # NULL when the device cell is not a whole number
+    benchmark_extdata = Column(JSON)  # Every roofline.csv column of the row
+
+    # Benchmark row can have one workload
+    workload = relationship("Workload", back_populates="benchmark_rows")
 
 
 class Metadata(Base):

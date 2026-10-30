@@ -656,7 +656,10 @@ Analyze validates ``roofline.csv`` on every run. Each column of the file becomes
 an empirical peak, read from its first row, that metrics such as Percent of Peak
 use. If the file is missing or invalid, analyze skips the roofline and every
 peak is unavailable (``N/A`` in the terminal output, NULL in the analysis
-database).
+database). The analysis database stores the first row, with every column, as the
+benchmark data of its workload in ``compute_workload.roofline_bench_extdata``. It
+also stores every row, with its ``device`` id, in ``compute_workload_benchmark``.
+Missing or non-finite values are NULL.
 
 .. note::
    Matrix multiplication performance data will vary depending on which architecture is profiled:
