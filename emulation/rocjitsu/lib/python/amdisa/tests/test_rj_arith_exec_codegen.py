@@ -1,11 +1,10 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 from pathlib import Path
-
-
 import re
 
-
 import pytest
-
 
 from amdisa.codegen.execute.rj_arith_scalar import EXEC_UPDATES, gen_scalar
 

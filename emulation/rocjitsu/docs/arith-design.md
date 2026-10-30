@@ -159,7 +159,8 @@ values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
 The migrated families are dense and sparse WMMA, fused floating-point arithmetic, basic
 floating-point arithmetic and selection, division, dot products, math functions,
 comparisons, integer arithmetic, conversions, register and lane routing, graphics
-operations and scalar arithmetic. Other handlers retain their existing implementations.
+operations, scalar arithmetic and dual-issue arithmetic. Other handlers retain their
+existing implementations.
 
 ### Guest FP controls
 

@@ -1,16 +1,33 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 from pathlib import Path
-
-
 import re
-
 
 import pytest
 
-
 from amdisa.codegen.execute.rj_arith_scalar import MOVES, gen_scalar
-
-
 from amdisa.codegen.execute.rj_arith_vector import gen_vector32, gen_integer16
+
+
+@pytest.mark.parametrize('name', sorted(MOVES))
+def test_scalar_moves_preserve_conditional_observation(name):
+    for arch in ('rdna3', 'rdna4'):
+        body = gen_scalar(arch, name, ['d'], ['a'])
+        assert f'rj_arith_{name.lower()}(' in body
+        assert 'wf.write_scc' not in body
+        assert 'read_scalar(d)' not in body
+        if name.startswith('S_CMOV'):
+            assert body.index('if (!input_scc) return;') < body.index(
+                'RegisterAccess registers'
+            )
+        else:
+            assert 'read_scc' not in body
+        assert ('uint16_t(a.encoding_value())' in body) == ('MOVK' in name)
+        assert body.index('status != RJ_ARITH_SUCCESS') < body.index(
+            'registers.write_scalar'
+        )
+    assert gen_scalar('cdna5', name, ['d'], ['a']) is None
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])

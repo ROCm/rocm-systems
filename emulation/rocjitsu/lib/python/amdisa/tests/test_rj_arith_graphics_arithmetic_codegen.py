@@ -1,15 +1,12 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 from pathlib import Path
-
-
 import re
-
 
 import pytest
 
-
 from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES, gen_mullit
-
-
 from amdisa.codegen.execute.rj_arith_interp import INTERP_NAMES, gen_interp
 
 

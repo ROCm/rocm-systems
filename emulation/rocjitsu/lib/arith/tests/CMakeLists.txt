@@ -210,6 +210,12 @@ foreach(family IN ITEMS cube interp mullit)
     rj_arith_add_test(${target} graphics/${family}_test.cpp)
 endforeach()
 
+# VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
+foreach(family IN ITEMS alu fused dot)
+    set(target "rj_arith_dual_${family}_test")
+    rj_arith_add_test(${target} dual/${family}_test.cpp)
+endforeach()
+
 # Scalar families keep required SCC/EXEC results distinct from FP status.
 foreach(
     family

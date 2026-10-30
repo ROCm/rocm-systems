@@ -40,11 +40,7 @@ private:
   };
 
   static const char *op_name(uint16_t op);
-  static bool uses_src_neg_modifier(uint16_t op);
-  static uint32_t apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx);
-  static uint32_t execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane);
 
-  static uint32_t bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table);
   std::string format_slot(const Slot &slot) const;
   void init_operands();
 

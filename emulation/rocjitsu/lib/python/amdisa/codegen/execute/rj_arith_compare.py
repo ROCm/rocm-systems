@@ -6,8 +6,6 @@
 from .rj_arith_names import wave_api
 
 INTEGER_COMPARISONS = {}
-
-
 for prefix in ('V_CMP', 'V_CMPX'):
     for dtype in ('I16', 'U16', 'I32', 'U32', 'I64', 'U64'):
         bits = int(dtype[1:])
@@ -78,13 +76,14 @@ FLOAT_COMPARISONS = {
         'T',
     )
 }
-
-
 CLASS_COMPARISONS = {
     f'{prefix}_CLASS_F{bits}': bits
     for prefix in ('V_CMP', 'V_CMPX')
     for bits in (16, 32, 64)
 }
+COMPARE_NAMES = (
+    set(INTEGER_COMPARISONS) | set(FLOAT_COMPARISONS) | set(CLASS_COMPARISONS)
+)
 
 
 def gen_float_compare(arch, mnemonic, dst, src, is_vop3, result_writer=None):
@@ -153,8 +152,3 @@ def gen_class_compare(arch, mnemonic, dst, src, is_vop3, result_writer=None):
         f'      {src[0]}, {src[1]}, false, {result_writer});',
     ]
     return '\n'.join(lines)
-
-
-COMPARE_NAMES = (
-    set(INTEGER_COMPARISONS) | set(FLOAT_COMPARISONS) | set(CLASS_COMPARISONS)
-)
