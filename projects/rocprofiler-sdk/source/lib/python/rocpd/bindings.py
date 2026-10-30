@@ -360,9 +360,9 @@ except ImportError:
             "%h": hostname,
             "%pid%": pid,
             "{pid}": pid,
-            "%p": pid,
             "%ppid%": ppid,
             "{ppid}": ppid,
+            "%p": pid,
             "%cwd%": cwd,
             "{cwd}": cwd,
             "%tag%": tag,
@@ -525,14 +525,13 @@ except ImportError:
     def read_agents(conn, conditions):
         """Read agent data from the database."""
         query = (
-            "SELECT * FROM rocpd_info_agent WHERE {}".format(conditions)
+            "SELECT * FROM rocpd_info_agent {}".format(conditions)
             if conditions
             else "SELECT * FROM rocpd_info_agent"
         )
         allowed_data = dict(
             (itr, itr)
             for itr in [
-                "id",
                 "guid",
                 "nid",
                 "pid",
@@ -553,7 +552,7 @@ except ImportError:
     def read_nodes(conn, conditions):
         """Read node data from the database."""
         query = (
-            "SELECT * FROM rocpd_info_node WHERE {}".format(conditions)
+            "SELECT * FROM rocpd_info_node {}".format(conditions)
             if conditions
             else "SELECT * FROM rocpd_info_node"
         )
@@ -566,8 +565,8 @@ except ImportError:
                 "machine_id",
                 "hostname",
                 "system_name",
-                "system_release",
-                "system_version",
+                "release",
+                "version",
             ]
         )
         return _fetch_all_objects(conn, query, factory=Node, allowed_data=allowed_data)
@@ -575,7 +574,7 @@ except ImportError:
     def read_processes(conn, conditions):
         """Read process data from the database."""
         query = (
-            "SELECT * FROM processes WHERE {}".format(conditions)
+            "SELECT * FROM processes {}".format(conditions)
             if conditions
             else "SELECT * FROM processes"
         )
@@ -604,7 +603,7 @@ except ImportError:
     def read_threads(conn, conditions):
         """Read thread data from the database."""
         query = (
-            "SELECT * FROM threads WHERE {}".format(conditions)
+            "SELECT * FROM threads {}".format(conditions)
             if conditions
             else "SELECT * FROM threads"
         )
@@ -620,6 +619,7 @@ except ImportError:
                 "system_release",
                 "system_version",
                 "ppid",
+                "pid",
                 "tid",
                 "start",
                 "end",

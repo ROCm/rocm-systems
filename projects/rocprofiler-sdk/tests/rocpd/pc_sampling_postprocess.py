@@ -41,7 +41,7 @@ import uuid as uuidlib
 
 import pytest
 
-from rocpd import libpyrocpd
+from rocpd import libpyrocpd, bindings
 from rocpd.features import get_supported_features_from_version
 from rocpd.importer import RocpdImportData
 
@@ -60,7 +60,7 @@ FULL_EXEC_MASK = "18446744073709551615"
     [((3, 0, 5), False), ((3, 0, 99), False), ((3, 1, 0), True), ((3, 1, 1), True)],
 )
 def test_pc_sampling_schema_version_boundary(version, pc_sampling_available):
-    features = get_supported_features_from_version(libpyrocpd.schema_version(*version))
+    features = get_supported_features_from_version(bindings.schema_version(*version))
     assert ("pc_sampling" in features) == pc_sampling_available
     assert "spm_counter_location" in features
 
@@ -1431,14 +1431,14 @@ def test_open_without_decoding_does_not_scan_samples(tmp_path, monkeypatch, code
     import rocpd.importer as importer
 
     statements = []
-    connect = importer.libpyrocpd.connect
+    connect = importer.bindings.connect
 
     def traced_connect(*args, **kwargs):
         connection = connect(*args, **kwargs)
         connection.set_trace_callback(lambda statement: statements.append(statement))
         return connection
 
-    monkeypatch.setattr(importer.libpyrocpd, "connect", traced_connect)
+    monkeypatch.setattr(importer.bindings, "connect", traced_connect)
 
     path, data = code_object
     pc_db = tmp_path / "pc.db"
