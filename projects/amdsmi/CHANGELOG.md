@@ -162,8 +162,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `--numa` was previously limited to Linux baremetal and passthrough guests.
   - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
 
-- **Repeated `amd-smi` device selections now combine on bare metal**.  
-  - Repeated `--gpu`, `--cpu`, `--core`, `--nic`, and `--switch` options combine without duplicates; later options no longer narrow the selection, including for set/reset commands.
+- **Repeated `amd-smi` device selections now combine**.  
+  - Repeated `--gpu`, `--cpu`, `--core`, `--nic`, and `--switch` options combine without duplicates. `reset --gpureset -g all -g 0` now resets every GPU (previously GPU 0 only); `set -g 0 -C CPX -g 1 -C SPX` now applies SPX to GPUs 0 and 1 (previously GPU 1 only). Remove earlier device options to retain the previous target set.
 
 ### Removed
 

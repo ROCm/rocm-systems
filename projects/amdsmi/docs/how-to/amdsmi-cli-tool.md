@@ -81,13 +81,10 @@ amd-smi --rocm-smi
 ```
 
 On bare-metal systems, `--gpu`, `--cpu`, `--core`, `--nic`, and `--switch`
-accept space-separated lists or repeated options (`--gpu 0 1` or `--gpu 0 --gpu 1`).
-Selections combine without duplicates. `--gpu 2 --gpu all` keeps GPU 2 first;
-`--gpu 2 all` uses device enumeration order. Later options do not narrow selection:
-`--gpu all --gpu 0` still selects every GPU, including for set/reset.
-Comma-separated lists are unsupported. GPU partition settings such as
-`--memory-partition` apply the last value to every selected GPU; CPU setter behavior
-is unchanged.
+accept space-separated or repeated selections without duplicates.
+`--gpu all --gpu 0` still selects every GPU, including for set/reset;
+comma-separated lists are unsupported.
+GPU partition setters use the last value and CPU setters the first, across all selected targets.
 
 ```{note}
 For command-specific help, use `amd-smi [command] --help` for see more detailed
@@ -124,6 +121,8 @@ details for usage.
 ### amd-smi list
 
 Lists GPU information, including identifier kind and CUID provenance.
+
+`--gpu 2 --gpu all` keeps GPU 2 first; `--gpu 2 all` uses device enumeration order.
 
 #### CUID identity and compatibility
 
