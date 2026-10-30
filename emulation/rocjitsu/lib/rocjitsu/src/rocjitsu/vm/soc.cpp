@@ -296,7 +296,10 @@ amdgpu::QueueContextSaveResult SoC::save_context(const amdgpu::QueueIdentity &id
                                                  uint32_t control_stack_size) {
   using amdgpu::VmAccessOutcome;
   const auto access = gpu_vm_.snapshot(identity.address_space);
-  if (!access || !mes_queue_owner_ || !amdgpu::cwsr_layout_modelled(arch_))
+  // A known CWSR layout does not imply complete MES state support: gfx9.4
+  // accumulator registers are not preserved by this save/restore path.
+  if (!access || !mes_queue_owner_ ||
+      amdgpu::cwsr_layout_kind(arch_) != amdgpu::CwsrLayoutKind::Gfx12_5)
     return {};
 
   std::vector<amdgpu::CwsrWaveState> states;
@@ -384,7 +387,7 @@ amdgpu::VmAccessOutcome SoC::restore_context(const amdgpu::QueueIdentity &identi
                                              uint32_t control_stack_size) {
   using amdgpu::VmAccessOutcome;
   const auto access = gpu_vm_.snapshot(identity.address_space);
-  if (!access || !amdgpu::cwsr_layout_modelled(arch_))
+  if (!access || amdgpu::cwsr_layout_kind(arch_) != amdgpu::CwsrLayoutKind::Gfx12_5)
     return VmAccessOutcome::Faulted;
   if (!mes_queue_owner_)
     return VmAccessOutcome::Faulted;

@@ -1469,6 +1469,60 @@ TEST_F(GpuDeviceMes, RemoveSavesProgressAndReleasesQueuesWithoutResidentWaves) {
   }
 }
 
+TEST_F(GpuDeviceMes, ContextSaveAndRestoreRejectArchitecturesWithoutCompleteMesState) {
+  constexpr uint64_t kContext = 0x20000, kPhysical = 0x300000;
+  constexpr uint32_t kSize = 0x20000, kStack = 0x1000, kSentinel = 0xfeedface;
+  configure_compute_unit();
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (const bool restoring : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << "arch=" << arch << " restoring=" << restoring);
+      store_dword(kSchedulerMqdPhysical + 171 * 4, kContext);
+      store_dword(kSchedulerMqdPhysical + 175 * 4, kStack);
+      store_dword(kSchedulerMqdPhysical + 177 * 4, kSize);
+      store_dword(kDefaultComputeSecondPagePhysical + 0xff8 -
+                      offsetof(amd_queue_t, write_dispatch_id) + offsetof(amd_queue_v2_t, caps),
+                  AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM);
+      submit_default_compute_queue(true);
+      for (uint64_t offset = 0; offset < kSize; offset += 0x1000)
+        store_vram_qword(kDefaultProcessPtb + ((kContext + offset) >> 12) * 8,
+                         (kPhysical + offset) | kGfx12SystemLeafPteFlags);
+      const auto space = soc_.mes_engine().process_address_space_for_test(3);
+      ASSERT_TRUE(space);
+      ASSERT_TRUE(soc_.gpu_vm().invalidate(*space));
+      store_dword(kPhysical, kSentinel);
+      // Probe the SoC gates without executing shaders or requiring an unsupported PCI profile.
+      if (!restoring)
+        soc_.set_arch(arch);
+      constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+      store_dword(kRemove, 0x00040031);
+      store_dword(kRemove + 4, kDefaultComputeDoorbell / 4);
+      store_qword(kRemove + 6 * 4, kApiStatusGpu);
+      store_qword(kRemove + 8 * 4, 2);
+      auto bell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+      ring_doorbell(0x60, bell);
+      ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+      if (!restoring) {
+        EXPECT_EQ(transport_.dword_at(kPhysical), kSentinel);
+        EXPECT_EQ(transport_.dword_at(kSchedulerMqdPhysical + 174 * 4), kStack);
+      } else {
+        ASSERT_NE(transport_.dword_at(kPhysical), kSentinel);
+        soc_.set_arch(arch);
+        for (uint32_t word = 0; word < 64; ++word)
+          store_dword(kRingPhysical + 128 * 4 + word * 4,
+                      transport_.dword_at(kRingPhysical + word * 4));
+        store_qword(kRingPhysical + 128 * 4 + 40 * 4, 3);
+        bell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+        ring_doorbell(0x60, bell);
+        EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+        EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+      }
+      soc_.set_arch(ROCJITSU_CODE_ARCH_CDNA5);
+      device_.reset(simdojo::ResetKind::FunctionLevel);
+      configure_gart();
+    }
+  }
+}
+
 TEST_F(GpuDeviceMes, RemoveRetriesUnsupportedLiveWorkAfterItDrainsWithoutAnotherDoorbell) {
   constexpr uint64_t kKernel = kDefaultComputeRingGpu + 0x80;
   constexpr uint64_t kContext = 0x20000;
