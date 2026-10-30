@@ -38,14 +38,6 @@ constexpr size_t ddaLL128RsSlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
-// Fixed-width peer staging for phase 1: unlike one-shot all-reduce, each peer
-// receives a different shard, so the pack cannot be hoisted out of the peer
-// loop. Loading a batch before storing it keeps the per-peer streams overlapped
-// -- interleaved, every store waits on the next pack. 8 covers rank counts 4
-// and 8 in one pass; the rank test is a predicate on a fixed trip count so both
-// loops unroll and the unused entries fold away when NRANKS_CT is known.
-constexpr int kDdaLL128RsPeerBatch = 8;
-
 // LL128 reduce-scatter kernel. One warp owns one slice of a shard at a time, so
 // the launcher sizes the grid on the shard's slices, not the message's.
 //
@@ -74,7 +66,8 @@ __launch_bounds__(512)
                                               uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                               int epochLen, // number of cells in epochDev
                                               size_t slicesTotal, // slices per shard this call uses
-                                              size_t bankSize) { // scratch bank size (from host)
+                                              size_t bankSize, // scratch bank size (from host)
+                                              DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -86,7 +79,7 @@ __launch_bounds__(512)
 
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  // ddaBankSize() floors the bank to a multiple of 16B, so it is always a whole
+  // ddaBankSize() floors the bank to a multiple of 128B, so it is always a whole
   // number of 8B words and the slot stride below is a whole number of slices.
   const size_t slotWords = ddaLL128RsSlotWords(bankSize, nRanks);
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
@@ -108,10 +101,10 @@ __launch_bounds__(512)
     const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
 
-    for (int base = 1; base < nRanks; base += kDdaLL128RsPeerBatch) {
-      uint64_t regs[kDdaLL128RsPeerBatch][kDdaLL128WordsPerThread] = {};
+    for (int base = 1; base < nRanks; base += kDdaLLPeerBatch) {
+      uint64_t regs[kDdaLLPeerBatch][kDdaLL128WordsPerThread] = {};
 #pragma unroll
-      for (int i = 0; i < kDdaLL128RsPeerBatch; ++i) {
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
@@ -120,7 +113,7 @@ __launch_bounds__(512)
         }
       }
 #pragma unroll
-      for (int i = 0; i < kDdaLL128RsPeerBatch; ++i) {
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
@@ -147,7 +140,10 @@ __launch_bounds__(512)
       const int peer = (selfRank + r) % nRanks;
       const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
       uint64_t vr[kDdaLL128WordsPerThread];
-      ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane);
+      if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
+        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
+        return;
+      }
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots
       // from the even ones and never writes them out, so folding blind is cheaper

@@ -58,7 +58,8 @@ __launch_bounds__(512)
                                         uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                         int epochLen, // number of cells in epochDev
                                         size_t slicesTotal, // slices this call actually uses
-                                        size_t bankSize) { // scratch bank size (from host)
+                                        size_t bankSize, // scratch bank size (from host)
+                                        DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -71,7 +72,7 @@ __launch_bounds__(512)
 
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  // ddaBankSize() floors the bank to a multiple of 16B, so it is always a whole
+  // ddaBankSize() floors the bank to a multiple of 128B, so it is always a whole
   // number of 8B words and the slot stride below is a whole number of slices.
   const size_t slotWords = ddaLL128ArSlotWords(bankSize, nRanks);
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
@@ -122,7 +123,11 @@ __launch_bounds__(512)
         ddaLL128LoadRegs<int8_t>(vr, srcBytes + dataByte, eltInSlice, lane, flagLane);
       } else {
         const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
-        ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+        if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
+                              params)) {
+          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
+          return;
+        }
       }
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots

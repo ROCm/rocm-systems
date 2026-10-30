@@ -89,8 +89,9 @@ typedef struct rocprofiler_thread_trace_decoder_occupancy_t
     uint32_t                              pipe_id      : 4;
     uint32_t                              is_ext       : 1;  ///< Is workgroup_id valid?
     uint32_t                              workgroup_id : 7;
-    uint32_t cluster_id : 5;  ///< 0 = not in a cluster; only valid on wavestart
-    uint32_t _rsvd      : 11;
+    uint32_t cluster_id  : 5;   ///< 0 = not in a cluster; only valid on wavestart
+    uint32_t dispatch_id : 10;  ///< Low 10 bits of dispatch ID
+    uint32_t _rsvd       : 1;
 } rocprofiler_thread_trace_decoder_occupancy_t;
 
 /**
@@ -244,7 +245,7 @@ typedef enum rocprofiler_thread_trace_decoder_event_type_t
     ROCPROFILER_THREAD_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH,
     ROCPROFILER_THREAD_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE_TS,
     ROCPROFILER_THREAD_TRACE_DECODER_EVENT_SAVE_CONTEXT,
-    ROCPROFILER_THREAD_TRACE_DECODER_EVENT_DISPATCH_END,
+    ROCPROFILER_THREAD_TRACE_DECODER_EVENT_DISPATCH_END,  ///< Payload is the dispatch ID
     ROCPROFILER_THREAD_TRACE_DECODER_EVENT_CACHE_FLUSH,
     ROCPROFILER_THREAD_TRACE_DECODER_EVENT_PACKET_LOSS,
     ROCPROFILER_THREAD_TRACE_DECODER_EVENT_CODE_OBJECT_LOAD,    ///< ID = payload.code_object_id
@@ -323,6 +324,7 @@ typedef struct rocprofiler_thread_trace_decoder_dispatch_t
     uint64_t dispatch_pkt_addr;
     uint64_t byte_offset;  ///< Byte offset within the trace data
     rocprofiler_thread_trace_decoder_pc_t entry_point;
+    uint64_t                              dispatch_id;  ///< Unique only within ME/PIPE
 } rocprofiler_thread_trace_decoder_dispatch_t;
 
 /**

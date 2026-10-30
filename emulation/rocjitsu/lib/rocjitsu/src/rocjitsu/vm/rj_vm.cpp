@@ -5,11 +5,14 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/vm/topology_assembly.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "util/diagnostic.h"
@@ -26,6 +29,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <unistd.h>
 #include <vector>
 
 using namespace rocjitsu;
@@ -76,55 +80,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   s->engine_config = loaded.engine_config;
   s->engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
 
-  if (loaded.num_gpus > 1 && !loaded.extra_gpu_builds.empty()) {
-    std::vector<std::unique_ptr<SoC>> socs;
-    std::vector<uint32_t> gpu_ids;
-
-    auto root0 = loaded.take_root();
-    root0.release();
-    socs.push_back(std::unique_ptr<SoC>(s->soc));
-    gpu_ids.push_back(loaded.devices.empty() ? 0 : loaded.devices[0].gpu_id);
-
-    for (size_t i = 0; i < loaded.extra_gpu_builds.size(); ++i) {
-      auto &eb = loaded.extra_gpu_builds[i];
-      auto *extra_soc = dynamic_cast<SoC *>(eb.root.get());
-      if (!extra_soc)
-        continue;
-      eb.root.release();
-      socs.push_back(std::unique_ptr<SoC>(extra_soc));
-      gpu_ids.push_back(i + 1 < loaded.devices.size() ? loaded.devices[i + 1].gpu_id : 0);
-    }
-
-    auto vm_ptr = std::make_unique<VirtualMachine>(std::move(socs), std::move(gpu_ids), daemon);
-    s->vm = vm_ptr.get();
-    s->engine->topology().set_root(std::move(vm_ptr));
-
-    auto prefix_specs = [](std::vector<simdojo::LinkSpec> &specs, const std::string &pfx) {
-      for (auto &ls : specs) {
-        ls.src = pfx + ls.src;
-        ls.dst = pfx + ls.dst;
-      }
-    };
-    prefix_specs(loaded.build_result.link_specs, "gpu0.");
-    loaded.wire_links(s->engine->topology());
-    s->soc->wire_backing(s->engine->topology());
-    for (size_t i = 0; i < loaded.extra_gpu_builds.size(); ++i) {
-      auto &eb = loaded.extra_gpu_builds[i];
-      prefix_specs(eb.link_specs, "gpu" + std::to_string(i + 1) + ".");
-      s->engine->topology().wire_links(eb.link_specs, loaded.exec_mode);
-      auto *extra_soc = s->vm->soc(static_cast<uint32_t>(i + 1));
-      if (extra_soc)
-        extra_soc->wire_backing(s->engine->topology());
-    }
-  } else {
-    auto root = loaded.take_root();
-    root.release();
-    auto vm_ptr = std::make_unique<VirtualMachine>(std::unique_ptr<SoC>(s->soc), daemon);
-    s->vm = vm_ptr.get();
-    s->engine->topology().set_root(std::move(vm_ptr));
-    loaded.wire_links(s->engine->topology());
-    s->soc->wire_backing(s->engine->topology());
-  }
+  s->vm = assemble_virtual_machine_topology(loaded, s->engine->topology(), daemon);
   if (num_threads_used > 1 && !amdgpu::partition_topology_by_xcds(
                                   s->engine->topology(), partition_socs, num_threads_used)) {
     throw std::invalid_argument("multi-threaded VM requires at least one XCD");
@@ -144,10 +100,16 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
 
   if (serve) {
     s->engine->register_as_primary();
-    if (loaded.num_gpus > 1 && !loaded.devices.empty())
-      s->vm->driver()->setup_topology(loaded.devices, num_xcds);
+    // Legacy replicated-GPU configs keep their existing XGMI discovery
+    // metadata for compatibility. Manifest routes describe topology only;
+    // until peer execution is granted, they must not advertise KFD XGMI
+    // links, hive IDs, or XGMI SDMA engines to ROCr.
+    if (!loaded.devices.empty())
+      s->vm->driver()->setup_topology(loaded.devices, num_xcds,
+                                      !loaded.system_graph.explicit_manifest,
+                                      loaded.system_graph.explicit_manifest, loaded.pci);
     else
-      s->vm->driver()->setup_topology(loaded.device, num_xcds);
+      s->vm->driver()->setup_topology(loaded.device, num_xcds, loaded.pci);
     s->vm->driver()->open();
   }
 
@@ -254,36 +216,47 @@ bool reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
 } // namespace
 
 rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm) {
+  return rj_vm_create_for_node(json_path, nullptr, mode, vm);
+}
+
+rj_status_t rj_vm_create_for_node(const char *json_path, const char *node_id, rj_vm_mode_t mode,
+                                  rj_vm_t **vm) {
   if (!json_path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
     util::StringDiagnostic diagnostic;
-    auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    auto loaded = config::load_config_for_node(json_path, rocjitsu::kEmbeddedSchema,
+                                               node_id ? node_id : "", diagnostic.emitter());
     if (loaded.failed()) {
-      util::Logger::warn("rj_vm_create failed: ", diagnostic.message());
+      util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
       return ROCJITSU_STATUS_INVALID_FILE;
     }
     return create_from_loaded(loaded.value(), mode, vm);
   } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_create failed: ", e.what());
+    util::Logger::warn("rj_vm_create_for_node failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
 }
 
 rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_t **vm) {
+  return rj_vm_create_from_string_for_node(json, nullptr, mode, vm);
+}
+
+rj_status_t rj_vm_create_from_string_for_node(const char *json, const char *node_id,
+                                              rj_vm_mode_t mode, rj_vm_t **vm) {
   if (!json || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
     util::StringDiagnostic diagnostic;
-    auto loaded =
-        config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    auto loaded = config::load_config_from_string_for_node(
+        json, rocjitsu::kEmbeddedSchema, node_id ? node_id : "", diagnostic.emitter());
     if (loaded.failed()) {
-      util::Logger::warn("rj_vm_create_from_string failed: ", diagnostic.message());
+      util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
     }
     return create_from_loaded(loaded.value(), mode, vm);
   } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_create_from_string failed: ", e.what());
+    util::Logger::warn("rj_vm_create_from_string_for_node failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
 }
@@ -372,15 +345,27 @@ rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
+  // The checkpoint format and restore path contain one SoC. Reject before
+  // opening the output file rather than silently dropping other GPU state.
+  if (vm->vm && vm->vm->num_socs() > 1)
+    return ROCJITSU_STATUS_UNSUPPORTED;
   try {
     auto engine_config = vm->engine_config;
     if (engine_config.num_threads == vm->loaded.execution_threads.engines)
       engine_config.num_threads = vm->loaded.requested_engine_threads;
-    config::save_checkpoint(path, *vm->soc, tick, engine_config, vm->loaded.cpu_dispatch_threads,
-                            vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
-                            vm->loaded.legacy_auto_dispatch, vm->loaded.async_helper_threads);
+    util::StringDiagnostic diagnostic;
+    if (config::save_checkpoint(path, *vm->soc, tick, engine_config,
+                                vm->loaded.cpu_dispatch_threads, diagnostic.emitter(),
+                                vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
+                                vm->loaded.legacy_auto_dispatch, vm->loaded.async_helper_threads)
+            .failed()) {
+      util::Logger::warn("rj_vm_save_checkpoint failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_ERROR;
+    }
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::exception &) {
+  } catch (const std::exception &error) {
+    // Serialization still allocates and calls library code that may throw.
+    util::Logger::warn("rj_vm_save_checkpoint failed: ", error.what());
     return ROCJITSU_STATUS_ERROR;
   }
 }
@@ -389,9 +374,16 @@ rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm) {
   if (!path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
-    auto loaded = config::restore_checkpoint(path);
-    return create_from_loaded(loaded, RJ_VM_MODE_DEFAULT, vm);
-  } catch (const std::exception &) {
+    util::StringDiagnostic diagnostic;
+    util::FailureOr<config::LoadedConfig> loaded =
+        config::restore_checkpoint(path, diagnostic.emitter());
+    if (loaded.failed()) {
+      util::Logger::warn("rj_vm_restore_checkpoint failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_INVALID_FILE;
+    }
+    return create_from_loaded(loaded.value(), RJ_VM_MODE_DEFAULT, vm);
+  } catch (const std::exception &e) {
+    util::Logger::warn("rj_vm_restore_checkpoint failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
 }
@@ -444,11 +436,11 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
   if (cmd->cmd == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU && cmd->result == 0) {
     auto *alloc_args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(cmd->buf);
     cmd->shared_handle =
-        driver->get_mmap_memfd(process_id, static_cast<off_t>(alloc_args->mmap_offset));
+        driver->get_mmap_backing(process_id, static_cast<off_t>(alloc_args->mmap_offset));
   } else if (cmd->cmd == AMDKFD_IOC_IPC_IMPORT_HANDLE && cmd->result == 0) {
     auto *import_args = static_cast<kfd_ioctl_ipc_import_handle_args *>(cmd->buf);
     cmd->shared_handle =
-        driver->get_mmap_memfd(process_id, static_cast<off_t>(import_args->mmap_offset));
+        driver->get_mmap_backing(process_id, static_cast<off_t>(import_args->mmap_offset));
   }
 
   return ROCJITSU_STATUS_SUCCESS;
@@ -571,10 +563,26 @@ rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path) {
 }
 
 rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info) {
+  return rj_vm_gpu_info_at(vm, 0, info);
+}
+
+rj_status_t rj_vm_gpu_count(rj_vm_t *vm, uint32_t *count) {
+  if (!vm || !count || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *count = vm->vm->driver()->num_gpus();
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_vm_gpu_info_at(rj_vm_t *vm, uint32_t ordinal, rj_vm_gpu_info_t *info) {
   if (!vm || !info || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const auto &gpu = vm->vm->driver()->topology().gpu_info();
+  const auto *gpu_ptr = vm->vm->driver()->gpu_info_at(ordinal);
+  if (!gpu_ptr && ordinal == 0)
+    gpu_ptr = &vm->vm->driver()->topology().gpu_info();
+  if (!gpu_ptr)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  const auto &gpu = *gpu_ptr;
   *info = {};
   info->present = 1;
   info->gpu_id = gpu.gpu_id;
@@ -599,6 +607,9 @@ rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info) {
   info->num_xcc = gpu.num_xcc;
   info->max_slots_scratch_cu = gpu.max_slots_scratch_cu;
   info->local_mem_size = gpu.local_mem_size;
+  info->visible_vram_size = gpu.visible_vram_size;
+  info->control_stack_size = gpu.control_stack_size;
+  info->context_save_size = gpu.context_save_size;
   info->vram_type = gpu.vram_type;
   info->lds_size_kb = gpu.lds_size_kb;
   info->mem_width = gpu.mem_width;
@@ -630,7 +641,7 @@ rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info) {
 rj_status_t rj_vm_get_shared_mem(rj_vm_t *vm, int64_t offset, rj_handle_t *handle) {
   if (!vm || !handle || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  *handle = vm->vm->driver()->get_mmap_memfd(static_cast<off_t>(offset));
+  *handle = vm->vm->driver()->get_mmap_backing(static_cast<off_t>(offset));
   return ROCJITSU_STATUS_SUCCESS;
 }
 
@@ -638,6 +649,31 @@ rj_status_t rj_vm_get_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t of
                                     rj_handle_t *handle) {
   if (!vm || !handle || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  *handle = vm->vm->driver()->get_mmap_memfd(process_id, static_cast<off_t>(offset));
+  *handle = vm->vm->driver()->get_mmap_backing(process_id, static_cast<off_t>(offset));
   return ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_vm_map_shared_mem(rj_handle_t handle, rj_vm_map_t *map) {
+  if (!map)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  map->mapped_addr = reinterpret_cast<uint64_t>(MAP_FAILED);
+  map->map_errno = EINVAL;
+  const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  if ((map->flags & MAP_TYPE) != MAP_SHARED || (map->flags & ~kMemoryBackingMappingFlags) ||
+      !map->length || map->offset < 0 || static_cast<uint64_t>(map->offset) % page ||
+      map->length > SIZE_MAX - static_cast<uint64_t>(map->offset))
+    return ROCJITSU_STATUS_ERROR;
+  const auto mapping_lock = host_mapping_lock().lock_exclusive();
+  if (check_memory_backing_size(handle, static_cast<size_t>(map->offset) +
+                                            static_cast<size_t>(map->length)) != 0) {
+    map->map_errno = errno;
+    return ROCJITSU_STATUS_ERROR;
+  }
+  void *result =
+      map_memory_backing(reinterpret_cast<void *>(map->addr), static_cast<size_t>(map->length),
+                         static_cast<int>(map->prot), static_cast<int>(map->flags), handle,
+                         static_cast<off_t>(map->offset));
+  map->map_errno = result == MAP_FAILED ? errno : 0;
+  map->mapped_addr = reinterpret_cast<uint64_t>(result);
+  return result == MAP_FAILED ? ROCJITSU_STATUS_ERROR : ROCJITSU_STATUS_SUCCESS;
 }

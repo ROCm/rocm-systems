@@ -11,16 +11,9 @@
 /// through CREATE_QUEUE -- the path that sets ComputeQueueConfig::xcd_fanout -- and
 /// dispatches a kernel that really does spill, behind a real process page table.
 ///
-/// What that reaches, and what it does not: the scratch *addressing* contract is
-/// covered here, because a wave's slot is indexed by its grid-wide workgroup id
-/// and the high-rank peers run the top of the grid. The driver's on-demand
-/// scratch-backing allocator is not, and cannot be from a local-mode test:
-/// opening a process turns GpuMemory passthrough on, so a wave's scratch address
-/// always resolves and the command processor never asks the driver to back it.
-/// That allocator -- and the existing-allocation check that keeps eight XCDs of
-/// one grid from each mapping the same pool -- is a daemon-mode path, where the
-/// guest's addresses are not the daemon's and passthrough stays off. Covering it
-/// needs a daemon-mode regression, not this fixture.
+/// The queue supplies the scratch metadata that ROCr would publish, and the
+/// kernel spills through the target's physical XCC/SE/scoreboard addressing.
+/// Runtime queues must not allocate through the simulator's synthetic fallback.
 
 #include "config_test_util.h"
 #include "test_paths.h"
@@ -28,6 +21,7 @@
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
@@ -157,16 +151,9 @@ struct alignas(kPage) Arena {
   std::array<uint8_t, kArenaSize> bytes;
 };
 
-// Private memory for the whole grid, supplied the way the runtime supplies it
-// rather than left to the driver's on-demand fallback. That fallback only fires
-// when a wave's scratch address fails to resolve, which cannot happen in local
-// mode: opening a process turns GpuMemory passthrough on, so every user-space VA
-// resolves whether or not the page table knows it. The fallback -- and the
-// existing-allocation check that keeps eight XCDs from each mapping the pool --
-// is therefore a daemon-mode path, where the guest's addresses are not the
-// daemon's and passthrough stays off.
-//
-// 64 KiB aligned because SET_SCRATCH_BACKING_VA carries the base shifted by 16.
+// A queue-owned scratch allocation, partitioned into physical XCC/SE slots.
+// SET_SCRATCH_BACKING_VA reserves a process address; amd_queue_t publishes the
+// allocation actually owned by this queue. The base is 64 KiB aligned.
 constexpr size_t kScratchAlign = 1u << 16;
 constexpr size_t kScratchSize = 8u << 20;
 struct alignas(kScratchAlign) ScratchArena {
@@ -195,12 +182,12 @@ struct HostImageLoader {
 
 /// Register a host buffer with the driver so the GPU can reach it.
 ///
-/// USERPTR with a caller-supplied address maps the process page table 1:1, so
-/// the GPU VA and the host pointer are the same number and the test can seed and
-/// read back memory directly.
+/// This fixture chooses the host pointer as its GPU VA so the test can seed
+/// and read back memory directly. USERPTR does not require equal addresses.
 bool map_userptr(SimulatedKfd *driver, uint32_t pid, void *host, size_t size) {
   kfd_ioctl_alloc_memory_of_gpu_args alloc{};
   alloc.va_addr = reinterpret_cast<uint64_t>(host);
+  alloc.mmap_offset = reinterpret_cast<uint64_t>(host);
   alloc.size = size;
   alloc.gpu_id = kGpuId;
   alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
@@ -234,10 +221,8 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
   const uint32_t pid = fx.driver->open_process();
   ASSERT_NE(pid, 0u);
 
-  // Nominate where private memory lives, as the runtime does before its first
-  // dispatch. Sized for the whole grid: a wave's slot is indexed by its grid-wide
-  // workgroup id, so the shares the high-rank peers run address the far end of
-  // this pool and a share-sized one would leave them writing past it.
+  // Reserve the process scratch aperture. The queue publishes ownership and
+  // its physical slot geometry separately below, as ROCr does.
   static ScratchArena scratch_arena{};
   std::memset(scratch_arena.bytes.data(), 0, scratch_arena.bytes.size());
   ASSERT_TRUE(map_userptr(fx.driver, pid, scratch_arena.bytes.data(), scratch_arena.bytes.size()));
@@ -307,6 +292,15 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
   create.ring_base_address = reinterpret_cast<uint64_t>(ring);
   create.ring_size = static_cast<uint32_t>(kRingSize);
   create.read_pointer_address = reinterpret_cast<uint64_t>(&queue_desc->read_dispatch_id);
+  queue_desc->scratch_backing_memory_location = scratch_pool_va;
+  const uint64_t wave_stride =
+      ((uint64_t{kd.private_segment_fixed_size} * kWavefrontSize + 1023) / 1024) * 1024;
+  constexpr uint32_t slots_per_xcc = 4;
+  ASSERT_LE(wave_stride * slots_per_xcc * kTotalXcds, kScratchSize);
+  // CDNA4 WAVES counts all SE slots in one XCC; WAVESIZE uses 1 KiB units.
+  const uint32_t scratch_granule = isa_properties(fx.soc->arch()).compute_tmpring_wavesize_granule;
+  queue_desc->compute_tmpring_size =
+      slots_per_xcc | (static_cast<uint32_t>(wave_stride / scratch_granule) << 12);
   create.write_pointer_address = reinterpret_cast<uint64_t>(&queue_desc->write_dispatch_id);
   create.queue_percentage = 100;
   ASSERT_EQ(fx.driver->ioctl(pid, AMDKFD_IOC_CREATE_QUEUE, &create), 0);

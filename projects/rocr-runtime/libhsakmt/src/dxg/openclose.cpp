@@ -546,6 +546,11 @@ ErrorCode hsakmtRuntime::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt
     if (size >= GPU_HUGE_PAGE_SIZE)
         align = GPU_HUGE_PAGE_SIZE;
 
+    if (!handle_aperture_mgr_) {
+        *out_gpu_virt_addr = 0;
+        return ErrorCode::OutOfHandleApeMemory;
+    }
+
     *out_gpu_virt_addr = handle_aperture_mgr_->Alloc(size, align);
     if (*out_gpu_virt_addr == 0)
         return ErrorCode::OutOfHandleApeMemory;
@@ -554,7 +559,9 @@ ErrorCode hsakmtRuntime::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt
 }
 
 void hsakmtRuntime::HandleApertureFree(gpusize gpu_addr) {
-    handle_aperture_mgr_->Free(gpu_addr);
+    if (handle_aperture_mgr_) {
+        handle_aperture_mgr_->Free(gpu_addr);
+    }
 }
 
 /* is_forked_child detects when the process has forked since the last
@@ -692,8 +699,9 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   if ((envvar = getenv("ROCR_USE_PM4")) != nullptr) {
     dxg_runtime->use_pm4_ = safe_env_to_int(envvar, 0);
   }
+
 #ifdef __linux__
-  dxg_runtime->use_pm4_ = 1;  // Force PM4 usage on Linux for now
+  dxg_runtime->use_pm4_ = safe_env_to_int(getenv("ROCR_USE_PM4"), 1);
 #endif
 
   // Disable wait timeout if ROCR_DISABLE_WAIT_TIMEOUT is set.
