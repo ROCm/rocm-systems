@@ -91,8 +91,9 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
 }
 
 template <typename T>
-testing::AssertionResult require_config_value(T &output, util::FailureOr<T> result,
-                                              const util::StringDiagnostic &diagnostic) {
+[[nodiscard]] testing::AssertionResult
+require_config_value(T &output, util::FailureOr<T> result,
+                     const util::StringDiagnostic &diagnostic) {
   if (result.failed())
     return testing::AssertionFailure() << diagnostic.message();
   output = std::move(result).value();
@@ -100,25 +101,26 @@ testing::AssertionResult require_config_value(T &output, util::FailureOr<T> resu
 }
 
 // Call with ASSERT_TRUE so failed setup stops the consuming test.
-testing::AssertionResult read_config_file_valid(std::string &output, const std::string &path) {
+[[nodiscard]] testing::AssertionResult read_config_file_valid(std::string &output,
+                                                              const std::string &path) {
   util::StringDiagnostic diagnostic;
   return require_config_value(output, config::read_config_file(path, diagnostic.emitter()),
                               diagnostic);
 }
 
 // Call with ASSERT_TRUE so failed setup stops the consuming test.
-testing::AssertionResult load_system_graph_valid(config::SystemGraph &output,
-                                                 const std::string &path,
-                                                 const std::string &schema) {
+[[nodiscard]] testing::AssertionResult load_system_graph_valid(config::SystemGraph &output,
+                                                               const std::string &path,
+                                                               const std::string &schema) {
   util::StringDiagnostic diagnostic;
   return require_config_value(output, config::load_system_graph(path, schema, diagnostic.emitter()),
                               diagnostic);
 }
 
 // Call with ASSERT_TRUE so failed setup stops the consuming test.
-testing::AssertionResult load_system_graph_from_string_valid(config::SystemGraph &output,
-                                                             const std::string &json,
-                                                             const std::string &schema) {
+[[nodiscard]] testing::AssertionResult
+load_system_graph_from_string_valid(config::SystemGraph &output, const std::string &json,
+                                    const std::string &schema) {
   util::StringDiagnostic diagnostic;
   return require_config_value(
       output, config::load_system_graph_from_string(json, schema, diagnostic.emitter()),
@@ -126,7 +128,7 @@ testing::AssertionResult load_system_graph_from_string_valid(config::SystemGraph
 }
 
 // Call with ASSERT_TRUE so failed setup stops the consuming test.
-testing::AssertionResult
+[[nodiscard]] testing::AssertionResult
 load_config_from_string_for_node_valid(config::LoadedConfig &output, const std::string &json,
                                        const std::string &schema, std::string_view node_id,
                                        std::optional<uint32_t> host_threads = std::nullopt) {
@@ -140,7 +142,7 @@ load_config_from_string_for_node_valid(config::LoadedConfig &output, const std::
 }
 
 // Call with ASSERT_TRUE so failed setup stops the consuming test.
-testing::AssertionResult load_execution_thread_settings_from_string_for_node_valid(
+[[nodiscard]] testing::AssertionResult load_execution_thread_settings_from_string_for_node_valid(
     config::ExecutionThreadSettings &output, const std::string &json, const std::string &schema,
     std::string_view node_id) {
   util::StringDiagnostic diagnostic;
@@ -151,7 +153,8 @@ testing::AssertionResult load_execution_thread_settings_from_string_for_node_val
 }
 
 // Call with ASSERT_TRUE so failed setup stops the consuming test.
-testing::AssertionResult validate_config_valid(const std::string &path, const std::string &schema) {
+[[nodiscard]] testing::AssertionResult validate_config_valid(const std::string &path,
+                                                             const std::string &schema) {
   util::StringDiagnostic diagnostic;
   if (config::validate_config(path, schema, diagnostic.emitter()).failed())
     return testing::AssertionFailure() << diagnostic.message();

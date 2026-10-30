@@ -206,7 +206,7 @@ constexpr Choice kAdditiveHelperChoices[] = {{1, 1, 0},  {1, 2, 0},  {1, 4, 0}, 
                                              {8, 25, 4}, {8, 25, 8}, {8, 25, 16}};
 
 // Call with ASSERT_TRUE before consuming output, which is unchanged on failure.
-testing::AssertionResult resolve_valid_execution_threads(
+[[nodiscard]] testing::AssertionResult resolve_valid_execution_threads(
     config::ExecutionThreadAllocation &output, const config::ExecutionThreadRequest &request,
     uint32_t host_threads, uint32_t xcds, std::span<const uint32_t> dispatch_capacities,
     bool async_supported, std::span<const Choice> choices, bool clocked = false) {
