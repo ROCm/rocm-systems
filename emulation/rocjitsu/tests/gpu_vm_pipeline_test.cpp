@@ -2546,11 +2546,9 @@ TEST(GpuVmPipeline, DeferredTensorLoadReportsInstructionPcAtCompletion) {
     void
     onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
       pcs.push_back(access.pc);
-      instruction_pcs.push_back(access.instruction_pc);
       lds_ranges.assign(access.lds_ranges.begin(), access.lds_ranges.end());
     }
     std::vector<uint64_t> pcs;
-    std::vector<uint64_t> instruction_pcs;
     std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
   };
 
@@ -2575,7 +2573,7 @@ TEST(GpuVmPipeline, DeferredTensorLoadReportsInstructionPcAtCompletion) {
   amdgpu::tensor_dma_detail::TensorDmaDescriptor descriptor;
   descriptor.elem_size = sizeof(uint32_t);
   auto state = std::make_unique<amdgpu::tensor_dma_detail::TensorDmaState>(descriptor, false);
-  state->instruction_pc = kIssuePc;
+  state->pc = kIssuePc;
   state->access = context.wf->snapshot_vm_access();
   ASSERT_TRUE(state->access);
   for (uint32_t index = 0; index < 2; ++index) {
@@ -2596,8 +2594,7 @@ TEST(GpuVmPipeline, DeferredTensorLoadReportsInstructionPcAtCompletion) {
   pipeline.tick();
 
   EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
-  EXPECT_EQ(observer->pcs, (std::vector<uint64_t>{kIssuePc + 8}));
-  EXPECT_EQ(observer->instruction_pcs, (std::vector<uint64_t>{kIssuePc}));
+  EXPECT_EQ(observer->pcs, (std::vector<uint64_t>{kIssuePc}));
   EXPECT_EQ(observer->lds_ranges, (std::vector<amdgpu::TensorDmaLdsRange>{
                                       {.address = context.wf->lds_base(), .bytes = 8}}));
 }

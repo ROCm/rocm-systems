@@ -412,9 +412,9 @@ protected:
     const size_t previous = sink->str().size();
     TensorDmaMemoryAccessObservation access;
     access.mnemonic = is_load ? "tensor_load_to_lds" : "tensor_store_from_lds";
+    access.pc = waves[wave]->pc;
     // The wave has moved past the instruction, as for a deferred transfer.
-    access.pc = waves[wave]->pc + 8;
-    access.instruction_pc = waves[wave]->pc;
+    waves[wave]->pc += 8;
     access.element_size_bytes = sizeof(uint32_t);
     access.data_size = 2;
     access.is_load = is_load;
@@ -493,8 +493,9 @@ TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
   EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
 }
 
-TEST_F(TensorDmaRaceTest, EventIsRecordedAtTheInstructionPc) {
-  // A deferred transfer completes after the wave's PC has moved past it. Keep
+TEST_F(TensorDmaRaceTest, EventIsRecordedAtTheObservedInstructionPc) {
+  // A deferred transfer completes after the wave's PC has moved past it; the
+  // event belongs to the observation's PC, not the wave's current one. Keep
   // wave 0's PCs distinct from wave 1's so the report identifies the event.
   waves[0]->pc = 0x2000;
   const uint64_t instruction_pc = waves[0]->pc + 16;

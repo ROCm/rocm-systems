@@ -525,10 +525,9 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaMemoryAccess(
 
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-  rs->registerLdsRangeEvent(access.instruction_pc,
-                            access.is_load ? MemoryEventType::GLOBAL_TO_LDS
-                                           : MemoryEventType::LDS_TO_GLOBAL,
-                            ranges, elementBytes, obligations, memoryOrder);
+  rs->registerLdsRangeEvent(
+      access.pc, access.is_load ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL,
+      ranges, elementBytes, obligations, memoryOrder);
 }
 
 void RaceDetectorPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
