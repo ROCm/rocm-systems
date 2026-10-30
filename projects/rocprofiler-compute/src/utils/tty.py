@@ -801,7 +801,7 @@ def format_table_output(
     )
 
     # Do not print the table if any column is empty. PC sampling table 21.1 is
-    # exempt: its source column is all N/A when the workload lacks debug info.
+    # exempt: a percentage column is all N/A when sysinfo lacks the wave specs.
     if is_empty_columns_exist and table_id_str != PC_SAMPLING_TABLE_ID:
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")

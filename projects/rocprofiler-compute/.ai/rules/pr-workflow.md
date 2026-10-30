@@ -32,7 +32,7 @@ Before drafting, ask the user:
 - "Do you have a JIRA ID for this PR?"
 - If yes, include it in the JIRA ID section.
 - If no, leave the JIRA ID section empty (keep the heading, leave body blank).
-- JIRA ID should never be specified using url, it should always be just the ticket id without the hyperlink part
+- JIRA ID should never be specified using url. Write it as `JIRA ID: AIPROFCOMP-123`, without the hyperlink part
 
 ### 4. Draft the PR title and body, then confirm with user
 

@@ -33,14 +33,8 @@ from utils.analysis_orm import (
 
 PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
     "workload_id",
-    "pid",
-    "code_object_id",
     "kernel_uuid",
     "kernel_name",
-    "offset",
-    "instruction",
-    "instruction_type",
-    "source",
     "count",
     "issue_count",
     "stall_count",
@@ -209,8 +203,7 @@ def fetch_pc_sampling_summary_rows(session: Session) -> list[dict[str, object]]:
     rows = session.execute(
         text(
             f"SELECT {selected_columns} FROM compute_pc_sampling_summary_view "
-            "ORDER BY workload_id, pid, code_object_id, kernel_uuid, offset, "
-            "instruction, source"
+            "ORDER BY workload_id, kernel_uuid"
         )
     ).mappings()
     decoded_rows = []
@@ -221,6 +214,16 @@ def fetch_pc_sampling_summary_rows(session: Session) -> list[dict[str, object]]:
             decoded_row["stall_reason"] = json.loads(stall_reason)
         decoded_rows.append(decoded_row)
     return decoded_rows
+
+
+def fetch_per_kernel_isa_rows(
+    session: Session, workload: Workload
+) -> list[dict[str, object]]:
+    """Fetch the per-instruction rows that the per-kernel ISA export writes."""
+    statement = Database._per_kernel_isa_statement(
+        workload_id=workload.workload_id, stall_reasons=[]
+    )
+    return [dict(row) for row in session.execute(statement).mappings()]
 
 
 def add_captured_source_file(
@@ -565,7 +568,7 @@ def test_get_or_create_type_dedups(db_session):
 
 
 def test_pc_sampling_summary_view_flattens_normalized_tables(db_session):
-    """The summary view flattens the normalized tables and rebuilds
+    """The summary view reads the normalized tables and rebuilds
     stall_reason as a JSON dict."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -584,14 +587,8 @@ def test_pc_sampling_summary_view_flattens_normalized_tables(db_session):
     assert fetch_pc_sampling_summary_rows(db_session) == [
         {
             "workload_id": workload.workload_id,
-            "pid": 42,
-            "code_object_id": 5,
             "kernel_uuid": kernel.kernel_uuid,
             "kernel_name": "vecCopy",
-            "offset": 0x10,
-            "instruction": "v_mov",
-            "instruction_type": None,
-            "source": "/s/a.cpp:1",
             "count": 3,
             "issue_count": 1,
             "stall_count": 2,
@@ -629,7 +626,7 @@ def test_instruction_line_static_type_defaults_to_none(db_session):
     assert sample_state.instruction_line.instruction_type_lookup is None
 
 
-def test_pc_sampling_summary_view_carries_the_static_instruction_type(db_session):
+def test_per_kernel_isa_carries_the_static_instruction_type(db_session):
     """The type comes from the lookup table, and is empty when unclassified."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -650,15 +647,14 @@ def test_pc_sampling_summary_view_carries_the_static_instruction_type(db_session
         instruction="not_an_instruction",
         code_object_id=6,
     )
-    Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_summary_rows(db_session)
+    rows = fetch_per_kernel_isa_rows(db_session, workload)
     assert [row["instruction_type"] for row in rows] == ["VALU", None]
 
 
-def test_pc_sampling_summary_view_separates_states_by_code_object(db_session):
-    """States under one kernel stay separate per code object."""
+def test_pc_sampling_summary_view_combines_states_across_code_objects(db_session):
+    """States of one kernel in two code objects sum into one row."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -687,15 +683,11 @@ def test_pc_sampling_summary_view_separates_states_by_code_object(db_session):
 
     rows = fetch_pc_sampling_summary_rows(db_session)
 
-    # The same offset in two code objects can be different code, so the rows are
-    # never summed together.
-    assert [row["code_object_id"] for row in rows] == [5, 6]
-    assert [row["count"] for row in rows] == [8, 9]
-    assert [row["issue_count"] for row in rows] == [2, 3]
-    assert [row["stall_count"] for row in rows] == [6, 6]
+    assert [row["count"] for row in rows] == [17]
+    assert [row["issue_count"] for row in rows] == [5]
+    assert [row["stall_count"] for row in rows] == [12]
     assert [row["stall_reason"] for row in rows] == [
-        {"MEMORY": 4, "WAITCNT": 2},
-        {"BARRIER": 1, "WAITCNT": 5},
+        {"BARRIER": 1, "MEMORY": 4, "WAITCNT": 7}
     ]
 
 
@@ -711,13 +703,13 @@ def test_pc_sampling_summary_view_separates_states_by_code_object(db_session):
         ),
     ],
 )
-def test_pc_sampling_summary_view_keeps_display_identity_fields_separate(
+def test_pc_sampling_summary_view_combines_instruction_and_source_values(
     db_session,
     identity_field: str,
     first_value: str,
     second_value: str,
 ):
-    """Different instruction or source values remain separate view rows."""
+    """Different instruction or source values combine into the kernel row."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -746,14 +738,11 @@ def test_pc_sampling_summary_view_keeps_display_identity_fields_separate(
 
     rows = fetch_pc_sampling_summary_rows(db_session)
 
-    assert {(row[identity_field], row["count"]) for row in rows} == {
-        (first_value, 3),
-        (second_value, 5),
-    }
+    assert [row["count"] for row in rows] == [8]
 
 
-def test_pc_sampling_summary_view_keeps_processes_separate_under_one_kernel(db_session):
-    """Identical states in two processes remain separate view rows."""
+def test_pc_sampling_summary_view_merges_processes_under_one_kernel(db_session):
+    """States of one kernel in two processes merge into one row."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -764,6 +753,7 @@ def test_pc_sampling_summary_view_keeps_processes_separate_under_one_kernel(db_s
         total_count=3,
         issue_count=3,
         stall_count=0,
+        wave_occupancy_percent=25.0,
     )
     add_pc_sampling_state(
         db_session,
@@ -773,15 +763,20 @@ def test_pc_sampling_summary_view_keeps_processes_separate_under_one_kernel(db_s
         total_count=5,
         issue_count=5,
         stall_count=0,
+        wave_occupancy_percent=50.0,
+        active_thread_percent=50.0,
     )
     Database.create_views()
     db_session.commit()
 
     rows = fetch_pc_sampling_summary_rows(db_session)
 
-    # One kernel row, one view row per process.
-    assert {row["kernel_uuid"] for row in rows} == {kernel.kernel_uuid}
-    assert {(row["pid"], row["count"]) for row in rows} == {(42, 3), (99, 5)}
+    assert [row["kernel_uuid"] for row in rows] == [kernel.kernel_uuid]
+    assert [row["count"] for row in rows] == [8]
+    # Weighted by sample count: (25 * 3 + 50 * 5) / 8.
+    assert [row["wave_occupancy_percent"] for row in rows] == [40.625]
+    # The state without the value adds no weight.
+    assert [row["active_thread_percent"] for row in rows] == [50.0]
 
 
 def test_pc_sampling_summary_view_keeps_different_workloads_separate(db_session):
@@ -849,8 +844,7 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
 
     rows = fetch_pc_sampling_summary_rows(db_session)
 
-    assert [row["code_object_id"] for row in rows] == [5, 6]
-    assert [row["count"] for row in rows] == [3, 5]
+    assert [row["count"] for row in rows] == [8]
     assert all(row["issue_count"] is None for row in rows)
     assert all(row["stall_count"] is None for row in rows)
     assert all(row["stall_reason"] is None for row in rows)
@@ -863,7 +857,7 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
 def test_pc_sampling_summary_view_attaches_reasons_with_nullable_identity(
     db_session, nullable_field
 ):
-    """Null identity fields keep their rows and their own stall reasons."""
+    """States with null identity fields still count toward their kernel."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     identity = {
@@ -900,10 +894,8 @@ def test_pc_sampling_summary_view_attaches_reasons_with_nullable_identity(
 
     rows = fetch_pc_sampling_summary_rows(db_session)
 
-    assert [row["code_object_id"] for row in rows] == [5, 6]
-    assert all(row[nullable_field] is None for row in rows)
-    assert [row["count"] for row in rows] == [3, 5]
-    assert [row["stall_reason"] for row in rows] == [{"WAITCNT": 2}, {"WAITCNT": 4}]
+    assert [row["count"] for row in rows] == [8]
+    assert [row["stall_reason"] for row in rows] == [{"WAITCNT": 6}]
 
 
 # =============================================================================
@@ -1024,25 +1016,24 @@ def test_source_lines_view_joins_lines_to_their_file(db_session):
         pytest.param(None, None, id="no_frames_yields_null"),
     ],
 )
-def test_pc_sampling_summary_view_rebuilds_source_from_frames(
+def test_per_kernel_isa_rebuilds_source_from_frames(
     db_session, source, expected_source
 ):
-    """The summary view reconstructs the comment text from ordered frames."""
+    """The ISA export reconstructs the comment text from ordered frames."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     db_session.add(Dispatch(dispatch_id=0, kernel=kernel))
     add_pc_sampling_state(
         db_session, workload=workload, kernel=kernel, pid=42, source=source
     )
-    Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_summary_rows(db_session)
+    rows = fetch_per_kernel_isa_rows(db_session, workload)
 
     assert [row["source"] for row in rows] == [expected_source]
 
 
-def test_pc_sampling_summary_view_keeps_frames_of_one_instruction_together(db_session):
+def test_per_kernel_isa_keeps_frames_of_one_instruction_together(db_session):
     """Two instructions sharing a source line keep their own chains."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -1064,10 +1055,9 @@ def test_pc_sampling_summary_view_keeps_frames_of_one_instruction_together(db_se
         offset=0x20,
         source="/s/a.cpp:36",
     )
-    Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_summary_rows(db_session)
+    rows = fetch_per_kernel_isa_rows(db_session, workload)
 
     assert [row["source"] for row in rows] == [
         "/s/hip.h:317 -> /s/a.cpp:36",

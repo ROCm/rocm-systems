@@ -62,10 +62,13 @@ Analysis options
 ================
 For using analysis options for PC sampling the configuration needed are:
 
-* ``--pc-sampling-sorting-type``: ``offset`` or ``count``. The default option is ``count``, which surfaces the most-sampled instructions (hotspots) first. ``offset`` is an assembly instruction offset in the code object.
-* ``--pc-sampling-rows``: Maximum number of rows shown in the PC sampling table (DEFAULT: 10). Must be a non-negative integer; use ``0`` to show all rows.
+* ``--pc-sampling-rows``: Maximum number of kernels shown in the PC sampling table (Default: 10). Must be a non-negative integer; use ``0`` to show all kernels.
 
-Two columns describe how well each instruction used the machine:
+The PC sampling table shows one row per kernel, sorted by sample ``count`` with
+the most-sampled kernel first. A kernel's counts are summed over all of its
+instructions.
+
+Two columns describe how well each kernel used the machine:
 
 * ``active_thread_percent``: percent of the wave's lanes that were active. A
   low value means control flow masked lanes off. Shown for both sampling
@@ -74,103 +77,53 @@ Two columns describe how well each instruction used the machine:
   wave. A low value means there were too few waves to hide latency. Shown for
   ``stochastic`` only, because ``host_trap`` records carry no wave count.
 
-Both are averaged over the samples that landed on the instruction. A kernel
-built for wave64 on a device that reports a wave size of 32 sets more lanes
-than that size, so ``active_thread_percent`` is capped at 100 and analyze warns
-once with how many lines were capped.
+Both are averaged over the kernel's samples. A kernel built for wave64 on a
+device that reports a wave size of 32 sets more lanes than that size, so
+``active_thread_percent`` is capped at 100 and analyze warns once with how many
+lines were capped.
 
-**Sample command:**
-
-.. code-block:: shell
-
-   $ rocprof-compute analyze -p <workload_dir> -k 0 --pc-sampling-sorting-type offset
+To find the hot instructions and source lines of a kernel, use the
+:ref:`per-kernel ISA and source files <pc-sampling-per-kernel-csv>` of CSV
+output.
 
 **Sample output:**
 
-``source_line`` shows ``N/A`` because the example binary was built without
-``-g`` (See the :ref:`note <pc-sampling-note>` at the end of this page).
-
-``instruction_type`` names the hardware pipeline that runs the instruction,
-such as ``VALU`` for vector math or ``MATRIX`` for matrix math.
-
-Selecting a single kernel with ``host_trap`` PC sampling:
-
-.. code-block:: shell-session
-
-   $ rocprof-compute analyze -p <workload_dir> -k 0
-
-   ╒═════════╤═════════╤═══════════════╤════════════════════════════════╤════════════════════╤══════════════════╤══════════╤═════════╤═════════════════════════╤══════════════════════════════════════╕
-   │   index │     pid │ source_line   │ instruction                    │ instruction_type   │   code_object_id │ offset   │   count │   active_thread_percent │ Kernel_Name                          │
-   ╞═════════╪═════════╪═══════════════╪════════════════════════════════╪════════════════════╪══════════════════╪══════════╪═════════╪═════════════════════════╪══════════════════════════════════════╡
-   │      83 │ 1429079 │ N/A           │ v_add_u32_e32 v16, s2, v0      │ VALU               │                2 │ 0x3f30   │   42959 │                  100.00 │ matmul_fp32_throughput(float*, float │
-   │         │         │               │                                │                    │                  │          │         │                         │ __vector(4)*, int)                   │
-   ├─────────┼─────────┼───────────────┼────────────────────────────────┼────────────────────┼──────────────────┼──────────┼─────────┼─────────────────────────┼──────────────────────────────────────┤
-   │      84 │ 1429079 │ N/A           │ v_ashrrev_i32_e32 v17, 31, v16 │ VALU               │                2 │ 0x3f38   │   10908 │                   96.88 │ matmul_fp32_throughput(float*, float │
-   │         │         │               │                                │                    │                  │          │         │                         │ __vector(4)*, int)                   │
-   ├─────────┼─────────┼───────────────┼────────────────────────────────┼────────────────────┼──────────────────┼──────────┼─────────┼─────────────────────────┼──────────────────────────────────────┤
-   │      85 │ 1429079 │ N/A           │ s_load_dword s0, s[0:1], 0x0   │ SCALAR             │                2 │ 0x3f40   │       1 │                   87.50 │ matmul_fp32_throughput(float*, float │
-   │         │         │               │                                │                    │                  │          │         │                         │ __vector(4)*, int)                   │
-   ╘═════════╧═════════╧═══════════════╧════════════════════════════════╧════════════════════╧══════════════════╧══════════╧═════════╧═════════════════════════╧══════════════════════════════════════╛
-
-Selecting a single kernel with ``stochastic`` PC sampling, which adds the
-``issue_count``, ``stall_count``, ``wave_occupancy_percent``, and
-``stall_reason`` columns:
-
-.. code-block:: shell-session
-
-   $ rocprof-compute analyze -p <workload_dir> -k 0
-
-   ╒═════════╤═════════╤═══════════════╤════════════════════════════════════╤════════════════════╤══════════════════╤══════════╤═════════╤═════════════════════════╤════════════════╤═════════════════╤══════════════════════════╤═══════════════════════════════════════════════════════╤══════════════════════════════════════╕
-   │   index │     pid │ source_line   │ instruction                        │ instruction_type   │   code_object_id │ offset   │   count │   active_thread_percent │   issue_count  │   stall_count   │   wave_occupancy_percent │ stall_reason                                          │ Kernel_Name                          │
-   ╞═════════╪═════════╪═══════════════╪════════════════════════════════════╪════════════════════╪══════════════════╪══════════╪═════════╪═════════════════════════╪════════════════╪═════════════════╪══════════════════════════╪═══════════════════════════════════════════════════════╪══════════════════════════════════════╡
-   │      90 │ 1429079 │ N/A           │ s_load_dword s8, s[0:1], 0x24      │ SCALAR             │                2 │ 0x3f00   │       3 │                  100.00 │              0 │               3 │                    78.12 │ [('ARBITER_NOT_WIN', 3)]                              │ matmul_fp32_throughput(float*, float │
-   │         │         │               │                                    │                    │                  │          │         │                         │                │                 │                          │                                                       │ __vector(4)*, int)                   │
-   ├─────────┼─────────┼───────────────┼────────────────────────────────────┼────────────────────┼──────────────────┼──────────┼─────────┼─────────────────────────┼────────────────┼─────────────────┼──────────────────────────┼───────────────────────────────────────────────────────┼──────────────────────────────────────┤
-   │      91 │ 1429079 │ N/A           │ s_load_dwordx4 s[4:7], s[0:1], 0x0 │ SCALAR             │                2 │ 0x3f08   │       2 │                  100.00 │              0 │               2 │                    71.88 │ [('ARBITER_NOT_WIN', 1), ('ARBITER_WIN_EX_STALL', 1)] │ matmul_fp32_throughput(float*, float │
-   │         │         │               │                                    │                    │                  │          │         │                         │                │                 │                          │                                                       │ __vector(4)*, int)                   │
-   ├─────────┼─────────┼───────────────┼────────────────────────────────────┼────────────────────┼──────────────────┼──────────┼─────────┼─────────────────────────┼────────────────┼─────────────────┼──────────────────────────┼───────────────────────────────────────────────────────┼──────────────────────────────────────┤
-   │      92 │ 1429079 │ N/A           │ s_load_dword s3, s[0:1], 0x10      │ SCALAR             │                2 │ 0x3f10   │       2 │                   96.88 │              0 │               2 │                    71.88 │ [('ARBITER_WIN_EX_STALL', 1), ('ARBITER_NOT_WIN', 1)] │ matmul_fp32_throughput(float*, float │
-   │         │         │               │                                    │                    │                  │          │         │                         │                │                 │                          │                                                       │ __vector(4)*, int)                   │
-   ╘═════════╧═════════╧═══════════════╧════════════════════════════════════╧════════════════════╧══════════════════╧══════════╧═════════╧═════════════════════════╧════════════════╧═════════════════╧══════════════════════════╧═══════════════════════════════════════════════════════╧══════════════════════════════════════╛
-
-Without a kernel filter, the same per-instruction table is shown across all
-kernels, with a ``Kernel_Name`` column identifying each row's kernel:
+``host_trap`` PC sampling:
 
 .. code-block:: shell-session
 
    $ rocprof-compute analyze -p <workload_dir>
 
-   ╒═════════╤═════════╤═══════════════╤══════════════════════════════════════════════════════════════╤════════════════════╤══════════════════╤══════════╤═════════╤═════════════════════════╤════════════════╤═════════════════╤══════════════════════════╤══════════════════════════╤══════════════════════════════════════════╕
-   │   index │     pid │ source_line   │ instruction                                                  │ instruction_type   │   code_object_id │ offset   │   count │   active_thread_percent │   issue_count  │   stall_count   │   wave_occupancy_percent │ stall_reason             │ Kernel_Name                              │
-   ╞═════════╪═════════╪═══════════════╪══════════════════════════════════════════════════════════════╪════════════════════╪══════════════════╪══════════╪═════════╪═════════════════════════╪════════════════╪═════════════════╪══════════════════════════╪══════════════════════════╪══════════════════════════════════════════╡
-   │      12 │ 1429079 │ N/A           │ s_cmp_eq_u32 s1, 0                                           │ SCALAR             │                2 │ 0x3bb8   │     199 │                  100.00 │            197 │               2 │                    84.38 │ [('ARBITER_NOT_WIN', 2)] │ _Z22matmul_fp16_throughputPDv4_DF16_PDv4 │
-   │         │         │               │                                                              │                    │                  │          │         │                         │                │                 │                          │                          │ _fi                                      │
-   ├─────────┼─────────┼───────────────┼──────────────────────────────────────────────────────────────┼────────────────────┼──────────────────┼──────────┼─────────┼─────────────────────────┼────────────────┼─────────────────┼──────────────────────────┼──────────────────────────┼──────────────────────────────────────────┤
-   │      13 │ 1429079 │ N/A           │ s_waitcnt vmcnt(2)                                           │ INTERNAL           │                2 │ 0x3bbc   │     199 │                  100.00 │              0 │             199 │                    84.38 │ [('WAITCNT', 199)]       │ _Z22matmul_fp16_throughputPDv4_DF16_PDv4 │
-   │         │         │               │                                                              │                    │                  │          │         │                         │                │                 │                          │                          │ _fi                                      │
-   ├─────────┼─────────┼───────────────┼──────────────────────────────────────────────────────────────┼────────────────────┼──────────────────┼──────────┼─────────┼─────────────────────────┼────────────────┼─────────────────┼──────────────────────────┼──────────────────────────┼──────────────────────────────────────────┤
-   │      14 │ 1429079 │ N/A           │ v_mfma_f32_16x16x16_f16 v[8:11], v[20:21], v[20:21], v[8:11] │ MATRIX             │                2 │ 0x3bc0   │       1 │                   93.75 │              0 │               1 │                    62.50 │ [('ARBITER_NOT_WIN', 1)] │ void fma_throughput<int>(int             │
-   │         │         │               │                                                              │                    │                  │          │         │                         │                │                 │                          │                          │ __vector(4)*, int)                       │
-   ╘═════════╧═════════╧═══════════════╧══════════════════════════════════════════════════════════════╧════════════════════╧══════════════════╧══════════╧═════════╧═════════════════════════╧════════════════╧═════════════════╧══════════════════════════╧══════════════════════════╧══════════════════════════════════════════╛
+   ╒═════════╤═════════════════════════╤═════════╤═════════════════════════╕
+   │   index │ Kernel_Name             │   count │   active_thread_percent │
+   ╞═════════╪═════════════════════════╪═════════╪═════════════════════════╡
+   │       0 │ sgprbound(int, double*) │  210836 │                  100.00 │
+   ├─────────┼─────────────────────────┼─────────┼─────────────────────────┤
+   │       1 │ vgprbound(int, double*) │  122973 │                   99.45 │
+   ├─────────┼─────────────────────────┼─────────┼─────────────────────────┤
+   │       2 │ ldsbound(int, double*)  │   18445 │                   98.80 │
+   ├─────────┼─────────────────────────┼─────────┼─────────────────────────┤
+   │       3 │ empty(int, double*)     │       4 │                  100.00 │
+   ╘═════════╧═════════════════════════╧═════════╧═════════════════════════╛
 
-Sorting a single kernel by sample ``count`` instead of ``offset``:
+``stochastic`` PC sampling, which adds the ``issue_count``, ``stall_count``,
+``wave_occupancy_percent``, and ``stall_reason`` columns:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p <workload_dir> -k 0 --pc-sampling-sorting-type count
+   $ rocprof-compute analyze -p <workload_dir>
 
-   ╒═════════╤═════════╤═══════════════╤═══════════════════════════════════════════════════╤════════════════════╤══════════════════╤══════════╤═════════╤═════════════════════════╤════════════════╤═════════════════╤══════════════════════════╤══════════════════════════════════════════════════════════════╤══════════════════════════════════════╕
-   │   index │     pid │ source_line   │ instruction                                       │ instruction_type   │   code_object_id │ offset   │   count │   active_thread_percent │   issue_count  │   stall_count   │   wave_occupancy_percent │ stall_reason                                                 │ Kernel_Name                          │
-   ╞═════════╪═════════╪═══════════════╪═══════════════════════════════════════════════════╪════════════════════╪══════════════════╪══════════╪═════════╪═════════════════════════╪════════════════╪═════════════════╪══════════════════════════╪══════════════════════════════════════════════════════════════╪══════════════════════════════════════╡
-   │     106 │ 1429079 │ N/A           │ global_load_dword v18, v[0:1], off                │ FLAT               │                2 │ 0x3f78   │   29715 │                  100.00 │              0 │           29715 │                    90.62 │ [('ARBITER_NOT_WIN', 26037), ('ARBITER_WIN_EX_STALL', 3678)] │ matmul_fp32_throughput(float*, float │
-   │         │         │               │                                                   │                    │                  │          │         │                         │                │                 │                          │                                                              │ __vector(4)*, int)                   │
-   ├─────────┼─────────┼───────────────┼───────────────────────────────────────────────────┼────────────────────┼──────────────────┼──────────┼─────────┼─────────────────────────┼────────────────┼─────────────────┼──────────────────────────┼──────────────────────────────────────────────────────────────┼──────────────────────────────────────┤
-   │     117 │ 1429079 │ N/A           │ v_mfma_f32_16x16x4_f32 v[8:11], v19, v19, v[8:11] │ VALU               │                2 │ 0x3fb0   │   21164 │                  100.00 │            169 │           20995 │                    87.50 │ [('ARBITER_NOT_WIN', 20995)]                                 │ matmul_fp32_throughput(float*, float │
-   │         │         │               │                                                   │                    │                  │          │         │                         │                │                 │                          │                                                              │ __vector(4)*, int)                   │
-   ├─────────┼─────────┼───────────────┼───────────────────────────────────────────────────┼────────────────────┼──────────────────┼──────────┼─────────┼─────────────────────────┼────────────────┼─────────────────┼──────────────────────────┼──────────────────────────────────────────────────────────────┼──────────────────────────────────────┤
-   │     188 │ 1429079 │ N/A           │ global_store_dwordx4 v[4:5], v[0:3], off          │ FLAT               │                2 │ 0x4204   │   13821 │                   78.12 │              0 │           13821 │                    65.62 │ [('ARBITER_WIN_EX_STALL', 7300), ('ARBITER_NOT_WIN', 6521)]  │ matmul_fp32_throughput(float*, float │
-   │         │         │               │                                                   │                    │                  │          │         │                         │                │                 │                          │                                                              │ __vector(4)*, int)                   │
-   ╘═════════╧═════════╧═══════════════╧═══════════════════════════════════════════════════╧════════════════════╧══════════════════╧══════════╧═════════╧═════════════════════════╧════════════════╧═════════════════╧══════════════════════════╧══════════════════════════════════════════════════════════════╧══════════════════════════════════════╛
+   ╒═════════╤═════════════════════════╤═════════╤═════════════════════════╤═══════════════╤═══════════════╤══════════════════════════╤═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╕
+   │   index │ Kernel_Name             │   count │   active_thread_percent │   issue_count │   stall_count │   wave_occupancy_percent │ stall_reason                                                                                                                                                                                        │
+   ╞═════════╪═════════════════════════╪═════════╪═════════════════════════╪═══════════════╪═══════════════╪══════════════════════════╪═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╡
+   │       0 │ vgprbound(int, double*) │  253159 │                   99.41 │         77966 │        175193 │                    49.51 │ [('ARBITER_NOT_WIN', 164088), ('ALU_DEPENDENCY', 5487), ('NO_INSTRUCTION_AVAILABLE', 3477), ('INTERNAL_INSTRUCTION', 1163), ('WAITCNT', 921), ('ARBITER_WIN_EX_STALL', 57)]                         │
+   ├─────────┼─────────────────────────┼─────────┼─────────────────────────┼───────────────┼───────────────┼──────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+   │       1 │ sgprbound(int, double*) │  141176 │                  100.00 │         30958 │        110218 │                    98.98 │ [('ARBITER_NOT_WIN', 102816), ('ALU_DEPENDENCY', 4283), ('NO_INSTRUCTION_AVAILABLE', 2434), ('INTERNAL_INSTRUCTION', 641), ('WAITCNT', 44)]                                                         │
+   ├─────────┼─────────────────────────┼─────────┼─────────────────────────┼───────────────┼───────────────┼──────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+   │       2 │ ldsbound(int, double*)  │   79579 │                   98.73 │         42296 │         37283 │                    24.69 │ [('ARBITER_NOT_WIN', 25600), ('ALU_DEPENDENCY', 3464), ('NO_INSTRUCTION_AVAILABLE', 2886), ('WAITCNT', 1869), ('ARBITER_WIN_EX_STALL', 1716), ('INTERNAL_INSTRUCTION', 936), ('BARRIER_WAIT', 812)] │
+   ├─────────┼─────────────────────────┼─────────┼─────────────────────────┼───────────────┼───────────────┼──────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+   │       3 │ empty(int, double*)     │      31 │                  100.00 │             0 │            31 │                     8.97 │ [('NO_INSTRUCTION_AVAILABLE', 31)]                                                                                                                                                                  │
+   ╘═════════╧═════════════════════════╧═════════╧═════════════════════════╧═══════════════╧═══════════════╧══════════════════════════╧═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╛
 
 Analyze multi-process workloads
 -------------------------------
@@ -183,18 +136,8 @@ multi-process option is required:
    $ rocprof-compute analyze -p <workload_dir>
 
 Analyze mode loads the PC sampling data for every process in the workload
-directory and reports it in a single table. A ``pid`` column identifies the
-process each row came from.
-
-Samples are not merged across processes. The same instruction offset can belong
-to different code in two processes, so each process keeps its own rows and its
-own counts.
-
-Sorting and ``--pc-sampling-rows`` apply to the combined table. Sorting by
-``offset`` orders on ``pid`` first, which keeps each process's rows together.
-Sorting by ``count`` ranks on sample count alone, so rows from different
-processes can interleave. In both cases, ``--pc-sampling-rows 10`` selects ten
-rows from the workload as a whole, not ten rows per process.
+directory and reports it in a single table. A kernel that ran in several
+processes is shown once, with the samples of all processes combined.
 
 .. _pc-sampling-per-kernel-csv:
 
@@ -319,5 +262,5 @@ number.
 .. note::
 
   * PC sampling now only shows assembly instructions collected in our record of pc samples and not all instructions of compiled code are represented.
-  * Source information requires the target app to be built with debug info (for example ``hipcc -g``). Without it, samples map to assembly only: profile mode captures no source files, the terminal table's ``source_line`` shows ``N/A``, and the ``Source`` column of the per-kernel CSV is empty.
+  * Source information requires the target app to be built with debug info (for example ``hipcc -g``). Without it, samples map to assembly only: profile mode captures no source files, and the ``Source`` column of the per-kernel CSV is empty.
   * The ``Source`` column can show ``?`` instead of a line number, such as ``kernel.cpp:?``. The compiler does this when it builds one instruction from several source lines. To find the source of such an instruction, look at the source lines of the instructions it depends on. For example, a wait instruction such as ``s_waitcnt`` depends on earlier memory and LDS operations, such as ``global_*``, ``buffer_*``, ``s_load*`` or ``ds_*`` instructions.

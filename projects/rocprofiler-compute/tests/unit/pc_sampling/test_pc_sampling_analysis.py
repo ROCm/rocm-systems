@@ -57,30 +57,18 @@ def reset_wave_size_clamp_warning():
 
 
 HOST_TRAP_DISPLAY_COLUMNS = [
-    "pid",
-    "source_line",
-    "instruction",
-    "instruction_type",
-    "code_object_id",
-    "offset",
+    "Kernel_Name",
     "count",
     "active_thread_percent",
-    "Kernel_Name",
 ]
 STOCHASTIC_DISPLAY_COLUMNS = [
-    "pid",
-    "source_line",
-    "instruction",
-    "instruction_type",
-    "code_object_id",
-    "offset",
+    "Kernel_Name",
     "count",
     "active_thread_percent",
     "issue_count",
     "stall_count",
     "wave_occupancy_percent",
     "stall_reason",
-    "Kernel_Name",
 ]
 
 
@@ -1115,7 +1103,7 @@ def test_wave_measurements_reach_both_the_terminal_frame_and_the_database(
     sys_info = {"wave_size": "64", "max_waves_per_cu": "32"}
     workload = schema.Workload(sys_info=pd.DataFrame([sys_info]))
 
-    display_frame = load_pc_sampling_data(workload, "count", [tool_data])
+    display_frame = load_pc_sampling_data(workload, [tool_data])
     assert display_frame.iloc[0]["active_thread_percent"] == 6.25
     if method == "stochastic":
         assert display_frame.iloc[0]["wave_occupancy_percent"] == 25.0
@@ -1173,88 +1161,29 @@ def setup_pc_sampling_data(
     )
 
 
-def test_load_pc_sampling_data_carries_the_static_instruction_type() -> None:
-    """The CLI table types every row, whichever sampling method ran."""
-    df = load_pc_sampling_data(
-        make_pc_sampling_workload(),
-        "offset",
-        [setup_pc_sampling_data(method="host_trap")],
-    )
-
-    # The workload filters to one kernel, which owns the first two offsets.
-    assert dict(zip(df["instruction"], df["instruction_type"], strict=True)) == {
-        "v_mov_b32": "VALU",
-        "s_waitcnt": "INTERNAL",
-    }
-
-
-@pytest.mark.parametrize(
-    "method, sorting_type",
-    [
-        ("host_trap", "offset"),
-        ("host_trap", "count"),
-        ("stochastic", "offset"),
-        ("stochastic", "count"),
-    ],
-)
-def test_load_pc_sampling_data_filtered_schema_and_sort(
-    method: str,
-    sorting_type: str,
-) -> None:
-    """Column projection follows method; row order follows sorting_type."""
+@pytest.mark.parametrize("method", ["host_trap", "stochastic"])
+def test_load_pc_sampling_data_filtered_schema_and_sort(method: str) -> None:
+    """Column projection follows method; the kernel's rows combine into one."""
     expected_columns = (
         HOST_TRAP_DISPLAY_COLUMNS
         if method == "host_trap"
         else STOCHASTIC_DISPLAY_COLUMNS
     )
     tool_data = setup_pc_sampling_data(method=method)
-    df = load_pc_sampling_data(
-        make_pc_sampling_workload(),
-        sorting_type,
-        [tool_data],
-    )
-    assert not df.empty
+    df = load_pc_sampling_data(make_pc_sampling_workload(), [tool_data])
     assert list(df.columns) == expected_columns
-    for _, row in df.iterrows():
-        assert row["code_object_id"] == 5
-    if sorting_type == "count":
-        counts = df["count"].tolist()
-        assert counts == sorted(counts, reverse=True)
-    else:
-        offsets = df["offset"].tolist()
-        assert offsets == sorted(offsets)
-
-
-def test_load_pc_sampling_data_filtered_offset_sort_is_numeric() -> None:
-    """Offset sort orders by numeric value, not lexicographic hex string."""
-    tool_data = make_tool_data(
-        host_trap=[
-            make_record(5, 0x100, 0, dispatch_id=0),
-            make_record(5, 0x20, 1, dispatch_id=1),
-        ],
-        instructions=["a", "b"],
-        comments=["/src/f.cpp:1", "/src/f.cpp:2"],
-        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
-        kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 100)],
-    )
-    df = load_pc_sampling_data(
-        make_pc_sampling_workload(),
-        "offset",
-        [tool_data],
-    )
-    # 0x20 (32) must precede 0x100 (256); lexicographic order would invert them.
-    assert df["offset"].tolist() == ["0x20", "0x100"]
+    assert df["Kernel_Name"].tolist() == ["vecCopy"]
+    assert df["count"].tolist() == [2]
 
 
 @pytest.mark.parametrize("num_rows, expected_rows", [(1, 1), (0, 2), (None, 2)])
-def test_load_pc_sampling_data_filtered_num_rows_limit(
+def test_load_pc_sampling_data_num_rows_limit(
     num_rows: int | None,
     expected_rows: int,
 ) -> None:
-    """num_rows caps the table after sorting; 0 or None keeps every row."""
+    """num_rows caps the kernel rows after sorting; 0 or None keeps every row."""
     df = load_pc_sampling_data(
-        make_pc_sampling_workload(),
-        "count",
+        schema.Workload(),
         [setup_pc_sampling_data()],
         num_rows=num_rows,
     )
@@ -1281,29 +1210,23 @@ def make_pc_sampling_guard_data(
 
 
 @pytest.mark.parametrize(
-    "instructions, comments, instruction_none, source_line_na, indices",
+    "instructions, comments, indices",
     [
         pytest.param(
             ["v_mov"],
             ["/s/a.cpp:1", "/s/a.cpp:2"],
-            "some",
-            "none",
             (0, 1),
             id="instructions_short",
         ),
         pytest.param(
             ["v_mov", "v_add"],
             ["/s/a.cpp:1"],
-            "none",
-            "some",
             (0, 1),
             id="comments_short",
         ),
         pytest.param(
             ["v_mov"],
             ["/s/a.cpp:1", "/s/a.cpp:2", "/s/a.cpp:3", "/s/a.cpp:4", "/s/a.cpp:5"],
-            "all",
-            "none",
             (3, 4),
             id="instructions_all_out_of_range",
         ),
@@ -1312,24 +1235,12 @@ def make_pc_sampling_guard_data(
 def test_load_pc_sampling_data_filtered_out_of_range_index_guards(
     instructions: list | None,
     comments: list | None,
-    instruction_none: str,
-    source_line_na: str,
     indices: tuple[int, int],
 ) -> None:
-    """An inst_index past a string table yields None / 'N/A', not an error.
-
-    instruction stays None when out of range; source_line uses the "N/A"
-    sentinel so display code does not suppress the table.
-    """
+    """An inst_index past a string table still counts toward its kernel row."""
     tool_data = make_pc_sampling_guard_data(instructions, comments, indices)
-    df = load_pc_sampling_data(
-        make_pc_sampling_workload(),
-        "offset",
-        [tool_data],
-    )
-    assert not df.empty
-    assert_none_kind(df["instruction"], instruction_none)
-    assert_na_kind(df["source_line"], source_line_na)
+    df = load_pc_sampling_data(make_pc_sampling_workload(), [tool_data])
+    assert df["count"].tolist() == [2]
 
 
 @pytest.mark.parametrize(
@@ -1346,35 +1257,10 @@ def test_load_pc_sampling_data_filtered_empty_string_table_warns_and_skips(
     """Empty instruction/comment table warns with the kernel name, no exit."""
     tool_data = make_pc_sampling_guard_data(instructions, comments)
     with patch("utils.parser.console_warning") as console_warning_mock:
-        df = load_pc_sampling_data(
-            make_pc_sampling_workload(),
-            "offset",
-            [tool_data],
-        )
+        df = load_pc_sampling_data(make_pc_sampling_workload(), [tool_data])
     assert df.empty
     console_warning_mock.assert_called_once()
     assert "vecCopy" in console_warning_mock.call_args.args[0]
-
-
-def assert_none_kind(column: pd.Series, kind: str) -> None:
-    """Assert how many entries in *column* are None: all / some / none."""
-    if kind == "all":
-        assert column.isna().all()
-    elif kind == "some":
-        assert column.isna().any() and not column.isna().all()
-    else:
-        assert not column.isna().any()
-
-
-def assert_na_kind(column: pd.Series, kind: str) -> None:
-    """Assert how many entries in *column* are the 'N/A' sentinel: all/some/none."""
-    is_na = column == "N/A"
-    if kind == "all":
-        assert is_na.all()
-    elif kind == "some":
-        assert is_na.any() and not is_na.all()
-    else:
-        assert not is_na.any()
 
 
 def test_load_pc_sampling_data_filtered_multi_dispatch_groupby() -> None:
@@ -1404,11 +1290,7 @@ def test_load_pc_sampling_data_filtered_multi_dispatch_groupby() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 100)],
     )
-    df = load_pc_sampling_data(
-        make_pc_sampling_workload(),
-        "count",
-        [tool_data],
-    )
+    df = load_pc_sampling_data(make_pc_sampling_workload(), [tool_data])
     assert len(df) == 1
     row = df.iloc[0]
     assert row["count"] == 2
@@ -1426,25 +1308,21 @@ def test_load_pc_sampling_data_filtered_kernel_not_found() -> None:
     is absent from the kernel symbols.
     """
     tool_data = setup_pc_sampling_data()
-    df = load_pc_sampling_data(
-        make_pc_sampling_workload("nonexistent"),
-        "offset",
-        [tool_data],
-    )
+    df = load_pc_sampling_data(make_pc_sampling_workload("nonexistent"), [tool_data])
     assert df.empty
 
 
 def test_load_pc_sampling_data_no_tool_data() -> None:
     """Return an empty DataFrame when no parsed tool data is provided."""
-    df = load_pc_sampling_data(schema.Workload(), "count", [])
+    df = load_pc_sampling_data(schema.Workload(), [])
     assert df.empty
 
 
 @pytest.mark.parametrize("method", ["host_trap", "stochastic"])
-def test_load_pc_sampling_data_separates_code_objects_within_one_record(
+def test_load_pc_sampling_data_combines_code_objects_within_one_record(
     method: str,
 ) -> None:
-    """Two code objects under one kernel name stay separate display rows."""
+    """Two code objects under one kernel name combine into one kernel row."""
     if method == "host_trap":
         samples = [
             make_host_trap_record(5, 0x10, 0, dispatch_id=0),
@@ -1491,31 +1369,20 @@ def test_load_pc_sampling_data_separates_code_objects_within_one_record(
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
     )
 
-    df = load_pc_sampling_data(
-        schema.Workload(),
-        "offset",
-        [tool_data],
-    )
+    df = load_pc_sampling_data(schema.Workload(), [tool_data])
 
-    # The same offset in two code objects can be different code, so the counts
-    # are never summed together.
-    assert len(df) == 2
     expected_columns = (
         HOST_TRAP_DISPLAY_COLUMNS
         if method == "host_trap"
         else STOCHASTIC_DISPLAY_COLUMNS
     )
     assert list(df.columns) == expected_columns
-    assert list(df["code_object_id"]) == [5, 7]
-    assert list(df["count"]) == [2, 2]
-    assert set(df["Kernel_Name"]) == {"sharedKernel"}
+    assert list(df["Kernel_Name"]) == ["sharedKernel"]
+    assert list(df["count"]) == [4]
     if method == "stochastic":
-        assert list(df["issue_count"]) == [1, 0]
-        assert list(df["stall_count"]) == [1, 2]
-        assert list(df["stall_reason"]) == [
-            [("WAITCNT", 1)],
-            [("ALU_DEPENDENCY", 1), ("WAITCNT", 1)],
-        ]
+        assert list(df["issue_count"]) == [1]
+        assert list(df["stall_count"]) == [3]
+        assert list(df["stall_reason"]) == [[("WAITCNT", 2), ("ALU_DEPENDENCY", 1)]]
 
 
 @pytest.mark.parametrize("method", ["stochastic", "host_trap"])
@@ -1541,7 +1408,6 @@ def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
     kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy", "vecAdd"]})
     no_filter = load_pc_sampling_data(
         schema.Workload(),
-        "offset",
         [tool_data],
     )
     # Index 1 selects the second kernel-top row, not the first.
@@ -1549,7 +1415,6 @@ def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
         schema.Workload(
             filter_kernel_ids=[1], dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df}
         ),
-        "offset",
         [tool_data],
     )
     assert list(no_filter.columns) == list(single.columns)
@@ -1557,9 +1422,8 @@ def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
     assert set(no_filter["Kernel_Name"]) == {"vecCopy", "vecAdd"}
     assert set(single["Kernel_Name"]) == {"vecAdd"}
     assert len(no_filter) > len(single)
-    by_kernel = dict(zip(no_filter["source_line"], no_filter["Kernel_Name"]))
-    assert by_kernel[".../vcopy.cpp:42"] == "vecCopy"
-    assert by_kernel[".../vadd.cpp:99"] == "vecAdd"
+    counts_by_kernel = dict(zip(no_filter["Kernel_Name"], no_filter["count"]))
+    assert counts_by_kernel == {"vecCopy": 2, "vecAdd": 1}
 
 
 def test_load_pc_sampling_data_multiple_kernels_error() -> None:
@@ -1567,7 +1431,7 @@ def test_load_pc_sampling_data_multiple_kernels_error() -> None:
     tool_data = make_tool_data(stochastic=[make_record(100, 0x10, 0, dispatch_id=0)])
     workload = schema.Workload(filter_kernel_ids=[0, 1])
     with patch("utils.parser.console_error"):
-        df = load_pc_sampling_data(workload, "count", [tool_data])
+        df = load_pc_sampling_data(workload, [tool_data])
     assert df.empty
 
 
@@ -1584,7 +1448,7 @@ def test_load_pc_sampling_data_single_kernel_valid() -> None:
         filter_kernel_ids=[0],
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, "count", [tool_data])
+    df = load_pc_sampling_data(workload, [tool_data])
     assert not df.empty
 
 
@@ -1603,7 +1467,7 @@ def test_load_pc_sampling_data_single_kernel_out_of_bounds() -> None:
             })
         },
     )
-    df = load_pc_sampling_data(workload, "count", [tool_data])
+    df = load_pc_sampling_data(workload, [tool_data])
     assert df.empty
 
 
@@ -1617,7 +1481,7 @@ def test_load_pc_sampling_data_method_not_detected() -> None:
         filter_kernel_ids=[0],
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, "count", [tool_data])
+    df = load_pc_sampling_data(workload, [tool_data])
     assert df.empty
 
 
@@ -1639,12 +1503,10 @@ def test_load_pc_sampling_data_detects_method_after_empty_record() -> None:
 
     expected = load_pc_sampling_data(
         schema.Workload(),
-        "count",
         [sampled_tool_data],
     )
     actual = load_pc_sampling_data(
         schema.Workload(),
-        "count",
         [empty_tool_data, sampled_tool_data],
     )
 
@@ -1659,7 +1521,6 @@ def test_load_pc_sampling_data_rejects_conflicting_methods() -> None:
     with patch("utils.parser.console_error") as console_error_mock:
         df = load_pc_sampling_data(
             schema.Workload(),
-            "count",
             [host_trap_tool_data, stochastic_tool_data],
         )
 
@@ -1672,8 +1533,8 @@ def test_load_pc_sampling_data_rejects_conflicting_methods() -> None:
 @pytest.mark.parametrize(
     "populated, expected_column_count",
     [
-        ("host_trap", 9),  # host_trap-only is detected
-        ("both", 13),  # stochastic wins when both arrays are populated
+        ("host_trap", 3),  # host_trap-only is detected
+        ("both", 7),  # stochastic wins when both arrays are populated
     ],
 )
 def test_load_pc_sampling_data_method_detection(
@@ -1695,12 +1556,12 @@ def test_load_pc_sampling_data_method_detection(
         filter_kernel_ids=[0],
         dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, "count", [tool_data])
+    df = load_pc_sampling_data(workload, [tool_data])
     assert len(df.columns) == expected_column_count
 
 
 def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
-    """No-filter: an inst_index past the instruction table yields a None entry."""
+    """No-filter: an inst_index past the instruction table still counts."""
     tool_data = make_tool_data(
         stochastic=[make_record(5, 0x10, 1, dispatch_id=0)],
         instructions=["v_mov"],  # len 1; inst_index 1 is out of range
@@ -1708,14 +1569,12 @@ def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    df = load_pc_sampling_data(schema.Workload(), "count", [tool_data])
-    assert not df.empty
-    assert pd.isna(df.iloc[0]["instruction"])
-    assert df.iloc[0]["source_line"] == ".../a.cpp:2"
+    df = load_pc_sampling_data(schema.Workload(), [tool_data])
+    assert df["count"].tolist() == [1]
 
 
 def test_load_pc_sampling_data_preserves_display_identity_boundaries() -> None:
-    """Keep rows distinct when kernel, instruction, or source metadata differs."""
+    """Rows merge by kernel name, whatever their instruction or source."""
     tool_data_records = [
         make_display_row_tool_data(
             "host_trap",
@@ -1753,25 +1612,15 @@ def test_load_pc_sampling_data_preserves_display_identity_boundaries() -> None:
 
     df = load_pc_sampling_data(
         schema.Workload(),
-        "offset",
         tool_data_records,
     )
 
-    actual_rows = set(
-        df[["Kernel_Name", "offset", "instruction", "source_line", "count"]].itertuples(
-            index=False, name=None
-        )
-    )
-    assert actual_rows == {
-        ("sharedKernel", "0x10", "v_add", ".../shared.cpp:10", 1),
-        ("sharedKernel", "0x10", "v_mul", ".../shared.cpp:10", 1),
-        ("sharedKernel", "0x10", "v_add", ".../other.cpp:20", 1),
-        ("otherKernel", "0x10", "v_add", ".../shared.cpp:10", 1),
-    }
+    actual_rows = set(df[["Kernel_Name", "count"]].itertuples(index=False, name=None))
+    assert actual_rows == {("sharedKernel", 3), ("otherKernel", 1)}
 
 
 def test_load_pc_sampling_data_retains_missing_instruction_metadata() -> None:
-    """Keep per-process rows even when their instruction metadata is missing."""
+    """Count samples even when their instruction metadata is missing."""
     tool_data_records = [
         make_display_row_tool_data(
             "host_trap",
@@ -1793,18 +1642,15 @@ def test_load_pc_sampling_data_retains_missing_instruction_metadata() -> None:
 
     df = load_pc_sampling_data(
         schema.Workload(),
-        "count",
         tool_data_records,
     )
 
-    assert len(df) == 2
-    assert list(df["pid"]) == [101, 202]
-    assert list(df["count"]) == [1, 1]
-    assert df["instruction"].isna().all()
+    assert list(df["Kernel_Name"]) == ["sharedKernel"]
+    assert list(df["count"]) == [2]
 
 
-def test_load_pc_sampling_data_keeps_multi_process_rows_separate() -> None:
-    """Rows from separate result records stay separate, keyed by process."""
+def test_load_pc_sampling_data_merges_multi_process_rows_by_kernel() -> None:
+    """Rows from separate result records merge by kernel name."""
     first_tool_data = make_tool_data(
         stochastic=[
             make_record(
@@ -1814,6 +1660,7 @@ def test_load_pc_sampling_data_keeps_multi_process_rows_separate() -> None:
                 dispatch_id=0,
                 wave_issued=False,
                 stall_reason=f"{PREFIX}WAITCNT",
+                wave_cnt=8,
             ),
             make_record(
                 5,
@@ -1822,6 +1669,7 @@ def test_load_pc_sampling_data_keeps_multi_process_rows_separate() -> None:
                 dispatch_id=0,
                 wave_issued=False,
                 stall_reason=f"{PREFIX}WAITCNT",
+                wave_cnt=8,
             ),
             make_record(6, 0x20, 1, dispatch_id=1, wave_issued=True),
         ],
@@ -1837,7 +1685,7 @@ def test_load_pc_sampling_data_keeps_multi_process_rows_separate() -> None:
     )
     second_tool_data = make_tool_data(
         stochastic=[
-            make_record(7, 0x10, 0, dispatch_id=0, wave_issued=True),
+            make_record(7, 0x10, 0, dispatch_id=0, wave_issued=True, wave_cnt=16),
             make_record(
                 7,
                 0x10,
@@ -1845,6 +1693,7 @@ def test_load_pc_sampling_data_keeps_multi_process_rows_separate() -> None:
                 dispatch_id=0,
                 wave_issued=False,
                 stall_reason=f"{PREFIX}ALU_DEPENDENCY",
+                wave_cnt=16,
             ),
             make_record(
                 7,
@@ -1853,6 +1702,7 @@ def test_load_pc_sampling_data_keeps_multi_process_rows_separate() -> None:
                 dispatch_id=0,
                 wave_issued=False,
                 stall_reason=f"{PREFIX}WAITCNT",
+                wave_cnt=16,
             ),
         ],
         instructions=["v_mov"],
@@ -1864,29 +1714,24 @@ def test_load_pc_sampling_data_keeps_multi_process_rows_separate() -> None:
     )
 
     df = load_pc_sampling_data(
-        schema.Workload(),
-        "count",
+        schema.Workload(sys_info=pd.DataFrame([{"max_waves_per_cu": "32"}])),
         [first_tool_data, second_tool_data],
     )
 
     assert set(df["Kernel_Name"]) == {"sharedKernel", "distinctKernel"}
-    shared_rows = df[df["Kernel_Name"] == "sharedKernel"]
-    # Both processes sampled offset 0x10 under the same kernel name, in code
-    # objects that only happen to be numbered differently. The rows stay apart.
-    assert list(shared_rows["pid"]) == [202, 101]
-    assert list(shared_rows["offset"]) == ["0x10", "0x10"]
-    assert list(shared_rows["code_object_id"]) == [7, 5]
-    assert list(shared_rows["count"]) == [3, 2]
-    assert list(shared_rows["issue_count"]) == [1, 0]
-    assert list(shared_rows["stall_count"]) == [2, 2]
-    assert list(shared_rows["stall_reason"]) == [
-        [("ALU_DEPENDENCY", 1), ("WAITCNT", 1)],
-        [("WAITCNT", 2)],
-    ]
+    shared_row = df[df["Kernel_Name"] == "sharedKernel"].iloc[0]
+    # Both processes sampled sharedKernel, in code objects that only happen to
+    # be numbered differently. Their counts sum into one row.
+    assert shared_row["count"] == 5
+    assert shared_row["issue_count"] == 1
+    assert shared_row["stall_count"] == 4
+    assert shared_row["stall_reason"] == [("WAITCNT", 3), ("ALU_DEPENDENCY", 1)]
+    # 2 samples at 25% and 3 samples at 50% average to 40%, not 37.5%.
+    assert shared_row["wave_occupancy_percent"] == 40.0
 
 
 def test_load_pc_sampling_data_applies_top_n_across_process_rows() -> None:
-    """Apply the row limit to the combined per-process rows."""
+    """Apply the row limit to the kernel rows merged across processes."""
     first_tool_data = make_tool_data(
         host_trap=[
             *[make_host_trap_record(5, 0x10, 0, dispatch_id=0) for _ in range(3)],
@@ -1918,17 +1763,14 @@ def test_load_pc_sampling_data_applies_top_n_across_process_rows() -> None:
 
     df = load_pc_sampling_data(
         schema.Workload(),
-        "count",
         [first_tool_data, second_tool_data],
         num_rows=1,
     )
 
-    # Per-process rows are ranked as they are; nothing is summed first, so the
-    # single largest row wins rather than a cross-process total.
+    # sharedKernel sums to 6 across processes, so it outranks firstLeader's 5.
     assert len(df) == 1
-    assert df.iloc[0]["Kernel_Name"] == "firstLeader"
-    assert df.iloc[0]["pid"] == 101
-    assert df.iloc[0]["count"] == 5
+    assert df.iloc[0]["Kernel_Name"] == "sharedKernel"
+    assert df.iloc[0]["count"] == 6
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2323,7 +2165,7 @@ def test_load_non_mertrics_table_populates_pc_sampling_from_tool_data(
     tmp_path: Path,
 ) -> None:
     """A ``from_pc_sampling`` table is populated when tool data is provided."""
-    args = argparse.Namespace(pc_sampling_sorting_type="count", pc_sampling_rows=10)
+    args = argparse.Namespace(pc_sampling_rows=10)
     workload = schema.Workload()
     workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": [True]})}
     tool_data = make_tool_data(**sample_tool_data_kwargs())
@@ -2337,7 +2179,7 @@ def test_load_non_mertrics_table_pc_sampling_empty_without_tool_data(
     tmp_path: Path,
 ) -> None:
     """Without tool data the ``from_pc_sampling`` table stays empty (no crash)."""
-    args = argparse.Namespace(pc_sampling_sorting_type="count", pc_sampling_rows=10)
+    args = argparse.Namespace(pc_sampling_rows=10)
     workload = schema.Workload()
     workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": [True]})}
     load_non_mertrics_table(workload, str(tmp_path), args)
@@ -2477,24 +2319,6 @@ def test_normalize_host_trap_line_has_null_issue_stall() -> None:
     assert line.issue_count is None
     assert line.stall_count is None
     assert line.stall_reasons == {}
-
-
-def test_load_pc_sampling_data_no_debug_info_source_line_na() -> None:
-    """Empty comment strings yield 'N/A' source lines across a multi-row table."""
-    # Without debug info every comment is "", which must not collapse the table.
-    tool_data = make_tool_data(
-        stochastic=[
-            make_record(5, 0x10, 0, dispatch_id=0, wave_issued=True),
-            make_record(5, 0x20, 1, dispatch_id=0, wave_issued=True),
-        ],
-        instructions=["v_mov", "v_add"],
-        comments=["", ""],
-        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
-        kernel_dispatch=[make_dispatch(0, 100)],
-    )
-    df = load_pc_sampling_data(schema.Workload(), "count", [tool_data])
-    assert len(df) == 2
-    assert (df["source_line"] == "N/A").all()
 
 
 def test_normalize_unmapped_dispatch_yields_none_kernel() -> None:

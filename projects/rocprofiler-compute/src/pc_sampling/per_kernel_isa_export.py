@@ -4,11 +4,10 @@
 """
 Per-kernel ISA export.
 
-A CSV analysis result carries the PC sampling counts of every kernel in one
-`pc_sampling_summary.csv`, which is hard to read against a kernel's own
-disassembly. This module writes one file per kernel per code object per
-process, holding that kernel's instruction lines in offset order with the
-counts collected on them.
+A CSV analysis result carries each kernel's PC sampling totals in
+`pc_sampling_summary.csv`. This module writes the per-instruction counts: one
+file per kernel per code object per process, holding that kernel's instruction
+lines in offset order with the counts collected on them.
 """
 
 from collections.abc import Iterable, Iterator
