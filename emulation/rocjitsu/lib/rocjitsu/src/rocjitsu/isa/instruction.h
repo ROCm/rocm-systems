@@ -96,15 +96,37 @@ enum InstFlags : uint64_t {
   /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
   INVALID_IU_MODIFIERS = (1ULL << 28),
   /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
-  MISALIGNED_SCALAR_DATA = (1ULL << 29)
+  MISALIGNED_SCALAR_DATA = (1ULL << 29),
+  /// @brief Encoded for the scalar ALU (SOP1, SOP2, SOPC, SOPK, SOPP), including
+  /// waits, barriers, messages, no-ops and the PC writers.
+  SALU = (1ULL << 30),
+  /// @brief Encoded for the vector ALU (VOP*, VOPD, VINTERP), including matrix and
+  /// transcendental operations.
+  VALU = (1ULL << 31),
+  /// @brief Encoded for scalar memory (SMEM), including scalar cache maintenance
+  /// and the SMEM timestamp reads.
+  SMEM = (1ULL << 32),
+  /// @brief Encoded for vector memory: buffer, flat, global, scratch, image and
+  /// tensor.
+  VMEM = (1ULL << 33),
+  /// @brief Encoded for LDS (DS, LDS-direct), including GWS and the DS no-op.
+  LDS = (1ULL << 34),
+  /// @brief Evaluated by the VALU transcendental unit: rcp, rsq, sqrt, exp, log,
+  /// sin and cos, including their pseudo-scalar forms.
+  TRANSCENDENTAL = (1ULL << 35),
+  /// @brief Sleeps or halts its wave (s_sleep, s_sleep_var, s_sethalt, s_sendmsghalt).
+  SUSPENDS_WAVE = (1ULL << 36),
+  /// @brief Enters or returns from the trap handler (s_trap, s_rfe*). Writes the PC
+  /// without any of the control-flow flags above.
+  TRAP_CONTROL = (1ULL << 37)
 };
 
 namespace amdgpu {
 
 /// @brief The AMDGPU block an instruction issues to.
-/// @details A static classification of the decoded instruction: it does not
-/// see address routing, so generic FLAT is VMEM even when its address resolves
-/// to LDS.
+/// @details A static classification of the decoded instruction's encoding: it
+/// does not see address routing, so generic FLAT is VMEM even when its address
+/// resolves to LDS.
 enum class ExecutionBlock : uint8_t {
   UNKNOWN, ///< In no block below, e.g. exports and non-AMDGPU instructions.
   SALU,    ///< Scalar ALU, including waits, barriers, messages and no-ops.
@@ -375,56 +397,37 @@ public:
 
   /// @brief Whether this instruction may leave the PC somewhere other than the
   /// next instruction.
-  /// @details The control-flow flags, plus the AMDGPU PC-write, call, trap entry
-  /// and trap return families, which carry none.
+  /// @details The control-flow flags plus TRAP_CONTROL. s_setpc, s_swappc and
+  /// s_call carry INDIRECT_BRANCH or INDIRECT_CALL.
   bool writes_pc() const {
     constexpr uint64_t pc_flags =
-        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
-    return (flags_ & pc_flags) != 0 ||
-           mnemonic_has_prefix({"s_setpc", "s_swappc", "s_call", "s_rfe", "s_trap"});
+        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR | TRAP_CONTROL;
+    return (flags_ & pc_flags) != 0;
   }
 
-  /// @brief Whether this is an AMDGPU VALU transcendental:
-  /// v_{rcp,rsq,sqrt,exp,log,sin,cos}*.
-  bool is_transcendental() const {
-    return mnemonic_has_prefix(
-        {"v_rcp_", "v_rsq_", "v_sqrt_", "v_exp_", "v_log_", "v_sin_", "v_cos_"});
-  }
+  /// @brief Whether this is an AMDGPU VALU transcendental. See TRANSCENDENTAL.
+  bool is_transcendental() const { return flags_ & TRANSCENDENTAL; }
 
-  /// @brief Whether this instruction sleeps or halts its wave:
-  /// s_sleep, s_sethalt and s_sendmsghalt.
-  bool suspends_wave() const {
-    return mnemonic_has_prefix({"s_sleep", "s_sethalt", "s_sendmsghalt"});
-  }
+  /// @brief Whether this instruction sleeps or halts its wave. See SUSPENDS_WAVE.
+  bool suspends_wave() const { return flags_ & SUSPENDS_WAVE; }
 
   /// @brief The AMDGPU block this instruction issues to.
-  /// @details Memory comes first: by mnemonic family, since whole families
-  /// carry no memory-issue metadata on some architectures (image, LDS-direct,
-  /// scalar cache maintenance), then by the decoded metadata, which catches
-  /// memory encodings outside those families (e.g. CDNA5 cluster loads). Then
-  /// PC writes, then the scalar and vector ALUs by mnemonic.
+  /// @details The generated encoding sets exactly one of the block flags, or
+  /// none for exports. PC writers are encoded for the scalar ALU and report as
+  /// BRANCH.
   [[nodiscard]] amdgpu::ExecutionBlock amdgpu_execution_block() const {
     using amdgpu::ExecutionBlock;
-    if (mnemonic_has_prefix({"ds_", "lds_"}))
+    if (flags_ & LDS)
       return ExecutionBlock::LDS;
-    if (mnemonic_has_prefix(
-            {"buffer_", "tbuffer_", "global_", "scratch_", "flat_", "image_", "tensor_"}))
+    if (flags_ & VMEM)
       return ExecutionBlock::VMEM;
-    if (mnemonic_has_prefix({"s_load", "s_store", "s_atomic", "s_buffer", "s_scratch", "s_dcache",
-                             "s_prefetch", "s_atc_probe", "s_gl1_inv"}))
+    if (flags_ & SMEM)
       return ExecutionBlock::SMEM;
-    if (const auto *issue = amdgpu_memory_issue_info()) {
-      for (const auto obligation : issue->counter_obligations())
-        if (obligation.completion_class() == amdgpu::MemoryCompletionClass::LDS)
-          return ExecutionBlock::LDS;
-    }
-    if (is_memory_op())
-      return mnemonic_has_prefix({"s_"}) ? ExecutionBlock::SMEM : ExecutionBlock::VMEM;
     if (writes_pc())
       return ExecutionBlock::BRANCH;
-    if (mnemonic_has_prefix({"s_"}))
+    if (flags_ & SALU)
       return ExecutionBlock::SALU;
-    if (mnemonic_has_prefix({"v_"}))
+    if (flags_ & VALU)
       return ExecutionBlock::VALU;
     return ExecutionBlock::UNKNOWN;
   }
@@ -514,14 +517,6 @@ public:
       build_modifiers(disassembly_);
     }
     return disassembly_;
-  }
-
-private:
-  bool mnemonic_has_prefix(std::initializer_list<std::string_view> prefixes) const {
-    for (const auto prefix : prefixes)
-      if (mnemonic_.starts_with(prefix))
-        return true;
-    return false;
   }
 
 protected:

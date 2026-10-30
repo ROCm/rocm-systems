@@ -123,6 +123,7 @@ Vopd::Vopd(const MachineInst *inst)
   raw_encoding_ = words;
   word0_ = words[0];
   word1_ = words[1];
+  flags_ |= VALU;
 
   format_ = Format::VopdXy;
   encoding_id_ = 0x32;

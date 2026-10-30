@@ -204,6 +204,90 @@ def _exec_mask_flag_stmts(sem) -> list[str]:
     ]
 
 
+# Execution-block flag (instruction.h) for each encoding with a generated
+# class. Exports issue to no block. Every such encoding must appear here, so a
+# new encoding fails generation until it is classified.
+_ENCODING_EXECUTION_BLOCKS: dict[str, str | None] = {
+    'ENC_SOP1': 'SALU',
+    'ENC_SOP2': 'SALU',
+    'ENC_SOPC': 'SALU',
+    'ENC_SOPK': 'SALU',
+    'ENC_SOPP': 'SALU',
+    'ENC_SMEM': 'SMEM',
+    'ENC_VOP1': 'VALU',
+    'ENC_VOP2': 'VALU',
+    'ENC_VOP3': 'VALU',
+    'ENC_VOP3P': 'VALU',
+    'ENC_VOPC': 'VALU',
+    'VOP3_SDST_ENC': 'VALU',
+    'VOP3P_MFMA': 'VALU',
+    'ENC_VINTERP': 'VALU',
+    'ENC_VINTRP': 'VALU',
+    'ENC_DS': 'LDS',
+    'ENC_VDS': 'LDS',
+    'ENC_LDSDIR': 'LDS',
+    'ENC_VDSDIR': 'LDS',
+    'ENC_MUBUF': 'VMEM',
+    'ENC_MTBUF': 'VMEM',
+    'ENC_MIMG': 'VMEM',
+    'ENC_FLAT': 'VMEM',
+    'ENC_VBUFFER': 'VMEM',
+    'ENC_VFLAT': 'VMEM',
+    'ENC_VGLOBAL': 'VMEM',
+    'ENC_VSCRATCH': 'VMEM',
+    'ENC_VIMAGE': 'VMEM',
+    'ENC_VSAMPLE': 'VMEM',
+    'ENC_EXP': None,
+    'ENC_VEXPORT': None,
+}
+
+
+def _execution_block_flag_stmt(enc_name: str) -> str:
+    """Return the ``flags_ |= ...;`` statement naming the block ``enc_name`` issues to."""
+    try:
+        block = _ENCODING_EXECUTION_BLOCKS[enc_name.upper()]
+    except KeyError:
+        raise ValueError(
+            f'{enc_name}: no execution block; add it to _ENCODING_EXECUTION_BLOCKS'
+        ) from None
+    return f' flags_ |= {block};' if block else ''
+
+
+# Operations evaluated by the VALU transcendental unit, in both the vector and
+# the pseudo-scalar (V_S_*) forms.
+_TRANSCENDENTAL_CLASSES = frozenset({'vector_unary', 'pseudo_scalar_unary'})
+_TRANSCENDENTAL_OPERATIONS = frozenset(
+    {'rcp', 'rcp_iflag', 'rsq', 'sqrt', 'exp2', 'log2', 'sin', 'cos'}
+)
+
+# Instructions that sleep or halt their wave.
+_SUSPENDS_WAVE_NAMES = frozenset(
+    {'S_SLEEP', 'S_SLEEP_VAR', 'S_SETHALT', 'S_SENDMSGHALT'}
+)
+
+# Trap entry and return. Their semantics carry no control-flow class (S_RFE
+# derives as a no-op), so they are named here.
+_TRAP_CONTROL_NAMES = frozenset(
+    {'S_TRAP', 'S_RFE_B64', 'S_RFE_I64', 'S_RFE_RESTORE_B64'}
+)
+
+
+def _instruction_class_flag_stmts(name: str, sem) -> list[str]:
+    """Return ``flags_ |= ...;`` for TRANSCENDENTAL, SUSPENDS_WAVE and TRAP_CONTROL."""
+    stmts = []
+    if (
+        sem is not None
+        and sem.semantic_class in _TRANSCENDENTAL_CLASSES
+        and sem.operation in _TRANSCENDENTAL_OPERATIONS
+    ):
+        stmts.append('flags_ |= TRANSCENDENTAL;')
+    if name in _SUSPENDS_WAVE_NAMES:
+        stmts.append('flags_ |= SUSPENDS_WAVE;')
+    if name in _TRAP_CONTROL_NAMES:
+        stmts.append('flags_ |= TRAP_CONTROL;')
+    return stmts
+
+
 def _memory_wait_producer(name: str) -> bool:
     """Conservative decode-time filter for completion-counter producers.
 
@@ -3132,6 +3216,7 @@ class CodeGenerator:
               raw_encoding_ = words;
               word0_ = words[0];
               word1_ = words[1];
+              flags_ |= VALU;
 
             @VOPD3_CONSTRUCTOR_BRANCH@
                 format_ = Format::VopdXy;
@@ -4344,6 +4429,8 @@ class CodeGenerator:
                 validation_body += ' }'
             if profile.vskip_affected_encoding(enc_upper):
                 size_line += ' flags_ |= VSKIP_AFFECTED;'
+            # First, so it stays outside the extension-decode guard.
+            size_line = _execution_block_flag_stmt(enc_upper) + size_line
             validation_body += ' return Result::success();'
             if has_encoding_validation:
                 public_members.append(
@@ -13292,6 +13379,9 @@ class CodeGenerator:
                     # Result-combinator metadata (RESULT_COPY / RESULT_OR) for
                     # EXEC-state all-ones reasoning.
                     ctor_body_parts.extend(_result_combinator_flag_stmts(_mem_sem))
+                    ctor_body_parts.extend(
+                        _instruction_class_flag_stmts(inst.name, _mem_sem)
+                    )
 
                     ctor_body = ''.join(ctor_body_parts)
                     class_ctor_impl_str = (

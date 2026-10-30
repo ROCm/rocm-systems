@@ -1520,6 +1520,7 @@ SRfeRestoreB64Sop2::SRfeRestoreB64Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= TRAP_CONTROL;
 }
 
 namespace detail {
