@@ -771,9 +771,22 @@ def prepare_phase_dir(work_dir: Path, phase: str) -> Path:
     """Create one phase's madengine working directory, with its own scripts copy.
 
     madengine writes its outputs under fixed names relative to its cwd.
+
+    Recreated from scratch: on a reused --work-dir an earlier run's exit_code,
+    perf files and node logs would otherwise still be there, and an allocation
+    that never ran a phase would be scored on them as if it had. Fails if the
+    old directory cannot be removed rather than run on top of it.
     """
     run_dir = work_dir / "ab" / phase
-    run_dir.mkdir(parents=True, exist_ok=True)
+    if run_dir.exists():
+        try:
+            shutil.rmtree(run_dir)
+        except OSError as exc:
+            raise RuntimeError(
+                f"{run_dir} holds an earlier run's results and cannot be removed "
+                f"({exc}); use a fresh --work-dir"
+            ) from exc
+    run_dir.mkdir(parents=True)
 
     scripts_src = work_dir / "scripts"
     scripts_dst = run_dir / "scripts"
@@ -876,6 +889,18 @@ def run_ab_in_one_allocation(
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text("\n".join(script_lines) + "\n")
 
+    # Unique per run, because cancelling by name is the only way to reach a
+    # request that is still queued: it has no job id in allocation.txt yet,
+    # and SIGKILL, which salloc cannot handle, leaves it queued to start later
+    # with nothing attached (InactiveLimit is 0 on ruby). Recorded before
+    # salloc starts so the workflow's release step can read it too.
+    run_tag = (
+        f"{os.environ['GITHUB_RUN_ID']}-{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
+        if os.environ.get("GITHUB_RUN_ID") else f"local-{os.getpid()}"
+    )
+    job_name = f"rccl-ab-{workload_name}-{run_tag}"
+    (work_dir / "allocation.name").write_text(job_name + "\n")
+
     cmd = [
         "salloc",
         "--nodes", str(nodes),
@@ -884,7 +909,7 @@ def run_ab_in_one_allocation(
         "--partition",
         cluster_config.get("slurm_partition", workload_config["slurm_partition"]),
         "--time", workload_config["time_limit"],
-        "--job-name", f"rccl-ab-{workload_name}",
+        "--job-name", job_name,
     ]
     qos = cluster_config.get("slurm_qos", "")
     if qos:
@@ -923,15 +948,12 @@ def run_ab_in_one_allocation(
         """
         log.error("Releasing the allocation: %s", reason)
         try:
+            # By name, not by the id in allocation.txt: the name also reaches
+            # a request that is still queued, which has no id there yet.
             try:
-                granted_job = alloc_info.read_text().split()[0]
-            except (OSError, IndexError):
-                granted_job = ""  # still queued; killing salloc withdraws it
-            if granted_job:
-                try:
-                    subprocess.run(["scancel", granted_job], timeout=60)
-                except (OSError, subprocess.SubprocessError) as exc:
-                    log.warning("scancel %s failed: %s", granted_job, exc)
+                subprocess.run(["scancel", "--me", "--name", job_name], timeout=60)
+            except (OSError, subprocess.SubprocessError) as exc:
+                log.warning("scancel --name %s failed: %s", job_name, exc)
         finally:
             # A second signal during scancel raises out of this function; the
             # group must still be killed and reaped.

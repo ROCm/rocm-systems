@@ -206,22 +206,27 @@ jobs:
       #
       # The runner starts this step itself, which is what makes it the one
       # piece of cleanup a cancellation cannot skip.
+      #
+      # It cancels by job name, which the script records before salloc starts:
+      # a request still queued has no job id yet, and a killed salloc does not
+      # withdraw it, so it would start later and hold the nodes all the same.
       - name: Release the SLURM allocation
         if: cancelled()
         run: |
-          recorded="${WORK_DIR}/allocation.txt"
+          recorded="${WORK_DIR}/allocation.name"
           if [ ! -s "${recorded}" ]; then
-            echo "No allocation was granted; nothing to release."
+            echo "salloc was never started; nothing to release."
             exit 0
           fi
-          job="$(head -n1 "${recorded}" | tr -d '[:space:]')"
-          case "${job}" in
-            ''|*[!0-9]*)
-              echo "::warning::no usable job id in ${recorded}, got '${job}'"
+          name="$(head -n1 "${recorded}" | tr -d '[:space:]')"
+          case "${name}" in
+            rccl-ab-*) ;;
+            *)
+              echo "::warning::unexpected job name in ${recorded}, got '${name}'"
               exit 0 ;;
           esac
-          echo "Releasing SLURM job ${job}"
-          scancel "${job}" || echo "::warning::scancel ${job} failed"
+          echo "Releasing SLURM job ${name}"
+          scancel --me --name "${name}" || echo "::warning::scancel --name ${name} failed"
 
       - name: Upload results
         if: always()
