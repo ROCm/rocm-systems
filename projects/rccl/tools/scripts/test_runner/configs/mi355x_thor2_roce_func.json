@@ -2757,6 +2757,35 @@
       },
       "description": "Forced PAT at 4 ranks with RCCL_PAT_SHARED_QPS=0, so ReduceScatter and AllGather each build their own connection set; the flag is cached for the process lifetime, so it is set here before launch."
     },
+    "direct_reduce_scatter_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 16,
+      "num_nodes": 2,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "Direct ReduceScatter on gfx950 at 2 nodes. It needs PXN, which RCCL turns on by itself only at 32 or more ranks, so NCCL_PXN_DISABLE=0 is set before launch (the value is cached per process).",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_PXN_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "DirectReduceScatter_NonGridMultipleCounts",
+          "description": "ReduceScatter with prime recvcounts in the 128 KiB-2 MiB direct window (sum int32, min float32) takes RCCL_DIRECT_REDUCESCATTER and matches a host reference; a guard region past recvcount stays untouched.",
+          "test_filter": "DirectReduceScatterMPITest.NonGridMultipleCountsMatchHostReference",
+          "timeout": 300
+        }
+      ]
+    },
+    "direct_reduce_scatter_multinode_8rank": {
+      "extends": "direct_reduce_scatter_multinode",
+      "num_ranks": 8,
+      "num_gpus": 4,
+      "description": "The same row at 8 ranks on 2 nodes, so the smallest count (4099) sits at the other end of the window."
+    },
     "gin_traffic_class": {
       "extends": "default",
       "is_gtest": true,
@@ -4302,6 +4331,18 @@
       "name": "PAT Forced MPI Tests - 4-Rank (separate connection sets)",
       "description": "The same rows with RCCL_PAT_SHARED_QPS=0",
       "config": "pat_forced_mpi_tests_separate_qps",
+      "enabled": true
+    },
+    {
+      "name": "Direct ReduceScatter MPI Tests - 16-Rank (2 nodes)",
+      "description": "Direct ReduceScatter data check on gfx950 over 2 nodes with PXN on",
+      "config": "direct_reduce_scatter_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Direct ReduceScatter MPI Tests - 8-Rank (2 nodes)",
+      "description": "The same row on 8 ranks over 2 nodes",
+      "config": "direct_reduce_scatter_multinode_8rank",
       "enabled": true
     },
     {
