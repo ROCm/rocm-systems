@@ -1128,6 +1128,29 @@ function(rccl_define_micro_source_lists)
     PARENT_SCOPE)
 endfunction()
 
+# Put a fronted binary in the build tree's micro/ subdirectory.
+#
+# A listing of the build output is the first thing anyone new to this tree reads, and ~40
+# rccl-UnitTestsMicro* binaries sitting beside rccl-UnitTestsHostAll say nothing about which of
+# them to run. With them one level down, the top level holds the two binaries a person actually
+# invokes -- the front door and rccl-HostUnitTests -- and micro/ is visibly the thing the front
+# door runs.
+#
+# The condition is the name prefix, which is the same registry rccl-UnitTestsHostAll discovers
+# its siblings by: a binary that is fronted is a binary that moves, and the front door looks for
+# them here. rccl-UnitTestsHostAll goes through this same helper and is deliberately not named
+# rccl-UnitTestsMicro*, so it stays put.
+#
+# Build tree only. The install rules are left alone: the installed test layout is consumed by
+# packaging and by INSTALL_TEST_FILE paths outside this directory, and the front door falls back
+# to looking beside itself, which is what it finds there.
+function(rccl_place_micro_binary _name)
+  if(_name MATCHES "^rccl-UnitTestsMicro")
+    set_target_properties(${_name} PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/micro")
+  endif()
+endfunction()
+
 # Create one host-only micro-test binary and apply all the boilerplate that
 # differs only by build mode. The per-target specifics are passed in:
 #   SOURCES         the target's source list
@@ -1187,6 +1210,7 @@ function(rccl_add_micro_binary _name)
       GTest::GTest Threads::Threads fmt::fmt-header-only)
   endif()
   target_link_libraries(${_name} PRIVATE nlohmann_json::nlohmann_json)
+  rccl_place_micro_binary(${_name})
 endfunction()
 
 # =====================================================================
@@ -1701,7 +1725,10 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
 foreach(_fake ionic ionic-no-gda mlx5)
   string(REGEX REPLACE "-.*" "" _dv "${_fake}")
   add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
-  set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON)
+  # Beside the binary that dlopens them, which is in micro/ in the build tree; dv_symbols_test.cc
+  # resolves them relative to its own executable and would otherwise skip itself silently.
+  set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/micro")
   target_compile_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE --offload-host-only)
   target_link_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE -no-hip-rt -Wl,-soname,lib${_dv}.so)
   add_dependencies(rccl-UnitTestsMicro rccl-micro-dv-provider-fake-${_fake})

@@ -1043,7 +1043,7 @@ whole-binary totals).
 
 ```bash
 BD=build/release                        # or build/debug, or a standalone build dir
-BIN=$BD/test/host/rccl-UnitTestsMicro
+BIN=$BD/test/host/micro/rccl-UnitTestsMicro
 SRC=$BD/hipify/src/transport/p2p_tmp.cc
 LLVM=/opt/rocm/llvm/bin                 # ROCm's llvm-cov matches the build clang
 
@@ -1111,10 +1111,10 @@ make -j $(nproc) rccl-UnitTestsMicro
 
 ```bash
 # All tests:
-./build/release/test/host/rccl-UnitTestsMicro
+./build/release/test/host/micro/rccl-UnitTestsMicro
 
 # One test:
-./build/release/test/host/rccl-UnitTestsMicro \
+./build/release/test/host/micro/rccl-UnitTestsMicro \
     --gtest_filter='P2pMicrotest.IpcRegisterBuffer_NullRegRecordIsNoOp'
 
 # Coverage: see the Coverage section (run under LLVM_PROFILE_FILE, then llvm-cov).
@@ -1144,6 +1144,32 @@ selected case:
 # One suite, wherever it lives:
 ./build/release/test/host/rccl-UnitTestsHostAll --gtest_filter='*RmaCeInitTest.*'
 ```
+
+### Where the binaries are
+
+The build tree puts the fronted binaries one level down, in `micro/`:
+
+```
+build/
+  rccl-UnitTestsHostAll      <- the front door: run this
+  rccl-HostUnitTests         <- not fronted (its name carries no rccl-UnitTestsMicro prefix)
+  micro/
+    rccl-UnitTestsMicroInit
+    rccl-UnitTestsMicroCrypt
+    ...                      <- ~40 more, plus the fake provider .so files that go with them
+```
+
+A listing of the build output is the first thing anyone new to this tree reads,
+and ~40 equally-plausible-looking binaries beside the front door say nothing
+about which to run. `rccl_place_micro_binary()` in `CMakeLists.txt` moves every
+target whose name starts `rccl-UnitTestsMicro` — the same prefix the front door
+discovers on, so a binary that is fronted is a binary that moves.
+
+An **install** keeps them flat, beside the front door: that layout is consumed
+by packaging and by test-registration paths outside this directory. The front
+door handles both by looking — `micro/` when it holds any fronted binary,
+otherwise its own directory — rather than by a build-time define, since the same
+binary runs from either tree.
 
 Case names are qualified with the owning binary's suffix — 
 `MicroInitUncached/InitMicrotest.Case` — because the multi-arm binaries
@@ -1330,59 +1356,59 @@ cd projects/rccl/test/host
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DRCCL_BUILD_DIR=/path/to/projects/rccl/build/release
 cmake --build build -j"$(nproc)"
-./build/rccl-UnitTestsMicroBootstrap          # src/bootstrap.cc tests
-./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
-./build/rccl-UnitTestsMicroCollectives        # src/collectives.cc tests
-./build/rccl-UnitTestsMicroOnerank            # src/device/onerank.cu tests
-./build/rccl-UnitTestsMicroMgmtTaskEnq        # src/enqueue/mgmt_task_enq.cc tests
-./build/rccl-UnitTestsMicroWarpSpeed  # src/scheduler/*.cc tests
-./build/rccl-UnitTestsMicroCrypt              # misc/crypt.cc tests
-./build/rccl-UnitTestsMicroStrongstream       # misc/strongstream.cc tests
-./build/rccl-UnitTestsMicroUtils              # misc/utils.cc tests
-./build/rccl-UnitTestsMicroArgcheck           # misc/argcheck.cc tests
-./build/rccl-UnitTestsMicroCpuset             # include/cpuset.h tests
-./build/rccl-UnitTestsMicroInit      # init.cc tests
-./build/rccl-UnitTestsMicroInit-uncached
-./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
-./build/rccl-UnitTestsMicroDdaColl            # src/algorithms/dda/*/dda_*.cu launchers
-./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
-./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
-./build/rccl-UnitTestsMicroCollTrace          # misc/latency_profiler tests
-./build/rccl-UnitTestsMicroRecorder           # misc/recorder.cc tests
-./build/rccl-UnitTestsMicroApiTrace           # misc/api_trace.cc tests
-./build/rccl-UnitTestsMicroDebug              # debug.cc tests
-./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
-./build/rccl-UnitTestsMicroGinHostProxy       # src/gin/gin_host_proxy.cc + proxy_gpucontext/
-./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
-./build/rccl-UnitTestsMicroNvls               # transport/nvls.cc (HIP stubs) tests
-./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
-./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
-./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
-./build/rccl-UnitTestsMicroTopo               # src/graph/*.cc tests
-./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
-./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
-./build/rccl-UnitTestsMicroNcclDevice         # nccl_device requirement builders tests
-./build/rccl-UnitTestsMicroCore               # nccl_device/core.cc tests
-./build/rccl-UnitTestsMicroCftDevRuntime      # cft_dev_runtime.cc tests
-./build/rccl-UnitTestsMicroDdaIpc             # src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
-./build/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
-./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
-./build/rccl-UnitTestsMicroPlugin             # src/plugin/{net,plugin_open}.cc + net/net_v*.cc
-./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
-./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
-./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
-./build/rccl-UnitTestsMicroProxy              # src/proxy.cc tests
-./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
-./build/rccl-UnitTestsMicroNetIbCastDataPath  # net_ib_cast p2p/scheduler/ops-fault tests
-./build/rccl-UnitTestsMicroNet                # src/transport/net.cc tests
-./build/rccl-UnitTestsMicroMisc               # src/misc/ IB verbs + dv loaders, gdr_peermem.cc
-./build/rccl-UnitTestsMicroP2pResiliency      # src/transport/net_ib_cast/p2p_resiliency*.cc tests
+./build/micro/rccl-UnitTestsMicroBootstrap          # src/bootstrap.cc tests
+./build/micro/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
+./build/micro/rccl-UnitTestsMicroCollectives        # src/collectives.cc tests
+./build/micro/rccl-UnitTestsMicroOnerank            # src/device/onerank.cu tests
+./build/micro/rccl-UnitTestsMicroMgmtTaskEnq        # src/enqueue/mgmt_task_enq.cc tests
+./build/micro/rccl-UnitTestsMicroWarpSpeed  # src/scheduler/*.cc tests
+./build/micro/rccl-UnitTestsMicroCrypt              # misc/crypt.cc tests
+./build/micro/rccl-UnitTestsMicroStrongstream       # misc/strongstream.cc tests
+./build/micro/rccl-UnitTestsMicroUtils              # misc/utils.cc tests
+./build/micro/rccl-UnitTestsMicroArgcheck           # misc/argcheck.cc tests
+./build/micro/rccl-UnitTestsMicroCpuset             # include/cpuset.h tests
+./build/micro/rccl-UnitTestsMicroInit      # init.cc tests
+./build/micro/rccl-UnitTestsMicroInit-uncached
+./build/micro/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
+./build/micro/rccl-UnitTestsMicroDdaColl            # src/algorithms/dda/*/dda_*.cu launchers
+./build/micro/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
+./build/micro/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
+./build/micro/rccl-UnitTestsMicroCollTrace          # misc/latency_profiler tests
+./build/micro/rccl-UnitTestsMicroRecorder           # misc/recorder.cc tests
+./build/micro/rccl-UnitTestsMicroApiTrace           # misc/api_trace.cc tests
+./build/micro/rccl-UnitTestsMicroDebug              # debug.cc tests
+./build/micro/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
+./build/micro/rccl-UnitTestsMicroGinHostProxy       # src/gin/gin_host_proxy.cc + proxy_gpucontext/
+./build/micro/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/micro/rccl-UnitTestsMicroNvls               # transport/nvls.cc (HIP stubs) tests
+./build/micro/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
+./build/micro/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
+./build/micro/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
+./build/micro/rccl-UnitTestsMicroTopo               # src/graph/*.cc tests
+./build/micro/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/micro/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
+./build/micro/rccl-UnitTestsMicroNcclDevice         # nccl_device requirement builders tests
+./build/micro/rccl-UnitTestsMicroCore               # nccl_device/core.cc tests
+./build/micro/rccl-UnitTestsMicroCftDevRuntime      # cft_dev_runtime.cc tests
+./build/micro/rccl-UnitTestsMicroDdaIpc             # src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
+./build/micro/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
+./build/micro/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
+./build/micro/rccl-UnitTestsMicroPlugin             # src/plugin/{net,plugin_open}.cc + net/net_v*.cc
+./build/micro/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
+./build/micro/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
+./build/micro/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
+./build/micro/rccl-UnitTestsMicroProxy              # src/proxy.cc tests
+./build/micro/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
+./build/micro/rccl-UnitTestsMicroNetIbCastDataPath  # net_ib_cast p2p/scheduler/ops-fault tests
+./build/micro/rccl-UnitTestsMicroNet                # src/transport/net.cc tests
+./build/micro/rccl-UnitTestsMicroMisc               # src/misc/ IB verbs + dv loaders, gdr_peermem.cc
+./build/micro/rccl-UnitTestsMicroP2pResiliency      # src/transport/net_ib_cast/p2p_resiliency*.cc tests
 ./build/rccl-HostUnitTests
-./build/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests
-./build/rccl-UnitTestsMicroRoctxNvml-roctx    # same, ROCTX_ENABLE arm
-./build/rccl-UnitTestsMicroRocmwrap           # src/misc/rocmwrap.cc cuMem + DMA-BUF init
-./build/rccl-UnitTestsMicroAmdsmiWrap         # src/misc/amdsmi_wrap.cc
-./build/rccl-UnitTestsMicroNetIbCastInit      # src/transport/net_ib_cast/ init, capability and GIN
+./build/micro/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests
+./build/micro/rccl-UnitTestsMicroRoctxNvml-roctx    # same, ROCTX_ENABLE arm
+./build/micro/rccl-UnitTestsMicroRocmwrap           # src/misc/rocmwrap.cc cuMem + DMA-BUF init
+./build/micro/rccl-UnitTestsMicroAmdsmiWrap         # src/misc/amdsmi_wrap.cc
+./build/micro/rccl-UnitTestsMicroNetIbCastInit      # src/transport/net_ib_cast/ init, capability and GIN
 ```
 
 Disable coverage instrumentation for the standalone host-only test binaries

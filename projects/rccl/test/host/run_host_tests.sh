@@ -353,7 +353,10 @@ do_coverage() {
   for dir in "$COVERAGE_DIR"/*/; do
     name="$(basename "$dir")"
     [ "$name" = overall ] && continue
+    # The fronted binaries build into micro/; the front door and rccl-HostUnitTests stay at the
+    # top. The profile directory is named after the binary alone, so look in both.
     exe="$BUILD_DIR/$name"
+    [ -x "$exe" ] || exe="$BUILD_DIR/micro/$name"
     if [ ! -x "$exe" ]; then
       echo "error: expected binary not built: $exe -- run the build phase first" >&2
       rc=1

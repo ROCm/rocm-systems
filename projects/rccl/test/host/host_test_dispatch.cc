@@ -53,6 +53,10 @@ namespace fs = std::filesystem;
 // host tree's own naming convention is the registry; nothing enumerates the binaries by hand.
 constexpr std::string_view kBinaryPrefix = "rccl-UnitTestsMicro";
 
+// The build tree's subdirectory holding every binary this dispatcher fronts. See
+// binaryDirectory(), and test/host/CMakeLists.txt's rccl_place_micro_binary().
+constexpr std::string_view kMicroSubdirectory = "micro";
+
 // Dropped from a binary's name to form the case-name qualifier, leaving e.g. "Micro",
 // "MicroInit-uncached". Kept distinct from kBinaryPrefix so the qualifier stays short.
 constexpr std::string_view kQualifierStrip = "rccl-UnitTests";
@@ -785,6 +789,27 @@ std::vector<std::string> discoverBinaries(const std::string &directory, const st
     }
     std::sort(binaries.begin(), binaries.end());
     return binaries;
+}
+
+// Where the fronted binaries live, given the directory holding this executable.
+//
+// The build tree puts them one level down, in micro/, so a listing of the build output shows
+// the front door rather than ~40 binaries that look equally runnable. An install does not: its
+// layout is consumed by packaging and by test-registration paths outside this directory, so the
+// binaries stay flat there and are found beside this one.
+//
+// Which of the two is in use is decided by looking, not by a build-time define: the same binary
+// is run from both trees, and "the directory that actually holds them" is the only thing either
+// layout agrees on. micro/ wins when it holds any, so a stale copy left beside the front door by
+// an earlier build cannot quietly be the one that runs.
+std::string binaryDirectory(const std::string &selfDir, const std::string &self)
+{
+    const fs::path micro = fs::path(selfDir) / kMicroSubdirectory;
+    std::error_code ec;
+    if (fs::is_directory(micro, ec) && !discoverBinaries(micro.string(), self).empty()) {
+        return micro.string();
+    }
+    return selfDir;
 }
 
 // ── the gtest environment the children are given ────────────────────
@@ -1544,7 +1569,7 @@ int main(int argc, char **argv)
                                          : std::optional<std::string_view>(disabledEnv));
     warnAboutUnknownGtestVariables(gtestVariablesToStrip());
 
-    const std::string directory = selfDirectory(argv[0]);
+    const std::string directory = binaryDirectory(selfDirectory(argv[0]), selfPath());
 
     if (options.help) {
         // Answered before anything is enumerated: listing the cases costs a fork per binary,
@@ -1580,8 +1605,9 @@ int main(int argc, char **argv)
 
     const std::vector<std::string> binaries = discoverBinaries(directory, selfPath());
     if (binaries.empty()) {
-        fmt::print(stderr, "host-test-dispatch: no {}* binaries next to {} -- nothing to run\n",
-                   kBinaryPrefix, directory);
+        fmt::print(stderr,
+                   "host-test-dispatch: no {}* binaries in {} or its {}/ -- nothing to run\n",
+                   kBinaryPrefix, directory, kMicroSubdirectory);
         return 1;
     }
 
