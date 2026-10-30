@@ -16,8 +16,7 @@
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. projects/rccl  install.sh  build RCCL (GIN), then build
 #      rccl-UnitTestsFixtures, the ConnCheck host/device tests, and
-#      rccl-UnitTestsGinSdmaBroadcastPolicy
-#      (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
+#      rccl-UnitTestsGinSdmaBroadcastPolicy -> rccl.env
 #   4. projects/rccl-tests        build rccl-tests (DEVICE_API + GIN)
 #   5. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
 #   6. run-gin-ci.sh              run the GIN tests (non-gating)
@@ -105,8 +104,8 @@ source "${ci_dir}/lib/ensure-python-yaml.sh"
 # 3) RCCL with GIN. install.sh --rocshmem-gin compiles the GIN host code it needs
 # straight from the in-tree projects/rocshmem *source* (auto-detected) and builds
 # no rocshmem library — librccl.so is self-contained. Build rccl-UnitTestsFixtures
-# plus the GIN gtest binaries in a second step (reconfigure BUILD_TESTS=ON,
-# GIN_ANVIL_UNIT_TESTS=ON). Do not pass install.sh -t: that builds every test
+# plus the GIN gtest binaries in a second step (reconfigure BUILD_TESTS=ON).
+# Do not pass install.sh -t: that builds every test
 # executable and can compile plugin tests before hipify headers exist under
 # parallel -j and abort before librccl.so is installed.
 echo "==> [3/6] build RCCL (GIN, targets=${gpu_targets})"
@@ -195,7 +194,7 @@ assert_conn_check_kernels_in_fatbin() {
 assert_conn_check_kernels_in_fatbin "${librccl}"
 echo "    conn-check kernels present in ${librccl} .hip_fatbin"
 
-echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaFactory, and UnitTestsMPI (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaFactory, and UnitTestsMPI"
 (
   cd "${rccl_build}"
   # ENABLE_MPI_TESTS is what creates the rccl-UnitTestsMPI target (test/
@@ -208,7 +207,6 @@ echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaF
   # by test/CMakeLists.txt.
   MPI_PATH="${MPI_HOME}" cmake . \
     -DBUILD_TESTS=ON \
-    -DGIN_ANVIL_UNIT_TESTS=ON \
     -DENABLE_MPI_TESTS=ON \
     -DMPI_PATH="${MPI_HOME}"
   make -j"${build_jobs}" \
