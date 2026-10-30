@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Operand coordinates and arithmetic stage ordering shared by dense WMMA backends.
+// Operand coordinates and arithmetic stage ordering shared by dense WMMA and sparse SWMMAC
+// backends.
 #pragma once
 
 #include "common/isa.h"
@@ -17,7 +18,7 @@ constexpr int wmma_gfx12_w32_k(int step) {
 // Map a gfx12 packed 4/8-bit K coordinate to its element index within a lane.
 constexpr int wmma_gfx12_packed_local(int k) { return k % 8 + 8 * (k / 16); }
 
-// Map a product within one CLAMP stage to its logical K coordinate.
+// Map a product within one CLAMP stage to dense K or a sparse compressed position.
 constexpr int wmma_gfx12_integer_stage_k(int stage, int local) {
   return 16 * (local / 8) + 8 * stage + local % 8;
 }

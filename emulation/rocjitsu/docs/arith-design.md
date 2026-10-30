@@ -74,6 +74,11 @@ The matrices are distributed across the wave, not replicated per lane.
 WMMA ignores EXEC, so the API has no execution-mask parameter.
 The [README example](../lib/arith/README.md#api-example) constructs these operands and decodes the result.
 
+Sparse SWMMAC instead reads the initial accumulator from `d`; its fourth pointer
+operand is `index`, not a separate `c`. See the
+[sparse instruction contracts](../lib/arith/include/rj_arith/detail/rj_arith_wmma.h)
+for operand layouts and metadata selectors.
+
 ### Operands and register storage
 
 Scalar inputs are values; scalar outputs are pointers. Vector operands are
