@@ -324,6 +324,8 @@ bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm);
 bool ncclCommIsSuspended(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
+// Chunk size for an MNNVL/UALoE clique fused across multiple physical hosts.
+RCCL_PARAM_DECLARE(P2pMnnvlChunkSize);
 // Segments behind the whole NET registration, not the collective's slice (cached).
 ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments);
 // Graph variant: no-op for a NULL record; drops the graph reference on failure or when =0 skips a multi-segment record.

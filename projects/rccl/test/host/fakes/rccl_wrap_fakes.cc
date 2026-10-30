@@ -196,6 +196,8 @@ int64_t g_rcclParamCeReduceScatter = 0;            // rccl_wrap.cc:70 RCCL_PARAM
 int64_t rcclParamCeReduceScatter() { return g_rcclParamCeReduceScatter; }
 int64_t g_rcclParamCeArStagingBytes = -1;          // rccl_wrap.cc:73 RCCL_PARAM default
 int64_t rcclParamCeArStagingBytes() { return g_rcclParamCeArStagingBytes; }
+int64_t g_rcclParamP2pMnnvlChunkSize = (1 << 17);  // rccl_wrap.cc RCCL_PARAM default
+int64_t rcclParamP2pMnnvlChunkSize() { return g_rcclParamP2pMnnvlChunkSize; }
 
 static ncclResult_t DefaultSelectAllReduce(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
                                            hipStream_t, bool, bool, struct rcclCollDecision*) {
@@ -346,6 +348,7 @@ void ResetRcclWrapFakes() {
   g_rcclParamCeAllReduce = -1;
   g_rcclParamCeReduceScatter = 0;
   g_rcclParamCeArStagingBytes = -1;
+  g_rcclParamP2pMnnvlChunkSize = (1 << 17);
   g_rcclUpdateCollectiveProtocolCalls = 0;
   g_rcclUpdateCollectiveAlgorithmCalls = 0;
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;

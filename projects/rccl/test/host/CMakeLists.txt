@@ -41,6 +41,11 @@ rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
   "RCCL_PARAM(DdaEnable, \"DDA_ENABLE\", 1)" "fakes/rccl_wrap_fakes.cc: rcclParamDdaEnable()")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rccl_wrap_fakes.cc"
   "int64_t g_rcclParamDdaEnable = 1" "the DdaEnable fake default")
+rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
+  "RCCL_PARAM(P2pMnnvlChunkSize, \"P2P_MNNVL_CHUNKSIZE\", (1 << 17))"
+  "fakes/rccl_wrap_fakes.cc: rcclParamP2pMnnvlChunkSize()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rccl_wrap_fakes.cc"
+  "int64_t g_rcclParamP2pMnnvlChunkSize = (1 << 17)" "the P2pMnnvlChunkSize fake default")
 # Both arms of the ROCM_VERSION split at enqueue.cc:437-441; enqueue_fakes.cc mirrors both, so pin both.
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 1)"

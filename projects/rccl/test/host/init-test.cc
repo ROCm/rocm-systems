@@ -5559,6 +5559,28 @@ TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeAllNvlink_UsesTheNvlinkChunkSiz
   EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 19, s.comm()->p2pChunkSize);
 }
+TEST_F(InitMicrotest, ComputeBuffSizes_MnnvlFusedMultiHost_UsesTheMnnvlChunkSize) {
+  BuffSizes_Scene s;
+  auto topo = std::make_unique<ncclTopoSystem>();
+  topo->nHosts = 2;
+  s.comm()->topo = topo.get();
+  s.comm()->nNodes = 1;
+  s.comm()->isAllNvlink = true;
+  s.comm()->MNNVL = 1;
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1 << 17, s.comm()->p2pChunkSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_MnnvlSingleHost_UsesTheNvlinkChunkSize) {
+  BuffSizes_Scene s;
+  auto topo = std::make_unique<ncclTopoSystem>();
+  topo->nHosts = 1;
+  s.comm()->topo = topo.get();
+  s.comm()->nNodes = 1;
+  s.comm()->isAllNvlink = true;
+  s.comm()->MNNVL = 1;
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1 << 19, s.comm()->p2pChunkSize);
+}
 TEST_F(InitMicrotest, ComputeBuffSizes_ChunkExceedsSimpleBuffer_ClampsToOneStep) {
   BuffSizes_Scene s;
   s.comm()->nNodes = 1;

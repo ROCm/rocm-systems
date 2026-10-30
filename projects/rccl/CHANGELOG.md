@@ -6,6 +6,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Added
 * `ncclGinFlushTimeout` and `ncclGinWaitTimeout` support on the rocSHMEM GDA and Anvil SDMA GIN backends, along with `ncclGinFlushAsync` and `ncclGinWait` on rocSHMEM GDA. Flush and wait on both backends also return when the communicator is aborted, except blocking flush on Anvil SDMA.
+* `RCCL_P2P_MNNVL_CHUNKSIZE` (default 128 kB): P2P chunk size for an MNNVL/UALoE clique fused across multiple physical hosts, independent of `NCCL_P2P_NVL_CHUNKSIZE`.
 
 ### Changed
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.
@@ -15,6 +16,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Resolved issues
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
+* Fixed UALoE fabric topology detection when one is available. As a result, rings/trees are properly created for scale-out executions.
 
 ### Known issues
 
