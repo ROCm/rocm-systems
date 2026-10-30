@@ -146,6 +146,14 @@
       "args": "--gtest_filter=GinMPIDeviceTests.VASignal_Put_MultiContext"
     },
     {
+      "_comment": "np $NP (3-8): full comm plus 3- and 2-rank splits, 256 MiB float AllReduce on ginAllReduceTwoShotKernel; asserts RCCL_GIN_SDMA is selected. gfx950 only.",
+      "name": "rccl-gin-mpi-sdma-allreduce-twoshot",
+      "kind": "mpi-fixtures",
+      "bin": "rccl-UnitTestsMPI",
+      "env": ["NCCL_CUMEM_ENABLE=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7", "NCCL_DEBUG=WARN"],
+      "args": "--gtest_filter=GinMPIDeviceTests.AllReduce_SdmaGinTwoShot"
+    },
+    {
       "name": "rccl-gin-rocshmem-sdma-internal",
       "kind": "rccl-tests",
       "bin": "alltoall_perf",
