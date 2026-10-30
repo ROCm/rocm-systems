@@ -40,6 +40,14 @@ A list of values is passed as one comma-separated argument.
 --example-ids 0,1,2
 ```
 
+`--trace-ml-api`, `--list-operators`, and `--operator` take space-separated
+values after the flag, not a comma-separated list:
+
+```console
+--trace-ml-api torch triton
+--operator 'torch:*conv*' '*relu*'
+```
+
 ## Help Messages
 
 For an option that takes an argument, the help message follows these rules:

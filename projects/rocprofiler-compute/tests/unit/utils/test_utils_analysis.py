@@ -29,7 +29,6 @@ from utils.utils_analysis import (
     attach_unlocated_trees_by_launcher_thread,
     build_operator_summary,
     copy_matched_operator_subtree,
-    filter_forest_by_backends,
     find_native_artifacts,
     fold_identical_sibling_subtrees,
     format_operator_args,
@@ -1079,32 +1078,6 @@ def test_fold_identical_sibling_subtrees_merges_nested_children():
     assert folded[0].children[0].kernels["k"].launches == 2
 
 
-def test_filter_forest_by_backends_strips_scaffolding_kernels():
-    child = leaf_operator(
-        "triton.JITFunction.matmul_kernel",
-        "1",
-        40.0,
-        kernel="triton_matmul_kernel",
-        backend="triton",
-    )
-    parent = leaf_operator(
-        "nn.Module.Linear.forward",
-        "0",
-        10.0,
-        kernel="torch_gemm_kernel",
-        backend="torch",
-    )
-    parent.children = [child]
-    forest = {"1": [parent]}
-
-    filtered = filter_forest_by_backends(forest, ["triton"])
-    filtered_parent = filtered["1"][0]
-    assert filtered_parent.kernels == {}
-    assert "triton_matmul_kernel" in filtered_parent.children[0].kernels
-    assert "torch_gemm_kernel" in forest["1"][0].kernels
-    assert "triton_matmul_kernel" in forest["1"][0].children[0].kernels
-
-
 def test_copy_matched_operator_subtree_keeps_ancestors_and_descendants():
     node_c = leaf_operator("C", "2", 30.0, kernel="c_kernel")
     node_b = leaf_operator("B", "1", 20.0, kernel="b_kernel")
@@ -1120,6 +1093,30 @@ def test_copy_matched_operator_subtree_keeps_ancestors_and_descendants():
     assert copied_a.kernels == {}
     assert [child.name for child in copied_a.children] == ["B"]
     assert [child.name for child in copied_a.children[0].children] == ["C"]
+
+
+def test_copy_matched_user_region_keeps_nested_work_and_unions_relu():
+    addmm = leaf_operator(
+        "aten::addmm", "1", 50.0, kernel="addmm_kernel", backend="torch"
+    )
+    region1 = CallTreeNode(name="region1", backend="user")
+    region1.children = [addmm]
+    sibling = leaf_operator(
+        "aten::relu", "2", 10.0, kernel="relu_kernel", backend="torch"
+    )
+    forest = {"1": [region1, sibling]}
+
+    copied = copy_matched_operator_subtree(forest, [region1])
+    roots = copied["1"]
+    assert [root.name for root in roots] == ["region1"]
+    assert [child.name for child in roots[0].children] == ["aten::addmm"]
+    assert "addmm_kernel" in roots[0].children[0].kernels
+
+    unioned = copy_matched_operator_subtree(forest, [region1, sibling])
+    union_roots = unioned["1"]
+    assert [root.name for root in union_roots] == ["region1", "aten::relu"]
+    assert [child.name for child in union_roots[0].children] == ["aten::addmm"]
+    assert "relu_kernel" in union_roots[1].kernels
 
 
 def test_kernel_stats_length_mismatch_records_error():

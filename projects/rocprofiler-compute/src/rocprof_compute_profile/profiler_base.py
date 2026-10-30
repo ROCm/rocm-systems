@@ -13,7 +13,6 @@ from typing import Any, Optional, Union
 
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -22,6 +21,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import MIGPUSpecs
+from utils.ml_api_selectors import resolve_profile_selection
 from utils.native_tool_finder import NativeToolFinder
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -38,13 +38,6 @@ from utils.utils_exceptions import (
 )
 from utils.utils_profile import gen_sysinfo, run_prof
 from vendored import yaml
-
-# Maps each CLI flag to the backends it enables.
-_FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
-    "torch_trace": ("torch",),
-    "triton_trace": ("triton",),
-    "ml_api_trace": KNOWN_ML_API_BACKENDS,
-}
 
 # Only the specs classes that can be power-gated carry a perf_level, so seeing
 # AUTO here is enough to warn.
@@ -76,15 +69,6 @@ def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
             f"based on the number of {derived} derived for this partition mode."
         )
     return messages
-
-
-def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
-    """Return the set of frameworks requested via CLI flags."""
-    selected: set[str] = set()
-    for flag, frameworks in _FLAG_TO_FRAMEWORKS.items():
-        if getattr(args, flag, False):
-            selected.update(frameworks)
-    return selected
 
 
 def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[str]]:
@@ -241,14 +225,20 @@ class RocProfCompute_Base:
                 current.append("30")
                 args.filter_blocks = current
 
-        selected_frameworks = _compute_selected_frameworks(args)
-        if selected_frameworks and is_only_pc_sampling(args.filter_blocks):
+        try:
+            frameworks = resolve_profile_selection(getattr(args, "trace_ml_api", None))
+        except ValueError as error:
+            console_error(str(error))
+        if getattr(args, "trace_ml_api", None) is not None:
+            args.trace_ml_api = list(frameworks)
+        selected_frameworks = set(frameworks)
+        self._ml_api_trace_enabled: bool = bool(frameworks)
+        if frameworks and is_only_pc_sampling(args.filter_blocks):
             console_error(
-                "ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) "
-                "cannot be used with PC-sampling-only profiling, which does not "
-                "collect counters. Remove the tracing option(s) or add a counter block."
+                "--trace-ml-api cannot be used with PC-sampling-only profiling, "
+                "which does not collect counters. Remove --trace-ml-api or add "
+                "a counter block."
             )
-        self._selected_frameworks: set[str] = selected_frameworks
 
         if (
             sum((
@@ -275,7 +265,7 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
-        if selected_frameworks:
+        if frameworks:
             if args.attach_pid:
                 console_error(
                     "ML API tracing cannot be used with --attach-pid. "
@@ -435,7 +425,7 @@ class RocProfCompute_Base:
             fnames=str_fnames,
             profiler_options=options,
             workload_dir=args.output_directory,
-            ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
+            ml_api_trace_enabled=bool(getattr(self, "_ml_api_trace_enabled", False)),
             retain_rocpd_output=args.retain_rocpd_output,
         )
 

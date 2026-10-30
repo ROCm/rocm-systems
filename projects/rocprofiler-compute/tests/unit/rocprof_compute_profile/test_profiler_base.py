@@ -16,7 +16,6 @@ from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import (
     RocProfCompute_Base,
-    _compute_selected_frameworks,
     _partition_warning_messages,
 )
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
@@ -29,7 +28,7 @@ from utils.utils_exceptions import (
 )
 
 
-def _make_sanitize_args(remaining, torch_trace=False, **overrides):
+def _make_sanitize_args(remaining, trace_ml_api=None, **overrides):
     """Build a minimal argparse.Namespace for profiler_base unit tests.
 
     Defaults satisfy sanitize(); pass **overrides to set or replace fields the
@@ -46,7 +45,7 @@ def _make_sanitize_args(remaining, torch_trace=False, **overrides):
         attach_pid=None,
         attach_duration_msec=None,
         remaining=["--"] + remaining,
-        torch_trace=torch_trace,
+        trace_ml_api=trace_ml_api,
         kernel_iteration_range=None,
         kernel=None,
     )
@@ -98,7 +97,7 @@ def test_partition_warning_messages(
 
 
 # ---------------------------------------------------------------------------
-# sanitize() with --torch-trace
+# sanitize() with --trace-ml-api
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "remaining, expected_exception, setup",
@@ -180,9 +179,9 @@ def test_partition_warning_messages(
     ],
 )
 def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
-    """Unit test: sanitize() behavior with --torch-trace enabled."""
+    """Unit test: sanitize() behavior with --trace-ml-api torch enabled."""
     remaining = _setup_test_files(tmp_path, remaining, setup)
-    args = _make_sanitize_args(remaining, torch_trace=True)
+    args = _make_sanitize_args(remaining, trace_ml_api=["torch"])
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     if expected_exception:
         with pytest.raises(expected_exception):
@@ -195,47 +194,33 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
 # sanitize() rejects ML API tracing flags for PC-sampling-only runs
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "filter_blocks, trace_flags, expect_error, expected_frameworks",
+    "filter_blocks, trace_flags, expect_error, expected_trace_ml_api",
     [
         pytest.param(
             ["21"],
-            {"torch_trace": True},
+            {"trace_ml_api": ["torch"]},
             True,
             None,
-            id="pc_only_torch_trace_errors",
-        ),
-        pytest.param(
-            ["pc_sampling"],
-            {"ml_api_trace": True},
-            True,
-            None,
-            id="pc_only_ml_api_trace_errors",
-        ),
-        pytest.param(
-            ["21"],
-            {"triton_trace": True},
-            True,
-            None,
-            id="pc_only_triton_trace_errors",
+            id="pc_only_trace_ml_api_errors",
         ),
         pytest.param(
             ["2", "21"],
-            {"torch_trace": True, "pc_sampling": True, "experimental": True},
+            {"trace_ml_api": ["torch"], "pc_sampling": True, "experimental": True},
             False,
-            {"torch"},
-            id="mixed_torch_trace_preserved",
+            ["torch"],
+            id="mixed_trace_ml_api_preserved",
         ),
         pytest.param(
             ["21"],
             {"pc_sampling": True, "experimental": True},
             False,
-            set(),
+            None,
             id="pc_only_no_trace_flag",
         ),
     ],
 )
 def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
-    tmp_path, filter_blocks, trace_flags, expect_error, expected_frameworks
+    tmp_path, filter_blocks, trace_flags, expect_error, expected_trace_ml_api
 ):
     """ML API tracing flags are rejected for PC-sampling-only runs and retained when a
     counter block is also requested."""
@@ -247,11 +232,11 @@ def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
             profiler.sanitize()
     else:
         profiler.sanitize()
-        assert profiler._selected_frameworks == expected_frameworks
+        assert args.trace_ml_api == expected_trace_ml_api
 
 
 # ---------------------------------------------------------------------------
-# sanitize() without --torch-trace
+# sanitize() without --trace-ml-api
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "remaining, expected_exception, setup",
@@ -321,9 +306,9 @@ def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
     ],
 )
 def test_sanitize_no_torch_trace(tmp_path, remaining, expected_exception, setup):
-    """Unit test: sanitize() behavior without --torch-trace."""
+    """Unit test: sanitize() behavior without --trace-ml-api."""
     remaining = _setup_test_files(tmp_path, remaining, setup)
-    args = _make_sanitize_args(remaining, torch_trace=False)
+    args = _make_sanitize_args(remaining)
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     if expected_exception:
         with pytest.raises(expected_exception):
@@ -350,7 +335,7 @@ def test_attach_library_resolution_with_fallback():
         attach_duration_msec=None,
         kernel=None,
         kernel_iteration_range=None,
-        torch_trace=False,
+        trace_ml_api=None,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
     resolve_target = (
@@ -401,7 +386,7 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
         attach_duration_msec=None,
         kernel=None,
         kernel_iteration_range=None,
-        torch_trace=False,
+        trace_ml_api=None,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
 
@@ -598,17 +583,13 @@ def _make_rpc_args(
         iteration_multiplexing=None,
         attach_pid=None,
         attach_duration_msec=None,
-        torch_trace=False,
-        triton_trace=False,
-        ml_api_trace=False,
+        trace_ml_api=None,
         kernel_iteration_range=None,
         remaining=["--", "./myapp"],
         list_stats=list_stats,
         output_format=output_format,
-        torch_operator=None,
-        triton_operator=None,
-        list_torch_operators=False,
-        list_triton_operators=False,
+        operator=None,
+        list_operators=None,
     )
 
 
@@ -759,6 +740,54 @@ def test_handle_analyze_args_list_stats_output_format(output_format, expect_erro
     if expect_error:
         with pytest.raises(SystemExit):
             instance.handle_analyze_args()
+    else:
+        instance.handle_analyze_args()
+
+
+def test_handle_analyze_args_listing_skips_operator_parse(monkeypatch):
+    """--list-operators ignores --operator, including an unknown prefix."""
+    args = _make_rpc_args(mode="analyze")
+    args.list_operators = ["torch"]
+    args.operator = ["unknown:*"]
+    warnings = []
+    monkeypatch.setattr(
+        "rocprof_compute_base.console_warning",
+        lambda *argv: warnings.append(argv),
+    )
+    instance = _make_rpc_with_args(args)
+    instance.handle_analyze_args()
+    assert args.list_operators == ["torch"]
+    assert args.operator_patterns is None
+    assert "ignored" in warnings[-1][1]
+
+
+@pytest.mark.parametrize("flag", ["list_operators", "operator"])
+@pytest.mark.parametrize(
+    "output_format, expect_error",
+    [("stdout", False), ("txt", True), ("csv", True), ("db", True)],
+)
+def test_handle_analyze_args_operator_flags_require_stdout(
+    flag, output_format, expect_error, monkeypatch
+):
+    """--list-operators and --operator are rejected unless output is stdout."""
+    args = _make_rpc_args(mode="analyze", output_format=output_format)
+    if flag == "list_operators":
+        args.list_operators = ["torch"]
+    else:
+        args.operator = ["torch:*relu*"]
+    instance = _make_rpc_with_args(args)
+    if expect_error:
+        error_text = None
+
+        def record_error(*argv, **_kwargs):
+            nonlocal error_text
+            error_text = argv[1]
+            raise SystemExit(1)
+
+        monkeypatch.setattr("rocprof_compute_base.console_error", record_error)
+        with pytest.raises(SystemExit):
+            instance.handle_analyze_args()
+        assert "only supported with --output-format stdout" in error_text
     else:
         instance.handle_analyze_args()
 
@@ -1245,28 +1274,18 @@ def test_run_profiling_native_tool_path(
         assert mocks.console_error.called is expect_error
 
 
-def test_compute_selected_frameworks_unions_torch_and_triton_flags():
-    both_flags = _compute_selected_frameworks(
-        argparse.Namespace(torch_trace=True, triton_trace=True, ml_api_trace=False)
-    )
-    ml_api = _compute_selected_frameworks(
-        argparse.Namespace(torch_trace=False, triton_trace=False, ml_api_trace=True)
-    )
-    assert both_flags == {"torch", "triton"}
-    assert ml_api == both_flags
-
-
-@pytest.mark.parametrize(
-    "trace_flag",
-    [
-        pytest.param("torch_trace", id="torch"),
-        pytest.param("triton_trace", id="triton"),
-        pytest.param("ml_api_trace", id="ml_api"),
-    ],
-)
-def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path, trace_flag):
+def test_sanitize_trace_ml_api_injects_torch_and_triton(tmp_path):
     remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
-    args = _make_sanitize_args(remaining, attach_pid=12345, **{trace_flag: True})
+    both = _make_sanitize_args(remaining, trace_ml_api=["torch", "triton"])
+    profiler = RocProfCompute_Base(both, profiler_mode="rocprofiler-sdk", soc=None)
+    profiler.sanitize()
+    assert both.trace_ml_api == ["torch", "triton"]
+    assert "--frameworks torch triton --" in both.remaining
+
+
+def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path):
+    remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
+    args = _make_sanitize_args(remaining, attach_pid=12345, trace_ml_api=["torch"])
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     with pytest.raises(SystemExit):
         profiler.sanitize()

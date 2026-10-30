@@ -8,13 +8,12 @@ import sys
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional, TextIO
+from typing import Any, Dict, List, Optional, TextIO
 
 import pandas as pd
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -23,6 +22,10 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
+from utils.ml_api_selectors import (
+    check_list_operators_against_traced_frameworks,
+    operator_patterns_for_traced_frameworks,
+)
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     validate_workload,
@@ -59,6 +62,32 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
         },
     ),
 ])
+
+
+def _check_ml_api_selectors_for_workload(
+    workload_path: str,
+    list_operators: Optional[List[str]],
+    operator_patterns: Optional[Dict[str, List[str]]],
+    profiling_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Reject --list-operators / --operator this workload did not collect."""
+    if list_operators is None and operator_patterns is None:
+        return
+    if profiling_config is None:
+        profiling_config = file_io.load_profiling_config(workload_path)
+    trace_ml_api = profiling_config.get("trace_ml_api")
+    traced_frameworks = [str(name) for name in trace_ml_api] if trace_ml_api else []
+    try:
+        if list_operators is not None:
+            check_list_operators_against_traced_frameworks(
+                list_operators, traced_frameworks
+            )
+        elif operator_patterns is not None:
+            operator_patterns_for_traced_frameworks(
+                operator_patterns, traced_frameworks
+            )
+    except ValueError as error:
+        console_error("ml api trace", f"{workload_path}: {error}")
 
 
 class OmniAnalyze_Base:
@@ -306,25 +335,16 @@ class OmniAnalyze_Base:
             args.path[0][0]
         )
         profiling_config = self.get_profiling_config()
+        list_operators = getattr(args, "list_operators", None)
+        operator_patterns = getattr(args, "operator_patterns", None)
 
-        # --ml-api-trace enables every backend.
-        ml_api_trace = profiling_config.get("ml_api_trace", False)
-        for backend in KNOWN_ML_API_BACKENDS:
-            needs_trace = getattr(
-                args, f"{backend}_operator", None
-            ) is not None or getattr(args, f"list_{backend}_operators", False)
-            if needs_trace and not (
-                profiling_config.get(f"{backend}_trace", False) or ml_api_trace
-            ):
-                console_error(
-                    "ml api trace",
-                    f'Workload was not profiled with "--{backend}-trace" or '
-                    '"--ml-api-trace". '
-                    f"Cannot use --{backend}-operator or "
-                    f"--list-{backend}-operators.",
-                )
-
-        for dir_info in args.path:
+        for index, dir_info in enumerate(args.path):
+            _check_ml_api_selectors_for_workload(
+                dir_info[0],
+                list_operators,
+                operator_patterns,
+                profiling_config if index == 0 else None,
+            )
             if not any([
                 profiling_config.get("iteration_multiplexing"),
                 self.pc_sampling_only(),

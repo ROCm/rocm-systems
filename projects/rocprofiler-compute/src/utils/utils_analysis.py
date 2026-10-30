@@ -1017,48 +1017,12 @@ def fold_identical_sibling_subtrees(
     return folded
 
 
-def filter_forest_by_backends(
-    forest: dict[str, list[CallTreeNode]],
-    backends: list[str],
-) -> dict[str, list[CallTreeNode]]:
-    """Copy a forest, keeping nodes for the requested backends and their ancestors.
-
-    An empty backends list keeps every node, including user. Ancestors kept
-    only as scaffolding have their own kernels cleared, so a torch parent
-    of a triton child does not contribute GPU time or kernel lines to a
-    triton listing. Inclusive stats on each copy are recomputed from the
-    kernels and children that remain.
-    """
-    if not backends:
-        return forest
-
-    filtered: dict[str, list[CallTreeNode]] = {}
-    for thread_id, roots in forest.items():
-        kept_roots: list[CallTreeNode] = []
-        for root in roots:
-            copied_root = _copy_backend_view(root, backends)
-            if copied_root is not None:
-                kept_roots.append(copied_root)
-        if kept_roots:
-            filtered[thread_id] = kept_roots
-    return filtered
-
-
-def _copy_backend_view(
-    node: CallTreeNode, backends: List[str]
-) -> Optional[CallTreeNode]:
-    """Copy one node for filter_forest_by_backends, or None when nothing is kept."""
-    kept_children: list[CallTreeNode] = []
-    for child in node.children:
-        copied_child = _copy_backend_view(child, backends)
-        if copied_child is not None:
-            kept_children.append(copied_child)
-    if node.backend not in backends and not kept_children:
-        return None
+def _copy_full_operator_subtree(node: CallTreeNode) -> CallTreeNode:
+    """Copy a node and every descendant, keeping kernels on each."""
     copied_node = clone_call_tree_node(node)
-    copied_node.children = kept_children
-    if node.backend not in backends:
-        copied_node.kernels = {}
+    copied_node.children = [
+        _copy_full_operator_subtree(child) for child in node.children
+    ]
     rollup_node_stats(copied_node)
     return copied_node
 
@@ -1070,6 +1034,8 @@ def _copy_scoped_operator_node(
 ) -> Optional[CallTreeNode]:
     """Copy one node, keeping match kernels and in-scope descendant kernels."""
     node_is_match = id(node) in matched_node_ids
+    if node_is_match and node.backend == "user":
+        return _copy_full_operator_subtree(node)
     descendant_backends = inherited_backends
     if node_is_match and node.backend is not None:
         descendant_backends = set(inherited_backends)
@@ -1593,7 +1559,7 @@ def process_ml_api_trace_output(
         console_warning(
             "No marker files with corresponding counter files found. "
             "Ensure profiling was done with ML API tracing enabled "
-            "(e.g., via '--torch-trace')."
+            "(e.g., via '--trace-ml-api')."
         )
         workload.ml_api_trace_pairs = []
         return

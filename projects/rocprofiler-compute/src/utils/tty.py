@@ -316,7 +316,7 @@ def list_ml_operators(
 ) -> None:
     """Display operators as a call tree sorted by GPU kernel duration.
 
-    framework_labels sets the heading text (for example PyTorch or Triton).
+    framework_labels sets the heading text (for example PyTorch, Triton, or User).
     """
     if not call_trees:
         print(f"\n{', '.join(framework_labels)} Operators in: {workload_path}")

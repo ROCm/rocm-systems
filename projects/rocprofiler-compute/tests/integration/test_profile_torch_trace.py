@@ -38,7 +38,7 @@ COUNTER_COLLECTION_COLUMNS = {
     "Start_Timestamp",
     "End_Timestamp",
 }
-# Caps for test_torch_trace_overhead. --torch-trace cost is host-side
+# Caps for test_torch_trace_overhead. --trace-ml-api torch cost is host-side
 # RecordFunction/ROCTX. Wall-clock of the profile job is a wide sanity
 # check, not a measurement. GPU idle and kernel duration are not gated:
 # they read deprecated results_*.csv.gz. A real overhead number needs a
@@ -120,7 +120,7 @@ def print_torch_trace_overhead_report(wall_clock):
     """
     without, with_flag, overhead_pct = wall_clock
     print(f"\n{'=' * 72}")
-    print("--torch-trace overhead")
+    print("--trace-ml-api torch overhead")
     print(f"  {'metric':<22} {'without':>12}  {'with':>16}  {'overhead':>10}")
     print(f"  {'-' * 22} {'-' * 12}  {'-' * 16}  {'-' * 10}")
     print(
@@ -150,7 +150,7 @@ def torch_trace_profiled_workload(
     torch_trace_workload_state,
     binary_handler_profile_rocprof_compute,
 ):
-    """Profile simple_net with --torch-trace and return the workload directory."""
+    """Profile simple_net with --trace-ml-api torch and --user-range."""
     require_torch(gpu=True)
     if not torch_trace_workload_state["profiled"]:
         workload_dir = common.get_output_dir(param_id="torch_trace")
@@ -160,13 +160,15 @@ def torch_trace_profiled_workload(
         profile_config["torch_test_app"] = [
             sys.executable,
             *config["torch_test_app"][1:],
+            "--user-range",
         ]
         returncode = binary_handler_profile_rocprof_compute(
             profile_config,
             workload_dir,
             [
                 "--experimental",
-                "--torch-trace",
+                "--trace-ml-api",
+                "torch",
                 "--iteration-multiplexing",
             ],
             check_success=True,
@@ -251,7 +253,7 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
 
 
 def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
-    """Compare host wall-clock with and without --torch-trace.
+    """Compare host wall-clock with and without --trace-ml-api torch.
 
     Torch-trace adds host-side RecordFunction/ROCTX work. Asserts a wide
     wall-clock sanity cap. GPU idle and kernel duration are not gated:
@@ -263,13 +265,13 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
         sys.executable,
         *config["torch_test_app"][1:],
     ]
-    # Run WITHOUT --torch-trace (baseline)
+    # Run WITHOUT --trace-ml-api torch (baseline)
     workload_dir_baseline = common.get_output_dir(param_id="torch_trace_baseline")
     start_baseline = time.time()
     returncode_baseline = binary_handler_profile_rocprof_compute(
         profile_config,
         workload_dir_baseline,
-        ["--iteration-multiplexing"],  # Baseline without --torch-trace
+        ["--iteration-multiplexing"],  # Baseline without --trace-ml-api torch
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -278,13 +280,13 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     assert returncode_baseline == 0, "Baseline profiling failed"
     common.clean_output_dir(config["cleanup"], workload_dir_baseline)
 
-    # Run WITH --torch-trace (requires --experimental)
+    # Run WITH --trace-ml-api torch (requires --experimental)
     workload_dir_with_flag = common.get_output_dir(param_id="torch_trace_with_flag")
     start_with_flag = time.time()
     returncode_with_flag = binary_handler_profile_rocprof_compute(
         profile_config,
         workload_dir_with_flag,
-        ["--experimental", "--torch-trace", "--iteration-multiplexing"],
+        ["--experimental", "--trace-ml-api", "torch", "--iteration-multiplexing"],
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -345,7 +347,7 @@ def test_profile_invalid_workloads_torch_trace(
     expected_exit,
     request,
 ):
-    """Assert profile exit codes for invalid workloads with --torch-trace."""
+    """Assert profile exit codes for invalid workloads with --trace-ml-api torch."""
     require_torch(gpu=True)
     app_name = "test_invalid_workload"
     test_config = {**config, app_name: workload_cmd}
@@ -357,7 +359,12 @@ def test_profile_invalid_workloads_torch_trace(
     returncode, stdout, stderr = binary_handler_profile_rocprof_compute(
         test_config,
         workload_dir,
-        options=["--experimental", "--torch-trace", "--iteration-multiplexing"],
+        options=[
+            "--experimental",
+            "--trace-ml-api",
+            "torch",
+            "--iteration-multiplexing",
+        ],
         check_success=False,
         app_name=app_name,
         capture_output=True,
@@ -417,7 +424,7 @@ def test_profile_invalid_workloads_no_torch_trace(
     expected_exit,
     request,
 ):
-    """Assert profile exit codes for invalid workloads without --torch-trace."""
+    """Assert profile exit codes for invalid workloads without --trace-ml-api torch."""
     app_name = "test_invalid_workload"
     test_config = {**config, app_name: workload_cmd}
 
@@ -450,7 +457,8 @@ def test_list_torch_operators_prints_call_tree(
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
-        "--list-torch-operators",
+        "--list-operators",
+        "torch",
         "--path",
         torch_trace_profiled_workload,
     ])
@@ -474,8 +482,8 @@ def test_torch_operator_addmm_selects_kernels(
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
-        "--torch-operator",
-        "*addmm*",
+        "--operator",
+        "torch:*addmm*",
         "--path",
         torch_trace_profiled_workload,
     ])
@@ -494,9 +502,10 @@ def test_list_torch_operators_wins_over_filter(
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
-        "--list-torch-operators",
-        "--torch-operator",
-        "*addmm*",
+        "--list-operators",
+        "torch",
+        "--operator",
+        "torch:*addmm*",
         "--path",
         torch_trace_profiled_workload,
     ])
@@ -514,7 +523,8 @@ def test_torch_operator_with_dispatch_filter(
     list_code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
-        "--list-torch-operators",
+        "--list-operators",
+        "torch",
         "--path",
         torch_trace_profiled_workload,
     ])
@@ -528,8 +538,8 @@ def test_torch_operator_with_dispatch_filter(
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
-        "--torch-operator",
-        "*",
+        "--operator",
+        "torch:*",
         "--dispatch",
         "1",
         "--path",
@@ -541,6 +551,65 @@ def test_torch_operator_with_dispatch_filter(
     kernel_top = pd.read_csv(Path(torch_trace_profiled_workload) / "pmc_kernel_top.csv")
     assert set(kernel_top["Kernel_Name"].astype(str)) == {dispatch_one_kernel}
     assert "operator filter selected" in out
+    miss = dispatch_df[
+        ~dispatch_df["Kernel_Name"]
+        .astype(str)
+        .str.contains("addmm", case=False, na=False)
+    ]
+    assert not miss.empty
+    miss_id = str(int(miss.iloc[0]["Dispatch_ID"]))
+    miss_code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--operator",
+        "torch:*addmm*",
+        "--dispatch",
+        miss_id,
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert miss_code != 0
+
+
+def test_list_and_filter_user_range_keeps_nested_addmm_drops_relu(
+    torch_trace_profiled_workload,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
+    list_code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-operators",
+        "user",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert list_code == 0
+    listed = capsys.readouterr()
+    listed_out = listed.out + listed.err
+    assert "User Operator Call Tree:" in listed_out
+    assert "Fc1_UserDefinedMarker" in listed_out
+    assert "nn.Module.Linear.forward" in listed_out
+    assert ADDMM_MARKER.search(listed_out)
+    assert "aten::relu" not in listed_out
+
+    filter_code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--operator",
+        "user:*UserDefined*",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert filter_code == 0
+    filtered = capsys.readouterr()
+    filtered_out = filtered.out + filtered.err
+    assert "Matched User Operators:" in filtered_out
+    assert "Fc1_UserDefinedMarker" in filtered_out
+    assert "nn.Module.Linear.forward" in filtered_out
+    assert ADDMM_MARKER.search(filtered_out)
+    assert "aten::relu" not in filtered_out
+    assert "operator filter selected" in filtered_out
 
 
 def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
@@ -561,7 +630,8 @@ def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
             workload_dir,
             [
                 "--experimental",
-                "--torch-trace",
+                "--trace-ml-api",
+                "torch",
                 "--iteration-multiplexing",
             ],
             check_success=True,
@@ -577,7 +647,7 @@ def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
                 for row in csv.DictReader(f):
                     functions.append(row["Function"])
                     thread_ids.add(row["Thread_Id"])
-        assert any(fn == "TrainingLoop_UserDefinedMarker" for fn in functions)
+        assert any(fn == "Fc1_UserDefinedMarker" for fn in functions)
         assert any("torch.Tensor.backward" in fn for fn in functions)
         assert len(thread_ids) >= 2
         assert any(re.search(r"\|ltid=\d+\|", fn) for fn in functions)

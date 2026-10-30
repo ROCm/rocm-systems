@@ -2,9 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 """
-Sample mixed PyTorch + Triton workload for rocprof-compute --ml-api-trace.
+Sample mixed PyTorch + Triton workload for rocprof-compute --trace-ml-api.
 
-    rocprof-compute profile --experimental --ml-api-trace --no-roof \
+    rocprof-compute profile --experimental --trace-ml-api --no-roof \
         -n torch_triton_net -- python3 ./torch_triton_net.py
 """
 
