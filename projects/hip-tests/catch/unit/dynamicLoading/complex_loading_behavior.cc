@@ -100,11 +100,10 @@ static bool launch_dynamically_loaded_kernel() {
   int ret = 1;
 
   void* handle = dlopen("./libLazyLoad.so", RTLD_LAZY);
-  if (!handle) {
-    INFO("dlopen Error: " << dlerror() << "\n");
-    testResult = false;
-    return testResult;
-  }
+  const char* loadError = dlerror();
+  INFO("dlopen failed: " << (loadError == nullptr ? "" : loadError));
+  REQUIRE(handle != nullptr);
+
   void* sym = dlsym(handle, "lazyLoad");
   if (!sym) {
     INFO("unable to locate lazyLoad within lazyLoad.so\n");
