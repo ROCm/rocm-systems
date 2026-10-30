@@ -13,9 +13,6 @@
 #include "gin_sdma_devtime.h"  // shared device-side (wall_clock64) timing scaffold
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
-// ncclGinAnvilSdmaGPUContext: read by BroadcastGetSdmaThreshold to pick up the
-// backend's NCCL_GIN_ANVIL_SDMA_THRESHOLD when no per-collective override is set.
-#include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 // v4u / v4u_gptr / RCCL_SYSTEM_SYNCSCOPE / RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS for
 // nontemporal system-scope b128 peer stores (the store path LL/host use over xGMI).
 #include "nccl_device/rccl_ptr.h"
@@ -393,6 +390,10 @@ bool BroadcastGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 __device__ size_t BroadcastGetSdmaThreshold(struct ncclDevComm const& devComm) {
+// nccl_device.h delivers the Anvil SDMA context type transitively through
+// gin_device_api.h only when NCCL_GIN_ANVIL_SDMA_ENABLE self-detects the backend
+// (a non-GIN install ships no anvil_sdma headers), so read it only when enabled.
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
   using nccl::utility::loadConst;
   if (devComm.ginConnectionCount == 0 || devComm.ginHandles[0] == nullptr) {
     return NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
@@ -404,6 +405,12 @@ __device__ size_t BroadcastGetSdmaThreshold(struct ncclDevComm const& devComm) {
     return NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
   }
   return loadConst(&rsCtx->sdmaThreshold);
+#else
+  // No Anvil SDMA backend installed: no GIN context to read, so fall back to the
+  // anvil-free default from the shared tier policy.
+  (void)devComm;
+  return gin_sdma::kBroadcastSdmaThresholdDefault;
+#endif
 }
 
 // Local send->recv copy on the root (out-of-place). Uses 16-byte vector stores
