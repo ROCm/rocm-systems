@@ -516,6 +516,95 @@ TEST_F(TensorDmaRaceTest, EventIsRecordedAtTheObservedInstructionPc) {
   EXPECT_EQ(report.find(std::format("0x{:x}", instruction_pc + 8)), std::string::npos) << report;
 }
 
+/// Executes decoded tensor DMA instructions, so the emulator itself reports
+/// them to the race detector. Both waves share one 256-byte LDS allocation.
+class DecodedTensorDmaRaceTest : public TensorDmaRaceTest {
+protected:
+  static constexpr uint64_t kGlobal = 0x10000;
+  static constexpr uint32_t kTileOffset = 0;
+  static constexpr uint32_t kEmptyOffset = 64;
+
+  struct Descriptor {
+    uint32_t lds_offset = kTileOffset;
+    uint32_t tensor_dim0 = 4; ///< Zero places the whole tile outside the tensor.
+    uint32_t tile_dim0 = 4;   ///< Zero makes the tile a NOP.
+    uint32_t tile_dim1 = 0;
+    uint32_t count = 1; ///< Zero makes this a NULL tensor.
+  };
+
+  void SetUp() override {
+    TensorDmaRaceTest::SetUp();
+    const uint32_t lds_base = fixture.cu()->allocate_lds(256);
+    for (auto *wave : waves) {
+      wave->set_lds_base(lds_base);
+      wave->set_lds_size(256);
+    }
+    decoder = Decoder::create(fixture.cu()->arch());
+    ASSERT_NE(decoder, nullptr);
+  }
+
+  /// Execute one decoded tensor DMA instruction on `wave`: i32 elements, one row.
+  void tensor(int wave, bool store, const Descriptor &desc) {
+    waves[wave]->pc += 16;
+    const uint32_t sgprs = waves[wave]->sgpr_alloc().base;
+    const std::array<uint32_t, 4> group0{desc.count, desc.lds_offset,
+                                         static_cast<uint32_t>(kGlobal), 0x80000000u};
+    const std::array<uint32_t, 8> group1{
+        2u << 16, desc.tensor_dim0 << 16, 1u << 16, desc.tile_dim0 << 16, desc.tile_dim1, 4, 0, 0};
+    for (uint32_t reg = 0; reg < group0.size(); ++reg)
+      fixture.cu()->write_sgpr(sgprs + reg, group0[reg]);
+    for (uint32_t reg = 0; reg < group1.size(); ++reg)
+      fixture.cu()->write_sgpr(sgprs + 12 + reg, group1[reg]);
+    const std::array<uint32_t, 3> words{store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                        0x7c7c0c00u};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+    EXPECT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[wave]).succeeded());
+  }
+
+  /// Load a tile, issue a transfer that moves no data, wait until at most
+  /// `remaining` transfers are outstanding, and read the loaded tile.
+  template <int Remaining>
+  bool loadThenEmptyThenRead(bool empty_is_store, const Descriptor &empty) {
+    tensor(0, /*store=*/false, {});
+    tensor(0, empty_is_store, empty);
+    wait_tensorcnt(0, Remaining);
+    return ds_read(0, waves[0]->lds_base() + kTileOffset + 4);
+  }
+
+  std::unique_ptr<Decoder> decoder;
+};
+
+// Each tensor instruction completes on TENSORcnt once, in issue order with the
+// others, including one that moves no data. Waiting for all but one therefore
+// completes the load issued before it.
+TEST_F(DecodedTensorDmaRaceTest, StoreOutsideTheTensorTakesATensorcntSlot) {
+  EXPECT_FALSE(loadThenEmptyThenRead<1>(/*empty_is_store=*/true,
+                                        {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, NullTensorStoreTakesATensorcntSlot) {
+  EXPECT_FALSE(
+      loadThenEmptyThenRead<1>(/*empty_is_store=*/true, {.lds_offset = kEmptyOffset, .count = 0}));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, NullTensorLoadTakesATensorcntSlot) {
+  EXPECT_FALSE(
+      loadThenEmptyThenRead<1>(/*empty_is_store=*/false, {.lds_offset = kEmptyOffset, .count = 0}));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, NopTileLoadTakesATensorcntSlot) {
+  EXPECT_FALSE(loadThenEmptyThenRead<1>(
+      /*empty_is_store=*/false, {.lds_offset = kEmptyOffset, .tile_dim0 = 0, .tile_dim1 = 1}));
+}
+
+// With both transfers outstanding, the load is still pending, so the read races.
+TEST_F(DecodedTensorDmaRaceTest, LoadStaysPendingUntilTheWaitCoversIt) {
+  EXPECT_TRUE(loadThenEmptyThenRead<2>(/*empty_is_store=*/true,
+                                       {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
+}
+
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,
                                             bool formatted) {
