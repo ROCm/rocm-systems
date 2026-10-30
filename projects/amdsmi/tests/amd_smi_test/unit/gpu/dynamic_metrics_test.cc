@@ -26,6 +26,7 @@
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "test_common.h"
+#include "test_fixture_utils.h"
 
 namespace amd::smi {
 
@@ -97,18 +98,12 @@ auto BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t new_header) -> std:
   return std::vector<uint8_t>(begin, begin + sizeof(header));
 }
 
-auto WriteBlobToTempFile(const std::vector<uint8_t>& blob,
+// Writes blob into tree, which deletes it when the test ends.
+auto WriteBlobToTempFile(FakeSysfsTree& tree, const std::vector<uint8_t>& blob,
                          const std::string& filename = "amdsmi_fake_metrics.bin")
     -> std::filesystem::path {
-  auto temp_dir = std::filesystem::temp_directory_path();
-  auto file_path = temp_dir / filename;
-
-  std::ofstream stream(file_path, std::ios::binary | std::ios::trunc);
-  stream.write(reinterpret_cast<const char*>(blob.data()),
-               static_cast<std::streamsize>(blob.size()));
-  stream.close();
-
-  return file_path;
+  tree.WriteFile(filename, std::string(blob.begin(), blob.end()));
+  return std::filesystem::path(tree.root()) / filename;
 }
 
 using AttrId = amd::smi::details::AMDGpuMetricAttributeId_t;
@@ -192,8 +187,9 @@ TEST(GpuUnit, GPUMetricDynamicVersionSupported) {
         .m_format_revision = 1,
         .m_content_revision = static_cast<uint8_t>(ver),  // Known minor versions
     });
-    const auto fake_path =
-        WriteBlobToTempFile(blob, "amdsmi_fake_gpu_metrics_v1" + std::to_string(ver) + ".bin");
+    FakeSysfsTree tree;
+    const auto fake_path = WriteBlobToTempFile(
+        tree, blob, "amdsmi_fake_gpu_metrics_v1" + std::to_string(ver) + ".bin");
 
     ASSERT_FALSE(blob.empty());
     ASSERT_TRUE(std::filesystem::exists(fake_path));
@@ -216,8 +212,6 @@ TEST(GpuUnit, GPUMetricDynamicVersionSupported) {
       std::cout << test_detail << "Unsupported Metric Version"
                 << " | Failed to create valid object for version 1." << ver << std::endl;
     }
-
-    std::filesystem::remove(fake_path);
   }
 }
 
@@ -238,8 +232,9 @@ TEST(GpuUnit, XCPMetricDynamicVersionSupported) {
         .m_format_revision = 1,
         .m_content_revision = static_cast<uint8_t>(ver),  // Known minor versions
     });
-    const auto fake_path =
-        WriteBlobToTempFile(blob, "amdsmi_fake_xcp_metrics_v1" + std::to_string(ver) + ".bin");
+    FakeSysfsTree tree;
+    const auto fake_path = WriteBlobToTempFile(
+        tree, blob, "amdsmi_fake_xcp_metrics_v1" + std::to_string(ver) + ".bin");
 
     ASSERT_FALSE(blob.empty());
     ASSERT_TRUE(std::filesystem::exists(fake_path));
@@ -262,8 +257,6 @@ TEST(GpuUnit, XCPMetricDynamicVersionSupported) {
       std::cout << test_detail << "Failed to create valid object for version 1." << ver
                 << std::endl;
     }
-
-    std::filesystem::remove(fake_path);
   }
 }
 
@@ -348,9 +341,10 @@ TEST(GpuUnit, GPUMetricVersionSupportClassification) {
         .m_format_revision = c.format,
         .m_content_revision = c.content,
     });
-    const auto fake_path =
-        WriteBlobToTempFile(blob, "amdsmi_fake_metrics_v" + std::to_string(c.format) + "_" +
-                                      std::to_string(c.content) + ".bin");
+    FakeSysfsTree tree;
+    const auto fake_path = WriteBlobToTempFile(tree, blob,
+                                               "amdsmi_fake_metrics_v" + std::to_string(c.format) +
+                                                   "_" + std::to_string(c.content) + ".bin");
     ASSERT_TRUE(std::filesystem::exists(fake_path));
 
     const auto* header = reinterpret_cast<const amd::smi::AMDGpuMetricsHeader_v1_t*>(blob.data());
@@ -367,8 +361,6 @@ TEST(GpuUnit, GPUMetricVersionSupportClassification) {
           << "unrecognized version must not map to a supported flag";
       EXPECT_EQ(metrics_ptr, nullptr) << "unrecognized version must not build a metrics object";
     }
-
-    std::filesystem::remove(fake_path);
   }
 }
 

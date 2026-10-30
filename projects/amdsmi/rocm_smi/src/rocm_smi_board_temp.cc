@@ -180,6 +180,7 @@ static bool read_dynamic_scalar_value(const std::byte* data,
   }
 
   // The driver fills unavailable entries with 0xFF bytes: the type's max value, or -1 if signed.
+  // The table has no other marker, so a real reading of -1 also reads as unavailable.
   switch (attr_type) {
     case details::AMDGpuMetricAttributeType_t::TYPE_UINT8: {
       auto v = std::uint8_t(0);
