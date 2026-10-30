@@ -184,7 +184,7 @@ def cli_search_order(source_dir, prefer_install=False):
 
 
 def generated_version_stub(version="0.0.0+source"):
-    """Return a ``_version`` stub unless a module or stub is already loaded or importable."""
+    """Stub CMake-generated ``_version`` for source-tree CLI tests when unavailable."""
     if "_version" in sys.modules or importlib.util.find_spec("_version") is not None:
         return {}
     return {"_version": fake_module("_version", __version__=version)}

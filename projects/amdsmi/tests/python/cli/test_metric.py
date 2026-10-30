@@ -26,10 +26,11 @@ class TestMetric(TestCliBase):
         return
 
     def test_repeated_gpu_selection(self):
+        self.common.print_func_name("")
         if len(self.list_data) < 2:
             self.skipTest("Requires at least two GPUs")
         first, second = (gpu["gpu"] for gpu in self.list_data[:2])
         cmd = f"amd-smi metric -u -g={first} -g={second} -g={first} --json"
-        status, output, error = self.util.RunCmdSync(cmd)
-        self.assertEqual(status, 0, error or output)
-        self.assertEqual([gpu["gpu"] for gpu in json.loads(output)["gpu_data"]], [first, second])
+        rc, data, std_err = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed: {std_err or data}")
+        self.assertEqual([gpu["gpu"] for gpu in json.loads(data)["gpu_data"]], [first, second])

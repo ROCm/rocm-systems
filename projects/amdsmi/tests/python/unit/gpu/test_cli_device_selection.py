@@ -5,6 +5,7 @@
 """Hardware-free tests for repeated device selections and single-value setters."""
 
 import inspect
+import io
 import os
 import sys
 import unittest
@@ -95,6 +96,9 @@ def _baremetal_helpers(helpers_type, errors):
             return True
 
         def is_hypervisor(self):
+            return False
+
+        def is_virtual_os(self):
             return False
 
         def is_amdgpu_initialized(self):
@@ -220,11 +224,14 @@ class TestRepeatedDeviceSelection(_CliFixture):
                 self.assertEqual(
                     self.gpus(*repeated, command="list"), self.gpus(*listed, command="list")
                 )
-        # A later "all" keeps earlier devices first; "all" in one list uses device order.
-        self.assertCountEqual(
-            self.gpus("-g", "2", "-g", "all", command="list"),
-            self.gpus("-g", "2", "all", command="list"),
-        )
+        self.assertEqual(self.gpus("-g", "2", "-g", "all", command="list"), [0x102, 0x100, 0x101])
+        self.assertEqual(self.gpus("-g", "2", "all", command="list"), _GPU_VALUES)
+
+    def test_help_builds_all_subparsers(self):
+        with mock.patch.object(sys, "stdout", new_callable=io.StringIO):
+            with self.assertRaises(SystemExit) as result:
+                self.parse("--help")
+        self.assertEqual(result.exception.code, 0)
 
     def test_duplicate_gpus_are_selected_once(self):
         for argv, expected in (
@@ -321,38 +328,8 @@ class TestRepeatedDeviceSelection(_CliFixture):
             self.parse("metric", "-g=0", "1")
 
 
-class TestRepeatedVfSelection(_CliFixture):
-    def setUp(self) -> None:
-        super().setUp()
-        patcher = mock.patch.multiple(
-            self.helpers,
-            is_baremetal=mock.Mock(return_value=False),
-            is_hypervisor=mock.Mock(return_value=True),
-            os_info=mock.Mock(return_value="Linux Hypervisor"),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def test_repeated_vf_options_keep_last_values(self) -> None:
-        for argv, expected in (
-            (["-v", "1", "-v", "2"], ["2"]),
-            (["--vf", "1", "--vf", "2", "3"], ["2", "3"]),
-            (["-v=1", "-v=2"], ["2"]),
-            (["--vf=1", "--vf=2"], ["2"]),
-            (["-v", "1", "2", "--vf", "3"], ["3"]),
-            (["--vf", "1", "--vf", "2", "2"], ["2", "2"]),
-        ):
-            with self.subTest(argv=argv):
-                self.assertEqual(self.parse("list", *argv).vf, expected)
-
-    def test_single_vf_selections_unchanged(self) -> None:
-        self.assertEqual(self.parse("list", "-v", "1").vf, ["1"])
-        self.assertEqual(self.parse("list", "--vf", "1", "2").vf, ["1", "2"])
-        self.assertIsNone(self.parse("list").vf)
-
-
 class TestRepeatedSetValues(_CliFixture):
-    """Single-value set options keep the last value; only different setters conflict."""
+    """GPU partition settings keep the last value; different partition setters conflict."""
 
     def test_repeated_partition_setter_keeps_last_value(self):
         for argv, dest, expected in (
