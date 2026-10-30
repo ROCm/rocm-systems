@@ -1,6 +1,6 @@
 # Changelog for hipFile
 
-## hipFile 0.7.0 (unreleased)
+## (Unreleased) hipFile 0.7.0 
 
 ### Added
 
