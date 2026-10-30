@@ -8,8 +8,8 @@ Invoked by run_rocdecode.py after the CTest suite, and runnable on its own for
 local debugging. Three things happen here:
 
   1. Fetch the conformance stream corpus. It is not redistributable, so it lives
-     in a private S3 bucket as a single zip rather than alongside the public
-     build artifacts. Repeat runs reuse the extracted copy.
+     in a private S3 bucket rather than alongside the public build artifacts.
+     Repeat runs reuse the extracted copy.
   2. Build the videoDecode sample, which is what actually decodes the streams.
   3. Run testScripts/run_rocDecode_Conformance.py once per codec and collect the
      results. That script does the decoding and MD5 comparison; this one supplies
@@ -22,8 +22,8 @@ repository secrets to pull requests from forks, so that case is expected.
 Environment variables:
   ROCM_PATH                     ROCm install prefix override.
   ROCDECODE_CONFORMANCE_DIR     Corpus location (also the fetch destination).
-  ROCDECODE_CONFORMANCE_BUCKET  S3 bucket holding the corpus zip.
-  ROCDECODE_CONFORMANCE_KEY     Object key of the corpus zip.
+  ROCDECODE_CONFORMANCE_BUCKET  S3 bucket holding the corpus zips.
+  ROCDECODE_CONFORMANCE_KEYS    Comma-separated object keys of the corpus zips.
   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_DEFAULT_REGION
 """
 
@@ -45,17 +45,22 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 PROJECT_NAME = "rocdecode"
 
 DEFAULT_BUCKET = "knagesh-media-test"
-DEFAULT_KEY = "rocDecodeConformance.zip"
+# The corpus is published as more than one object. rocDecodeConformance.zip is a
+# container: it holds one zip per codec (AVC, AV1 and VP9) rather than the stream
+# folders themselves. HEVC is published beside it as its own zip instead of being
+# folded in, so it has to be fetched separately.
+DEFAULT_KEYS = ["rocDecodeConformance.zip", "HevcConformance.zip"]
 DEFAULT_REGION = "us-east-2"
 
-# Codec -> the folder name(s) it ships under, tried in order. These are the literal
-# names in the corpus; the AV1 set has shipped as both Av1Conformance and
-# Av1Conformance_v1, so accept either rather than renaming on extraction.
-CODEC_DIRS = {
-    "AVC": ["AvcConformance"],
-    "AV1": ["Av1Conformance", "Av1Conformance_v1"],
-    "HEVC": ["HevcConformance"],
-    "VP9": ["Vp9Conformance"],
+# Codec -> the literal prefix of the folder it ships under. Matched as a prefix
+# rather than in full because the AV1 set carries a version suffix in its folder
+# name -- Av1Conformance_v1.0 at the time of writing -- and pinning the exact
+# spelling is what breaks the next time that version moves.
+CODEC_DIR_PREFIXES = {
+    "AVC": "AvcConformance",
+    "AV1": "Av1Conformance",
+    "HEVC": "HevcConformance",
+    "VP9": "Vp9Conformance",
 }
 
 # Written beside the extracted corpus so a repeat run can skip the download.
@@ -89,7 +94,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--codecs",
-        default=",".join(CODEC_DIRS),
+        default=",".join(CODEC_DIR_PREFIXES),
         help="Comma-separated codecs to run (default: %(default)s).",
     )
     parser.add_argument(
@@ -113,12 +118,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bucket",
         default=os.getenv("ROCDECODE_CONFORMANCE_BUCKET", DEFAULT_BUCKET),
-        help="S3 bucket holding the corpus zip (default: %(default)s).",
+        help="S3 bucket holding the corpus zips (default: %(default)s).",
     )
     parser.add_argument(
-        "--key",
-        default=os.getenv("ROCDECODE_CONFORMANCE_KEY", DEFAULT_KEY),
-        help="Object key of the corpus zip (default: %(default)s).",
+        "--keys",
+        default=os.getenv("ROCDECODE_CONFORMANCE_KEYS", ",".join(DEFAULT_KEYS)),
+        help="Comma-separated object keys of the corpus zips "
+        "(default: %(default)s).",
     )
     parser.add_argument(
         "--region",
@@ -180,8 +186,16 @@ def default_corpus_dir() -> Path:
     return Path.home() / "rocDecodeConformance"
 
 
-def find_codec_dirs(root: Path) -> Dict[str, Path]:
-    """Return {codec: folder} for the per-codec folders present under root.
+def codec_of(dir_name: str) -> Optional[str]:
+    """Return the codec whose folder this directory name is, or None."""
+    for codec, prefix in CODEC_DIR_PREFIXES.items():
+        if dir_name.startswith(prefix):
+            return codec
+    return None
+
+
+def scan_codec_dirs(root: Path) -> Dict[str, Path]:
+    """Return {codec: folder} for root's immediate children that are corpora.
 
     A folder counts only if it holds both Streams/ and MD5/. Requiring both is
     what distinguishes the real thing from a stray directory carrying the name.
@@ -189,28 +203,32 @@ def find_codec_dirs(root: Path) -> Dict[str, Path]:
     found: Dict[str, Path] = {}
     if not root.is_dir():
         return found
-    for codec, names in CODEC_DIRS.items():
-        for name in names:
-            candidate = root / name
-            if (candidate / "Streams").is_dir() and (candidate / "MD5").is_dir():
-                found[codec] = candidate
-                break
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+        codec = codec_of(child.name)
+        if codec is None or codec in found:
+            continue
+        if (child / "Streams").is_dir() and (child / "MD5").is_dir():
+            found[codec] = child
     return found
 
 
-def resolve_corpus_root(dest: Path) -> Optional[Path]:
-    """Find the directory holding the per-codec folders.
+def find_codec_dirs(root: Path) -> Dict[str, Path]:
+    """Return {codec: folder}, looking in root and one level below it.
 
-    The zip may or may not carry its own top-level wrapper directory, so look in
-    dest and then one level below rather than assuming either shape.
+    Both levels are searched, and merged, because the codecs do not all arrive
+    the same way: the zips may or may not carry their own wrapper directory, and
+    HEVC comes from a separate archive from the rest, so it can land at a
+    different depth than the codecs it sits beside.
     """
-    if find_codec_dirs(dest):
-        return dest
-    if dest.is_dir():
-        for child in sorted(dest.iterdir()):
-            if child.is_dir() and find_codec_dirs(child):
-                return child
-    return None
+    found = scan_codec_dirs(root)
+    if root.is_dir():
+        for child in sorted(root.iterdir()):
+            if child.is_dir():
+                for codec, path in scan_codec_dirs(child).items():
+                    found.setdefault(codec, path)
+    return found
 
 
 def fetch_feasibility() -> Optional[str]:
@@ -293,28 +311,66 @@ def safe_members(archive: zipfile.ZipFile, dest: Path) -> List[zipfile.ZipInfo]:
     return members
 
 
-def download_corpus(client, bucket: str, key: str, dest: Path, size: int) -> None:
-    """Replace dest's contents with a freshly downloaded copy of the corpus.
+def extract_zip(archive_path: Path, dest: Path) -> None:
+    with zipfile.ZipFile(archive_path) as archive:
+        archive.extractall(dest, members=safe_members(archive, dest))
 
-    Downloaded and extracted under a scratch directory first, so an interrupted
-    transfer cannot leave a half-extracted corpus that the next run would take
-    for a complete one.
+
+def extract_nested_zips(root: Path) -> None:
+    """Unpack the per-codec zips shipped inside the corpus archive.
+
+    rocDecodeConformance.zip does not contain the stream folders directly, it
+    contains one zip per codec. Each is extracted where it sits and then removed,
+    so what remains is the folder layout the sweep expects and the corpus is not
+    left holding a second, compressed copy of itself.
+
+    Looping rather than making a single pass costs four lines and means a future
+    archive that nests one level deeper does not quietly yield an empty corpus.
+    """
+    while True:
+        archives = sorted(root.rglob("*.zip"))
+        if not archives:
+            return
+        for archive_path in archives:
+            logging.info(f"++ Extracting {archive_path.name}")
+            extract_zip(archive_path, archive_path.parent)
+            archive_path.unlink()
+
+
+def download_corpus(
+    client, bucket: str, heads: Dict[str, Tuple[str, int]], dest: Path
+) -> None:
+    """Replace dest's contents with freshly downloaded copies of the corpus zips.
+
+    Everything is downloaded and extracted under a scratch directory first, so an
+    interrupted transfer cannot leave a half-extracted corpus that the next run
+    would take for a complete one.
+
+    The scratch directory sits beside dest rather than in the system temp dir.
+    The extracted corpus runs to several GiB, which /tmp inside a CI container
+    frequently is not, and staging on the same filesystem makes the final move a
+    rename instead of a copy of every stream.
     """
     dest.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="rocdecode-conformance-") as scratch:
-        archive_path = Path(scratch) / "corpus.zip"
-        logging.info(
-            f"++ Downloading s3://{bucket}/{key} ({size / (1024 ** 2):.1f} MiB)"
-        )
-        with archive_path.open("wb") as handle:
-            client.download_fileobj(bucket, key, handle)
-
-        logging.info(f"++ Extracting into {dest}")
+    with tempfile.TemporaryDirectory(
+        prefix=".rocdecode-conformance-", dir=dest.parent
+    ) as scratch:
         staging = Path(scratch) / "extracted"
         staging.mkdir()
-        with zipfile.ZipFile(archive_path) as archive:
-            archive.extractall(staging, members=safe_members(archive, staging))
+        for key, (_, size) in heads.items():
+            archive_path = Path(scratch) / Path(key).name
+            logging.info(
+                f"++ Downloading s3://{bucket}/{key} ({size / (1024 ** 2):.1f} MiB)"
+            )
+            with archive_path.open("wb") as handle:
+                client.download_fileobj(bucket, key, handle)
+            logging.info(f"++ Extracting {archive_path.name}")
+            extract_zip(archive_path, staging)
+            archive_path.unlink()
 
+        extract_nested_zips(staging)
+
+        logging.info(f"++ Installing corpus into {dest}")
         for existing in dest.iterdir():
             if existing.is_dir():
                 shutil.rmtree(existing)
@@ -324,51 +380,59 @@ def download_corpus(client, bucket: str, key: str, dest: Path, size: int) -> Non
             shutil.move(str(extracted), str(dest / extracted.name))
 
 
-def fetch_corpus(bucket: str, key: str, dest: Path, region: str) -> Path:
-    """Ensure the corpus is present locally and return the per-codec parent dir."""
+def fetch_corpus(
+    bucket: str, keys: List[str], dest: Path, region: str
+) -> Dict[str, Path]:
+    """Ensure the corpus is present locally and return its per-codec folders."""
     client = make_client(region, bucket)
-    response = client.head_object(Bucket=bucket, Key=key)
-    etag = response["ETag"].strip('"')
-    size = int(response["ContentLength"])
+    heads: Dict[str, Tuple[str, int]] = {}
+    for key in keys:
+        response = client.head_object(Bucket=bucket, Key=key)
+        heads[key] = (response["ETag"].strip('"'), int(response["ContentLength"]))
 
+    # One line per object, so changing any of them invalidates the cached copy.
+    want = "".join(f"{key} {etag}\n" for key, (etag, _) in heads.items())
     marker = dest / ETAG_MARKER
-    cached = marker.read_text().strip() if marker.is_file() else None
-    corpus_root = resolve_corpus_root(dest)
-    if cached == etag and corpus_root is not None:
-        logging.info(f"++ Corpus already up to date at {corpus_root}")
-        return corpus_root
-    if cached and cached != etag:
-        logging.info(f"++ Cached corpus is stale (have {cached}, want {etag})")
+    cached = marker.read_text() if marker.is_file() else None
+    found = find_codec_dirs(dest)
+    if cached == want and found:
+        logging.info(f"++ Corpus already up to date at {dest}")
+        return found
+    if cached and cached != want:
+        logging.info("++ Cached corpus is stale; fetching again")
 
-    download_corpus(client, bucket, key, dest, size)
-    marker.write_text(etag + "\n")
+    download_corpus(client, bucket, heads, dest)
+    marker.write_text(want)
 
-    corpus_root = resolve_corpus_root(dest)
-    if corpus_root is None:
-        expected = ", ".join(sorted(n for names in CODEC_DIRS.values() for n in names))
+    found = find_codec_dirs(dest)
+    if not found:
+        expected = ", ".join(sorted(CODEC_DIR_PREFIXES.values()))
         raise RuntimeError(
-            f"Extracted s3://{bucket}/{key} into {dest} but found none of "
-            f"[{expected}] containing Streams/ and MD5/. The archive layout is "
-            "not what this script expects."
+            f"Extracted {len(keys)} archive(s) from s3://{bucket} into {dest} but "
+            f"found no folder named for [{expected}] containing Streams/ and "
+            "MD5/. The archive layout is not what this script expects."
         )
-    found = find_codec_dirs(corpus_root)
     logging.info(
-        f"++ Corpus ready at {corpus_root}: "
+        f"++ Corpus ready at {dest}: "
         + ", ".join(f"{c}={p.name}" for c, p in found.items())
     )
-    return corpus_root
+    return found
 
 
-def resolve_corpus(args: argparse.Namespace) -> Optional[Path]:
-    """Locate the corpus, fetching it if needed. None means 'skip the sweep'."""
+def resolve_corpus(args: argparse.Namespace) -> Optional[Dict[str, Path]]:
+    """Locate the per-codec folders, fetching them if needed.
+
+    None means 'skip the sweep', which is distinct from an empty mapping.
+    """
     if args.conformance_dir is not None:
         corpus = args.conformance_dir.resolve()
-        if not find_codec_dirs(corpus):
+        found = find_codec_dirs(corpus)
+        if not found:
             raise FileNotFoundError(
                 f"No conformance corpus at {corpus}: expected per-codec folders "
                 "each containing Streams/ and MD5/."
             )
-        return corpus
+        return found
 
     blocker = fetch_feasibility()
     if blocker is not None:
@@ -380,7 +444,10 @@ def resolve_corpus(args: argparse.Namespace) -> Optional[Path]:
         logging.warning("")
         return None
 
-    return fetch_corpus(args.bucket, args.key, default_corpus_dir(), args.region)
+    keys = [k.strip() for k in args.keys.split(",") if k.strip()]
+    if not keys:
+        raise ValueError("--keys selected no objects to download.")
+    return fetch_corpus(args.bucket, keys, default_corpus_dir(), args.region)
 
 
 # --------------------------------------------------------------------------
@@ -515,23 +582,22 @@ def main() -> int:
         )
 
     requested = [c.strip().upper() for c in args.codecs.split(",") if c.strip()]
-    unknown = [c for c in requested if c not in CODEC_DIRS]
+    unknown = [c for c in requested if c not in CODEC_DIR_PREFIXES]
     if unknown:
         raise ValueError(
             f"Unknown codec(s): {', '.join(unknown)}. "
-            f"Choose from {', '.join(CODEC_DIRS)}."
+            f"Choose from {', '.join(CODEC_DIR_PREFIXES)}."
         )
     # Otherwise the sweep runs nothing and the all-PASSED check below is vacuously
     # true, which would report a clean pass for having done no work.
     if not requested:
         raise ValueError(
-            f"--codecs selected no codecs. Choose from {', '.join(CODEC_DIRS)}."
+            f"--codecs selected no codecs. Choose from {', '.join(CODEC_DIR_PREFIXES)}."
         )
 
-    corpus = resolve_corpus(args)
-    if corpus is None:
+    available = resolve_corpus(args)
+    if available is None:
         return 0
-    available = find_codec_dirs(corpus)
 
     env = os.environ.copy()
     setup_env(env, rocm_path)
@@ -557,9 +623,9 @@ def main() -> int:
             # passing over it is how a partial download ends up reporting green
             # having covered a quarter of the streams. Run a deliberate subset
             # with --codecs instead.
-            wanted = " or ".join(CODEC_DIRS[codec])
             logging.error(
-                f"++ {codec}: no {wanted} containing Streams/ and MD5/ under {corpus}"
+                f"++ {codec}: no {CODEC_DIR_PREFIXES[codec]}* folder containing "
+                "Streams/ and MD5/ was found in the corpus"
             )
             results[codec] = MISSING
             continue
