@@ -250,6 +250,7 @@ FailureOr<ParsedArguments> parse(Command &root, std::span<const std::string_view
     if (arg == "--") {
       positional_only = true;
       result.saw_separator = true;
+      result.positionals_before_separator = result.positional.size();
       continue;
     }
     if (arg.size() > 1 && arg.front() == '-') {
@@ -290,7 +291,14 @@ FailureOr<ParsedArguments> parse(Command &root, std::span<const std::string_view
 
 std::string format_help(const Command &command) {
   std::ostringstream out;
-  const auto write_positional_usage = [&]() { out << " [--] " << command.positional_usage(); };
+  const auto write_positional_usage = [&](bool separator_required) {
+    const std::string &usage = command.positional_usage();
+    if (usage.starts_with("--")) {
+      out << ' ' << usage;
+      return;
+    }
+    out << (separator_required ? " -- " : " [--] ") << usage;
+  };
   out << "Usage: " << command.path() << " [options]";
   const bool has_commands = !command.commands().empty();
   if (has_commands)
@@ -298,7 +306,7 @@ std::string format_help(const Command &command) {
   if (!command.positional_usage().empty()) {
     if (has_commands)
       out << "\n       " << command.path() << " [options]";
-    write_positional_usage();
+    write_positional_usage(has_commands);
   }
   out << "\n";
   for (const auto &group : command.groups()) {
@@ -309,7 +317,8 @@ std::string format_help(const Command &command) {
         out << ", " << alias;
       if (flag->info().value_mode == ValueMode::Required)
         out << ' '
-            << (flag->info().value_placeholder.empty() ? "VALUE" : flag->info().value_placeholder);
+            << (flag->info().value_placeholder.empty() ? kDefaultValuePlaceholder
+                                                       : flag->info().value_placeholder);
       out << "\n      " << flag->info().description << '\n';
     }
   }
