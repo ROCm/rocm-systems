@@ -99,6 +99,154 @@ namespace RcclUnitTesting
       return kernel;
     }
 
+    // AllReduce_RSxTmaLD_AGxTmaST on k x nRanks x CTAs deep chunks. A chunk is 4 warp tiles and a block 16
+    // warps, so a warp runs k / 4 deep-loop iterations: past the first it prefetches its next tile, and with
+    // k % 4 != 0 the last wave is short. kPeriod is prime, so a tile from the wrong iteration changes the sum.
+    constexpr int    kArTdmCtas      = 1;
+    constexpr size_t kArTdmChunk     = ncclSymkDeepBytePerChunk(sizeof(float));
+    constexpr size_t kArTdmWaves[]   = {5, 11};
+    constexpr size_t kArTdmGuard     = 4096;  // floats after recv that must keep the sentinel
+    constexpr float  kArTdmSentinel  = -5.0f;
+    constexpr float  kArTdmSendPad   = -3.0f;
+    constexpr char   kArTdmSkipFileEnv[] = "RCCL_UT_SYM_AR_TDM_SKIP_FILE";
+
+    float ReduceValue(int rank, size_t idx)
+    {
+      return static_cast<float>((rank + 1) * 4096 + static_cast<int>(idx % kPeriod));
+    }
+
+    float ReduceSum(int nRanks, size_t idx)
+    {
+      return static_cast<float>(nRanks * (nRanks + 1) / 2 * 4096 + nRanks * static_cast<int>(idx % kPeriod));
+    }
+
+    void RunAllReduceTdm()
+    {
+      if (!IsGfx1250() || !TDM_TOOLCHAIN_AVAILABLE)
+      {
+        SkipOrHandToParent(kArTdmSkipFileEnv, "AllReduce_RSxTmaLD_AGxTmaST needs gfx1250 and a TDM-capable build");
+        return;
+      }
+      int numDevices = 0;
+      HIP_CHECK(hipGetDeviceCount(&numDevices));
+      ASSERT_GE(numDevices, 2) << "the parent gate saw at least 2 GPUs";
+      const int nRanks = std::min(numDevices, kMaxRanks);
+      char      logPath[256];
+      snprintf(logPath, sizeof(logPath), "/tmp/rccl_sym_ar_tdm_%d.log", (int)getpid());
+      remove(logPath);
+      setenv("NCCL_DEBUG_FILE", logPath, 1);
+      ncclResetDebugInitInternal();
+
+      // The larger size also leaves kPeriod floats past the last full wave for the per-element tail.
+      std::vector<size_t> counts;
+      for (size_t k : kArTdmWaves) counts.push_back(k * nRanks * kArTdmCtas * kArTdmChunk / sizeof(float));
+      counts.back() += kPeriod;
+      const size_t maxCount  = *std::max_element(counts.begin(), counts.end());
+      const size_t winFloats = maxCount + kArTdmGuard;
+      const size_t winBytes  = winFloats * sizeof(float);
+
+      std::vector<ncclComm_t> comms(nRanks);
+      ASSERT_EQ(ncclSuccess, ncclCommInitAll(comms.data(), nRanks, nullptr));
+      std::vector<hipStream_t> streams(nRanks);
+      for (int i = 0; i < nRanks; i++)
+      {
+        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipStreamCreate(&streams[i]));
+      }
+
+      std::vector<RCCLTestHelpers::SymBuf> send, recv;
+      ncclResult_t regRes = RCCLTestHelpers::ncclSymBufAllocPerRank(comms, winBytes, send);
+      if (regRes == ncclSuccess)
+      {
+        regRes = RCCLTestHelpers::ncclSymBufAllocPerRank(comms, winBytes, recv);
+      }
+      // cuMem is on by default on gfx1250, so a failed registration is a failure, not a skip.
+      EXPECT_EQ(ncclSuccess, regRes) << ncclGetErrorString(regRes);
+
+      int                nCalls = 0;
+      std::vector<float> host(winFloats);
+      for (size_t count : counts)
+      {
+        if (regRes != ncclSuccess || ::testing::Test::HasFailure()) break;
+        SCOPED_TRACE("count " + std::to_string(count));
+        for (int i = 0; i < nRanks; i++)
+        {
+          int algo = -1, protocol = 0, channels = 0;
+          ASSERT_EQ(ncclSuccess, rcclGetCollImplInfo(comms[i], ncclFuncAllReduce, count, ncclFloat32, ncclSum,
+                                                     send[i].ptr, recv[i].ptr, /*graphCapturing=*/0, &algo, &protocol,
+                                                     &channels));
+          EXPECT_EQ(static_cast<int>(rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM), algo) << "rank " << i;
+        }
+
+        for (int i = 0; i < nRanks; i++)
+        {
+          HIP_CHECK(hipSetDevice(i));
+          std::fill(host.begin(), host.end(), kArTdmSendPad);
+          for (size_t k = 0; k < count; k++) host[k] = ReduceValue(i, k);
+          HIP_CHECK(hipMemcpy(send[i].ptr, host.data(), winBytes, hipMemcpyHostToDevice));
+          std::fill(host.begin(), host.end(), kArTdmSentinel);
+          HIP_CHECK(hipMemcpy(recv[i].ptr, host.data(), winBytes, hipMemcpyHostToDevice));
+        }
+
+        ASSERT_EQ(ncclSuccess, ncclGroupStart());
+        for (int i = 0; i < nRanks; i++)
+        {
+          HIP_CHECK(hipSetDevice(i));
+          ASSERT_EQ(ncclSuccess,
+                    ncclAllReduce(send[i].ptr, recv[i].ptr, count, ncclFloat32, ncclSum, comms[i], streams[i]));
+        }
+        ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+        nCalls++;
+        for (int i = 0; i < nRanks; i++)
+        {
+          HIP_CHECK(hipSetDevice(i));
+          HIP_CHECK(hipStreamSynchronize(streams[i]));
+        }
+
+        for (int i = 0; i < nRanks; i++)
+        {
+          HIP_CHECK(hipSetDevice(i));
+          HIP_CHECK(hipMemcpy(host.data(), recv[i].ptr, winBytes, hipMemcpyDeviceToHost));
+          size_t wrong = 0, firstWrong = 0;
+          for (size_t k = 0; k < winFloats; k++)
+          {
+            const float expected = k < count ? ReduceSum(nRanks, k) : kArTdmSentinel;
+            if (host[k] != expected && wrong++ == 0) firstWrong = k;
+          }
+          EXPECT_EQ(0u, wrong) << "rank " << i << ": " << wrong << " wrong floats, first at " << firstWrong
+                               << " (count " << count << ")";
+        }
+      }
+
+      // Rank 0 logs one line per launch; each must be the forced kernel on the pinned block count.
+      int           logged = 0;
+      std::ifstream log(logPath);
+      for (std::string line; std::getline(log, line);)
+      {
+        const std::string kernel = SymmetricKernelOnLine(line, "AllReduce");
+        if (kernel.empty()) continue;
+        logged++;
+        EXPECT_EQ("AllReduce_RSxTmaLD_AGxTmaST", kernel) << line;
+        EXPECT_EQ(std::to_string(kArTdmCtas), TokenAfter(line, "nchannels ")) << line;
+      }
+      EXPECT_EQ(nCalls, logged) << "symmetric AllReduce lines in " << logPath;
+
+      send.clear();
+      recv.clear();
+      for (int i = 0; i < nRanks; i++)
+      {
+        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipStreamDestroy(streams[i]));
+      }
+      for (auto& c : comms) ASSERT_EQ(ncclSuccess, ncclCommDestroy(c));
+      unsetenv("NCCL_DEBUG_FILE");
+      ncclResetDebugInitInternal();
+      if (!::testing::Test::HasFailure())
+      {
+        remove(logPath);
+      }
+    }
+
     void RunInPlace(ncclFunc_t coll, size_t sliceCount)
     {
       int numDevices = 0;
@@ -277,6 +425,32 @@ namespace RcclUnitTesting
   TEST(ReduceScatter, SymmetricInPlaceSlices)
   {
     RunBothSlices("ReduceScatter", ncclFuncReduceScatter);
+  }
+
+  // gfx1250 only: forces the TDM AllReduce so each warp runs more than one deep-loop iteration.
+  TEST(AllReduce, SymmetricTmaLdPrefetch)
+  {
+    if (TooFewGpus())
+    {
+      GTEST_SKIP() << "This test requires at least 2 GPUs.";
+    }
+    const std::string skipFile = "/tmp/rccl_sym_ar_tdm_skip_" + std::to_string(getpid());
+    std::remove(skipFile.c_str());
+    RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig("AllReduceTmaLdPrefetch", []() { RunAllReduceTdm(); })
+                         .withEnvironment({{"NCCL_SYM_KERNEL", "AllReduce_RSxTmaLD_AGxTmaST"},
+                                           {"NCCL_SYM_CTAS", std::to_string(kArTdmCtas)},
+                                           {"RCCL_IGNORE_ARCH_TABLE", "1"},
+                                           {"NCCL_DEBUG", "INFO"},
+                                           {"NCCL_DEBUG_SUBSYS", "TUNING"},
+                                           {kArTdmSkipFileEnv, skipFile}})
+                         .clearVariable("NCCL_ALGO")
+                         .clearVariable("NCCL_SYM_TMA_ENABLE")
+                         .withTimeout(kTimeout));
+    const std::string reason = TakeHandedSkip(skipFile);
+    if (!reason.empty())
+    {
+      GTEST_SKIP() << reason;
+    }
   }
 
   TEST(AllGather, SymmetricInPlaceSlices)
