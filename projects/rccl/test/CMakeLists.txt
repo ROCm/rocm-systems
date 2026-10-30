@@ -637,9 +637,10 @@ if(BUILD_TESTS)
     endif()
     target_compile_definitions(rccl-UnitTestsGinAnvilSdmaFactory PRIVATE ENABLE_ROCSHMEM_GIN)
     add_dependencies(rccl-UnitTestsGinAnvilSdmaFactory hipify_all)
-    # anvil.cpp links HSAKMT which transitively needs drm/drm_amdgpu/numa.
-    # Reuse the same cache variables as the MPI test block — find_library is
-    # a no-op when the result is already cached.
+    # This target compiles anvil.cpp directly (not via librccl) and links the
+    # static libhsakmt.a, so the linker must resolve hsakmt's drm*/numa_* refs at
+    # link time from libs on this line — hsakmt/numa/drm/drm_amdgpu are all
+    # required here (unlike targets that link librccl, which resolves them).
     find_library(_GIN_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
     find_library(_GIN_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
     if(NOT _GIN_DRM)
@@ -1265,25 +1266,15 @@ if(BUILD_TESTS)
     endif()
 
     # GIN device code is header-only (inlined into the test kernels), so the MPI
-    # test TU needs no -fgpu-rdc device link and nothing rocSHMEM. It just opts
-    # back in to the GIN backends (the blanket force-off above keeps them out of
-    # host-only TUs) and links the system libs librccl leaves undefined.
+    # test TU needs no -fgpu-rdc device link and nothing rocSHMEM. It only re-opts
+    # in to the GIN backends (the blanket force-off above keeps them out of
+    # host-only TUs). No system libs are linked: this target links librccl, which
+    # already resolves ibverbs/hsa/drm/numa transitively.
     if(ENABLE_ROCSHMEM_GIN AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
-      # Fall back to linking by bare name if the hint lookup misses (avoids injecting <VAR>-NOTFOUND into the link line).
-      find_library(_GIN_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-      find_library(_GIN_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-      if(NOT _GIN_DRM)
-        set(_GIN_DRM drm)
-      endif()
-      if(NOT _GIN_DRM_AMDGPU)
-        set(_GIN_DRM_AMDGPU drm_amdgpu)
-      endif()
       # Re-enable the GIN backends in the TU that launches their kernels (-U first
       # since the target opted out with =0; a second -D warns under -Wmacro-redefined).
       set_source_files_properties(transport/GinDeviceMPITests.cpp PROPERTIES
           COMPILE_OPTIONS "-UNCCL_GIN_ANVIL_SDMA_ENABLE;-DNCCL_GIN_ANVIL_SDMA_ENABLE=1;-UNCCL_GIN_ROCSHMEM_GDA_ENABLE;-DNCCL_GIN_ROCSHMEM_GDA_ENABLE=1")
-      target_link_libraries(${test_executable} PRIVATE
-          ibverbs hsa-runtime64 hsakmt numa ${_GIN_DRM} ${_GIN_DRM_AMDGPU})
     endif()
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
