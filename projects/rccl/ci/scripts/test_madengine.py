@@ -1260,12 +1260,17 @@ def previous_comparison(
     workload_name: str,
     scale: str,
     precision: str,
+    base_image: str,
 ) -> dict | None:
     """The latest earlier passing run's candidate row for this workload.
 
     Called before this run appends its own rows, so the latest match is the
-    previous run's. Same workload, scale and precision only: a ratio depends
-    on all three.
+    previous run's. Same workload, scale, precision and base image only: a
+    ratio depends on all four. The base image is the denominator -- a bump
+    moves the ratio with no change in the candidate, and since only passing
+    runs become references, matching across it would fail every night after
+    the bump with nothing to reset it. After a bump the first run has no
+    previous and becomes the new reference.
 
     Only runs whose own verdict was a pass count. A failed run's ratio would
     otherwise become the reference: a regression that failed one night would
@@ -1289,6 +1294,7 @@ def previous_comparison(
             and row.get("workload") == workload_name
             and row.get("scale") == scale
             and row.get("precision") == precision
+            and row.get("base_image") == base_image
             and row.get("verdict") == "pass"
             and isinstance(row.get("ratio"), (int, float))
             and _usable_metric(float(row["ratio"]))
@@ -1686,7 +1692,10 @@ def main() -> None:
             log.info(msg)
 
         # Read before Step 8 appends this run's rows, so it is the previous run.
-        prev = previous_comparison(results_dir, args.workload, scale, c["precision"])
+        prev = previous_comparison(
+            results_dir, args.workload, scale, c["precision"],
+            workload_config["base_image"],
+        )
         if prev is None:
             regression_msgs.append(
                 f"[{prec}] vs previous: no earlier comparison recorded — not scored"
@@ -1714,6 +1723,13 @@ def main() -> None:
     # Step 8: Append to datastore — one record per phase per precision, with
     # absolute values kept for trend analysis and the ratio on the candidate.
     extra = {
+        # What previous_comparison() keys the reference on: the stock
+        # image is the ratio's denominator.
+        "base_image": workload_config["base_image"],
+        # The run's own gate verdict, final by now: it covers the phase exit
+        # codes, RCCL verification and both regression checks. A later run
+        # takes only a passing one as its reference.
+        "verdict": "pass" if exit_code == 0 else "fail",
         "cluster": args.cluster,
         "overlay_image": overlay_image,
         "nodelist": allocation["nodelist"],
@@ -1721,10 +1737,6 @@ def main() -> None:
         # run_id names this test run; these name the RCCL binary it tested.
         "artifact_run_id": os.environ.get("ARTIFACT_RUN_ID", ""),
         "rccl_md5": rccl_fingerprint["md5"],
-        # The run's own gate verdict, final by now: it covers the phase exit
-        # codes, RCCL verification and both regression checks. A later run
-        # takes only a passing one as its reference.
-        "verdict": "pass" if exit_code == 0 else "fail",
     }
     phase_images = {
         BASELINE: workload_config["base_image"],
