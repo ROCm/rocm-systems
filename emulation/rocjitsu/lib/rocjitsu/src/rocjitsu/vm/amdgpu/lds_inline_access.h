@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/lds_writeback.h"
+
 #include <cstdint>
 
 namespace rocjitsu {
@@ -31,17 +33,47 @@ struct LdsAccessRequest {
   bool d16_lo = false;      ///< Loads write the lower 16 bits.
 };
 
+/// @brief A plain load after its LDS read: the data is in lane-major staging,
+/// and these are where and how the writeback stores it.
+struct LdsStagedLoad {
+  uint8_t *dst[4]; ///< Raw lanes of each destination VGPR.
+  uint64_t exec;
+  uint32_t wave;
+  bool sram_ecc;
+};
+
 /// @brief Completes DS accesses inside execute_impl() when the CU allows it,
 /// instead of routing them to the local memory pipeline.
-/// @details Both entry points return false, with no side effects, when the CU
+/// @details Every entry point returns false, with no side effects, when the CU
 /// keeps the routed order; the handler then sets its state on the instruction.
 class LdsInlineAccess {
 public:
-  /// @brief Plain single-address load or store, without a VectorMemState.
+  /// Largest per-lane footprint of a plain DS access (b128).
+  static constexpr uint32_t kMaxLaneBytes = 16;
+
+  /// @brief Plain single-address load, without a VectorMemState: the LDS read
+  /// out of line, then the writeback for the opcode's format @p F.
+  template <lds_writeback::DstFormat F>
+  static bool complete(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf) {
+    alignas(64) uint8_t staging[64 * kMaxLaneBytes];
+    LdsStagedLoad load;
+    if (!access(inst, req, wf, staging, load))
+      return false;
+    lds_writeback::write_back_as<F>(load.dst, load.sram_ecc, load.wave, load.exec, staging);
+    return true;
+  }
+
+  /// @brief Plain single-address store, without a VectorMemState.
   static bool complete(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf);
 
   /// @brief Every other DS form: run the routed path's access code on @p d.
   static bool complete(const Instruction &inst, VectorMemState &d, Wavefront &wf);
+
+private:
+  /// Steps 1-5 of a plain access: a store completes; a load stops with its data
+  /// in @p staging and its destination in @p load.
+  static bool access(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf,
+                     uint8_t *staging, LdsStagedLoad &load);
 };
 
 } // namespace amdgpu

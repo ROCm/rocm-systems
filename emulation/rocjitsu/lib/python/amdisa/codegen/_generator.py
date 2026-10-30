@@ -9328,8 +9328,20 @@ class CodeGenerator:
             fields.append('  .d16_hi = true,')
         if is_load and sem.d16_lo:
             fields.append('  .d16_lo = true,')
+        # Loads name their destination format, so the writeback is specialized
+        # per opcode (lds_writeback.h).
+        entry = 'amdgpu::LdsInlineAccess::complete'
+        if is_load:
+            fmt = [f'.elem_size = {sem.elem_size}', f'.num_elems = {sem.num_elems}']
+            if sem.sign_extend:
+                fmt.append('.sign_extend = true')
+            if sem.d16_hi:
+                fmt.append('.d16_hi = true')
+            if sem.d16_lo:
+                fmt.append('.d16_lo = true')
+            entry += f"<amdgpu::lds_writeback::DstFormat{{{', '.join(fmt)}}}>"
         return [
-            '  if (amdgpu::LdsInlineAccess::complete(*this, amdgpu::LdsAccessRequest{',
+            f'  if ({entry}(*this, amdgpu::LdsAccessRequest{{',
             *('  ' + f for f in fields),
             '      }, wf))',
             '    return;',
