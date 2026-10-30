@@ -84,6 +84,21 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
         self.assertTrue(
             all(self.option(c, '--suite') == 'iree,kernels,cts' for c in calls)
         )
+        self.assertTrue(all('-k' not in c['args'] for c in calls))
+
+    def test_ubsan_excludes_slow_simulator_cases_from_every_pass(self):
+        self.env['CORPUS_TEST_FAIL'] = '1'
+        result, calls = self.run_script('--ubsan', '--race-tests', '--rerun-failed')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        simulator = [c for c in calls if self.option(c, '--suite') != 'race']
+        self.assertTrue(any('--last-failed' in c['args'] for c in simulator))
+        for call in simulator:
+            self.assertEqual(
+                self.option(call, '-k'), 'not (rocblas_sgemm.large_2048x2048)'
+            )
+        race = [c for c in calls if self.option(c, '--suite') == 'race']
+        self.assertTrue(race)
+        self.assertTrue(all('-k' not in c['args'] for c in race))
 
     def test_race_uses_private_config_and_shared_launch_wrapper(self):
         result, calls = self.run_script(

@@ -244,7 +244,7 @@ std::array<uint32_t, 4> unpack_format(const Format &f, uint32_t selectors,
 // channel count. General DST_SEL routing is not an inverse of load swizzling.
 // CDNA1-4, RDNA1/2 and RDNA3.5 use this policy by extrapolation, without native
 // measurements. Rejection marks unsupported emulation, not a hardware fault.
-bool qualified_store_selectors(const Format &f, uint32_t selectors) {
+util::FailureOr<uint32_t> resolve_store_selectors(const Format &f, uint32_t selectors) {
   constexpr uint32_t identity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
   constexpr uint32_t reversed = 7 | (6 << 3) | (5 << 6) | (4 << 9);
   const uint32_t channels =
@@ -252,19 +252,23 @@ bool qualified_store_selectors(const Format &f, uint32_t selectors) {
   if (channels == 4) {
     constexpr uint32_t rgb = 4 | (5 << 3) | (6 << 6);
     constexpr uint32_t bgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
-    return selectors == identity || selectors == reversed || selectors == bgra ||
-           selectors == rgb || selectors == (rgb | (1 << 9));
+    if (selectors == identity || selectors == reversed || selectors == bgra || selectors == rgb ||
+        selectors == (rgb | (1 << 9)))
+      return selectors;
+    return util::Result::failure();
   }
+  if (channels == 1 && f.widths[0] == 32 && f.number == Number::Float && selectors == 0)
+    return 4u << 9; // Native gfx1100/gfx1201 resolve this view to A8 (W to R).
   if (channels == 1 && (selectors == identity || selectors == reversed || selectors == (4 << 9)))
-    return true; // Single-channel identity, WZYX, and A8 views were measured.
+    return selectors; // Single-channel identity, WZYX, and A8 views were measured.
   if (!channels)
-    return false;
+    return util::Result::failure();
   for (uint32_t channel = 0; channel < 4; ++channel) {
     const uint32_t selector = (selectors >> (channel * 3)) & 7;
     if (channel < channels ? selector != channel + 4 : selector > 1)
-      return false;
+      return util::Result::failure();
   }
-  return true;
+  return selectors;
 }
 
 void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> components,
@@ -318,11 +322,13 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
                                 std::span<const uint32_t> components, std::span<uint8_t> bytes,
                                 BufferFormatEncoding encoding, BufferStoreMissingChannel missing) {
   const auto decoded = decode(format, encoding);
-  if (decoded.failed() || components.empty() ||
-      !qualified_store_selectors(decoded.value(), selectors))
+  if (decoded.failed() || components.empty())
+    return util::Result::failure();
+  const auto resolved = resolve_store_selectors(decoded.value(), selectors);
+  if (resolved.failed())
     return util::Result::failure();
   const fp_mode::detail::ScopedFenv environment(0);
-  pack_format(decoded.value(), selectors, components, bytes, missing, encoding);
+  pack_format(decoded.value(), resolved.value(), components, bytes, missing, encoding);
   return util::Result::success();
 }
 
@@ -388,9 +394,12 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
       d.buffer_selectors = resolved;
     }
   }
-  if (!d.is_load && format < 0 &&
-      !qualified_store_selectors(d.decoded_buffer_format, d.buffer_selectors))
-    return util::Result::failure();
+  if (!d.is_load && format < 0) {
+    const auto resolved = resolve_store_selectors(d.decoded_buffer_format, d.buffer_selectors);
+    if (resolved.failed())
+      return util::Result::failure();
+    d.buffer_selectors = resolved.value();
+  }
   return true;
 }
 
