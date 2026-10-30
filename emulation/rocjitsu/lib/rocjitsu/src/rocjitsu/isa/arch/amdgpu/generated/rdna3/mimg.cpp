@@ -92,6 +92,23 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
+void ImageLoadMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
 void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
   Mimg::implicit_uses(uses);
   const auto registers =
@@ -292,6 +309,23 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageStoreMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
 }
 
 void ImageStoreMimg::implicit_uses(RegisterSet &uses) const {

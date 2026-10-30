@@ -32,8 +32,8 @@ inline constexpr uint8_t kImageDim2dMsaa = 6;
 inline constexpr uint8_t kImageDim2dMsaaArray = 7;
 
 /// @brief Number of logical coordinates encoded by an instruction DIM.
-/// @details In DIM order the coordinates are X; X/Y; X/Y/Z; cube X/Y/Z;
-/// X/layer; X/Y/layer; X/Y/sample; and X/Y/sample/layer.
+/// @details In DIM order the coordinates are X; X/Y; X/Y/Z; cube X/Y/face;
+/// X/layer; X/Y/layer; X/Y/sample; and X/Y/layer/sample.
 inline uint32_t image_coordinate_count(uint32_t dim) {
   static constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
   return coordinates[dim & 7u];

@@ -763,6 +763,41 @@ TEST_P(RdnaDecodedImageAccessTest, DecodedLoadAndStorePrintNoncontiguousCoordina
   }
 }
 
+TEST_P(RdnaDecodedImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3)
+    GTEST_SKIP() << "RDNA3.5 intentionally renders NSA for all MIMG variants";
+
+  const test::Gfx11MimgEncoding mimg{.nsa = true,
+                                     .dim = amdgpu::kImageDim2d,
+                                     .unorm = true,
+                                     .dmask = 1,
+                                     .vaddr = 2,
+                                     .vdata = 8,
+                                     .srsrc = 2,
+                                     .nsa_word = 6};
+  struct Case {
+    uint16_t opcode;
+    const char *disassembly;
+    uint8_t address_words;
+  };
+  for (const Case test_case : {
+           Case{rdna3::kImageLoadMipMimg, "image_load_mip v8, v[2:4], s[8:15]", 3},
+           Case{rdna3::kImageAtomicAddMimg, "image_atomic_add v8, v[2:3], s[8:15]", 2},
+       }) {
+    SCOPED_TRACE(test_case.disassembly);
+    auto decoded = test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(*decoder_, rdna3::build_mimg,
+                                                                     test_case.opcode, mimg);
+    ASSERT_TRUE(decoded.succeeded());
+    const std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->disassemble(), test_case.disassembly);
+
+    const InstDefUse def_use(*inst);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 2, test_case.address_words}));
+    EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 6, 1}));
+  }
+}
+
 TEST_P(RdnaDecodedImageAccessTest,
        StoreThenLoadUsesPaddedRowsNonconsecutiveCoordinatesAndExecMask) {
   const uint32_t vb = wf_->vgpr_alloc().base;
