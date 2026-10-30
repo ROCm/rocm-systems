@@ -6728,6 +6728,13 @@ class CodeGenerator:
             ),
             result_writer=result_writer,
         )
+        from amdisa.codegen.execute.rj_arith_float import RjArithBody
+        from amdisa.codegen.execute.rj_arith_division import gen_division
+
+        rj_arith_division = gen_division(ctx)
+        if rj_arith_division is not None:
+            return RjArithBody(rj_arith_division)
+
         from amdisa.codegen.execute.rj_arith_float import (
             RjArithBody,
             gen_float_unary32,
@@ -6747,7 +6754,22 @@ class CodeGenerator:
         )
 
         if result_writer is None:
-            for handler in (gen_packed_binary16, gen_packed_fma16, gen_mixed_fma, gen_float_unary16, gen_float_unary32, gen_float_unary64, gen_float_binary64, gen_float_fma64, gen_float64_word, gen_float_binary16, gen_float_binary32, gen_float_ternary_selection, gen_float_fma16, gen_float_fma32):
+            for handler in (
+                gen_packed_binary16,
+                gen_packed_fma16,
+                gen_mixed_fma,
+                gen_float_unary16,
+                gen_float_unary32,
+                gen_float_unary64,
+                gen_float_binary64,
+                gen_float_fma64,
+                gen_float64_word,
+                gen_float_binary16,
+                gen_float_binary32,
+                gen_float_ternary_selection,
+                gen_float_fma16,
+                gen_float_fma32,
+            ):
                 rj_arith_body = handler(ctx)
                 if rj_arith_body is not None:
                     return RjArithBody(rj_arith_body)
@@ -14550,6 +14572,18 @@ class CodeGenerator:
                 if enc.enc_name.upper() in ('ENC_LDSDIR', 'ENC_VDSDIR'):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/lds_direct.h', False)
+                    )
+
+                from amdisa.codegen.execute.rj_arith_division import DIVISION_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in DIVISION_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_division_exec.h',
+                            False,
+                        )
                     )
 
                 from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES

@@ -1,0 +1,121 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// AVX2 division FMA with conditional scaling and guest rounding/status handling.
+// CPU-specific arithmetic stays here; public entry points select this backend.
+
+#include "fp/div_fmas_impl.h"
+#include "fp/x86_64/div_fmas_simd.h"
+
+#include <immintrin.h>
+#include <stdint.h>
+
+namespace {
+
+class Ops {
+public:
+  using V = __m256i;
+  using Mask = __m256i;
+  static constexpr int lanes = 4;
+
+  // Return whether any lane satisfies the supplied predicate.
+  static bool any(Mask m) { return !_mm256_testz_si256(m, m); }
+
+  // Broadcast the supplied bit pattern to each vector lane.
+  static V set(uint64_t a) { return _mm256_set1_epi64x(int64_t(a)); }
+
+  // Add corresponding integer lanes with unsigned wraparound.
+  static V add(V a, V b) { return _mm256_add_epi64(a, b); }
+
+  // Subtract corresponding integer lanes with unsigned wraparound.
+  static V sub(V a, V b) { return _mm256_sub_epi64(a, b); }
+
+  // Return the bitwise intersection of the vector operands.
+  static V band(V a, V b) { return _mm256_and_si256(a, b); }
+
+  // Return the bitwise union of the vector operands.
+  static V bor(V a, V b) { return _mm256_or_si256(a, b); }
+
+  // Return the bitwise exclusive-or of the vector operands.
+  static V bxor(V a, V b) { return _mm256_xor_si256(a, b); }
+
+  // Shift each lane left by the supplied count.
+  static V shl(V a, V b) { return _mm256_sllv_epi64(a, b); }
+
+  // Shift each unsigned lane right by the supplied count.
+  static V shr(V a, V b) { return _mm256_srlv_epi64(a, b); }
+
+  // Multiply the low unsigned 32-bit factors of each 64-bit lane, returning full 64-bit
+  // products.
+  static V mul32(V a, V b) { return _mm256_mul_epu32(a, b); }
+
+  // Return the lane mask for equal operands.
+  static Mask eq(V a, V b) { return _mm256_cmpeq_epi64(a, b); }
+
+  // Return the lane mask for signed a > b.
+  static Mask gt(V a, V b) { return _mm256_cmpgt_epi64(a, b); }
+
+  // Return the lane mask for unsigned a > b.
+  static Mask ugt(V a, V b) { return gt(bxor(a, set(1ULL << 63)), bxor(b, set(1ULL << 63))); }
+
+  // Intersect lane predicates.
+  static Mask both(Mask a, Mask b) { return band(a, b); }
+
+  // Unite lane predicates.
+  static Mask either(Mask a, Mask b) { return bor(a, b); }
+
+  // Complement a lane predicate.
+  static Mask inverse(Mask a) { return bxor(a, set(UINT64_MAX)); }
+
+  // Select values lane by lane according to the supplied predicate.
+  static V select(Mask m, V yes, V no) { return _mm256_blendv_epi8(no, yes, m); }
+
+  // Expand EXEC bits into the vector lane-predicate representation.
+  static Mask lane_mask(uint32_t exec_mask) {
+    return _mm256_setr_epi64x(-int64_t(exec_mask & 1), -int64_t((exec_mask >> 1) & 1),
+                              -int64_t((exec_mask >> 2) & 1), -int64_t((exec_mask >> 3) & 1));
+  }
+
+  // Load consecutive unsigned 32-bit words and widen them into 64-bit lanes.
+  static V load_words(const uint32_t *p) {
+    return _mm256_cvtepu32_epi64(_mm_loadu_si128(reinterpret_cast<const __m128i *>(p)));
+  }
+
+  // Store each 64-bit lane's low word to consecutive 32-bit destinations.
+  static void store_words(uint32_t *p, V value) {
+    auto words = _mm256_permutevar8x32_epi32(value, _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p), _mm256_castsi256_si128(words));
+  }
+
+  // Copy staged words to destination lanes selected by exec_mask.
+  static void masked_words(uint32_t *d, const uint32_t *p, uint32_t exec_mask) {
+    auto lane_exec_mask = _mm_setr_epi32(-int(exec_mask & 1), -int((exec_mask >> 1) & 1),
+                                         -int((exec_mask >> 2) & 1), -int((exec_mask >> 3) & 1));
+    _mm_maskstore_epi32(reinterpret_cast<int *>(d), lane_exec_mask,
+                        _mm_loadu_si128(reinterpret_cast<const __m128i *>(p)));
+  }
+};
+
+} // namespace
+
+namespace rocjitsu::arith {
+
+// Evaluate division FMA with conditional scaling. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+template <int Width>
+void div_fmas_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
+                        const uint32_t *const *a, const uint32_t *const *b,
+                        const uint32_t *const *c, uint32_t condition, uint64_t flags,
+                        uint32_t *state) {
+  division_vector_run<Width, Ops>(exec_mask, mode, d, a, b, c, condition, flags, state);
+}
+
+template void div_fmas_x86_64_v3<32>(uint32_t, uint32_t, uint32_t *const *, const uint32_t *const *,
+                                     const uint32_t *const *, const uint32_t *const *, uint32_t,
+                                     uint64_t, uint32_t *);
+template void div_fmas_x86_64_v3<64>(uint32_t, uint32_t, uint32_t *const *, const uint32_t *const *,
+                                     const uint32_t *const *, const uint32_t *const *, uint32_t,
+                                     uint64_t, uint32_t *);
+
+} // namespace rocjitsu::arith

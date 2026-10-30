@@ -3,6 +3,7 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
 #include <array>
@@ -185,6 +186,8 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             write(3 * stride, midpoint);
             wf->set_vcc_mask(1);
             cu->write_vgpr(base, 1, 0x12345678u);
+            cu->restore_arithmetic_policy(
+                {amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
             fmas->execute(*fmas, wf);
             EXPECT_EQ(result(), rounding == 1 && (denorm & 2u) ? 1u : 0u);
             EXPECT_EQ(cu->read_vgpr(base, 1), 0x12345678u);
@@ -196,6 +199,8 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             write(3 * stride, one);
             wf->set_trapsts(1u << 5); // An unrelated sticky cause must survive.
             wf->clear_pending_alu_causes();
+            // FP exception expectations explicitly select reporting; the default omits it.
+            cu->restore_arithmetic_policy({amdgpu::ArithmeticSemantics::BitExactEmpirical});
             fixup->execute(*fixup, wf);
             const uint32_t causes = (denorm & 1u) ? 1u << 1 : 1u << 2;
             EXPECT_EQ(result(), (denorm & 1u) ? one : inf);
@@ -205,6 +210,10 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
           }
         }
         for (bool clamp : {false, true}) {
+          // RDNA4 ISA 7.2.3.1 says exceptions precede CLAMP, but gfx1201
+          // suppresses new FIXUP flags under CLAMP; old sticky flags survive.
+          // Preserve the existing CDNA5 expectation (not measured here).
+          const uint32_t omod_causes = arch == ROCJITSU_CODE_ARCH_RDNA4 && clamp ? 0u : 1u << 3;
           wf->set_mode_raw(0);
           write(stride, inf - 1); // Finite quotient before OMOD.
           write(2 * stride, one);
@@ -218,8 +227,8 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
           wf->clear_pending_alu_causes();
           modified->execute(*modified, wf);
           EXPECT_EQ(result(), clamp ? one : inf);
-          EXPECT_EQ(wf->pending_alu_causes(), 1u << 3);
-          EXPECT_EQ(wf->trapsts(), (1u << 3) | (1u << 5));
+          EXPECT_EQ(wf->pending_alu_causes(), omod_causes);
+          EXPECT_EQ(wf->trapsts(), omod_causes | (1u << 5));
 
           // Directed FIXUP recovery can produce max-finite, which OMOD then
           // overflows. ABS/NEG on either original input determines that recovery.
@@ -247,8 +256,8 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
               const uint64_t expected =
                   absolute ? (clamp ? one : inf - 1) : (clamp ? 0 : (inf - 1) | sign);
               EXPECT_EQ(result(), expected);
-              EXPECT_EQ(wf->pending_alu_causes(), 1u << 3);
-              EXPECT_EQ(wf->trapsts(), (1u << 3) | (1u << 5));
+              EXPECT_EQ(wf->pending_alu_causes(), omod_causes);
+              EXPECT_EQ(wf->trapsts(), omod_causes | (1u << 5));
               EXPECT_EQ(cu->read_vgpr(base, 1), 0x12345678u);
             }
           }
