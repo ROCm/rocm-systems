@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "amd_smi/impl/amd_smi_utils.h"
+#include "amd_smi/impl/amd_smi_kfd_process_list.h"
 
 namespace {
 

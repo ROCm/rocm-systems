@@ -33,6 +33,7 @@
 #include "amd_smi/impl/amd_smi_clk_testing.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
+#include "amd_smi/impl/amd_smi_kfd_process_list.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/scoped_fd.h"
