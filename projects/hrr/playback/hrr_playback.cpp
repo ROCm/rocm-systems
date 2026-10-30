@@ -751,7 +751,37 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
     return hipSuccess;
   }
 
+  hrr_unmapped_note = {};
   hipError_t r = hrr_playback_dispatch[etype](ctx, ev.raw_payload.data());
+
+  // A pointer argument the handler could not translate decides the event,
+  // whatever the handler returned: see "Unmapped-pointer policy" in
+  // hip_playback.h.
+  if (hrr_unmapped_note.count > 0) {
+    ctx.unmapped_events.fetch_add(1, std::memory_order_relaxed);
+    // A strict abort names its event even in the silent warm-up pass.
+    if (log || ctx.strict_unmapped) {
+      char more[48] = "";
+      if (hrr_unmapped_note.count > 1)
+        snprintf(more, sizeof(more), " (and %u more)", hrr_unmapped_note.count - 1);
+      fprintf(stderr,
+              "[HRR] Unmapped: T%llu Event %zu (%s): recorded pointer 0x%llx%s is "
+              "in no allocation this replay knows — %s\n",
+              (unsigned long long)ev.header().thread_id, idx,
+              hrr::event_type_name(etype),
+              (unsigned long long)hrr_unmapped_note.first, more,
+              ctx.strict_unmapped ? "aborting replay (--strict-unmapped)"
+                                  : "event not replayed as recorded");
+    }
+    if (ctx.strict_unmapped) {
+      ctx.fatal_error.store(true, std::memory_order_release);
+      return r != hipSuccess ? r : hipErrorInvalidValue;
+    }
+    // Same as --continue-on-error: a refused call must not leave a sticky
+    // error for an unrelated later event to report.
+    (void)hipGetLastError();
+    return hipSuccess;
+  }
 
   if (r != hipSuccess) {
     if (ctx.continue_on_error) {
@@ -798,9 +828,11 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
 // Per-thread replay worker (MT path)
 // ---------------------------------------------------------------------------
 
+// `first` is archive.events.data(): diagnostics name an event by its archive
+// index, the same in either replay mode, not by its place in this thread.
 static void replay_thread(PlaybackContext& ctx,
                           const std::vector<const hrr::Event*>& events,
-                          bool log) {
+                          const hrr::Event* first, bool log) {
   for (size_t i = 0; i < events.size(); i++) {
     if (ctx.fatal_error.load(std::memory_order_acquire))
       return;
@@ -809,7 +841,7 @@ static void replay_thread(PlaybackContext& ctx,
       fprintf(stderr, "[HRR] T%llu [%zu] %s\n",
               (unsigned long long)ev.header().thread_id, i,
               hrr::event_type_name(ev.header().event_type));
-    (void)dispatch_event(ctx, ev, i, log);
+    (void)dispatch_event(ctx, ev, static_cast<size_t>(&ev - first), log);
   }
 }
 
@@ -922,7 +954,7 @@ static bool run_pass(PlaybackContext& ctx,
     for (uint64_t tid : archive.threads) {
       const auto& evlist = thread_events.at(tid);
       threads.emplace_back(replay_thread, std::ref(ctx),
-                           std::cref(evlist), log);
+                           std::cref(evlist), archive.events.data(), log);
     }
     for (auto& t : threads) t.join();
   } else {
@@ -1304,7 +1336,8 @@ static bool write_root_manifest(const fs::path& root,
 //
 // Returns false if this is not a multi-process root, leaving the caller to
 // handle the path as a single archive. Sets exit_code only when it returns true.
-static bool repair_root(const std::string& archive_path, int& exit_code) {
+static bool repair_root(const std::string& archive_path, uint64_t host_cap,
+                        int& exit_code) {
   fs::path root(archive_path);
   if (fs::exists(root / "events.bin")) return false;
   // The root is the path the user named, so any link in it is theirs and is
@@ -1355,9 +1388,11 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
     }
 
     // Scoped per iteration so each archive's events are released before the
-    // next is read — these run to gigabytes apiece.
+    // next is read — these run to gigabytes apiece. Each pid gets its own
+    // --max-host-bytes budget, released with its archive.
+    hrr::ByteBudget budget(host_cap);
     hrr::Archive archive;
-    if (!hrr::load_archive(dir.string(), archive)) {
+    if (!hrr::load_archive(dir.string(), archive, &budget)) {
       fprintf(stderr, "[HRR] repair: cannot load %s; skipping\n", dir.string().c_str());
       failed++;
       continue;
@@ -1385,8 +1420,9 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
 
 // The archive format version leads because it is the number that decides whether
 // this binary can read a given capture at all: the reader rejects a mismatch
-// ("Version mismatch: file=N reader=M"). The revision answers the separate
-// question of which build this is, which nothing else in the binary records.
+// ("Version mismatch in <path>: file=N reader=M"). The revision answers the
+// separate question of which build this is, which nothing else in the binary
+// records.
 static void print_version() {
   printf("hrr-playback (HIP Record & Replay)\n");
   printf("  archive format version : %u\n", static_cast<unsigned>(HRR_VERSION));
@@ -1441,6 +1477,10 @@ static void print_usage(const char* argv0) {
     "                        less the further past the first error they are.\n"
     "                        Also downgrades an unloadable code object at pre-load\n"
     "                        from fatal to a warning.\n"
+    "  --strict-unmapped     Abort at the first event with a pointer argument that\n"
+    "                        resolves in no allocation this replay knows. By\n"
+    "                        default that event's result is discarded, reported,\n"
+    "                        and counted in the summary's Unmapped line.\n"
     "  --sync-watchdog-ms N  Abort with a diagnostic if any device synchronize does\n"
     "                        not complete within N ms (catches hung/deadlocked\n"
     "                        kernels, e.g. StreamK flag spin-waits). 0 = disabled.\n"
@@ -1459,12 +1499,13 @@ static void print_usage(const char* argv0) {
     "  --max-threads N       Refuse a --multi-thread replay of an archive recording\n"
     "                        more than N threads. Default 256.\n"
     "  --max-events N        Refuse an archive with more than N events. Default 50000000.\n"
-    "  --max-host-bytes N    End the replay when host memory held for the archive\n"
+    "  --max-host-bytes N    Refuse an archive that would hold more than N bytes once\n"
+    "                        loaded, and end the replay when host memory held for it\n"
     "                        (blob caches, pinned buffers, read-backs) would pass N\n"
     "                        bytes. Default 17179869184 (16 GiB).\n"
-    "  --max-wall-seconds S  End the replay after S seconds (0 = no limit; at most\n"
-    "                        31536000, 365 days).\n"
-    "                        Default 3600.\n"
+    "  --max-wall-seconds S  End the run after S seconds, loading the archive\n"
+    "                        included (0 = no limit; at most 31536000, 365 days).\n"
+    "                        --repair is not limited. Default 3600.\n"
     "  --trace-kernels       Print one compact line before every kernel launch\n"
     "  --trace-sync          Print sync begin/done markers around kernel syncs\n"
     "  --progress-kernels N  Print heartbeat every N launched kernels\n"
@@ -1520,6 +1561,9 @@ static void print_usage(const char* argv0) {
     "  HIP_HRR_REPLAY_PROGRESS_KERNELS=N    same as --progress-kernels N\n"
     "  HIP_HRR_REPLAY_PROGRESS_SECONDS=S    same as --progress-seconds S\n"
     "  HIP_HRR_REPLAY_SYNC_WATCHDOG_MS=N    same as --sync-watchdog-ms N\n"
+    "  HIP_HRR_D2H_TOL=T:A:R  Accept a D2H read-back that differs from its blob when\n"
+    "                        every element, read as T (f32, bf16, f16 or f64), is\n"
+    "                        within A + R*|expected|. Default: byte-exact.\n"
     "\n"
     "Default mode: single-threaded, serialize GPU after pass, abort on first error.\n"
     "Use --sync-after-event to pinpoint the exact event causing a GPU fault or hang.\n",
@@ -1552,6 +1596,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--sync-after-launch")) ctx.sync_after_launch  = true;
     else if (!strcmp(argv[i], "--sync-after-event"))  ctx.sync_after_event   = true;
     else if (!strcmp(argv[i], "--continue-on-error")) ctx.continue_on_error  = true;
+    else if (!strcmp(argv[i], "--strict-unmapped"))   ctx.strict_unmapped    = true;
     else if (!strcmp(argv[i], "--sync-watchdog-ms") && i + 1 < argc) {
       char* end = nullptr;
       unsigned long long n = std::strtoull(argv[++i], &end, 10);
@@ -1682,11 +1727,36 @@ int main(int argc, char** argv) {
   if (ctx.scan_args_ordinal && !ctx.dump_ptrs_ordinal)
     ctx.dump_ptrs_ordinal = ctx.scan_args_ordinal;
 
+  if (const char* tol = std::getenv("HIP_HRR_D2H_TOL")) {
+    if (!hrr_parse_d2h_tol(tol, &ctx.d2h_tol)) {
+      fprintf(stderr, "[HRR] HIP_HRR_D2H_TOL expects <f32|bf16|f16|f64>:<atol>:<rtol> "
+                      "with finite non-negative tolerances, got \"%s\"\n", tol);
+      return 1;
+    }
+  }
+
   if (archive_path.empty()) {
     fprintf(stderr, "[HRR] No archive path specified\n");
     print_usage(argv[0]);
     return 1;
   }
+
+  // Wall-clock limit for the whole run, started before the archive is read: the
+  // load is bounded by it too (--info included), and it can be blocked in a
+  // read or a HIP call that no flag interrupts, so the watchdog ends the
+  // process. --repair keeps its own pace; it has no replay to bound and its
+  // load is still capped in bytes.
+  hrr::WallClockWatchdog wall_watchdog(
+      std::chrono::milliseconds(do_repair ? 0 : max_wall_secs * 1000),
+      [max_wall_secs] {
+        fprintf(stderr,
+                "[HRR] Fatal: still running after %llu s "
+                "(--max-wall-seconds); ending it\n",
+                (unsigned long long)max_wall_secs);
+        fflush(stdout);
+        fflush(stderr);
+        std::_Exit(124);
+      });
 
   // --info on an archive root prints the common process summary. Direct
   // pid-<pid> paths continue through load_archive for detailed event info.
@@ -1697,11 +1767,11 @@ int main(int argc, char** argv) {
   // Direct pid-<pid> paths fall through to the single-archive path below.
   if (do_repair) {
     int repair_exit = 0;
-    if (repair_root(archive_path, repair_exit)) return repair_exit;
+    if (repair_root(archive_path, ctx.host_budget.cap(), repair_exit)) return repair_exit;
   }
 
   hrr::Archive archive;
-  if (!hrr::load_archive(archive_path, archive)) return 1;
+  if (!hrr::load_archive(archive_path, archive, &ctx.host_budget)) return 1;
 
   // --info: print summary and exit without touching the GPU
   if (show_info) {
@@ -1739,19 +1809,6 @@ int main(int argc, char** argv) {
       return 1;
     }
   }
-
-  // Wall-clock limit for the whole replay. The replay can be blocked inside a
-  // HIP call that no flag interrupts, so the watchdog ends the process.
-  hrr::WallClockWatchdog wall_watchdog(
-      std::chrono::milliseconds(max_wall_secs * 1000), [max_wall_secs] {
-        fprintf(stderr,
-                "[HRR] Fatal: replay still running after %llu s "
-                "(--max-wall-seconds); ending it\n",
-                (unsigned long long)max_wall_secs);
-        fflush(stdout);
-        fflush(stderr);
-        std::_Exit(124);
-      });
 
   // Capture-address placement: hold every recorded hipMalloc and
   // hipMallocAsync range before hipInit, so the runtime cannot take it.
@@ -1901,6 +1958,7 @@ int main(int argc, char** argv) {
     ctx.total_kernel_ms  = 0.0;
     ctx.events_failed.store(0, std::memory_order_relaxed);
     ctx.code_objects_failed.store(0, std::memory_order_relaxed);
+    ctx.unmapped_events.store(0, std::memory_order_relaxed);
     // Warm-up drained the region cursor. advance_to is monotonic and would
     // leave the timed pass classifying against an empty live-set (--regions-strict
     // phantom failures, --guard-blocks guarding nothing).
@@ -2013,6 +2071,10 @@ int main(int argc, char** argv) {
          ctx.d2h_pass.load() - ctx.d2h_pass_tol.load(), ctx.d2h_pass_tol.load(),
          ctx.d2h_fail.load(),
          ctx.d2h_attempted.load() - ctx.d2h_pass.load() - ctx.d2h_fail.load());
+  if (ctx.host_snapshots_restored + ctx.host_snapshots_refused + ctx.host_snapshots_skipped)
+    printf("[HRR]   Pinned host snapshots: %zu restored, %zu refused, %zu skipped "
+           "(graph capture)\n", ctx.host_snapshots_restored.load(),
+           ctx.host_snapshots_refused.load(), ctx.host_snapshots_skipped.load());
 
   bool ok = (ctx.d2h_fail == 0);
 
@@ -2024,6 +2086,12 @@ int main(int argc, char** argv) {
            ctx.events_failed.load());
     ok = false;
   }
+  // Not a failure by itself (see "Unmapped-pointer policy" in hip_playback.h),
+  // but a replay that left recorded work out must say so.
+  if (ctx.unmapped_events.load() > 0)
+    printf("[HRR]   Unmapped       : %zu event(s) not replayed as recorded "
+           "(a pointer argument in no allocation)\n",
+           ctx.unmapped_events.load());
   if (ctx.code_objects_failed.load() > 0) {
     printf("[HRR]   Code objects   : %zu unloadable (continued)\n",
            ctx.code_objects_failed.load());

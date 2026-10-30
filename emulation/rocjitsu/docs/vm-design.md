@@ -173,6 +173,20 @@ ring extent. An unavailable access retains the snapshot and exact progress for a
 later retry; faulted or malformed work becomes terminal after any required cursor
 publication.
 
+`COPY_LINEAR_SWAP` supports disjoint, adjacent, and identical operand ranges.
+Partially overlapping ranges are unsupported: the processor rejects them before
+writing either operand and logs the packet operands `address_a` and `address_b`
+and the byte count. ROCr places the API destination in A and source in B. The
+queue becomes terminal and subsequent completion packets remain
+unexecuted. ROCr may accept such submissions, but that acceptance does not
+establish hardware overlap semantics. This conservative restriction is a
+simulator limitation.
+
+Malformed packet warnings label the root packet's starting byte cursor as
+`root_cursor`; the reported header can belong to that root packet or an indirect
+packet within it. A cursor-publication failure preserves this packet diagnostic,
+including when the cursor store faults after an unavailable retry.
+
 KFD and PCI/MES only adapt queue creation, producer notifications, interrupts,
 and reset into `GpuQueueRegistry`. MES may supply the initial device cursor captured
 from an MQD. KFD supplies the zero cursor it establishes during queue creation.
@@ -549,10 +563,64 @@ SC0/GLC is set. The L1 line is invalidated after the atomic to prevent
 stale reads. Supported integer atomics: swap, cmpswap, add, sub,
 smin/umin, smax/umax, and, or, xor, inc, dec.
 
+**Scalar atomics** (`s_atomic_*` and `s_atomic_*_x2`, CDNA1–4) bypass the
+L1 scalar cache and perform read-modify-write at L2; the atomic boundary's
+coherence epoch makes stale K$ lines refetch. The old value is returned to
+SDATA when GLC is set. Supported: swap, cmpswap, add, sub, smin/umin,
+smax/umax, and, or, xor, inc, dec. Compare-swap reads the source and then
+the compare value from SDATA and returns only the old value, to the low half.
+`s_buffer_atomic_*` are not yet implemented.
+
 **Cache management instructions:**
 
 - `s_dcache_inv` / `s_dcache_inv_vol` — invalidate the L1 scalar cache
 - `s_gl1_inv` — invalidate the L1 vector cache
+
+### Transaction observation boundaries
+
+Cache geometry does not establish transfer atomicity. `MemoryTransactionPolicy`
+selects an observation boundary independently of the 128-byte L1 vector and L2
+cache lines. A 256-byte wave access consists of multiple transactions and may
+observe different publication epochs in different transactions.
+
+| Target | Modeled boundary | Basis |
+|--------|------------------|-------|
+| gfx1250 | 128 bytes | RCCL communication protocol evidence |
+| Other or unknown targets, including gfx1251 | 128 bytes | Preserve existing compatibility behavior pending hardware qualification |
+| Internal `unqualified_64()` profile | 64 bytes | Boundary tests; no production target selects it |
+
+[RCCL's target selection](https://github.com/ROCm/rocm-systems/blob/9c35798820670b1a2301730c9b4ee90200731160/projects/rccl/src/include/archinfo.h#L40-L56)
+uses 128-byte LL records for gfx1250 and 64-byte records for other targets.
+Its [gfx1250 FIFO accesses](https://github.com/ROCm/rocm-systems/blob/9c35798820670b1a2301730c9b4ee90200731160/projects/rccl/src/device/prims_ll128.h#L15-L69)
+use system-scope `b128` operations (16 bytes per lane). That evidence supports
+a protocol model under the required access and buffer-ownership conditions;
+it does not establish an arbitrary concurrent snapshot guarantee, a fabric
+packet size, or the same behavior on every gfx12 target. Changing older target
+defaults to 64 bytes requires qualification of the relevant physical access
+paths. A cache-line size or fabric transfer width alone is insufficient.
+
+The backing memory owns the policy; each CU inherits it. No per-target override
+is enabled until qualification justifies changing a default. The policy bounds
+coalesced vector transfers and legacy mapped-memory copies. Permuted non-overlapping lanes gather/scatter
+through contiguous transactions; overlapping operands retain lane order.
+Lanes crossing a boundary contribute byte fragments to each neighboring
+transaction. Legacy mapped accesses synchronize on shared host-storage lock stripes, so
+aliases and independent XCD cache objects coordinate. Stripe hashing remains
+identical across policies: a shared stripe can serialize two adjacent 64-byte
+transfers without making their combined 128 bytes one observation. Failed host
+accesses release the stripes, and translated retries preserve completed requests.
+
+Translated backends retain one request per lane-ordered run at the default
+policy, avoiding extra transport/DMA round trips. Reordered runs are transaction
+bounded; the internal 64-byte profile also splits ordered requests for testing.
+
+Cache hits and fills may observe more bytes together than the selected boundary;
+the model does not force every permitted interleaving. External physical-memory
+backends still own their snapshot/publication contract, including translation
+span boundaries. Tests demonstrate 64/128-byte request boundaries with unchanged
+cache geometry, separate 64-byte publications, split 256-byte records, lane
+permutations, aliases, and retry progress. These are simulator regressions, not
+physical-hardware qualification results.
 
 ---
 
@@ -671,7 +739,7 @@ ROCm application
 
 | ioctl | Handler | Notes |
 |-------|---------|-------|
-| `GET_VERSION` | `get_version_ioctl` | Returns KFD_IOCTL_MAJOR/MINOR_VERSION |
+| `GET_VERSION` | `get_version_ioctl` | Returns the implemented KFD UAPI version 1.18; the shared header describes 1.19, whose metadata-ring queue creation is unsupported |
 | `GET_PROCESS_APERTURES_NEW` | `get_process_apertures_ioctl` | Returns `gpu_apertures(ordinal)` — LDS/scratch shifted by `kApertureStride` per GPU, with per-instance `gpu_id` |
 | `ACQUIRE_VM` | `acquire_vm_ioctl` | No-op (VM is always acquired) |
 | `ALLOC_MEMORY_OF_GPU` | `alloc_memory_ioctl` | Allocates host memory, assigns GPU VA from a linear bump allocator |

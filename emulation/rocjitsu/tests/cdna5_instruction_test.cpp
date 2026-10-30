@@ -3,6 +3,7 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
 
 #include <atomic>
 #include <mutex>
@@ -91,6 +92,7 @@ TEST(Gfx1250SimulationTest, VClsI32CountsLeadingSignBits) {
     SCOPED_TRACE(force_scalar ? "scalar" : "simd");
 
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto *wf = sim.dispatch_scratch_wf();
     ASSERT_NE(wf, nullptr);
     ASSERT_EQ(wf->wf_size(), 32u);
@@ -146,6 +148,7 @@ TEST(Gfx1250SimulationTest, PackedBf16ArithmeticRoundsOnceAndHonorsOverflowMode)
       Case{cdna5::kVPkFmaBf16Vop3p, 0x7f7f, 0x4000, 0x0000, 0x7f80, 0x7f7f},
   };
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
   std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
@@ -188,6 +191,7 @@ TEST(Gfx1250SimulationTest, SGetPcI64ReturnsNextInstructionAddress) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kKernelAddr, code, std::size(code));
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch(kernel_object, 32, 32);
@@ -195,7 +199,7 @@ TEST(Gfx1250SimulationTest, SGetPcI64ReturnsNextInstructionAddress) {
 
   ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
   const auto &wf = sim.snapshot->snapshots().front();
-  uint64_t entry_pc = kKernelAddr + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t);
+  uint64_t entry_pc = kKernelAddr + sizeof(rocjitsu::amdhsa::kernel_descriptor_t);
   EXPECT_EQ(wf.sgpr64(4), entry_pc + sizeof(uint32_t));
 }
 
@@ -208,6 +212,7 @@ TEST(Gfx1250SimulationTest, SAddPcI64SkipsRelativeToNextPc) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->sgpr(4), 2u);
@@ -226,6 +231,7 @@ TEST(Gfx1250SimulationTest, SAddPcI64NegativeLiteralJumpsBackwardFromNextPc) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code.data(), code.size());
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->sgpr(4), 2u);
@@ -243,6 +249,7 @@ TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
   ASSERT_NE(decrement, nullptr);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *wf = sim.cu()->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
 
@@ -262,7 +269,7 @@ TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
 TEST(Gfx1250SimulationTest, SSetPcI64JumpsToScalarAddress) {
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint32_t kTargetWord = 5;
-  uint64_t entry_pc = kKernelAddr + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t);
+  uint64_t entry_pc = kKernelAddr + sizeof(rocjitsu::amdhsa::kernel_descriptor_t);
   uint64_t target_pc = entry_pc + kTargetWord * sizeof(uint32_t);
   std::vector<uint32_t> code = {
       0xBE8400FFu,    static_cast<uint32_t>(target_pc), // s_mov_b32 s4, target_pc[31:0]
@@ -274,6 +281,7 @@ TEST(Gfx1250SimulationTest, SSetPcI64JumpsToScalarAddress) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kKernelAddr, code.data(), code.size());
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch(kernel_object, 32, 32);
@@ -287,7 +295,7 @@ TEST(Gfx1250SimulationTest, SSwapPcI64StoresReturnAddressAndJumps) {
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint32_t kReturnWord = 4;
   constexpr uint32_t kTargetWord = 5;
-  uint64_t entry_pc = kKernelAddr + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t);
+  uint64_t entry_pc = kKernelAddr + sizeof(rocjitsu::amdhsa::kernel_descriptor_t);
   uint64_t return_pc = entry_pc + kReturnWord * sizeof(uint32_t);
   uint64_t target_pc = entry_pc + kTargetWord * sizeof(uint32_t);
   std::vector<uint32_t> code = {
@@ -300,6 +308,7 @@ TEST(Gfx1250SimulationTest, SSwapPcI64StoresReturnAddressAndJumps) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kKernelAddr, code.data(), code.size());
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch(kernel_object, 32, 32);
@@ -320,6 +329,7 @@ TEST(Gfx1250SimulationTest, SBitreplicateB64B32DuplicatesEachSourceBit) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->sgpr64(4), 0xC000000000000003ULL);
@@ -332,6 +342,7 @@ TEST(Gfx1250SimulationTest, SGetShaderCyclesU64ReadsSimulationTime) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   sim.engine->schedule_event_async(sim.cp()->doorbell_event(), 17);
   ASSERT_TRUE(sim.engine->step());
   ASSERT_EQ(sim.engine->global_time(), 17u);
@@ -351,6 +362,7 @@ TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   sim.engine->schedule_event_async(sim.cp()->doorbell_event(), 23);
   ASSERT_TRUE(sim.engine->step());
   ASSERT_EQ(sim.engine->global_time(), 23u);
@@ -377,6 +389,7 @@ TEST(Gfx1250SimulationTest, SMovrelsReadsM0IndexedScalarSources) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->sgpr(8), 0x22222222u);
@@ -395,6 +408,7 @@ TEST(Gfx1250SimulationTest, SMovreldWritesM0IndexedScalarDestinations) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->sgpr(9), 0x55555555u);
@@ -410,6 +424,7 @@ TEST(Gfx1250SimulationTest, SMovrelsd2B32UsesSeparatePackedM0Offsets) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->sgpr(25), 0x88888888u);
@@ -427,6 +442,7 @@ TEST(Gfx1250SimulationTest, SplitNamedBarrierOpsReportIdleState) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->sgpr(4), 0u);
@@ -434,6 +450,7 @@ TEST(Gfx1250SimulationTest, SplitNamedBarrierOpsReportIdleState) {
 
 TEST(Gfx1250SimulationTest, NamedBarrierSignalIsfirstPreservesSccWithoutAllocation) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
 
@@ -451,6 +468,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierSignalIsfirstPreservesSccWithoutAllocati
 
 void expect_barrier_init_reads_implicit_m0(uint32_t init_encoding, uint32_t init_m0) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf0 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   auto *wf1 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
@@ -502,6 +520,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierInitM0ReadsMemberCountFromImplicitM0) {
 
 TEST(Gfx1250SimulationTest, NamedBarrierSynchronizesJoinedWavesAcrossPhases) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf0 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   auto *wf1 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
@@ -562,6 +581,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierSynchronizesJoinedWavesAcrossPhases) {
 
 TEST(Gfx1250SimulationTest, WorkgroupBarrierSignalAndWaitUseDedicatedCompletionState) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf0 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   auto *wf1 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
@@ -583,6 +603,7 @@ TEST(Gfx1250SimulationTest, WorkgroupBarrierSignalAndWaitUseDedicatedCompletionS
 
 TEST(Gfx1250SimulationTest, WorkgroupBarrierCompletesAfterUnsignaledWaveTerminates) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *waiting = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   auto *terminating = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
@@ -601,6 +622,7 @@ TEST(Gfx1250SimulationTest, WorkgroupBarrierCompletesAfterUnsignaledWaveTerminat
 
 TEST(Gfx1250SimulationTest, NamedBarrierMembershipPersistsAfterJoinedWaveTerminates) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *waiting = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   auto *terminating = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
@@ -622,6 +644,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierMembershipPersistsAfterJoinedWaveTermina
 
 TEST(Gfx1250SimulationTest, WorkgroupAndTrapBarriersKeepIndependentSignalCounts) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf0 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   auto *wf1 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
@@ -641,6 +664,7 @@ TEST(Gfx1250SimulationTest, WorkgroupAndTrapBarriersKeepIndependentSignalCounts)
 
 TEST(Gfx1250SimulationTest, WorkgroupSignalIsfirstAcceptsNegativeInlineBarrierId) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf0 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   auto *wf1 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
@@ -662,6 +686,7 @@ TEST(Gfx1250SimulationTest, WorkgroupSignalIsfirstAcceptsNegativeInlineBarrierId
 
 TEST(Gfx1250SimulationTest, NamedBarrierLeaveCompletesReducedMembership) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf0 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   auto *wf1 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
@@ -698,6 +723,7 @@ TEST(Gfx1250SimulationTest, AqlDescriptorAllocatesNamedBarriersForTwoWaveKernel)
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kKernelAddr, code, std::size(code), 104, 32, 2, false,
                                             false, false, 0, 0, 0, 0, 0, 1);
   test::AqlQueue queue(sim.memory, sim.cp());
@@ -726,6 +752,7 @@ TEST(Gfx1250SimulationTest, ParallelClusterBarrierSynchronizesWorkgroupsAcrossCo
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto plugin = std::make_unique<BarrierSpanPlugin>();
   auto *barrier_span = plugin.get();
   ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
@@ -768,6 +795,7 @@ TEST(Gfx1250SimulationTest, ClusterBarrierCompletesAfterWorkgroupTerminatesEarly
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
@@ -779,6 +807,7 @@ TEST(Gfx1250SimulationTest, ClusterBarrierCompletesAfterWorkgroupTerminatesEarly
 
 TEST(Gfx1250SimulationTest, VgprMsbModeTracksModeRegisterLayout) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: this test mutates and reads live wavefront MODE state.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -820,6 +849,7 @@ TEST(Gfx1250SimulationTest, SSetVgprMsbUpdatesWavefrontMode) {
   constexpr uint8_t kSetLayout = 0xB9;
   constexpr uint8_t kModeLayout = amdgpu::set_vgpr_msb_to_mode_layout(kSetLayout);
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const uint32_t code[] = {S_SET_VGPR_MSB | kSetLayout, S_ENDPGM_GFX12};
 
   // The s_set_vgpr_msb result lives in the wavefront MODE register; capture it at
@@ -856,6 +886,7 @@ TEST(Gfx1250SimulationTest, SetregModeClobbersVgprMsbFromUnshiftedSourceBits) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->vgpr_msb_mode, kExpectedSetLayout);
@@ -880,6 +911,7 @@ TEST(Gfx1250SimulationTest, SetVgprMsbImmediatelyAfterSetregModeIsDropped) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->vgpr_msb_mode, kExpectedSetLayout);
@@ -897,6 +929,7 @@ TEST(Gfx1250SimulationTest, InterveningNopEndsSetregVgprMsbHazard) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->vgpr_msb_mode, kFollowingSetLayout);
@@ -916,6 +949,7 @@ TEST(Gfx1250SimulationTest, NonModeSetregImm32DoesNotArmVgprMsbHazard) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->vgpr_msb_mode, kFollowingSetLayout);
@@ -932,6 +966,7 @@ TEST(Gfx1250SimulationTest, InterveningTrapEndsSetregVgprMsbHazard) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->vgpr_msb_mode, kFollowingSetLayout);
@@ -939,6 +974,7 @@ TEST(Gfx1250SimulationTest, InterveningTrapEndsSetregVgprMsbHazard) {
 
 TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: this test drives Operand read/write against live VGPR banks.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -975,6 +1011,7 @@ TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {
 
 TEST(Gfx1250SimulationTest, VMovDppReadsSelectedHighVgprBank) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1021,6 +1058,7 @@ TEST(Gfx1250SimulationTest, VMovDppReadsSelectedHighVgprBank) {
 
 TEST(Gfx1250SimulationTest, VMovDpp8ReadsSelectedHighVgprBank) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1062,6 +1100,7 @@ TEST(Gfx1250SimulationTest, VMovDpp8ReadsSelectedHighVgprBank) {
 
 TEST(Gfx1250SimulationTest, VMovDppPreservesMaskedHighDestinationLanes) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1104,6 +1143,7 @@ TEST(Gfx1250SimulationTest, VMovDppPreservesMaskedHighDestinationLanes) {
 
 TEST(Gfx1250SimulationTest, VAddDppReadsHighBanksAndPreservesMaskedHighDst) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1153,6 +1193,7 @@ TEST(Gfx1250SimulationTest, VAddDppReadsHighBanksAndPreservesMaskedHighDst) {
 
 TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1204,6 +1245,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
 
 TEST(Gfx1250SimulationTest, VAddF32Vop3DppPreservesMaskedHighDestinationLanes) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1251,6 +1293,7 @@ TEST(Gfx1250SimulationTest, VAddF32Vop3DppPreservesMaskedHighDestinationLanes) {
 
 TEST(Gfx1250SimulationTest, ModeBit27DoesNotIndexVmovDppOperands) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1290,6 +1333,7 @@ TEST(Gfx1250SimulationTest, ModeBit27DoesNotIndexVmovDppOperands) {
 
 TEST(Gfx1250SimulationTest, PackedTrue16SourcesIgnoreModeBit27) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: this test drives Operand reads against live VGPR banks.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1314,6 +1358,7 @@ TEST(Gfx1250SimulationTest, PackedTrue16SourcesIgnoreModeBit27) {
 
 TEST(Gfx1250SimulationTest, PackedTrue16InstructionIgnoresModeBit27) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1351,6 +1396,7 @@ TEST(Gfx1250SimulationTest, PackedTrue16InstructionIgnoresModeBit27) {
 
 TEST(Gfx1250SimulationTest, DsPermuteUsesIndependentHighOperandBanks) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1391,6 +1437,7 @@ TEST(Gfx1250SimulationTest, DsPermuteUsesIndependentHighOperandBanks) {
 
 TEST(Gfx1250SimulationTest, DsStore2addrUsesSrc2HighBank) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1441,6 +1488,7 @@ TEST(Gfx1250SimulationTest, DsStore2addrUsesSrc2HighBank) {
 
 TEST(Gfx1250SimulationTest, DsStorexchg2addrB64ExchangesBothAddresses) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
@@ -1498,6 +1546,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrB64ExchangesBothAddresses) {
 
 TEST(Gfx1250SimulationTest, NonReturningDsAddU32DoesNotWriteVgpr) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
@@ -1538,6 +1587,7 @@ TEST(Gfx1250SimulationTest, NonReturningDsAddU32DoesNotWriteVgpr) {
 
 TEST(Gfx1250SimulationTest, NonReturningDsAddU64DoesNotWriteVgpr) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
@@ -1582,6 +1632,7 @@ TEST(Gfx1250SimulationTest, NonReturningDsAddU64DoesNotWriteVgpr) {
 
 TEST(Gfx1250SimulationTest, DsStorexchg2addrStride64B32UsesScaledOffsetsForActiveLanes) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0x5u);
@@ -1660,6 +1711,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrStride64B32UsesScaledOffsetsForActiv
 
 TEST(Gfx1250SimulationTest, DsStorexchg2addrSameAddressAppliesBothExchangesInOrder) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
@@ -1700,6 +1752,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrSameAddressAppliesBothExchangesInOrd
 
 TEST(Gfx1250SimulationTest, DsTransposeLoadUsesHighDestinationBank) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1727,6 +1780,7 @@ TEST(Gfx1250SimulationTest, DsTransposeLoadUsesHighDestinationBank) {
 
 TEST(Gfx1250SimulationTest, Vop2FmamkUsesSrc2HighBank) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1769,6 +1823,7 @@ TEST(Gfx1250SimulationTest, VopdFmamkUsesSrc2HighBank) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
@@ -1790,6 +1845,7 @@ TEST(Gfx1250SimulationTest, VopdFmamkUsesSrc2HighBank) {
 
 TEST(Gfx1250SimulationTest, VSwapUsesIndependentSourceAndDestinationBanks) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1823,6 +1879,7 @@ TEST(Gfx1250SimulationTest, VSwapUsesIndependentSourceAndDestinationBanks) {
 
 TEST(Gfx1250SimulationTest, AsyncToLdsUsesDstAndSrc0HighBanks) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1862,6 +1919,7 @@ TEST(Gfx1250SimulationTest, AsyncToLdsUsesDstAndSrc0HighBanks) {
 
 TEST(Gfx1250SimulationTest, AddtidStoresUseSrc1HighBank) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1907,6 +1965,7 @@ TEST(Gfx1250SimulationTest, DsLoadTransposeIgnoresExecForAddressesAndMasks) {
   for (const uint64_t architectural_exec : {uint64_t{0}, uint64_t{1} << 7}) {
     SCOPED_TRACE(architectural_exec);
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(architectural_exec);
@@ -1940,6 +1999,7 @@ TEST(Gfx1250SimulationTest, DsLoadTransposeIgnoresExecForAddressesAndMasks) {
 
 TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0x3u);
@@ -2013,6 +2073,7 @@ TEST(Gfx1250SimulationTest, VMovrelsReadsM0RelativeVgpr) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code), 16);
   ASSERT_NE(wf, nullptr);
 
@@ -2037,6 +2098,7 @@ TEST(Gfx1250SimulationTest, VopdMulDx9ZeroOverridesNanProducts) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code.data(), code.size(), 16);
   ASSERT_NE(wf, nullptr);
 
@@ -2067,6 +2129,7 @@ TEST(Gfx1250SimulationTest, VopdFmaUsesSingleRounding) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code.data(), code.size(), 16);
   ASSERT_NE(wf, nullptr);
 
@@ -2092,12 +2155,55 @@ TEST(Gfx1250SimulationTest, VopdFmacUsesDestinationAccumulator) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *wf = dispatch_one_wave(sim, code, std::size(code), 16);
   ASSERT_NE(wf, nullptr);
 
   for (uint32_t lane = 0; lane < wf->wf_size; ++lane) {
     EXPECT_EQ(wf->vgpr(10, lane), 0x40E00000u) << "lane " << lane;
     EXPECT_EQ(wf->vgpr(9, lane), 0x40000000u) << "lane " << lane;
+  }
+}
+
+TEST(Gfx1250ExecutionTest, UnsupportedVopd3SlotDoesNotCommitMixedWidthPair) {
+  constexpr VopdOp kInvalidVopd3Op = static_cast<VopdOp>(63);
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (bool invalid_x : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << "invalid_x=" << invalid_x);
+    const auto words = make_vopd3_pair({.op = invalid_x ? kInvalidVopd3Op : VopdOp::AddF64,
+                                        .src0 = vopd_src0_vgpr(2),
+                                        .src1 = 4,
+                                        .src2 = 0,
+                                        .dst = 8},
+                                       {.op = invalid_x ? VopdOp::AddF64 : kInvalidVopd3Op,
+                                        .src0 = vopd_src0_vgpr(6),
+                                        .src1 = 10,
+                                        .src2 = 0,
+                                        .dst = 12});
+    // Invalid encodings cannot reach this fallback through the decoder.
+    cdna5::Vopd inst(reinterpret_cast<const cdna5::MachineInst *>(words.data()));
+    wf->set_exec(0xAAAA'AAAA);
+    wf->set_vcc(0x12345678);
+    wf->write_scc(1);
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      for (uint32_t reg = 0; reg < 16; ++reg)
+        sim.cu()->write_vgpr(base + reg, lane, 100u * reg + lane);
+    ASSERT_NE(inst.execute, nullptr);
+    wf->clear_instruction_execution_error();
+    ASSERT_NO_THROW(inst.execute(inst, wf));
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(wf->exec(), 0xAAAA'AAAAu);
+    EXPECT_EQ(wf->vcc(), 0x12345678u);
+    EXPECT_EQ(wf->read_scc(), 1u);
+    EXPECT_FALSE(wf->is_halted());
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      for (uint32_t reg = 0; reg < 16; ++reg)
+        EXPECT_EQ(sim.cu()->read_vgpr(base + reg, lane), 100u * reg + lane);
   }
 }
 
@@ -2108,6 +2214,7 @@ TEST(Gfx1250ExecutionTest, Vopd3CndmaskAppliesB32NegModifiers) {
       /*negx=*/0x1, /*negy=*/0x2);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
   ASSERT_NE(wf, nullptr);

@@ -57,10 +57,17 @@ extern std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_devrBoot
 extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapSend;
 extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv;
 
+extern std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
+                                  uint32_t)>
+    g_devrGinDevCommSetup;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                                  ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>
+                                  ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
+                                  uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int)>
     g_devrGinRegister;
-extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_devrGinDeregister;
+extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
+                                  uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS])>
+    g_devrGinDeregister;
 
 extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t, int, int64_t*)> g_devrSpaceAlloc;
 extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t)> g_devrSpaceFree;
@@ -78,6 +85,7 @@ extern std::function<ncclResult_t(struct ncclDevrState*, struct ncclDevrMemory*,
     g_devrAllocAndPopulateSegmentWindows;
 extern std::function<ncclResult_t(struct ncclDevrMemory*, struct ncclComm*)> g_devrVerifySegmentLayouts;
 extern std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos;
+extern std::function<ncclResult_t(void*, size_t, struct ncclComm*, bool, int)> g_devrCheckRegistrationSupport;
 
 // The CFT seams 2.31 added: the two team accessors, the two sizes
 // ncclDevrInitOnce caches, and whether the RMA proxy is in play. Defaults

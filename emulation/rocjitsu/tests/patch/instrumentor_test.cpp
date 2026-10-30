@@ -6,11 +6,13 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/amdhsa_metadata.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/builders/vector_builders.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
@@ -18,17 +20,15 @@
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
 
+#include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
+#include "../instrumentor_test_access.h"
 
 #include <gtest/gtest.h>
 
@@ -643,6 +643,29 @@ TEST(Instrumentor, RejectsAlignedOffsetPastLastInstruction) {
       << "error was: " << result.errors.front();
 }
 
+TEST(Instrumentor, RejectsCodeObjectsUsingTheBranchStack) {
+  // The anchor itself is an ordinary s_nop; the join elsewhere in .text is what
+  // makes liveness unreliable for every site.
+  auto image = make_gfx950_elf_with_text_words({
+      0xBF800000u, // s_nop 0
+      0xBE802E22u, // s_cbranch_join s34
+      0xBF810000u, // s_endpgm
+  });
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/0);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(
+      result.errors.front().find("conditional branch stack (s_cbranch_join at .text offset 4)"),
+      std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
 TEST(Instrumentor, RejectsOffsetInteriorToMultiWordInstruction) {
   // .text: [s_mov_b32 s0, 0xDEADBEEF (8 bytes)][s_nop 0]. Offset 4 lands in the
   // *interior* of the 8-byte instruction at offset 0, so no decoded instruction
@@ -920,6 +943,82 @@ TEST(InstrumentorPatch, PatchesEightByteAnchorEndToEnd) {
   EXPECT_EQ(relocated->size(), 8) << "relocated original must decode as an 8-byte instruction";
   EXPECT_NE(relocated->mnemonic().find("s_mov_b32"), std::string_view::npos)
       << "mnemonic was: " << relocated->mnemonic();
+}
+
+TEST(InstrumentorPatch, RejectsUnsupportedElfTableStridesBeforePatching) {
+  enum class Table { SectionHeaders, ProgramHeaders, Symbols, DynamicSymbols, Rela, Rel };
+  for (const auto table : {Table::SectionHeaders, Table::ProgramHeaders, Table::Symbols,
+                           Table::DynamicSymbols, Table::Rela, Table::Rel}) {
+    SCOPED_TRACE(static_cast<int>(table));
+    auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+    Elf64_Ehdr header{};
+    std::memcpy(&header, image.data(), sizeof(header));
+    const uint64_t strided_offset = image.size();
+    if (table == Table::SectionHeaders) {
+      constexpr uint16_t kStride = 2 * sizeof(Elf64_Shdr);
+      image.resize(image.size() + static_cast<size_t>(header.e_shnum) * kStride, 0);
+      for (size_t index = 0; index < header.e_shnum; ++index)
+        std::memcpy(image.data() + strided_offset + index * kStride,
+                    image.data() + header.e_shoff + index * sizeof(Elf64_Shdr), sizeof(Elf64_Shdr));
+      header.e_shoff = strided_offset;
+      header.e_shentsize = kStride;
+    } else if (table == Table::ProgramHeaders) {
+      constexpr uint16_t kStride = 2 * sizeof(Elf64_Phdr);
+      image.resize(image.size() + static_cast<size_t>(header.e_phnum) * kStride, 0);
+      for (size_t index = 0; index < header.e_phnum; ++index)
+        std::memcpy(image.data() + strided_offset + index * kStride,
+                    image.data() + header.e_phoff + index * sizeof(Elf64_Phdr), sizeof(Elf64_Phdr));
+      header.e_phoff = strided_offset;
+      header.e_phentsize = kStride;
+    } else if (table == Table::Rela || table == Table::Rel) {
+      std::vector<Elf64_Shdr> sections(header.e_shnum);
+      std::memcpy(sections.data(), image.data() + header.e_shoff,
+                  sections.size() * sizeof(Elf64_Shdr));
+      Elf64_Shdr relocations{};
+      relocations.sh_type = table == Table::Rela ? SHT_RELA : SHT_REL;
+      relocations.sh_offset = image.size();
+      relocations.sh_entsize = 2 * (table == Table::Rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel));
+      relocations.sh_size = relocations.sh_entsize;
+      image.resize(image.size() + relocations.sh_size, 0);
+      sections.push_back(relocations);
+      header.e_shoff = image.size();
+      header.e_shnum = static_cast<uint16_t>(sections.size());
+      image.resize(image.size() + sections.size() * sizeof(Elf64_Shdr));
+      std::memcpy(image.data() + header.e_shoff, sections.data(),
+                  sections.size() * sizeof(Elf64_Shdr));
+    } else {
+      std::vector<Elf64_Shdr> sections(header.e_shnum);
+      std::memcpy(sections.data(), image.data() + header.e_shoff,
+                  sections.size() * sizeof(Elf64_Shdr));
+      const auto symbols = std::find_if(sections.begin(), sections.end(), [](const auto &section) {
+        return section.sh_type == SHT_SYMTAB;
+      });
+      ASSERT_NE(symbols, sections.end());
+      const uint64_t old_offset = symbols->sh_offset;
+      const size_t count = symbols->sh_size / sizeof(Elf64_Sym);
+      constexpr uint64_t kStride = 2 * sizeof(Elf64_Sym);
+      image.resize(image.size() + count * kStride, 0);
+      for (size_t index = 0; index < count; ++index)
+        std::memcpy(image.data() + strided_offset + index * kStride,
+                    image.data() + old_offset + index * sizeof(Elf64_Sym), sizeof(Elf64_Sym));
+      symbols->sh_type = table == Table::DynamicSymbols ? SHT_DYNSYM : SHT_SYMTAB;
+      symbols->sh_offset = strided_offset;
+      symbols->sh_size = count * kStride;
+      symbols->sh_entsize = kStride;
+      std::memcpy(image.data() + header.e_shoff, sections.data(),
+                  sections.size() * sizeof(Elf64_Shdr));
+    }
+    std::memcpy(image.data(), &header, sizeof(header));
+
+    AmdGpuCodeObject obj(image.data(), image.size());
+    EXPECT_FALSE(obj.is_valid());
+    Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+    instrumentor.add_point_by_offset(0);
+    const auto result = instrumentor.patch();
+    EXPECT_TRUE(result.elf_bytes.empty());
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors.front(), "cannot instrument an invalid code object");
+  }
 }
 
 TEST(InstrumentorPatch, RejectsZeroQueuedPoints) {
@@ -1838,7 +1937,7 @@ TEST(InstrumentorSpill, PlanAccSpillsRejectsUnsupportedArch) {
 
 // AccVGPR spilling is CDNA-only. RDNA4 has a scratch emitter (nonzero offset cap)
 // but no AccVGPR file, so plan_acc_spills rejects it up front with a CDNA-only
-// diagnostic instead of letting emission throw UnimplementedInst later.
+// diagnostic instead of deferring the rejection to emission.
 TEST(InstrumentorSpill, PlanAccSpillsRejectsNonCdnaArch) {
   SpillManager spills(0, 4096);
   std::vector<SpillSlot> out;
@@ -1890,6 +1989,38 @@ TEST(InstrumentorProbePatch, RejectsGfx1251ProbeForGfx1250Destination) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("concrete target"), std::string::npos)
       << "error was: " << result.errors.front();
+}
+
+// Normal planning needs no spills for this probe, but emission must still reject
+// RDNA2's unsupported boundary drain without publishing a partial patch or ELF.
+TEST(InstrumentorProbePatch, RejectsNoSpillRdna2BoundaryDrainWithoutOutput) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA2;
+  const uint32_t nop = build_s_nop(0, arch);
+  auto target = make_amdgpu_kernel_elf({nop, nop}, /*private_bytes=*/0,
+                                       /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1030);
+  auto probe = make_amdgpu_probe_elf("rj_test_probe", {build_s_setpc_b64(30, arch)},
+                                     EF_AMDGPU_MACH_AMDGCN_GFX1030);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  Instrumentor instr(obj, arch);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  EXPECT_NO_THROW({
+    const auto result = instr.patch_with_debug_summaries();
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors.front(),
+              "probe-call emission: boundary drain: Unimplemented instruction: "
+              "all-loads wait for target architecture");
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.patches.empty());
+  });
 }
 
 TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
@@ -2203,6 +2334,90 @@ TEST(InstrumentorProbePatch, AnchorExecHighDwordOnAWave64KernelIsAccepted) {
   ASSERT_EQ(result.patches.size(), 1u);
 }
 
+namespace {
+
+// gfx1200 `global_store_b32 v0, v1, s[2:3]`, 12 bytes, from
+// `llvm-mc -triple=amdgcn -mcpu=gfx1200 -show-encoding`.
+constexpr std::array<uint32_t, 3> kGfx12GlobalStoreV0V1S2{0xee068002u, 0x00800000u, 0x00000000u};
+
+// gfx1200 `image_store v[0:3], [v4, v5, v6], s[8:15] dmask:0xf dim:SQ_RSRC_IMG_3D`,
+// 12 bytes, from `llvm-mc -triple=amdgcn -mcpu=gfx1200 -show-encoding`.
+constexpr std::array<uint32_t, 3> kGfx12ImageStoreV4V5V6{0xd3c18002u, 0x00001000u, 0x00060504u};
+
+// The store, then a return. With @p define_base the body first writes the
+// store's SGPR base pair, s[2:3].
+std::vector<uint32_t> gfx12_store_probe_body(bool define_base) {
+  std::vector<uint32_t> body;
+  if (define_base)
+    body.push_back(build_s_mov_b64(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  body.insert(body.end(), kGfx12GlobalStoreV0V1S2.begin(), kGfx12GlobalStoreV0V1S2.end());
+  body.push_back(build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4));
+  return body;
+}
+
+// Patch @p body into a Wave32 gfx1200 kernel, passing @p arg_dwords immediate
+// arguments in v0 upward.
+InstrumentedCodeObjectDebug patch_gfx12_probe(const std::vector<uint32_t> &body,
+                                              size_t arg_dwords) {
+  auto target = make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx1200_probe_elf("rj_test_probe", body);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args.assign(arg_dwords, probe_arg_imm(0));
+  instr.add_point(pt);
+  return instr.patch_with_debug_summaries();
+}
+
+} // namespace
+
+// A probe built around a 12-byte RDNA4 store, with every input defined or
+// passed, is admitted and copied into the patched .text word for word.
+TEST(InstrumentorProbePatch, Rdna4TwelveByteStoreProbeIsCopiedWhole) {
+  const std::vector<uint32_t> body = gfx12_store_probe_body(/*define_base=*/true);
+  const auto result = patch_gfx12_probe(body, /*arg_dwords=*/2);
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.patches.size(), 1u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  const size_t first = result.patches[0].probe_target_offset / sizeof(uint32_t);
+  ASSERT_LE(first + body.size(), text.size());
+  EXPECT_TRUE(std::equal(body.begin(), body.end(), text.begin() + first));
+}
+
+// Without the definition, the store reads s[2:3] before anything writes it, and
+// two argument dwords supply only v0 and v1.
+TEST(InstrumentorProbePatch, Rdna4TwelveByteStoreProbeWithAnUndefinedBaseIsRefused) {
+  const auto result =
+      patch_gfx12_probe(gfx12_store_probe_body(/*define_base=*/false), /*arg_dwords=*/2);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("reads s2, s3 before defining it"), std::string::npos)
+      << result.errors.front();
+}
+
+// An RDNA4 image store whose address registers, v4..v6, nothing defines. Its
+// decoder names no address register, and the four arguments supply the data
+// registers v0..v3, so without the image check this probe would be admitted.
+TEST(InstrumentorProbePatch, Rdna4ImageProbeIsRefused) {
+  std::vector<uint32_t> body;
+  for (const uint16_t sgpr : {8, 10, 12, 14}) // s[8:15], the image descriptor
+    body.push_back(build_s_mov_b64(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  body.insert(body.end(), kGfx12ImageStoreV4V5V6.begin(), kGfx12ImageStoreV4V5V6.end());
+  body.push_back(build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4));
+
+  const auto result = patch_gfx12_probe(body, /*arg_dwords=*/4);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("image instruction"), std::string::npos)
+      << result.errors.front();
+}
+
 // The ABI fixes the argument VGPRs at v0 upward, so unlike the envelope's SGPR
 // temps they cannot be re-picked to fit. The default fixture allocates 8 unified
 // VGPRs with the AGPR window at v4, leaving v0..v3 ordinary, so a fifth argument
@@ -2273,6 +2488,168 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
       << result.errors.front();
 }
 
+// DBI analyzes kernels and probes at one wave size per code object, and kernels
+// that mix Wave32 and Wave64 have none. Two Wave32 kernels are the control.
+TEST(InstrumentorProbePatch, MixedWaveSizesFailClosed) {
+  for (const std::array<bool, 2> wave32 : {std::array{true, false}, std::array{true, true}}) {
+    const bool mixed = !wave32[1];
+    SCOPED_TRACE(mixed ? "mixed" : "both Wave32");
+    auto target = make_amdgpu_two_kernel_elf(
+        {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4), build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)},
+        /*private_bytes=*/0, /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1200, wave32);
+    auto probe =
+        make_gfx1200_probe_elf("rj_test_probe", {build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4)});
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+    InstrumentationPoint pt;
+    pt.anchor_offset = 0;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    if (!mixed) {
+      EXPECT_TRUE(result.errors.empty()) << result.errors.front();
+      continue;
+    }
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_NE(result.errors.front().find("mix Wave32 and Wave64"), std::string::npos)
+        << result.errors.front();
+  }
+}
+
+namespace {
+
+// A probe-call point on @p target fails with @p error from both validate_points()
+// and patch(), while an inline-nop point at the same anchor passes both.
+void expect_only_probe_calls_refused(const std::vector<uint8_t> &target,
+                                     const std::vector<uint8_t> &probe, rj_code_arch_t arch,
+                                     uint64_t anchor_offset, std::string_view error) {
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  for (const bool validate : {true, false}) {
+    SCOPED_TRACE(validate ? "validate_points" : "patch");
+    Instrumentor probe_call(obj, arch);
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor_offset;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    probe_call.add_point(pt);
+    const std::vector<std::string> errors =
+        validate ? probe_call.validate_points().errors : probe_call.patch().errors;
+    ASSERT_FALSE(errors.empty());
+    EXPECT_NE(errors.front().find(error), std::string::npos) << errors.front();
+
+    Instrumentor inline_nop(obj, arch);
+    inline_nop.add_point_by_offset(anchor_offset);
+    const std::vector<std::string> nop_errors =
+        validate ? inline_nop.validate_points().errors : inline_nop.patch().errors;
+    EXPECT_TRUE(nop_errors.empty()) << nop_errors.front();
+  }
+}
+
+} // namespace
+
+// Both gates refuse a probe call before its body is analyzed. Each probe here
+// also reads s3 before defining it, and that must not be the error reported.
+TEST(InstrumentorProbePatch, ProbeCallGatesPrecedeProbeAnalysis) {
+  expect_only_probe_calls_refused(
+      make_gfx950_elf_with_two_nops(),
+      make_gfx950_probe_elf("rj_test_probe",
+                            {build_s_mov_b32(4, 3, ROCJITSU_CODE_ARCH_CDNA4), kProbeSetpcS30S31}),
+      ROCJITSU_CODE_ARCH_CDNA4, /*anchor_offset=*/4, "discovered kernel descriptor");
+  expect_only_probe_calls_refused(
+      make_amdgpu_two_kernel_elf(
+          {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4), build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)},
+          /*private_bytes=*/0, /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1200,
+          {true, false}),
+      make_gfx1200_probe_elf("rj_test_probe", {build_s_mov_b32(4, 3, ROCJITSU_CODE_ARCH_RDNA4),
+                                               build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4)}),
+      ROCJITSU_CODE_ARCH_RDNA4, /*anchor_offset=*/0, "mix Wave32 and Wave64");
+}
+
+// A Wave32 compare into s2 writes only s2, so a probe that then reads s3 reads a
+// register it never defined. The probe is analyzed at its kernel's wave size; at
+// Wave64 the compare writes s[2:3] and the same probe is admitted.
+TEST(InstrumentorProbePatch, ProbeReadingAboveAWave32CompareIsRefused) {
+  const auto compare =
+      rdna4::build_vop3(rdna4::kVCmpEqU32Vop3, {.vdst = 2, .src0 = 128, .src1 = 128});
+  const std::vector<uint32_t> body = {
+      compare[0],
+      compare[1],
+      rdna4::build_sop1(rdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 4})[0],
+      build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint32_t> text = {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+                                      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4)};
+  for (const bool wave32 : {true, false}) {
+    SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
+    auto target = wave32 ? make_gfx1200_wave32_kernel_elf(text, /*private_bytes=*/0)
+                         : make_gfx1200_kernel_elf(text, /*private_bytes=*/0);
+    auto probe = make_gfx1200_probe_elf("rj_test_probe", body);
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+    InstrumentationPoint pt;
+    pt.anchor_offset = 0;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    if (!wave32) {
+      EXPECT_TRUE(result.errors.empty()) << result.errors.front();
+      continue;
+    }
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_NE(result.errors.front().find("reads s3 before defining it"), std::string::npos)
+        << result.errors.front();
+  }
+}
+
+// The kernel holds s3 across the call and has no scratch to spill into. A probe
+// comparing into s2 clobbers only s2 in Wave32, so nothing live needs a spill;
+// in Wave64 it clobbers s[2:3] and the site is refused for want of scratch.
+TEST(InstrumentorProbePatch, ProbeCompareClobbersTheSgprAboveOnlyInWave64) {
+  const std::vector<uint32_t> text = {
+      build_s_mov_b32(/*sdst=*/3, scalar_positive_inline_u32(42), ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4), // The anchor.
+      rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 3, .vdst = 3})[0],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const auto compare =
+      rdna4::build_vop3(rdna4::kVCmpEqU32Vop3, {.vdst = 2, .src0 = 128, .src1 = 128});
+  const std::vector<uint32_t> body = {compare[0], compare[1],
+                                      build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4)};
+  for (const bool wave32 : {true, false}) {
+    SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
+    auto target = wave32 ? make_gfx1200_wave32_kernel_elf(text, /*private_bytes=*/0)
+                         : make_gfx1200_kernel_elf(text, /*private_bytes=*/0);
+    auto probe = make_gfx1200_probe_elf("rj_test_probe", body);
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+    InstrumentationPoint pt;
+    pt.anchor_offset = sizeof(uint32_t);
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    if (wave32) {
+      EXPECT_TRUE(result.errors.empty()) << result.errors.front();
+      continue;
+    }
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_NE(result.errors.front().find("must spill live registers"), std::string::npos)
+        << result.errors.front();
+  }
+}
+
 //==============================================================================
 // The DBI entry prologue
 //
@@ -2286,7 +2663,9 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
 namespace {
 
 // A probe declaring one argument sourced from the framework's entry storage,
-// which is what asks the instrumentor for a prologue.
+// which is what asks the instrumentor for a prologue. Patching one needs the
+// patch gates skipped; these tests inspect the planned prologue and never
+// dispatch it, so nothing needs the kernarg wrapper.
 InstrumentationPoint log_buffer_point(const AmdGpuCodeObject &probe_obj, uint64_t anchor_offset) {
   InstrumentationPoint pt;
   pt.anchor_offset = anchor_offset;
@@ -2325,14 +2704,77 @@ bool contains_words(const std::vector<uint32_t> &haystack, std::span<const uint3
 std::optional<uint16_t> storage_base_from_argument(const std::vector<uint32_t> &trampoline,
                                                    rj_code_arch_t arch) {
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
-    const uint32_t mov = build_v_mov_b32_src(/*vdst=*/0, sgpr, arch);
-    if (std::find(trampoline.begin(), trampoline.end(), mov) != trampoline.end())
+    const auto mov = build_v_mov_b32_src(/*vdst=*/0, sgpr, arch);
+    if (mov.failed())
+      return std::nullopt;
+    if (std::find(trampoline.begin(), trampoline.end(), mov.value()) != trampoline.end())
       return sgpr;
   }
   return std::nullopt;
 }
 
+// Five argument dwords: the buffer pointer, the Wave64 anchor mask, and a site
+// immediate, one more than the kernarg fixture's default allocation leaves
+// ordinary on CDNA.
+std::vector<ProbeArgValue> five_log_buffer_args() {
+  return {{ProbeArgSource::LogBufferPtrLo, 0},
+          {ProbeArgSource::LogBufferPtrHi, 0},
+          {ProbeArgSource::AnchorExecLo, 0},
+          {ProbeArgSource::AnchorExecHi, 0},
+          probe_arg_imm(0)};
+}
+
+InstrumentedCodeObjectDebug patch_five_log_buffer_args(const std::vector<uint8_t> &target) {
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt = log_buffer_point(probe_obj, /*anchor_offset=*/0);
+  pt.probe_args = five_log_buffer_args();
+  instr.add_point(pt);
+  InstrumentorTestAccess::skip_patch_gates(instr);
+  return instr.patch_with_debug_summaries();
+}
+
 } // namespace
+
+// A kernarg kernel that declares a wider VGPR window admits the fifth argument:
+// 16 unified VGPRs with the AGPR window at v8 leaves v0..v7 ordinary.
+TEST(InstrumentorEntryPrologue, AWiderVgprAllocationAdmitsAFifthArgument) {
+  namespace kd = rocjitsu::amdhsa;
+  const auto target = test::make_kernarg_kernel_elf(
+      {0xBF800000u, 0xBF800000u}, /*private_bytes=*/0, EF_AMDGPU_MACH_AMDGCN_GFX950,
+      kTestKernargSize, /*wave32=*/false, /*granulated_sgpr_count=*/3, /*entry_text_offset=*/0,
+      /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
+
+  // The patch outcome turns on the AGPR window alone, so check that the helper
+  // wrote both fields.
+  AmdGpuCodeObject obj(target.data(), target.size());
+  ASSERT_TRUE(obj.is_valid());
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(target, text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 1u);
+  const kd::kernel_descriptor_t &desc = kernels.front().descriptor;
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc1,
+                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+            1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+            1u);
+
+  const auto result = patch_five_log_buffer_args(target);
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  EXPECT_EQ(result.patches.size(), 1u);
+}
+
+// Control: the default allocation refuses the same point.
+TEST(InstrumentorEntryPrologue, TheDefaultVgprAllocationRefusesAFifthArgument) {
+  const auto result = patch_five_log_buffer_args(make_gfx950_kernarg_kernel_elf());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("v0..v4"), std::string::npos) << result.errors.front();
+  EXPECT_NE(result.errors.front().find("only 4 ordinary VGPRs"), std::string::npos)
+      << result.errors.front();
+}
 
 // The prologue loads its pointer out of the kernarg wrapper the CP delivers, so
 // a kernel that never receives a kernarg pointer has nothing to load through.
@@ -2345,6 +2787,7 @@ TEST(InstrumentorEntryPrologue, KernelWithoutAKernargPointerFailsClosed) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("ENABLE_SGPR_KERNARG_SEGMENT_PTR"), std::string::npos)
@@ -2366,6 +2809,7 @@ TEST(InstrumentorEntryPrologue, PointOnTheKernelEntryComposesWithThePrologue) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2409,6 +2853,7 @@ InstrumentedCodeObjectDebug patch_kernel_of_size(uint64_t text_bytes) {
 
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/text_bytes - 8));
+  InstrumentorTestAccess::skip_patch_gates(instr);
   return instr.patch_with_debug_summaries();
 }
 
@@ -2453,6 +2898,7 @@ TEST(InstrumentorEntryPrologue, StubKeepsANonzeroEntryResidue) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/12));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2486,6 +2932,7 @@ TEST(InstrumentorEntryPrologue, KernelEntryKeepsItsBytes) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2497,24 +2944,30 @@ TEST(InstrumentorEntryPrologue, KernelEntryKeepsItsBytes) {
   EXPECT_EQ(text[0], branch) << "the kernel entry was overwritten";
 }
 
-// patch() is the production entry point, and no runtime builds the kernarg
-// wrapper the prologue loads through, so it refuses before planning anything.
+// Both patch entry points require an explicit runtime binding for the kernarg
+// wrapper the prologue loads through; default options do not supply one.
 TEST(InstrumentorEntryPrologue, PatchRefusesEntryStorageWithoutAWrapper) {
   auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
 
-  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+  for (const bool with_summaries : {false, true}) {
+    SCOPED_TRACE(with_summaries ? "patch_with_debug_summaries()" : "patch()");
+    Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+    instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
-  auto result = instr.patch();
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_NE(result.errors.front().find("kernarg wrapper"), std::string::npos)
-      << result.errors.front();
-  EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
-      << result.errors.front();
+    const InstrumentedCodeObject result =
+        with_summaries ? instr.patch_with_debug_summaries() : instr.patch();
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_NE(result.errors.front().find("kernarg wrapper"), std::string::npos)
+        << result.errors.front();
+    EXPECT_NE(result.errors.front().find("CallerSuppliedWrapper"), std::string::npos)
+        << result.errors.front();
+    EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
+        << result.errors.front();
+  }
 }
 
 // Instrumentation does not support multi-kernel objects, so neither does the
@@ -2529,6 +2982,7 @@ TEST(InstrumentorEntryPrologue, MultipleKernelsFailClosed) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("multi-kernel code object"), std::string::npos)
@@ -2575,6 +3029,7 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2616,11 +3071,15 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
 
   // Both loads address through the kernarg pair at s[0:1], the only enabled
   // user SGPR in this descriptor.
-  const auto load_payload = build_s_load_dwordx2(
+  const auto load_payload_result = build_s_load_dwordx2(
       *storage_base, /*sbase=*/0, layout->payload_offsets.front(), ROCJITSU_CODE_ARCH_CDNA4);
-  const auto load_guest_ptr =
+  ASSERT_TRUE(load_payload_result.succeeded());
+  const auto load_payload = load_payload_result.value();
+  const auto load_guest_ptr_result =
       build_s_load_dwordx2(static_cast<uint16_t>(*storage_base + 2), /*sbase=*/0,
                            layout->original_kernarg_pointer_offset, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(load_guest_ptr_result.succeeded());
+  const auto load_guest_ptr = load_guest_ptr_result.value();
   EXPECT_TRUE(contains_words(prologue, load_payload))
       << "the prologue does not load the payload the record declares";
   EXPECT_TRUE(contains_words(prologue, load_guest_ptr));
@@ -2638,7 +3097,9 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
   // flight against, so a wait placed only ahead of the reads below it would be
   // too late. Both bounds are asserted, since either alone admits a placement
   // that would not work.
-  const uint32_t wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wait_result = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(wait_result.succeeded());
+  const auto wait = wait_result.value();
   const auto wait_it = std::find(prologue.begin(), prologue.end(), wait);
   ASSERT_NE(wait_it, prologue.end()) << "the prologue does not wait for its loads";
   const auto guest_ptr_load_it =
@@ -2670,6 +3131,7 @@ std::optional<uint16_t> patch_and_recover_storage(const std::vector<uint32_t> &p
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   if (!result.errors.empty()) {
     *error_out = result.errors.front();
@@ -2771,6 +3233,7 @@ TEST(InstrumentorEntryPrologue, StorageAvoidsAProbeThatDoesNotReadIt) {
   plain.probe_symbol = "rj_test_writer";
   instr.add_point(plain);
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2804,6 +3267,7 @@ TEST(InstrumentorKernargRecord, DeclaresTheWrapperThePrologueReadsFrom) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
@@ -2871,6 +3335,7 @@ TEST(InstrumentorKernargRecord, ObjectAlreadyDeclaringAKernargExtensionFailsClos
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
 
+  InstrumentorTestAccess::skip_patch_gates(instr);
   auto result = instr.patch_with_debug_summaries();
   ASSERT_FALSE(result.errors.empty()) << "a second kernarg record was appended";
   EXPECT_NE(result.errors.front().find("already carries"), std::string::npos)
@@ -2900,6 +3365,37 @@ TEST(InstrumentorKernargRecord, OrdinaryProbeCallDeclaresNothing) {
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   EXPECT_TRUE(test::section_bytes(patched, kKernargExtensionMetadataSectionName).empty());
+}
+
+TEST(InstrumentorKernargRecord, UnusedWrapperBindingRetainsTheOriginalKernargAbi) {
+  const std::vector<uint8_t> target = make_gfx950_kernarg_kernel_elf();
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("plain", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(target.data(), target.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const InstrumentationKind kind :
+       {InstrumentationKind::BeforeInst, InstrumentationKind::KernelEntry}) {
+    SCOPED_TRACE(static_cast<int>(kind));
+    InstrumentationOptions options;
+    options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
+    Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+    InstrumentationPoint point;
+    point.anchor_offset = kind == InstrumentationKind::KernelEntry ? 0 : 4;
+    point.kind = kind;
+    point.probe_obj = &probe;
+    point.probe_symbol = "plain";
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const Section *text = patched.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(result.elf_bytes, text->sectionOffset(), text->size());
+    ASSERT_EQ(kernels.size(), 1u);
+    EXPECT_EQ(kernels.front().descriptor.kernarg_size, kTestKernargSize);
+    EXPECT_EQ(result.resources.kernarg_bytes, kTestKernargSize);
+    EXPECT_TRUE(test::section_bytes(patched, kKernargExtensionMetadataSectionName).empty());
+  }
 }
 
 // An inline nop has nowhere to put arguments.
@@ -3159,24 +3655,33 @@ TEST(InstrumentorProbePatch, DescriptorlessProbeCallFailsClosed) {
 
 // Section 8: probe-call register spilling (end-to-end)
 
-// True if `cave` holds a SOP1 s_mov (opcode `mov_op`) whose scalar source (save,
+// True if `w` is a SOP1 s_mov (opcode `mov_op`) whose scalar source (save,
 // as_src=true) or scalar destination (restore, as_src=false) is `operand`. Used
 // to spot the special-state save/restore s_mov pair regardless of which dead SGPR
 // temp the planner happened to pick.
+[[nodiscard]] bool is_special_mov(uint32_t w, uint32_t mov_op, uint16_t operand, bool as_src) {
+  if ((w >> 23) != kSop1EncodingPrefix)
+    return false;
+  if (((w >> 8) & 0xFFu) != mov_op)
+    return false;
+  const uint16_t field =
+      as_src ? static_cast<uint16_t>(w & 0xFFu) : static_cast<uint16_t>((w >> 16) & 0x7Fu);
+  return field == operand;
+}
+
+// True if `cave` holds a special-state s_mov as is_special_mov() defines it.
 [[nodiscard]] bool cave_has_special_mov(const std::vector<uint32_t> &cave, uint32_t mov_op,
                                         uint16_t operand, bool as_src) {
-  for (uint32_t w : cave) {
-    if ((w >> 23) != kSop1EncodingPrefix)
-      continue;
-    if (((w >> 8) & 0xFFu) != mov_op)
-      continue;
-    const uint16_t field =
-        as_src ? static_cast<uint16_t>(w & 0xFFu) : static_cast<uint16_t>((w >> 16) & 0x7Fu);
-    if (field == operand)
-      return true;
-  }
-  return false;
+  return std::ranges::any_of(
+      cave, [&](uint32_t w) { return is_special_mov(w, mov_op, operand, as_src); });
 }
+
+// Anchors that read a register the envelope restores right before them. Same
+// encoding on gfx942 and gfx950 (llvm-mc).
+// global_load_dword v1, v0, s[8:9]: reads s[8:9] as saddr and v0 as the offset.
+constexpr std::array<uint32_t, 2> kGlobalLoadV1V0S8 = {0xDC508000u, 0x01080000u};
+// s_movrels_b32 s1, s2: reads s[2 + M0].
+constexpr uint32_t kMovrelsS1S2 = 0xBE812A02u;
 
 // DBI probe-call spill path: static e2e over CDNA3 (gfx942), CDNA4 (gfx950), and
 // RDNA4 (gfx1200). CDNA shares one GFX9 FLAT-scratch bracket on wave64; RDNA4 uses
@@ -3223,8 +3728,11 @@ protected:
   Caved patch_spill(const std::vector<uint32_t> &kernel_body,
                     const std::vector<uint32_t> &probe_body, uint32_t private_bytes,
                     uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0) {
-    auto target = a_.make_kernel(kernel_body, private_bytes, /*granulated_sgpr_count=*/3,
-                                 granulated_vgpr_count, accum_offset);
+    std::vector<uint8_t> target =
+        a_.make_kernel(kernel_body, private_bytes, /*granulated_sgpr_count=*/3,
+                       granulated_vgpr_count, accum_offset);
+    if (private_bytes != 0)
+      target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = a_.make_probe("rj_test_probe", probe_body);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -3306,7 +3814,10 @@ protected:
   // pending is stored final-valued, not stale.
   void expect_drain_before_store(const std::vector<uint32_t> &cave,
                                  const std::vector<uint32_t> &first_spill_op) {
-    const auto drain = build_wait_all_loads_complete(a_.arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_drain =
+        build_wait_all_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_drain.succeeded());
+    const auto &drain = maybe_drain.value();
     auto op = std::ranges::search(cave, first_spill_op).begin();
     ASSERT_NE(op, cave.end());
     EXPECT_NE(std::ranges::search(std::ranges::subrange(cave.begin(), op), drain).begin(), op)
@@ -3322,7 +3833,10 @@ protected:
   void expect_drain_after_return(const std::vector<uint32_t> &cave,
                                  const std::vector<uint32_t> &first_spill_op,
                                  const std::vector<uint32_t> &first_fill_load) {
-    const auto drain = build_wait_all_loads_complete(a_.arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_drain =
+        build_wait_all_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_drain.succeeded());
+    const auto &drain = maybe_drain.value();
     auto op = std::ranges::search(cave, first_spill_op).begin();
     ASSERT_NE(op, cave.end());
     auto fill = std::ranges::search(std::ranges::subrange(op, cave.end()), first_fill_load).begin();
@@ -3335,8 +3849,14 @@ protected:
   // (epilogue) at slot `off`. Checks the words appear, not their order or the
   // descriptor size -- callers assert the load wait, drain, and scratch growth.
   void expect_vgpr_spill_present(const std::vector<uint32_t> &cave, uint16_t vgpr, uint32_t off) {
-    const auto store = build_scratch_store_dword(vgpr, off, a_.arch);
-    const auto load = build_scratch_load_dword(vgpr, off, a_.arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(vgpr, off, a_.arch);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const auto &store = maybe_store.value();
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(vgpr, off, a_.arch);
+    ASSERT_TRUE(maybe_load.succeeded());
+    const auto &load = maybe_load.value();
     EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
         << "missing store for v" << vgpr;
     EXPECT_NE(std::ranges::search(cave, load).begin(), cave.end()) << "missing load for v" << vgpr;
@@ -3347,10 +3867,22 @@ protected:
   // the words appear, not their order or the descriptor size -- callers assert the
   // load wait, drain, and scratch growth.
   void expect_sgpr_spill_present(const std::vector<uint32_t> &cave, uint16_t sgpr, uint32_t off) {
-    const auto writelane = build_v_writelane_b32(/*bridge=*/0, sgpr, /*lane=*/0, a_.arch);
-    const auto store = build_scratch_store_dword(/*bridge=*/0, off, a_.arch);
-    const auto load = build_scratch_load_dword(/*bridge=*/0, off, a_.arch);
-    const auto readlane = build_v_readlane_b32(sgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_writelane =
+        build_v_writelane_b32(/*bridge=*/0, sgpr, /*lane=*/0, a_.arch);
+    ASSERT_TRUE(maybe_writelane.succeeded());
+    const auto &writelane = maybe_writelane.value();
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(/*bridge=*/0, off, a_.arch);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const auto &store = maybe_store.value();
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(/*bridge=*/0, off, a_.arch);
+    ASSERT_TRUE(maybe_load.succeeded());
+    const auto &load = maybe_load.value();
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_readlane =
+        build_v_readlane_b32(sgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    ASSERT_TRUE(maybe_readlane.succeeded());
+    const auto &readlane = maybe_readlane.value();
     EXPECT_NE(std::ranges::search(cave, writelane).begin(), cave.end())
         << "missing writelane for s" << sgpr;
     EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
@@ -3364,8 +3896,14 @@ protected:
   // load (epilogue) at slot `off`, both carrying the `acc` bit (a direct accumulator-file
   // spill, no bridge). Checks the words appear, not their order or the descriptor size.
   void expect_acc_spill_present(const std::vector<uint32_t> &cave, uint16_t acc, uint32_t off) {
-    const auto store = build_scratch_store_dword(acc, off, a_.arch, /*acc=*/true);
-    const auto load = build_scratch_load_dword(acc, off, a_.arch, /*acc=*/true);
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(acc, off, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const auto &store = maybe_store.value();
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(acc, off, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_load.succeeded());
+    const auto &load = maybe_load.value();
     EXPECT_NE(std::ranges::search(cave, store).begin(), cave.end())
         << "missing store for acc" << acc;
     EXPECT_NE(std::ranges::search(cave, load).begin(), cave.end()) << "missing load for acc" << acc;
@@ -3377,11 +3915,18 @@ protected:
   void expect_vgpr_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_vgpr_spill_present(cave, /*vgpr=*/2, /*off=*/64);
-    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
-    const auto store = build_scratch_store_dword(/*vgpr=*/2, /*off=*/64, a_.arch);
+    const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+    EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(/*vgpr=*/2, /*off=*/64, a_.arch);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const auto &store = maybe_store.value();
     expect_drain_before_store(cave, store);
-    expect_drain_after_return(cave, store,
-                              build_scratch_load_dword(/*vgpr=*/2, /*off=*/64, a_.arch));
+    const util::FailureOr<std::vector<uint32_t>> maybe_scratch_load_dword =
+        build_scratch_load_dword(/*vgpr=*/2, /*off=*/64, a_.arch);
+    ASSERT_TRUE(maybe_scratch_load_dword.succeeded());
+    expect_drain_after_return(cave, store, maybe_scratch_load_dword.value());
     EXPECT_EQ(caved.scratch, 68u);
   }
 
@@ -3392,12 +3937,19 @@ protected:
   void expect_sgpr_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_sgpr_spill_present(cave, /*sgpr=*/8, /*off=*/64);
-    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
-    const auto writelane = build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, a_.arch);
+    const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+    EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_writelane =
+        build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, a_.arch);
+    ASSERT_TRUE(maybe_writelane.succeeded());
+    const auto &writelane = maybe_writelane.value();
     const std::vector<uint32_t> writelane_words{writelane.begin(), writelane.end()};
     expect_drain_before_store(cave, writelane_words);
-    expect_drain_after_return(cave, writelane_words,
-                              build_scratch_load_dword(/*bridge=*/0, /*off=*/64, a_.arch));
+    const util::FailureOr<std::vector<uint32_t>> maybe_scratch_load_dword =
+        build_scratch_load_dword(/*bridge=*/0, /*off=*/64, a_.arch);
+    ASSERT_TRUE(maybe_scratch_load_dword.succeeded());
+    expect_drain_after_return(cave, writelane_words, maybe_scratch_load_dword.value());
     EXPECT_EQ(caved.scratch, 68u);
   }
 
@@ -3410,11 +3962,18 @@ protected:
   void expect_acc_spill(const Caved &caved) {
     const std::vector<uint32_t> &cave = caved.cave;
     expect_acc_spill_present(cave, /*acc=*/0, /*off=*/64);
-    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
-    const auto store = build_scratch_store_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true);
+    const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+    EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(/*vdata=*/0, /*off=*/64, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const auto &store = maybe_store.value();
     expect_drain_before_store(cave, store);
-    expect_drain_after_return(
-        cave, store, build_scratch_load_dword(/*acc=*/0, /*off=*/64, a_.arch, /*acc=*/true));
+    const util::FailureOr<std::vector<uint32_t>> maybe_scratch_load_dword =
+        build_scratch_load_dword(/*vdst=*/0, /*off=*/64, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_scratch_load_dword.succeeded());
+    expect_drain_after_return(cave, store, maybe_scratch_load_dword.value());
     EXPECT_EQ(caved.scratch, 68u);
   }
 
@@ -3428,7 +3987,9 @@ protected:
     expect_acc_spill_present(cave, /*acc=*/1, /*off=*/68);
     expect_acc_spill_present(cave, /*acc=*/2, /*off=*/72);
     expect_acc_spill_present(cave, /*acc=*/3, /*off=*/76);
-    EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(a_.arch)), cave.end());
+    const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(a_.arch);
+    ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+    EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
     EXPECT_EQ(caved.scratch, 80u);
   }
 
@@ -3496,7 +4057,10 @@ protected:
   void expect_boundary_drains_at_no_spill_site() {
     const std::vector<uint32_t> cave = patch_probe_clobbering(build_s_nop(0, arch()));
     ASSERT_FALSE(cave.empty());
-    const auto drain = build_wait_all_loads_complete(arch());
+    const util::FailureOr<std::vector<uint32_t>> maybe_drain =
+        build_wait_all_loads_complete(arch());
+    ASSERT_TRUE(maybe_drain.succeeded());
+    const auto &drain = maybe_drain.value();
     size_t count = 0;
     for (auto it = std::ranges::search(cave, drain).begin(); it != cave.end();
          it = std::ranges::search(std::ranges::subrange(it + drain.size(), cave.end()), drain)
@@ -3516,6 +4080,113 @@ protected:
         patch_expecting_result(kernel_elf({kMovV3V2, endpgm()}, /*private_bytes=*/0),
                                probe_elf({clobber, setpc()})),
         "FLAT_SCRATCH");
+  }
+
+  // The instructions a cave runs between a hazard's producer and the relocated
+  // anchor, counted the way GFX9 hardware counts wait states: s_nop N supplies N+1,
+  // any other instruction 1. `trace` names each instruction for failure messages.
+  struct WaitGap {
+    uint32_t wait_states = 0;
+    uint32_t nops = 0;
+    std::string trace;
+  };
+
+  // Gap between the last instruction before the relocated `anchor` for which
+  // `is_producer(words)` holds and the anchor itself. Walks decoded instructions, so
+  // a multi-word instruction counts once. nullopt (with a failure recorded if the
+  // anchor is missing) when either end is not found.
+  template <typename IsProducer>
+  std::optional<WaitGap> wait_gap_before_anchor(const std::vector<uint32_t> &cave,
+                                                std::span<const uint32_t> anchor,
+                                                IsProducer is_producer) {
+    const std::unique_ptr<Decoder> decoder = Decoder::create(a_.arch);
+    if (decoder == nullptr) {
+      ADD_FAILURE() << "no decoder for the fixture's arch";
+      return std::nullopt;
+    }
+    std::optional<WaitGap> gap;
+    for (size_t i = 0; i < cave.size();) {
+      const std::span<const uint32_t> rest(cave.data() + i, cave.size() - i);
+      if (rest.size() >= anchor.size() && std::ranges::equal(rest.first(anchor.size()), anchor))
+        return gap;
+      DecodeResult decoded = decoder->decode_window(rest);
+      if (decoded.failed()) {
+        ADD_FAILURE() << "cave word " << i << " does not decode";
+        return std::nullopt;
+      }
+      const std::unique_ptr<Instruction> inst = std::move(decoded).value();
+      const size_t words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
+      if (is_producer(rest.first(words))) {
+        gap = WaitGap{};
+      } else if (gap) {
+        const bool is_nop = inst->mnemonic() == "s_nop";
+        gap->wait_states += is_nop ? (rest.front() & 0xFFFFu) + 1 : 1;
+        gap->nops += is_nop ? 1 : 0;
+        gap->trace += "  " + std::string(inst->mnemonic()) + "\n";
+      }
+      i += words;
+    }
+    ADD_FAILURE() << "relocated anchor not found in the cave";
+    return std::nullopt;
+  }
+
+  // Gap after the envelope's last v_readlane_b32 restoring s`sgpr`, whichever bridge
+  // VGPR the planner picked.
+  std::optional<WaitGap> sgpr_restore_gap(const std::vector<uint32_t> &cave,
+                                          std::span<const uint32_t> anchor, uint16_t sgpr) {
+    // The bridge is an ordinary VGPR, so the scan covers the ordinary VGPR file
+    // (256 on both CDNA and RDNA).
+    constexpr uint16_t kVgprFileSize = 256;
+    return wait_gap_before_anchor(cave, anchor, [&](std::span<const uint32_t> words) {
+      for (uint16_t bridge = 0; bridge < kVgprFileSize; ++bridge) {
+        const util::FailureOr<std::array<uint32_t, 2>> readlane =
+            build_v_readlane_b32(sgpr, bridge, /*lane=*/0, a_.arch);
+        if (readlane.failed()) {
+          ADD_FAILURE() << "could not build the SGPR restore instruction";
+          return false;
+        }
+        if (std::ranges::equal(words, readlane.value()))
+          return true;
+      }
+      return false;
+    });
+  }
+
+  // Gap after the envelope's s_mov_b32 restoring M0.
+  std::optional<WaitGap> m0_restore_gap(const std::vector<uint32_t> &cave,
+                                        std::span<const uint32_t> anchor) {
+    return wait_gap_before_anchor(cave, anchor, [&](std::span<const uint32_t> words) {
+      return words.size() == 1 && is_special_mov(words.front(), sop1_op_mov_b32(a_.arch),
+                                                 scalar_operand_m0(a_.arch), /*as_src=*/false);
+    });
+  }
+
+  // s8 live at a global load that reads s[8:9] as saddr, and a probe that writes it:
+  // s8 is the site's only spill, so only the EXEC and VCC restores follow its
+  // v_readlane_b32, 2 of the 5 wait states the load needs. The envelope pads with
+  // s_nop 2 and no further.
+  void expect_sgpr_restore_padded_to_five() {
+    const Caved caved = patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
+                                    {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), setpc()},
+                                    /*private_bytes=*/64);
+    const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
+    ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
+    EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
+    EXPECT_EQ(gap->nops, 1u) << gap->trace;
+  }
+
+  // M0 restored right before an anchor that reads it: s_movrels_b32 indexes its
+  // source by M0, and needs 1 wait state after the SALU write. Nothing follows the
+  // M0 restore, so the envelope pads with s_nop 0. No register spills.
+  void expect_m0_restore_padded_to_one() {
+    const Caved caved =
+        patch_spill({kMovrelsS1S2, endpgm()},
+                    {build_s_mov_b32(scalar_operand_m0(arch()), /*inline 0=*/128, arch()), setpc()},
+                    /*private_bytes=*/0);
+    const std::optional<WaitGap> gap = m0_restore_gap(caved.cave, std::span(&kMovrelsS1S2, 1));
+    ASSERT_TRUE(gap) << "no s_mov_b32 restoring M0 before the anchor";
+    EXPECT_EQ(gap->wait_states, 1u) << gap->trace;
+    EXPECT_EQ(gap->nops, 1u) << gap->trace;
   }
 
   SpillArch a_;
@@ -3549,11 +4220,18 @@ TEST_F(Rdna4ProbeSpill, SpillsLiveClobberedVgpr) {
   expect_vgpr_spill(caved);
 
   const std::vector<uint32_t> &cave = caved.cave;
-  const auto store = build_scratch_store_dword(2, 64, arch());
-  const auto load = build_scratch_load_dword(2, 64, arch());
+  const util::FailureOr<std::vector<uint32_t>> maybe_store =
+      build_scratch_store_dword(2, 64, arch());
+  ASSERT_TRUE(maybe_store.succeeded());
+  const auto &store = maybe_store.value();
+  const util::FailureOr<std::vector<uint32_t>> maybe_load = build_scratch_load_dword(2, 64, arch());
+  ASSERT_TRUE(maybe_load.succeeded());
+  const auto &load = maybe_load.value();
   const auto store_it = std::ranges::search(cave, store).begin();
   const auto load_it = std::ranges::search(cave, load).begin();
-  const uint32_t store_wait = build_wait_stores_complete(arch());
+  const util::FailureOr<uint32_t> maybe_store_wait = build_wait_stores_complete(arch());
+  ASSERT_TRUE(maybe_store_wait.succeeded());
+  const uint32_t store_wait = maybe_store_wait.value();
   const auto store_wait_it = std::ranges::find(cave, store_wait);
   ASSERT_NE(store_wait_it, cave.end()) << "missing RDNA4 store-counter fence before the reload";
   EXPECT_LT(store_it, store_wait_it) << "store-counter fence must follow the store";
@@ -3706,6 +4384,91 @@ TEST_F(Rdna4ProbeSpill, PreservesExecFromImplicitCmpx) {
 TEST_F(Cdna3ProbeSpill, RejectsClobberedFlatScratch) { expect_rejects_clobbered_flat_scratch(); }
 TEST_F(Cdna4ProbeSpill, RejectsClobberedFlatScratch) { expect_rejects_clobbered_flat_scratch(); }
 
+// GFX9 (CDNA1-4) does not interlock a VALU write of an SGPR against a later
+// vector-memory read of it (5 wait states, LLVM GCNHazardRecognizer::
+// checkVMEMHazards), nor a SALU write of M0 against a later M0 reader (1,
+// checkReadM0Hazards). The envelope restores SGPRs with v_readlane_b32 and M0 with
+// s_mov_b32 just before the relocated anchor, so it pads with one s_nop covering
+// whatever the instructions after the restore leave short. DbiSim models no wait
+// states, so only the emitted sequence shows this.
+TEST_F(Cdna3ProbeSpill, SgprRestorePadsToFiveWaitStates) { expect_sgpr_restore_padded_to_five(); }
+TEST_F(Cdna4ProbeSpill, SgprRestorePadsToFiveWaitStates) { expect_sgpr_restore_padded_to_five(); }
+TEST_F(Cdna3ProbeSpill, M0RestorePadsToOneWaitState) { expect_m0_restore_padded_to_one(); }
+TEST_F(Cdna4ProbeSpill, M0RestorePadsToOneWaitState) { expect_m0_restore_padded_to_one(); }
+
+// The pad counts instructions, not words: the probe also writes v0, the load's live
+// offset, so one two-word scratch_load and its wait follow the readlane. With the
+// EXEC and VCC restores that is 4, and s_nop 0 supplies the fifth.
+TEST_F(Cdna4ProbeSpill, SgprRestoreCountsAReloadAsOneWaitState) {
+  const Caved caved =
+      patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
+                  {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), kMovV0Zero, setpc()},
+                  /*private_bytes=*/64);
+  const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
+  ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
+  EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
+  EXPECT_EQ(gap->nops, 1u) << gap->trace;
+}
+
+// AccVGPR reloads count the same way: the probe also writes acc0, which the guest
+// reads after the anchor, so one acc-bit scratch_load and its wait follow the
+// readlane, and s_nop 0 supplies the fifth wait state.
+TEST_F(Cdna4ProbeSpill, SgprRestoreCountsAnAccVgprReloadAsOneWaitState) {
+  const Caved caved = patch_spill(
+      {kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()},
+      {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), kAccWriteA0ZeroLo, kAccWriteA0ZeroHi,
+       setpc()},
+      /*private_bytes=*/64);
+  const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
+  ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
+  EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
+  EXPECT_EQ(gap->nops, 1u) << gap->trace;
+}
+
+// Two reloads (v0, and v2 which the guest reads after the anchor), their wait, and
+// the EXEC and VCC restores already supply all 5, so no s_nop is emitted.
+TEST_F(Cdna4ProbeSpill, SgprRestoreAfterTwoReloadsAddsNoNop) {
+  const Caved caved = patch_spill(
+      {kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], kMovV3V2, endpgm()},
+      {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), kMovV0Zero, kMovV2Zero, setpc()},
+      /*private_bytes=*/64);
+  const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
+  ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
+  EXPECT_EQ(gap->wait_states, 5u) << gap->trace;
+  EXPECT_EQ(gap->nops, 0u) << gap->trace;
+}
+
+// One s_nop serves both restores, sized by the larger shortfall rather than their
+// sum: the EXEC, VCC and M0 restores give the SGPR 3 of its 5, the M0 restore has
+// none of its 1, so s_nop 1.
+TEST_F(Cdna4ProbeSpill, SgprAndM0RestoresShareOneNop) {
+  const Caved caved =
+      patch_spill({kGlobalLoadV1V0S8[0], kGlobalLoadV1V0S8[1], endpgm()},
+                  {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()),
+                   build_s_mov_b32(scalar_operand_m0(arch()), /*inline 0=*/128, arch()), setpc()},
+                  /*private_bytes=*/64);
+  const std::optional<WaitGap> sgpr_gap = sgpr_restore_gap(caved.cave, kGlobalLoadV1V0S8, 8);
+  ASSERT_TRUE(sgpr_gap) << "no v_readlane_b32 restoring s8 before the anchor";
+  EXPECT_EQ(sgpr_gap->wait_states, 5u) << sgpr_gap->trace;
+  EXPECT_EQ(sgpr_gap->nops, 1u) << sgpr_gap->trace;
+  const std::optional<WaitGap> m0_gap = m0_restore_gap(caved.cave, kGlobalLoadV1V0S8);
+  ASSERT_TRUE(m0_gap) << "no s_mov_b32 restoring M0 before the anchor";
+  EXPECT_EQ(m0_gap->wait_states, 2u) << m0_gap->trace;
+  EXPECT_EQ(m0_gap->nops, 1u) << m0_gap->trace;
+}
+
+// GFX9-style s_nop padding is omitted on RDNA4; the resume s_wait_alu covers
+// the restored SGPR before the anchor's VALU read. Separate emitted-envelope
+// tests pin the internal SALU guards and the final restore drain. RDNA4 global
+// loads are 12 bytes and cannot be anchors, hence the VALU read.
+TEST_F(Rdna4ProbeSpill, SgprRestoreAddsNoNop) {
+  const Caved caved = patch_spill(
+      {kMovV3S8, endpgm()}, {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), setpc()}, 64);
+  const std::optional<WaitGap> gap = sgpr_restore_gap(caved.cave, std::span(&kMovV3S8, 1), 8);
+  ASSERT_TRUE(gap) << "no v_readlane_b32 restoring s8 before the anchor";
+  EXPECT_EQ(gap->nops, 0u) << gap->trace;
+}
+
 // A site that must spill on a code object with more than one kernel has no
 // unambiguous descriptor to grow, so it fails closed (instrumentor.cpp:768).
 TEST_F(Cdna4ProbeSpill, MultiKernelSpillFailsClosed) {
@@ -3746,7 +4509,9 @@ TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgprSgprAndAccVgpr) {
   expect_sgpr_spill_present(cave, /*sgpr=*/8, /*off=*/68);
   // AccVGPR acc0 -> slot 72, straight to scratch via the acc bit.
   expect_acc_spill_present(cave, /*acc=*/0, /*off=*/72);
-  EXPECT_NE(std::ranges::find(cave, build_wait_loads_complete(arch())), cave.end());
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(arch());
+  ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+  EXPECT_NE(std::ranges::find(cave, maybe_wait_loads_complete.value()), cave.end());
 
   // Three 4-byte slots on top of the 16-aligned base: 64 -> 76.
   EXPECT_EQ(caved.scratch, 76u);
@@ -3777,8 +4542,330 @@ TEST_F(Cdna4ProbeSpill, SpillsMultipleLiveClobberedSgprs) {
       patch_spill({kMovV3S8, kMovV4S9, endpgm()}, {kMovS8Zero, kMovS9Zero, setpc()}, 64);
   expect_sgpr_spill_present(caved.cave, /*sgpr=*/8, /*off=*/64);
   expect_sgpr_spill_present(caved.cave, /*sgpr=*/9, /*off=*/68);
-  EXPECT_NE(std::ranges::find(caved.cave, build_wait_loads_complete(arch())), caved.cave.end());
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(arch());
+  ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+  EXPECT_NE(std::ranges::find(caved.cave, maybe_wait_loads_complete.value()), caved.cave.end());
   EXPECT_EQ(caved.scratch, 72u);
+}
+
+TEST(InstrumentorKernelBoundary, EntryAndAccessAtTheSameAnchorRunInDispatchOrder) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::vector<uint8_t> image =
+      make_gfx950_kernel_elf({build_s_nop(0, kArch), build_s_endpgm(kArch)}, 0);
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("boundary", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  Instrumentor instrumentor(object, kArch);
+  Instrumentor debug_instrumentor(object, kArch);
+  for (const auto &[kind, offset] : {std::pair{InstrumentationKind::KernelEntry, uint64_t{0}},
+                                     std::pair{InstrumentationKind::BeforeInst, uint64_t{0}},
+                                     std::pair{InstrumentationKind::KernelExit, uint64_t{4}}}) {
+    InstrumentationPoint point;
+    point.kind = kind;
+    point.anchor_offset = offset;
+    point.probe_obj = &probe;
+    point.probe_symbol = "boundary";
+    instrumentor.add_point(point);
+    debug_instrumentor.add_point(point);
+  }
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.sites.size(), 3u);
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> words = section_words(patched, ".text");
+  const std::optional<uint64_t> entry = patched_entry_text_offset(patched);
+  ASSERT_TRUE(entry);
+  const auto target_of = [&](uint64_t offset) {
+    return offset + 4 + int64_t{static_cast<int16_t>(words.at(offset / 4))} * 4;
+  };
+  EXPECT_EQ(target_of(*entry), result.sites[0].instrumentation_offset);
+  const InstrumentedSite &entry_site = result.sites[0];
+  EXPECT_EQ(entry_site.guest_size, 0u);
+  EXPECT_EQ(target_of(entry_site.guest_offset), 0u);
+  EXPECT_EQ(target_of(0), result.sites[1].instrumentation_offset);
+  EXPECT_EQ(target_of(4), result.sites[2].instrumentation_offset);
+  EXPECT_EQ(words.at(result.sites[2].guest_offset / 4), build_s_endpgm(kArch));
+  EXPECT_EQ(result.sites[2].guest_offset / 4 + 1, words.size());
+
+  const InstrumentedCodeObjectDebug debug = debug_instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(debug.errors.empty()) << debug.errors.front();
+  EXPECT_EQ(debug.elf_bytes, result.elf_bytes);
+  ASSERT_EQ(debug.patches.size(), 3u);
+  ASSERT_TRUE(debug.patches[0].return_target);
+  EXPECT_EQ(debug.patches[0].return_target, 0u);
+  EXPECT_EQ(debug.patches[1].return_target, 4u);
+  EXPECT_FALSE(debug.patches[2].return_target);
+}
+
+TEST(InstrumentorKernelBoundary, RejectsIncorrectBoundaryOffsetsAndMissingProbes) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::vector<uint8_t> image =
+      make_gfx950_kernel_elf({build_s_nop(0, kArch), build_s_endpgm(kArch)}, 0);
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("boundary", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const InstrumentationKind kind :
+       {InstrumentationKind::KernelEntry, InstrumentationKind::KernelExit}) {
+    Instrumentor wrong_offset(object, kArch);
+    InstrumentationPoint point;
+    point.kind = kind;
+    point.anchor_offset = kind == InstrumentationKind::KernelEntry ? 4 : 0;
+    point.probe_obj = &probe;
+    point.probe_symbol = "boundary";
+    wrong_offset.add_point(point);
+    const InstrumentedCodeObject wrong = wrong_offset.patch();
+    EXPECT_FALSE(wrong.errors.empty());
+    EXPECT_TRUE(wrong.elf_bytes.empty());
+
+    Instrumentor missing_probe(object, kArch);
+    missing_probe.add_point_by_offset(0, kind);
+    const InstrumentedCodeObject missing = missing_probe.patch();
+    EXPECT_FALSE(missing.errors.empty());
+    EXPECT_TRUE(missing.elf_bytes.empty());
+  }
+}
+
+TEST(InstrumentorKernelBoundary, EntryDoesNotRelocateOrOverwriteATwelveByteInstruction) {
+  const std::vector<uint8_t> image = make_gfx1200_wave32_kernel_elf(
+      {kGfx12GlobalStoreV0V1S2[0], kGfx12GlobalStoreV0V1S2[1], kGfx12GlobalStoreV0V1S2[2],
+       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)},
+      0);
+  const std::vector<uint8_t> body =
+      make_gfx1200_probe_elf("boundary", {build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4)});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint point;
+  point.kind = InstrumentationKind::KernelEntry;
+  point.probe_obj = &probe;
+  point.probe_symbol = "boundary";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.sites.size(), 1u);
+  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_TRUE(result.patches.front().return_target);
+  EXPECT_EQ(result.patches.front().return_target, 0u);
+  EXPECT_EQ(result.sites.front().guest_size, 0u);
+  EXPECT_TRUE(result.patches.front().patched_anchor_bytes.empty());
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> words = section_words(patched, ".text");
+  ASSERT_GE(words.size(), 4u);
+  EXPECT_TRUE(
+      std::equal(kGfx12GlobalStoreV0V1S2.begin(), kGfx12GlobalStoreV0V1S2.end(), words.begin()));
+  const uint64_t branch_pc = result.sites.front().guest_offset;
+  const std::optional<int16_t> branch = compute_sopp_branch_simm16(branch_pc, 0);
+  ASSERT_TRUE(branch);
+  EXPECT_EQ(words.at(branch_pc / 4), build_s_branch(*branch, ROCJITSU_CODE_ARCH_RDNA4));
+}
+
+TEST(InstrumentorResources, ScratchGrowthWithoutMetadataPublishesNothing) {
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, 64);
+  const std::vector<uint8_t> original = image;
+  const std::vector<uint8_t> probe_image =
+      make_gfx950_probe_elf("scratch", {kMovV2Zero, kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+  Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint point;
+  point.probe_obj = &probe;
+  point.probe_symbol = "scratch";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("metadata"), std::string::npos);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+  EXPECT_EQ(image, original);
+}
+
+TEST(InstrumentorResources, ScratchGrowthAndWrapperShareMetadataPublication) {
+  for (const DbiKernargBinding binding :
+       {DbiKernargBinding::None, DbiKernargBinding::CallerSuppliedWrapper}) {
+    for (const uint32_t original_private : {64u, 127u}) {
+      SCOPED_TRACE(static_cast<int>(binding));
+      SCOPED_TRACE(original_private);
+      const bool narrow = original_private == 127;
+      const std::vector<uint8_t> image = test::with_resource_metadata(
+          make_kernarg_kernel_elf({kMovV3V2, 0xbf810000u}, original_private,
+                                  EF_AMDGPU_MACH_AMDGCN_GFX950, 20),
+          {{"test_kernel", 20, 32, 4, original_private}}, narrow);
+      const std::vector<uint8_t> original = image;
+      const std::vector<uint8_t> probe_image =
+          make_gfx950_probe_elf("scratch", {kMovV2Zero, kProbeSetpcS30S31});
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+      const InstrumentationOptions options{.kernarg_binding = binding,
+                                           .register_growth = std::nullopt};
+      Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+      InstrumentationPoint point;
+      point.probe_obj = &probe;
+      point.probe_symbol = "scratch";
+      if (binding == DbiKernargBinding::CallerSuppliedWrapper)
+        point.probe_args = {{ProbeArgSource::LogBufferPtrLo}, {ProbeArgSource::LogBufferPtrHi}};
+      instrumentor.add_point(point);
+      const InstrumentedCodeObject result = instrumentor.patch();
+      Instrumentor debug_instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+      debug_instrumentor.add_point(point);
+      const InstrumentedCodeObjectDebug debug = debug_instrumentor.patch_with_debug_summaries();
+      EXPECT_EQ(debug.errors, result.errors);
+      EXPECT_EQ(debug.elf_bytes, result.elf_bytes);
+      if (narrow) {
+        ASSERT_FALSE(result.errors.empty());
+        EXPECT_NE(result.errors.front().find("wider"), std::string::npos);
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+      } else {
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        const AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_EQ(output.text_sections().size(), 1u);
+        const Section &text = *output.text_sections().front();
+        const std::vector<KernelDescriptorInfo> kernels =
+            scan_kernel_descriptors(result.elf_bytes, text.sectionOffset(), text.size());
+        ASSERT_EQ(kernels.size(), 1u);
+        const FailureOr<amdhsa::MetadataDocument> metadata =
+            amdhsa::MetadataDocument::parse(result.elf_bytes);
+        ASSERT_TRUE(metadata.succeeded());
+        const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+        ASSERT_NE(entries, nullptr);
+        ASSERT_EQ(entries->array.size(), 1u);
+        const amdhsa::MetadataValue &entry = entries->array.front();
+        EXPECT_GT(kernels.front().descriptor.private_segment_fixed_size, original_private);
+        EXPECT_EQ(entry.integer_field(".private_segment_fixed_size"),
+                  kernels.front().descriptor.private_segment_fixed_size);
+        EXPECT_EQ(entry.integer_field(".kernarg_segment_size"),
+                  kernels.front().descriptor.kernarg_size);
+        EXPECT_EQ(kernels.front().descriptor.kernarg_size,
+                  binding == DbiKernargBinding::CallerSuppliedWrapper ? 40u : 20u);
+      }
+      EXPECT_EQ(image, original);
+    }
+  }
+}
+
+TEST(InstrumentorResources, ExplicitPoliciesRequireTheirMetadataInputs) {
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
+  const AmdGpuCodeObject object(image.data(), image.size());
+  for (const InstrumentationOptions options :
+       {InstrumentationOptions{.preservation = GuestStatePreservation::DeclaredRegisters,
+                               .register_growth = std::nullopt},
+        InstrumentationOptions{.register_growth = OriginalRegisterCounts{32, 4}}}) {
+    Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+    instrumentor.add_point_by_offset(0);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+  }
+}
+
+TEST(InstrumentorResources, MissingMetadataPublishesNoPartialImageOrSites) {
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("return", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  InstrumentationOptions options;
+  options.register_growth = OriginalRegisterCounts{32, 4};
+  Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+  InstrumentationPoint point;
+  point.probe_obj = &probe;
+  point.probe_symbol = "return";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("AMDHSA metadata"), std::string::npos);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+  EXPECT_EQ(image.front(), 0x7f);
+}
+
+TEST(InstrumentorResources, RegisterBackupsExhaustTheRegisterFileBeforeImagePublication) {
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("return", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  InstrumentationOptions options;
+  options.preservation = GuestStatePreservation::DeclaredRegisters;
+  options.register_growth =
+      OriginalRegisterCounts{static_cast<uint32_t>(REGISTER_SET_ALLOCATABLE_SGPRS), 4};
+  Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+  InstrumentationPoint point;
+  point.probe_obj = &probe;
+  point.probe_symbol = "return";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("register preservation exceeds the bounded register file"),
+            std::string::npos);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+}
+
+TEST(InstrumentorResources, OddSgprCountsLeaveBothEntrySnapshotsOutsideRegisterBackups) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  for (const uint32_t original_sgprs : {34u, 35u}) {
+    SCOPED_TRACE(original_sgprs);
+    const std::vector<uint8_t> image = test::with_resource_metadata(
+        make_kernarg_kernel_elf({build_s_nop(0, kArch), build_s_endpgm(kArch)}, 0,
+                                EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize, false, 5),
+        {{"test_kernel", kTestKernargSize, original_sgprs, 4, 0}});
+    const std::vector<uint8_t> body = make_gfx950_probe_elf("snapshots", {kProbeSetpcS30S31});
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const AmdGpuCodeObject probe(body.data(), body.size());
+    InstrumentationOptions options;
+    options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
+    options.preservation = GuestStatePreservation::DeclaredRegisters;
+    options.register_growth = OriginalRegisterCounts{original_sgprs, 4};
+    Instrumentor instrumentor(object, kArch, options);
+    InstrumentationPoint point;
+    point.kind = InstrumentationKind::KernelEntry;
+    point.probe_obj = &probe;
+    point.probe_symbol = "snapshots";
+    point.probe_args = {{.source = ProbeArgSource::EntryVgprLane0, .register_index = 0},
+                        {.source = ProbeArgSource::EntryVgprLane0, .register_index = 1}};
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_FALSE(result.elf_bytes.empty());
+    EXPECT_EQ(result.sites.size(), 1u);
+  }
+}
+
+TEST(InstrumentorProbePatch, Gfx1250RequiresProvenZeroBanksAndBankPreservingProbeBodies) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  for (const uint16_t bank : {0, 1}) {
+    for (const bool probe_changes_bank : {false, true}) {
+      const std::array<uint32_t, 1> select_bank =
+          cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = bank});
+      const std::vector<uint8_t> image =
+          make_amdgpu_kernel_elf({select_bank[0], build_s_nop(0, kArch), build_s_endpgm(kArch)}, 0,
+                                 3, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+      std::vector<uint32_t> probe_words;
+      if (probe_changes_bank)
+        probe_words.push_back(select_bank[0]);
+      probe_words.push_back(build_s_setpc_b64(30, kArch));
+      const std::vector<uint8_t> body =
+          make_amdgpu_probe_elf("banked", probe_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const AmdGpuCodeObject probe(body.data(), body.size());
+      Instrumentor instrumentor(object, kArch);
+      InstrumentationPoint point;
+      point.anchor_offset = 4;
+      point.probe_obj = &probe;
+      point.probe_symbol = "banked";
+      instrumentor.add_point(point);
+      const Instrumentor::ValidationResult result = instrumentor.validate_points();
+      if (bank == 0 && !probe_changes_bank) {
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        EXPECT_EQ(result.sites.size(), 1u);
+      } else {
+        ASSERT_FALSE(result.errors.empty());
+        EXPECT_TRUE(result.sites.empty());
+        EXPECT_NE(result.errors.front().find(probe_changes_bank ? "bank state" : "VGPR_MSB"),
+                  std::string::npos)
+            << result.errors.front();
+      }
+    }
+  }
 }
 
 } // namespace

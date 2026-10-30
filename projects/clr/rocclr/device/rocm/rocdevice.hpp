@@ -70,6 +70,17 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
 
+  //! Reuse bookkeeping, touched only by the owning RetiringSignalTracker. Kept out of flags_
+  //! because timestamp processing updates flags_ from other threads.
+  uint64_t use_seq_ = 0;         //!< Queue sequence of the last use, 0 if unused
+  uint64_t use_aql_slot_ = kInvalidAqlSlot;  //!< AQL packet completing the use, if it retires
+                                             //!< in queue order
+  uint64_t use_queue_gen_ = 0;   //!< HW queue generation the packet was submitted to
+  bool use_fence_ = false;       //!< The packet was published with the barrier bit
+  bool use_retired_ = true;      //!< The last use is known to be complete
+  bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
+  bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+
   typedef union {
     struct {
       uint32_t done_ : 1;       //!< True if signal is done
@@ -99,8 +110,9 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   virtual ~ProfilingSignal();
   std::recursive_mutex& LockSignalOps() { return lock_; }
 
-  //! Cache timing data from HSA for this signal (called once when signal completes)
-  void CacheTimingData(hsa_agent_t gpu_device);
+  //! Cache timing data from HSA for this signal (called once when signal completes).
+  //! completed skips the value check when the caller already knows the signal completed.
+  void CacheTimingData(hsa_agent_t gpu_device, bool completed = false);
 
   //! Reset cached timing for signal reuse
   void ResetCachedTiming() {
@@ -187,7 +199,8 @@ class NullDevice : public amd::Device {
   virtual void deregisterSvmMemory(void* ptr) const { ShouldNotReachHere(); }
 
   //! Just returns nullptr for the dummy device
-  device::Memory* createMemory(amd::Memory& owner) const override {
+  device::Memory* createMemory(
+      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const override {
     ShouldNotReachHere();
     return nullptr;
   }
@@ -418,7 +431,8 @@ class Device : public NullDevice {
   virtual device::Program* createProgram(amd::Program& owner,
                                          amd::option::Options* options = nullptr) override;
 
-  virtual device::Memory* createMemory(amd::Memory& owner) const override;
+  virtual device::Memory* createMemory(
+      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const override;
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const override;
   //! Sampler object allocation
   virtual bool createSampler(const amd::Sampler& owner,  //!< abstraction layer sampler object
@@ -474,8 +488,10 @@ class Device : public NullDevice {
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
-  //! Allocate a host-resident VMM handle on a CPU NUMA pool. numaNode < 0 resolves
-  //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
+  //! Allocate a host-resident VMM handle on a CPU NUMA pool. The node selector is resolved to a
+  //! CPU agent. numaNode = -1 resolves to calling thread's current node (HostNumaCurrent).
+  //! numaNode = -2 resolves to default ROCr CPU agent (Host). numaNode >= 0 resolves to that
+  //! particular NUMA node. Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
 
   //! Recovers the location, owning device and size of a VMM allocation from its
@@ -503,6 +519,9 @@ class Device : public NullDevice {
                                 size_t num_attributes, const void* dev_ptr, size_t count) const override;
   virtual size_t ScratchLimitCurrent() const final;
   virtual bool UpdateScratchLimitCurrent(size_t limit) const final;
+  virtual size_t PersistingL2CacheSizeCurrent() const final;
+  virtual size_t PersistingL2CacheSizeMax() const final;
+  virtual bool UpdatePersistingL2CacheSizeCurrent(size_t size) const final;
   virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override;
   virtual bool virtualFree(void* addr) override;
 
@@ -533,7 +552,36 @@ class Device : public NullDevice {
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override;
   virtual void ReleaseGlobalSignal(void* signal) const override;
   virtual void RetainGlobalSignal(void* signal) const override;
-  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual bool CreateHwEvents(int count, bool batched,
+                              std::vector<void*>& hw_events) const override;
+  //! Creates signals, from one allocation when batched, else from the ROCr signal pool.
+  //! A batch costs an allocation, so batched is for pooled signals. device_memory places the
+  //! batch in device memory, which requires a batch. Each signal is destroyed individually
+  //! either way. in_device_memory reports where the signals were placed.
+  bool CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
+                     bool batched, bool device_memory, hsa_signal_t* signals,
+                     bool& in_device_memory) const;
+  //! True if queue completion signals are batched in device memory
+  bool QueueDeviceSignals() const { return queue_device_signals_; }
+  //! A batched command keeps its completion signal until the batch completes, and replacing a
+  //! device-memory signal costs a device allocation, so those queues complete batches sooner
+  size_t SubmissionBatchLimit() const override {
+    constexpr size_t kDeviceSignalBatchLimit = 64;
+    return (QueueDeviceSignals() && flagIsDefault(DEBUG_CLR_MAX_BATCH_SIZE))
+               ? kDeviceSignalBatchLimit
+               : DEBUG_CLR_MAX_BATCH_SIZE;
+  }
+  //! Makes earlier host stores to device-memory signal values visible to the GPU. When ROCr
+  //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
+  //! last_stored must be in device memory, or the readback does not drain HDP.
+  void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
+  //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
+  //! packets from the host, so its queues keep system-memory rings.
+  bool AqlRingsInDeviceMemory() const {
+    return settings().aql_device_ring_buf_ && info_.largeBar_ &&
+           Hsa::amd_queue_create_available() &&
+           !amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
+  }
   virtual void DestroyHwEvent(void* hw_event) const override;
   virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
@@ -752,6 +800,10 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpuvm_segment_;
   hsa_amd_memory_pool_t gpu_fine_grained_segment_;
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
+  hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
+  bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
+  bool queue_device_signals_ = false;  //!< Queue signals live in device_signal_pool_
+  bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
 
