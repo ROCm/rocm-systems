@@ -36,24 +36,13 @@ const char* ncclAlgNameForSymk(int) { return "sym-kernel"; }
 #include ALLGATHERV_SCHED_CC_PATH
 
 // Seams for symmetric_sched.cc's argsBuf calloc/free, so tests can fail the allocation and see the error paths
-// release it. Textual and TU-wide while the UUT is included; #undef'd immediately after.
+// release it. SchedulerMicrotest installs the recorders below into g_microCalloc/g_microFree.
 static bool g_symSchedCallocFail = false;
 static void* g_symSchedLastCalloc = nullptr;
 static std::vector<void*> g_symSchedFreed;
-static void* SymSchedMicroCalloc(size_t n, size_t size) {
-  if (g_symSchedCallocFail) return nullptr;
-  g_symSchedLastCalloc = ::calloc(n, size);
-  return g_symSchedLastCalloc;
-}
-static void SymSchedMicroFree(void* p) {
-  if (p != nullptr) g_symSchedFreed.push_back(p);
-  ::free(p);
-}
-#define calloc(n, s) SymSchedMicroCalloc(n, s)
-#define free(p) SymSchedMicroFree(p)
+#include "fakes/alloc_seam.h"
 #include SYMMETRIC_SCHED_CC_PATH
-#undef calloc
-#undef free
+#include "fakes/alloc_seam_undef.h"
 
 namespace {
 constexpr int kBaselineChannels = 4;
@@ -233,6 +222,15 @@ class SchedulerMicrotest : public ::testing::Test {
   // Suite-wide generous default: the canonical sym_kernels_fakes.cc default is false, silently halting classification.
   void SetUp() override {
     g_symkAvailable = [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; };
+    g_microCalloc = [](size_t n, size_t size) -> void* {
+      if (g_symSchedCallocFail) return nullptr;
+      g_symSchedLastCalloc = ::calloc(n, size);
+      return g_symSchedLastCalloc;
+    };
+    g_microFree = [](void* p) {
+      if (p != nullptr) g_symSchedFreed.push_back(p);
+      ::free(p);
+    };
   }
   void TearDown() override {
     ResetEnqueueFakes();          // this file's own enqueue_fakes.{h,cc} seams
@@ -245,6 +243,7 @@ class SchedulerMicrotest : public ::testing::Test {
     g_symSchedCallocFail = false;  // TU-local argsBuf seams
     g_symSchedLastCalloc = nullptr;
     g_symSchedFreed.clear();
+    ResetAllocSeam();
   }
 
   // symBatchAligned16B reads only comm->rank.

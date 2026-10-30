@@ -3425,6 +3425,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   if (job->parent) {
     /* unlink child abort flag. */
     COMPILER_ATOMIC_STORE(&job->parent->childAbortFlag, static_cast<uint32_t*>(nullptr), std::memory_order_release);
+    COMPILER_ATOMIC_STORE(&job->parent->childAbortFlagDev, static_cast<uint32_t*>(nullptr), std::memory_order_release);
     if (job->isGrow) {
       TRACE_CALL("ncclCommGrow(%p, %d, %p)", job->parent, comm->nRanks, comm);
     } else {
@@ -4718,8 +4719,8 @@ fail:
 static ncclResult_t setCommAbortFlags(ncclComm_t comm, int value) {
   // Set abort flags
   uint32_t uval = static_cast<uint32_t>(value);
-  if (comm->childAbortFlag != nullptr && comm->childAbortFlagDev != nullptr) {
-    COMPILER_ATOMIC_STORE(comm->childAbortFlag, uval, std::memory_order_release);
+  if (comm->childAbortFlag != nullptr) COMPILER_ATOMIC_STORE(comm->childAbortFlag, uval, std::memory_order_release);
+  if (comm->childAbortFlagDev != nullptr) {
     COMPILER_ATOMIC_STORE(comm->childAbortFlagDev, uval, std::memory_order_release);
   }
   if (comm->abortFlag != nullptr) COMPILER_ATOMIC_STORE(comm->abortFlag, uval, std::memory_order_release);
@@ -4930,6 +4931,7 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
       childComm->abortFlagDev = comm->abortFlagDev;
       childComm->abortFlagRefCount = comm->abortFlagRefCount;
       comm->childAbortFlag = NULL;
+      comm->childAbortFlagDev = NULL;
       ncclAtomicRefCountIncrement(comm->abortFlagRefCount);
     } else {
       NCCLCHECKGOTO(ncclCalloc(&childComm->abortFlag, 1), res, fail);
@@ -4987,12 +4989,17 @@ exit:
   (void)cudaSetDevice(oldDev);
   return res;
 fail:
-  if (job) {
-    free(job->excludeRanksList);
-    delete job;
-  }
+  if (job) childCommCleanupJob(job);
   if (childComm) {
-    if (!comm->shareResources) {
+    if (comm->shareResources) {
+      // Drop the reference taken on the parent's abort flags.
+      if (childComm->abortFlagRefCount) (void)ncclAtomicRefCountDecrement(childComm->abortFlagRefCount);
+    } else {
+      // Unlink the parent from the flags freed below.
+      if (childComm->abortFlag != nullptr && comm->childAbortFlag == childComm->abortFlag) {
+        comm->childAbortFlag = NULL;
+        comm->childAbortFlagDev = NULL;
+      }
       if (childComm->abortFlag) free(childComm->abortFlag);
       if (childComm->abortFlagDev) ncclCudaHostFree(childComm->abortFlagDev);
       if (childComm->abortFlagRefCount) free(childComm->abortFlagRefCount);
@@ -5214,21 +5221,13 @@ exit:
   return res;
 
 fail:
-  if (job) {
-    if (job->commId) {
-      free(job->commId);
-      job->commId = NULL;
-    }
-    delete job;
-  }
-  // Clean up newly allocated comm on failure
+  if (job) childCommCleanupJob(job);
+  // Clean up newly allocated comm on failure. Grow never shares abort flags with
+  // the parent, so they are always this comm's own.
   if (newComm) {
-    // Only free abort resources if we allocated them (not shared)
-    if (!isExistingRank || !comm->shareResources) {
-      free(newComm->abortFlag);
-      if (newComm->abortFlagDev) (void)ncclCudaHostFree((void*)newComm->abortFlagDev);
-      free(newComm->abortFlagRefCount);
-    }
+    free(newComm->abortFlag);
+    if (newComm->abortFlagDev) (void)ncclCudaHostFree((void*)newComm->abortFlagDev);
+    free(newComm->abortFlagRefCount);
     free(newComm);
     if (newcomm) *newcomm = NULL;
   }

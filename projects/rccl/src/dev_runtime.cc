@@ -1254,6 +1254,8 @@ static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory
   struct ncclWindow_vidmem* winDevHost = nullptr;
   struct ncclDevCommWindowTable* unpublishedTable = nullptr;
   struct ncclDevCommWindowTable* tableDev = nullptr;
+  struct ncclDevCommWindowTable::Entry* stagedEntry = nullptr;
+  struct ncclDevCommWindowTable** stagedNext = nullptr;
 
   if (outWinDev) *outWinDev = nullptr;
   if (outWin) *outWin = nullptr;
@@ -1303,22 +1305,25 @@ static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory
     int i = 0;
     while (i < 32 && tableHost->entries[i].window != nullptr) i += 1;
     if (i < 32) {
-      struct ncclDevCommWindowTable::Entry entry;
-      entry.base = userAddr;
-      entry.size = userSize;
-      entry.window = winDev;
-      CUDACHECKGOTO(cudaMemcpyAsync(&tableDev->entries[i], &entry, sizeof(entry), cudaMemcpyHostToDevice, stream), ret,
-                    fail);
-      tableHost->entries[i] = entry;
+      // The async copy reads the host shadow, which outlives it; fail: clears the slot if the copy is not queued.
+      stagedEntry = &tableHost->entries[i];
+      stagedEntry->base = userAddr;
+      stagedEntry->size = userSize;
+      stagedEntry->window = winDev;
+      CUDACHECKGOTO(cudaMemcpyAsync(&tableDev->entries[i], stagedEntry, sizeof(*stagedEntry), cudaMemcpyHostToDevice,
+                                    stream),
+                    ret, fail);
+      stagedEntry = nullptr;
       break;
     }
     if (tableHost->next == nullptr) {
       NCCLCHECKGOTO(ncclShadowPoolAlloc<ncclDevCommWindowTable>(&devr->shadows, &unpublishedTable, nullptr, stream),
                     ret, fail);
-      CUDACHECKGOTO(cudaMemcpyAsync(&tableDev->next, &unpublishedTable, sizeof(unpublishedTable),
-                                    cudaMemcpyHostToDevice, stream),
+      stagedNext = &tableHost->next;
+      *stagedNext = unpublishedTable;
+      CUDACHECKGOTO(cudaMemcpyAsync(&tableDev->next, stagedNext, sizeof(*stagedNext), cudaMemcpyHostToDevice, stream),
                     ret, fail);
-      tableHost->next = unpublishedTable;
+      stagedNext = nullptr;
       unpublishedTable = nullptr;
     }
     tableDev = tableHost->next;
@@ -1338,6 +1343,8 @@ static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory
   return ncclSuccess;
 
 fail:
+  if (stagedEntry != nullptr) *stagedEntry = {};
+  if (stagedNext != nullptr) *stagedNext = nullptr;
   if (unpublishedTable != nullptr) {
     NCCLCHECKIGNORE(ncclShadowPoolFree(&devr->shadows, unpublishedTable, stream), ret);
   }
@@ -2605,9 +2612,12 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWin
   win->ipcPeerPtrsAllocBase = nullptr;
   win->ipcPeerIsCuMem = nullptr;
 
-  // Undo stage 3: shadow pool entry.
+  // Undo stage 3: shadow pool entry. Under forceCleanup a failed stream create
+  // falls back to the default stream (stream == nullptr) rather than leaking the
+  // entry; either way the free has completed before the stream sync returns.
   streamErr = cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
   if (streamErr != cudaSuccess) {
+    stream = nullptr;
     if (ret == ncclSuccess) ret = rcclCudaErrorHandler(streamErr);
     if (!forceCleanup) goto fail;
   }
@@ -2618,8 +2628,8 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWin
       if (!forceCleanup) goto fail_stream;
     }
   }
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
   if (stream != nullptr) {
-    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
     CUDACHECKIGNORE(cudaStreamDestroy(stream));
     stream = nullptr;
   }

@@ -1293,6 +1293,7 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
           newInfo->impInfo.numSegments = numSegments;
           newInfo->ipcProxyconn = proxyConn;
           regRecord->ipcInfos[peerIndex] = newInfo;
+          newInfo = NULL; // owned by regRecord from here on
           if (regRecord->regIpcAddrs.hostPeerRmtAddrs == NULL) {
             NCCLCHECKGOTO(ncclCalloc(&regRecord->regIpcAddrs.hostPeerRmtAddrs, ipcIndexSize), ret, fail);
           }

@@ -88,9 +88,6 @@ static inline int __get_cpuid(unsigned int __leaf, unsigned int* __eax,
 #include "ScopedHook.h"
 
 // Each default forwards to what the UUT would otherwise call, so an uninstalled redirect is a no-op.
-static std::function<void(void*)> g_microFree = [](void* p) { ::free(p); };
-static void MicroFree(void* p) { g_microFree(p); }
-
 static std::function<int(unsigned, unsigned*, unsigned*, unsigned*, unsigned*)> g_microCpuid =
     [](unsigned leaf, unsigned* a, unsigned* b, unsigned* c, unsigned* d) {
       return __get_cpuid(leaf, a, b, c, d);
@@ -113,7 +110,7 @@ static std::function<bool(const char*)> g_microIommuPassthroughOk =
     };
 static bool MicroIommuPassthroughOk(const char* cmdline) { return g_microIommuPassthroughOk(cmdline); }
 
-#define free(p) MicroFree(p)
+#include "fakes/alloc_seam.h"  // g_microFree / g_microCalloc
 #define __get_cpuid(l, a, b, c, d) MicroCpuid(l, a, b, c, d)
 #define ncclOsTopoGetStrFromSys(p, f, o, n) MicroTopoGetStrFromSys(p, f, o, n)
 #define ncclIommuPassthroughOk(c) MicroIommuPassthroughOk(c)
@@ -125,7 +122,7 @@ static int g_trRingChannelsInstalled = -1;
 #include INIT_CC_PATH
 
 #undef malloc  // scoped to the UUT: leaving it defined would silently reroute every malloc() in the tests below
-#undef free
+#include "fakes/alloc_seam_undef.h"
 #undef __get_cpuid
 #undef ncclOsTopoGetStrFromSys
 #undef ncclIommuPassthroughOk
@@ -4429,7 +4426,10 @@ class AbortFlagsComm {
     comm_->childAbortFlagDev = &slots_[3];
   }
   ncclComm* get() { return comm_.get(); }
-  void detachChild() { comm_->childAbortFlag = nullptr; }
+  void detachChild() {
+    comm_->childAbortFlag = nullptr;
+    comm_->childAbortFlagDev = nullptr;
+  }
   uint32_t parent() const { return slots_[0]; }
   uint32_t parentDev() const { return slots_[1]; }
   uint32_t child() const { return slots_[2]; }
@@ -4509,14 +4509,26 @@ TEST_F(InitMicrotest, SetCommAbortFlags_LargePositiveValue_StoredVerbatim) {
   EXPECT_EQ(0x7F00FF01u, c.childDev());
 }
 
-TEST_F(InitMicrotest, SetCommAbortFlags_NullChildDev_SkipsDetachedChildPair) {
+// The child pair is guarded per pointer, like the parent pair: a null device
+// flag skips only that store, never the host flag beside it.
+TEST_F(InitMicrotest, SetCommAbortFlags_NullChildDev_StillWritesTheChildHostFlag) {
   AbortFlagsComm c;
   c.get()->childAbortFlagDev = nullptr;
 
   EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
   EXPECT_EQ(1u, c.parent());
   EXPECT_EQ(1u, c.parentDev());
-  EXPECT_EQ(AbortFlagsComm::kChildSentinel, c.child());
+  EXPECT_EQ(1u, c.child());
+}
+
+TEST_F(InitMicrotest, SetCommAbortFlags_NullChildHost_StillWritesTheChildDevFlag) {
+  AbortFlagsComm c;
+  c.get()->childAbortFlag = nullptr;
+
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  EXPECT_EQ(1u, c.parent());
+  EXPECT_EQ(1u, c.parentDev());
+  EXPECT_EQ(1u, c.childDev());
 }
 
 // A comm whose own abort pair was never allocated (an early init failure) must not be dereferenced; the
@@ -9350,7 +9362,9 @@ TEST_F(InitMicrotest, CommGrow_ParentDoesNotShare_FailPathReleasesAbortResources
   }
 }
 
-TEST_F(InitMicrotest, CommGrow_ParentSharesResources_FailPathReleasesOnlyTheComm) {
+// A parent left with shareResources set by an earlier split/shrink changes
+// nothing: grow never adopts the parent's abort resources, so it frees its own.
+TEST_F(InitMicrotest, CommGrow_ParentSharesResources_FailPathStillReleasesItsOwnAbortResources) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
   parent->shareResources = true;
@@ -9364,11 +9378,11 @@ TEST_F(InitMicrotest, CommGrow_ParentSharesResources_FailPathReleasesOnlyTheComm
 
   EXPECT_EQ(nullptr, out);
   EXPECT_EQ(0, spy.calls());
-  ASSERT_EQ(1u, frees.freed().size())
-      << "LATENT BUG (init.cc:4421): grow never adopts the parent's abort resources, so this guard leaks its own";
-  auto* leaked = static_cast<ncclComm*>(frees.freed()[0]);
-  EXPECT_EQ(NCCL_MAGIC, leaked->startMagic);
-  Rank_ReleaseComm(leaked, /*ownsAbortResources=*/true);
+  ASSERT_EQ(3u, frees.freed().size()) << "abortFlag, abortFlagRefCount and the comm itself";
+  EXPECT_EQ(1, *parent->abortFlagRefCount) << "the parent's own reference is untouched";
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
 }
 
 TEST_F(InitMicrotest, CommGrow_ExistingRankNullConfig_CopiesParentConfigIntoNewComm) {
@@ -9859,6 +9873,53 @@ TEST_F(InitMicrotest, InitChildComm_AbortFlagDevAllocFails_ReleasesChildAndClear
   }
 }
 
+// A sharing child took a reference on the parent's abort flags; a failure
+// before launch must drop it, or the parent's flags outlive every comm.
+TEST_F(InitMicrotest, InitChildComm_SharedSplitConfigFails_DropsTheReferenceOnTheParentsAbortFlags) {
+  Grow_ParentComm parent;
+  parent->config.splitShare = 1;
+  ncclConfig_t bad = NCCL_CONFIG_INITIALIZER;
+  bad.blocking = 7;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, &bad));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_TRUE(parent->shareResources);
+  EXPECT_EQ(1, *parent->abortFlagRefCount);
+  ASSERT_EQ(1u, frees.freed().size()) << "only the child; the shared abort flags stay with the parent";
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
+}
+
+// A non-sharing child's flags were linked into the parent as childAbortFlag*;
+// fail: frees them, so it must unlink them too or the next abort writes freed memory.
+TEST_F(InitMicrotest, InitChildComm_SplitConfigFails_UnlinksTheFreedChildAbortFlagsFromTheParent) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ncclConfig_t bad = NCCL_CONFIG_INITIALIZER;
+  bad.blocking = 7;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, &bad));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_FALSE(parent->shareResources);
+  EXPECT_EQ(nullptr, parent->childAbortFlag);
+  EXPECT_EQ(nullptr, parent->childAbortFlagDev);
+  ASSERT_EQ(3u, frees.freed().size()) << "abortFlag, abortFlagRefCount and the child itself";
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
+}
+
 TEST_F(InitMicrotest, InitChildComm_ExcludeListAllocFails_ReturnsSystemErrorAndSkipsLaunch) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
@@ -9881,7 +9942,8 @@ TEST_F(InitMicrotest, InitChildComm_ExcludeListAllocFails_ReturnsSystemErrorAndS
   EXPECT_EQ(0, spy.calls());
   ASSERT_TRUE(watch.armed()) << "the job was never allocated";
   EXPECT_EQ(1, watch.hits()) << "fail: must delete the job it still owns before launch";
-  EXPECT_EQ(1, std::count(freed.begin(), freed.end(), nullptr)) << "the job's never-allocated exclude list";
+  EXPECT_EQ(0, std::count(freed.begin(), freed.end(), nullptr))
+      << "childCommCleanupJob skips the never-allocated exclude list";
   for (void* p : freed) {
     ::free(p);
   }
@@ -11325,8 +11387,19 @@ TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesAboveOneGigabyte_IsCappedThere) 
   AllocedCommPtr comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   SetParams({{"WORK_FIFO_BYTES", kTwoGigabytes}});
-  EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  // The cap is read off the FIFO's allocation request, which is refused so the
+  // test never maps and zeroes 1 GiB; other host allocations go through.
+  constexpr std::size_t kOneGigabyte = std::size_t{1} << 30;
+  auto passThrough = g_hipHostMalloc;
+  int fifoRequests = 0;
+  ScopedHook hostMalloc(g_hipHostMalloc, [&](void** ptr, std::size_t size, unsigned flags) {
+    if (size != kOneGigabyte) return passThrough(ptr, size, flags);
+    ++fifoRequests;
+    return hipErrorMemoryAllocation;
+  });
+  EXPECT_NE(ncclSuccess, devCommSetup(comm.get()));
   EXPECT_EQ(1u << 30, comm->workFifoBytes);
+  EXPECT_EQ(1, fifoRequests);
 }
 
 TEST_F(InitMicrotest, DevCommSetup_CollNetRankMapPresent_CopiesItToTheDevice) {

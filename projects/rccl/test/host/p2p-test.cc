@@ -1263,9 +1263,8 @@ TEST_F(FreshRegistrationMicrotest, SkipsProxyConnectWhenAlreadyInitialized)
     ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
 }
 
-// Fresh-registration fail path with newInfo already allocated. Drives the
-// True arm of `if (newInfo) free(newInfo)` in the `fail:` epilogue -- the
-// leak-prevention contract on the fail: epilogue. Sequence:
+// Fresh-registration fail path after newInfo was handed to the record.
+// Sequence:
 //
 //   1. Happy-path through hipMemGetAddressRange / hipIpcGetMemHandle /
 //      proxyCallBlocking -> rmtRegAddr non-null -> newInfo ncclCalloc'd,
@@ -1274,19 +1273,14 @@ TEST_F(FreshRegistrationMicrotest, SkipsProxyConnectWhenAlreadyInitialized)
 //   3. Post-loop COLLECTIVE strong-stream block fires (devPeerRmtAddrs is
 //      NULL, needUpdate is true).
 //   4. g_strongStreamAcquire hook returns failure -> NCCLCHECKGOTO into
-//      `fail:` with newInfo non-null and the local var still holding the
-//      most recent allocation.
+//      `fail:`.
 //
-// Without this test the True arm was never hit (existing fresh-reg
-// failure test triggers fail: before newInfo is ever set).
-//
-// Note on the dangling pointer: the production fail: epilogue frees
-// newInfo but leaves regRecord->ipcInfos[peerLocalRank] pointing at the
-// freed memory. That's an existing pre-condition of the function (the
-// fail: path doesn't roll back ipcInfos), not something this test is
-// asserting. The RegRecordCleaner would normally double-free, so we
-// null out the slot before the cleaner runs.
-TEST_F(FreshRegistrationMicrotest, FreesNewInfoOnPostLoopFailure)
+// Once installed in ipcInfos the entry belongs to the record, which frees it
+// on deregistration, so fail: must leave it alone. Freeing it there left the
+// slot dangling and the record's own cleanup freed it a second time. Reading
+// the entry back below is a heap-use-after-free under ASAN if fail: frees it,
+// and RegRecordCleaner is what releases it.
+TEST_F(FreshRegistrationMicrotest, PostLoopFailureLeavesNewInfoOwnedByTheRecord)
 {
     constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
 
@@ -1319,19 +1313,10 @@ TEST_F(FreshRegistrationMicrotest, FreesNewInfoOnPostLoopFailure)
     EXPECT_EQ(r, ncclSystemError);
     out.ExpectZeroed();
 
-    // The contract being pinned down: the function ran far enough that
-    // newInfo *was* allocated (and stashed in ipcInfos) before the
-    // failure, and the fail: epilogue then free()d it. We can't observe
-    // the free directly without leak detection, but we *can* observe
-    // that the precondition was reached -- otherwise the True arm of
-    // `if (newInfo)` was never exercised.
     ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr)
-        << "test scaffolding broken: newInfo was never allocated, so the "
-           "True arm of `if (newInfo) free(newInfo)` is not reached";
-
-    // Production leaves this slot pointing at freed memory on fail:.
-    // Null it out so RegRecordCleaner doesn't double-free.
-    regRecord.ipcInfos[kPeerLocalRank] = nullptr;
+        << "test scaffolding broken: newInfo was never installed in the record";
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->peerRank, kPeerRank);
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->impInfo.rmtRegAddr, reinterpret_cast<void*>(kRmtRegAddr));
 }
 
 // Regression test for NVIDIA/nccl#1859 / AICOMRCCL-1100 ("user-buffer p2p +

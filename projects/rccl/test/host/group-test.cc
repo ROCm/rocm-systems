@@ -69,16 +69,13 @@ static std::function<bool()> g_threadCreateShouldFail = [] { return false; };
 
 #include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before group.cc includes it
 
-// Seam for the UUT's free(), so a test can observe which entries a dequeue loop releases.
-// Textual and TU-wide while group.cc is included; #undef'd immediately after.
-static std::function<void(void*)> g_groupMicroFree = [](void* p) { ::free(p); };
-static void GroupMicroFree(void* p) { g_groupMicroFree(p); }
-#define free(p) GroupMicroFree(p)
+// g_microFree lets a test observe which entries a dequeue loop releases.
+#include "fakes/alloc_seam.h"
 
 // Pulls in group.cc's file-static helpers (groupLaunch, asyncJobLaunch, ...); must come last.
 #include GROUP_CC_PATH
 
-#undef free
+#include "fakes/alloc_seam_undef.h"
 
 namespace {
 
@@ -1210,7 +1207,7 @@ TEST_F(ArgsGlobalCheckTest, HookFailsOnSecondEntry_StopsDequeuingAndPropagatesTh
     return info == failing ? ncclInternalError : ncclSuccess;
   });
   std::vector<void*> freed;
-  ScopedHook freeHook(g_groupMicroFree, [&](void* p) {
+  ScopedHook freeHook(g_microFree, [&](void* p) {
     freed.push_back(p);
     ::free(p);
   });
@@ -1522,7 +1519,7 @@ TEST_F(GroupRegisterSymmetricCeInitTest, CeInitFailurePropagatesAndStopsDequeuin
   ncclIntruQueueEnqueue(&comm_->ceInitTaskQueue, neverReached);
   ScopedHook hook(g_ncclCeInit, [&](struct ncclComm*) { return ncclSystemError; });
   std::vector<void*> freed;
-  ScopedHook freeHook(g_groupMicroFree, [&](void* p) {
+  ScopedHook freeHook(g_microFree, [&](void* p) {
     freed.push_back(p);
     ::free(p);
   });

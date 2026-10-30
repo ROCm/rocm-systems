@@ -3164,6 +3164,36 @@ TEST_F(SymWindowCreateTest, FullTable_ChainsAnotherTable) {
   EXPECT_EQ(first->next->entries[0].window, winDev);
 }
 
+// The table copies are asynchronous, so their sources must outlive the call:
+// both the entry and the chain link are copied out of the host shadow, never
+// out of a local. dev == host under the shadow-pool fake, so the host shadow
+// slot is the copy's own destination.
+TEST_F(SymWindowCreateTest, TableCopiesReadFromTheHostShadow) {
+  for (int i = 0; i < 32; i++) {
+    ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000 + i * 0x1000), 4096), ncclSuccess);
+  }
+  ncclDevCommWindowTable* first = comm->devrState.windowTable;
+  ASSERT_NE(first, nullptr);
+
+  std::vector<std::pair<void*, const void*>> copies;
+  ScopedHook copy(g_hipMemcpyAsync, [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+    copies.emplace_back(dst, src);
+    if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
+    return hipSuccess;
+  });
+
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x200000), 4096), ncclSuccess);
+  ASSERT_NE(first->next, nullptr);
+  const void* linkSrc = nullptr;
+  const void* entrySrc = nullptr;
+  for (auto& c : copies) {
+    if (c.first == &first->next) linkSrc = c.second;
+    if (c.first == &first->next->entries[0]) entrySrc = c.second;
+  }
+  EXPECT_EQ(linkSrc, &first->next);
+  EXPECT_EQ(entrySrc, &first->next->entries[0]);
+}
+
 // The sorted list is keyed on user address, so windows created out of order are
 // still stored in address order.
 TEST_F(SymWindowCreateTest, InsertsIntoSortedListByAddress) {
@@ -5232,6 +5262,43 @@ TEST_F(WindowDeregisterNonSymTest, ShadowFreeFails_LeavesWindowRegistered) {
 
   EXPECT_NE(windowDeregisterNonSym(comm, winDev), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 1);
+}
+
+// Branch: the stream create fails without forceCleanup, so nothing is torn
+// down and the caller can retry.
+TEST_F(WindowDeregisterNonSymTest, StreamCreateFails_LeavesWindowRegistered) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  ScopedHook create(g_hipStreamCreateWithFlags, [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook poolFree(g_devrShadowPoolFree, [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
+
+  EXPECT_NE(windowDeregisterNonSym(comm, winDev), ncclSuccess);
+  EXPECT_EQ(poolFree.calls, 0);
+  EXPECT_EQ(comm->devrState.winSortedCount, 1);
+}
+
+// Branch: under forceCleanup a failed stream create still releases the shadow
+// entry, on the default stream, and waits for that stream before going on; the
+// failure is still reported.
+TEST_F(WindowDeregisterNonSymTest, ForceCleanupStreamCreateFails_FreesOnTheDefaultStreamAndSyncsIt) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  ScopedHook create(g_hipStreamCreateWithFlags, [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  std::vector<std::string> order;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void*, hipStream_t s) {
+    order.push_back(s == nullptr ? "free(default)" : "free(other)");
+    return ncclSuccess;
+  });
+  ScopedHook sync(g_hipStreamSynchronize, [&](hipStream_t s) {
+    order.push_back(s == nullptr ? "sync(default)" : "sync(other)");
+    return hipSuccess;
+  });
+  ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipSuccess; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  EXPECT_NE(windowDeregisterNonSym(comm, winDev, /*forceCleanup=*/true), ncclSuccess);
+  EXPECT_EQ(order, (std::vector<std::string>{"free(default)", "sync(default)"}));
+  EXPECT_EQ(destroy.calls, 0);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
 
