@@ -19,6 +19,7 @@
 #include "MPITestBase.hpp"
 #include "TestChecks.hpp"
 #include "comm.h" // internal: struct ncclComm::ddaFabricBarrierState
+#include "rccl_common.h" // internal: rcclDdaLLOneShotThreshold
 
 #include <hip/hip_runtime.h>
 #include <mpi.h>
@@ -49,6 +50,13 @@ inline bool fabricInitRequired()
 inline bool isGfx1250Device()
 {
     return DdaMPITestHelpers::isGfx1250Device();
+}
+
+// `count` elements of `eltSize` bytes, clipped in whole 16-byte lines to this comm's DDA LL one-shot AllReduce cap.
+inline size_t ddaLLOneShotCount(const ncclComm* comm, size_t count, size_t eltSize)
+{
+    const size_t capBytes = rcclDdaLLOneShotThreshold(comm) / 16 * 16;
+    return std::min(count, capBytes / eltSize);
 }
 
 inline size_t countOccurrences(const std::string& haystack, const char* needle)

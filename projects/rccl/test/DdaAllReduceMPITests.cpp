@@ -187,7 +187,8 @@ size_t countEventNodes(hipGraph_t graph, hipGraphNodeType type, hipEvent_t event
 class DdaAllReduceMPITest : public DdaFabricMPITest
 {
 protected:
-    void runAllReduce(size_t count, const char* logNeedle, const char* testId)
+    // capToLLOneShot clips count to this comm's LL one-shot cap, so the one-shot claims it at any rank count.
+    void runAllReduce(size_t count, const char* logNeedle, const char* testId, bool capToLLOneShot = false)
     {
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
@@ -201,6 +202,15 @@ protected:
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
         ncclCommCount(getActiveCommunicator(), &nRanks);
+
+        if(capToLLOneShot)
+        {
+            count = DdaFabricMPI::ddaLLOneShotCount(getActiveCommunicator(), count, sizeof(float));
+            const std::string capSkip
+                = mpiCoordinatedSkipReason(count == 0, "RCCL_DDA_LL_ONESHOT_THRESHOLD leaves no one-shot size");
+            if(!capSkip.empty())
+                GTEST_SKIP() << capSkip;
+        }
 
         const size_t bytes = count * sizeof(float);
 
@@ -278,9 +288,10 @@ protected:
                       algoName ? algoName : "?");
     }
 
-    // Every rank must get the same bits back; logNeedle pins the DDA tier, nullptr allows any.
+    // Every rank must get the same bits back; logNeedle pins the DDA tier, nullptr allows any. capToLLOneShot
+    // clips each size to this comm's LL one-shot cap.
     void runBitIdenticalAcrossRanks(const std::vector<ncclDataType_t>& types, const std::vector<size_t>& sizes,
-                                    const char* logNeedle, const char* testId)
+                                    const char* logNeedle, const char* testId, bool capToLLOneShot = false)
     {
         if(!validateTestPrerequisites(kMinProcessesForMPI))
         {
@@ -313,10 +324,20 @@ protected:
 
         for(const ncclDataType_t type : types)
         {
-            for(const size_t bytes : sizes)
+            for(const size_t sizeBytes : sizes)
             {
                 const size_t eltSize = (type == ncclBfloat16) ? sizeof(uint16_t) : sizeof(float);
-                const size_t count   = bytes / eltSize;
+                const size_t count
+                    = capToLLOneShot
+                          ? DdaFabricMPI::ddaLLOneShotCount(getActiveCommunicator(), sizeBytes / eltSize, eltSize)
+                          : sizeBytes / eltSize;
+                const size_t bytes = count * eltSize;
+                const std::string capSkip = mpiCoordinatedSkipReason(
+                    count == 0, "RCCL_DDA_LL_ONESHOT_THRESHOLD leaves no one-shot size");
+                if(!capSkip.empty())
+                {
+                    GTEST_SKIP() << capSkip;
+                }
                 SCOPED_TRACE(std::string(testId) + " type=" + std::to_string(static_cast<int>(type))
                              + " bytes=" + std::to_string(bytes));
 
@@ -392,9 +413,11 @@ protected:
 class DdaMPI_AllReduce : public DdaAllReduceMPITest
 {};
 
+// From the arch table's one-shot rank cap the one-shot stops below kOneShotCount, so the count follows the comm.
 TEST_F(DdaMPI_AllReduce, LLOneShotMultiRank)
 {
-    runAllReduce(kOneShotCount, kOneShotLogNeedle, "DdaMPI_AllReduce/LLOneShotMultiRank");
+    runAllReduce(kOneShotCount, kOneShotLogNeedle, "DdaMPI_AllReduce/LLOneShotMultiRank",
+                 /*capToLLOneShot=*/true);
 }
 
 TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
@@ -467,11 +490,11 @@ TEST_F(DdaMPI_AllReduce, BitIdenticalAcrossRanksDefaultSelection)
                                /*logNeedle=*/nullptr, "DdaMPI_AllReduce/BitIdenticalAcrossRanksDefaultSelection");
 }
 
-// 256 KiB is under the default LL one-shot threshold, so the LL one-shot kernel produces every byte compared.
+// 256 KiB, clipped to this comm's LL one-shot cap, so the LL one-shot kernel produces every byte compared.
 TEST_F(DdaMPI_AllReduce, LLOneShotBitIdenticalAcrossRanks)
 {
     runBitIdenticalAcrossRanks({ncclFloat32, ncclBfloat16}, {256 * 1024}, kOneShotLogNeedle,
-                               "DdaMPI_AllReduce/LLOneShotBitIdenticalAcrossRanks");
+                               "DdaMPI_AllReduce/LLOneShotBitIdenticalAcrossRanks", /*capToLLOneShot=*/true);
 }
 
 // Sets the same thresholds as LL128OneShotMultiRank, so it needs its own process (see the note above).
