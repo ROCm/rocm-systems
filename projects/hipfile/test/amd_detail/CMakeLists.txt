@@ -98,6 +98,13 @@ add_test(
 set_tests_properties(batch_mt_test PROPERTIES LABELS "stress;internal")
 
 hipfile_add_test_executable(
+    NAME hipfile-fastpath-gate
+    DEPS hipfile
+    SRCS "hipfile-fastpath-gate.cpp" "${HIPFILE_TEST_COMMON_PATH}/ais-capability.cpp"
+    SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_INCLUDE_PATH} ${HIPFILE_TEST_COMMON_PATH} ${HIPFILE_THIRD_PARTY_PATH}
+)
+
+hipfile_add_test_executable(
     NAME hipfileread-cpu-visibility
     DEPS hipfile
     SRCS "hipfileread-cpu-visibility.cpp"
