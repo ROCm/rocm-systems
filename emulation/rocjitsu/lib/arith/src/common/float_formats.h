@@ -9,11 +9,12 @@
 #ifndef RJ_ARITH_FLOAT_FORMATS_H_
 #define RJ_ARITH_FLOAT_FORMATS_H_
 
+#include "common/bits.h"
 #include "common/internal.h"
 
 #include <stdint.h>
 
-namespace rocjitsu::arith {
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // Widen a BF16 encoding to FP32, retaining its sign, payload, and subnormal bits.
 inline float bf16_to_float(uint16_t bits) { return as_float(uint32_t(bits) << 16); }
@@ -76,6 +77,6 @@ inline uint16_t float_to_f16(float value, bool saturate = false) {
   return uint16_t(sign | (uint32_t(adjusted) << 10) | rounded);
 }
 
-} // namespace rocjitsu::arith
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
 
 #endif
