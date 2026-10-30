@@ -285,17 +285,25 @@ create_forked_callback_threads()
     // it. Release pairs with fork_stale()/the destructor guard's acquire.
     g_fork_generation.fetch_add(1, std::memory_order_release);
 
-    // Abandon auxiliary inherited SDK state before decisions, reconstruction, or signal delivery.
-    fork_participants.begin_child();
-    // All SDK/tool decisions precede every callback-pool or tool-worker reconstruction.
-    registration::fork_child();
-    if(registration::fork_child_abandoned() || !fork_participants.eligible())
+    // A participant veto must disable the SDK before any child state is adopted or any inherited
+    // auxiliary state is touched.
+    if(!fork_participants.eligible())
     {
         registration::abandon_fork_child();
+        fork_participants.begin_child();
         fork_participants.abandon();
         return;
     }
 
+    registration::fork_child();
+    if(registration::fork_child_abandoned())
+    {
+        fork_participants.begin_child();
+        fork_participants.abandon();
+        return;
+    }
+
+    fork_participants.begin_child();
     common::reset_tid_after_fork();
     if(task_groups_initialized.load(std::memory_order_acquire))
     {

@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -151,6 +152,7 @@ auto graph_instantiate(RetT (*next)(::hipGraphExec_t*, Args...))
     static auto next_func = next;
     return +[](::hipGraphExec_t* out, Args... args) -> RetT {
         auto ret = next_func(out, std::forward<Args>(args)...);
+        if(registration::fork_child_abandoned()) return ret;
         if(ret == hipSuccess && out != nullptr && *out != nullptr)
         {
             auto exec_id = assign_graph_exec_id(*out);
@@ -166,6 +168,8 @@ auto graph_destroy(RetT (*next)(::hipGraphExec_t))
 {
     static auto next_func = next;
     return +[](::hipGraphExec_t exec) -> RetT {
+        if(registration::fork_child_abandoned()) return next_func(exec);
+
         // Capture id before next_func; only forget + fire on successful destroy.
         auto exec_id = (exec != nullptr) ? lookup_graph_exec_id(exec) : uint64_t{0};
 
@@ -265,6 +269,8 @@ auto graph_launch(RetT (*next)(::hipGraphExec_t, ::hipStream_t))
 {
     static auto next_func = next;
     return +[](::hipGraphExec_t exec, ::hipStream_t stream) -> RetT {
+        if(registration::fork_child_abandoned()) return next_func(exec, stream);
+
         // Shared callback_contexts spans ENTER and EXIT per execute_phase_exit_callbacks contract.
         auto callback_contexts = tracing::callback_context_data_vec_t{};
         auto external_corr_ids = tracing::external_correlation_id_map_t{};

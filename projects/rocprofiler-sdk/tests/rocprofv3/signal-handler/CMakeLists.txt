@@ -232,44 +232,6 @@ endif()
 set(_fork_test_root "$<TARGET_FILE_DIR:rocprofiler-sdk-fork-test-shared>/..")
 add_dependencies(signal-handler-test rocprofiler-sdk-fork-test-runtime)
 
-# Model an application atfork prepare handler registered before rocprofv3 writing the
-# first marker record after the tool has locked its output registry. The record is
-# deliberately omitted instead of re-entering the registry and deadlocking fork().
-set(_prepare_name app-fork-prepare-marker)
-set(_prepare_outdir ${BASE_OUT_DIR}/fork-prepare-marker)
-
-rocprofiler_add_integration_cleanup_test(
-    ${_prepare_name}
-    DIRECTORIES ${_prepare_outdir}
-    LABELS "integration-tests;signal-handler"
-    FIXTURES_SETUP ${_prepare_name}-clean)
-
-rocprofiler_add_integration_execute_test(
-    ${_prepare_name}
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocm-root ${_fork_test_root}
-        --marker-trace --output-format json -d ${_prepare_outdir} -o out_%pid% --
-        $<TARGET_FILE:signal-handler-test> --fork-prepare-marker
-    DEPENDS signal-handler-test
-    TIMEOUT ${CTEST_TIMEOUT}
-    LABELS "integration-tests;signal-handler"
-    PRELOAD "${PRELOAD_ENV}"
-    ENVIRONMENT "ROCPROF_INTERNAL_TEST_ATFORK_PREPARE_WRITE=1"
-    PASS_REGULAR_EXPRESSION "clean exit"
-    FIXTURES_REQUIRED ${_prepare_name}-clean
-    FIXTURES_SETUP ${_prepare_name})
-
-rocprofiler_add_integration_validate_test(
-    ${_prepare_name}
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    TIMEOUT ${CTEST_TIMEOUT}
-    LABELS "integration-tests;signal-handler"
-    FIXTURES_REQUIRED ${_prepare_name}
-    ARGS --output-dir ${_prepare_outdir} --expect clean-exit --process-type
-         fork-prepare-marker)
-
 # Real production-handler regressions. Pipe rendezvous in the application/tool establish
 # the incomplete lifecycle; TIMEOUT diagnoses deadlocks and does not establish the race.
 foreach(

@@ -44,6 +44,9 @@ destroy_static_objects();
 void
 abandon_static_objects_after_fork() noexcept;
 
+void
+adopt_static_objects_after_fork() noexcept;
+
 bool
 static_objects_abandoned() noexcept;
 

@@ -1204,7 +1204,10 @@ fork_child() noexcept
     if(lifecycle.abandoned())
         common::abandon_static_objects_after_fork();
     else
+    {
+        common::adopt_static_objects_after_fork();
         sdk_fork_sequence.finish();
+    }
 }
 
 bool

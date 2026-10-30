@@ -30,7 +30,6 @@
 
 namespace
 {
-using rocprofiler::common::fork_signal_mask;
 using rocprofiler::common::fork_signal_state;
 fork_signal_state*    current   = nullptr;
 int                   signal_fd = -1;
@@ -49,7 +48,7 @@ handler(int)
 }
 
 void
-run(bool masked)
+run()
 {
     alarm(5);
     fork_signal_state state{};
@@ -58,48 +57,24 @@ run(bool masked)
     signal_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if(signal_fd < 0) std::_Exit(32);
     const auto       parent_fd = signal_fd;
-    const int        signo     = masked ? SIGTERM : SIGABRT;
+    constexpr auto   signo     = SIGABRT;
     struct sigaction action
     {};
     action.sa_handler = handler;
     sigemptyset(&action.sa_mask);
     if(sigaction(signo, &action, nullptr) != 0) std::_Exit(33);
-    sigset_t handled{};
-    sigemptyset(&handled);
-    sigaddset(&handled, signo);
-    pthread_sigmask(SIG_UNBLOCK, &handled, nullptr);
-    fork_signal_mask mask{};
-    if(masked && mask.prepare(handled) != 0) std::_Exit(34);
     const auto child = fork();
     if(child == 0)
     {
-        if(masked)
-        {
-            state.begin_child();
-            raise(signo);
-            sigset_t pending{};
-            sigpending(&pending);
-            if(!sigismember(&pending, signo)) std::_Exit(35);
-            signal_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-            if(signal_fd < 0) std::_Exit(36);
-            state.ready(getpid());
-            mask.child();
-            uint64_t value = 0;
-            if(read(signal_fd, &value, sizeof(value)) != sizeof(value) || value != 1)
-                std::_Exit(37);
-        }
-        else
-        {
-            // Deliberately signal before begin_child(): this is the pre-atfork-callback hole.
-            raise(signo);
-            if(!rejected) std::_Exit(38);
-        }
+        // Signal before any atfork child callback could update profiler state. PID ownership must
+        // reject the inherited worker without writing its eventfd.
+        raise(signo);
+        if(!rejected) std::_Exit(38);
         uint64_t inherited = 0;
         errno              = 0;
         if(read(parent_fd, &inherited, sizeof(inherited)) >= 0 || errno != EAGAIN) std::_Exit(39);
         std::_Exit(0);
     }
-    if(masked) mask.parent();
     int status = 0;
     if(child < 0 || waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
        WEXITSTATUS(status) != 0)
@@ -113,51 +88,19 @@ run(bool masked)
 
 TEST(fork_signal_state, inherited_worker_is_rejected_before_child_callback)
 {
-    ASSERT_EXIT(run(false), ::testing::ExitedWithCode(0), "");
+    ASSERT_EXIT(run(), ::testing::ExitedWithCode(0), "");
 }
 
-TEST(fork_signal_state, pending_signal_reaches_only_the_fresh_child_eventfd)
-{
-    ASSERT_EXIT(run(true), ::testing::ExitedWithCode(0), "");
-}
-
-TEST(fork_signal_state, readiness_requires_current_pid_and_completed_transition)
+TEST(fork_signal_state, readiness_requires_current_pid)
 {
     fork_signal_state state{};
     EXPECT_FALSE(state.usable(getpid()));
     state.ready(getpid());
     EXPECT_TRUE(state.usable(getpid()));
-    state.begin_child();
-    EXPECT_FALSE(state.usable(getpid()));
     state.ready(getpid() + 1);
     EXPECT_FALSE(state.usable(getpid()));
     state.ready(getpid());
     EXPECT_TRUE(state.usable(getpid()));
-}
-
-TEST(fork_signal_state, nested_parent_masks_restore_the_outer_original_mask)
-{
-    sigset_t original{};
-    pthread_sigmask(SIG_SETMASK, nullptr, &original);
-    struct restore_mask
-    {
-        sigset_t original;
-        ~restore_mask() { pthread_sigmask(SIG_SETMASK, &original, nullptr); }
-    } restore{original};
-    sigset_t handled{};
-    sigemptyset(&handled);
-    sigaddset(&handled, SIGTERM);
-    pthread_sigmask(SIG_UNBLOCK, &handled, nullptr);
-    fork_signal_mask mask{};
-    ASSERT_EQ(mask.prepare(handled), 0);
-    ASSERT_EQ(mask.prepare(handled), 0);
-    mask.parent();
-    sigset_t now{};
-    pthread_sigmask(SIG_SETMASK, nullptr, &now);
-    EXPECT_TRUE(sigismember(&now, SIGTERM));
-    mask.parent();
-    pthread_sigmask(SIG_SETMASK, nullptr, &now);
-    EXPECT_FALSE(sigismember(&now, SIGTERM));
 }
 
 namespace

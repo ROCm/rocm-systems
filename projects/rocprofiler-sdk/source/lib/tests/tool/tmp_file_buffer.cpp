@@ -26,57 +26,15 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <new>
 #include <vector>
 
 namespace
 {
-struct test_record
-{
-    uint64_t value = 0;
-};
-
 struct retry_record
 {
     uint64_t value = 0;
 };
 }  // namespace
-
-TEST(tmp_file_buffer, suspended_fork_output_does_not_offload_a_full_buffer)
-{
-    namespace tool = ::rocprofiler::tool;
-
-    tool::get_tmp_file_name_callback() = [](domain_type) {
-        return "/tmp/rocprofiler-sdk-tmp-file-buffer-test.dat";
-    };
-
-    auto*& filebuf = tool::get_tmp_file_buffer<test_record>(domain_type::MARKER);
-    ASSERT_NE(filebuf, nullptr);
-
-    auto record = test_record{};
-    while(auto* slot = filebuf->buffer.request(false))
-        new(slot) test_record{record};
-    ASSERT_TRUE(filebuf->buffer.is_full());
-
-    tool::suspend_fork_output();
-    tool::prepare_fork_file_buffers();
-    tool::write_ring_buffer(record, domain_type::MARKER);
-    tool::parent_fork_file_buffers();
-    tool::resume_fork_output();
-
-    EXPECT_TRUE(filebuf->buffer.is_full());
-}
-
-TEST(tmp_file_buffer, snapshot_releases_registry_before_later_prepare_work)
-{
-    namespace tool = ::rocprofiler::tool;
-    tool::prepare_fork_file_buffers();
-    ASSERT_TRUE(tool::fork_file_buffers_unchanged());
-    // Same-thread registration would deadlock if prepare retained the registry mutex.
-    tool::register_file_buffer({[]() {}, []() {}});
-    EXPECT_FALSE(tool::fork_file_buffers_unchanged());
-    tool::parent_fork_file_buffers();
-}
 
 TEST(tmp_file_buffer, preserved_read_stream_reopens_for_append)
 {

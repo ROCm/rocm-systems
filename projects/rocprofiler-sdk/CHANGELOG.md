@@ -8,6 +8,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- `rocprofv3` no longer profiles a child that continues after `fork()` without `exec()`. The
+  parent remains profiled, while a successful `exec()` or spawn initializes a fresh child
+  profiling session.
+
 ### Resolved issues
 
 ### Known issues

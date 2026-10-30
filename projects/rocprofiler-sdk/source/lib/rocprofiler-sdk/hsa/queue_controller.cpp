@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <hsa/amd_hsa_queue.h>
 #include <hsa/amd_hsa_signal.h>
@@ -95,6 +96,10 @@ create_queue(hsa_agent_t        agent,
              hsa_queue_t** queue)
 {
     auto* controller = CHECK_NOTNULL(get_queue_controller());
+    if(registration::fork_child_abandoned())
+        return controller->get_core_table().hsa_queue_create_fn(
+            agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
+
     for(const auto& [_, agent_info] : controller->get_supported_agents())
     {
         if(agent_info.get_hsa_agent().handle == agent.handle)
@@ -151,7 +156,10 @@ create_queue(hsa_agent_t        agent,
 hsa_status_t
 destroy_queue(hsa_queue_t* hsa_queue)
 {
-    if(get_queue_controller()) get_queue_controller()->destroy_queue(hsa_queue);
+    auto* controller = CHECK_NOTNULL(get_queue_controller());
+    if(registration::fork_child_abandoned())
+        return controller->get_core_table().hsa_queue_destroy_fn(hsa_queue);
+    controller->destroy_queue(hsa_queue);
     return HSA_STATUS_SUCCESS;
 }
 
@@ -160,7 +168,10 @@ hsa_status_t
 create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs)
 {
     auto* controller = CHECK_NOTNULL(get_queue_controller());
-    auto  status     = controller->get_ext_table().hsa_amd_queue_create_fn(agent, descs, num_descs);
+    if(registration::fork_child_abandoned())
+        return controller->get_ext_table().hsa_amd_queue_create_fn(agent, descs, num_descs);
+
+    auto status = controller->get_ext_table().hsa_amd_queue_create_fn(agent, descs, num_descs);
 
     // hsa_amd_queue_create permits partial batch success: it may return an error for the first
     // failing descriptor while leaving earlier descs[i].queue entries valid.  Process every

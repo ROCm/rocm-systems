@@ -127,6 +127,7 @@ tool_child()
         common::abandon_static_objects_after_fork();
         return;
     }
+    common::adopt_static_objects_after_fork();
     sequence.finish();
 }
 

@@ -55,41 +55,6 @@ compose_tmp_file_name(const output_config& cfg, domain_type buffer_type);
 tmp_file_name_callback_t&
 get_tmp_file_name_callback();
 
-bool
-is_fork_output_suspended() noexcept;
-
-void
-suspend_fork_output() noexcept;
-
-void
-resume_fork_output() noexcept;
-
-// Capture/flush under short parent-side locks. No registry/file lock is retained when this
-// prepare callback returns. A later lifecycle change invalidates the child's snapshot.
-void
-initialize_fork_file_buffers();
-
-void
-prepare_fork_file_buffers();
-
-void
-parent_fork_file_buffers();
-
-bool
-fork_file_buffers_unchanged() noexcept;
-
-void
-child_fork_file_buffers();
-
-struct file_buffer_fork_handlers
-{
-    void (*flush)() = nullptr;
-    void (*reset)() = nullptr;
-};
-
-void
-register_file_buffer(file_buffer_fork_handlers handlers);
-
 template <typename Tp>
 struct file_buffer
 {
@@ -107,7 +72,6 @@ struct file_buffer
     file_buffer& operator=(file_buffer&&) noexcept = default;
 
     void reset();
-    void forget_inherited();
 
     domain_type       domain = {};
     uint64_t          nbytes = 0;
@@ -127,16 +91,6 @@ file_buffer<Tp>::reset()
     buffer.clear();
 }
 
-// Called only for a validated quiescent snapshot: drop inherited records and use a child file.
-template <typename Tp>
-void
-file_buffer<Tp>::forget_inherited()
-{
-    file.detach(get_tmp_file_name_callback()(domain));
-    nbytes = 0;
-    buffer.clear();
-}
-
 template <typename Tp>
 struct file_buffer<ring_buffer_t<Tp>>
 {
@@ -148,22 +102,7 @@ template <typename Tp>
 file_buffer<Tp>*&
 get_tmp_file_buffer(domain_type type)
 {
-    static file_buffer<Tp>* val        = new file_buffer<Tp>{type};
-    static bool             registered = []() {
-        auto flush = []() {
-            if(val)
-            {
-                auto lock = std::lock_guard<std::mutex>{val->file.file_mutex};
-                val->file.flush();
-            }
-        };
-        auto reset = []() {
-            if(val) val->forget_inherited();
-        };
-        register_file_buffer(file_buffer_fork_handlers{flush, reset});
-        return true;
-    }();
-    (void) registered;
+    static file_buffer<Tp>* val = new file_buffer<Tp>{type};
     return val;
 }
 
@@ -208,10 +147,6 @@ void
 write_ring_buffer(Tp _v, domain_type type)
 {
     if(common::static_objects_abandoned()) return;
-
-    // Application prepare handlers must not append direct tool output around the snapshot.
-    // The coordinator temporarily permits the intentional SDK-buffer flush before suspending again.
-    if(is_fork_output_suspended()) return;
 
     auto* filebuf = get_tmp_file_buffer<Tp>(type);
 

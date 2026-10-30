@@ -22,10 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""
-Validation for records made before fork(): only the parent may report them. Each fork()
-child event stream must contain only records captured after that child started.
-"""
+"""Validate that plain-fork children produce no profiler output."""
 
 import glob
 import json
@@ -119,21 +116,15 @@ def load_json_outputs(output_dir):
     return outputs
 
 
-def test_each_process_records_its_own_identity(output_dir):
+def test_only_parent_output_is_created(output_dir):
     outputs = load_outputs(output_dir)
-    assert len(outputs) == 3, f"Expected one parent and two child outputs: {outputs}"
-
-    for path, data in outputs.items():
-        assert (
-            len(data["exit_markers"]) == 1
-        ), f"{path}: expected one exit marker, found {data['exit_markers']}"
-        marker_pid = int(re.search(r" pid:(\d+)", data["exit_markers"][0]).group(1))
-        assert data["pids"] == [
-            marker_pid
-        ], f"{path}: recorded pids {data['pids']}, process was {marker_pid}"
-
-    uuids = [data["uuid"] for data in outputs.values()]
-    assert len(set(uuids)) == 3, f"Expected distinct process UUIDs: {outputs}"
+    assert len(outputs) == 1, f"Expected only the parent output: {outputs}"
+    path, data = next(iter(outputs.items()))
+    assert data["parent"] == 1, f"{path}: expected the parent exit marker: {data}"
+    assert data["child"] == 0, f"{path}: child marker leaked into parent output: {data}"
+    assert len(data["exit_markers"]) == 1, data["exit_markers"]
+    marker_pid = int(re.search(r" pid:(\d+)", data["exit_markers"][0]).group(1))
+    assert data["pids"] == [marker_pid], (path, data)
 
 
 def test_parent_reports_its_records(output_dir):
@@ -144,35 +135,13 @@ def test_parent_reports_its_records(output_dir):
     assert parents[0]["hip"] > 0, outputs
 
 
-def test_children_report_only_their_records(output_dir):
-    outputs = load_outputs(output_dir)
-    children = {k: v for k, v in outputs.items() if v["child"] == 1}
-    # 2 forked children
-    assert len(children) == 2, f"Expected two child outputs: {outputs}"
-    for path, counts in children.items():
-        assert counts["prefork"] == 0, f"{path} reports the parent's markers: {counts}"
-        assert counts["hip"] == 0, f"{path} reports the parent's HIP calls: {counts}"
-        assert (
-            counts["before_start"] == 0
-        ), f"{path} reports records from before fork(): {counts}"
-
-
-def test_json_outputs_contain_only_process_local_records(output_dir):
+def test_json_contains_only_parent_records(output_dir):
     outputs = load_json_outputs(output_dir)
-    assert len(outputs) == 3, f"Expected one parent and two child JSON outputs: {outputs}"
-
-    parents = [v for v in outputs.values() if v["parent"] == 1]
-    assert len(parents) == 1, f"Expected one parent JSON output: {outputs}"
-    assert parents[0]["prefork"] == NUM_PREFORK_MARKERS, outputs
-    assert parents[0]["hip"] > 0, outputs
-
-    children = {k: v for k, v in outputs.items() if v["child"] == 1}
-    assert len(children) == 2, f"Expected two child JSON outputs: {outputs}"
-    for path, counts in children.items():
-        assert counts["prefork"] == 0, f"{path} reports the parent's markers: {counts}"
-        assert (
-            counts["before_start"] == 0
-        ), f"{path} reports records from before fork(): {counts}"
-        assert (
-            counts["foreign_thread"] == 0
-        ), f"{path} attributes child records to the parent thread: {counts}"
+    assert len(outputs) == 1, f"Expected only the parent JSON output: {outputs}"
+    path, parent = next(iter(outputs.items()))
+    assert parent["parent"] == 1, (path, parent)
+    assert parent["child"] == 0, (path, parent)
+    assert parent["prefork"] == NUM_PREFORK_MARKERS, outputs
+    assert parent["hip"] > 0, outputs
+    assert parent["before_start"] == 0, outputs
+    assert parent["foreign_thread"] == 0, outputs

@@ -39,8 +39,8 @@
 //   then forks children that exit on their own. Records made before fork() belong to the parent
 //   only.
 //
-// TODO: --raw-fork (_Fork without exec) is not supported. _Fork skips
-// pthread_atfork handlers, leaving stale profiler state. Extremely rare in practice.
+// _Fork skips pthread_atfork handlers. PID ownership still disables inherited profiler state,
+// but the child must follow the _Fork contract and call exec or _exit.
 
 #include <hip/hip_runtime.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
@@ -216,7 +216,7 @@ mode_fork_after_work()
 {
     fprintf(stderr, "Mode: fork-after-work, PID=%d\n", getpid());
 
-    // HIP API calls only: a child forked after kernel launches cannot finalize the GPU runtime.
+    // Generate parent HIP records before fork. Plain-fork children must not copy or extend them.
     for(int i = 0; i < 20; ++i)
     {
         float* d_buf = nullptr;
@@ -228,9 +228,8 @@ mode_fork_after_work()
     for(int i = 0; i < 5000; ++i)
         emit_roctx_marker("prefork_marker %d", i);
 
-    // All traced work is complete before fork: deterministic plain-fork child output requires
-    // producers to be quiescent at this boundary. Concurrent trace production is outside this
-    // regression's supported scope.
+    // All traced work is complete before fork. Plain-fork children must not produce profiler
+    // output or duplicate these parent records.
     constexpr int NUM_CHILDREN = 2;
     pid_t         children[NUM_CHILDREN];
     for(int i = 0; i < NUM_CHILDREN; ++i)
@@ -238,6 +237,21 @@ mode_fork_after_work()
         pid_t pid = fork();
         if(pid == 0)
         {
+            if(i == 1)
+            {
+                execl("/__rocprofv3_missing_exec__", "__rocprofv3_missing_exec__", nullptr);
+                if(errno != ENOENT) std::_Exit(77);
+            }
+            using query_type = rocprofiler_status_t (*)(int*);
+            auto initialized =
+                reinterpret_cast<query_type>(dlsym(RTLD_DEFAULT, "rocprofiler_is_initialized"));
+            auto finalized =
+                reinterpret_cast<query_type>(dlsym(RTLD_DEFAULT, "rocprofiler_is_finalized"));
+            int init = -1;
+            int fini = -1;
+            if(!initialized || !finalized || initialized(&init) != ROCPROFILER_STATUS_SUCCESS ||
+               finalized(&fini) != ROCPROFILER_STATUS_SUCCESS || init != 0 || fini != 1)
+                std::_Exit(78);
             emit_roctx_marker(
                 "exit_marker child fork-after-work ppid:%d pid:%d", getppid(), getpid());
             exit(0);
@@ -245,29 +259,14 @@ mode_fork_after_work()
         children[i] = pid;
     }
     for(int i = 0; i < NUM_CHILDREN; ++i)
-        waitpid(children[i], nullptr, 0);
+    {
+        int status = 0;
+        if(waitpid(children[i], &status, 0) != children[i] || !WIFEXITED(status) ||
+           WEXITSTATUS(status) != 0)
+            throw std::runtime_error{"plain-fork child contract check failed"};
+    }
 
     emit_roctx_marker("exit_marker parent fork-after-work ppid:%d pid:%d", getppid(), getpid());
-    fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
-    return 0;
-}
-
-int
-mode_fork_prepare_marker()
-{
-    fprintf(stderr, "Mode: fork-prepare-marker, PID=%d\n", getpid());
-
-    auto child = fork();
-    if(child == 0)
-    {
-        emit_roctx_marker(
-            "exit_marker child fork-prepare-marker ppid:%d pid:%d", getppid(), getpid());
-        exit(0);
-    }
-    if(child < 0) throw std::runtime_error{"fork failed"};
-
-    waitpid(child, nullptr, 0);
-    emit_roctx_marker("exit_marker parent fork-prepare-marker ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
     return 0;
 }
@@ -744,7 +743,6 @@ main(int argc, char** argv)
            std::strcmp(argv[i], "--fork-exec") == 0 || std::strcmp(argv[i], "--spawn") == 0 ||
            std::strcmp(argv[i], "--lingering-child") == 0 ||
            std::strcmp(argv[i], "--fork-after-work") == 0 ||
-           std::strcmp(argv[i], "--fork-prepare-marker") == 0 ||
            std::strcmp(argv[i], "--fork-prepare-detach") == 0 ||
            std::strcmp(argv[i], "--startup-fork-check") == 0 ||
            std::strcmp(argv[i], "--fork-child-transition-abort") == 0 ||
@@ -780,7 +778,6 @@ main(int argc, char** argv)
     // Normal-exit regression mode (no signal); independent of app_handles_signals.
     if(std::strcmp(mode, "--lingering-child") == 0) return mode_lingering_child();
     if(std::strcmp(mode, "--fork-after-work") == 0) return mode_fork_after_work();
-    if(std::strcmp(mode, "--fork-prepare-marker") == 0) return mode_fork_prepare_marker();
     if(std::strcmp(mode, "--fork-prepare-detach") == 0)
     {
         emit_roctx_marker("exit_marker parent fork-prepare-detach");

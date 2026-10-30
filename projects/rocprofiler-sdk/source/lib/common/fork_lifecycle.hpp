@@ -22,6 +22,9 @@
 
 #pragma once
 
+#include <sys/types.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <cstdint>
 #include <utility>
@@ -59,7 +62,11 @@ public:
         fork_lifecycle* m_owner = nullptr;
     };
 
-    bool abandoned() const noexcept { return m_abandoned.load(std::memory_order_acquire); }
+    bool abandoned() const noexcept
+    {
+        return m_abandoned.load(std::memory_order_acquire) ||
+               m_owner_pid.load(std::memory_order_acquire) != ::getpid();
+    }
     bool try_prepare() noexcept
     {
         if(abandoned()) return false;
@@ -74,7 +81,7 @@ public:
     bool child_eligible() const noexcept
     {
         const auto value = m_state.load(std::memory_order_acquire);
-        return !abandoned() && (value & fork_preparing) != 0 &&
+        return !m_abandoned.load(std::memory_order_acquire) && (value & fork_preparing) != 0 &&
                value == m_snapshot.load(std::memory_order_acquire);
     }
     void parent_complete() noexcept
@@ -84,7 +91,10 @@ public:
     }
     void child_complete(bool force_abandon = false) noexcept
     {
-        if(force_abandon || !child_eligible()) m_abandoned.store(true, std::memory_order_release);
+        if(force_abandon || !child_eligible())
+            m_abandoned.store(true, std::memory_order_release);
+        else
+            m_owner_pid.store(::getpid(), std::memory_order_release);
         m_state.store(0, std::memory_order_release);
     }
 
@@ -95,8 +105,10 @@ private:
     std::atomic<uint64_t>     m_state{0};
     std::atomic<uint64_t>     m_snapshot{0};
     std::atomic<bool>         m_abandoned{false};
+    std::atomic<pid_t>        m_owner_pid{::getpid()};
     static_assert(std::atomic<uint64_t>::is_always_lock_free);
     static_assert(std::atomic<bool>::is_always_lock_free);
+    static_assert(std::atomic<pid_t>::is_always_lock_free);
 };
 
 // A nested prepare must not flush SDK buffers or acquire the registry a second time. The parent

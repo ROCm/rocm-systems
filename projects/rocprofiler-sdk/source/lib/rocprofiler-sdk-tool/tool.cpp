@@ -151,12 +151,8 @@ rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 
 namespace
 {
-common::fork_lifecycle                tool_fork_lifecycle = {};
-thread_local common::fork_sequence    tool_fork_sequence  = {};
-std::atomic<bool>                     tool_worker_initialized{false};
-std::atomic<bool>                     tool_fork_ready{false};
-common::fork_signal_state             tool_signal_state{};
-thread_local common::fork_signal_mask tool_fork_signal_mask{};
+common::fork_lifecycle    tool_fork_lifecycle = {};
+common::fork_signal_state tool_signal_state{};
 
 void
 ensure_tool_fork_coordination();
@@ -167,16 +163,6 @@ fork_initialization_test(const char* phase);
 
 void
 reset_detach_output_state();
-
-void
-prepare_tool_in_parent(bool sdk_admitted);
-void
-parent_tool_after_fork() noexcept;
-
-bool
-tool_child_eligible() noexcept;
-void
-rebuild_tool_in_child();
 
 auto&
 get_tool_session_lifecycle()
@@ -205,7 +191,6 @@ get_output_generation_thread()
 void
 abandon_tool_in_child() noexcept
 {
-    tool_signal_state.begin_child();
     tool_fork_lifecycle.child_complete(true);
     common::abandon_static_objects_after_fork();
 }
@@ -2608,7 +2593,6 @@ void
 finalize_rocprofv3(std::string_view context)
 {
     if(tool_fork_lifecycle.abandoned()) return;
-    auto activity = common::fork_lifecycle::activity{tool_fork_lifecycle};
 
     using status_t = tool::finalization_gate::status;
 
@@ -3032,7 +3016,6 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             void* /*tool_data*/)
 {
     if(tool_fork_lifecycle.abandoned()) return 0;
-    auto activity  = common::fork_lifecycle::activity{tool_fork_lifecycle};
     auto ownership = get_tool_session_lifecycle().update();
     if(!ownership) return 0;
 
@@ -3295,7 +3278,6 @@ int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
     if(tool_fork_lifecycle.abandoned()) return 0;
-    auto activity = common::fork_lifecycle::activity{tool_fork_lifecycle};
 
     static constexpr auto null_context_id = rocprofiler_context_id_t{.handle = 0};
     static constexpr auto null_buffer_id  = rocprofiler_buffer_id_t{.handle = 0};
@@ -4144,67 +4126,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool_metadata->process_start_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
 
-    // A fork() child without exec keeps this process's tool state. Give it its own identity so
-    // its output is not attributed to the parent and sibling children do not derive the same
-    // rocpd UUID from the parent's pid and start time. Also drop the records it inherits, which
-    // the parent already reports.
-    //
-    // Plain-fork child output is best-effort and requires traced API and marker producers to be
-    // quiescent at the fork boundary. The prepare handler drains records already buffered but
-    // does not stop another application thread from producing an SDK record before the kernel
-    // forks. Child attribution for records racing that boundary is unspecified. Applications
-    // requiring deterministic child profiling should use fork+exec/spawn or quiesce tracing
-    // activity before a plain fork.
-    static std::once_flag fork_handlers_once;
-    std::call_once(fork_handlers_once, []() {
-#if defined(ROCPROFILER_TOOL_TEST_HOOKS)
-        if(tool::get_env("ROCPROF_INTERNAL_TEST_ATFORK_PREPARE_WRITE", false))
-        {
-            const int test_status = pthread_atfork(
-                []() {
-                    auto record      = rocprofiler_buffer_tracing_marker_api_record_t{};
-                    record.size      = sizeof(record);
-                    record.kind      = ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API;
-                    record.operation = ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA;
-                    tool::write_ring_buffer(record, domain_type::MARKER);
-                },
-                nullptr,
-                nullptr);
-            ROCP_FATAL_IF(test_status != 0) << "failed to register test fork handler";
-        }
-#endif
-        // This latest prepare records nesting before application handlers execute. The SDK's
-        // earlier coordinator subsequently snapshots under short-lived SDK/tool ownership.
-        const int status = pthread_atfork(
-            []() {
-                if(tool_fork_lifecycle.abandoned()) return;
-                sigset_t handled{};
-                sigemptyset(&handled);
-                for(auto signo : rocprofv3_handled_signals)
-                    sigaddset(&handled, signo);
-                ROCP_FATAL_IF(tool_fork_signal_mask.prepare(handled) != 0)
-                    << "failed to block signals for fork";
-                tool_fork_sequence.begin();
-                tool::suspend_fork_output();
-            },
-            []() {
-                if(tool_fork_lifecycle.abandoned()) return;
-                if(tool_fork_sequence.finish()) tool::resume_fork_output();
-                tool_fork_signal_mask.parent();
-            },
-            []() {
-                // The SDK coordinator has returned after every auxiliary worker reconstruction.
-                if(!tool_fork_lifecycle.abandoned() &&
-                   tool_worker_initialized.load(std::memory_order_acquire) &&
-                   get_signal_worker().started.load(std::memory_order_acquire) != 0)
-                    tool_signal_state.ready(getpid());
-                tool_fork_signal_mask.child();
-            });
-        ROCP_FATAL_IF(status != 0)
-            << "failed to register rocprofv3 fork handlers: " << strerror(status);
-    });
-    tool_fork_ready.store(true, std::memory_order_release);
-
     return 0;
 }
 
@@ -4792,7 +4713,6 @@ void
 tool_detach(void* /*tool_data*/)
 {
     if(tool_fork_lifecycle.abandoned()) return;
-    auto activity  = common::fork_lifecycle::activity{tool_fork_lifecycle};
     auto ownership = get_tool_session_lifecycle().update();
     if(!ownership) return;
 
@@ -4829,8 +4749,7 @@ tool_detach(void* /*tool_data*/)
         // This allows tool_detach to return immediately without waiting.
         // The thread will be joined later in tool_attach (for reattachment) or tool_fini
         get_output_generation_thread().wlock([](auto& thread_ptr) {
-            auto output_activity = common::fork_lifecycle::activity{tool_fork_lifecycle};
-            thread_ptr.emplace([output_activity = std::move(output_activity)]() {
+            thread_ptr.emplace([]() {
                 try
                 {
                     fork_lifecycle_test_barrier("detach");
@@ -4914,7 +4833,6 @@ void
 tool_fini(void* /*tool_data*/)
 {
     if(tool_fork_lifecycle.abandoned()) return;
-    auto activity = common::fork_lifecycle::activity{tool_fork_lifecycle};
 
     auto status = get_signal_worker().tool_finalization.run_or_wait(
         []() { tool_fini_impl(); },
@@ -5229,7 +5147,6 @@ signal_finalization_worker()
 {
     auto& sw = get_signal_worker();
     {
-        auto activity = common::fork_lifecycle::activity{tool_fork_lifecycle};
         sw.worker_id.store(std::this_thread::get_id(), std::memory_order_release);
         sigset_t mask;
         sigemptyset(&mask);
@@ -5255,10 +5172,6 @@ signal_finalization_worker()
         ROCP_WARNING << "signal worker: eventfd read failed: " << strerror(errno);
         return;
     }
-
-    // Once awakened, every operation below belongs to signal-driven finalization. Keep fork
-    // admission closed through logging, finalization, re-raise, and child reaping.
-    auto worker_activity = common::fork_lifecycle::activity{tool_fork_lifecycle};
 
     auto this_pid  = getpid();
     auto this_ppid = getppid();
@@ -5438,116 +5351,18 @@ extern "C++" {
 namespace
 {
 void
-prepare_tool_in_parent(bool sdk_admitted)
-{
-    if(tool_fork_lifecycle.abandoned() || tool_fork_sequence.nested()) return;
-    common::reset_tid_after_fork();  // prime this DSO's TLS before any child handler can use it
-    tool_fork_sequence.admitted = false;
-    if(!sdk_admitted || !tool_fork_ready.load(std::memory_order_acquire) ||
-       tool_signal_state.transitioning())
-        return;
-    auto ownership = get_tool_session_lifecycle().try_update();
-    if(!ownership || !tool_finalization_expected.load(std::memory_order_acquire)) return;
-    if(tool_worker_initialized.load(std::memory_order_acquire) &&
-       get_signal_worker().handling.load(std::memory_order_acquire) != 0)
-        return;
-    tool_fork_sequence.admitted = tool_fork_lifecycle.try_prepare();
-    if(!tool_fork_sequence.admitted) return;
-
-    // SDK session ownership is held by the coordinator, tool ownership by this frame. Both are
-    // released before any subsequent prepare handler runs. Permit the intentional SDK flush.
-    tool::resume_fork_output();
-    if(client_identifier)
-    {
-        for(auto buffer : get_buffers().as_array())
-        {
-            if(buffer.handle == 0) continue;
-            auto status = rocprofiler_flush_buffer(buffer);
-            ROCP_FATAL_IF(status != ROCPROFILER_STATUS_SUCCESS)
-                << "failed to flush buffer before fork: " << rocprofiler_get_status_string(status);
-        }
-    }
-    tool::suspend_fork_output();
-    tool::prepare_fork_file_buffers();
-}
-
-void
-parent_tool_after_fork() noexcept
-{
-    if(tool_fork_lifecycle.abandoned() || tool_fork_sequence.nested() ||
-       !tool_fork_sequence.admitted)
-        return;
-    tool::parent_fork_file_buffers();
-    tool_fork_lifecycle.parent_complete();
-}
-
-bool
-tool_child_eligible() noexcept
-{
-    int finalized = 0;
-    rocprofiler_is_finalized(&finalized);
-    const bool signal_idle = !tool_worker_initialized.load(std::memory_order_acquire) ||
-                             get_signal_worker().handling.load(std::memory_order_acquire) == 0;
-    return finalized == 0 && tool_finalization_expected.load(std::memory_order_acquire) &&
-           signal_idle && tool_fork_sequence.admitted && !tool_fork_sequence.nested() &&
-           tool_fork_lifecycle.child_eligible() && tool::fork_file_buffers_unchanged();
-}
-
-void
-rebuild_tool_in_child()
-{
-    tool_signal_state.begin_child();
-    tool_fork_lifecycle.child_complete();
-    tool_fork_sequence.finish();
-    common::reset_tid_after_fork();
-    if(tool_metadata)
-    {
-        tool_metadata->process_id        = getpid();
-        tool_metadata->parent_process_id = getppid();
-        rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
-    }
-    reserve_initial_attach_output_session();
-    tool::child_fork_file_buffers();
-    tool::resume_fork_output();
-    // Even a completed async output thread remains joinable until reaped in the parent.
-    // Never join that inherited handle in an eligible child either.
-    get_output_thread_storage() = new output_thread_state{};
-    if(tool_worker_initialized.load(std::memory_order_acquire))
-    {
-        auto& child_sw = get_signal_worker();
-        if(child_sw.eventfd >= 0) ::close(child_sw.eventfd);
-        ::new(static_cast<void*>(&child_sw)) signal_worker_state{};
-        child_sw.eventfd = eventfd(0, EFD_CLOEXEC);
-        if(child_sw.eventfd >= 0)
-        {
-            child_sw.thread = std::thread{signal_finalization_worker};
-            while(child_sw.started.load(std::memory_order_acquire) == 0)
-                syscall(SYS_futex, &child_sw.started, FUTEX_WAIT, 0, nullptr, nullptr, 0);
-        }
-    }
-    // Keep transition/PID rejection active until the late child callback restores the mask.
-}
-}  // namespace
-namespace
-{
-void
 ensure_tool_fork_coordination()
 {
     static auto fork_once = std::once_flag{};
     std::call_once(fork_once, []() {
-        // Resolve parent-only lazy state before the participant can run from an atfork prepare.
-        (void) get_tool_session_lifecycle();
-        tool::initialize_fork_file_buffers();
-
-        static common::fork_participant participant{
-            prepare_tool_in_parent,
-            parent_tool_after_fork,
-            tool_child_eligible,
-            abandon_tool_in_child,
-            rebuild_tool_in_child,
-            nullptr,
-            []() noexcept { tool_signal_state.begin_child(); },
-            common::fork_rebuild_phase::core};
+        static common::fork_participant participant{[](bool) {},
+                                                    []() noexcept {},
+                                                    []() noexcept { return false; },
+                                                    abandon_tool_in_child,
+                                                    []() {},
+                                                    nullptr,
+                                                    nullptr,
+                                                    common::fork_rebuild_phase::core};
         using register_type       = void (*)(common::fork_participant*);
         auto register_participant = reinterpret_cast<register_type>(
             dlsym(RTLD_DEFAULT, "rocprofiler_sdk_register_fork_participant_v2"));
@@ -5555,16 +5370,9 @@ ensure_tool_fork_coordination()
             register_participant(&participant);
         else
         {
-            // Compatibility fallback: an older SDK retains its pre-existing reconstruction
-            // behavior. Cross-component abandonment requires the matching updated SDK.
-            const int status = pthread_atfork([]() { prepare_tool_in_parent(true); },
-                                              parent_tool_after_fork,
-                                              []() {
-                                                  if(tool_child_eligible())
-                                                      rebuild_tool_in_child();
-                                                  else
-                                                      abandon_tool_in_child();
-                                              });
+            // An older SDK may still reconstruct its own workers, but the inherited rocprofv3
+            // session always fails closed.
+            const int status = pthread_atfork(nullptr, nullptr, abandon_tool_in_child);
             ROCP_FATAL_IF(status != 0) << "failed to register legacy tool fork handler";
         }
     });
@@ -5610,7 +5418,6 @@ rocprofiler_configure(uint32_t                 version,
 {
     if(tool_fork_lifecycle.abandoned()) return nullptr;
     ensure_tool_fork_coordination();
-    auto activity = common::fork_lifecycle::activity{tool_fork_lifecycle};
     initialize_logging();
     fork_initialization_test("tool-configure");
 
@@ -5690,7 +5497,6 @@ rocprofiler_configure_attach(uint32_t /*version*/,
                              rocprofiler_client_id_t* /*id*/)
 {
     if(tool_fork_lifecycle.abandoned()) return nullptr;
-    auto activity = common::fork_lifecycle::activity{tool_fork_lifecycle};
 
     // This function is called right after rocprofiler_configure with the same parameters.
     // The data returned is only used when attaching to a running process.
@@ -5725,7 +5531,6 @@ rocprofv3_signal(int signum, sighandler_t handler)
     if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
     if(tool_fork_lifecycle.abandoned() || !tool_signal_state.usable(getpid()))
         return get_signal_function()(signum, handler);
-    auto activity = common::fork_lifecycle::activity{tool_fork_lifecycle};
     if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0 ||
        !is_handled_signal(signum) || !tool_signal_handlers_enabled.load(std::memory_order_acquire))
         return get_signal_function()(signum, handler);
@@ -5744,7 +5549,6 @@ rocprofv3_sigaction(int signum,
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
     if(tool_fork_lifecycle.abandoned() || !tool_signal_state.usable(getpid()))
         return get_sigaction_function()(signum, act, oldact);
-    auto activity = common::fork_lifecycle::activity{tool_fork_lifecycle};
     if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0 ||
        !is_handled_signal(signum) || !act ||
        !tool_signal_handlers_enabled.load(std::memory_order_acquire))
@@ -5764,8 +5568,6 @@ rocprofv3_main(int argc, char** argv, char** envp)
 {
     if(tool_fork_lifecycle.abandoned()) return get_main_function()(argc, argv, envp);
     ensure_tool_fork_coordination();
-    auto startup =
-        std::optional<common::fork_lifecycle::activity>{std::in_place, tool_fork_lifecycle};
     auto convert_to_vec = [](char** inp) {
         auto        _data = std::vector<std::string_view>{};
         size_t      n     = 0;
@@ -5793,8 +5595,8 @@ rocprofv3_main(int argc, char** argv, char** envp)
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    // Idle plain-fork children retain best-effort host tracing. Children of incomplete lifecycle
-    // operations abandon their copied state instead of recreating workers or waiting for callbacks.
+    // Plain-fork children never use this inherited worker. A successful exec initializes a new
+    // rocprofv3 process and creates a fresh worker.
     {
         auto& sw   = get_signal_worker();
         sw.eventfd = eventfd(0, EFD_CLOEXEC);
@@ -5802,7 +5604,6 @@ rocprofv3_main(int argc, char** argv, char** envp)
         if(sw.eventfd >= 0)
             while(sw.started.load(std::memory_order_acquire) == 0)
                 syscall(SYS_futex, &sw.started, FUTEX_WAIT, 0, nullptr, nullptr, 0);
-        tool_worker_initialized.store(true, std::memory_order_release);
         tool_signal_handlers_enabled.store(tool::get_config().enable_signal_handlers,
                                            std::memory_order_release);
         if(sw.started.load(std::memory_order_acquire) != 0) tool_signal_state.ready(getpid());
@@ -5822,7 +5623,6 @@ rocprofv3_main(int argc, char** argv, char** envp)
         rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
 
     reserve_initial_attach_output_session();
-    startup.reset();
     auto ret = CHECK_NOTNULL(get_main_function())(argc, argv, envp);
 
     if(tool_fork_lifecycle.abandoned())

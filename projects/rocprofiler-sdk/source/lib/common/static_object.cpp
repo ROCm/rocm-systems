@@ -22,6 +22,9 @@
 
 #include "lib/common/static_object.hpp"
 
+#include <sys/types.h>
+#include <unistd.h>
+
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -35,8 +38,10 @@ namespace common
 {
 namespace
 {
-std::atomic<bool> abandoned_after_fork{false};
+std::atomic<bool>  abandoned_after_fork{false};
+std::atomic<pid_t> static_object_owner_pid{::getpid()};
 static_assert(std::atomic<bool>::is_always_lock_free);
+static_assert(std::atomic<pid_t>::is_always_lock_free);
 
 auto*&
 get_static_object_stack()
@@ -52,10 +57,17 @@ abandon_static_objects_after_fork() noexcept
     abandoned_after_fork.store(true, std::memory_order_release);
 }
 
+void
+adopt_static_objects_after_fork() noexcept
+{
+    static_object_owner_pid.store(::getpid(), std::memory_order_release);
+}
+
 bool
 static_objects_abandoned() noexcept
 {
-    return abandoned_after_fork.load(std::memory_order_acquire);
+    return abandoned_after_fork.load(std::memory_order_acquire) ||
+           static_object_owner_pid.load(std::memory_order_acquire) != ::getpid();
 }
 
 void

@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include <pthread.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <array>
@@ -39,24 +38,12 @@ namespace common
 class fork_signal_state
 {
 public:
-    bool usable(pid_t pid) const noexcept
-    {
-        return !m_transition.load(std::memory_order_acquire) &&
-               m_owner.load(std::memory_order_acquire) == pid;
-    }
-    bool transitioning() const noexcept { return m_transition.load(std::memory_order_acquire); }
-    void begin_child() noexcept { m_transition.store(true, std::memory_order_release); }
-    void ready(pid_t pid) noexcept
-    {
-        m_owner.store(pid, std::memory_order_release);
-        m_transition.store(false, std::memory_order_release);
-    }
+    bool usable(pid_t pid) const noexcept { return m_owner.load(std::memory_order_acquire) == pid; }
+    void ready(pid_t pid) noexcept { m_owner.store(pid, std::memory_order_release); }
 
 private:
     std::atomic<pid_t> m_owner{0};
-    std::atomic<bool>  m_transition{false};
     static_assert(std::atomic<pid_t>::is_always_lock_free);
-    static_assert(std::atomic<bool>::is_always_lock_free);
 };
 
 // Signal handlers only read published immutable records. Retain at most a startup snapshot
@@ -109,31 +96,5 @@ private:
     static_assert(std::atomic<const signal_disposition*>::is_always_lock_free);
 };
 
-// One POD instance per forking thread. Nested prepare handlers retain the outer original mask.
-struct fork_signal_mask
-{
-    sigset_t original{};
-    unsigned depth = 0;
-    bool     saved = false;
-    int      prepare(const sigset_t& handled) noexcept
-    {
-        if(depth++ != 0) return 0;
-        const auto result = pthread_sigmask(SIG_BLOCK, &handled, &original);
-        saved             = result == 0;
-        return result;
-    }
-    void parent() noexcept
-    {
-        if(depth == 0 || --depth != 0) return;
-        if(saved) pthread_sigmask(SIG_SETMASK, &original, nullptr);
-        saved = false;
-    }
-    void child() noexcept
-    {
-        depth = 0;
-        if(saved) pthread_sigmask(SIG_SETMASK, &original, nullptr);
-        saved = false;
-    }
-};
 }  // namespace common
 }  // namespace rocprofiler

@@ -92,8 +92,8 @@ prepare_fork_participants(bool sdk_admitted);
 void
 parent_fork_participants() noexcept;
 
-// Publish component hooks in parent execution; all abandonment precedes eligibility, and all
-// reconstruction completes before the tool restores handled signals in the child.
+// Publish component hooks in parent execution. Child eligibility is decided before inherited
+// auxiliary state is touched, and eligible reconstruction runs only after every participant agrees.
 bool
 register_fork_child_hooks(void (*begin_child)() noexcept, void (*rebuild)());
 
