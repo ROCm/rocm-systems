@@ -8,6 +8,7 @@
 #include "algorithms/dda/broadcast/dda_broadcast.h"
 
 #include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128.h"
+#include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128_twoshot.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "checks.h"
 #include "comm.h"
@@ -25,6 +26,9 @@
 constexpr unsigned kDdaLL128BcDefaultThreads = 512;
 
 RCCL_PARAM(DdaLL128BcThreads, "DDA_LL128_BC_THREADS", kDdaLL128BcDefaultThreads);
+
+// One-shot up to this many bytes, scatter-allgather above it (up to the LL128 tier cap).
+RCCL_PARAM(DdaLL128BcOneShotThreshold, "DDA_LL128_BC_ONESHOT_THRESHOLD", (int64_t)512 * 1024);
 
 namespace {
 
@@ -63,17 +67,27 @@ size_t ddaLL128BcSlices(const ncclComm* comm, size_t bytes) {
   return (bytes + per - 1) / per;
 }
 
+bool ddaLL128BcTwoShot(size_t bytes) {
+  return (int64_t)bytes > rcclParamDdaLL128BcOneShotThreshold();
+}
+
 // Root: one column per peer (at least one block each, as AllGather LL128), the
 // rest of the budget split across slice groups. Non-root: groups within the budget.
+// Two-shot: a root column covers one chunk; a non-root covers nRanks-1 chunks.
 dim3 ddaLL128BcGrid(const ncclComm* comm, bool isRoot, size_t bytes) {
   const size_t warps = ddaLL128BcThreads(comm) / ddaLL128BcArch(comm).warp;
-  const size_t groups = (ddaLL128BcSlices(comm, bytes) + warps - 1) / warps;
+  const size_t peers = (size_t)(comm->nRanks - 1);
+  const size_t slices = ddaLL128BcSlices(comm, bytes);
+  const bool twoShot = ddaLL128BcTwoShot(bytes);
+  const size_t cs = (slices + peers - 1) / peers;
+  const size_t rootSlices = twoShot ? cs : slices;
   const size_t budget = ncclBroadcastDdaBlockBudget(comm);
   if (isRoot) {
-    const size_t peers = (size_t)(comm->nRanks - 1);
+    const size_t groups = (rootSlices + warps - 1) / warps;
     const size_t perPeer = budget / peers < 1 ? 1 : budget / peers;
     return dim3((unsigned)peers, (unsigned)(groups < perPeer ? groups : perPeer));
   }
+  const size_t groups = ((twoShot ? peers * cs : slices) + warps - 1) / warps;
   return dim3((unsigned)(groups < budget ? groups : budget));
 }
 
@@ -120,11 +134,24 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
 
   const DdaLL128BcArch arch = ddaLL128BcArch(comm);
   const unsigned threads = ddaLL128BcThreads(comm);
-  INFO(NCCL_COLL, "DDA Broadcast LL128: nRanks=%d root=%d bytes=%zu grid=%ux%u block=%u line=%dB warp=%zu aligned=%d",
-       comm->nRanks, root, bytes, grid.x, grid.y, threads, arch.lineBytes, arch.warp, (int)aligned);
+  const bool twoShot = ddaLL128BcTwoShot(bytes);
+  INFO(NCCL_COLL,
+       "DDA Broadcast LL128 %s: nRanks=%d root=%d bytes=%zu grid=%ux%u block=%u line=%dB warp=%zu aligned=%d",
+       twoShot ? "two-shot" : "one-shot", comm->nRanks, root, bytes, grid.x, grid.y, threads, arch.lineBytes,
+       arch.warp, (int)aligned);
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  if (aligned) {
+  if (twoShot && aligned) {
+    hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL128TwoShot<true>), grid, dim3(threads), 0,
+                          stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
+                          static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
+                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
+  } else if (twoShot) {
+    hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL128TwoShot<false>), grid, dim3(threads), 0,
+                          stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
+                          static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
+                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
+  } else if (aligned) {
     hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL128<true>), grid, dim3(threads), 0,
                           stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
                           static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,

@@ -6,7 +6,7 @@
 
 /**
  * @file DdaBroadcastMPITests.cpp
- * @brief MPI end-to-end data tests for the DDA fabric Broadcast one-shot kernels (LL, LL128).
+ * @brief MPI end-to-end data tests for the DDA fabric Broadcast kernels (LL, LL128 one-shot and two-shot).
  *
  * Every call carries a payload derived from (root, call sequence, element), so a
  * stale bank or a missed handshake cannot pass. Every rank checks its whole
@@ -15,12 +15,13 @@
  *
  * Broadcast DDA is opt-in and its caps come from RCCL_PARAM, which caches on
  * first read, so the settings below must be in the environment before the first
- * communicator. The standard_env_dda_bc category in test_categories_mpi.yaml does
+ * communicator. The standard_env_dda_bc* categories in test_categories_mpi.yaml do
  * that; a process whose cached settings differ skips on every rank.
  *
  * Run (example):
  *   RCCL_DDA_BC=1 RCCL_DDA_LL_THRESHOLD=262144 RCCL_DDA_LL128_THRESHOLD=4194304 \
- *     mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter='DdaMPI_Broadcast*'
+ *     mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter='DdaMPI_BroadcastLL.*:DdaMPI_BroadcastLL128.*:DdaMPI_BroadcastTransition.*'
+ * The MixedShots and Unroll suites pin more settings and each need their own process.
  */
 
 #ifdef MPI_TESTS_ENABLED
@@ -46,6 +47,7 @@
 #include <vector>
 
 RCCL_PARAM_DECLARE(DdaBc);
+RCCL_PARAM_DECLARE(DdaLL128BcOneShotThreshold);
 
 using namespace MPITestConstants;
 
@@ -75,6 +77,9 @@ constexpr size_t kLL128PartialSlice = kLLCap + 16;
 constexpr size_t kLL128WholeSlices = 137 * kLL128SliceBytes;
 constexpr size_t kLL128Mid = 1024 * 1024 + 16;
 static_assert(kLL128PartialSlice % kLL128SliceBytes != 0 && kLL128WholeSlices > kLLCap, "LL128 sizes");
+// Seven back-to-back LL128 sizes, partial and whole last slices up to the cap.
+constexpr size_t kLL128BackToBack[7] = {kLL128PartialSlice, kLL128Mid, kLL128WholeSlices, kLL128Cap,
+                                        kLL128PartialSlice, kLL128Mid, kLL128PartialSlice};
 
 // The LL128 launcher takes kAligned=false below 16-byte alignment.
 constexpr std::pair<size_t, size_t> kLL128Offsets[] = {{4, 4}, {8, 8}, {4, 12}, {1, 3}, {0, 8}, {8, 0}};
@@ -377,6 +382,10 @@ protected:
     return e;
   }
 
+  void unalignedLL128() {
+    unaligned({kLL128PartialSlice, kLL128Mid}, kLL128Offsets, std::size(kLL128Offsets), RCCL_DDA_FABRIC_LL128);
+  }
+
   void unaligned(std::initializer_list<size_t> sizes, const std::pair<size_t, size_t>* offsets, size_t nOffsets,
                  int expectedAlgo) {
     int k = 0;
@@ -448,14 +457,12 @@ TEST_F(DdaMPI_BroadcastLL128, RepeatedLaunches) {
 
 // Buffers off 16-byte alignment (kAligned=false).
 TEST_F(DdaMPI_BroadcastLL128, UnalignedBuffers) {
-  unaligned({kLL128PartialSlice, kLL128Mid}, kLL128Offsets, std::size(kLL128Offsets), RCCL_DDA_FABRIC_LL128);
+  unalignedLL128();
 }
 
 // Seven launches with no sync between them: ranks run ahead into the reused bank and the start-token wait.
 TEST_F(DdaMPI_BroadcastLL128, BackToBackNoSync) {
-  const size_t sizes[7] = {kLL128PartialSlice, kLL128Mid, kLL128WholeSlices, kLL128Cap,
-                           kLL128PartialSlice, kLL128Mid, kLL128PartialSlice};
-  backToBackRounds(sizes, RCCL_DDA_FABRIC_LL128);
+  backToBackRounds(kLL128BackToBack, RCCL_DDA_FABRIC_LL128);
 }
 
 class DdaMPI_BroadcastTransition : public DdaBroadcastMPITest {};
@@ -509,6 +516,77 @@ TEST_F(DdaMPI_BroadcastTransition, LL128LeftoversDoNotPassLLPoll) {
     if (HasFatalFailure() || IsSkipped()) return;
     ASSERT_MPI_EQ(currentEpoch(), epoch + 3);
   }
+}
+
+// LL128 cases with extra RCCL_DDA_LL128_BC_* settings pinned; RCCL_PARAM caches, so each subclass runs in its
+// own process.
+class DdaBroadcastLL128PinnedMPITest : public DdaBroadcastMPITest {
+protected:
+  struct Pinned {
+    const char* env;
+    int64_t value;
+    int64_t (*cached)();
+  };
+
+  virtual std::vector<Pinned> pinned() const = 0;
+
+  std::vector<std::pair<const char*, std::string>> ddaEnv() const override {
+    auto env = DdaBroadcastMPITest::ddaEnv();
+    for (const Pinned& p : pinned()) env.emplace_back(p.env, std::to_string(p.value));
+    return env;
+  }
+
+  std::string configMismatch() override {
+    const std::string mismatch = DdaBroadcastMPITest::configMismatch();
+    if (!mismatch.empty()) return mismatch;
+    for (const Pinned& p : pinned()) {
+      if (p.cached() != p.value) return std::string(p.env) + " is not " + std::to_string(p.value);
+    }
+    return {};
+  }
+
+  void allRootsBothPlacements(std::initializer_list<size_t> sizes) {
+    allRoots(sizes, false, RCCL_DDA_FABRIC_LL128);
+    if (HasFatalFailure() || IsSkipped()) return;
+    allRoots(sizes, true, RCCL_DDA_FABRIC_LL128);
+  }
+};
+
+// One-shot up to 1 MiB and two-shot above, so the LL128 sizes switch kernels on one comm.
+constexpr size_t kLL128MixedOneShotCap = 1024 * 1024;
+static_assert(kLL128WholeSlices <= kLL128MixedOneShotCap && kLL128Mid > kLL128MixedOneShotCap, "mixed sizes");
+
+class DdaMPI_BroadcastLL128MixedShots : public DdaBroadcastLL128PinnedMPITest {
+protected:
+  std::vector<Pinned> pinned() const override {
+    return {{"RCCL_DDA_LL128_BC_ONESHOT_THRESHOLD", static_cast<int64_t>(kLL128MixedOneShotCap),
+             rcclParamDdaLL128BcOneShotThreshold}};
+  }
+};
+
+TEST_F(DdaMPI_BroadcastLL128MixedShots, AllRoots) {
+  allRootsBothPlacements({kLL128PartialSlice, kLL128WholeSlices, kLL128Mid, kLL128Cap});
+}
+
+TEST_F(DdaMPI_BroadcastLL128MixedShots, UnalignedBuffers) {
+  unalignedLL128();
+}
+
+// One-shot and two-shot alternate with no sync between them.
+TEST_F(DdaMPI_BroadcastLL128MixedShots, BackToBackNoSync) {
+  backToBackRounds(kLL128BackToBack, RCCL_DDA_FABRIC_LL128);
+}
+
+// LL, LL128 one-shot and LL128 two-shot on one comm with no sync between them.
+TEST_F(DdaMPI_BroadcastLL128MixedShots, WithLLBackToBackNoSync) {
+  const std::pair<size_t, int> steps[7] = {{16, RCCL_DDA_FABRIC_LL},
+                                           {kLL128PartialSlice, RCCL_DDA_FABRIC_LL128},
+                                           {kLL128Mid, RCCL_DDA_FABRIC_LL128},
+                                           {kLLCap, RCCL_DDA_FABRIC_LL},
+                                           {kLL128WholeSlices, RCCL_DDA_FABRIC_LL128},
+                                           {kLL128Cap, RCCL_DDA_FABRIC_LL128},
+                                           {kLLMultiChunk, RCCL_DDA_FABRIC_LL}};
+  backToBackRounds(steps);
 }
 
 #endif  // MPI_TESTS_ENABLED

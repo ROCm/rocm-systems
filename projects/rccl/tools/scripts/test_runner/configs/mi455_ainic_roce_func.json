@@ -5835,6 +5835,11 @@
           "test_filter": "DdaMPI_BroadcastLL128.BackToBackNoSync"
         },
         {
+          "name": "DDA_Fabric_Broadcast_LL128_MixedShots",
+          "description": "DDA fabric Broadcast LL128 one-shot up to 1 MiB and two-shot above (RCCL_DDA_LL128_BC_ONESHOT_THRESHOLD set in-process), alternated on one comm, with LL in between",
+          "test_filter": "DdaMPI_BroadcastLL128MixedShots.*"
+        },
+        {
           "name": "DDA_Fabric_Broadcast_Transition",
           "description": "DDA fabric Broadcast LL and LL128 alternated on one comm, synced and back to back",
           "test_filter": "DdaMPI_BroadcastTransition.LLThenLL128ThenLL:DdaMPI_BroadcastTransition.BackToBackNoSync"

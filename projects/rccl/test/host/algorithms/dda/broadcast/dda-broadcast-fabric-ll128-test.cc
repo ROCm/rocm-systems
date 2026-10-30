@@ -42,10 +42,20 @@ constexpr size_t kGfx1250Slice = 1920;
 // One group per block at the default 512 threads: 8 gfx9 slices, 16 gfx1250 slices.
 constexpr size_t kGfx9Group = 8 * kGfx9Slice;
 constexpr size_t kGfx1250Group = 16 * kGfx1250Slice;
+constexpr char kOneShotThreshold[] = "RCCL_DDA_LL128_BC_ONESHOT_THRESHOLD";
+constexpr size_t kDefaultOneShotThreshold = 512 << 10;
+constexpr size_t kTwoShotThreshold = 64 << 10;
+// Two-shot on 8 ranks: 140 gfx9 slices, 20 per chunk.
+constexpr size_t kTwoShotBytes = 7 * 20 * kGfx9Slice;
 
 template <bool kAligned>
 const void* Kernel() {
   return KernelPtr(&dda::common::ddaBroadcastFabricLL128<kAligned>);
+}
+
+template <bool kAligned>
+const void* TwoShotKernel() {
+  return KernelPtr(&dda::common::ddaBroadcastFabricLL128TwoShot<kAligned>);
 }
 
 void* Addr(uintptr_t a) { return reinterpret_cast<void*>(a); }
@@ -64,6 +74,8 @@ class DdaBroadcastFabricLL128Microtest : public ::testing::Test {
     comm().topo = topo_.get();
     SetArch("gfx950");
     comm().WarpSize = 64;
+    // One-shot unless a test opts into two-shot.
+    params_[kOneShotThreshold] = int64_t{1} << 40;
     comm().rank = kRank;
     comm().addonStopEvent = kStopEvent;
   }
@@ -77,6 +89,12 @@ class DdaBroadcastFabricLL128Microtest : public ::testing::Test {
   ncclComm& comm() { return mock_.comm; }
 
   void SetArch(const char* arch) { comm().archName = const_cast<char*>(arch); }
+
+  // Two-shot above 64 KiB, with the block pinned to 8 gfx9 warps.
+  void UseTwoShot() {
+    params_[kOneShotThreshold] = kTwoShotThreshold;
+    params_["RCCL_DDA_LL128_BC_THREADS"] = 512;
+  }
 
   // int8 so count is bytes; broadcast is datatype-agnostic.
   bool Eligible(size_t count, ncclDataType_t datatype = ncclInt8) {
@@ -352,6 +370,140 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_PassesBuffersBytesRanksEpochAndB
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(kOtherRoot, 16), ncclUnhandledCudaError);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_TwoShotAboveOneShotThreshold) {
+  params_[kOneShotThreshold] = kTwoShotThreshold;
+  for (int root : {kOtherRoot, kRank}) {
+    EXPECT_EQ(RunOne(root, kTwoShotThreshold).kernel, Kernel<true>()) << "root " << root;
+    EXPECT_EQ(RunOne(root, kTwoShotThreshold + 16).kernel, TwoShotKernel<true>()) << "root " << root;
+  }
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_OneShotUpToDefaultThreshold) {
+  params_.erase(kOneShotThreshold);
+  EXPECT_EQ(RunOne(kOtherRoot, kDefaultOneShotThreshold).kernel, Kernel<true>());
+  EXPECT_EQ(RunOne(kOtherRoot, kDefaultOneShotThreshold + 16).kernel, TwoShotKernel<true>());
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_TwoShotRootColumnsEachCoverOneChunk) {
+  UseTwoShot();
+  // Rows of 8 warps over ceil(slices / 7) slices per chunk.
+  const std::pair<size_t, unsigned> cases[] = {
+      {kTwoShotBytes, 3}, {kTwoShotBytes + 16, 3}, {7 * 24 * kGfx9Slice, 3}, {7 * 25 * kGfx9Slice, 4}};
+  for (const auto& [bytes, rows] : cases) {
+    const DdaLaunch launch = RunOne(kRank, bytes);
+    EXPECT_EQ(launch.grid.x, 7u) << "bytes " << bytes;
+    EXPECT_EQ(launch.grid.y, rows) << "bytes " << bytes;
+    EXPECT_EQ(Blocks(bytes), 7 * rows) << "bytes " << bytes;
+  }
+  comm().nRanks = 2;
+  EXPECT_EQ(RunOne(kRank, kTwoShotBytes).grid.y, 18u);
+  comm().nRanks = 8;
+  params_["RCCL_DDA_BC_MAX_BLOCKS"] = 14;
+  EXPECT_EQ(RunOne(kRank, kTwoShotBytes).grid.y, 2u);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_TwoShotNonRootCoversEveryChunk) {
+  UseTwoShot();
+  // 7 chunks of 20 or 21 slices in 8-warp blocks.
+  const std::pair<size_t, unsigned> cases[] = {{kTwoShotBytes, 18}, {kTwoShotBytes + 16, 19}};
+  for (const auto& [bytes, blocks] : cases) {
+    const DdaLaunch launch = RunOne(kOtherRoot, bytes);
+    EXPECT_EQ(launch.grid.x, blocks) << "bytes " << bytes;
+    EXPECT_EQ(launch.grid.y, 1u) << "bytes " << bytes;
+  }
+  params_["RCCL_DDA_BC_MAX_BLOCKS"] = 5;
+  EXPECT_EQ(RunOne(kOtherRoot, kTwoShotBytes).grid.x, 5u);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_TwoShotEmptyChunksStillGetAColumnAndATask) {
+  UseTwoShot();
+  // 19 slices over 31 peers: chunks of 1 slice, the last 12 empty.
+  comm().nRanks = 32;
+  const DdaLaunch root = RunOne(kRank, kTwoShotThreshold + 16);
+  EXPECT_EQ(root.kernel, TwoShotKernel<true>());
+  EXPECT_EQ(root.grid.x, 31u);
+  EXPECT_EQ(root.grid.y, 1u);
+  EXPECT_EQ(RunOne(kOtherRoot, kTwoShotThreshold + 16).grid.x, 4u);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_TwoShotTwoRanksNonRootCoversTheOneChunk) {
+  UseTwoShot();
+  comm().nRanks = 2;
+  const DdaLaunch launch = RunOne(kOtherRoot, kTwoShotBytes);
+  EXPECT_EQ(launch.kernel, TwoShotKernel<true>());
+  EXPECT_EQ(launch.grid.x, 18u);
+  EXPECT_EQ(launch.grid.y, 1u);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_TwoShotPassesBuffersBytesRanksEpochAndBank) {
+  UseTwoShot();
+  comm().ddaScratchBytes = 4096 + 40;
+  ASSERT_EQ(Run(/*root=*/2, kTwoShotBytes / 2, kSendbuff, kRecvbuff, ncclFloat16), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  const DdaLaunch& launch = g_ddaLaunches[0];
+  EXPECT_EQ(launch.kernel, TwoShotKernel<true>());
+  EXPECT_EQ(launch.grid.x, 18u);
+  EXPECT_EQ(launch.block.x, 512u);
+  EXPECT_EQ(launch.stream, kStream);
+  EXPECT_EQ(launch.startEvent, nullptr);
+  EXPECT_EQ(launch.stopEvent, kStopEvent);
+  EXPECT_EQ(comm().addonStopEvent, nullptr);
+  EXPECT_EQ(launch.sharedMemBytes, 0u);
+  EXPECT_EQ(launch.flags, 0u);
+  ASSERT_EQ(launch.args.size(), 11u);
+  EXPECT_EQ(launch.Arg<char* const*>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<char*>(1), kRecvbuff);
+  EXPECT_EQ(launch.Arg<const char*>(2), kSendbuff);
+  EXPECT_EQ(launch.Arg<size_t>(3), kTwoShotBytes);
+  EXPECT_EQ(launch.Arg<int>(4), kRank);
+  EXPECT_EQ(launch.Arg<int>(5), 8);
+  EXPECT_EQ(launch.Arg<int>(6), 2);
+  EXPECT_EQ(launch.Arg<uint32_t*>(7), comm().ddaLLEpochDev);
+  EXPECT_EQ(launch.Arg<int>(8), comm().ddaLLEpochLen);
+  EXPECT_EQ(launch.Arg<size_t>(9), 2048u);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_TwoShotRootGridMustFitEpoch) {
+  UseTwoShot();
+  // Root grid 7 x 3; non-root 18.
+  comm().ddaLLEpochLen = 21;
+  EXPECT_TRUE(Eligible(kTwoShotBytes));
+  comm().ddaLLEpochLen = 20;
+  EXPECT_FALSE(Eligible(kTwoShotBytes));
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_TwoShotNonRootGridMustFitEpoch) {
+  UseTwoShot();
+  // Budget 5 on 4 ranks, 3 chunks of 16 slices: root grid 3 x 1, non-root 5.
+  comm().nRanks = 4;
+  params_["RCCL_DDA_BC_MAX_BLOCKS"] = 5;
+  comm().ddaLLEpochLen = 5;
+  EXPECT_TRUE(Eligible(3 * 16 * kGfx9Slice));
+  comm().ddaLLEpochLen = 4;
+  EXPECT_FALSE(Eligible(3 * 16 * kGfx9Slice));
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_TwoShotAlignedKernelFrom16ByteOwnBuffersOnly) {
+  UseTwoShot();
+  struct Case {
+    int root;
+    uintptr_t send, recv;
+    bool aligned;
+  };
+  const Case cases[] = {
+      {kOtherRoot, 0x1008, 0x2000, true},
+      {kOtherRoot, 0x1000, 0x2008, false},
+      {kRank, 0x1000, 0x2010, true},
+      {kRank, 0x1008, 0x2000, false},
+  };
+  for (const Case& c : cases) {
+    EXPECT_EQ(RunOne(c.root, kTwoShotBytes, Addr(c.send), Addr(c.recv)).kernel,
+              c.aligned ? TwoShotKernel<true>() : TwoShotKernel<false>())
+        << "root " << c.root << " send " << std::hex << c.send << " recv " << c.recv;
+  }
 }
 
 }  // namespace
