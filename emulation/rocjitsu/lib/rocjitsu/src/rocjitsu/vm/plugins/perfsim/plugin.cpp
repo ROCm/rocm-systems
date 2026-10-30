@@ -1191,11 +1191,10 @@ struct PerfsimPlugin::Impl {
     }
     const bool is_load = access.mnemonic == "tensor_load_to_lds";
     const bool is_store = access.mnemonic == "tensor_store_from_lds";
-    if ((!is_load && !is_store) || access.is_load != is_load || access.addresses.empty() ||
-        !access.addresses.valid() || !std::has_single_bit(access.element_size_bytes) ||
-        access.element_size_bytes > 8 || access.data_size > 3 ||
-        access.element_size_bytes != (uint32_t{1} << access.data_size) || access.tile_dim0 == 0 ||
-        access.tensor_dim0_stride < 0 || access.tensor_dim1_stride < 0 ||
+    if ((!is_load && !is_store) || access.is_load != is_load || !access.addresses.valid() ||
+        !std::has_single_bit(access.element_size_bytes) || access.element_size_bytes > 8 ||
+        access.data_size > 3 || access.element_size_bytes != (uint32_t{1} << access.data_size) ||
+        access.tile_dim0 == 0 || access.tensor_dim0_stride < 0 || access.tensor_dim1_stride < 0 ||
         access.addresses.size() > std::numeric_limits<uint32_t>::max()) {
       reject_wave(wave, access.dispatch_id, "tensor-DMA observation is malformed");
       return;
@@ -1204,6 +1203,10 @@ struct PerfsimPlugin::Impl {
       reject_wave(wave, access.dispatch_id, "tensor-DMA address payload is too large");
       return;
     }
+    // A load whose tile lies wholly outside the tensor only zero-fills LDS and
+    // makes no global requests, so there is nothing to stage.
+    if (access.addresses.empty())
+      return;
     if (!can_stage_event(access.dispatch_id, access.addresses.size() * sizeof(uint64_t))) {
       return;
     }

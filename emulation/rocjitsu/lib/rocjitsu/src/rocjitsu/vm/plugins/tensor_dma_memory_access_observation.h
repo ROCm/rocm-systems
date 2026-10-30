@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file tensor_dma_memory_access_observation.h
-/// @brief Completed global-memory accesses performed by one tensor DMA instruction.
+/// @brief Global-memory requests and LDS bytes of one completed tensor DMA instruction.
 
 #pragma once
 
