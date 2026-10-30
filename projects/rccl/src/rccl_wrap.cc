@@ -2117,11 +2117,12 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     const bool agCrossTray = rcclCommSpansTrays(comm);
     bool agSymTdmWindow = false;
     if (agSymkRequested && rcclSymTdmWindowTab(archTable, ncclFuncAllGather, totalBytes, agCrossTray, ceCapturing)) {
-      int a, p, ch;
-      agSymTdmWindow = rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch,
-                                     ncclSymAligned16B(ncclFuncAllGather, comm->rank, sendbuff, recvbuff, sendWin,
-                                                       recvWin, sendcount * typeSize)) &&
-                       a == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
+      int symkAlgo, symkProto, symkChannels;
+      agSymTdmWindow =
+        rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &symkAlgo, &symkProto, &symkChannels,
+                      ncclSymAligned16B(ncclFuncAllGather, comm->rank, sendbuff, recvbuff, sendWin, recvWin,
+                                        sendcount * typeSize)) &&
+        symkAlgo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
     }
     const bool agSymSuppressedByMin  = agSymkRequested && !agSymTdmWindow && agSymMinR2 > 0 && totalBytes < agSymMinR2;
     const bool agSymSuppressedBySize = agSymkRequested && !agSymTdmWindow && totalBytes > agSymMaxR2;
