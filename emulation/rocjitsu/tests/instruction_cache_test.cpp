@@ -662,6 +662,47 @@ TEST(DecodedInstructionCacheCuTest, ContiguousScalarAndVectorLoopsReuseAfterWarm
   }
 }
 
+TEST(DecodedInstructionCacheCuTest, LdsLoopDecodesOnceAndUsesCurrentOperands) {
+  CuFixture fixture("decoded_lds_loop");
+  auto decoder = std::make_unique<CountingDecoder>();
+  auto *counter = decoder.get();
+  fixture.cu()->replace_decoder_for_test(std::move(decoder));
+  // ds_write_b32 v0, v2; ds_read_b32 v1, v0; s_waitcnt lgkmcnt(0); s_branch -6.
+  // LDS accesses complete inside their own issue, so both DS instructions are
+  // recycled into the decoded cache like the scalar ones.
+  fixture.write_program(std::array<uint32_t, 6>{0xD81A0000u, 0x00000200u, 0xD86C0000u, 0x01000000u,
+                                                0xBF8CC07Fu, 0xBF82FFFAu});
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint32_t kLdsBytes = 64 * sizeof(uint32_t);
+  wf->set_lds_base(fixture.cu()->allocate_lds(kLdsBytes));
+  wf->set_lds_size(kLdsBytes);
+  const uint32_t v0 = wf->vgpr_alloc().base;
+  constexpr uint32_t kUntouched = 0xDEADBEEFu;
+  // Each pass changes addresses, data and EXEC, so a reused decode that kept any
+  // per-access state from the previous pass would read or write the wrong lanes.
+  const std::array<uint64_t, 4> execs{~uint64_t{0}, 0x00FF00FF00FF00FFull, 0x8000000000000001ull,
+                                      ~uint64_t{0}};
+  for (uint32_t pass = 0; pass < execs.size(); ++pass) {
+    SCOPED_TRACE(pass);
+    wf->set_exec(execs[pass]);
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      fixture.cu()->write_vgpr(v0, lane, ((lane * 7 + pass) % 64) * sizeof(uint32_t));
+      fixture.cu()->write_vgpr(v0 + 1, lane, kUntouched);
+      fixture.cu()->write_vgpr(v0 + 2, lane, pass * 1000 + lane);
+    }
+    for (int i = 0; i < 4; ++i)
+      fixture.cu()->step();
+    ASSERT_EQ(wf->pc, kCodeBase);
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      const bool active = (execs[pass] >> lane) & 1;
+      EXPECT_EQ(fixture.cu()->read_vgpr(v0 + 1, lane), active ? pass * 1000 + lane : kUntouched)
+          << "lane " << lane;
+    }
+  }
+  EXPECT_EQ(counter->calls, 4u);
+}
+
 TEST(DecodedInstructionCacheTest, EveryFetchedWordParticipatesInReuse) {
   CountingDecoder decoder;
   amdgpu::DecodedInstructionCache cache;
