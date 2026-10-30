@@ -1253,6 +1253,9 @@ private:
   friend class GlobalMemPipeline;
   friend class LocalMemPipeline;
   friend class ScalarMemPipeline;
+  // DS instructions completing their LDS access inside execute_impl() write
+  // results the same way, bypassing instruction observation.
+  friend class LdsInlineAccess;
 };
 
 /// @brief Return whether an M0 GPR_IDX selector enables one operand role.

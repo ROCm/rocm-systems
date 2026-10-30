@@ -24,6 +24,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 #if RJ_HOST_HAS_AVX2
 #include <immintrin.h>
@@ -140,8 +141,9 @@ namespace detail {
 ///
 /// @details Inactive lanes are written as 0 rather than skipped: an AND with
 /// the EXEC mask replaces masked stores, which cost more than the plain stores
-/// they guard. This matches skipping only because callers pass a freshly
-/// constructed VectorMemState, whose per_lane_addr is value-initialized.
+/// they guard. That matches skipping because callers either pass a freshly
+/// constructed VectorMemState, whose per_lane_addr is value-initialized, or
+/// never read inactive lanes.
 template <uint32_t WF>
 inline void ds_lane_addresses_avx2(const uint32_t *addresses, uint64_t exec, uint32_t bias,
                                    uint64_t *per_lane_addr) {
@@ -166,6 +168,28 @@ inline void ds_lane_addresses_avx2(const uint32_t *addresses, uint64_t exec, uin
 } // namespace detail
 #endif
 
+/// @brief Write addresses[lane] + bias, a 32-bit sum, for the active lanes.
+/// @details Lanes inactive in @p exec are either left unchanged or written as 0.
+inline void ds_lane_addresses(std::span<const uint32_t> addresses, uint64_t exec, uint32_t wf_size,
+                              uint32_t bias, uint64_t *per_lane_addr) {
+  uint32_t lane = 0;
+#if RJ_HOST_HAS_AVX2
+  // Constant wave sizes let the AVX2 loop unroll fully.
+  if (wf_size == 64) {
+    detail::ds_lane_addresses_avx2<64>(addresses.data(), exec, bias, per_lane_addr);
+    lane = 64;
+  } else if (wf_size == 32) {
+    detail::ds_lane_addresses_avx2<32>(addresses.data(), exec, bias, per_lane_addr);
+    lane = 32;
+  }
+#endif
+  for (; lane < wf_size; ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    per_lane_addr[lane] = addresses[lane] + bias;
+  }
+}
+
 /// @brief Compute per-lane addresses for DS encoding.
 ///
 /// @details Populates d.per_lane_addr, d.lane_mask, and d.exec_mask.
@@ -184,26 +208,9 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   RegisterAccess regs(cu);
   auto addr_region = regs.read_vgpr_region(wf.vgpr_alloc().base + inst.addr, 1, exec);
-  const std::span<const uint32_t> addresses = addr_region.lanes();
-
   // Inactive lanes of per_lane_addr end up 0, as constructed.
-  uint32_t lane = 0;
-#if RJ_HOST_HAS_AVX2
-  // Constant wave sizes let the AVX2 loop unroll fully.
-  const uint32_t bias = offset + wf.lds_base();
-  if (wf.wf_size() == 64) {
-    detail::ds_lane_addresses_avx2<64>(addresses.data(), exec, bias, d.per_lane_addr.data());
-    lane = 64;
-  } else if (wf.wf_size() == 32) {
-    detail::ds_lane_addresses_avx2<32>(addresses.data(), exec, bias, d.per_lane_addr.data());
-    lane = 32;
-  }
-#endif
-  for (; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    d.per_lane_addr[lane] = addresses[lane] + offset + wf.lds_base();
-  }
+  ds_lane_addresses(addr_region.lanes(), exec, wf.wf_size(), offset + wf.lds_base(),
+                    d.per_lane_addr.data());
 
   util::Logger::vm([&](auto &os) {
     static uint64_t ds_addr_count = 0;

@@ -207,14 +207,6 @@ public:
   static MemoryAccessCompletion complete_lds_access(VectorMemState &d, Wavefront &wf,
                                                     MemoryAccessDeferredCompletion complete);
 
-  /// @brief Complete the LDS access of a DS instruction inside its execute_impl().
-  /// @details Runs initiate_lds_access() and complete_lds_access() exactly as the
-  /// routed path does, without routing, issue or wait-counter traffic: the access
-  /// cannot be retried or deferred, so the counters would be taken and returned
-  /// within this call. Returns false, leaving @p d untouched, when the CU keeps
-  /// the routed order (plugins observing it, a debugger) or the load writes LDS.
-  static bool complete_inline(const Instruction &inst, VectorMemState &d, Wavefront &wf);
-
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
   MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,

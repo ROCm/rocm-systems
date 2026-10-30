@@ -9299,8 +9299,40 @@ class CodeGenerator:
         is set on the instruction and routed to the local memory pipeline.
         """
         return [
-            f'{indent}if (!amdgpu::LocalMemPipeline::complete_inline(*this, *d, wf))',
+            f'{indent}if (!amdgpu::LdsInlineAccess::complete(*this, *d, wf))',
             f'{indent}  set_data(std::move(d));',
+        ]
+
+    def _ds_inline_request(self, sem: InstructionSemantics, is_load: bool) -> list[str]:
+        """Complete a plain single-address DS load or store without building state.
+
+        Emitted before the VectorMemState is constructed; the handler continues
+        to its routed body only when the CU keeps the routed order.
+        """
+        fields = [
+            f"  .addr_vgpr = {self._vgpr_base_expr('addr', use_acc=False, role='Src0')},",
+            '  .offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0,',
+        ]
+        if is_load:
+            fields.append(f"  .dst_vgpr = {self._vgpr_base_expr('vdst')},")
+        else:
+            fields.append(f"  .data_vgpr = {self._vgpr_base_expr('data0')},")
+        fields += [
+            f'  .elem_size = {sem.elem_size},',
+            f'  .num_elems = {sem.num_elems},',
+            f"  .is_load = {'true' if is_load else 'false'},",
+        ]
+        if is_load and sem.sign_extend:
+            fields.append('  .sign_extend = true,')
+        if sem.d16_hi:
+            fields.append('  .d16_hi = true,')
+        if is_load and sem.d16_lo:
+            fields.append('  .d16_lo = true,')
+        return [
+            '  if (amdgpu::LdsInlineAccess::complete(*this, amdgpu::LdsAccessRequest{',
+            *('  ' + f for f in fields),
+            '      }, wf))',
+            '    return;',
         ]
 
     def _gen_ds_append_consume(
@@ -9685,6 +9717,7 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         acc = self._acc_vgpr_expr
+        L.extend(self._ds_inline_request(sem, is_load=True))
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
@@ -9836,6 +9869,7 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         acc = self._acc_vgpr_expr
+        L.extend(self._ds_inline_request(sem, is_load=False))
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
@@ -15240,6 +15274,7 @@ class CodeGenerator:
             '',
             '#include "rocjitsu/vm/amdgpu/wavefront.h"',
             '#include "rocjitsu/vm/amdgpu/compute_unit.h"',
+            '#include "rocjitsu/vm/amdgpu/lds_inline_access.h"',
             '#include "rocjitsu/vm/amdgpu/mem_state.h"',
             '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
