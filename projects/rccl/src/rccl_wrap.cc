@@ -2674,7 +2674,7 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   }
 
   size_t threshold = rcclParamDirectReduceScatterThreshold();
-  if (threshold > -1) {
+  if (threshold != (size_t)-1) {
     // Set threshold to 8MiB hard limit
     // NOTE: If the DirectReduceScatterThreshold / hard-limit is increased, ensure TEMP_BUFF_SIZE (init.cc)
     // is increased accordingly -> TEMP_BUFF_SIZE >= 2 * (max enabled msgSize) for headroom.

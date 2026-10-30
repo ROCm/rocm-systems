@@ -2992,41 +2992,46 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_UnsupportedNodeCountReturnsFa
       });
 }
 
-// *** CONFIRMED REAL BUG, EMPIRICALLY VERIFIED *** in rcclUseReduceScatterDirect
-// (rccl_wrap.cc): `size_t threshold = ...; if (threshold > -1)` -- comparing an
-// unsigned size_t against the literal -1 promotes -1 to SIZE_MAX, so this
-// condition is ALWAYS FALSE regardless of what RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD
-// is set to. Execution always falls to the `else` branch, hardcoding
-// threshold=8388608 no matter what the user configures. This test proves it
-// directly: override the threshold to 100 via g_loadParam, use a msgSize
-// (1024) that's within the (buggy) 8MiB default but ABOVE the requested
-// 100-byte override -- if the override worked, this should return false; it
-// doesn't.
+// RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD=100 must reject a 1024-byte message; the
+// old `threshold > -1` guard ignored the override and always used 8 MiB.
 //
-// This also explains why the bug was never caught by any test above: every
-// other test in this section relies on the real default (8388608) rather
-// than overriding it, so they all pass regardless of whether the override
-// path works. This is the only test in the whole file that actually
-// exercises RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD's override path.
-//
-// The assertion below (EXPECT_TRUE) PINS the current, buggy behavior -- not
-// the intended one -- so this test passes today. If/when the production
-// `threshold > -1` bug gets fixed to `threshold != (size_t)-1` (matching the
-// working pattern used by rcclUseAllGatherDirect's equivalent check), this
-// assertion must flip to EXPECT_FALSE. Left failing-if-fixed deliberately,
-// so fixing the bug forces a conscious update here rather than silently
-// leaving a stale, wrong-direction test behind.
-TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdOverride_PinsConfirmedBug) {
+// These two tests are the only coverage of the override path -- every other
+// case in this section leaves the default in place, which is why that bug
+// survived. Keep both: this one pins the override, the next pins the clamp.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdOverrideIsHonoured) {
   RUN_ISOLATED_TEST(
-      "Wrap_UseReduceScatterDirect_ThresholdOverride_PinsConfirmedBug",
+      "Wrap_UseReduceScatterDirect_ThresholdOverrideIsHonoured",
       []() {
         g_loadParam = ForceParam("RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD", int64_t(100));
         ncclComm* comm = MakeCommWithArch("gfx950");
         comm->nNodes = 8;
-        size_t msgSize = 1024; // > the requested 100-byte override, but within the buggy 8MiB fallback
-        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize))
-            << "This pins CURRENT (buggy) behavior -- see the comment above. If this now "
-               "fails, the production threshold bug was fixed; flip this to EXPECT_FALSE.";
+        size_t msgSize = 1024; // > the requested 100-byte override, < the 8MiB hard limit
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize))
+            << "RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD=100 must exclude a 1024-byte message. "
+               "Seeing true here means the threshold is being ignored and the hardcoded "
+               "8MiB fallback is back -- see the sign-conversion note above.";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The 8MiB hard limit, which the std::min above applies. Before the
+// sign-conversion fix that clamp was unreachable -- the guard was always false,
+// so the else branch hardcoded 8MiB and std::min never ran. It executes for the
+// first time now, and it is what keeps enabled message sizes inside the
+// TEMP_BUFF_SIZE headroom noted at the clamp. 8 nodes accepts anything up to
+// the threshold, so raising the override past 8MiB isolates the clamp: without
+// it, threshold stays 16MiB and this message is accepted.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdAboveHardLimitIsClamped) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_ThresholdAboveHardLimitIsClamped",
+      []() {
+        g_loadParam = ForceParam("RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD", int64_t(16777216));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 8;
+        size_t msgSize = 8388609; // 8MiB + 1: under the 16MiB override, over the clamp
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize))
+            << "A threshold above 8MiB must be clamped to 8388608. Seeing true here means "
+               "the hard limit is gone and messages can exceed the TEMP_BUFF_SIZE headroom.";
         DeleteCommWithArch(comm);
       });
 }
