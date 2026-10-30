@@ -22,8 +22,9 @@
  *     #elif chain otherwise silently aliases QueuePair to the first-listed
  *     provider (IONIC>BNXT>MLX5), which is wrong on the other NICs. rccl always
  *     builds all three, so GDA_MUX is always ON here.
- *   - USE_CONSTMEM: OFF — the GIN device dispatch reads the provider from the
- *     QueuePair instance, not __constant__ constmem (see queue_pair_mux.hpp).
+ *   - USE_CONSTMEM: hardcoded undefined (not a #cmakedefine) — the GIN device
+ *     dispatch reads the provider from the QueuePair instance, not __constant__
+ *     constmem (see queue_pair_mux.hpp); a stray CMake define must not flip it on.
  *   - BUILD_DEBUG_DEVICE: OFF for now — gates device debug prints in the provider
  *     QP headers. Retained as a toggle (set BUILD_DEBUG_DEVICE in rccl's CMake to
  *     re-enable) so the feature can be turned back on later.
@@ -36,7 +37,7 @@
 #cmakedefine GDA_BNXT
 #cmakedefine GDA_MLX5
 #cmakedefine GDA_MUX
-#cmakedefine USE_CONSTMEM
+#undef USE_CONSTMEM
 #cmakedefine BUILD_DEBUG_DEVICE
 
 #endif  // RCCL_GIN_ROCSHMEM_CONFIG_H_
