@@ -83,6 +83,28 @@ constexpr unsigned ds_swizzle_lane(unsigned lane, unsigned offset) {
          ((((lane & 31u) & (offset & 31u)) | ((offset >> 5) & 31u)) ^ ((offset >> 10) & 31u));
 }
 
+// rj-arith's RDNA3/RDNA4 swizzles also implement the ISA rotate and FFT modes.
+// Retain legacy routing for other architectures until their execution migrates.
+constexpr unsigned ds_swizzle_lane(unsigned lane, unsigned offset, rj_code_arch_t arch) {
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA4) || offset < 0xc000)
+    return ds_swizzle_lane(lane, offset);
+  const unsigned mask = offset & 31;
+  unsigned selected;
+  if (offset >= 0xe000) {
+    unsigned mask_bits = 0;
+    for (unsigned bit = 0; bit < 5; ++bit)
+      mask_bits += (mask >> bit) & 1;
+    const unsigned reversed =
+        ((lane & 1) << 4) | ((lane & 2) << 2) | (lane & 4) | ((lane & 8) >> 2) | ((lane & 16) >> 4);
+    selected = (reversed >> mask_bits) | (lane & mask);
+  } else {
+    const unsigned amount = (offset >> 5) & 31;
+    const unsigned rotated = lane + ((offset & 1024) ? 0U - amount : amount);
+    selected = (lane & mask) | (rotated & ~mask);
+  }
+  return (lane & ~31U) | (selected & 31);
+}
+
 enum class ValuPermutation : uint8_t {
   None,
   Perm16,

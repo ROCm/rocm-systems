@@ -130,6 +130,31 @@ inline bool write_vector32_result(Wavefront &wave, RegisterAccess &registers,
   return true;
 }
 
+// Select raw words or halves using a wave-wide condition mask. Acquire both
+// sources before writes, and preserve the unused destination half for B16.
+template <bool Half, typename Wave32, typename Wave64>
+inline void execute_conditional(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
+                                uint64_t modifiers, const Operand &destination, const Operand &lhs,
+                                const Operand &rhs, uint64_t condition) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!exec_mask)
+    return;
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, lhs, exec_mask,
+                  Half ? (modifiers & RJ_ARITH_ALU_HIGH_A ? 0xc : 0x3) : 0xf);
+  VectorInput32 b(registers, wave, rhs, exec_mask,
+                  Half ? (modifiers & RJ_ARITH_ALU_HIGH_B ? 0xc : 0x3) : 0xf);
+  write_vector32_result(
+      wave, registers, destination, exec_mask,
+      [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data,
+                            uint32_t(condition))
+                   : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, condition);
+      },
+      /*allow_direct=*/!Half, Half ? (modifiers & RJ_ARITH_ALU_HIGH_D ? 0xc : 0x3) : 0xf);
+}
+
 // Consume the selected input halves and commit only the selected destination
 // half. VOP1's packed operands instead supply/accept a resolved low-half value.
 // SourceCount determines whether source_b and source_c must be provided.

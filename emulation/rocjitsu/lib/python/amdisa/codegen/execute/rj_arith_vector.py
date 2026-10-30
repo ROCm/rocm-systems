@@ -38,7 +38,14 @@ BINARY32 = {
 }
 
 
-UNARY32 = {'V_NOT_B32', 'V_BFREV_B32', 'V_CLZ_I32_U32', 'V_CTZ_I32_B32', 'V_CLS_I32'}
+UNARY32 = {
+    'V_MOV_B32',
+    'V_NOT_B32',
+    'V_BFREV_B32',
+    'V_CLZ_I32_U32',
+    'V_CTZ_I32_B32',
+    'V_CLS_I32',
+}
 
 
 TERNARY32 = {
@@ -83,6 +90,9 @@ WIDEN16_NAMES = {'V_CVT_I32_I16', 'V_CVT_U32_U16'}
 SATURATE_NAMES = {'V_SAT_PK_U8_I16'}
 
 
+CONDITIONAL_NAMES = {'V_CNDMASK_B32', 'V_CNDMASK_B16'}
+
+
 # These multiplication APIs do not accept CLAMP. The ISA ignores it here;
 # forwarding it would turn an ignored encoding bit into a rj-arith error.
 UNMODIFIED_MULTIPLIES = {
@@ -97,6 +107,8 @@ UNMODIFIED_MULTIPLIES = {
 def gen_vector32(arch, mnemonic, dst, src, is_vop3):
     if arch not in ('rdna3', 'rdna4') or mnemonic not in VECTOR32_NAMES:
         return None
+    if mnemonic in CONDITIONAL_NAMES:
+        return gen_conditional(arch, mnemonic, dst, src, is_vop3)
     if mnemonic in UNARY32 | WIDEN16_NAMES | SATURATE_NAMES:
         kind, count = 'unary', 1
     elif mnemonic in BINARY32:
@@ -141,6 +153,40 @@ def gen_vector32(arch, mnemonic, dst, src, is_vop3):
         '      wf.cu().arithmetic_flags(),\n'
         f'      {modifiers}, {dst[0]}, {", ".join(src)});'
     )
+
+
+def gen_conditional(arch, mnemonic, dst, src, is_vop3):
+    if len(dst) != 1 or len(src) != (3 if is_vop3 else 2):
+        return None
+    half = mnemonic.endswith('B16')
+    # A zero execution mask must not observe the scalar condition operand.
+    lines = ['  if (!(wf.exec() & wf.vgpr_write_mask())) return;']
+    modifiers = '0'
+    if is_vop3:
+        lines += [
+            '  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
+            '      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |',
+            '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
+            '      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);',
+        ]
+        if half:
+            lines += [
+                '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
+                '  modifiers |= ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |',
+                '      ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |',
+                '      ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);',
+            ]
+        modifiers = 'modifiers'
+    condition = (
+        f'amdgpu::read_wave_mask_scalar({src[2]}, wf)' if is_vop3 else 'wf.vcc_mask()'
+    )
+    api = 'rj_arith_' + mnemonic.lower()
+    lines += [
+        f'  amdgpu::arith::execute_conditional<{str(half).lower()}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        '      wf.cu().arithmetic_flags(),',
+        f'      {modifiers}, {dst[0]}, {src[0]}, {src[1]}, {condition});',
+    ]
+    return '\n'.join(lines)
 
 
 CARRY32_NAMES = {
@@ -223,7 +269,7 @@ def gen_wide_integer(arch, mnemonic, dst, src, is_vop3, result_writer=None):
     )
 
 
-UNARY16 = {'V_NOT_B16'}
+UNARY16 = {'V_MOV_B16', 'V_NOT_B16'}
 
 
 BINARY16 = {
@@ -407,4 +453,6 @@ def gen_integer_dot(arch, mnemonic, dst, src, enc_name, opsel_exprs):
     )
 
 
-VECTOR32_NAMES = UNARY32 | BINARY32 | TERNARY32 | WIDEN16_NAMES | SATURATE_NAMES
+VECTOR32_NAMES = (
+    UNARY32 | BINARY32 | TERNARY32 | WIDEN16_NAMES | SATURATE_NAMES | CONDITIONAL_NAMES
+)
