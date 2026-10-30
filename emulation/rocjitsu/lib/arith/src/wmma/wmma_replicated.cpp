@@ -24,6 +24,24 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
           rocjitsu::arith::kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if constexpr (Bf16) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
+        !rocjitsu::arith::is_exact(flags) &&
+        rocjitsu::arith::wmma_x86_64_v4_bf16<Lanes, true>(uint32_t(instruction_flags), d, a, b,
+                                                          c)) {
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4) &&
+      rocjitsu::arith::is_exact(flags)) {
+    rocjitsu::arith::wmma_exact_x86_64_v4<Bf16, Lanes, true>(uint32_t(instruction_flags), d, a, b,
+                                                             c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     if (rocjitsu::arith::is_exact(flags)) {
