@@ -612,6 +612,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
     NCCLCHECK(freeChannel(comm->channels + channel, comm->nRanks, 1, comm->localRanks, comm));
 
   if (comm->doneEvent != NULL) CUDACHECK(hipEventDestroy(comm->doneEvent));
+  if (comm->addonDoneEvent != NULL) CUDACHECK(hipEventDestroy(comm->addonDoneEvent));
 
   // GIN may use proxy. We need to finalize it before destroying the proxy.
   // closeColl and last-ref plugin-finalize errors are recorded here and returned
@@ -892,6 +893,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->doneEvent = doneEvent;
   comm->lastStreamTag = 0;
   comm->addonStopEvent = nullptr;
+  CUDACHECK(hipEventCreateWithFlags(&comm->addonDoneEvent, hipEventDisableTiming | hipEventDisableSystemFence));
+  comm->addonDoneEventLast = false;
 
   // RCCL: acquire a scoped side stream for init-time allocations. It is
   // released once init completes (see ncclCommInitRankFunc) so it does not hold

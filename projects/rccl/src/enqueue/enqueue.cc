@@ -2341,7 +2341,7 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
     // doneEvent may carry a node from another capture or from outside one, and waiting on such an
     // event inside a capture breaks capture isolation, so a captured stream gets no edge here and is
     // ordered through deviceStream below instead, as native captured launches are.
-    CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
+    CUDACHECK(hipStreamWaitEvent(stream, rcclLastDoneEvent(comm), 0));
   }
 
   // Capture never binds a fused stopEvent, so under capture nothing is offered and the epilogue
@@ -2350,7 +2350,7 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
     NCCLCHECK(rcclAddonCaptureOrderBegin(comm, stream, state));
   } else {
     state->eventOffered = true;
-    comm->addonStopEvent = comm->doneEvent;
+    comm->addonStopEvent = comm->addonDoneEvent;
   }
 
   return ncclSuccess;
@@ -2371,6 +2371,7 @@ ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
     // The tag advances however the event was recorded: it is what tells the next collective on
     // another stream that an edge is needed.
     comm->lastStreamTag = ncclStreamTag(stream);
+    comm->addonDoneEventLast = taken;
     if (state.capturing) {
       NCCLCHECKGOTO(rcclAddonCaptureOrderEnd(comm, stream, state), result, release);
     }
@@ -2555,7 +2556,7 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       // Stream changed. Wait on doneEvent, recorded by ncclLaunchKernel on the previous launch
       // stream; deviceStream is stale here because the fast path skips the Finish-side advance.
       // Don't record it here — that stream may already be destroyed (ROCM-29677).
-      CUDACHECKGOTO(hipStreamWaitEvent(launchStream, comm->doneEvent, 0), result, failure);
+      CUDACHECKGOTO(hipStreamWaitEvent(launchStream, rcclLastDoneEvent(comm), 0), result, failure);
     }
 
     enum ncclImplicitOrder implicitOrder;
@@ -2697,6 +2698,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
     CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
 #endif
     comm->lastStreamTag = ncclStreamTag(launchStream);
+    comm->addonDoneEventLast = false;
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
   }
@@ -2819,6 +2821,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
 #endif
   comm->lastStreamTag = ncclStreamTag(launchStream);
+  comm->addonDoneEventLast = false;
 
 do_return:
   NCCLCHECK(ncclProfilerStopKernelLaunchEvent(plan));

@@ -2178,16 +2178,19 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 
 namespace {
 // Opaque handles. Every HIP entry point this path reaches is faked, so nothing dereferences them.
-hipEvent_t const  kAddonDoneEvent = reinterpret_cast<hipEvent_t>(0xD0E);
-hipStream_t const kAddonStream    = reinterpret_cast<hipStream_t>(0x57A);
+hipEvent_t const  kAddonDoneEvent   = reinterpret_cast<hipEvent_t>(0xD0E);
+hipEvent_t const  kAddonFusedEvent  = reinterpret_cast<hipEvent_t>(0xF5E);
+hipStream_t const kAddonStream      = reinterpret_cast<hipStream_t>(0x57A);
+hipStream_t const kAddonOtherStream = reinterpret_cast<hipStream_t>(0x57B);
 
 // ncclComm is far too large for the stack (see CostComm). cudaDev matches the seam's current
 // device, which keeps the prologue's hipSetDevice and the epilogue's restore out of the way.
 struct AddonComm {
   std::unique_ptr<ncclComm> comm{new ncclComm{}};
   AddonComm() {
-    comm->cudaDev   = g_currentDevice;
-    comm->doneEvent = kAddonDoneEvent;
+    comm->cudaDev        = g_currentDevice;
+    comm->doneEvent      = kAddonDoneEvent;
+    comm->addonDoneEvent = kAddonFusedEvent;
   }
   ncclComm* c() { return comm.get(); }
 };
@@ -2214,6 +2217,7 @@ TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
   EXPECT_EQ(kAddonDoneEvent, recordedEvent);
   EXPECT_EQ(kAddonStream, recordedStream);
   EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+  EXPECT_EQ(kAddonDoneEvent, rcclLastDoneEvent(ac.c()));
 }
 
 TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) {
@@ -2231,11 +2235,47 @@ TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) 
     return ncclSuccess;
   }));
 
-  EXPECT_EQ(kAddonDoneEvent, stopEvent);
+  EXPECT_EQ(kAddonFusedEvent, stopEvent);
   EXPECT_EQ(0, record.calls);
   // The tag advances however the event reached the stream, so the next collective on another
   // stream still gets its edge.
   EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+  EXPECT_EQ(kAddonFusedEvent, rcclLastDoneEvent(ac.c()));
+}
+
+// AICOMRCCL-2873: the fused stop event is not doneEvent, so the edge taken on a stream change has to
+// follow whichever of the two the previous collective recorded.
+TEST_F(EnqueueMicrotest, AddonLaunch_StreamChange_WaitsOnTheEventThePreviousCollectiveRecorded) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  std::vector<std::pair<hipStream_t, hipEvent_t>> waits;
+  ScopedHook wait(g_hipStreamWaitEvent, [&](hipStream_t stream, hipEvent_t event, unsigned int) {
+    waits.emplace_back(stream, event);
+    return hipSuccess;
+  });
+
+  // A kernel takes the fused event, then the epilogue records doneEvent, then a kernel takes it again,
+  // each on the other stream from the one before.
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    (void)rcclTakeAddonStopEvent(ac.c());
+    return ncclSuccess;
+  }));
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonOtherStream, [] { return ncclSuccess; }));
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    (void)rcclTakeAddonStopEvent(ac.c());
+    return ncclSuccess;
+  }));
+
+  ASSERT_EQ(2u, waits.size());
+  EXPECT_EQ(kAddonOtherStream, waits[0].first);
+  EXPECT_EQ(kAddonFusedEvent, waits[0].second);
+  EXPECT_EQ(kAddonStream, waits[1].first);
+  EXPECT_EQ(kAddonDoneEvent, waits[1].second);
 }
 
 TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag) {

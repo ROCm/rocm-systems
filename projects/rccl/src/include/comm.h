@@ -980,9 +980,16 @@ struct ncclComm {
   // implies the prior kernel already finished.
   uintptr_t lastStreamTag;
   // The event the addon collective's last kernel carries as its stopEvent, in place of a standalone
-  // record. Non-null only between rcclAddonLaunchBegin, which sets it to doneEvent, and
+  // record. Non-null only between rcclAddonLaunchBegin, which sets it to addonDoneEvent, and
   // rcclTakeAddonStopEvent, which hands it out.
   hipEvent_t addonStopEvent;
+  // doneEvent's stand-in for a fused addon stop event. It is created with hipEventDisableSystemFence:
+  // a stopEvent without that flag gives the kernel a system-scope release, which the addon kernels did
+  // not have before they carried an event, and the only consumer is a same-device hipStreamWaitEvent.
+  hipEvent_t addonDoneEvent;
+  // Set when the last collective's completion went to addonDoneEvent instead of doneEvent. See
+  // rcclLastDoneEvent.
+  bool addonDoneEventLast;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_WARP_SPEED
@@ -1239,6 +1246,11 @@ static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
   hipEvent_t stopEvent = comm->addonStopEvent;
   comm->addonStopEvent = nullptr;
   return stopEvent;
+}
+
+// The event recorded at the end of the last collective, which a collective on another stream waits on.
+static inline hipEvent_t rcclLastDoneEvent(const struct ncclComm* comm) {
+  return comm->addonDoneEventLast ? comm->addonDoneEvent : comm->doneEvent;
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);
