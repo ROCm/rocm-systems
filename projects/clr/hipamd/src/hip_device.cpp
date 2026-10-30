@@ -203,6 +203,14 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
     activeQueues = devices()[0]->getActiveQueues();
     for (const auto& queue : activeQueues) {
       auto* active_stream = static_cast<hip::Stream*>(queue);
+      // The active queue set holds every amd::HostQueue on the device, and not all of them are
+      // HIP streams: e.g. amd::Program::runInitFiniKernel() enqueues the code object's init/fini
+      // kernels that sanitisers emit on a bare amd::HostQueue. Reading hip::Stream members off
+      // such a queue runs past the end of the object, so we need to guard against queues that
+      // are not streams.
+      if (!StreamExists(active_stream)) {
+        continue;
+      }
       // Only wait on blocking (non-nonblocking) streams other than the current one
       if ((active_stream->Flags() & hipStreamNonBlocking) == 0 &&
           active_stream != blocking_stream) {
