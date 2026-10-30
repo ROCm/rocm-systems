@@ -10,9 +10,22 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#ifdef _WIN32
+#    ifndef WIN32_LEAN_AND_MEAN
+#        define WIN32_LEAN_AND_MEAN
+#    endif
+#    ifndef NOMINMAX
+#        define NOMINMAX
+#    endif
+#    include <tlhelp32.h>
+#    include <windows.h>
+#endif
 
 namespace
 {
@@ -384,6 +397,154 @@ TEST(sqlite_backend_impl_test,
         backend->initialize_schema(storage.get_storage_version());
     }
     ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&sqlite));
+}
+
+#ifdef _WIN32
+// profiler-hub.dll, libprofiler-hub.dll, and an optional -<version> suffix.
+// The unit-test executable also contains the schema headers, so match the DLL name.
+bool
+is_profiler_hub_dll(std::wstring_view module_name)
+{
+    std::wstring name(module_name);
+    for(wchar_t& ch : name)
+    {
+        if(ch >= L'A' && ch <= L'Z')
+        {
+            ch = static_cast<wchar_t>(ch - L'A' + L'a');
+        }
+    }
+
+    constexpr std::wstring_view k_suffix = L".dll";
+    if(name.size() < k_suffix.size() ||
+       name.compare(name.size() - k_suffix.size(), k_suffix.size(), k_suffix) != 0)
+    {
+        return false;
+    }
+    name.resize(name.size() - k_suffix.size());
+
+    constexpr std::wstring_view k_lib_prefix = L"lib";
+    if(name.compare(0, k_lib_prefix.size(), k_lib_prefix) == 0)
+    {
+        name.erase(0, k_lib_prefix.size());
+    }
+
+    constexpr std::wstring_view k_stem = L"profiler-hub";
+    if(name.compare(0, k_stem.size(), k_stem) != 0)
+    {
+        return false;
+    }
+    if(name.size() == k_stem.size())
+    {
+        return true;
+    }
+    if(name[k_stem.size()] != L'-')
+    {
+        return false;
+    }
+    for(std::size_t index = k_stem.size() + 1; index < name.size(); ++index)
+    {
+        const wchar_t ch = name[index];
+        if((ch < L'0' || ch > L'9') && ch != L'.')
+        {
+            return false;
+        }
+    }
+    return name.size() > k_stem.size() + 1;
+}
+
+std::filesystem::path
+loaded_profiler_hub_library_windows()
+{
+    const HANDLE snapshot =
+        CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+    if(snapshot == INVALID_HANDLE_VALUE)
+    {
+        return {};
+    }
+
+    MODULEENTRY32W entry = {};
+    entry.dwSize         = sizeof(entry);
+    HMODULE module       = nullptr;
+    if(Module32FirstW(snapshot, &entry) != FALSE)
+    {
+        do
+        {
+            if(is_profiler_hub_dll(entry.szModule))
+            {
+                module = entry.hModule;
+                break;
+            }
+        } while(Module32NextW(snapshot, &entry) != FALSE);
+    }
+    CloseHandle(snapshot);
+    if(module == nullptr)
+    {
+        return {};
+    }
+
+    std::wstring path(32768, L'\0');
+    const DWORD  written =
+        GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+    if(written == 0 || written >= path.size())
+    {
+        return {};
+    }
+    path.resize(written);
+    return std::filesystem::path(path);
+}
+#endif
+
+// The schema SQL is compiled into the profiler-hub shared library. Read that
+// loaded file. Linux lists it in /proc/self/maps. Windows lists it in the
+// process module list.
+std::filesystem::path
+loaded_profiler_hub_library()
+{
+#ifdef _WIN32
+    return loaded_profiler_hub_library_windows();
+#else
+    std::ifstream maps("/proc/self/maps");
+    std::string   line;
+    while(std::getline(maps, line))
+    {
+        const auto path_at = line.rfind(' ');
+        if(path_at == std::string::npos)
+        {
+            continue;
+        }
+        std::string path = line.substr(path_at + 1);
+        if(path.find("libprofiler-hub.so") == std::string::npos)
+        {
+            continue;
+        }
+        const auto deleted = path.find(" (deleted)");
+        if(deleted != std::string::npos)
+        {
+            path.resize(deleted);
+        }
+        return path;
+    }
+    return {};
+#endif
+}
+
+TEST(sqlite_backend_impl_test, shared_library_contains_each_embedded_schema)
+{
+    const std::filesystem::path library_path = loaded_profiler_hub_library();
+    ASSERT_FALSE(library_path.empty());
+
+    std::ifstream library(library_path, std::ios::binary);
+    ASSERT_TRUE(library.is_open()) << library_path.string();
+    const std::string bytes((std::istreambuf_iterator<char>(library)),
+                            std::istreambuf_iterator<char>());
+
+    for(const auto& schema : k_embedded_schemas)
+    {
+        SCOPED_TRACE(schema.version);
+        const std::string banner =
+            std::string("-- RocPD schema version ") + schema.version;
+        EXPECT_NE(bytes.find(banner), std::string::npos);
+    }
 }
 
 }  // namespace

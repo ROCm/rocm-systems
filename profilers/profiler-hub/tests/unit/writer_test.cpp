@@ -92,7 +92,7 @@ TEST_F(writer_test, get_storage_version_returns_explicitly_passed_version)
 TEST_F(writer_test, initialize_schema_default_version_succeeds)
 {
     auto backend = make_backend();
-    EXPECT_NO_THROW(backend->initialize_schema(version_t{ 3, 0, 0 }));
+    EXPECT_NO_THROW(backend->initialize_schema(version_t{ 3, 0, 1 }));
 }
 
 TEST_F(writer_test, initialize_schema_latest_sentinel_version_succeeds)
