@@ -77,9 +77,10 @@ struct TensorDmaLdsRange {
 /// wrote (loads) or read (stores), in element order, with adjacent elements
 /// merged. A load writes every element, zero-filling those outside the tensor,
 /// so its LDS ranges can be nonempty when the address view is empty. A store
-/// reads only in-bounds elements. The callback is emitted only after the
-/// instruction and any descriptor-requested atomic-barrier arrival return
-/// normally, and only when either side is nonempty. Memory access outcomes are
+/// reads only in-bounds elements. The callback is emitted once for every
+/// tensor DMA instruction that completes, after any descriptor-requested
+/// atomic-barrier arrival, including a NULL tensor or a tile that moves no
+/// data: each still completes on TENSORcnt. Memory access outcomes are
 /// intentionally not filtered, matching the observer's boundary.
 ///
 /// The views borrow execution-owned context and are valid only for the duration
