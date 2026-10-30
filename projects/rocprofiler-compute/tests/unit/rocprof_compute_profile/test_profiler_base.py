@@ -761,6 +761,37 @@ def test_handle_analyze_args_listing_skips_operator_parse(monkeypatch):
     assert "ignored" in warnings[-1][1]
 
 
+@pytest.mark.parametrize("flag", ["list_operators", "operator"])
+@pytest.mark.parametrize(
+    "output_format, expect_error",
+    [("stdout", False), ("txt", True), ("csv", True), ("db", True)],
+)
+def test_handle_analyze_args_operator_flags_require_stdout(
+    flag, output_format, expect_error, monkeypatch
+):
+    """--list-operators and --operator are rejected unless output is stdout."""
+    args = _make_rpc_args(mode="analyze", output_format=output_format)
+    if flag == "list_operators":
+        args.list_operators = ["torch"]
+    else:
+        args.operator = ["torch:*relu*"]
+    instance = _make_rpc_with_args(args)
+    if expect_error:
+        error_text = None
+
+        def record_error(*argv, **_kwargs):
+            nonlocal error_text
+            error_text = argv[1]
+            raise SystemExit(1)
+
+        monkeypatch.setattr("rocprof_compute_base.console_error", record_error)
+        with pytest.raises(SystemExit):
+            instance.handle_analyze_args()
+        assert "only supported with --output-format stdout" in error_text
+    else:
+        instance.handle_analyze_args()
+
+
 # ---------------------------------------------------------------------------
 # pre_processing(): memory-bandwidth configuration persistence
 # ---------------------------------------------------------------------------
