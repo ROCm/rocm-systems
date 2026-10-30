@@ -4,6 +4,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 7.18.0 for ROCm 10.3.0
 
+### Resolved issues
+
+* Resolved heap corruption when `hipStreamDestroy` is called on a stream that `hipDeviceReset` already destroyed. Such a stale handle now returns `hipErrorInvalidHandle` without accessing the released stream, matching the `cudaErrorInvalidResourceHandle` returned by CUDA.
+
 ## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added
