@@ -1,7 +1,7 @@
 {
   "system_configurations": {
     "name": "RCCL-Bootstrap-TLS",
-    "description": "Socket encryption (ncclSetEncryption) and bootstrap root robustness. Builds the OpenSSL 3 TLS backend, so configure needs the OpenSSL 3 headers. Single node, 2 GPUs."
+    "description": "Socket encryption (ncclSetEncryption) and bootstrap root robustness. Builds the OpenSSL 3 TLS backend, so configure needs the OpenSSL 3 headers. Single node, 4 GPUs: the bidirectional ring needs at least 3 ranks."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
@@ -32,9 +32,9 @@
     "bootstrap_mpi_bidir": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
-      "num_ranks": 2,
+      "num_ranks": 4,
       "num_nodes": 1,
-      "num_gpus": 2,
+      "num_gpus": 4,
       "timeout": 300,
       "env_variables": {
         "NCCL_BOOTSTRAP_BIDIR_ALLGATHER": "1",
@@ -48,9 +48,9 @@
     "bootstrap_mpi_unidir": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
-      "num_ranks": 2,
+      "num_ranks": 4,
       "num_nodes": 1,
-      "num_gpus": 2,
+      "num_gpus": 4,
       "timeout": 300,
       "env_variables": {
         "NCCL_BOOTSTRAP_BIDIR_ALLGATHER": "0"
@@ -63,7 +63,7 @@
   },
   "test_suites": [
     {"name": "Socket encryption", "description": "rccl-UnitTestsFixturesDebug SocketCrypt.*", "config": "socket_crypt", "enabled": true, "smoke": true},
-    {"name": "Bootstrap TLS - bidirectional ring", "description": "BootstrapTlsMPITest.* and BootstrapStrayPeerMPITest.*, 2 ranks", "config": "bootstrap_mpi_bidir", "enabled": true, "smoke": true},
-    {"name": "Bootstrap TLS - unidirectional ring", "description": "BootstrapTlsMPITest.* and BootstrapStrayPeerMPITest.*, 2 ranks", "config": "bootstrap_mpi_unidir", "enabled": true}
+    {"name": "Bootstrap TLS - bidirectional ring", "description": "BootstrapTlsMPITest.* and BootstrapStrayPeerMPITest.*, 4 ranks", "config": "bootstrap_mpi_bidir", "enabled": true, "smoke": true},
+    {"name": "Bootstrap TLS - unidirectional ring", "description": "BootstrapTlsMPITest.* and BootstrapStrayPeerMPITest.*, 4 ranks", "config": "bootstrap_mpi_unidir", "enabled": true}
   ]
 }
