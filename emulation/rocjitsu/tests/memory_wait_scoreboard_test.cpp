@@ -1649,7 +1649,8 @@ TEST_F(MemoryWaitOrderingTest, SuccessiveFlatLdsResultsPreserveWriteOrder) {
 }
 
 TEST_F(MemoryWaitOrderingTest, NativeLdsDoesNotExemptUnqualifiedFlatWriteback) {
-  // Preserve this guard when native-LDS ordered overwrites are enabled separately.
+  // Native LDS writeback is in order, but RDNA1/2 FLAT LDS writebacks are not
+  // in order with them.
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
     setup(arch);
