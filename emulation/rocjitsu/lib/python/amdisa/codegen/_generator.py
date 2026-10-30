@@ -8601,8 +8601,9 @@ class CodeGenerator:
         """Return the legacy GDS EXPCNT completion obligation.
 
         MemoryIssueInfo obligations gate whole-event completion, not source-only
-        protection. Static waitcheck tracks GDS source/EXEC protection separately;
-        dynamic GDS execution is unimplemented.
+        protection. Static waitcheck tracks GDS source/EXEC protection separately.
+        GWS operations execute with gds=1 and carry this obligation; other GDS
+        data operations are unimplemented.
         """
         kind = self._MEMORY_ISSUE_KINDS[sem_class]
         obligation = self._memory_counter_obligation(

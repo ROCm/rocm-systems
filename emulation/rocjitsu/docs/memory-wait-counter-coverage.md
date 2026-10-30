@@ -172,9 +172,14 @@ requirement.
 Static waitcheck separately protects GDS source VGPRs and EXEC until an EXP
 wait on legacy targets other than CDNA4. Generated GDS metadata retains its
 LGKM and EXP obligations on those targets, but the dynamic detector's
-whole-event obligations do not implement this source-only protection. GDS
-execution is unimplemented, so decoded-metadata and static-checker coverage
-do not establish dynamic GDS source/EXEC protection.
+whole-event obligations do not implement this source-only protection. GDS data
+operations, such as DS loads, stores and atomics with `GDS=1`, are
+unimplemented and fail when executed. GWS operations (`ds_gws_*`) do execute
+with `GDS=1` on CDNA1–3 and RDNA1–3.5. They publish a zero-payload request
+through the local-memory pipeline, so their retained EXP obligation adds an
+EXPCNT token in emulation. That accounting is still not source VGPR/EXEC
+protection, and decoded-metadata and static-checker coverage do not establish
+dynamic GDS source/EXEC protection.
 
 The external
 [`race` suite](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
@@ -227,7 +232,8 @@ wait requirements on untested architectures or under all schedules.
 | Stores and atomics without return | Store queue, or the shared legacy VMEM queue; no destination register |
 | Generic FLAT loads, stores and atomics | Only the VMEM/DS queues used by resolved requests; returned lanes depend on DS for the shared aperture and VMEM for global/scratch |
 | LDS, including permutation, swizzle and DS no-op | DS/legacy LGKM queue; returning forms track registers |
-| GDS (decoded metadata; execution unimplemented) | LGKM and, on legacy targets other than CDNA4, EXP. Static waitcheck separately protects source VGPRs and EXEC |
+| GDS data operations (decoded metadata; execution unimplemented) | LGKM and, on legacy targets other than CDNA4, EXP. Static waitcheck separately protects source VGPRs and EXEC |
+| GWS (`ds_gws_*`; executes on CDNA1–3 and RDNA1–3.5) | Zero-payload request on the DS/legacy LGKM queue with the GDS completion class, plus EXP; no register results. Static waitcheck separately protects source VGPRs and EXEC |
 | Scalar loads, atomics, cache operations, timestamps, barrier-state and wave-ID queries | KM/legacy LGKM queue; returned scalar registers are tracked |
 | Messages, including message returns | KM/legacy LGKM queue. Return forms contribute two units, with the result pending through the return unit |
 | Barrier signal with an `isfirst` result | KM queue and pending SCC result |
