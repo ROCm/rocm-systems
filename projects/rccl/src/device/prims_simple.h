@@ -833,20 +833,15 @@ public:
 
     if (tid < NCCL_PAT_NDIMS && ((1UL << tid) < nNodes)) {
       int node = ncclShmem.comm.node;
-      uint32_t mask = 1 << tid;
       int denseLocalRank = localRanks > 1 ? channel->nvls.headRank : 0;
-      int prevDensePeer = ((node + nNodes - mask) % nNodes) * localRanks + denseLocalRank;
-      int nextDensePeer = ((node + mask) % nNodes) * localRanks + denseLocalRank;
-      int prevPeer = prevDensePeer;
-      int nextPeer = nextDensePeer;
+      const bool mirrored = ncclShmem.comm.patSharedQps == 0 && mode == primsModePatAg;
+      int recvPeer = patRecvPeer(node, nNodes, tid, mirrored) * localRanks + denseLocalRank;
+      int sendPeer = patSendPeer(node, nNodes, tid, mirrored) * localRanks + denseLocalRank;
       if (localRanks > 1) {
         int* denseToUserRank = ncclShmem.comm.denseToUserRank;
-        prevPeer = denseToUserRank[prevDensePeer];
-        nextPeer = denseToUserRank[nextDensePeer];
+        recvPeer = denseToUserRank[recvPeer];
+        sendPeer = denseToUserRank[sendPeer];
       }
-      const bool shared = ncclShmem.comm.patSharedQps != 0;
-      int recvPeer = (shared || mode == primsModePatRs) ? prevPeer : nextPeer;
-      int sendPeer = (!shared && mode == primsModePatAg) ? prevPeer : nextPeer;
 
       // Load recv peer
       struct ncclPatPeer* peer = recvDims + tid;
