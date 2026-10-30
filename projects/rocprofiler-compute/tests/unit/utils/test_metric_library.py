@@ -93,6 +93,22 @@ def test_load_metric_library_reads_variables(tree):
     assert "GRBM_X" not in library.metrics
 
 
+def test_load_metric_library_reads_sets_through_the_chain(tree):
+    write_text_file(
+        tree / "gfx_base" / "sets.yaml",
+        "busy:\n  title: Busy\n  metrics: [compute.salu_util, compute.valu_util]\n"
+        "old:\n  title: Old\n  metrics: [compute.salu_util]\n",
+    )
+    write_text_file(
+        tree / "gfx_c4" / "sets.yaml",
+        "inherit: ../gfx_base/sets.yaml\nbusy:\n  metrics: [compute.valu_util]\n"
+        "old: !remove\n",
+    )
+    library = load_metric_library(tree, "gfx_c4")
+    assert library.sets == {"busy": {"title": "Busy", "metrics": ["compute.valu_util"]}}
+    assert "busy" not in library.metrics
+
+
 def test_duplicate_id_across_files_fails(tree):
     write_text_file(
         tree / "gfx_c4" / "wave.yaml",

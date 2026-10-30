@@ -8,7 +8,8 @@ Imported by both the main runtime code and lightweight tooling such as
 """
 
 import re
-from typing import Any
+from collections import defaultdict
+from typing import Any, Dict, Set
 
 from utils.logger import console_error
 
@@ -204,3 +205,28 @@ def counter_to_block(counter: str) -> str:
     if block == "TX":
         return "TCP"
     return BLOCK_REMAP.get(block, block)
+
+
+def counters_over_block_limits(
+    counters: Set[str], perfmon_config: Dict[str, Any]
+) -> Dict[str, Set[str]]:
+    """Return, per block, the counters that do not fit in one profiling pass.
+
+    *_ACCUM counters are left out: the profiler gives each its own pass.
+
+    Args:
+        counters: The counters one pass would collect.
+        perfmon_config: The arch's counters per block, from mi_gpu_spec.yaml.
+
+    Returns:
+        The counters of each block that holds more than its limit, by block name.
+    """
+    block_counters: Dict[str, Set[str]] = defaultdict(set)
+    for counter in counters:
+        if not counter.endswith("_ACCUM"):
+            block_counters[counter_to_block(counter)].add(counter)
+    return {
+        block: block_set
+        for block, block_set in sorted(block_counters.items())
+        if block in perfmon_config and len(block_set) > perfmon_config[block]
+    }

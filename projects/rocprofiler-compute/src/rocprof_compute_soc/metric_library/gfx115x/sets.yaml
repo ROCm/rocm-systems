@@ -1,0 +1,22 @@
+compute_thruput_flops:
+  title: Compute Throughput FLOPS
+  metrics:
+  - compute.valu_flops
+  - compute.valu_flops_f64
+launch_stats:
+  title: Launch Stats
+  metrics:
+  - dispatch.grid_size
+  - dispatch.workgroup_size
+  - wave.dispatched_wavefronts
+  - dispatch.vgprs
+  - dispatch.sgprs
+  - dispatch.lds_allocation
+  - dispatch.scratch_allocation
+mem_thruput:
+  title: Memory Throughput
+  metrics:
+  - lds.bank_conflicts
+  - lds.estimated_bw
+  - gl1.util
+  - gl2.util
