@@ -2615,7 +2615,7 @@ rccl_add_micro_binary(rccl-UnitTestsHostAll
   EXTRA_DEFS ${_MICRO_MODE_DEFS})
 
 # =====================================================================
-# Standalone-only tail: coverage + no CTest registration.
+# Standalone-only tail: coverage, the runner's binary list, no CTest registration.
 # =====================================================================
 if(BUILD_TESTS)
   # In-RCCL-build path registers these binaries via CTest categories
@@ -2624,3 +2624,7 @@ if(BUILD_TESTS)
 endif()
 
 rccl_standalone_coverage()
+
+# run_host_tests.sh runs every binary listed here, so a new binary needs no runner edit.
+string(REPLACE ";" "\n" _host_test_binaries "${HOST_TEST_BINARIES}")
+file(WRITE "${CMAKE_BINARY_DIR}/host_test_binaries.txt" "${_host_test_binaries}\n")
