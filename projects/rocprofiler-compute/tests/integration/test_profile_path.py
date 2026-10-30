@@ -38,14 +38,10 @@ def test_path(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_path_rocflop(binary_handler_profile_rocprof_compute, monkeypatch):
+def test_path_rocflop(binary_handler_profile_rocprof_compute):
     # Test whether multiprocess workloads like rocflop are handled correctly
     workload_dir = common.get_output_dir()
-    options = ["--block", "3"]
-    # Rocflop defaults to one dispatch; match the shared CSV row expectation.
-    monkeypatch.setitem(
-        config, "rocflop", [*config["rocflop"], "--runs", str(num_kernels)]
-    )
+    options = ["--set", "launch_stats"]
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -54,7 +50,7 @@ def test_path_rocflop(binary_handler_profile_rocprof_compute, monkeypatch):
         roof=False,
         app_name="rocflop",
     )
-    integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
+    integration_common.check_csv_files(workload_dir, num_devices, num_kernels=1)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
