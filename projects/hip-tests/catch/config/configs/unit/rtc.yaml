@@ -3,6 +3,12 @@ rtc:
   Unit_hiprtc_saxpy:
     <<: *level_default
     tags: [compile]
+  Unit_hiprtc_ThreadSafeInit:
+    <<: *level_default
+    tags: [compile, multithread]
+  Unit_hiprtc_ThreadSafeInit_Child:
+    <<: *level_default
+    tags: [compile, multithread]
   Unit_hiprtc_ProfileRuntimeLink:
     <<: *level_2
     tags: [link]

@@ -59,20 +59,23 @@ template <typename T, typename... Args> inline std::string ToString(T first, Arg
   return ToString(first) + ", " + ToString(args...);
 }
 
+inline bool InitOnce() {
+  static const bool init_successfull = [] {
+    if (!amd::Flag::init()) {
+      return false;
+    }
+    amd::Os::PrintLibraryLocation();
+    return true;
+  }();
+  return init_successfull;
+}
+
 }  // namespace internal
 }  // namespace hiprtc
 
-// hiprtcInit lock
-static std::atomic_bool g_hiprtcInitOnce;
 #define HIPRTC_INIT_API_INTERNAL(...)                                                              \
-  {                                                                                                \
-    bool expected = false;                                                                         \
-    if (g_hiprtcInitOnce.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {     \
-      if (!amd::Flag::init()) {                                                                    \
-        HIPRTC_RETURN(HIPRTC_ERROR_INTERNAL_ERROR);                                                \
-      }                                                                                            \
-      amd::Os::PrintLibraryLocation();                                                             \
-    }                                                                                              \
+  if (!hiprtc::internal::InitOnce()) {                                                             \
+    HIPRTC_RETURN(HIPRTC_ERROR_INTERNAL_ERROR);                                                    \
   }
 
 #define HIPRTC_INIT_API(...)                                                                       \
