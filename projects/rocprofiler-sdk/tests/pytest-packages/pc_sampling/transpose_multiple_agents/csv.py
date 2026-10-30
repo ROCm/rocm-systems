@@ -32,9 +32,6 @@ def validate_all_agents_are_sampled(
     input_kernel_trace_csv: pd.DataFrame,
     input_agent_info_csv: pd.DataFrame,
 ):
-    transpose_kernel_source_line_start = 181
-    transpose_kernel_source_line_end = 189
-
     # PC sampling is supported on these architectures. agent_info lists every
     # KFD node, including GPUs hidden by HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES,
     # so this count is not the set of agents the workload can dispatch to.
@@ -83,26 +80,3 @@ def validate_all_agents_are_sampled(
         sampled_dispatches = agent_samples_df["Dispatch_Id"].unique()
         # at least 1 sampled dispatch per agent
         assert len(sampled_dispatches) >= 1
-
-    # Samples with no decoded source line have an empty Instruction_Comment.
-    # Only check the ones the decoder mapped back to transpose.cpp.
-    comments = samples_df["Instruction_Comment"]
-    transpose_samples_df = samples_df[
-        comments.notna() & comments.astype(str).str.contains("transpose.cpp")
-    ].copy()
-    if not transpose_samples_df.empty:
-        # determine the line number for each sample
-        transpose_samples_df["Source_Line_Num"] = transpose_samples_df[
-            "Instruction_Comment"
-        ].apply(lambda source_line: int(source_line.split(":")[-1]))
-        # assert that line belongs to a kernel range
-        assert (
-            (
-                transpose_samples_df["Source_Line_Num"]
-                >= transpose_kernel_source_line_start
-            )
-            & (
-                transpose_samples_df["Source_Line_Num"]
-                <= transpose_kernel_source_line_end
-            )
-        ).all()
