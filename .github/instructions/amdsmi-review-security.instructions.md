@@ -147,3 +147,7 @@ Return findings as a markdown list:
 **[F-N] [Severity]: [Issue Title]** (`file:line`)
 - Explanation and impact
 - **Fix:** [fix] or **Option A/B** with recommendation
+
+## Test-only rule
+
+- In CHANGELOG.md, flag every use of the word "rest".
