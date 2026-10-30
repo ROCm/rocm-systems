@@ -33,6 +33,11 @@ check_cxx_compiler_flag(
 )
 
 set(rj_arith_x86_64_v3_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_exact_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/half_dot_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/integer_dot_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/binary_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fixup_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fmas_x86_64_v3.cpp
@@ -61,6 +66,10 @@ set(rj_arith_x86_64_v3_sources
 
 set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fp64_directed_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_bf16_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_exact_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/half_dot_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fixup_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fmas_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_scale_x86_64_v4.cpp

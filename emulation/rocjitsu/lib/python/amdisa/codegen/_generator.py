@@ -6729,6 +6729,8 @@ class CodeGenerator:
             result_writer=result_writer,
         )
         from amdisa.codegen.execute.rj_arith_float import RjArithBody
+        from amdisa.codegen.execute.rj_arith_vector import gen_integer_dot
+
         from amdisa.codegen.execute.rj_arith_division import gen_division
 
         rj_arith_division = gen_division(ctx)
@@ -6751,25 +6753,12 @@ class CodeGenerator:
             gen_packed_fma16,
             gen_mixed_fma,
             gen_packed_binary16,
+            gen_float_dot32,
+            gen_half_dot,
         )
 
         if result_writer is None:
-            for handler in (
-                gen_packed_binary16,
-                gen_packed_fma16,
-                gen_mixed_fma,
-                gen_float_unary16,
-                gen_float_unary32,
-                gen_float_unary64,
-                gen_float_binary64,
-                gen_float_fma64,
-                gen_float64_word,
-                gen_float_binary16,
-                gen_float_binary32,
-                gen_float_ternary_selection,
-                gen_float_fma16,
-                gen_float_fma32,
-            ):
+            for handler in (gen_integer_dot, gen_half_dot, gen_float_dot32, gen_packed_binary16, gen_packed_fma16, gen_mixed_fma, gen_float_unary16, gen_float_unary32, gen_float_unary64, gen_float_binary64, gen_float_fma64, gen_float64_word, gen_float_binary16, gen_float_binary32, gen_float_ternary_selection, gen_float_fma16, gen_float_fma32):
                 rj_arith_body = handler(ctx)
                 if rj_arith_body is not None:
                     return RjArithBody(rj_arith_body)
@@ -14594,7 +14583,17 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
+                from amdisa.codegen.execute.rj_arith_vector import INTEGER_DOT_NAMES
 
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    (i.name in INTEGER_DOT_NAMES for i in all_insts)
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h',
+                            False,
+                        )
+                    )
                 has_matrix_exec = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))

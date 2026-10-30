@@ -219,7 +219,7 @@ inline V dot(const V (&a)[N], const V (&b)[N], V acc, bool saturate) {
         av[i] = uint16_t(left[i][lane]);
         bv[i] = uint16_t(right[i][lane]);
       }
-      values[lane] = repair_wmma_dot(av, bv, accumulators[lane], Bf16, Rdna3, Packed, saturate);
+      values[lane] = repair_wmma_dot(av, bv, accumulators[lane], Bf16, Rdna3, Packed, saturate, N);
     }
     result = load<V>(values);
   }

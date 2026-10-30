@@ -99,12 +99,13 @@ private:
 };
 
 // Packed inline constants arrive either as FP32 words or already narrowed
-// FP16 bits.
+// FP16/BF16 bits.
 // Replication broadcasts the resulting low half into both components.
 class PackedFloatInput {
 public:
   PackedFloatInput(RegisterAccess &registers, Wavefront &wave, const Operand &operand,
-                   uint64_t exec_mask, bool narrow, bool replicate, uint8_t source_bytes = 0xF)
+                   uint64_t exec_mask, bool narrow, bool replicate, bool bf16 = false,
+                   uint8_t source_bytes = 0xF)
       : source_(registers, wave, operand, exec_mask, narrow ? 0xF : source_bytes) {
     data = source_.data;
     if (!narrow && !replicate)
@@ -112,7 +113,8 @@ public:
     for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
       uint32_t value = source_.data[lane];
       if (narrow)
-        value = util::f32_to_f16(std::bit_cast<float>(value));
+        value = bf16 ? util::f32_to_bf16(std::bit_cast<float>(value))
+                     : util::f32_to_f16(std::bit_cast<float>(value));
       values_[lane] = replicate ? (value & 0xffffu) * 0x10001u : value;
     }
     data = values_.data();
@@ -189,6 +191,31 @@ inline bool write_vector64_result(Wavefront &wave, RegisterAccess &registers,
                                result[0][lane] | (uint64_t(result[1][lane]) << 32));
   }
   return true;
+}
+using Ternary32Function = int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *,
+                                  const uint32_t *const *, const uint32_t *const *,
+                                  const uint32_t *const *);
+using Ternary64Function = int (*)(uint64_t, uint64_t, uint64_t, uint32_t *const *,
+                                  const uint32_t *const *, const uint32_t *const *,
+                                  const uint32_t *const *);
+
+// All three routed inputs remain live through the call, including aliased VGPRs.
+inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary64Function wave64,
+                              uint64_t flags, uint64_t modifiers, const Operand &destination,
+                              const Operand &source_a, const Operand &source_b,
+                              const Operand &source_c) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!exec_mask)
+    return;
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source_a, exec_mask), b(registers, wave, source_b, exec_mask),
+      c(registers, wave, source_c, exec_mask);
+  write_vector32_result(
+      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, &c.data)
+                   : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data);
+      });
 }
 
 } // namespace rocjitsu::amdgpu::arith

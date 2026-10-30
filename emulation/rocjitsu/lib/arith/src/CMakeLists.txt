@@ -10,6 +10,11 @@ add_library(
     common/cpu.cpp
     common/cpu_decode.cpp
     fp/scalar_repair.cpp
+    dot/dot.cpp
+    dot/fp8_dot.cpp
+    dot/half_dot.cpp
+    dot/integer_dot.cpp
+    dot/scalar_repair.cpp
     fp/fma.cpp
     fp/binary.cpp
     fp/div_fixup.cpp
@@ -25,7 +30,6 @@ add_library(
     fp/minmax.cpp
     fp/mixed_fma.cpp
     fp/packed_fma.cpp
-    dot/scalar_repair.cpp
     register/dpp.cpp
     wmma/swmmac16.cpp
     wmma/swmmac8.cpp

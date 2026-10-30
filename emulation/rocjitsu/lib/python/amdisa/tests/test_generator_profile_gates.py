@@ -7059,27 +7059,26 @@ def test_generated_pseudo_scalar_users_include_dependency(
         assert (include in text) == ('pseudo_scalar::' in text), source
 
 
-def test_generated_vop3_dot2_true16_uses_true16_helpers(
+def test_generated_vop3_dot2_true16_uses_rj_arith_true16_adapter(
     rdna4_generated_root: Path,
 ):
     vop3 = (rdna4_generated_root / 'vop3_exec.cpp').read_text()
-
-    body = _generated_method_body(vop3, 'VDot2F16F16Vop3', 'VDot2Bf16Bf16Vop3')
-
-    assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
-    assert 'uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);' in body
-    assert 'uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);' in body
-    assert (
-        'uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane(src2, lane);' in body
+    body = ' '.join(
+        _generated_method_body(vop3, 'VDot2F16F16Vop3', 'VDot2Bf16Bf16Vop3').split()
     )
-    replication = 'if (amdgpu::dot2_src_needs_half_replication(inst_.src2))'
-    assert replication in body
-    assert body.index(replication) < body.index('if (opsel & 4u)')
+    assert 'const uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
+    assert 'pk16_src_needs_narrowing(inst_.src0, src0.size_bits())' in body
+    assert 'pk16_src_needs_narrowing(inst_.src1, src1.size_bits())' in body
+    assert 'dot2_src_needs_half_replication(inst_.src0)' in body
+    assert 'dot2_src_needs_half_replication(inst_.src2) ? 4u : 0u' in body
+    assert '((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u)' in body
+    assert '((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u)' in body
+    assert 'RJ_ARITH_ALU_HIGH_A' not in body and 'RJ_ARITH_ALU_HIGH_B' not in body
     assert (
-        'amdgpu::gfx12_dot2_packed16<false>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl())'
+        'arith::execute_dot2_f16(wf, rj_arith_v_dot2_f16_f16_w32_gfx12, rj_arith_v_dot2_f16_f16_w64_gfx12'
         in body
     )
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
+    assert 'modifiers, vdst, src0, src1, src2' in body
     assert 'throw util::UnimplementedInst' not in body
 
 

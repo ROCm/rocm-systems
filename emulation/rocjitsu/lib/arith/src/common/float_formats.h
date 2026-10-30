@@ -77,6 +77,15 @@ inline uint16_t float_to_f16(float value, bool saturate = false) {
   return uint16_t(sign | (uint32_t(adjusted) << 10) | rounded);
 }
 
+// Nearest-even FP32-to-BF16 conversion; NaNs are quieted and remain NaNs.
+inline uint16_t float_to_bf16(float value) {
+  uint32_t bits = as_bits(value);
+  if ((bits & 0x7fffffff) > 0x7f800000) {
+    return uint16_t((bits >> 16) | 0x40);
+  }
+  return uint16_t((bits + 0x7fff + ((bits >> 16) & 1)) >> 16);
+}
+
 // OCP FP8 E4M3FN and BF8 E5M2, adapted from rocjitsu util/data_types.h.
 // E4M3FN's top exponent remains finite except codes 0x7f/0xff; E5M2 has
 // infinities. Neither uses the FNUZ encoding. All finite values widen exactly.

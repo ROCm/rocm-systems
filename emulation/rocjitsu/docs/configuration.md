@@ -341,8 +341,9 @@ does not select direct-CU groups; their WGP IDs still follow CU child order.
 ### CPU arithmetic policy
 
 This policy currently applies to dense and sparse WMMA, fused floating-point arithmetic,
-basic floating-point arithmetic and selection and division. Other instructions retain
-their existing implementations while integration proceeds by instruction family.
+basic floating-point arithmetic and selection, division and dot products. Other
+instructions retain their existing implementations while integration proceeds by
+instruction family.
 
 The optional top-level `arithmetic` object selects one semantics mode for
 RDNA3/RDNA4 instructions executed through rj-arith:
@@ -390,10 +391,12 @@ For migrated instructions with architectural FP status, mode 3 requires faithful
 Modes 0–2 leave FP status untouched; ordinary results such as comparison masks,
 SCC, EXEC and explicit register writes remain required in every mode. Matrix
 instructions and DIV_SCALE have no FP status output. DIV_SCALE still writes its
-ordinary per-lane condition mask in every semantics mode.
+ordinary per-lane condition mask in every semantics mode. On observed gfx1201,
+FP8/BF8 DOT4 and FP32-output DOT2 likewise leave FP status unchanged, including
+invalid and inexact cases; mode 3 accepts those instructions.
 
 These controls cover RDNA3/RDNA4 dense and sparse WMMA, fused floating-point arithmetic,
-basic floating-point arithmetic and selection and division.
+basic floating-point arithmetic and selection, division and dot products.
 Other GPU architectures retain their existing implementations. Decoding, register
 addressing, memory operations, scheduling, HWREG access and trap delivery remain
 rocjitsu responsibilities.
