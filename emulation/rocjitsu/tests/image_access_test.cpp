@@ -825,10 +825,9 @@ TEST_P(RdnaDecodedImageAccessTest, DecodedLoadAndStorePrintNoncontiguousCoordina
   }
 }
 
-TEST_P(RdnaDecodedImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3)
-    GTEST_SKIP() << "RDNA3.5 intentionally renders NSA for all MIMG variants";
-
+TEST(ImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_NE(decoder, nullptr);
   const test::Gfx11MimgEncoding mimg{.nsa = true,
                                      .dim = amdgpu::kImageDim2d,
                                      .unorm = true,
@@ -849,7 +848,7 @@ TEST_P(RdnaDecodedImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
            Case{rdna3::kImageAtomicAddMimg, "image_atomic_add v8, v[2:3], s[8:15]"},
        }) {
     SCOPED_TRACE(test_case.disassembly);
-    auto decoded = test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(*decoder_, rdna3::build_mimg,
+    auto decoded = test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(*decoder, rdna3::build_mimg,
                                                                      test_case.opcode, mimg);
     ASSERT_TRUE(decoded.succeeded());
     const std::unique_ptr<Instruction> inst = std::move(decoded).value();
