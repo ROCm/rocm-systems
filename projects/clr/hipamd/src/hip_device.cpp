@@ -622,14 +622,13 @@ hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (IS_LINUX) {
-    // The LUID is a Windows/DXGI adapter concept; unsupported elsewhere and the
-    // output parameters are left untouched.
-    HIP_RETURN(hipErrorNotSupported);
-  }
-
   auto* deviceHandle = g_devices[device]->devices()[0];
   const auto& info = deviceHandle->info();
+
+  // No WDDM/DXGI adapter behind this device, so no LUID to report.
+  if (info.luidLowPart_ == 0 && info.luidHighPart_ == 0) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
 
   // The LUID is an 8-byte value formed from the low and high parts reported by the backend.
   static_assert(sizeof(info.luidLowPart_) + sizeof(info.luidHighPart_) == 8,
