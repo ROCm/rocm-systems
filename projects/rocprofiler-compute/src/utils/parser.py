@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -17,7 +16,12 @@ from pc_sampling.pc_sampling_analysis import (
     load_pc_sample_records,
 )
 from utils import schema
-from utils.file_io import validate_kernel_filter_ids
+from utils.filter_validation import (
+    dispatch_threshold,
+    validate_dispatch_filter_ids,
+    validate_gpu_filter_ids,
+    validate_kernel_filter_ids,
+)
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.pattern_matching import fnmatch_glob_matches
@@ -282,36 +286,15 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
 
 def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
     """Apply dispatch ID filters."""
+    validate_dispatch_filter_ids(
+        workload.filter_dispatch_ids,
+        df["Dispatch_ID"].unique(),
+    )
+
     # '> n' keeps the dispatches whose id is greater than n.
-    available_dispatch_ids = set(df["Dispatch_ID"].astype(int))
-    if available_dispatch_ids:
-        available_ids_hint = (
-            f"Dispatch ids run from {min(available_dispatch_ids)} to "
-            f"{max(available_dispatch_ids)}."
-        )
-    else:
-        available_ids_hint = "This workload has no dispatches."
-
-    for dispatch_id in workload.filter_dispatch_ids:
-        if isinstance(dispatch_id, str) and ">" in dispatch_id:
-            threshold = int(re.match(r"\>\s*(\d+)", dispatch_id).group(1))
-            valid = bool(available_dispatch_ids) and threshold <= max(
-                available_dispatch_ids
-            )
-        else:
-            valid = int(dispatch_id) in available_dispatch_ids
-        if not valid:
-            console_error(
-                "analysis",
-                f"{dispatch_id} is an invalid dispatch id. {available_ids_hint}",
-            )
-
-    if (
-        isinstance(workload.filter_dispatch_ids[0], str)
-        and ">" in workload.filter_dispatch_ids[0]
-    ):
-        dispatch_match = re.match(r"\>\s*(\d+)", workload.filter_dispatch_ids[0])
-        df = df[df["Dispatch_ID"] > int(dispatch_match.group(1))]
+    threshold = dispatch_threshold(workload.filter_dispatch_ids[0])
+    if threshold is not None:
+        df = df[df["Dispatch_ID"] > threshold]
     else:
         selected_dispatches = [
             int(dispatch_str) for dispatch_str in workload.filter_dispatch_ids
@@ -323,17 +306,18 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
 
 def _apply_gpu_filter(workload: schema.Workload) -> pd.DataFrame:
     """Apply the requested GPU IDs before other row filters."""
-    # TODO: error out properly if filters out of bound
     filtered_df = workload.raw_pmc
 
     if workload.filter_gpu_ids:
+        validate_gpu_filter_ids(
+            workload.filter_gpu_ids,
+            filtered_df["GPU_ID"].unique(),
+        )
         filtered_df = filtered_df.loc[
             filtered_df["GPU_ID"]
             .astype(str)
             .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
         ]
-        if filtered_df.empty:
-            console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
 
     return filtered_df
 

@@ -78,6 +78,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--dispatch` is no longer accepted in analyze mode.
   * `-d` is now the short form of `--output-directory` in analyze mode, as in profile mode.
 
+* `--gpu-id` rejects any unknown id in the list, and the analysis database rejects unknown `--gpu-id`, `-k` and `--kernel-iteration-range` ids the same way.
+  * Before, `--gpu-id` rejected a list only when no GPU matched, and a single `-p` kept only the first id of the list.
+  * Before, an unknown id in the analysis database path produced an empty database.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or the `analysis.db` that every analyze run writes to explore results in ROCm Optiq.
@@ -125,6 +129,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed the aggregate L2 cache hit rate in the L2 Cache (per Channel) panel on AMD Instinct MI100 and MI200 Series.
 
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
+
+* Fixed the error for a mismatched count of `-k/--kernel` values and `--path` values, which ran the word `analysis` into the message.
 
 ### Upcoming changes
 

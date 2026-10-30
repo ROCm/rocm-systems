@@ -184,8 +184,8 @@ class OmniAnalyze_Base:
                 args.gpu_kernel *= len(args.path)
             else:
                 console_error(
-                    "analysis"
-                    "The number of -k/--kernel doesn't match the number of --dir."
+                    "analysis",
+                    "The number of -k/--kernel doesn't match the number of --dir.",
                 )
 
     @demarcate
@@ -348,7 +348,6 @@ class OmniAnalyze_Base:
         # set filters
         filter_configs = [
             (args.gpu_kernel, "filter_kernel_ids"),
-            (args.gpu_id, "filter_gpu_ids"),
             (args.gpu_dispatch_id, "filter_dispatch_ids"),
         ]
 
@@ -363,6 +362,14 @@ class OmniAnalyze_Base:
             # Apply filters to workloads
             for path_info, filter_value in zip(args.path, filter_list):
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
+
+        # A single path takes the whole --gpu-id list, so every id reaches the
+        # validator. With several paths the ids pair with the paths in order.
+        if args.gpu_id and len(args.path) == 1:
+            self._runs[args.path[0][0]].filter_gpu_ids = list(args.gpu_id)
+        elif args.gpu_id:
+            for path_info, gpu_id in zip(args.path, args.gpu_id):
+                self._runs[path_info[0]].filter_gpu_ids = gpu_id
 
     @abstractmethod
     def write_outputs(self, run_folder: Path) -> None:

@@ -53,6 +53,11 @@ from utils.file_io import (
     load_pc_sampling_results,
     process_pc_sampling_kernel_traces,
     rank_kernels_by_total_duration,
+)
+from utils.filter_validation import (
+    dispatch_threshold,
+    validate_dispatch_filter_ids,
+    validate_gpu_filter_ids,
     validate_kernel_filter_ids,
 )
 from utils.logger import (
@@ -148,35 +153,50 @@ def filter_dispatch_frame(
     """Apply the analysis mode filters to one frame of dispatch rows.
 
     The frame carries the profiler's column names, so both the counter frame
-    and the PC-sampling trace can be filtered by the same rules. Kernel ids
-    index the gpu and dispatch filtered ranking, the same ids the cli mode's
+    and the PC-sampling trace can be filtered by the same rules. The filters
+    run in the cli order, gpu, kernel, then dispatch, and each unknown id exits
+    with the cli message, so the database rejects what the cli rejects. Kernel
+    ids index the gpu and dispatch filtered ranking, the same ids the cli mode's
     top stats table shows.
     """
     if filter_gpu_ids:
+        validate_gpu_filter_ids(filter_gpu_ids, dispatch_frame["GPU_ID"].unique())
         dispatch_frame = dispatch_frame.loc[
             dispatch_frame["GPU_ID"]
             .astype(str)
             .isin(normalize_filter_to_str_list(filter_gpu_ids))
         ]
-    if filter_dispatch_ids:
-        if ">" in filter_dispatch_ids[0]:
-            dispatch_bound = re.match(r"\>\s*(\d+)", filter_dispatch_ids[0])
-            dispatch_frame = dispatch_frame[
-                dispatch_frame["Dispatch_ID"] > int(dispatch_bound.group(1))
-            ]
-        else:
-            dispatch_frame = dispatch_frame.loc[
-                dispatch_frame["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)
-            ]
     if filter_kernel_ids:
-        top_kernels = rank_kernels_by_total_duration(dispatch_frame)
+        ranked_frame = _select_dispatch_ids(dispatch_frame, filter_dispatch_ids)
+        top_kernels = rank_kernels_by_total_duration(ranked_frame)
         validate_kernel_filter_ids(filter_kernel_ids, len(top_kernels))
         dispatch_frame = dispatch_frame.loc[
             dispatch_frame["Kernel_Name"].isin([
                 top_kernels[kernel_id] for kernel_id in filter_kernel_ids
             ])
         ]
+    if filter_dispatch_ids:
+        validate_dispatch_filter_ids(
+            filter_dispatch_ids,
+            dispatch_frame["Dispatch_ID"].unique(),
+        )
+        dispatch_frame = _select_dispatch_ids(dispatch_frame, filter_dispatch_ids)
     return dispatch_frame
+
+
+def _select_dispatch_ids(
+    dispatch_frame: pd.DataFrame,
+    filter_dispatch_ids: Optional[list[str]],
+) -> pd.DataFrame:
+    """Keep the rows of the given dispatch ids, or those above a '> n' bound."""
+    if not filter_dispatch_ids:
+        return dispatch_frame
+    threshold = dispatch_threshold(filter_dispatch_ids[0])
+    if threshold is not None:
+        return dispatch_frame[dispatch_frame["Dispatch_ID"] > threshold]
+    return dispatch_frame.loc[
+        dispatch_frame["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)
+    ]
 
 
 class MetricInfoRow(NamedTuple):

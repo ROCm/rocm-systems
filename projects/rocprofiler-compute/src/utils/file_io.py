@@ -13,6 +13,7 @@ import yaml
 
 import config
 from utils import csv_compression, utils_analysis
+from utils.filter_validation import dispatch_threshold
 from utils.logger import (
     console_debug,
     console_error,
@@ -89,23 +90,6 @@ def rank_kernels_by_total_duration(dispatch_frame: pd.DataFrame) -> list[str]:
     )
 
 
-def validate_kernel_filter_ids(
-    filter_kernel_ids: list[int],
-    kernel_count: int,
-) -> None:
-    """Exit with a readable message when a ``-k`` id names no kernel."""
-    if kernel_count == 0:
-        console_error("analysis", "No kernels found in this workload.")
-
-    for kernel_id in filter_kernel_ids:
-        if not 0 <= kernel_id < kernel_count:
-            console_error(
-                "analysis",
-                f"{kernel_id} is an invalid kernel id. "
-                f"Please enter an id between 0-{kernel_count - 1}",
-            )
-
-
 @demarcate
 def create_df_kernel_top_stats(
     df_in: pd.DataFrame,
@@ -134,13 +118,10 @@ def create_df_kernel_top_stats(
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
         #     The better way may be parsing python slice string
-        first_filter = filter_dispatch_ids[0]
+        threshold = dispatch_threshold(filter_dispatch_ids[0])
 
-        if isinstance(first_filter, str) and first_filter.startswith(">"):
-            match = re.match(r">\s*(\d+)", str(first_filter))
-            if match:
-                threshold = int(match.group(1))
-                df = df[df["Dispatch_ID"] > threshold]
+        if threshold is not None:
+            df = df[df["Dispatch_ID"] > threshold]
         else:
             filter_strings = [str(f) for f in filter_dispatch_ids]
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]

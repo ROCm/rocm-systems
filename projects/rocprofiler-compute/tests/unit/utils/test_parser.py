@@ -401,17 +401,6 @@ def _filter_workload() -> SimpleNamespace:
     )
 
 
-def record_and_exit_stub():
-    """Return a calls list and a stub that records its args, then raises SystemExit."""
-    calls = []
-
-    def stub(*args, **_kwargs):
-        calls.append(args)
-        raise SystemExit(1)
-
-    return calls, stub
-
-
 def _kernel_filter_workload() -> SimpleNamespace:
     """Workload stub with dfs populated for apply_kernel_filter tests."""
     return SimpleNamespace(
@@ -470,9 +459,9 @@ class TestApplyFilters:
 
     def test_unknown_dispatch_id_errors(self, monkeypatch) -> None:
         """Dispatch 0 and other IDs absent from the column exit with a range hint."""
-        error_calls, record_and_exit = record_and_exit_stub()
+        error_calls, record_and_exit = common.record_and_exit_stub()
         common.patch_console(
-            monkeypatch, "utils.parser", "error", error=record_and_exit
+            monkeypatch, "utils.filter_validation", "error", error=record_and_exit
         )
         workload = _filter_workload()
         workload.filter_dispatch_ids = ["0"]
@@ -508,9 +497,9 @@ class TestApplyFilters:
 
     def test_dispatch_greater_than_highest_id_errors(self, monkeypatch) -> None:
         """'> n' past the highest dispatch id exits with a range hint."""
-        error_calls, record_and_exit = record_and_exit_stub()
+        error_calls, record_and_exit = common.record_and_exit_stub()
         common.patch_console(
-            monkeypatch, "utils.parser", "error", error=record_and_exit
+            monkeypatch, "utils.filter_validation", "error", error=record_and_exit
         )
         workload = _filter_workload()
         workload.filter_dispatch_ids = [">5"]
@@ -521,9 +510,9 @@ class TestApplyFilters:
 
     def test_dispatch_filter_without_dispatches_errors(self, monkeypatch) -> None:
         """A dispatch filter on a workload with no dispatches exits."""
-        error_calls, record_and_exit = record_and_exit_stub()
+        error_calls, record_and_exit = common.record_and_exit_stub()
         common.patch_console(
-            monkeypatch, "utils.parser", "error", error=record_and_exit
+            monkeypatch, "utils.filter_validation", "error", error=record_and_exit
         )
         workload = _filter_workload()
         workload.raw_pmc = workload.raw_pmc.iloc[0:0]
@@ -538,13 +527,53 @@ class TestApplyFilters:
         workload.filter_gpu_ids = [0, 1]
         assert len(apply_filters(workload, False)) == 4
 
+    def test_unknown_gpu_id_errors(self, monkeypatch) -> None:
+        """A GPU id the workload does not contain exits, though rows remain."""
+        error_calls, record_and_exit = common.record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.filter_validation", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.filter_gpu_ids = ["7"]
+        with pytest.raises(SystemExit):
+            apply_filters(workload, False)
+        assert error_calls == [("analysis", "['7'] is an invalid gpu-id")]
+
+    def test_partly_invalid_gpu_list_errors(self, monkeypatch) -> None:
+        """A valid GPU beside an unknown one exits, naming only the unknown id."""
+        error_calls, record_and_exit = common.record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.filter_validation", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.filter_gpu_ids = ["0", "7"]
+        with pytest.raises(SystemExit):
+            apply_filters(workload, False)
+        assert error_calls == [("analysis", "['7'] is an invalid gpu-id")]
+
+    def test_gpu_error_fires_before_kernel_and_dispatch_errors(
+        self, monkeypatch
+    ) -> None:
+        """Unknown ids are reported in the cli order: gpu, kernel, then dispatch."""
+        error_calls, record_and_exit = common.record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.filter_validation", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.filter_gpu_ids = ["7"]
+        workload.filter_kernel_ids = [99]
+        workload.filter_dispatch_ids = ["99"]
+        with pytest.raises(SystemExit):
+            apply_filters(workload, False)
+        assert error_calls == [("analysis", "['7'] is an invalid gpu-id")]
+
     @pytest.mark.parametrize("dispatch_id", ["2", ">2"])
     def test_combined_filters_keep_kernel_scoped_dispatch_error(
         self, monkeypatch, dispatch_id
     ) -> None:
-        error_calls, record_and_exit = record_and_exit_stub()
+        error_calls, record_and_exit = common.record_and_exit_stub()
         common.patch_console(
-            monkeypatch, "utils.parser", "error", error=record_and_exit
+            monkeypatch, "utils.filter_validation", "error", error=record_and_exit
         )
         workload = _filter_workload()
         workload.filter_gpu_ids = "0"

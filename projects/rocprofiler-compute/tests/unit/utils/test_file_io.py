@@ -17,7 +17,6 @@ from utils.file_io import (
     is_single_panel_config,
     load_kernel_short_names,
     rank_kernels_by_total_duration,
-    validate_kernel_filter_ids,
 )
 
 KERNEL_SYMBOLS_COLUMNS = ["Kernel_Name", "Kernel_Short_Name"]
@@ -183,42 +182,6 @@ def test_kernel_top_stats_rows_follow_the_ranking() -> None:
         assert kernel_top_df["Kernel_Name"].tolist() == (
             rank_kernels_by_total_duration(dispatch_frame)
         )
-
-
-class TestValidateKernelFilterIds:
-    """Tests for utils.file_io.validate_kernel_filter_ids."""
-
-    def test_ids_within_range_are_accepted(self, monkeypatch) -> None:
-        mock_error = common.patch_console(monkeypatch, "utils.file_io", "error")[
-            "error"
-        ]
-        validate_kernel_filter_ids([0, 2], kernel_count=3)
-        mock_error.assert_not_called()
-
-    @pytest.mark.parametrize("kernel_id", [99, -1])
-    def test_id_outside_range_reports_the_valid_range(
-        self, monkeypatch, kernel_id
-    ) -> None:
-        """Ids above the last kernel and negative ids both name no kernel."""
-        mock_error = common.patch_console(monkeypatch, "utils.file_io", "error")[
-            "error"
-        ]
-
-        # The mock records instead of exiting, so validation runs to completion.
-        validate_kernel_filter_ids([kernel_id], kernel_count=3)
-
-        assert f"{kernel_id} is an invalid kernel id" in mock_error.call_args.args[1]
-        assert "0-2" in mock_error.call_args.args[1]
-
-    def test_no_kernels_is_reported_as_such(self, monkeypatch) -> None:
-        """A workload with no kernels reports that, not an empty range."""
-        mock_error = common.patch_console(monkeypatch, "utils.file_io", "error")[
-            "error"
-        ]
-
-        validate_kernel_filter_ids([0], kernel_count=0)
-
-        assert "No kernels found" in mock_error.call_args_list[0].args[1]
 
 
 def test_filters() -> None:
