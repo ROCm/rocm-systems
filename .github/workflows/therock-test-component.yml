@@ -70,7 +70,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: b063323dfed92047c0067097b4da6d597986f102 # 2026-10-27
+          ref: 9d5bc51330c08dbdfbe7e3f79cc7d72698b9425b # 2026-10-28
           sparse-checkout: build_tools
           path: "prejob"
 
@@ -88,7 +88,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: b063323dfed92047c0067097b4da6d597986f102 # 2026-10-27
+          ref: 9d5bc51330c08dbdfbe7e3f79cc7d72698b9425b # 2026-10-28
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
