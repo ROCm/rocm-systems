@@ -45,9 +45,49 @@ constexpr uint32_t kLdsBytes = 64 * 1024;
 
 uint32_t seed_word(uint32_t index) { return index * 0x9E3779B9u ^ 0x5A5A0F0Fu; }
 
-/// @brief Lane addresses: distinct and permuted, all lanes equal, or partly
-/// past the allocation so both paths take their bounds handling.
-enum class Addresses { Permuted, Broadcast, PastEnd };
+/// @brief Lane addresses: distinct and permuted, all lanes equal, partly past
+/// the allocation so both paths take their bounds handling, or consecutive
+/// lanes S bytes apart, across the wave or within permuted 16-lane groups, so
+/// loads of S bytes per lane read their groups in place.
+enum class Addresses {
+  Permuted,
+  Broadcast,
+  PastEnd,
+  Contiguous4,
+  Contiguous8,
+  Contiguous16,
+  Segments4,
+  Segments8,
+  Segments16
+};
+constexpr Addresses kAllAddresses[] = {
+    Addresses::Permuted,    Addresses::Broadcast,   Addresses::PastEnd,
+    Addresses::Contiguous4, Addresses::Contiguous8, Addresses::Contiguous16,
+    Addresses::Segments4,   Addresses::Segments8,   Addresses::Segments16};
+
+uint32_t lane_address(Addresses addresses, uint32_t lane) {
+  switch (addresses) {
+  case Addresses::Permuted:
+    return ((lane * 7) % 64) * 16 + 64;
+  case Addresses::Broadcast:
+    return 256;
+  case Addresses::PastEnd:
+    return lane % 4 == 3 ? kLdsBytes - 8 + lane : ((lane * 7) % 64) * 16 + 64;
+  case Addresses::Contiguous4:
+    return 64 + lane * 4;
+  case Addresses::Contiguous8:
+    return 64 + lane * 8;
+  case Addresses::Contiguous16:
+    return 64 + lane * 16;
+  case Addresses::Segments4:
+    return 64 + ((lane / 16) * 3 % 4) * 1024 + (lane % 16) * 4;
+  case Addresses::Segments8:
+    return 64 + ((lane / 16) * 3 % 4) * 1024 + (lane % 16) * 8;
+  case Addresses::Segments16:
+    return 64 + ((lane / 16) * 3 % 4) * 1024 + (lane % 16) * 16;
+  }
+  return 0;
+}
 
 /// @brief One CU running a single DS instruction followed by s_endpgm.
 class DsCu {
@@ -83,14 +123,8 @@ public:
     for (uint32_t reg = 1; reg < kVgprs; ++reg)
       for (uint32_t lane = 0; lane < 64; ++lane)
         cu_->write_vgpr(v0 + reg, lane, seed_word(reg * 64 + lane));
-    for (uint32_t lane = 0; lane < 64; ++lane) {
-      uint32_t address = ((lane * 7) % 64) * 16 + 64;
-      if (addresses == Addresses::Broadcast)
-        address = 256;
-      else if (addresses == Addresses::PastEnd && lane % 4 == 3)
-        address = kLdsBytes - 8 + lane;
-      cu_->write_vgpr(v0, lane, address);
-    }
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      cu_->write_vgpr(v0, lane, lane_address(addresses, lane));
     wf_->set_m0(0x100);
     wf_->set_exec(exec);
     cu_->step();
@@ -147,8 +181,7 @@ std::pair<unsigned, unsigned> compare_every_ds_opcode(Target target, Build build
       if (mnemonic.starts_with("ds_gws"))
         continue;
       for (const uint64_t exec : {~uint64_t{0}, uint64_t{0xA55AA55AA55AA55Aull}, uint64_t{0}})
-        for (const Addresses addresses :
-             {Addresses::Permuted, Addresses::Broadcast, Addresses::PastEnd}) {
+        for (const Addresses addresses : kAllAddresses) {
           SCOPED_TRACE(testing::Message() << mnemonic << " wave" << target.wave << " data0="
                                           << unsigned(operands.data0) << " exec=" << std::hex
                                           << exec << " addresses=" << static_cast<int>(addresses));

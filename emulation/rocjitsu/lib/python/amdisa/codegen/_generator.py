@@ -9320,7 +9320,6 @@ class CodeGenerator:
         fields += [
             f'  .elem_size = {sem.elem_size},',
             f'  .num_elems = {sem.num_elems},',
-            f"  .is_load = {'true' if is_load else 'false'},",
         ]
         if is_load and sem.sign_extend:
             fields.append('  .sign_extend = true,')
@@ -9329,8 +9328,8 @@ class CodeGenerator:
         if is_load and sem.d16_lo:
             fields.append('  .d16_lo = true,')
         # Loads name their destination format, so the writeback is specialized
-        # per opcode (lds_writeback.h).
-        entry = 'amdgpu::LdsInlineAccess::complete'
+        # per opcode (lds_writeback.h). Load or store is fixed by the entry point.
+        entry = 'amdgpu::LdsInlineAccess::' + ('load' if is_load else 'store')
         if is_load:
             fmt = [f'.elem_size = {sem.elem_size}', f'.num_elems = {sem.num_elems}']
             if sem.sign_extend:

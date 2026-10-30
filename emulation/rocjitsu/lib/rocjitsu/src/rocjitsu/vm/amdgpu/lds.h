@@ -194,13 +194,20 @@ public:
   /// lane l reads at (lanes[l] + offset) mod 2^32.
   /// @details Reads every lane value of the span (the highest active lane
   /// rounded up to a multiple of 16), which must be initialized, and @p dst
-  /// must hold the span.
-  void vector_load32(const uint32_t *lanes, uint32_t offset, uint64_t lane_mask, uint32_t elem_size,
-                     uint32_t num_elems, uint8_t *dst) const {
-    lds_patterns::load32({data_.data(), data_.size()}, lanes, offset, lane_mask, elem_size,
-                         num_elems, dst, [&](const uint64_t *exact, uint64_t slow_lanes) {
-                           load_lanes(exact, slow_lanes, elem_size, num_elems, dst);
-                         });
+  /// must hold the span. @p lane_mask has no lanes at or past @p Wave. With a
+  /// @p view (Wave / 16 entries), read the result through it instead of
+  /// @p dst: lanes 16g..16g+15 are at view[g], which points into LDS itself
+  /// when those lanes read consecutive bytes (lds_patterns::load32()).
+  template <uint32_t Wave = 64>
+  [[gnu::always_inline]] void
+  vector_load32(const uint32_t *lanes, uint32_t offset, uint64_t lane_mask, uint32_t elem_size,
+                uint32_t num_elems, uint8_t *dst, const uint8_t **view = nullptr) const {
+    lds_patterns::load32<Wave>(
+        {data_.data(), data_.size()}, lanes, offset, lane_mask, elem_size, num_elems, dst,
+        [&](const uint64_t *exact, uint64_t slow_lanes) {
+          load_lanes(exact, slow_lanes, elem_size, num_elems, dst);
+        },
+        view);
   }
 
   /// @brief Per-lane vector store to LDS. OOB writes are dropped.

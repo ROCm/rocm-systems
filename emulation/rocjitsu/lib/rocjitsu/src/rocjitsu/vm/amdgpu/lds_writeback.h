@@ -51,11 +51,15 @@ template <DstFormat F, uint32_t Wave> struct Writeback {
   static constexpr bool kB32 = F.elem_size == 4 && F.num_elems == 1;
   static constexpr uint64_t kAll = Wave == 64 ? ~uint64_t{0} : (uint64_t{1} << Wave) - 1;
 
-  static void run(uint8_t *const *regs, bool sram_ecc, uint64_t exec, const uint8_t *staging) {
-    // A local copy: the caller's array may alias the stores below.
+  [[gnu::always_inline]] static void run(uint8_t *const *regs, bool sram_ecc, uint64_t exec,
+                                         const uint8_t *const *groups) {
+    // Local copies: the caller's arrays may alias the stores below.
     uint8_t *dst[kRegs<F>];
     for (uint32_t r = 0; r < kRegs<F>; ++r)
       dst[r] = regs[r];
+    const uint8_t *src[Wave / 16];
+    for (uint32_t g = 0; g < Wave / 16; ++g)
+      src[g] = groups[g];
     const bool ecc = kD16 && sram_ecc;
 
     // b32 always uses masked stores: its EXEC is full in 54% of the census and
@@ -64,16 +68,18 @@ template <DstFormat F, uint32_t Wave> struct Writeback {
     // full EXEC almost always, and masked stores there cost the mix 1.5 ns
     // (7.8 -> 6.3 with plain stores).
     if (!kB32 && exec == kAll)
-      store_chunks<false>(dst, exec, ecc, staging);
+      store_chunks<false>(dst, exec, ecc, src);
     else
-      store_chunks<true>(dst, exec, ecc, staging);
+      store_chunks<true>(dst, exec, ecc, src);
   }
 
+  /// Chunk c is lanes 8c..8c+7: the first or second half of group c / 2.
   template <bool Masked>
-  static void store_chunks(uint8_t *const *dst, uint64_t exec, bool ecc, const uint8_t *staging) {
+  [[gnu::always_inline]] static void store_chunks(uint8_t *const *dst, uint64_t exec, bool ecc,
+                                                  const uint8_t *const *src) {
     for (uint32_t c = 0; c < Wave / 8; ++c) {
       __m256i v[kRegs<F>];
-      chunk(staging + c * 8 * kStride, dst[0] + c * 32, ecc, v);
+      chunk(src[c / 2] + (c % 2) * 8 * kStride, dst[0] + c * 32, ecc, v);
       for (uint32_t r = 0; r < kRegs<F>; ++r) {
         auto *p = dst[r] + c * 32;
         if constexpr (Masked)
@@ -85,14 +91,15 @@ template <DstFormat F, uint32_t Wave> struct Writeback {
   }
 
   /// old: the destination's current dwords, which d16 loads partly keep.
-  static void chunk(const uint8_t *src, const uint8_t *old, bool ecc, __m256i *v) {
+  [[gnu::always_inline]] static void chunk(const uint8_t *src, const uint8_t *old, bool ecc,
+                                           __m256i *v) {
     if constexpr (F.elem_size >= 4)
       dwords(src, v);
     else
       v[0] = narrow(src, old, ecc);
   }
 
-  static void dwords(const uint8_t *src, __m256i *v) {
+  [[gnu::always_inline]] static void dwords(const uint8_t *src, __m256i *v) {
     if constexpr (kRegs<F> == 1) {
       // Staging is lane-major, which for b32 is the register layout.
       v[0] = load(src);
@@ -121,7 +128,7 @@ template <DstFormat F, uint32_t Wave> struct Writeback {
     }
   }
 
-  static __m256i narrow(const uint8_t *src, const uint8_t *old, bool ecc) {
+  [[gnu::always_inline]] static __m256i narrow(const uint8_t *src, const uint8_t *old, bool ecc) {
     static_assert(F.num_elems == 1 && (F.elem_size == 1 || F.elem_size == 2));
     __m256i v;
     if constexpr (F.elem_size == 1) {
@@ -141,27 +148,30 @@ template <DstFormat F, uint32_t Wave> struct Writeback {
   }
 
   /// Lanes 8c..8c+7 of exec, each in its dword's sign bit (what maskstore reads).
-  static __m256i exec_mask(uint64_t exec, uint32_t c) {
+  [[gnu::always_inline]] static __m256i exec_mask(uint64_t exec, uint32_t c) {
     const __m256i half = _mm256_set1_epi32(static_cast<int>(exec >> (32 * (c / 4))));
     const int s = 31 - 8 * static_cast<int>(c % 4);
     return _mm256_sllv_epi32(half,
                              _mm256_setr_epi32(s, s - 1, s - 2, s - 3, s - 4, s - 5, s - 6, s - 7));
   }
 
-  static __m256i load(const void *p) { return _mm256_loadu_si256(static_cast<const __m256i *>(p)); }
+  [[gnu::always_inline]] static __m256i load(const void *p) {
+    return _mm256_loadu_si256(static_cast<const __m256i *>(p));
+  }
 };
 #endif
 
 /// @brief Per-lane writeback, for hosts without AVX2.
 template <DstFormat F>
-void write_back_lanes(uint8_t *const *dst, bool sram_ecc, uint64_t exec, const uint8_t *staging) {
+void write_back_lanes(uint8_t *const *dst, bool sram_ecc, uint64_t exec,
+                      const uint8_t *const *groups) {
   constexpr uint32_t stride = F.elem_size * F.num_elems;
   constexpr uint32_t copy_size = F.elem_size < 4 ? F.elem_size : 4;
   for (uint64_t lanes = exec; lanes; lanes &= lanes - 1) {
     const uint32_t lane = std::countr_zero(lanes);
     for (uint32_t r = 0; r < kRegs<F>; ++r) {
       uint32_t value = 0;
-      std::memcpy(&value, &staging[lane * stride + r * 4], copy_size);
+      std::memcpy(&value, groups[lane / 16] + (lane % 16) * stride + r * 4, copy_size);
       if constexpr (F.sign_extend && F.elem_size == 1)
         value = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(value)));
       if constexpr (F.sign_extend && F.elem_size == 2)
@@ -179,22 +189,23 @@ void write_back_lanes(uint8_t *const *dst, bool sram_ecc, uint64_t exec, const u
   }
 }
 
-/// @brief Write a load's lane-major staging to its destination VGPRs for the
+/// @brief Write a load's lane-major data to its destination VGPRs for the
 /// lanes in @p exec, leaving every other lane unchanged.
-/// @details @p dst holds the raw lanes of the kRegs<F> destination registers.
-/// Wavefront::exec() has no lanes past the wave, which makes the wave size a
-/// safe template parameter.
+/// @details @p dst holds the raw lanes of the kRegs<F> destination registers;
+/// lanes 16g..16g+15 of the data are lane-major at @p groups[g]. Wavefront::exec()
+/// has no lanes past the wave, which makes the wave size a safe template
+/// parameter.
 template <DstFormat F>
-void write_back_as(uint8_t *const *dst, bool sram_ecc, uint32_t wave, uint64_t exec,
-                   const uint8_t *staging) {
+[[gnu::always_inline]] inline void write_back_as(uint8_t *const *dst, bool sram_ecc, uint32_t wave,
+                                                 uint64_t exec, const uint8_t *const *groups) {
 #if RJ_HOST_HAS_AVX2
   if (wave == 32)
-    Writeback<F, 32>::run(dst, sram_ecc, exec, staging);
+    Writeback<F, 32>::run(dst, sram_ecc, exec, groups);
   else
-    Writeback<F, 64>::run(dst, sram_ecc, exec, staging);
+    Writeback<F, 64>::run(dst, sram_ecc, exec, groups);
 #else
   (void)wave;
-  write_back_lanes<F>(dst, sram_ecc, exec, staging);
+  write_back_lanes<F>(dst, sram_ecc, exec, groups);
 #endif
 }
 
