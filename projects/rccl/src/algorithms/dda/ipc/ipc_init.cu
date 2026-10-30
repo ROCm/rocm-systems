@@ -211,8 +211,19 @@ ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
   }
 
   auto* barrierState = comm->ddaIpcBarrierState;
-  if (barrierState != nullptr && barrierState->resources != nullptr &&
-      barrierState->resources->ipcMemHandler != nullptr) {
+  const bool hasBarrierMappings = barrierState != nullptr && barrierState->resources != nullptr &&
+                                  barrierState->resources->ipcMemHandler != nullptr;
+  if ((hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) && comm->doneEvent != nullptr) {
+    // DDA kernels run on the user stream, which the hostStream/deviceStream
+    // syncs in commDestroySync do not cover. doneEvent is recorded after
+    // every launch, so waiting on it keeps in-flight kernels off unmapped peers.
+    cudaError_t syncErr = cudaEventSynchronize(comm->doneEvent);
+    if (syncErr != cudaSuccess) {
+      WARN("ncclDdaIpcCommClosePeerMappings: doneEvent sync failed (%s); continuing cleanup",
+           cudaGetErrorString(syncErr));
+    }
+  }
+  if (hasBarrierMappings) {
     ncclResult_t closeResult = barrierState->resources->ipcMemHandler->closePeerMappings();
     if (closeResult != ncclSuccess) {
       WARN("ncclDdaIpcCommClosePeerMappings: barrier peer mapping close failed (%d); continuing cleanup",

@@ -365,27 +365,37 @@ TEST_F(DdaIpcLifecycleMicrotest, FinalizationWithoutIpcInitializationIsNonCollec
   }
 }
 
-TEST_F(DdaIpcLifecycleMicrotest, RevokeClosesAllLocalPeerMappingsBeforeSerialCommFree) {
+TEST_F(DdaIpcLifecycleMicrotest, ClosePeerMappingsWaitsForInFlightDdaKernelsBeforeUnmapping) {
   initializeDdaIpcForAllRanks();
+  hipEvent_t doneEvents[kRanks];
   for (int rank = 0; rank < kRanks; ++rank) {
-    comms_[rank]->revokedFlag = true;
+    doneEvents[rank] = reinterpret_cast<hipEvent_t>(static_cast<uintptr_t>(0x1000 + rank));
+    comms_[rank]->doneEvent = doneEvents[rank];
   }
 
-  // commReclaim closes every revoked local rank's mappings before its serial
-  // commCleanup loop, without the normal-destroy barrier.
-  closeDdaIpcPeerMappingsForAllRanks();
-  EXPECT_EQ(0, openMappingCount());
-  finalizeDdaIpcSerially();
+  std::vector<hipEvent_t> syncedEvents;
+  std::vector<int> closesAtSync;
+  ScopedHook<hipError_t(hipEvent_t)> syncHook{g_hipEventSynchronize, [&](hipEvent_t event) {
+    std::lock_guard<std::mutex> lock(memoryMu_);
+    syncedEvents.push_back(event);
+    closesAtSync.push_back(closeCalls_);
+    // A failed wait must not stop the unmap and free path.
+    return syncedEvents.size() == 1 ? hipErrorLaunchFailure : hipSuccess;
+  }};
 
-  EXPECT_EQ(0, bootstrap_.timeouts);
-  EXPECT_EQ(0, bootstrap_.desyncs);
-  EXPECT_EQ(0, bootstrap_.barrierCalls);
+  for (int rank = 0; rank < kRanks; ++rank) {
+    const int closesBefore = closeCalls_;
+    EXPECT_EQ(ncclSuccess, ncclDdaIpcCommClosePeerMappings(comms_[rank].get())) << "rank " << rank;
+    ASSERT_EQ(static_cast<size_t>(rank + 1), syncedEvents.size()) << "rank " << rank;
+    EXPECT_EQ(doneEvents[rank], syncedEvents[rank]) << "rank " << rank;
+    EXPECT_EQ(closesBefore, closesAtSync[rank]) << "rank " << rank << " unmapped before waiting";
+    EXPECT_GT(closeCalls_, closesBefore) << "rank " << rank;
+  }
+  EXPECT_EQ(0, openMappingCount());
+
+  finalizeDdaIpcSerially();
   EXPECT_EQ(0, earlyFrees_);
   EXPECT_TRUE(liveAllocations_.empty());
-  for (int rank = 0; rank < kRanks; ++rank) {
-    EXPECT_EQ(ncclSuccess, closeResults_[rank]) << "rank " << rank;
-    EXPECT_EQ(ncclSuccess, finiResults_[rank]) << "rank " << rank;
-  }
 }
 
 TEST_F(DdaIpcLifecycleMicrotest, FiniWithoutPriorCloseStaysLocalAndClosesPeerMappings) {
