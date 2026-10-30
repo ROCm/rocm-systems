@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "TestBed.hpp"
+#include "PipeUtils.hpp"
 #include <gtest/gtest-spi.h>
 #include <hip/hip_runtime.h>
 #include <cerrno>
@@ -11,6 +12,7 @@
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <optional>
 #include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -194,8 +196,9 @@ namespace RcclUnitTesting
     }
 
     // Forks a worker that keeps its pipes open but never answers, as a worker
-    // wedged in a collective would.
-    TestBedChild* ForkHungChild(int const childId)
+    // wedged in a collective would. With a reply, it first reads one two-int
+    // command (such as LaunchGraphs) and answers it with that reply.
+    TestBedChild* ForkHungChild(int const childId, std::optional<int> const reply = std::nullopt)
     {
       TestBedChild* child = new TestBedChild(childId, false, 0, false);
       if (child->InitPipes() != TEST_SUCCESS)
@@ -209,6 +212,10 @@ namespace RcclUnitTesting
       {
         close(child->parentWriteFd);
         close(child->parentReadFd);
+        int command[2];
+        if (reply && safe_pipe_read(child->childReadFd, command, sizeof(command)) ==
+                     static_cast<ssize_t>(sizeof(command)))
+          (void)safe_pipe_write(child->childWriteFd, &*reply, sizeof(*reply));
         while (true) pause();
       }
       if (child->pid < 0)
@@ -291,6 +298,39 @@ namespace RcclUnitTesting
     errno = 0;
     EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
     EXPECT_EQ(errno, ECHILD);
+  }
+
+  // The graphs launched on healthy children wait on a child that failed to launch
+  // its own, so no later command could complete: LaunchGraphs must stop every worker.
+  TEST(Teardown, FailedGraphLaunchStopsAllWorkers)
+  {
+    TestBed testBed;
+    testBed.poolMode = false;
+    testBed.configUsedPool = false;
+    LimitParentWaitsToOneSecond(testBed);
+    for (int const reply : {static_cast<int>(TEST_FAIL), static_cast<int>(TEST_SUCCESS)})
+    {
+      TestBedChild* const child = ForkHungChild(testBed.NumActiveChildren(), reply);
+      ASSERT_NE(child, nullptr);
+      testBed.childList.push_back(child);
+      testBed.rankToChildMap.push_back(child->childId);
+    }
+    std::vector<pid_t> const pids = {testBed.childList[0]->pid, testBed.childList[1]->pid};
+    testBed.numGroupCalls = 1;
+
+    ::testing::TestPartResultArray failures;
+    CaptureFailures(failures, [&]() { testBed.LaunchGraphs(0); });
+
+    EXPECT_EQ(failures.size(), 1);
+    EXPECT_TRUE(AnyFailureMentions(failures, "Child 0 reported failure"));
+    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.NumActiveRanks(), 0);
+    for (pid_t const pid : pids)
+    {
+      errno = 0;
+      EXPECT_EQ(waitpid(pid, nullptr, WNOHANG), -1);
+      EXPECT_EQ(errno, ECHILD);
+    }
   }
 
   // Pool workers must start from a fresh process image even when an earlier

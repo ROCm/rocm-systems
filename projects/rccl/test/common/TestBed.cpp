@@ -699,7 +699,7 @@ namespace RcclUnitTesting
 
     // Wait for child acknowledgement
     // This is done after previous loop to avoid deadlock as every rank needs to enter ncclInitCommRank
-    CollectAcks(AllChildIds(), nullptr, /*peersInterlocked=*/true);
+    CollectAcks("InitComms", AllChildIds(), OnChildFailure::StopIfOwed);
     InteractiveWait("Finishing InitComms");
   }
 
@@ -755,11 +755,13 @@ namespace RcclUnitTesting
       FAIL();
     }
 
-    // Loop over all ranks and send CollectiveArgs to appropriate child process
+    // Send CollectiveArgs for every selected rank before waiting, so children work in parallel
     int const cmd = TestBedChild::CHILD_SET_COLL_ARGS;
+    std::vector<int> ackChildIds;
     for (auto currRank : rankList)
     {
       int const childId = rankToChildMap[currRank];
+      ackChildIds.push_back(childId);
       PIPE_WRITE(childId, cmd);
       PIPE_WRITE(childId, currRank);
       PIPE_WRITE(childId, collId);
@@ -770,12 +772,13 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, numOutputElements);
       PIPE_WRITE(childId, streamIdx);
       PIPE_WRITE(childId, optionalArgs);
-      PIPE_CHECK(childId);
     }
+    CollectAcks("SetCollectiveArgs", ackChildIds);
     InteractiveWait("Finishing SetCollectiveArgs");
   }
 
-  void TestBed::CollectAcks(std::vector<int> const& childIds, bool* allSucceeded, bool const peersInterlocked)
+  void TestBed::CollectAcks(char const* const command, std::vector<int> const& childIds,
+                            OnChildFailure const onFailure, bool* allSucceeded)
   {
     if (allSucceeded) *allSucceeded = false;
 
@@ -787,6 +790,7 @@ namespace RcclUnitTesting
     int const replyTimeoutSec = ChildReplyTimeoutSec();
     auto const replyDeadline = Clock::now() + std::chrono::seconds(replyTimeoutSec);
     int numFailed = 0;
+    int firstFailedChild = -1;
     while (!pendingAcks.empty())
     {
       // Watch every active child for a hangup: a dead peer can leave a pending
@@ -840,10 +844,10 @@ namespace RcclUnitTesting
         if (response != TEST_SUCCESS)
         {
           TEST_ERROR("Child %d reports failure", childId);
-          ++numFailed;
+          if (numFailed++ == 0) firstFailedChild = childId;
           // Children still owing an ack may be blocked on this one and cannot
           // read an abort request; stopping the workers is the only way out.
-          if (peersInterlocked && !pendingAcks.empty())
+          if (onFailure != OnChildFailure::Report && !pendingAcks.empty())
           {
             std::string waiting;
             for (auto const& pending : pendingAcks)
@@ -856,10 +860,16 @@ namespace RcclUnitTesting
         }
       }
     }
+    if (numFailed > 0 && onFailure == OnChildFailure::StopAlways)
+    {
+      TEST_ERROR("%s: work queued on the other children waits on child %d", command, firstFailedChild);
+      FAIL() << AbandonChildren(firstFailedChild, /*waitForExit=*/false, "reported failure");
+    }
     if (numFailed > 0)
     {
       this->childFailed = true;
-      FAIL() << numFailed << " of " << childIds.size() << " child acknowledgements reported failure";
+      FAIL() << command << ": " << numFailed << " of " << childIds.size()
+             << " child acknowledgements reported failure";
     }
     if (allSucceeded) *allSucceeded = true;
   }
@@ -898,7 +908,7 @@ namespace RcclUnitTesting
       }
       // Each CHILD_ALLOCATE_MEM command produces one acknowledgement. Read one
       // acknowledgement from the child that received that command.
-      CollectAcks(ackChildIds, &allocated);
+      CollectAcks("AllocateMem", ackChildIds, OnChildFailure::Report, &allocated);
     }();
     InteractiveWait("Finishing AllocateMemInternal");
     return allocated;
@@ -917,6 +927,9 @@ namespace RcclUnitTesting
     std::vector<std::vector<int>> const ranksPerChild = RanksPerChild(rankList);
     std::vector<int> const childIds = ChildrenWithRanks(ranksPerChild);
 
+    // Symmetric-window registration is collective over the comm, so peers wait on each other.
+    OnChildFailure const registrationFailure = this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN
+                                               ? OnChildFailure::StopIfOwed : OnChildFailure::Report;
     int const regCmd = TestBedChild::CHILD_REGISTER_MEM;
     for (auto currGroup : groupList) {
       // Send to all participating children before waiting so collective
@@ -932,7 +945,7 @@ namespace RcclUnitTesting
       }
 
       bool allAcked = false;
-      CollectAcks(childIds, &allAcked, this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN);
+      CollectAcks("RegisterMem", childIds, registrationFailure, &allAcked);
       if (!allAcked) return;
     }
     InteractiveWait("Finishing RegisterMemInternal");
@@ -969,9 +982,10 @@ namespace RcclUnitTesting
     std::vector<int> rankList, groupList;
     if (!SelectRanks(rank, rankList) || !SelectGroups(groupId, groupList)) return;
 
-    // Loop over all ranks and send prepare data command to appropriate child process
+    // Send every selected rank its prepare data command before waiting, so children work in parallel
     int const cmd = TestBedChild::CHILD_PREPARE_DATA;
     intptr_t const prepDataFuncOffset = CollFuncPtrToOffset(prepDataFunc);
+    std::vector<int> ackChildIds;
     for (auto currGroup : groupList)
     {
       for (auto currRank : rankList)
@@ -982,9 +996,10 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
         PIPE_WRITE(childId, prepDataFuncOffset);
-        PIPE_CHECK(childId);
+        ackChildIds.push_back(childId);
       }
     }
+    CollectAcks("PrepareData", ackChildIds);
     InteractiveWait("Finishing PrepareData");
   }
 
@@ -1027,7 +1042,7 @@ namespace RcclUnitTesting
       }
 
       bool allAcked = false;
-      CollectAcks(childIds, &allAcked, /*peersInterlocked=*/true);
+      CollectAcks("ExecuteCollectives", childIds, OnChildFailure::StopIfOwed, &allAcked);
       if (!allAcked) return;
     }
 
@@ -1041,12 +1056,11 @@ namespace RcclUnitTesting
     std::vector<int> rankList, groupList;
     if (!SelectRanks(rank, rankList) || !SelectGroups(groupId, groupList)) return;
 
+    // Send every selected rank its ValidateResults command before waiting, so children work in parallel
     int const cmd = TestBedChild::CHILD_VALIDATE_RESULTS;
-
-    isCorrect = true;
+    std::vector<int> ackChildIds;
     for (auto currGroup : groupList)
     {
-      // Send ValidateResults command to each active child process
       for (auto currRank : rankList)
       {
         int const childId = rankToChildMap[currRank];
@@ -1054,15 +1068,10 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, currRank);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
-
-        int response = 0;
-        PIPE_READ(childId, response);
-        isCorrect &= (response == TEST_SUCCESS);
-        if (response != TEST_SUCCESS) this->childFailed = true;
+        ackChildIds.push_back(childId);
       }
     }
-
-    ASSERT_EQ(isCorrect, true) << "Output does not match expected";
+    CollectAcks("ValidateResults", ackChildIds, OnChildFailure::Report, &isCorrect);
 
     InteractiveWait("Finishing ValidateResults");
   }
@@ -1073,18 +1082,20 @@ namespace RcclUnitTesting
     std::vector<int> groupList;
     if (!SelectGroups(groupId, groupList)) return;
 
+    // A launch only queues the graph, so the replies arrive without peers waiting on
+    // each other. But the launched graphs wait on any child that failed to launch,
+    // and no later command could complete, so a failed launch stops every worker.
     int const cmd = TestBedChild::CHILD_LAUNCH_GRAPHS;
     for (auto currGroup : groupList)
     {
       for (int childId = 0; childId < NumActiveChildren(); ++childId)
       {
-        // Send LaunchGraphs command to each active child process
         PIPE_WRITE(childId, cmd);
         PIPE_WRITE(childId, currGroup);
-
-        // Wait for child acknowledgement
-        PIPE_CHECK(childId);
       }
+      bool allLaunched = false;
+      CollectAcks("LaunchGraphs", AllChildIds(), OnChildFailure::StopAlways, &allLaunched);
+      if (!allLaunched) return;
     }
 
     InteractiveWait("Finishing LaunchGraphs");
@@ -1102,6 +1113,8 @@ namespace RcclUnitTesting
     std::vector<std::vector<int>> const ranksPerChild = RanksPerChild(rankList);
     std::vector<int> const childIds = ChildrenWithRanks(ranksPerChild);
 
+    OnChildFailure const registrationFailure = this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN
+                                               ? OnChildFailure::StopIfOwed : OnChildFailure::Report;
     int const deregCmd = TestBedChild::CHILD_DEREGISTER_MEM;
     int const deallocCmd = TestBedChild::CHILD_DEALLOCATE_MEM;
     for (auto currGroup : groupList) {
@@ -1119,7 +1132,7 @@ namespace RcclUnitTesting
       }
 
       bool allDeregistered = false;
-      CollectAcks(childIds, &allDeregistered, this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN);
+      CollectAcks("DeregisterMem", childIds, registrationFailure, &allDeregistered);
       if (!allDeregistered) return;
 
       // Phase 2: now no selected communicator retains a window/registration
@@ -1136,7 +1149,7 @@ namespace RcclUnitTesting
       }
 
       // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
-      CollectAcks(deallocAckChildIds);
+      CollectAcks("DeallocateMem", deallocAckChildIds);
     }
 
     InteractiveWait("Finishing DeallocateMem");
@@ -1191,7 +1204,7 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, abortComms);
       }
       if (ev.verbose) waitStart = Clock::now();
-      CollectAcks(AllChildIds(), nullptr, /*peersInterlocked=*/true);
+      CollectAcks("DestroyComms", AllChildIds(), OnChildFailure::StopIfOwed);
 
       if (ev.verbose)
       {
@@ -1236,7 +1249,7 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, currGroup);
       }
       bool allAcked = false;
-      CollectAcks(AllChildIds(), &allAcked);
+      CollectAcks("DestroyGraphs", AllChildIds(), OnChildFailure::Report, &allAcked);
       if (!allAcked) return;
     }
 

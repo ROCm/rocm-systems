@@ -241,10 +241,18 @@ namespace RcclUnitTesting
     // Reads a Warming worker's reply by deadline; on failure removes it from the pool and fails the test.
     bool FinishWarmup(int worker, std::chrono::steady_clock::time_point deadline);
 
-    // Reads one ack per listed child id and fails if any reported failure. peersInterlocked:
-    // children wait on each other, so a failure with acks still owed stops every worker.
-    void CollectAcks(std::vector<int> const& childIds, bool* allSucceeded = nullptr,
-                     bool peersInterlocked = false);
+    // What a child failure means for the children still running the same command.
+    enum class OnChildFailure
+    {
+      Report,       // children are independent: read every ack, then fail the test
+      StopIfOwed,   // children wait on each other: with acks still owed, stop every worker
+      StopAlways,   // peers' queued GPU work waits on the failed child: always stop every worker
+    };
+
+    // Reads one ack per listed child id (a child listed n times owes n acks) and fails
+    // the test, naming command, if any reported failure.
+    void CollectAcks(char const* command, std::vector<int> const& childIds,
+                     OnChildFailure onFailure = OnChildFailure::Report, bool* allSucceeded = nullptr);
 
     // Forgets the active config's children, ranks and failure flag; owned children
     // must already be reaped. configUsedPool still reports how that config was served.
