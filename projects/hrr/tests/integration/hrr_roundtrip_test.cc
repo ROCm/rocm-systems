@@ -47,6 +47,11 @@
 #include <string>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 // fs, kPathSep, set_proc_search_path, ScopedDir, hrr_single_process_archive,
 // read_text_file, hrr_run_playback, hrr_run_roundtrip, hrr_capture_direct,
 // hrr_playback_env and run_playback_raw all live in hrr_test_common.h so the
@@ -277,6 +282,190 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
     REQUIRE(ret == 0);
     CHECK(count_notices(out) == 0);
   }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Spawns Unit_HRR_DeviceInfo_Direct with HIP_HRR_CAPTURE_OUTPUT set, without
+ *     HIP_HRR_CAPTURE_CONSENT and with an empty configuration directory. The
+ *     workload must still pass and say on stderr that capture needs consent.
+ *     After it exits the capture directory must hold nothing, not even an empty
+ *     or partial pid-* directory: without consent hip_capture_enabled() is
+ *     false, so neither init nor exit writes there.
+ *   - Writes yes to that consent file and captures again: the archive is
+ *     written and its metadata records capture_consent "file".
+ *   - Captures with HIP_HRR_CAPTURE_CONSENT=yes and no consent file: the
+ *     metadata records capture_consent "HIP_HRR_CAPTURE_CONSENT".
+ *   - Writes the yes as Windows PowerShell does, after a UTF-8 or a UTF-16LE
+ *     byte order mark: each still records capture_consent "file".
+ *   - Writes UTF-16LE that is not a yes but would read as one with its NULs
+ *     dropped or a line end looked for byte by byte: U+6579 then s, and yes,
+ *     U+010A, no. Nothing is written.
+ *   - With yes in the file and HIP_HRR_CAPTURE_CONSENT=no, nothing is written:
+ *     a set variable decides the run. With an empty exported variable the file
+ *     consents.
+ *   - On POSIX, puts a FIFO with no writer at the consent path: the workload
+ *     must finish within a deadline, with nothing written and the file named as
+ *     not regular, instead of blocking HIP's init in the open of the consent file.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_consent"};
+  ScopedDir cfg{fs::temp_directory_path() / "hrr_capture_consent_cfg"};
+  fs::create_directories(cfg.path);
+  const fs::path consent_file = cfg.path / "hrr" / "capture-consent";
+
+  // env_consent is the value of HIP_HRR_CAPTURE_CONSENT, or nullptr to unset it.
+  auto capture = [&](const char* env_consent, int timeout_seconds = 0) {
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    // The consent file lives under XDG_CONFIG_HOME on POSIX and APPDATA on Windows.
+    proc.setEnv("XDG_CONFIG_HOME", cfg.path.string());
+    proc.setEnv("APPDATA", cfg.path.string());
+    if (env_consent == nullptr) {
+      proc.unsetEnv("HIP_HRR_CAPTURE_CONSENT");
+    } else {
+      proc.setEnv("HIP_HRR_CAPTURE_CONSENT", env_consent);
+    }
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_DeviceInfo_Direct\"", timeout_seconds);
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret == 0);
+    return out;
+  };
+  auto recorded_consent = [&]() {
+    const fs::path archive = hrr_single_process_archive(cap.path);
+    const std::string metadata =
+        json_object_value(read_text_file(archive / "manifest.json"), "metadata");
+    INFO("Metadata:\n" << metadata);
+    REQUIRE_FALSE(metadata.empty());
+    return json_string_value(metadata, "capture_consent");
+  };
+  // Stricter than hrr_process_archives(), which skips a pid-* directory with no
+  // events.bin: any entry at all would be a partial archive.
+  auto nothing_written = [&]() {
+    std::error_code ec;
+    return !fs::exists(cap.path, ec) || fs::is_empty(cap.path, ec);
+  };
+
+  {
+    const std::string out = capture(nullptr);
+    CHECK(out.find("[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent.") !=
+          std::string::npos);
+    CHECK(nothing_written());
+  }
+
+  {
+    fs::create_directories(consent_file.parent_path());
+    std::ofstream(consent_file) << "yes\n";
+    capture(nullptr);
+    CHECK(recorded_consent() == "file");
+  }
+
+  {
+    fs::remove_all(cap.path);
+    fs::remove(consent_file);
+    capture("yes");
+    CHECK(recorded_consent() == "HIP_HRR_CAPTURE_CONSENT");
+  }
+
+  // Windows PowerShell's byte order marks: UTF-8, and UTF-16LE from its `>`.
+  for (const std::string& yes :
+       {std::string("\xEF\xBB\xBFyes\r\n"), std::string("\xFF\xFEy\0e\0s\0\r\0\n\0", 12)}) {
+    fs::remove_all(cap.path);
+    std::ofstream(consent_file, std::ios::binary) << yes;
+    capture(nullptr);
+    CHECK(recorded_consent() == "file");
+  }
+
+  // UTF-16LE that is no yes: U+6579 then s, and yes, U+010A, no.
+  for (const std::string& not_yes :
+       {std::string("\xFF\xFE\x79\x65s\0", 6),
+        std::string("\xFF\xFEy\0e\0s\0\x0A\x01n\0o\0", 14)}) {
+    fs::remove_all(cap.path);
+    std::ofstream(consent_file, std::ios::binary) << not_yes;
+    capture(nullptr);
+    CHECK(nothing_written());
+  }
+
+  {
+    fs::remove_all(cap.path);
+    std::ofstream(consent_file) << "yes\n";
+    capture("no");
+    CHECK(nothing_written());
+    // An exported empty variable counts as unset, so the file decides.
+    capture("");
+    CHECK(recorded_consent() == "file");
+  }
+
+#if !defined(_WIN32)
+  {
+    fs::remove_all(cap.path);
+    fs::remove(consent_file);
+    REQUIRE(::mkfifo(consent_file.c_str(), 0600) == 0);
+    const std::string out = capture(nullptr, 60);
+    CHECK(out.find(consent_file.string() + " is not a regular file.") != std::string::npos);
+    CHECK(nothing_written());
+  }
+#endif
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Writes yes to the consent file, gives it to another user and spawns
+ *     Unit_HRR_DeviceInfo_Direct with HIP_HRR_CAPTURE_OUTPUT set and no
+ *     HIP_HRR_CAPTURE_CONSENT. A yes owned by someone else is not this user's,
+ *     so the workload passes and writes nothing.
+ *   - Gives the file back and captures again: the metadata records
+ *     capture_consent "file", so the refusal came from the owner alone.
+ *   - Skipped on Windows, where the file is not checked for an owner, and when
+ *     the test does not run as root, which it needs to give the file away.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureIgnoresConsentOfOtherUser) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX file owners");
+#else
+  if (::geteuid() != 0) HRR_SKIP("Giving the consent file to another user needs root");
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_consent_owner"};
+  ScopedDir cfg{fs::temp_directory_path() / "hrr_capture_consent_owner_cfg"};
+  const fs::path consent_file = cfg.path / "hrr" / "capture-consent";
+  fs::create_directories(consent_file.parent_path());
+  std::ofstream(consent_file) << "yes\n";
+
+  auto capture = [&]() {
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    proc.setEnv("XDG_CONFIG_HOME", cfg.path.string());
+    proc.unsetEnv("HIP_HRR_CAPTURE_CONSENT");
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret == 0);
+  };
+
+  {
+    // 65534 is nobody on most systems; any uid other than root's will do.
+    REQUIRE(::chown(consent_file.c_str(), 65534, 65534) == 0);
+    capture();
+    std::error_code ec;
+    CHECK((!fs::exists(cap.path, ec) || fs::is_empty(cap.path, ec)));
+  }
+
+  {
+    REQUIRE(::chown(consent_file.c_str(), ::geteuid(), ::getegid()) == 0);
+    capture();
+    const fs::path archive = hrr_single_process_archive(cap.path);
+    const std::string metadata =
+        json_object_value(read_text_file(archive / "manifest.json"), "metadata");
+    INFO("Metadata:\n" << metadata);
+    CHECK(json_string_value(metadata, "capture_consent") == "file");
+  }
+#endif
 }
 
 /**

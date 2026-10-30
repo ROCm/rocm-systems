@@ -48,6 +48,15 @@ EXIT_NO_CROSS_CHECK = 3
 # Emitted by hrr_reader.cpp when the archive format and the reader disagree.
 VERSION_MISMATCH = "Version mismatch"
 
+# A runtime without the user's consent to capture writes nothing and says so on
+# the workload's stderr, while preflight still passes: only this line tells it
+# apart from a runtime that cannot capture. Only the user can give consent.
+CONSENT_HINT = (
+    "If the workload's stderr has a line starting '[HRR capture] HIP_HRR_CAPTURE_OUTPUT "
+    "ignored: capture needs your consent', capture was refused because the user has not "
+    "consented to it. Only the user can give consent, in one of the two ways that line names."
+)
+
 # `events.bin` is hrr_file_header(8) + events + optional hrr_eof_record(44).
 # The header is `{ uint32 magic, uint16 version, uint16 reserved }`, little
 # endian, and its version is the number the reader compares against its own
@@ -827,7 +836,8 @@ def render(report: ArchiveReport) -> str:
         lines.append(
             "The usual cause is that the runtime the workload loaded has no capture "
             "support, or that HIP_HRR_CAPTURE_OUTPUT never reached the process that "
-            "used the GPU. Run 'hrr_capture.sh preflight' in the same environment."
+            "used the GPU. Run 'hrr_capture.sh preflight' in the same environment. "
+            + CONSENT_HINT
         )
         lines.append("")
         lines.append(
@@ -960,16 +970,18 @@ def missing_archive(archive: Path) -> tuple[str, dict]:
     """The report for a path capture never created, in both output forms.
 
     Distinct from an empty archive: nothing was created at all, so capture
-    never ran. Usual causes are a runtime with no capture compiled in, or a
-    workload that died before its first HIP call.
+    never ran. Usual causes are a runtime with no capture compiled in, a user
+    who has not consented to capture, or a workload that died before its first
+    HIP call.
     """
     text = (
         f"Archive: {archive}\n\n"
         "The runtime wrote nothing here. Either the runtime it loaded has no capture "
         "support, which is the common case, or the workload failed before its first HIP "
         "call. Run 'hrr_capture.sh preflight' with the workload command in the same "
-        "environment to tell those apart."
-        "\n\nVerdict: no archive. The directory was never created, so capture never started."
+        "environment to tell those apart. "
+        + CONSENT_HINT
+        + "\n\nVerdict: no archive. The directory was never created, so capture never started."
     )
     payload = {
         "archive": str(archive),
