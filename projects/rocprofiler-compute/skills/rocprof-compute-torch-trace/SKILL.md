@@ -132,7 +132,7 @@ rocprof-compute uses ROCTx internally: torch tracing injects ROCTx regions to
 annotate operators, which is what makes attribution possible.
 
 rocprof-compute does not start, stop, or resume counter collection at a user-authored
-ROCTx range. User-defined ROCTx regions are instrumented with every
+ROCTx range. User-defined ROCTx regions are included with every
 `--trace-ml-api` run. List or filter them at analyze time with
 `--list-operators user` and `--operator user:PATTERN`. That keeps the region
 and nested GPU work.
