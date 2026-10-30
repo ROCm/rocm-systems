@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/soc.h"
-#include "util/diagnostic.h"
 #include "util/result.h"
 
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
@@ -75,9 +74,8 @@ void SoC::add_xcd(amdgpu::Xcd *xcd) {
   // GWS is device-global: share one store across every XCD so a dispatch that
   // fans out across XCDs still rendezvouses (see GwsDevice). Supersedes the XCD's
   // standalone default store. The XCD's CUs are already attached by this point.
-  util::StringDiagnostic diagnostic;
-  if (xcd->adopt_gws_store(gws_device_, diagnostic.emitter()).failed())
-    throw std::logic_error(diagnostic.message());
+  [[maybe_unused]] const util::Result wired = xcd->adopt_gws_store(gws_device_);
+  assert(wired.succeeded());
   xcds_.push_back(xcd);
 }
 
