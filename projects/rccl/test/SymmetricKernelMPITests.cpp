@@ -22,20 +22,28 @@
 // These tests exercise the fixed code paths with inputs that would have
 // triggered corruption before the fix.
 
+#include "DdaFabricMPITestFixture.hpp" // DdaFabricMPI::waitStreamBounded, abortJobUnlessAllRanksDrained
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
+#include "ResourceGuards.hpp"
 #include "SymmetricBufferHelpers.hpp"
 #include "TestChecks.hpp"
+#include "VerifiableFp8.hpp"
 #include "comm.h"  // ncclComm::symkState, ncclSymkMaxBlocks
 #include "nccl_device.h"
 #include "rccl/rccl.h"
 #include "rccl_common.h"  // rcclSymKGetInfo, rcclAddonAlgos_t
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <gtest/gtest.h>
+#include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <initializer_list>
 #include <memory>
@@ -537,7 +545,8 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedOps_Sub8ByteAlignment)
 //
 // Forces ReduceScatter_LL, the only caller of ncclLLA2ASession::send, and
 // sends values unique per (rank, index) so a lane or slot permutation in the
-// send path lands a wrong value in a checked output element.
+// send path lands a wrong value in a checked output element. Also forces
+// AllReduce_AGxLL_R, whose last epoch narrows the bcast slot stride.
 // ===========================================================================
 
 // A slot shift that leaves a slot unwritten hangs recvReduce instead of failing; only the runner timeout shows it.
@@ -630,6 +639,150 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterLL_PositionDependentData)
         {
             ADD_FAILURE() << "ReduceScatter_LL mismatch at recvCount=" << recvCount << " index=" << errIdx
                           << " expected=" << expVal << " got=" << actVal;
+        }
+        // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next LL kernel.
+        ASSERT_MPI_TRUE(ok);
+    }
+}
+
+// One CTA of 256 threads moves 256 8-byte packs per LL epoch, so 1100 floats end in a 38-pack wave and 2050 in a
+// 1-pack wave, where the slot stride shrinks; odd counts and a one-float input skew take the unaligned arm.
+TEST_F(SymmetricKernelCorruptionTest, AllReduceLL_PinnedTailWave)
+{
+    // AllReduce_AGxLL_R needs a single LSA team: at most 8 ranks on one node.
+    constexpr int kMaxRanks = 8;
+    if(!validateTestPrerequisites(2, kMaxRanks, false, 1, 1))
+    {
+        GTEST_SKIP() << "Need 2 to " << kMaxRanks << " MPI ranks on a single node";
+    }
+
+    // NCCL_PARAM caches NCCL_SYM_CTAS at its first read, so only the launch environment pins it reliably.
+    constexpr int     kCtas   = 1;
+    const char*       ctasEnv = std::getenv("NCCL_SYM_CTAS");
+    const std::string noCtas  = mpiCoordinatedSkipReason(ctasEnv == nullptr || std::atoi(ctasEnv) != kCtas,
+                                                        "Needs NCCL_SYM_CTAS=1 in the launch environment");
+    if(!noCtas.empty())
+    {
+        GTEST_SKIP() << noCtas;
+    }
+
+    // Read at communicator init, so the guard must outlive createTestCommunicator.
+    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "AllReduce_AGxLL_R");
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    struct Case
+    {
+        size_t count;
+        size_t skew; // input offset in floats
+    };
+    const std::vector<Case> cases = {{1100, 0}, {1101, 0}, {2050, 0}, {2051, 0}, {1100, 1}, {2050, 1}};
+    constexpr size_t        kMaxCount = 2051;
+    constexpr size_t        kMaxSkew  = 1;
+    // The output sits 4 floats in, keeping it 8-byte aligned with a guard before it.
+    constexpr size_t kOutOff  = 4;
+    constexpr size_t kGuard   = 16;
+    constexpr float  kSendPad = -3.0f;
+    constexpr float  kRecvPad = -7.0f;
+
+    // value(s, i) = i * 8 + s is injective; the largest sum over 8 ranks is about 2^17, so float addition is exact.
+    auto value = [](int src, size_t idx) {
+        return static_cast<float>(idx * kMaxRanks + static_cast<size_t>(src));
+    };
+
+    const size_t sendWinElts = kMaxSkew + kMaxCount + kGuard;
+    const size_t recvWinElts = kOutOff + kMaxCount + kGuard;
+
+    // Window registration is collective, so allocate once and agree on the outcome before any rank can skip.
+    SymBuf            sendSym;
+    SymBuf            recvSym;
+    const std::string noSym
+        = allocSymBufsSkipReason({{sendWinElts * sizeof(float), &sendSym}, {recvWinElts * sizeof(float), &recvSym}});
+    if(!noSym.empty())
+    {
+        GTEST_SKIP() << noSym;
+    }
+
+    // Without symmetricSupport the forced kernel is ineligible; skip with that reason instead of on ncclInvalidUsage.
+    ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(getActiveCommunicator(), &props));
+    int symmetric = props.deviceApiSupport ? 1 : 0;
+    ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!symmetric)
+    {
+        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem/VMM unavailable)";
+    }
+
+    bool first = true;
+    for(const Case& c : cases)
+    {
+        float* send = static_cast<float*>(sendSym.ptr) + c.skew;
+        float* recv = static_cast<float*>(recvSym.ptr) + kOutOff;
+
+        ASSERT_MPI_EQ(hipSuccess,
+                      initializeBufferWithPattern<float>(sendSym.ptr, sendWinElts, [&](size_t j) {
+                          return j >= c.skew && j < c.skew + c.count ? value(rank, j - c.skew) : kSendPad;
+                      }));
+        ASSERT_MPI_EQ(hipSuccess,
+                      initializeBufferWithPattern<float>(recvSym.ptr, recvWinElts, [](size_t) { return kRecvPad; }));
+
+        // Only the first call may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
+        ncclResult_t res = ncclAllReduce(send, recv, c.count, ncclFloat, ncclSum, getActiveCommunicator(),
+                                         getActiveStream());
+        // A slot no peer writes leaves recvReduce spinning; abort the job rather than wait for the runner timeout.
+        if(res == ncclSuccess)
+        {
+            const std::string what = "AllReduce_AGxLL_R count=" + std::to_string(c.count)
+                                     + " skew=" + std::to_string(c.skew);
+            DdaFabricMPI::abortJobUnlessAllRanksDrained(
+                DdaFabricMPI::waitStreamBounded(getActiveStream(), std::chrono::seconds(60)), what.c_str());
+        }
+        const std::string ineligible
+            = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first,
+                                       "AllReduce_AGxLL_R symmetric kernel not eligible on this topology");
+        if(!ineligible.empty())
+        {
+            GTEST_SKIP() << ineligible;
+        }
+        first = false;
+        ASSERT_MPI_EQ(ncclSuccess, res);
+
+        // A fallback to another backend or CTA count would not reach the tail waves above.
+        int algo{-1}, proto{-1}, nChannels{};
+        ASSERT_MPI_EQ(ncclSuccess,
+                      rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, c.count, ncclFloat, ncclSum,
+                                          send, recv, /*graphCapturing=*/0, &algo, &proto, &nChannels));
+        ASSERT_MPI_EQ(static_cast<int>(RCCL_SYMMETRIC), algo);
+        ASSERT_MPI_EQ(NCCL_PROTO_LL, proto);
+        ASSERT_MPI_EQ(kCtas, nChannels);
+
+        const size_t count    = c.count;
+        auto         expected = [nRanks, count, &value](size_t j) {
+            if(j < kOutOff || j >= kOutOff + count)
+            {
+                return kRecvPad;
+            }
+            float sum = 0.0f;
+            for(int s = 0; s < nRanks; ++s)
+            {
+                sum += value(s, j - kOutOff);
+            }
+            return sum;
+        };
+
+        size_t errIdx{};
+        float  expVal{}, actVal{};
+        bool   ok = verifyBufferData<float>(recvSym.ptr, recvWinElts, expected, 0, 0, &errIdx, &expVal, &actVal);
+        if(!ok)
+        {
+            const bool inOutput = errIdx >= kOutOff && errIdx < kOutOff + count;
+            ADD_FAILURE() << "AllReduce_AGxLL_R mismatch at count=" << count << " skew=" << c.skew << ", "
+                          << (inOutput ? "output index " : "guard at window index ")
+                          << (inOutput ? errIdx - kOutOff : errIdx) << " expected=" << expVal << " got=" << actVal;
         }
         // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next LL kernel.
         ASSERT_MPI_TRUE(ok);
@@ -892,6 +1045,203 @@ TEST_F(SymmetricKernelCorruptionTest, MisalignedBuffers_FourBytePackTier)
                 << " index=" << errIdx
                 << " expected=" << expVal << " got=" << actVal;
         }
+    }
+}
+
+namespace
+{
+
+// fp16 input: a position term with a prime period plus a distinct term per rank. The largest sum over
+// 8 ranks is 8 * 198 + 16 * 28 = 2032, so every partial sum is an integer fp16 holds exactly.
+inline float subWordHalfValue(int rank, size_t idx)
+{
+    return static_cast<float>(idx % 199 + 16 * static_cast<size_t>(rank));
+}
+
+} // namespace
+
+// A 1- or 2-byte input skew sends fp16 and fp8 through the per-element head and tail alone; a 4-byte
+// skew admits them to the 4-byte tier, which the two larger sizes enter at up to 8 ranks and 2 CTAs.
+TEST_F(SymmetricKernelCorruptionTest, AllReduceSubWord_SkewedHeadAndFourByteTier)
+{
+    constexpr int kMaxRanks = 8;
+    if(!validateTestPrerequisites(2, kMaxRanks, false, 1, 1))
+    {
+        GTEST_SKIP() << "Need 2 to " << kMaxRanks << " MPI ranks on a single node";
+    }
+
+    // NCCL_PARAM caches NCCL_SYM_CTAS at its first read, so only the launch environment pins it reliably.
+    constexpr int     kCtas   = 2;
+    const char*       ctasEnv = std::getenv("NCCL_SYM_CTAS");
+    const std::string noCtas  = mpiCoordinatedSkipReason(ctasEnv == nullptr || std::atoi(ctasEnv) != kCtas,
+                                                        "Needs NCCL_SYM_CTAS=2 in the launch environment");
+    if(!noCtas.empty())
+    {
+        GTEST_SKIP() << noCtas;
+    }
+
+    // Read at communicator init, so the guard must outlive createTestCommunicator.
+    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "AllReduce_RSxLD_AGxST");
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    // skew is in bytes. The two larger sizes clear the 4-byte tier minimum (gfx942: 16 x 4 KiB at 8 ranks x 2 CTAs).
+    struct Case
+    {
+        ncclDataType_t type;
+        size_t         count;
+        size_t         skew;
+    };
+    std::vector<Case> cases;
+    for(size_t count : {1, 1021, 49155, 524291})
+    {
+        for(size_t skew : {2, 4})
+        {
+            cases.push_back({ncclFloat16, count, skew});
+        }
+    }
+    for(size_t count : {1, 2045, 98311, 1048583})
+    {
+        for(size_t skew : {1, 2, 3, 4})
+        {
+            cases.push_back({ncclFloat8e4m3, count, skew});
+        }
+    }
+
+    // The output sits 16 bytes in, leaving a guard before it without changing the offsets mod 16.
+    constexpr size_t  kMaxSkew  = 4;
+    constexpr size_t  kOutOff   = 16;
+    constexpr size_t  kGuard    = 64;
+    constexpr uint8_t kSendFill = 0x5A;
+    constexpr uint8_t kRecvFill = 0xA5;
+    size_t            maxBytes  = 0;
+    for(const Case& c : cases)
+    {
+        maxBytes = std::max(maxBytes, c.count * (c.type == ncclFloat16 ? 2 : 1));
+    }
+    const size_t sendWinBytes = kMaxSkew + maxBytes + kGuard;
+    const size_t recvWinBytes = kOutOff + maxBytes + kGuard;
+
+    // Window registration is collective, so allocate once and agree on the outcome before any rank can skip.
+    SymBuf            sendSym;
+    SymBuf            recvSym;
+    const std::string noSym = allocSymBufsSkipReason({{sendWinBytes, &sendSym}, {recvWinBytes, &recvSym}});
+    if(!noSym.empty())
+    {
+        GTEST_SKIP() << noSym;
+    }
+
+    // Without symmetricSupport the forced kernel is ineligible; skip with that reason instead of on ncclInvalidUsage.
+    ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(getActiveCommunicator(), &props));
+    int symmetric = props.deviceApiSupport ? 1 : 0;
+    ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!symmetric)
+    {
+        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem/VMM unavailable)";
+    }
+
+    void* fp8Expected = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&fp8Expected, maxBytes));
+    auto fp8ExpectedGuard = RCCLTestGuards::makeDeviceBufferAutoGuard(fp8Expected);
+
+    std::vector<uint8_t> host(recvWinBytes);
+    bool                 first = true;
+    for(const Case& c : cases)
+    {
+        const bool   isHalf = c.type == ncclFloat16;
+        const size_t bytes  = c.count * (isHalf ? 2 : 1);
+        uint8_t*     send   = static_cast<uint8_t*>(sendSym.ptr) + c.skew;
+        uint8_t*     recv   = static_cast<uint8_t*>(recvSym.ptr) + kOutOff;
+        // Varies the fp8 data per case so a stale output cannot match.
+        const uint64_t seed = c.count * 8 + c.skew;
+
+        std::vector<uint8_t> expected(bytes);
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(sendSym.ptr, kSendFill, sendWinBytes));
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvSym.ptr, kRecvFill, recvWinBytes));
+        // The fills run on the null stream; finish them before the fp8 input is generated on the active stream.
+        ASSERT_MPI_EQ(hipSuccess, hipDeviceSynchronize());
+        if(isHalf)
+        {
+            std::vector<__half> in(c.count);
+            std::vector<__half> out(c.count);
+            for(size_t i = 0; i < c.count; ++i)
+            {
+                in[i]     = __float2half(subWordHalfValue(rank, i));
+                float sum = 0.0f;
+                for(int s = 0; s < nRanks; ++s)
+                {
+                    sum += subWordHalfValue(s, i);
+                }
+                out[i] = __float2half(sum);
+            }
+            std::memcpy(expected.data(), out.data(), bytes);
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(send, in.data(), bytes, hipMemcpyHostToDevice));
+        }
+        else
+        {
+            ASSERT_MPI_EQ(hipSuccess,
+                          RcclUnitTesting::VerifiableFp8PrepareInput(send, c.count, c.type, ncclSum, nRanks, rank,
+                                                                     seed, 0, getActiveStream()));
+            ASSERT_MPI_EQ(hipSuccess,
+                          RcclUnitTesting::VerifiableFp8PrepareExpected(fp8Expected, c.count, c.type, ncclSum, nRanks,
+                                                                        seed, 0, getActiveStream()));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(expected.data(), fp8Expected, bytes, hipMemcpyDeviceToHost));
+        }
+
+        // Only the first call may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
+        ncclResult_t res = ncclAllReduce(send, recv, c.count, c.type, ncclSum, getActiveCommunicator(),
+                                         getActiveStream());
+        // Drain before the vote so a skip never leaves a kernel writing a window that ~SymBuf deregisters and frees.
+        hipError_t syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
+        const std::string ineligible
+            = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first,
+                                       "AllReduce_RSxLD_AGxST symmetric kernel not eligible on this topology");
+        if(!ineligible.empty())
+        {
+            GTEST_SKIP() << ineligible;
+        }
+        first = false;
+        ASSERT_MPI_EQ(ncclSuccess, res);
+        ASSERT_MPI_EQ(hipSuccess, syncErr);
+
+        // A fallback to another backend or CTA count would leave the tier sizes above meaningless.
+        int algo{-1}, proto{-1}, nChannels{};
+        ASSERT_MPI_EQ(ncclSuccess,
+                      rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, c.count, c.type, ncclSum, send,
+                                          recv, /*graphCapturing=*/0, &algo, &proto, &nChannels));
+        ASSERT_MPI_EQ(static_cast<int>(RCCL_SYMMETRIC), algo);
+        ASSERT_MPI_EQ(NCCL_PROTO_SIMPLE, proto);
+        ASSERT_MPI_EQ(kCtas, nChannels);
+
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), recvSym.ptr, recvWinBytes, hipMemcpyDeviceToHost));
+        // Compares bytes: every sum is exact, so the encodings must match bit for bit.
+        size_t badByte = recvWinBytes;
+        for(size_t b = 0; b < recvWinBytes && badByte == recvWinBytes; ++b)
+        {
+            const bool inOutput = b >= kOutOff && b < kOutOff + bytes;
+            if(host[b] != (inOutput ? expected[b - kOutOff] : kRecvFill))
+            {
+                badByte = b;
+            }
+        }
+        const bool ok = badByte == recvWinBytes;
+        if(!ok)
+        {
+            const bool inOutput = badByte >= kOutOff && badByte < kOutOff + bytes;
+            ADD_FAILURE() << "AllReduce_RSxLD_AGxST mismatch, " << (isHalf ? "fp16" : "fp8e4m3")
+                          << " count=" << c.count << " skew=" << c.skew << " bytes: "
+                          << (inOutput ? "output element " : "guard byte at window offset ")
+                          << (inOutput ? (badByte - kOutOff) / (isHalf ? 2 : 1) : badByte) << " got=0x" << std::hex
+                          << static_cast<int>(host[badByte]) << std::dec;
+        }
+        // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next kernel.
+        ASSERT_MPI_TRUE(ok);
     }
 }
 
@@ -1293,6 +1643,143 @@ TEST_F(SymmetricKernelCorruptionTest, LLA2A_EpochWraparound)
     // The call after the wrap ran at epoch 2.
     ASSERT_MPI_TRUE(inspect());
     ASSERT_MPI_EQ(1u, hostHeaders[0]);
+}
+
+// ===========================================================================
+// Test group 6: AllReduce deep loop peer rotation
+//
+// allreduceDeep reduces and stores peers in batches of UnrollPeers (2 or 4 on
+// gfx942, 8 on gfx950) plus one partial batch. At 8 ranks the partial store
+// batch is empty, so CI runs this at 3, 5 and 7 ranks.
+// ===========================================================================
+
+// Generated by NCCL_PARAM(SymCTAs, ...) in src/tuning/sym_model.cc.
+int64_t ncclParamSymCTAs();
+
+namespace
+{
+
+// Rank weight 8^r keeps every peer multiset distinct up to 8 ranks; sums stay below 2^24, exact in float.
+inline float arDeepValue(int rank, size_t idx)
+{
+    return static_cast<float>((size_t{1} << (3 * rank)) * (1 + idx % 5));
+}
+
+inline float arDeepSum(int nRanks, size_t idx)
+{
+    float sum = 0.0f;
+    for(int r = 0; r < nRanks; ++r)
+    {
+        sum += arDeepValue(r, idx);
+    }
+    return sum;
+}
+
+} // namespace
+
+// With 2 blocks this count runs several deep-loop iterations per warp in the 16-byte tier and,
+// on gfx942, in the 4-byte tier on what the trim leaves; a 4-byte input skew runs only the 4-byte tier.
+TEST_F(SymmetricKernelCorruptionTest, AllReduceDeep_PeerRotationTail)
+{
+    constexpr int kMaxRanks = 8;
+    if(!validateTestPrerequisites(2, kMaxRanks, false, 1, 1))
+    {
+        GTEST_SKIP() << "Need 2 to " << kMaxRanks << " MPI ranks on a single node";
+    }
+
+    // NCCL_SYM_CTAS is cached on first read, so CI also sets it at launch.
+    constexpr int           kCtas = 2;
+    MPIHelpers::MpiEnvGuard ctasGuard("NCCL_SYM_CTAS", std::to_string(kCtas).c_str());
+    const std::string       staleCtas
+        = mpiCoordinatedSkipReason(ncclParamSymCTAs() != kCtas,
+                                   "NCCL_SYM_CTAS already cached this process; run this test in its own mpirun");
+    if(!staleCtas.empty())
+    {
+        GTEST_SKIP() << staleCtas;
+    }
+
+    // Read at communicator init, so the guard must outlive createTestCommunicator.
+    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "AllReduce_RSxLD_AGxST");
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    // 65 x 16 KiB or 261 x 4 KiB chunks plus a tail; odd chunk counts, so the gfx942 trim to nRanks * 2 always cuts.
+    constexpr size_t kCount    = 267267;
+    constexpr size_t kSkewElts = 1;
+
+    SymBuf            sendSym;
+    SymBuf            recvSym;
+    const std::string noSym = allocSymBufsSkipReason(
+        {{(kCount + kSkewElts) * sizeof(float), &sendSym}, {kCount * sizeof(float), &recvSym}});
+    if(!noSym.empty())
+    {
+        GTEST_SKIP() << noSym;
+    }
+
+    ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(getActiveCommunicator(), &props));
+    int symmetric = props.deviceApiSupport ? 1 : 0;
+    ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!symmetric)
+    {
+        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem/VMM unavailable)";
+    }
+
+    bool first = true;
+    for(size_t skew : {size_t{0}, kSkewElts})
+    {
+        float* send = static_cast<float*>(sendSym.ptr) + skew;
+        float* recv = static_cast<float*>(recvSym.ptr);
+
+        ASSERT_MPI_EQ(hipSuccess,
+                      initializeBufferWithPattern<float>(
+                          send, kCount, [rank](size_t i) { return arDeepValue(rank, i); }));
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<float>(recv, kCount, [](size_t) { return -1.0f; }));
+
+        // Only the first call may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
+        ncclResult_t res = ncclAllReduce(send, recv, kCount, ncclFloat, ncclSum, getActiveCommunicator(),
+                                         getActiveStream());
+        hipError_t syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
+        const std::string ineligible
+            = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first,
+                                       "AllReduce_RSxLD_AGxST symmetric kernel not eligible on this topology");
+        if(!ineligible.empty())
+        {
+            GTEST_SKIP() << ineligible;
+        }
+        first = false;
+        ASSERT_MPI_EQ(ncclSuccess, res);
+        ASSERT_MPI_EQ(hipSuccess, syncErr);
+
+        // The forced kernel is the only symmetric Simple AllReduce left enabled.
+        int algo{-1}, proto{-1}, nChannels{};
+        ASSERT_MPI_EQ(ncclSuccess,
+                      rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, kCount, ncclFloat, ncclSum, send,
+                                          recv, /*graphCapturing=*/0, &algo, &proto, &nChannels));
+        const bool onPath = algo == static_cast<int>(RCCL_SYMMETRIC) && proto == NCCL_PROTO_SIMPLE
+                            && nChannels == kCtas;
+        if(!onPath)
+        {
+            ADD_FAILURE() << "skew=" << skew << ": expected SYM/Simple on " << kCtas << " blocks, got algo=" << algo
+                          << " proto=" << proto << " blocks=" << nChannels;
+        }
+        ASSERT_MPI_TRUE(onPath);
+
+        size_t errIdx{};
+        float  expVal{}, actVal{};
+        bool   ok = verifyBufferData<float>(
+            recv, kCount, [nRanks](size_t i) { return arDeepSum(nRanks, i); }, 0, 0, &errIdx, &expVal, &actVal);
+        if(!ok)
+        {
+            ADD_FAILURE() << "AllReduce_RSxLD_AGxST mismatch at nRanks=" << nRanks << " skew=" << skew
+                          << " index=" << errIdx << " expected=" << expVal << " got=" << actVal;
+        }
+        ASSERT_MPI_TRUE(ok);
+    }
 }
 
 #endif // MPI_TESTS_ENABLED
