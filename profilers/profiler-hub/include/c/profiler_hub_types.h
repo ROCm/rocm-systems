@@ -173,12 +173,16 @@ extern "C"
     /** @brief A single duration event (region/kernel dispatch/memory
      *         copy/memory allocate).
      * @note name points into memory owned by the producing ph_ctx_t.
+     * @note nesting_depth is the TraceLens host-tree level of the event plus 1
+     *       (1 = top level). 0 means not computed: events on GPU stream tracks, host
+     *       events outside the tree, and every event of a SQLite trace.
      */
     typedef struct
     {
         uint64_t    start;
         uint64_t    end;
         const char* name;
+        uint32_t    nesting_depth;
     } ph_event_t;
 
     /** @brief A list of duration events; same lifetime rule as

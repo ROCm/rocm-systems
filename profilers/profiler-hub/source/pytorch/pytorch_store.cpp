@@ -244,7 +244,10 @@ pytorch_store_t::derive(loaded_trace_t& t)
         for(const auto& ev : sorted)
         {
             track.end_ts = std::max(track.end_ts, ev.end);
-            track.events.push_back({ ev.start, ev.end, name_ptr[ev.name_id] });
+            track.events.push_back({ ev.start,
+                                     ev.end,
+                                     name_ptr[ev.name_id],
+                                     ev.depth == k_not_in_tree ? 0u : ev.depth + 1u });
             track.category_ids.push_back(ev.category_id);
         }
         sorted = std::vector<sort_event_t>{};

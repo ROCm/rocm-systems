@@ -170,9 +170,10 @@ ph_ctx::core_get_track_events(profiler_hub::common::connection& conn,
     for(const auto& event : result.events)
     {
         result.c_events.push_back(ph_event_t{
-            .start = event.start_timestamp,
-            .end   = event.end_timestamp,
-            .name  = event.display_name.empty() ? "" : event.display_name.data(),
+            .start         = event.start_timestamp,
+            .end           = event.end_timestamp,
+            .name          = event.display_name.empty() ? "" : event.display_name.data(),
+            .nesting_depth = 0,
         });
     }
 
