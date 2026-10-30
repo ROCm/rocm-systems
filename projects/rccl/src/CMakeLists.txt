@@ -752,6 +752,23 @@ add_custom_command(
 list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
 list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
 
+# GIN backend availability for consumers (see rccl_gin_config.h.in). Generated
+# into the hipify include tree (not hipified) so the hipified gin headers resolve
+# it with no extra -I and copy_nccl_device_headers stages + installs it.
+if (ENABLE_ROCSHMEM_GIN)
+  set(NCCL_GIN_ROCSHMEM_GDA_AVAILABLE 1)
+  set(NCCL_GIN_ANVIL_SDMA_AVAILABLE 1)
+else()
+  set(NCCL_GIN_ROCSHMEM_GDA_AVAILABLE 0)
+  set(NCCL_GIN_ANVIL_SDMA_AVAILABLE 0)
+endif()
+set(RCCL_GIN_CONFIG_DST "${HIPIFY_DIR}/src/include/nccl_device/gin/rccl_gin_config.h")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/gin/rccl_gin_config.h.in"
+  "${RCCL_GIN_CONFIG_DST}"
+  @ONLY)
+list(APPEND NCCL_DEVICE_HIP_FILES ${RCCL_GIN_CONFIG_DST})
+
 # proxy_trace headers are not produced by hipify-perl; copy from src so the
 # hipify include tree matches (unit tests search hipify paths before src/include).
 set(PROXY_TRACE_HDR_SRC "${RCCL_SOURCE_DIR}/src/include/proxy_trace/proxy_trace.h")
@@ -1107,19 +1124,6 @@ endif()
 #   self-contained: the rocshmem host code GIN needs is compiled directly into
 #   librccl.so, so no host symbol is left unresolved.  Does not enable
 #   alltoall_wg offload.
-# GIN backend availability for consumers (see rccl_gin_config.h.in).
-if (ENABLE_ROCSHMEM_GIN)
-  set(NCCL_GIN_ROCSHMEM_GDA_AVAILABLE 1)
-  set(NCCL_GIN_ANVIL_SDMA_AVAILABLE 1)
-else()
-  set(NCCL_GIN_ROCSHMEM_GDA_AVAILABLE 0)
-  set(NCCL_GIN_ANVIL_SDMA_AVAILABLE 0)
-endif()
-configure_file(
-  "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/gin/rccl_gin_config.h.in"
-  "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rccl_gin_config.h"
-  @ONLY)
-
 if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
   # Ensure rocSHMEM is fully built/installed before compiling rccl
