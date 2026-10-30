@@ -337,9 +337,7 @@ class RocProfCompute:
                 console_warning(
                     "ml api trace",
                     "Operator filters are ignored when --list-operators "
-                    "is used; the full operator tree will be shown. "
-                    "Drop --list-operators to apply the operator filter, or "
-                    "drop --operator to list all operators.",
+                    "is used. Drop --list-operators to apply the operator filter.",
                 )
 
     @demarcate
