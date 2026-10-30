@@ -189,6 +189,12 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
 
 bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> current,
                  rj_code_arch_t arch) {
+  if (amdgpu::has_ordered_lds_direct_writeback(arch) && event.counter == WaitCounterKind::Exp &&
+      event.kind == WaitEventKind::LdsDirect) {
+    return std::ranges::any_of(current, [](const auto &other) {
+      return other.counter == WaitCounterKind::Exp && other.kind == WaitEventKind::LdsDirect;
+    });
+  }
   if (!amdgpu::has_ordered_vmem_writeback(arch))
     return false;
   if (event.kind == WaitEventKind::FlatLoad) {
