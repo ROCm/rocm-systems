@@ -4,6 +4,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
 #include <charconv>
@@ -17,6 +18,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -102,9 +104,13 @@ std::string_view error_code_name(FaultMutationErrorCode code) {
   return "Unknown";
 }
 
-int reject(const FaultMutationError &error, std::string_view operation) {
-  std::cerr << "rj_code_mutate: " << operation << " failed: code=" << error_code_name(error.code)
-            << " offset=" << error.offset << ' ' << error.message << '\n';
+int reject(const FaultMutationError &error, std::string_view operation,
+           std::optional<uint64_t> known_offset = std::nullopt) {
+  std::cerr << "rj_code_mutate: " << operation << " failed: code=" << error_code_name(error.code);
+  // Library offsets do not encode presence; callers supply a known CLI coordinate explicitly.
+  if (known_offset.has_value())
+    std::cerr << " offset=" << *known_offset;
+  std::cerr << ' ' << error.message << '\n';
   return 2;
 }
 
@@ -233,7 +239,7 @@ int run(int argc, char **argv) {
                      .offset = *exact,
                      .message = "no complete barrier starts at .text offset " +
                                 std::to_string(*exact) + " for this entry"},
-                    "selection");
+                    "selection", exact);
     selector.ordinal = static_cast<size_t>(found - barriers.begin());
   }
   const FailureOr<DropBarrierSelection> selection =

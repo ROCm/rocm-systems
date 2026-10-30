@@ -9,6 +9,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/target_registry.h"
 
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
