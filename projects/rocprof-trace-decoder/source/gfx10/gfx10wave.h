@@ -76,7 +76,7 @@ public:
 
 protected:
     // Assigns an exec popcount to the oldest pending exec write (VALU if va, SALU otherwise) of the
-    // wave in slot wid. Ignored if wid is not a valid slot or the slot has no wave.
+    // wave in slot wid. Ignored if count is 127 (invalid)
     void send_exec_popcount(int wid, uint64_t count, bool va);
 
     static constexpr uint64_t SQTT_CFG_WAVES = 32;

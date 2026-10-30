@@ -490,29 +490,27 @@ TEST(Gfx10WaveTest, NewPcPushesEntry)
     EXPECT_GT(wave.pc_infos.size(), before);
 }
 
-// Exec popcounts for out of range wave slots must be ignored
+// Exec popcounts with an invalid count of 127 must be ignored
 class ExecPopcountParser : public RDNASQTParser
 {
 public:
     using RDNASQTParser::SIMD;
-    using RDNASQTParser::SQTT_CFG_WAVES;
     using RDNASQTParser::send_exec_popcount;
 };
 
-TEST(Gfx10ExecPopcountTest, IgnoresOutOfRangeWaveSlot)
+TEST(Gfx10ExecPopcountTest, IgnoresInvalidCount)
 {
     ExecPopcountParser parser;
-    const int last = static_cast<int>(ExecPopcountParser::SQTT_CFG_WAVES) - 1;
 
     gfx10::Token start_tok{0, 0, RdnaType::WAVE_START};
-    auto& wave = parser.SIMD[last].emplace_back(0, 0, last, pcinfo_t{100, 1}, start_tok, false);
+    auto& wave = parser.SIMD[3].emplace_back(0, 0, 3, pcinfo_t{100, 1}, start_tok, false);
     wave.popcnt_va.push_back({20, 2, 0});
 
-    parser.send_exec_popcount(last + 1, 1, true);
-    parser.send_exec_popcount(-1, 1, true);
+    parser.send_exec_popcount(3, 127, true);
     EXPECT_TRUE(wave.popcnt.empty());
+    EXPECT_EQ(wave.popcnt_va.size(), 1u);
 
-    parser.send_exec_popcount(last, 4, true);
+    parser.send_exec_popcount(3, 4, true);
     ASSERT_EQ(wave.popcnt.size(), 1u);
     EXPECT_EQ(wave.popcnt[0].count, 4u);
 }

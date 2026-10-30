@@ -49,6 +49,7 @@ const bool SQTT_LOGGING = std::getenv("SQTT_LOGGING") ? (*std::getenv("SQTT_LOGG
 
 void RDNASQTParser::send_exec_popcount(int wid, uint64_t count, bool va)
 {
+    if (count == 127) return;
     if (wid < 0 || static_cast<uint64_t>(wid) >= SIMD.size() || SIMD[wid].empty()) return;
 
     auto& wave = SIMD[wid].back();
