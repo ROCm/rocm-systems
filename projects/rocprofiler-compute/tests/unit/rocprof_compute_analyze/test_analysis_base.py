@@ -213,13 +213,9 @@ def test_sanitize_authorizes_trace_ml_api_selectors(tmp_path, monkeypatch) -> No
         lambda path: None,
     )
     errors = []
-
-    def record_error(*argv, **_kwargs):
-        errors.append(argv)
-        raise SystemExit(1)
-
     monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_base.console_error", record_error
+        "rocprof_compute_analyze.analysis_base.console_error",
+        functools.partial(record_error_and_exit, errors),
     )
 
     def run_sanitize(list_operators=None, operator=None):
