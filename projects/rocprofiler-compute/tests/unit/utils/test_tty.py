@@ -14,6 +14,7 @@ import pytest
 
 import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
+from utils.terminal_selection import TerminalSelection
 from utils.tty import (
     _render_membw_guidance,
     build_continuation_indent,
@@ -25,6 +26,7 @@ from utils.tty import (
     format_table_output,
     has_time_data,
     print_operator_node,
+    print_roofline_html_path,
     resolve_hidden_columns,
     show_all,
     show_call_tree,
@@ -131,7 +133,6 @@ def render_roofline_panel(panel: SimpleNamespace, view: Optional[str]) -> str:
     rendered_output = StringIO()
     show_all(
         make_args(
-            filter_metrics=None,
             include_cols=None,
             membw_analysis=False,
             path=[["fixture"]],
@@ -446,7 +447,6 @@ def test_show_all_membw_analysis_panel_gate(
     """Panel 3000 is rendered only when its table was built."""
     args = argparse.Namespace(
         decimal=2,
-        filter_metrics=None,
         include_cols=None,
         normal_unit="per_wave",
         path=[["fixture"]],
@@ -519,7 +519,6 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
 ) -> None:
     args = argparse.Namespace(
         decimal=2,
-        filter_metrics=None,
         include_cols=None,
         membw_analysis=False,
         normal_unit="per_wave",
@@ -595,7 +594,6 @@ def test_show_all_renders_identically_to_file_and_stdout(
 ) -> None:
     """A report is the same whether analyze writes it to a .txt file or stdout."""
     args = make_args(
-        filter_metrics=None,
         include_cols=None,
         membw_analysis=True,
         path=[["fixture"]],
@@ -1009,7 +1007,6 @@ def test_show_all_view_table_replaces_memory_chart_panel(
 
     show_all(
         make_args(
-            filter_metrics=None,
             include_cols=None,
             membw_analysis=False,
             path=[["fixture"]],
@@ -1083,6 +1080,109 @@ def test_show_all_prints_roofline_html_path_under_heading(
         )
     else:
         assert "Interactive roofline plot" not in output
+
+
+def render_membw_panel(
+    monkeypatch: pytest.MonkeyPatch,
+    metric_dataframe: pd.DataFrame,
+    terminal_selection: TerminalSelection,
+) -> str:
+    """Run show_all over a make_membw_panel fixture holding metric_dataframe."""
+    panel = make_membw_panel()
+    panel.runs["fixture"].dfs[3013] = metric_dataframe
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_a, **_k: metric_dataframe
+    )
+    rendered_output = StringIO()
+    show_all(
+        make_args(
+            include_cols=None, membw_analysis=True, path=[["fixture"]], time_unit="ns"
+        ),
+        panel.runs,
+        panel.arch_configs,
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+        terminal_selection=terminal_selection,
+    )
+    return rendered_output.getvalue()
+
+
+def test_show_all_terminal_selection_skips_unselected_panels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A panel past speed-of-light and not selected prints nothing at all."""
+    output = render_membw_panel(
+        monkeypatch, make_membw_panel().metric_dataframe, TerminalSelection()
+    )
+
+    assert output == ""
+
+
+def test_show_all_terminal_selection_prints_only_selected_metric_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A -b metric id prints its panel with that row and hides its siblings."""
+    metric_dataframe = pd.DataFrame(
+        {
+            "Metric": ["EA read request fraction - HBM", "EA write request fraction"],
+            "Avg": [50.0, 25.0],
+            "Unit": ["Percent", "Percent"],
+        },
+        index=pd.Index(["30.13.0", "30.13.1"], name="Metric_ID"),
+    )
+
+    output = render_membw_panel(
+        monkeypatch,
+        metric_dataframe,
+        TerminalSelection(metric_ids=frozenset({"30.13.1"})),
+    )
+
+    assert "30. Memory Bandwidth Analysis" in output
+    assert "EA write request fraction" in output
+    assert "EA read request fraction - HBM" not in output
+
+
+def test_show_all_terminal_selection_skips_roofline_before_its_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unselected roofline panel neither renders nor warns about invalid data."""
+    warnings: list[tuple] = []
+    monkeypatch.setattr("utils.tty.console_warning", lambda *a: warnings.append(a))
+    monkeypatch.setattr(
+        "utils.tty.is_roofline_shown",
+        lambda *_a, **_k: pytest.fail("roofline panel was not skipped"),
+    )
+    panel = make_roofline_panel()
+    panel.runs["fixture"].roofline_peaks = pd.DataFrame()
+    rendered_output = StringIO()
+
+    show_all(
+        make_args(
+            include_cols=None, membw_analysis=False, path=[["fixture"]], time_unit="ns"
+        ),
+        panel.runs,
+        panel.arch_configs,
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+        terminal_selection=TerminalSelection(),
+    )
+
+    assert rendered_output.getvalue() == ""
+    assert warnings == []
+
+
+def test_print_roofline_html_path_names_each_saved_file() -> None:
+    runs = {
+        "saved": SimpleNamespace(roofline_html_path="run/1-wl/roofline-gpu-0.html"),
+        "not_saved": SimpleNamespace(roofline_html_path=None),
+    }
+    rendered_output = StringIO()
+
+    print_roofline_html_path(runs, rendered_output)
+
+    assert rendered_output.getvalue() == (
+        "\nInteractive roofline plot saved to run/1-wl/roofline-gpu-0.html\n\n"
+    )
 
 
 # ---------------------------------------------------------------------------

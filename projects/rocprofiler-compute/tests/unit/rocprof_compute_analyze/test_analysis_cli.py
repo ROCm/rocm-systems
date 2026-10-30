@@ -5,6 +5,7 @@
 
 import argparse
 import functools
+import sys
 from types import SimpleNamespace
 
 import pandas as pd
@@ -16,6 +17,7 @@ from rocprof_compute_analyze.analysis_cli import (
     parse_operator_patterns,
 )
 from utils import schema
+from utils.terminal_selection import TerminalSelection
 from utils.utils_analysis import CallTreeNode, KernelStats, iter_call_tree_paths
 
 ADDMM_PMC_GROUP_KEY = (1, "addmm_kernel", 0, 0, 0)
@@ -97,6 +99,7 @@ def cli_with_two_operator_workloads(args):
         workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx950"}])
     inst._arch_configs = {"gfx950": SimpleNamespace(dfs_expressions={})}
     inst._OmniAnalyze_Base__args = args
+    inst._terminal_selection = TerminalSelection()
     return inst
 
 
@@ -137,6 +140,7 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
         triton_list_ops=False,
         ml_api_list_ops=False,
         list_stats=False,
+        filter_metrics=None,
     )
     inst._OmniAnalyze_Base__args = args
 
@@ -427,3 +431,42 @@ def test_write_outputs_prints_matched_tree_for_every_path(monkeypatch, tmp_path)
     )
     inst.write_outputs(tmp_path)
     assert handled_paths == ["/w1", "/w2"]
+
+
+def test_write_outputs_writes_full_report_and_prints_the_terminal_selection(
+    monkeypatch, tmp_path
+):
+    """report.txt gets every panel; stdout gets the terminal selection and the
+    roofline HTML path."""
+    args = argparse.Namespace(
+        path=[["/w1"], ["/w2"]],
+        torch_operator=None,
+        triton_operator=None,
+        list_stats=False,
+    )
+    inst = cli_with_two_operator_workloads(args)
+    inst._roofline_figures = None
+    inst._terminal_selection = TerminalSelection(metric_ids=frozenset({"7"}))
+    show_all_calls = []
+    path_outputs = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.tty.show_all",
+        lambda _args, _runs, _config, output, _profiling, **kwargs: (
+            show_all_calls.append((output, kwargs.get("terminal_selection")))
+        ),
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.tty.print_roofline_html_path",
+        lambda _runs, output: path_outputs.append(output),
+    )
+
+    inst.write_outputs(tmp_path)
+
+    (report_output, report_selection), (stdout_output, stdout_selection) = (
+        show_all_calls
+    )
+    assert report_output.name == str(tmp_path / "report.txt")
+    assert report_selection is None
+    assert stdout_output is sys.stdout
+    assert stdout_selection is inst._terminal_selection
+    assert path_outputs == [sys.stdout]

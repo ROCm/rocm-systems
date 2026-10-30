@@ -49,7 +49,8 @@ Stall reasons
 The ``stall_reason`` column of a stochastic PC sampling table holds the raw
 reason names reported by ROCprofiler-SDK for samples where a wave did not
 issue an instruction. Those names are defined in the ROCprofiler-SDK
-documentation, and the analysis output prints a link to it above the table:
+documentation, and section 21 of ``report.txt`` prints a link to it above the
+table:
 
 .. code-block:: shell-session
 
@@ -60,6 +61,10 @@ documentation, and the analysis output prints a link to it above the table:
 
 Analysis options
 ================
+The PC sampling table is section 21 of ``report.txt`` in the run folder. To
+also print it on the terminal, add ``-b 21``. The sample outputs below show
+section 21.
+
 For using analysis options for PC sampling the configuration needed are:
 
 * ``--pc-sampling-sorting-type``: ``offset`` or ``count``. The default option is ``count``, which surfaces the most-sampled instructions (hotspots) first. ``offset`` is an assembly instruction offset in the code object.

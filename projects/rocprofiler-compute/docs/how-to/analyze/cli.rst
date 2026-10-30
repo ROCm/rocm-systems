@@ -27,13 +27,14 @@ Run ``rocprof-compute analyze -h`` for more details.
 Walkthrough
 ===========
 
-1. To begin, generate a high-level analysis report using ROCm Compute Profiler's ``-b`` (or ``--block``) flag.
+1. To begin, print a high-level analysis view on the terminal using ROCm Compute Profiler's ``-b`` (or ``--block``) flag.
 
 .. note::
 
-   By default, analyze only evaluates the profiled blocks. Analyze-mode
-   ``-b`` overrides this and might produce missing-counter warnings for blocks
-   whose counters were not collected.
+   The terminal always shows the top stats, the system information and the System
+   Speed-of-Light section. ``-b`` adds the given blocks, tables or metrics after them.
+   ``report.txt`` in the run folder always holds every profiled block; ``-b`` does not change
+   it or the analysis database.
 
 There are three high-level GPU analysis views:
 
@@ -268,10 +269,10 @@ Open the saved HTML file in a browser for the interactive roofline plot. See :re
    and memory partition modes. See :doc:`/conceptual/cdna/compute-memory-partition`
    for how those fields affect metric normalization.
 
-3. Choose your own customized subset of metrics with the ``-b`` (or ``--block``)
-   option. Or, build your own configuration following
+3. Choose your own customized subset of metrics to print on the terminal with the
+   ``-b`` (or ``--block``) option. Or, build your own configuration following
    `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
-   The following snippet shows how to generate a report containing only metric 2
+   The following snippet prints block 2 on the terminal
    (:doc:`System Speed-of-Light </conceptual/cdna/system-speed-of-light>`).
 
    .. code-block:: shell-session
@@ -360,7 +361,7 @@ Open the saved HTML file in a browser for the interactive roofline plot. See :re
       ╘═════════════╧═══════════════════════════╧═════════╧════════════════════════╧══════════╧═══════════════════╛
 
    Alternatively, use the option ``-b`` (or ``--block``) with block alias(es).
-   The following snippet shows how to generate a report containing only metric 2 with the alias equivalent of ``sol``
+   The following snippet does the same with the alias ``sol``
 
    .. code-block:: shell-session
 
@@ -733,7 +734,7 @@ Analysis output
 Every analyze run creates one new run folder and writes all of its output there. The run folder
 holds:
 
-* ``report.txt``: the full analysis report, as printed on the terminal.
+* ``report.txt``: the full analysis report, with every profiled block.
 * ``analysis.db``: a SQLite database with all the data in the analysis report, structured
   according to the :ref:`analysis database schema <analysis-database>`.
 * One CSV file per view of the :ref:`analysis database schema <analysis-database>`.
@@ -743,8 +744,9 @@ holds:
 * For a single workload with roofline data, ``1-<workload>/roofline-gpu-0.html``, where
   ``<workload>`` is the name of the workload directory given with ``-p``.
 
-The terminal still shows the analysis report. The last line printed is the absolute path of the
-run folder.
+The terminal shows the top stats, the system information and the System Speed-of-Light section,
+followed by any blocks selected with ``-b``. It also names the roofline HTML file when one is saved.
+The last line printed is the absolute path of the run folder.
 
 Use these analyze mode options to choose where the run folder goes:
 

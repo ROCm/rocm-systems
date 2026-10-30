@@ -55,10 +55,12 @@ collected and runs bottleneck detection automatically:
 
    $ rocprof-compute analyze -p workloads/my_workload/MI350/
 
-Analyze mode applies the block filter used at ``profile`` time, so this
-command shows the memory chart and the memory bandwidth analysis panel.
-When bottlenecks are detected, the guidance annotations appear on the
-memory chart and a guidance panel is rendered below it.
+Analyze mode applies the block filter used at ``profile`` time, so the
+report includes the memory chart and the memory bandwidth analysis panel.
+Both are in ``report.txt`` in the run folder. To also print them on the
+terminal, add ``-b 3 30``. When bottlenecks are detected, the guidance
+annotations appear on the memory chart and a guidance panel is rendered
+below it.
 
 .. code-block:: text
 
@@ -197,9 +199,10 @@ Further resources
 
 For deeper analysis beyond the guided output:
 
-* **Block 30 raw metrics**: run ``-b 30`` to see the full set of
-  Memory Bandwidth Analysis metric tables (L1 cache, L2 bottleneck
-  indicators, EA indicators).
+* **Block 30 raw metrics**: section 30 of ``report.txt`` holds the full
+  set of Memory Bandwidth Analysis metric tables (L1 cache, L2 bottleneck
+  indicators, EA indicators). Run with ``-b 30`` to also print them on the
+  terminal.
 * **Memory chart**: the :doc:`CLI analysis documentation </how-to/analyze/cli>`
   covers the memory chart layout in detail.
 * **CDNA performance model**: the :doc:`L2 cache
@@ -212,9 +215,10 @@ For deeper analysis beyond the guided output:
 Terminal width
 ==============
 
-The memory chart requires a terminal width of at least **240 columns**
-to display properly. The guidance panel matches the chart width.
-Narrower terminals cause line wrapping that reduces readability.
+The memory chart in ``report.txt`` needs a window at least **240 columns**
+wide to display properly. The guidance panel matches the chart width.
+Narrower windows cause line wrapping that reduces readability; see
+:ref:`viewing the memory chart <cli-memory-chart-viewing>`.
 
 Check your terminal width with:
 

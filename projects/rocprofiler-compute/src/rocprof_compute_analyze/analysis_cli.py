@@ -19,6 +19,7 @@ from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import calc_ai_analyze
+from utils.terminal_selection import TerminalSelection, build_terminal_selection
 from utils.utils_analysis import (
     CallTreeNode,
     build_operator_summary,
@@ -226,6 +227,7 @@ class cli_analysis(OmniAnalyze_Base):
         super().pre_processing()
         args = self.get_args()
         self._roofline_figures: Optional[RooflineFigures] = None
+        self._terminal_selection = TerminalSelection()
 
         active_operator_filters = [
             framework_name
@@ -354,6 +356,9 @@ class cli_analysis(OmniAnalyze_Base):
 
         if not args.list_stats:
             self._roofline_figures = self._build_roofline_figures()
+            self._terminal_selection = build_terminal_selection(
+                args.filter_metrics, self._first_gpu_arch()
+            )
 
     @demarcate
     def show_listing(self) -> None:
@@ -369,7 +374,8 @@ class cli_analysis(OmniAnalyze_Base):
 
     @demarcate
     def write_outputs(self, run_folder: Path) -> None:
-        """Write the roofline HTML and report.txt, then print the report."""
+        """Write the roofline HTML and the full report.txt, then print the report
+        up to speed-of-light plus the -b selection."""
         super().write_outputs(run_folder)
         args = self.get_args()
         self._write_roofline_html(run_folder)
@@ -388,12 +394,18 @@ class cli_analysis(OmniAnalyze_Base):
             self._first_arch_config(),
             sys.stdout,
             self._profiling_config,
+            terminal_selection=self._terminal_selection,
         )
+        tty.print_roofline_html_path(self._runs, sys.stdout)
+
+    def _first_gpu_arch(self) -> str:
+        """Return the GPU arch of the first -p workload, which drives rendering."""
+        workload = self._runs[self.get_args().path[0][0]]
+        return workload.sys_info.iloc[0]["gpu_arch"]
 
     def _first_arch_config(self) -> schema.ArchConfig:
         """Return the arch config of the first -p workload, which drives rendering."""
-        workload = self._runs[self.get_args().path[0][0]]
-        return self._arch_configs[workload.sys_info.iloc[0]["gpu_arch"]]
+        return self._arch_configs[self._first_gpu_arch()]
 
     def _show_operators(self) -> None:
         """Print the matched operator call tree of every workload to the terminal."""

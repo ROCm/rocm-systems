@@ -140,7 +140,6 @@ class OmniAnalyze_Base:
         arch: str,
         config_dir: str,
         list_stats: bool,
-        filter_metrics: Optional[list[str]],
         sys_info: pd.Series,
         profiling_config: dict[str, Any],
     ) -> dict[str, schema.ArchConfig]:
@@ -162,7 +161,6 @@ class OmniAnalyze_Base:
 
         parser.build_dfs(
             arch_configs=ac,
-            filter_metrics=filter_metrics,
             sys_info=sys_info,
             profiling_config=profiling_config,
             arch=arch,
@@ -204,7 +202,6 @@ class OmniAnalyze_Base:
                     arch,
                     args.config_dir,
                     args.list_stats,
-                    args.filter_metrics,
                     sys_info.iloc[0],
                     getattr(self, "_profiling_config", {}),
                 )

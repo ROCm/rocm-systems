@@ -214,7 +214,7 @@ directory. Every ``analyze`` run creates a new run folder and writes all of the 
    * - File
      - Description
    * - ``report.txt``
-     - The full analysis report, as printed on the terminal.
+     - The full analysis report. The terminal shows the top stats, system information and System Speed-of-Light sections, plus any blocks selected with ``-b``.
    * - ``analysis.db``
      - SQLite analysis database with all the data in the analysis report.
    * - ``*.csv``

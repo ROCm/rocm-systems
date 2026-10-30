@@ -91,8 +91,11 @@ memory chart (block 3) and block 30, so profile only those two blocks:
 rocprof-compute profile --experimental --membw-analysis -b 3 30 \
     --name <name> -- <application>
 
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id>
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b 3 30
 ```
+
+`-b 3 30` prints the memory chart and its guidance on the terminal; both are
+also in `report.txt` in the run folder.
 
 Its cutoffs and guidance text are data, not something to restate from memory.
 They live in `src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml` and
