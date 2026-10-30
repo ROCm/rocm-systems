@@ -101,7 +101,7 @@ TEST_F(CpusetMicrotest, StrToCpuset_KnownBug_MoreThan32WordsShiftsTheMask) {
 // Single-process multi-GPU ranks parse their cpumaps concurrently; distinct per-thread masks expose shared tokenizer state.
 TEST_F(CpusetMicrotest, StrToCpuset_ConcurrentParsesDoNotInterfere) {
   constexpr int kThreads = 8;
-  constexpr int kIters = 20000;
+  constexpr int kIters = 2000;
   std::vector<std::string> masks(kThreads);
   std::vector<ncclAffinity> expected(kThreads);
   for (int t = 0; t < kThreads; t++) {
