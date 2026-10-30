@@ -10,6 +10,8 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_sparse_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -1645,305 +1647,447 @@ RJ_NOINLINE void VDot4F32Bf8Bf8Vop3p::execute_modifier_impl(amdgpu::Wavefront &w
 }
 
 void VWmmaF3216x16x16F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_gfx12_wmma_dot4<false>(
-      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
-      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt, inst_.neg,
-      inst_.neg_hi);
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  uint64_t modifiers = inst_.neg | (uint64_t(inst_.neg_hi) << 3);
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12
+                  : rj_arith_v_wmma_f32_16x16x16_f16_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (128 + lanes - 1) / lanes, 256 / lanes,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaF3216x16x16Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_gfx12_wmma_dot4<true>(cu, wf.wf_size(), dst, src0_base, src1_base, s2,
-                                     src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)
-                                                                : std::nullopt,
-                                     inst_.neg, inst_.neg_hi);
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  uint64_t modifiers = inst_.neg | (uint64_t(inst_.neg_hi) << 3);
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12
+                  : rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (128 + lanes - 1) / lanes, 256 / lanes,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaF1616x16x16F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
   if (src2.encoding_value_ < 256)
     const_acc = amdgpu::dot_packed16::inline_word<false>(const_acc, src2.encoding_value_);
-  amdgpu::exec_gfx12_wmma_dot4<false, true>(
-      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
-      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt, inst_.neg,
-      inst_.neg_hi, wf.fp16_ovfl());
+  uint64_t modifiers = inst_.neg | (uint64_t(inst_.neg_hi) << 3);
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_f16_16x16x16_f16_w32_gfx12
+                  : rj_arith_v_wmma_f16_16x16x16_f16_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (128 + lanes - 1) / lanes, 128 / lanes,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaBf1616x16x16Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
   if (src2.encoding_value_ < 256)
     const_acc = amdgpu::dot_packed16::inline_word<true>(const_acc, src2.encoding_value_);
-  amdgpu::exec_gfx12_wmma_dot4<true, true>(
-      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
-      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt, inst_.neg,
-      inst_.neg_hi, wf.fp16_ovfl());
+  uint64_t modifiers = inst_.neg | (uint64_t(inst_.neg_hi) << 3);
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_bf16_16x16x16_bf16_w32_gfx12
+                  : rj_arith_v_wmma_bf16_16x16x16_bf16_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (128 + lanes - 1) / lanes, 128 / lanes,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaI3216x16x16Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_rdna_wmma_i32<true, 8>(
-      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
-      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,
-      /*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  uint64_t modifiers = (inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u);
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_i32_16x16x16_iu8_w32_gfx12
+                  : rj_arith_v_wmma_i32_16x16x16_iu8_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (64 + lanes - 1) / lanes, 256 / lanes,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaI3216x16x16Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_rdna_wmma_i32<true, 4>(
-      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
-      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,
-      /*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  uint64_t modifiers = (inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u);
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_i32_16x16x16_iu4_w32_gfx12
+                  : rj_arith_v_wmma_i32_16x16x16_iu4_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (32 + lanes - 1) / lanes, 256 / lanes,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt, 0xf, 32);
 }
 
 void VWmmaF3216x16x16Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_gfx12_wmma_dot8<true, true>(
-      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  uint64_t modifiers = 0;
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_f32_16x16x16_fp8_fp8_w32_gfx12
+                  : rj_arith_v_wmma_f32_16x16x16_fp8_fp8_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (64 + lanes - 1) / lanes, 256 / lanes,
       src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaF3216x16x16Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_gfx12_wmma_dot8<true, false>(
-      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  uint64_t modifiers = 0;
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_f32_16x16x16_fp8_bf8_w32_gfx12
+                  : rj_arith_v_wmma_f32_16x16x16_fp8_bf8_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (64 + lanes - 1) / lanes, 256 / lanes,
       src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaF3216x16x16Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_gfx12_wmma_dot8<false, true>(
-      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  uint64_t modifiers = 0;
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_f32_16x16x16_bf8_fp8_w32_gfx12
+                  : rj_arith_v_wmma_f32_16x16x16_bf8_fp8_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (64 + lanes - 1) / lanes, 256 / lanes,
       src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaF3216x16x16Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_gfx12_wmma_dot8<false, false>(
-      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  uint64_t modifiers = 0;
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_f32_16x16x16_bf8_bf8_w32_gfx12
+                  : rj_arith_v_wmma_f32_16x16x16_bf8_bf8_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (64 + lanes - 1) / lanes, 256 / lanes,
       src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaI3216x16x32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t const_acc;
-  uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_rdna_wmma_i32<true, 4, 32>(
-      cu, wf.wf_size(), dst, src0_base, src1_base, s2,
-      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,
-      /*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t dst = vb + vdst.encoding_value_;
+  const uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
+  const uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t const_acc = 0;
+  const uint32_t s2 = rdna4::resolve_acc(vb, dst, src2.encoding_value_, const_acc, [&] {
+    return amdgpu::RegisterAccess(wf).read_scalar(src2);
+  });
+  uint64_t flags = wf.cu().arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  uint64_t modifiers = (inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u);
+  amdgpu::arith::execute_wmma(
+      wf,
+      lanes == 32 ? rj_arith_v_wmma_i32_16x16x32_iu4_w32_gfx12
+                  : rj_arith_v_wmma_i32_16x16x32_iu4_w64_gfx12,
+      flags, modifiers, dst, src0_base, src1_base, s2, (64 + lanes - 1) / lanes, 256 / lanes,
+      src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VSwmmacF3216x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_gfx12_swmmac_dot4<false>(cu, wf.wf_size(), dst, src0_base, src1_base, index_base,
-                                        index_key, inst_.neg, inst_.neg_hi);
+  const uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  modifiers |= (inst_.neg & 7u) | (uint64_t(inst_.neg_hi & 7u) << 3);
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_f32_16x16x32_f16_w32
+                                            : rj_arith_v_swmmac_f32_16x16x32_f16_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (128 + lanes - 1) / lanes, 256 / lanes, 256 / lanes, lanes);
 }
 
 void VSwmmacF3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_gfx12_swmmac_dot4<true>(cu, wf.wf_size(), dst, src0_base, src1_base, index_base,
-                                       index_key, inst_.neg, inst_.neg_hi);
+  const uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  modifiers |= (inst_.neg & 7u) | (uint64_t(inst_.neg_hi & 7u) << 3);
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_f32_16x16x32_bf16_w32
+                                            : rj_arith_v_swmmac_f32_16x16x32_bf16_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (128 + lanes - 1) / lanes, 256 / lanes, 256 / lanes, lanes);
 }
 
 void VSwmmacF1616x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_gfx12_swmmac_dot4<false, true>(cu, wf.wf_size(), dst, src0_base, src1_base,
-                                              index_base, index_key, inst_.neg, inst_.neg_hi,
-                                              wf.fp16_ovfl());
+  const uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  modifiers |= (inst_.neg & 7u) | (uint64_t(inst_.neg_hi & 7u) << 3);
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_f16_16x16x32_f16_w32
+                                            : rj_arith_v_swmmac_f16_16x16x32_f16_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (128 + lanes - 1) / lanes, 256 / lanes, 128 / lanes, lanes);
 }
 
 void VSwmmacBf1616x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_gfx12_swmmac_dot4<true, true>(cu, wf.wf_size(), dst, src0_base, src1_base,
-                                             index_base, index_key, inst_.neg, inst_.neg_hi,
-                                             wf.fp16_ovfl());
+  const uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  modifiers |= (inst_.neg & 7u) | (uint64_t(inst_.neg_hi & 7u) << 3);
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_bf16_16x16x32_bf16_w32
+                                            : rj_arith_v_swmmac_bf16_16x16x32_bf16_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (128 + lanes - 1) / lanes, 256 / lanes, 128 / lanes, lanes);
 }
 
 void VSwmmacI3216x16x32Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_rdna_swmmac_i32<8, 32>(cu, wf.wf_size(), dst, src0_base, src1_base, index_base,
-                                      index_key, /*a_signed=*/(inst_.neg & 0x1u) != 0,
-                                      /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
+  const uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  modifiers |= (inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u);
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_i32_16x16x32_iu8_w32
+                                            : rj_arith_v_swmmac_i32_16x16x32_iu8_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (64 + lanes - 1) / lanes, 128 / lanes, 256 / lanes, lanes);
 }
 
 void VSwmmacI3216x16x32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_rdna_swmmac_i32<4, 32>(cu, wf.wf_size(), dst, src0_base, src1_base, index_base,
-                                      index_key, /*a_signed=*/(inst_.neg & 0x1u) != 0,
-                                      /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
+  const uint32_t index_key = inst_.opsel & (1u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  modifiers |= (inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u);
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_i32_16x16x32_iu4_w32
+                                            : rj_arith_v_swmmac_i32_16x16x32_iu4_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (32 + lanes - 1) / lanes, 64 / lanes, 256 / lanes, 32);
 }
 
 void VSwmmacI3216x16x64Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_rdna_swmmac_i32<4, 64>(cu, wf.wf_size(), dst, src0_base, src1_base, index_base,
-                                      index_key, /*a_signed=*/(inst_.neg & 0x1u) != 0,
-                                      /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);
+  const uint32_t index_key = inst_.opsel & (lanes == 32 ? 0u : 1u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  modifiers |= (inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u);
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_i32_16x16x64_iu4_w32
+                                            : rj_arith_v_swmmac_i32_16x16x64_iu4_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (64 + lanes - 1) / lanes, 128 / lanes, 256 / lanes, lanes);
 }
 
 void VSwmmacF3216x16x32Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_gfx12_swmmac_dot8<true, true>(cu, wf.wf_size(), dst, src0_base, src1_base,
-                                             index_base, index_key);
+  const uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w32
+                                            : rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (64 + lanes - 1) / lanes, 128 / lanes, 256 / lanes, lanes);
 }
 
 void VSwmmacF3216x16x32Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_gfx12_swmmac_dot8<true, false>(cu, wf.wf_size(), dst, src0_base, src1_base,
-                                              index_base, index_key);
+  const uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_f32_16x16x32_fp8_bf8_w32
+                                            : rj_arith_v_swmmac_f32_16x16x32_fp8_bf8_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (64 + lanes - 1) / lanes, 128 / lanes, 256 / lanes, lanes);
 }
 
 void VSwmmacF3216x16x32Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_gfx12_swmmac_dot8<false, true>(cu, wf.wf_size(), dst, src0_base, src1_base,
-                                              index_base, index_key);
+  const uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_f32_16x16x32_bf8_fp8_w32
+                                            : rj_arith_v_swmmac_f32_16x16x32_bf8_fp8_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (64 + lanes - 1) / lanes, 128 / lanes, 256 / lanes, lanes);
 }
 
 void VSwmmacF3216x16x32Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
+  const uint32_t lanes = wf.wf_size();
+  const uint32_t vb = wf.vgpr_alloc().base;
   uint32_t dst = vb + vdst.encoding_value_;
   uint32_t src0_base = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t src1_base = amdgpu::src_base(vb, src1.encoding_value_);
   uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);
-  uint32_t index_key = inst_.opsel & 0x3u;
-  amdgpu::exec_gfx12_swmmac_dot8<false, false>(cu, wf.wf_size(), dst, src0_base, src1_base,
-                                               index_base, index_key);
+  const uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);
+  uint64_t modifiers = uint64_t(index_key) << 7;
+  uint64_t flags = wf.cu().arithmetic_flags();
+  amdgpu::arith::execute_swmmac(wf,
+                                lanes == 32 ? rj_arith_v_swmmac_f32_16x16x32_bf8_bf8_w32
+                                            : rj_arith_v_swmmac_f32_16x16x32_bf8_bf8_w64,
+                                flags, modifiers, dst, src0_base, src1_base, index_base,
+                                (64 + lanes - 1) / lanes, 128 / lanes, 256 / lanes, lanes);
 }
 
 } // namespace rdna4
