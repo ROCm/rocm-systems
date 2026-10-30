@@ -1318,21 +1318,16 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainIsNonZeroForTheFixture) {
          "WarpSize, ll128ShmemElemsPerThread or ll128DataElems makes calcCollChunking:3302 SIGFPE";
 }
 
-TEST_F(EnqueueMicrotest, OneRpnNetRegChannelCap_GatesOnlyAllGatherOnOffloadCapability) {
+TEST_F(EnqueueMicrotest, OneRpnNetRegChannelCap_AppliesToBroadcastAlone) {
   EXPECT_TRUE(ncclUseOneRpnNetRegChannelCap(ncclFuncBroadcast));
-  EXPECT_EQ(bool(NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED), ncclUseOneRpnNetRegChannelCap(ncclFuncAllGather));
   for (int i = 0; i < int(ncclNumFuncs); ++i) {
     const auto func = static_cast<ncclFunc_t>(i);
-    if (func == ncclFuncBroadcast || func == ncclFuncAllGather) continue;
+    if (func == ncclFuncBroadcast) continue;
     EXPECT_FALSE(ncclUseOneRpnNetRegChannelCap(func)) << "func=" << i;
   }
 }
 
-TEST_F(EnqueueMicrotest, CalcCollChunking_NetOffloadUnsupportedOneRpnRegisteredAllGatherUsesKernelSchedule) {
-#if !NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
-  // ROCM-33020: without device net offload, registered one-RPN AllGather must
-  // retain the ordinary proxy schedule. NCCL_LOCAL_REGISTER=0 and the legacy
-  // torch process group both reach the unregistered baseline below.
+TEST_F(EnqueueMicrotest, CalcCollChunking_OneRpnRegisteredAllGatherUsesTheUnregisteredSchedule) {
   constexpr size_t kPerRankBytes = 11 * 1024 * 1024;
   constexpr size_t kGlobalBytes = 2 * kPerRankBytes;
   ChunkComm cc(/*protoSimpleBuf=*/1 << 22);
@@ -1362,9 +1357,6 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_NetOffloadUnsupportedOneRpnRegisteredA
   EXPECT_EQ(workaround.proxyOp.loopOffset, zeroCopy.proxyOp.loopOffset);
   EXPECT_EQ(workaround.proxyOp.nsteps, zeroCopy.proxyOp.nsteps);
   EXPECT_NE(size_t(NCCL_MAX_NET_SIZE), size_t(zeroCopy.proxyOp.chunkSize));
-#else
-  GTEST_SKIP() << "This build supports the matching host/device net-offload schedule";
-#endif
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_ChunkSizeIsAlwaysWritten) {
@@ -5195,26 +5187,21 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegMultiRpn_PicksTheSendBufferPerCo
   }
 }
 
-TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegRingOneRpnAllGather_UsesWholeNetSizedChunks) {
-#if !NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
-  // ROCM-33020: HIP builds keep the ordinary proxy schedule. The unsupported
-  // path is covered by CalcCollChunking_NetOffloadUnsupportedOneRpnRegisteredAllGatherUsesKernelSchedule.
-  GTEST_SKIP() << "one-RPN AllGather net offload is not compiled in";
-#else
-  ChunkComm cc;
-  cc.comm.isOneRPN = true;
-  auto t = NetRegTask(ncclFuncAllGather, NCCL_ALGO_RING);
-  const int nChannels = 2;
-  const size_t nBytes = size_t(3) * NCCL_MAX_NET_SIZE;
-  auto r = RunChunking(cc, t, nChannels, nBytes);
-  ASSERT_EQ(ncclSuccess, r.rc);
-  EXPECT_EQ(uint32_t(NCCL_MAX_NET_SIZE), r.proxyOp.chunkSize);
-  EXPECT_EQ(uint32_t(NCCL_MAX_NET_SIZE), r.proxyOp.sliceSize);
-  EXPECT_EQ(1, r.proxyOp.chunkSteps);
-  const size_t loopSize = size_t(nChannels) * cc.comm.nRanks * NCCL_MAX_NET_SIZE;
-  EXPECT_EQ(loopSize, r.proxyOp.loopSize);
-  EXPECT_EQ(int(DIVUP(nBytes, loopSize) * (cc.comm.nRanks - 1)), r.proxyOp.nsteps);
-#endif
+TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegRing_WiresTheRecvSideAndLeavesSendUnset) {
+  const size_t nBytes = 1 << 20;
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncAllReduce}) {
+    ChunkComm cc;
+    cc.comm.isOneRPN = true;
+    auto t = NetRegTask(func, NCCL_ALGO_RING);
+    auto r = RunChunking(cc, t, /*nChannels=*/2, nBytes);
+    ASSERT_EQ(ncclSuccess, r.rc) << func;
+    EXPECT_EQ(1, r.proxyOp.reg) << func;
+    EXPECT_EQ(g_netRegRecv, r.proxyOp.recvbuff) << func;
+    EXPECT_EQ(kRecvMhandle, r.proxyOp.recvMhandle) << func;
+    EXPECT_EQ(nBytes, r.proxyOp.nbytes) << func;
+    EXPECT_EQ(nullptr, r.proxyOp.sendbuff) << func;
+    EXPECT_EQ(nullptr, r.proxyOp.sendMhandle) << func;
+  }
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegWithTree_IsAnInternalError) {
