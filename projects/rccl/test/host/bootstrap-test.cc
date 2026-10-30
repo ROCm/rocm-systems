@@ -536,8 +536,8 @@ TEST_F(BootstrapMicrotest, Accept_BadHandshakePeerIsClosedAndTheNextOneAccepted)
   for (auto* s : {&l, &stray, &good, &sock}) (void)ncclSocketClose(s);
 }
 
-// bootstrapAccept retries only on BadHandshake, so it returns a rejected peer unconnected; a fix flips this pin.
-TEST_F(BootstrapMicrotest, Accept_KnownBug_RejectedPeerReportedAsAccepting_IsReturnedUnconnected) {
+// ncclSocketAccept(retry=false) hands a rejected peer back in the Accepting state.
+TEST_F(BootstrapMicrotest, Accept_RejectedPeerReportedAsAccepting_IsSkippedAndTheNextOneAccepted) {
   struct ncclSocket l, stray, good, sock;
   ASSERT_EQ(ncclSuccess, ncclSocketInit(&l, &bootstrapNetIfAddr, 7, ncclSocketTypeBootstrap, &abort_));
   ASSERT_EQ(ncclSuccess, ncclSocketListen(&l));
@@ -545,12 +545,14 @@ TEST_F(BootstrapMicrotest, Accept_KnownBug_RejectedPeerReportedAsAccepting_IsRet
   ASSERT_EQ(ncclSuccess, ncclSocketConnect(&stray));
   ASSERT_EQ(ncclSuccess, ncclSocketInit(&good, &l.addr, 7, ncclSocketTypeBootstrap));
   ASSERT_EQ(ncclSuccess, ncclSocketConnect(&good));
+  ASSERT_EQ(ncclSuccess, socketSend(&good, (void*)"ok", 2));
 
   EXPECT_EQ(ncclSuccess, bootstrapAccept(&sock, &l, &abort_));
 
-  EXPECT_EQ(ncclSocketStateAccepting, sock.state);
-  char out[2];
-  EXPECT_NE(ncclSuccess, socketRecv(&sock, out, 2));
+  EXPECT_EQ(ncclSocketStateReady, sock.state);
+  char out[3] = {};
+  EXPECT_EQ(ncclSuccess, socketRecv(&sock, out, 2));
+  EXPECT_STREQ("ok", out);
   for (auto* s : {&l, &stray, &good, &sock}) (void)ncclSocketClose(s);
 }
 
@@ -678,17 +680,15 @@ TEST_F(BootstrapMicrotest, Root_RankGoneBeforeItsAnswer_MakesTheRootGiveUp) {
   (void)ncclSocketClose(&listen[1]);
 }
 
-// The Accept_KnownBug_ above makes one stray connection end the root; a fix flips this pin.
-TEST_F(BootstrapMicrotest, Root_KnownBug_StrayPeerWithTheWrongMagicMakesTheRootExit) {
+TEST_F(BootstrapMicrotest, Root_StrayPeerWithTheWrongMagicIsDroppedAndTheRootKeepsAccepting) {
   ASSERT_EQ(ncclSuccess, bootstrapGetUniqueId(&handle_, nullptr));
-  struct ncclSocket stray;
+  struct ncclSocket stray, listen;
   ASSERT_EQ(ncclSuccess, ncclSocketInit(&stray, &handle_.addr, handle_.magic + 1, ncclSocketTypeBootstrap));
   ASSERT_EQ(ncclSuccess, ncclSocketConnect(&stray));
+  CheckIn(0, 1, &listen);
+  struct ringConnectInfo got = Answer(&listen);
+  EXPECT_EQ(1, got.fwd.handle[0]);
   WaitRoots();
-  // A valid one-rank check-in: a fixed root still listening then finishes, rather than dividing by nroots 0.
-  struct extInfo info = {};
-  info.nranks = info.nroots = 1;
-  EXPECT_EQ(ncclRemoteError, sendToRoot(&handle_, self_.comm.get(), &info));
   (void)ncclSocketClose(&stray);
 }
 

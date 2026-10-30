@@ -437,8 +437,10 @@ struct extInfo {
 // (retry=true) loops internally on bad-handshake events, which can
 // monopolize CPU and starve legitimate peer connects when a non-NCCL TCP
 // peer hits the bootstrap listen socket. We pass retry=false and
-// drive the retry from here: close the rejected socket, yield 1ms, retry.
-// abortFlag is honored between iterations.
+// drive the retry from here: yield 1ms, then accept again.
+// abortFlag is honored between iterations. A rejected peer (bad magic or type,
+// failed TLS handshake) comes back in the Accepting state with its descriptor
+// already closed, so only Ready means the connection can be used.
 static ncclResult_t bootstrapAccept(struct ncclSocket* sock, struct ncclSocket* listenSock,
                                     volatile uint32_t* abortFlag) {
   while (1) {
@@ -447,9 +449,8 @@ static ncclResult_t bootstrapAccept(struct ncclSocket* sock, struct ncclSocket* 
     }
     NCCLCHECK(ncclSocketInit(sock));
     NCCLCHECK(ncclSocketAccept(sock, listenSock, /*retry=*/false));
-    if (sock->state != ncclSocketStateBadHandshake) return ncclSuccess;
-    INFO(NCCL_INIT | NCCL_NET, "bootstrap: rejected bad-magic peer connection on listen sock, retrying accept");
-    (void)ncclSocketClose(sock);
+    if (sock->state == ncclSocketStateReady) return ncclSuccess;
+    INFO(NCCL_INIT | NCCL_NET, "bootstrap: rejected peer connection on listen sock, retrying accept");
     usleep(1000);
   }
 }
