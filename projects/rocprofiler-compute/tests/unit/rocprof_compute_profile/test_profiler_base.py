@@ -1244,11 +1244,12 @@ def test_run_profiling_native_tool_path(
 
 
 def test_sanitize_trace_ml_api_injects_torch_and_triton(tmp_path):
-    remaining = _setup_test_files(tmp_path, ["{binary}"], "binary")
+    remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
     both = _make_sanitize_args(remaining, trace_ml_api=["torch", "triton"])
     profiler = RocProfCompute_Base(both, profiler_mode="rocprofiler-sdk", soc=None)
     profiler.sanitize()
     assert profiler._selected_frameworks == {"torch", "triton"}
+    assert "--frameworks torch triton --" in both.remaining
 
 
 def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path):
