@@ -216,6 +216,7 @@ class BannerLogsTest(unittest.TestCase):
                 (exact / f"prefill_NODE{node}.log").write_text(banner)
                 (rogue / f"prefill_NODE{node}.log").write_text("forged " + banner)
             (exact / "decode_NODE9.log").symlink_to(rogue / "prefill_NODE0.log")
+            os.mkfifo(exact / "blocked.log")
 
             logs = tm.rccl_banner_logs(run_dir, "42")
             self.assertEqual(len(logs), 4)
@@ -229,6 +230,19 @@ class BannerLogsTest(unittest.TestCase):
             verified = tm.rccl_banner_logs(run_dir, "42")
             self.assertTrue(all(path.is_relative_to(snapshot) for path in verified))
             self.assertNotIn("changed after snapshot", verified[0].read_text())
+
+    def test_private_root_accepts_exact_nobody_job_and_rejects_two_roots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            run_logs = run_dir / "slurm_output" / "run_logs"
+            private = run_logs / ("run-" + "a" * 32)
+            exact = private / "42"
+            exact.mkdir(parents=True)
+            nobody = mock.Mock(pw_uid=os.getuid())
+            with mock.patch.object(tm.pwd, "getpwnam", return_value=nobody):
+                self.assertEqual(tm._trusted_server_log_dir(run_dir, "42"), exact)
+                (run_logs / ("run-" + "b" * 32)).mkdir()
+                self.assertIsNone(tm._trusted_server_log_dir(run_dir, "42"))
 
     def test_node_out_fallback_is_scoped_to_exact_job(self):
         with tempfile.TemporaryDirectory() as tmp:
