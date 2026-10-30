@@ -32,6 +32,7 @@ from membw_analysis.models import (
     MEMBW_TABLE_IDS,
     BottleneckNode,
     MemBwAnalysisResult,
+    SupportingMetric,
 )
 from memory_chart.loader import Layouts
 from pc_sampling.code_object_analysis import (
@@ -480,6 +481,34 @@ def _add_membw_nodes(
         _add_membw_nodes(analysis, node.children, node_row, node_orders)
 
 
+def _load_membw_node(row: orm.MembwNode) -> BottleneckNode:
+    """Rebuild one node, and its subtree, from its stored rows."""
+    return BottleneckNode(
+        id=row.node_id,
+        label=row.label,
+        level=row.level,
+        state=row.state,
+        supporting=tuple(
+            SupportingMetric(
+                key=metric.metric_key,
+                value=metric.value,
+                unit=metric.unit,
+                display=metric.display,
+            )
+            for metric in row.supporting_metrics
+        ),
+        children=_load_membw_nodes(row.children),
+        guidance_id=row.guidance_id,
+    )
+
+
+def _load_membw_nodes(rows: List[orm.MembwNode]) -> Tuple[BottleneckNode, ...]:
+    """Rebuild these sibling nodes and their subtrees, in node_order."""
+    return tuple(
+        _load_membw_node(row) for row in sorted(rows, key=lambda row: row.node_order)
+    )
+
+
 class db_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -873,6 +902,28 @@ class db_analysis(OmniAnalyze_Base):
                 )
             )
         _add_membw_nodes(analysis, membw_result.nodes, None, itertools.count())
+
+    @staticmethod
+    def load_membw_analysis(
+        workload_obj: orm.Workload,
+    ) -> Optional[MemBwAnalysisResult]:
+        """Rebuild one workload's memory bandwidth analysis from its stored rows.
+
+        Returns None when the workload has no membw rows. Otherwise the result
+        equals the one run_membw_analysis returned when add_membw_analysis wrote it.
+        """
+        analysis = workload_obj.membw_analysis
+        if analysis is None:
+            return None
+        return MemBwAnalysisResult(
+            arch=analysis.arch,
+            availability=analysis.availability,
+            availability_reason=analysis.availability_reason,
+            nodes=_load_membw_nodes([
+                node for node in analysis.nodes if node.parent is None
+            ]),
+            guidance_blocks=tuple(block.text for block in analysis.guidance_blocks),
+        )
 
     def calc_pmc_df_data(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
