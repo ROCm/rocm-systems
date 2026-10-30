@@ -1305,6 +1305,10 @@ TEST_F(GpuDeviceMes, MesTrapConfigurationReachesTheComputeUnit) {
   constexpr uint64_t kHandler = kDefaultComputeRingGpu + 0x1080;
   constexpr uint64_t kTrapMemory = 0x123456789abc;
   constexpr uint64_t kProcessContext = 0x123000;
+  constexpr uint64_t kInterruptRing = 0x900000000;
+  constexpr uint64_t kInterruptWptr = 0x900001000;
+  const uint32_t send_interrupt =
+      rocjitsu::cdna5::build_sopp(rocjitsu::cdna5::kSSendmsgSopp, {.simm16 = 1})[0];
   configure_compute_unit();
 
   for (const bool aql : {true, false}) {
@@ -1330,11 +1334,24 @@ TEST_F(GpuDeviceMes, MesTrapConfigurationReachesTheComputeUnit) {
     ring_doorbell(0x60, doorbell);
     ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
 
-    store_dword(kDefaultComputeRingPhysical + 0x80, 0xbf900003); // gfx1250 s_trap 3
-    // gfx1250: advance the saved PC and return through s_rfe_i64 ttmp[0:1].
-    store_dword(kDefaultComputeSecondPagePhysical + 0x80, 0x806c846c);
-    store_dword(kDefaultComputeSecondPagePhysical + 0x84, 0x826d806d);
-    store_dword(kDefaultComputeSecondPagePhysical + 0x88, 0xbe804a6c);
+    store_dword(kInterruptWptr, 0);
+    transport_.clear_triggered();
+    write_register_at(0x448c, static_cast<uint32_t>(kInterruptRing >> 8));
+    write_register_at(0x4490, static_cast<uint32_t>(kInterruptRing >> 40) & 0xff);
+    write_register_at(0x4498, static_cast<uint32_t>(kInterruptWptr));
+    write_register_at(0x4494, static_cast<uint32_t>(kInterruptWptr >> 32) & 0xffff);
+    write_register_at(0x4480, (10u << 1) | 1u | (1u << 17) | (2u << 28));
+
+    store_dword(kDefaultComputeRingPhysical + 0x80, send_interrupt);
+    store_dword(kDefaultComputeRingPhysical + 0x84, 0xbf900003); // gfx1250 s_trap 3
+    // The handler supplies M0's SQ payload, sends the interrupt, advances the
+    // saved PC, and returns through s_rfe_i64 ttmp[0:1].
+    store_dword(kDefaultComputeSecondPagePhysical + 0x80, 0xbefd00ff); // s_mov_b32 m0, literal
+    store_dword(kDefaultComputeSecondPagePhysical + 0x84, 0xff000401);
+    store_dword(kDefaultComputeSecondPagePhysical + 0x88, send_interrupt);
+    store_dword(kDefaultComputeSecondPagePhysical + 0x8c, 0x806c846c);
+    store_dword(kDefaultComputeSecondPagePhysical + 0x90, 0x826d806d);
+    store_dword(kDefaultComputeSecondPagePhysical + 0x94, 0xbe804a6c);
     const auto address_space = soc_.mes_engine().process_address_space_for_test(3);
     ASSERT_TRUE(address_space.has_value());
     for (const auto &[page, physical] : {std::pair{0x10u, kDefaultComputeRingPhysical},
@@ -1349,20 +1366,35 @@ TEST_F(GpuDeviceMes, MesTrapConfigurationReachesTheComputeUnit) {
     wave->set_address_space(*address_space);
     wave->set_exec(0x1234);
 
+    // An ordinary shader's message must not become a trap notification.
+    compute_unit_->step();
+    device_.drain_doorbell_inbox_for_test();
+    EXPECT_FALSE(wave->in_trap_handler());
+    EXPECT_EQ(transport_.dword_at(kInterruptWptr), 0u);
+    EXPECT_TRUE(transport_.triggered().empty());
+
     compute_unit_->step();
     ASSERT_TRUE(wave->in_trap_handler());
     EXPECT_EQ(wave->pc, kHandler);
-    EXPECT_EQ(wave->ttmp(0), kKernel);
+    EXPECT_EQ(wave->ttmp(0), kKernel + 4);
     EXPECT_EQ(wave->ttmp(1), 3u << 28);
     EXPECT_NE(wave->status_raw() & (1u << 5), 0u);
     EXPECT_NE(wave->ttmp(11) & (1u << 23), 0u);
     EXPECT_EQ(wave->ttmp(14), static_cast<uint32_t>(kTrapMemory));
     EXPECT_EQ(wave->ttmp(15), static_cast<uint32_t>(kTrapMemory >> 32));
 
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 5; ++i)
       compute_unit_->step();
+    device_.drain_doorbell_inbox_for_test();
+    EXPECT_EQ(transport_.dword_at(kInterruptRing), 0x0100ef14u);
+    EXPECT_EQ(transport_.dword_at(kInterruptRing + 12), 0x00020003u);
+    EXPECT_EQ(transport_.dword_at(kInterruptRing + 16), 0x04000401u);
+    EXPECT_EQ(transport_.dword_at(kInterruptRing + 20), 0x40u);
+    EXPECT_EQ(transport_.dword_at(kInterruptWptr), 32u);
+    ASSERT_EQ(transport_.triggered().size(), 1u);
+    EXPECT_EQ(transport_.triggered().front(), 0u);
     EXPECT_FALSE(wave->in_trap_handler());
-    EXPECT_EQ(wave->pc, kKernel + 4);
+    EXPECT_EQ(wave->pc, kKernel + 8);
     EXPECT_EQ(wave->status_raw() & (1u << 5), 0u);
     EXPECT_EQ(wave->exec(), 0x1234u);
     compute_unit_->free_wavefront_resources(*wave);
