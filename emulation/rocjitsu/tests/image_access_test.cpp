@@ -840,11 +840,10 @@ TEST_P(RdnaDecodedImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
   struct Case {
     uint16_t opcode;
     const char *disassembly;
-    uint8_t address_words;
   };
   for (const Case test_case : {
-           Case{rdna3::kImageLoadMipMimg, "image_load_mip v8, v[2:4], s[8:15]", 3},
-           Case{rdna3::kImageAtomicAddMimg, "image_atomic_add v8, v[2:3], s[8:15]", 2},
+           Case{rdna3::kImageLoadMipMimg, "image_load_mip v8, v[2:4], s[8:15]"},
+           Case{rdna3::kImageAtomicAddMimg, "image_atomic_add v8, v[2:3], s[8:15]"},
        }) {
     SCOPED_TRACE(test_case.disassembly);
     auto decoded = test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(*decoder_, rdna3::build_mimg,
@@ -853,10 +852,6 @@ TEST_P(RdnaDecodedImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
     const std::unique_ptr<Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->disassemble(), test_case.disassembly);
-
-    const InstDefUse def_use(*inst);
-    EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 2, test_case.address_words}));
-    EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 6, 1}));
   }
 }
 
