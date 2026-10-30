@@ -18,6 +18,8 @@ class InvalidExpressionError(ValueError):
 
 
 # ast.Attribute is deliberately omitted — it enables dunder-chain escapes.
+# visit_Attribute rewrites only _collect.<piece>; every other attribute
+# still raises InvalidExpressionError.
 ALLOWED_AST_NODES: frozenset[type] = frozenset({
     ast.Module,
     ast.Expr,
@@ -247,6 +249,32 @@ def is_composite_avg_formula(formula: str) -> bool:
     )
 
 
+def _is_plain_collect_piece(piece: str) -> bool:
+    """True for a normal identifier: not private, and not a dunder."""
+    if not piece.isidentifier():
+        return False
+    is_dunder = piece.startswith("__") and piece.endswith("__")
+    return not piece.startswith("_") and not is_dunder
+
+
+def _collect_piece_attribute(node: ast.Attribute) -> str | None:
+    """Return the piece id for Attribute(Name('_collect'), attr=piece)."""
+    if not isinstance(node.value, ast.Name) or node.value.id != "_collect":
+        return None
+    if not _is_plain_collect_piece(node.attr):
+        return None
+    return node.attr
+
+
+def _collect_piece_call(piece: str) -> ast.Call:
+    """One call the evaluator resolves to that collectable's own value."""
+    return ast.Call(
+        func=ast.Name(id="collect_piece", ctx=ast.Load()),
+        args=[ast.Constant(value=f"_collect.{piece}")],
+        keywords=[],
+    )
+
+
 SUPPORTED_CALL: dict[str, str] = {
     # If the below has a single arg, like(expr), it is an aggr,
     # in which case it turns into a pandas function.
@@ -280,6 +308,16 @@ class CodeTransformer(ast.NodeTransformer):
                 f"Disallowed expression element: {type(node).__name__}"
             )
         return super().generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+        # Not whitelisted. Only _collect.<piece> becomes one collect_piece call.
+        # The Name('_collect') child is not visited, so it is not a PMC column.
+        piece = _collect_piece_attribute(node)
+        if piece is None:
+            raise InvalidExpressionError(
+                f"Disallowed expression element: {type(node).__name__}"
+            )
+        return _collect_piece_call(piece)
 
     def visit_Call(self, node: ast.Call) -> ast.Call:
         if isinstance(node.func, ast.Name):
