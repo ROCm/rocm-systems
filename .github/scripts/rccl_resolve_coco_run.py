@@ -6,24 +6,43 @@
 
 from __future__ import annotations
 
+import http.client
+import json
 import os
+import re
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from ci_utils import set_github_output
+from ci_utils import retry, set_github_output
 
 # Must stay in step with the cron entries in rccl-coco-scheduled.yml.
 WEEKDAY_NIGHTLY_CRON = "47 3 * * 1-5"
 SATURDAY_CRON = "47 3 * * 6"
 
 VALID_MODES = frozenset({"pr", "nightly", "weekly", "monthly"})
+
+FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+# The coco harness CLI sources searched for the --baseline-sha option. Any file
+# and either quote style counts, so moving the declaration does not hide it.
+HARNESS_CLI_DIR = Path("coco") / "cli"
+BASELINE_SHA_OPTION = re.compile(r"""["']--baseline-sha["']""")
+
+# Besides server errors, a rate limit is worth waiting out.
+RETRYABLE_STATUSES = frozenset({403, 429})
+
+GitHubGet = Callable[[str], dict]
 
 
 @dataclass(frozen=True)
@@ -70,17 +89,108 @@ def resolve_mode_and_trigger(
     return periodic_mode, "manual"
 
 
-def build_coco_args(*, mode: str, dry_run: bool) -> str:
+def build_coco_args(*, mode: str, dry_run: bool, baseline_sha: str = "") -> str:
     args = "-vv --skip-failed-builds"
     if mode == "pr":
         # No --prune-build: the build and test phases share a directory and
         # prune would delete trees the later phase still needs.
         args += " --skip-baselines"
+        if baseline_sha:
+            args += f" --baseline-sha {baseline_sha}"
     else:
         args += " --prune-build"
     if dry_run:
         args += " --dry-run"
     return args
+
+
+def harness_supports_baseline_sha(harness_dir: Path) -> bool:
+    """True when the coco harness in *harness_dir* declares ``--baseline-sha``."""
+    return any(
+        BASELINE_SHA_OPTION.search(source.read_text(encoding="utf-8"))
+        for source in (harness_dir / HARNESS_CLI_DIR).rglob("*.py")
+    )
+
+
+class GitHubApiError(Exception):
+    """A GitHub REST call failed; the message names the request and the reason."""
+
+
+class TransientGitHubError(GitHubApiError):
+    """A failure worth retrying: a server error, a rate limit or a lost connection."""
+
+
+@retry(max_attempts=3, delay_seconds=2, exceptions=(TransientGitHubError,))
+def github_get(url: str) -> dict:
+    """GET a GitHub REST API URL as JSON, authenticated by ``GITHUB_TOKEN``.
+
+    Raises ``GitHubApiError`` naming *url* and the reason. Only server errors,
+    rate limits and transport failures (timeouts, refused or reset connections,
+    a truncated response) are retried; any other HTTP error, such as a 404 for
+    a mistyped PR, and a malformed URL fail at once.
+    """
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if token == "":
+        raise GitHubApiError("GITHUB_TOKEN is not set; cannot call the GitHub API.")
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as exc:
+        failure = (
+            TransientGitHubError
+            if exc.code >= 500 or exc.code in RETRYABLE_STATUSES
+            else GitHubApiError
+        )
+        raise failure(f"GET {url} failed: HTTP {exc.code} {exc.reason}") from exc
+    except http.client.InvalidURL as exc:
+        raise GitHubApiError(f"GET {url} is not a valid URL: {exc}") from exc
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
+        raise TransientGitHubError(f"GET {url} failed: {exc!r}") from exc
+    except ValueError as exc:
+        raise GitHubApiError(f"GET {url} returned invalid JSON: {exc}") from exc
+
+
+def resolve_merge_base(
+    *, pr_repo: str, pr_number: str, pr_sha: str, get: GitHubGet = github_get
+) -> str:
+    """The merge-base of the PR head *pr_sha* with the PR's base branch.
+
+    The baseline arm is built at this commit, so a PR is measured only
+    against code it contains. Raises ``ValueError`` when it cannot be
+    resolved, or when it is the PR head itself, and ``GitHubApiError`` when a
+    GitHub call fails.
+    """
+    api = f"https://api.github.com/repos/{pr_repo}"
+    pr_sha = pr_sha.lower()
+    try:
+        base_ref = get(f"{api}/pulls/{pr_number}")["base"]["ref"]
+        compare = get(
+            f"{api}/compare/{urllib.parse.quote(base_ref, safe='/')}...{pr_sha}"
+        )
+        merge_base = compare["merge_base_commit"]["sha"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(
+            f"GitHub's response for PR #{pr_number} lacks {exc}; "
+            "cannot resolve its merge-base."
+        ) from exc
+    if not FULL_SHA.match(merge_base or ""):
+        raise ValueError(
+            f"Could not resolve the merge-base of PR #{pr_number} with {base_ref!r}."
+        )
+    if merge_base == pr_sha:
+        raise ValueError(
+            f"PR #{pr_number}'s head {pr_sha} is its merge-base with {base_ref!r}; "
+            "there is no change to measure."
+        )
+    return merge_base
 
 
 def resolve_run(
@@ -94,6 +204,7 @@ def resolve_run(
     dry_run: bool,
     day_of_month: int | None = None,
     coco_sha: str | None = None,
+    baseline_sha: str = "",
 ) -> ResolvedRun:
     mode, trigger_kind = resolve_mode_and_trigger(
         pr_number=pr_number,
@@ -117,26 +228,77 @@ def resolve_run(
         mode=mode,
         trigger_kind=trigger_kind,
         coco_ref=coco_sha,
-        coco_args=build_coco_args(mode=mode, dry_run=dry_run),
+        coco_args=build_coco_args(
+            mode=mode, dry_run=dry_run, baseline_sha=baseline_sha
+        ),
         pr_number=pr_number,
         pr_sha=pr_sha,
         pr_repo=pr_repo,
     )
 
 
+def resolve_baseline_sha(
+    *,
+    pr_number: str,
+    pr_sha: str,
+    pr_repo: str,
+    harness_dir: Path,
+    require: bool,
+    get: GitHubGet = github_get,
+) -> str:
+    """The commit to build a PR run's baseline at, or ``""`` to keep its configured ref.
+
+    Empty for a periodic run. A harness without ``--baseline-sha`` leaves the
+    baseline on its configured ref with a workflow warning, or raises
+    ``ValueError`` when *require* is set.
+    """
+    if not pr_number:
+        return ""
+    if not harness_supports_baseline_sha(harness_dir):
+        if require:
+            raise ValueError(
+                "This coco harness has no --baseline-sha, but this run requires the "
+                "PR baseline to be built at the PR's merge-base."
+            )
+        print(
+            "::warning::This coco harness has no --baseline-sha; the PR is measured "
+            "against the baseline's configured ref, not its merge-base."
+        )
+        return ""
+    return resolve_merge_base(
+        pr_repo=pr_repo, pr_number=pr_number, pr_sha=pr_sha, get=get
+    )
+
+
 def main() -> None:
     dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
+    pr_number = os.environ.get("PR_NUMBER", "")
+    pr_sha = os.environ.get("PR_SHA", "")
+    pr_repo = os.environ.get("PR_REPO", "")
     try:
+        harness_dir = os.environ.get("HARNESS_DIR", "")
+        if harness_dir == "":
+            raise ValueError(
+                "HARNESS_DIR is not set; it names the checked-out coco harness."
+            )
         resolved = resolve_run(
-            pr_number=os.environ.get("PR_NUMBER", ""),
-            pr_sha=os.environ.get("PR_SHA", ""),
-            pr_repo=os.environ.get("PR_REPO", ""),
+            pr_number=pr_number,
+            pr_sha=pr_sha,
+            pr_repo=pr_repo,
             event_name=os.environ.get("EVENT_NAME", ""),
             schedule=os.environ.get("SCHEDULE", ""),
             periodic_mode=os.environ.get("PERIODIC_MODE", "nightly"),
             dry_run=dry_run,
+            baseline_sha=resolve_baseline_sha(
+                pr_number=pr_number,
+                pr_sha=pr_sha,
+                pr_repo=pr_repo,
+                harness_dir=Path(harness_dir),
+                require=os.environ.get("REQUIRE_BASELINE_SHA", "false").lower()
+                == "true",
+            ),
         )
-    except ValueError as exc:
+    except (ValueError, GitHubApiError) as exc:
         print(f"::error::{exc}")
         raise SystemExit(1) from exc
 

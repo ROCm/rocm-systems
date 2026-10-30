@@ -153,11 +153,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         SHARED
         src/rocjitsu/code/dbt/gfx1250_b0_to_a0_library.cpp
     )
+    # The CDNA4-to-CDNA3 lowering downcasts to CDNA4 instruction classes. With
+    # vptr checks, it references their RTTI, which only the CDNA4 model emits.
+    # This library links only the gfx1250 model, so it compiles that source
+    # without vptr checks.
+    rj_vptr_free_sources(
+        _translator_code_objects
+        rocjitsu_code
+        dbt/semantic/cdna4_to_cdna3.cpp
+    )
     foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)
-        target_sources(
-            rocjitsu_gfx1250_b0_to_a0
-            PRIVATE $<TARGET_OBJECTS:${_object_lib}>
-        )
+        if(_object_lib STREQUAL "rocjitsu_code")
+            set(_translator_objects ${_translator_code_objects})
+        else()
+            set(_translator_objects $<TARGET_OBJECTS:${_object_lib}>)
+        endif()
+        target_sources(rocjitsu_gfx1250_b0_to_a0 PRIVATE ${_translator_objects})
     endforeach()
     set_target_properties(
         rocjitsu_gfx1250_b0_to_a0
