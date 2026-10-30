@@ -2119,6 +2119,10 @@ per VGPR. A/B words pack two FP16 elements; C/D words contain FP32 bit patterns.
 The matrices are distributed across the wave, not replicated per lane.
 WMMA ignores EXEC, so the API has no execution-mask parameter.
 The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/arith/README.md#api-example">README example</a> constructs these operands and decodes the result.</p>
+<p>Sparse SWMMAC instead reads the initial accumulator from <code>d</code>; its fourth pointer
+operand is <code>index</code>, not a separate <code>c</code>. See the
+<a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/arith/include/rj_arith/detail/rj_arith_wmma.h">sparse instruction contracts</a>
+for operand layouts and metadata selectors.</p>
 <h3 id="operands-and-register-storage">Operands and register storage<a class="headerlink" href="#operands-and-register-storage" title="Permanent link">&para;</a></h3>
 <p>Scalar inputs are values; scalar outputs are pointers. Vector operands are
 arrays of VGPR pointers, with <code>uint32_t</code> words carrying raw bits in ISA layout.
