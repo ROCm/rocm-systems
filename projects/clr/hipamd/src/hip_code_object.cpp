@@ -703,10 +703,10 @@ Var* StatCO::FindDeferredManagedVar(const void* ptr) {
 }
 
 // ================================================================================================
-void StatCO::ForEachFatBinaryBlob(void (*cb)(const void*)) const {
+void StatCO::ForEachFatBinary(void (*cb)(FatBinaryInfo*)) {
   std::scoped_lock lock(sclock_);
-  for (const auto& [data, _] : modules_) {
-    cb(data);
+  for (const auto& [_, fat_binary_info] : modules_) {
+    cb(fat_binary_info);
   }
 }
 
