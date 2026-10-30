@@ -309,11 +309,12 @@ private:
 
 /// @brief Count the elements materialized by a tensor DMA instruction.
 /// @details Gather mode uses valid_indices * tile_dims[0]. Dense mode includes
-/// every iteration. Arithmetic overflow and empty dense tile dimensions return
-/// std::nullopt.
+/// every iteration. A zero tile_dims[0] makes the instruction a NOP whatever the
+/// higher tile dimensions (CDNA5 ISA, Table 80). Arithmetic overflow and a zero
+/// higher dimension below the rank return std::nullopt.
 inline std::optional<uint64_t> tensor_element_count(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout) {
-  if (layout.rank() == 0)
+  if (layout.rank() == 0 || desc.tile_dims[0] == 0)
     return uint64_t{0};
   if (desc.gather)
     return util::checked_mul(uint64_t{desc.valid_indices}, uint64_t{desc.tile_dims[0]});
@@ -344,10 +345,7 @@ inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &des
   if (desc.gather) {
     if (rank != 2) [[unlikely]]
       return util::Result::failure();
-    if (desc.tile_dims[0] == 0) [[unlikely]]
-      return util::Result::failure();
-    if (desc.valid_indices == 0) [[unlikely]]
-      return util::Result::failure();
+    // Zero valid indices or a zero tile_dims[0] is a NOP; see tensor_element_count.
     const uint32_t max_indices = desc.gather_indices_32bit ? 8 : 16;
     if (desc.valid_indices > max_indices) [[unlikely]]
       return util::Result::failure();
@@ -729,8 +727,6 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
   const size_t observed_address_count = static_cast<size_t>(
       std::ranges::count_if(state.elements, &TensorDmaTransferElement::in_bounds));
   const std::vector<TensorDmaLdsRange> lds_ranges = tensor_dma_lds_ranges(state);
-  if (observed_address_count == 0 && lds_ranges.empty())
-    return;
 
   const TensorDmaMemoryAccessObservation access{
       .mnemonic = inst.mnemonic(),
@@ -944,9 +940,10 @@ util::Result execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) 
     inst.set_data(std::move(state));
   }
   TensorDmaState &state = *inst.template data_as<TensorDmaState>();
-  if (!state.desc.active())
-    return util::Result::success();
-  state.outcome = resume_tensor_dma_state(state, wf);
+  // A NULL tensor copies nothing and sends no barrier arrive, but it still
+  // completes on TENSORcnt, so it is reported like any other instruction.
+  if (state.desc.active())
+    state.outcome = resume_tensor_dma_state(state, wf);
   report_completed_tensor_dma(inst, wf, state);
   return util::Result::success();
 }

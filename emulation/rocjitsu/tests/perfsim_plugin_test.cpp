@@ -1005,15 +1005,21 @@ TEST_F(PerfsimPluginTest, ReportsNegotiatedVersionForUnrepresentableInstruction)
 }
 
 TEST_F(PerfsimPluginTest, ExecutedTensorLoadWithoutGlobalRequestsKeepsTheDispatch) {
-  // A tensor load whose tile lies wholly outside the tensor zero-fills LDS and
-  // makes no global requests. Its observation has LDS ranges but no addresses,
-  // which perfsim must skip rather than reject. The control is in bounds.
+  // Tensor loads that make no global requests: a tile wholly outside the tensor
+  // (which still zero-fills LDS), a NULL tensor and a NOP tile. Each is
+  // observed with no addresses, which perfsim must skip rather than reject.
+  // The control is in bounds.
   struct Case {
     uint32_t dispatch_id;
-    uint32_t tensor_dim0;
+    uint32_t tensor_dim0 = 1;
+    uint32_t count = 1;
+    uint32_t tile_dim0 = 1;
+    uint32_t tile_dim1 = 0;
   };
-  for (const Case test_case : {Case{60, 1}, Case{61, 0}}) {
-    SCOPED_TRACE(test_case.tensor_dim0);
+  for (const Case test_case : {Case{.dispatch_id = 60}, Case{.dispatch_id = 61, .tensor_dim0 = 0},
+                               Case{.dispatch_id = 62, .count = 0},
+                               Case{.dispatch_id = 63, .tile_dim0 = 0, .tile_dim1 = 1}}) {
+    SCOPED_TRACE(test_case.dispatch_id);
     const std::string config = plugin_config();
     WaveFixture fixture;
     testing::internal::CaptureStderr();
@@ -1035,10 +1041,16 @@ TEST_F(PerfsimPluginTest, ExecutedTensorLoadWithoutGlobalRequestsKeepsTheDispatc
 
       // One i32 element at LDS offset 0 from a one-element tile.
       constexpr uint64_t kGlobal = 0x300000;
-      const std::array<uint32_t, 4> group0{1, 0, static_cast<uint32_t>(kGlobal),
+      const std::array<uint32_t, 4> group0{test_case.count, 0, static_cast<uint32_t>(kGlobal),
                                            static_cast<uint32_t>(kGlobal >> 32) | 0x80000000u};
-      const std::array<uint32_t, 8> group1{
-          2u << 16, test_case.tensor_dim0 << 16, 0, 1u << 16, 0, 0, 0, 0};
+      const std::array<uint32_t, 8> group1{2u << 16,
+                                           test_case.tensor_dim0 << 16,
+                                           1u << 16,
+                                           test_case.tile_dim0 << 16,
+                                           test_case.tile_dim1,
+                                           1,
+                                           0,
+                                           0};
       const uint32_t sgprs = wave.sgpr_alloc().base;
       for (uint32_t reg = 0; reg < group0.size(); ++reg)
         fixture.cu->write_sgpr(sgprs + reg, group0[reg]);
@@ -1069,8 +1081,9 @@ TEST_F(PerfsimPluginTest, ExecutedTensorLoadWithoutGlobalRequestsKeepsTheDispatc
     const auto trace = lines(read_file(trace_.path()));
     EXPECT_NE(line_with_prefix(trace, "begin " + dispatch), trace.size());
     EXPECT_NE(line_with_prefix(trace, "end " + dispatch), trace.size());
+    // Only the in-bounds control makes global requests to stage.
     EXPECT_EQ(line_with_prefix(trace, "tdm " + dispatch) != trace.size(),
-              test_case.tensor_dim0 != 0);
+              test_case.dispatch_id == 60);
   }
 }
 
