@@ -14,6 +14,7 @@ from config import analysis_configs_dir
 from utils.metrics.base_units import (
     SCALED_UNITS,
     base_unit,
+    from_base_unit_value,
     to_base_unit_value,
 )
 
@@ -119,3 +120,45 @@ def test_every_scaled_config_unit_has_a_base_unit_rule():
     }
     assert scaled_in_configs, "expected scaled units in the shipped configs"
     assert scaled_in_configs <= set(SCALED_UNITS)
+
+
+@pytest.mark.parametrize(
+    ("unit", "value_name", "config_value"),
+    [
+        ("GB/s", "Value", 1.5),
+        ("GFLOP/s", "Peak (Empirical)", 81715.2),
+        ("KB per Wave", "Avg", 2.5),
+        ("Bytes/s", "Value", 1 / 3),
+        ("Nanoseconds", "Avg", 12.5),
+    ],
+)
+def test_from_base_unit_value_inverts_to_base_unit_value(
+    unit, value_name, config_value
+):
+    """Reading a stored value back in its config unit recovers the value."""
+    stored = to_base_unit_value(unit, value_name, config_value)
+    assert from_base_unit_value(unit, value_name, stored) == pytest.approx(
+        config_value, rel=1e-12
+    )
+
+
+def test_from_base_unit_value_divides_a_stored_value_by_its_scale():
+    """A Bytes/s value stored for a GB/s metric is shown in GB/s again."""
+    assert from_base_unit_value("GB/s", "Value", 1.5e9) == 1.5
+    assert from_base_unit_value("KB per Wave", "Value", 2560.0) == 2.5
+
+
+def test_from_base_unit_value_keeps_percent_of_peak_unscaled():
+    """Percent of Peak keeps its scale in both directions."""
+    assert from_base_unit_value("GB/s", "Percent of Peak", 42.5) == 42.5
+
+
+@pytest.mark.parametrize("value", [None, "N/A"])
+def test_from_base_unit_value_passes_non_numbers_through(value):
+    """A NULL or text value is returned as it is, never shown as 0."""
+    assert from_base_unit_value("GB/s", "Value", value) is value
+
+
+def test_from_base_unit_value_keeps_nan_as_nan():
+    """NaN stays NaN, so a value that was never calculated is still NULL."""
+    assert np.isnan(from_base_unit_value("GB/s", "Value", float("nan")))

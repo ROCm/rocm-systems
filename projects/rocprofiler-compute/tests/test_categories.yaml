@@ -21,6 +21,7 @@ test_categories:
       - test_pattern_matching
       - test_pc_sampling_analysis
       - test_analysis_db
+      - test_report_adapter
       - test_analysis_base
       - test_analysis_orm
       - test_code_object_analysis
@@ -115,6 +116,7 @@ test_categories:
       - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
+      - test_report_adapter
       - test_analysis_base
       - test_analysis_orm
       - test_code_object_analysis
@@ -219,6 +221,7 @@ test_categories:
       - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
+      - test_report_adapter
       - test_analysis_base
       - test_analysis_orm
       - test_code_object_analysis
@@ -323,6 +326,7 @@ test_categories:
       - test_conftest
       - test_profile_multi_rank
       - test_analysis_db
+      - test_report_adapter
       - test_analysis_base
       - test_analysis_orm
       - test_code_object_analysis

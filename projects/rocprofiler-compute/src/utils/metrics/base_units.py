@@ -52,6 +52,13 @@ def base_unit(unit: Optional[str]) -> Optional[str]:
     return unit
 
 
+def _config_scale(unit: Optional[str], value_name: str) -> Optional[float]:
+    """Return the factor that scales a config unit to its base unit, or None."""
+    if unit not in SCALED_UNITS or value_name in UNSCALED_VALUE_NAMES:
+        return None
+    return SCALED_UNITS[unit][1]
+
+
 def to_base_unit_value(
     unit: Optional[str],
     value_name: str,
@@ -61,8 +68,23 @@ def to_base_unit_value(
 
     Missing values, text and Percent of Peak are returned unchanged.
     """
-    if unit not in SCALED_UNITS or value_name in UNSCALED_VALUE_NAMES:
+    scale = _config_scale(unit, value_name)
+    if scale is None or not isinstance(value, numbers.Real):
         return value
-    if not isinstance(value, numbers.Real):
+    return value * scale
+
+
+def from_base_unit_value(
+    unit: Optional[str],
+    value_name: str,
+    value: Union[float, str, None],
+) -> Union[float, str, None]:
+    """Return one stored value in the config unit its metric is labelled with.
+
+    The inverse of to_base_unit_value. Missing values, text and Percent of Peak
+    are returned unchanged.
+    """
+    scale = _config_scale(unit, value_name)
+    if scale is None or not isinstance(value, numbers.Real):
         return value
-    return value * SCALED_UNITS[unit][1]
+    return value / scale

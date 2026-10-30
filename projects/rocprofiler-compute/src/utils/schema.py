@@ -10,6 +10,20 @@ import pandas as pd
 
 from membw_analysis.models import MemBwAnalysisResult
 
+# Metric table columns that name or describe a metric. The database stores no
+# values for them, so the report adapter reads them from the config template.
+METRIC_DESCRIPTIVE_COLUMNS = frozenset({
+    "Metric",
+    "Unit",
+    "Description",
+    "Type",
+    "Xfer",
+    "Coherency",
+    "Transaction",
+})
+# Derived from the Value or Avg and Peak rows, so it is not a template expression.
+PERCENT_OF_PEAK_COLUMN = "Percent of Peak"
+
 
 @dataclass
 class ArchConfig:
