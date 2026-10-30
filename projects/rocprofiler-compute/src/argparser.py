@@ -802,7 +802,11 @@ Examples:
         metavar="",
         nargs="+",
         type=block_token_or_alias,
-        help="\t\tSpecify metric id(s) from --list-metrics for filtering.",
+        help=(
+            "\t\tSpecify metric id(s) from --list-metrics for filtering. "
+            "Narrows the terminal report only; csv and db outputs keep every "
+            "metric the profile collected."
+        ),
     )
     analyze_group.add_argument(
         "--gpu-id",

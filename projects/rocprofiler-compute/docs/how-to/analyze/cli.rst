@@ -31,9 +31,10 @@ Walkthrough
 
 .. note::
 
-   By default, analyze only evaluates the profiled blocks. Analyze-mode
-   ``-b`` overrides this and might produce missing-counter warnings for blocks
-   whose counters were not collected.
+   By default, analyze only evaluates the profiled blocks. For the terminal
+   report, analyze-mode ``-b`` overrides this and might produce missing-counter
+   warnings for blocks whose counters were not collected. The ``csv`` and ``db``
+   outputs always evaluate every profiled metric, whatever ``-b`` selects.
 
 There are three high-level GPU analysis views:
 
@@ -753,10 +754,12 @@ format is ``stdout``.
    * For a PC-sampled workload it also holds each kernel's disassembly and source, and the samples per source line; see :ref:`pc-sampling-per-kernel-csv` and :ref:`pc-sampling-per-source-line-csv`.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
+   * NOTE: The ``-b`` selection does not narrow the CSV files, which hold every metric the profile collected.
 
 * ``db`` format:
    * Generate a file named ``rocprof_compute_<uuid>.db`` in the current working directory.
    * This is a SQLite database file containing all the data in the analysis report structured according to :ref:`analysis database schema <analysis-database>`.
+   * The database holds every metric the profile collected for each kernel and for the workload, including the roofline plot points and the memory chart values. The ``-b`` selection does not narrow it.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 

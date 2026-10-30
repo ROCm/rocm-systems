@@ -318,6 +318,10 @@ def memory_chart_layout_extdata(gpu_arch: str) -> Optional[dict[str, Any]]:
 
 
 class db_analysis(OmniAnalyze_Base):
+    def analysis_metric_filter(self) -> Optional[list[str]]:
+        """The database stores every metric, so analyze -b does not narrow it."""
+        return None
+
     # -----------------------
     # Required child methods
     # -----------------------
@@ -1375,7 +1379,6 @@ class db_analysis(OmniAnalyze_Base):
                     list(metric_df.iterrows()),
                 )
                 for table_id, metric_df in arch_config.dfs.items()
-                if table_id != 402  # roofline points handled in calc_roofline_data
                 if "Metric" in metric_df.columns
             ]
 
@@ -1526,7 +1529,10 @@ class db_analysis(OmniAnalyze_Base):
         return pmc_df_per_workload
 
     def calc_roofline_data(self) -> dict[str, pd.DataFrame]:
-        """Calculate per-kernel roofline data for each workload."""
+        """Calculate per-kernel roofline data for each workload. The plot-points
+        metric rows are stored by calc_metrics_data; this keeps KernelRooflineData.
+        It evaluates the same 402 expressions with the raw sys_info, so a 402
+        expression must not use built-in variables or the two values diverge."""
         roofline_data_per_kernel: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._pmc_df_per_workload.keys():

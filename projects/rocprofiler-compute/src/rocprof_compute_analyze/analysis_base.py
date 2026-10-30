@@ -127,6 +127,11 @@ class OmniAnalyze_Base:
         config = getattr(self, "_profiling_config", {})
         return config.get("membw_analysis", False)
 
+    def analysis_metric_filter(self) -> Optional[list[str]]:
+        """The analyze -b selection that narrows the metric tables built for
+        this run. The terminal report honours it."""
+        return self.get_args().filter_metrics
+
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs
 
@@ -209,7 +214,7 @@ class OmniAnalyze_Base:
                     arch,
                     args.config_dir,
                     args.list_stats,
-                    args.filter_metrics,
+                    self.analysis_metric_filter(),
                     sys_info.iloc[0],
                     getattr(self, "_profiling_config", {}),
                 )

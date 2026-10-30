@@ -859,6 +859,74 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert set(exprs["metric_id"]) == {"7.1.0"}
 
 
+def test_calc_metrics_data_stores_plot_points_and_memory_chart_tables():
+    """Roofline plot points (402) and memory chart (301) are stored as metric
+    rows like the roofline rates (401); only the KernelRooflineData shape stays
+    in calc_roofline_data."""
+    workload_path = "/fake/workload"
+    rate_df = pd.DataFrame(
+        {
+            "Metric": ["HBM Bandwidth"],
+            "Value": ["bw_expr"],
+            "Unit": ["GB/s"],
+            "Peak (Empirical)": ["peak_expr"],
+        },
+        index=pd.Index(["4.1.0"], name="Metric_ID"),
+    )
+    plot_points_df = pd.DataFrame(
+        {"Metric": ["AI HBM"], "Value": ["ai_expr"], "Unit": ["FLOPs/Byte"]},
+        index=pd.Index(["4.2.0"], name="Metric_ID"),
+    )
+    memory_chart_df = pd.DataFrame(
+        {"Metric": ["VGPR"], "Value": ["vgpr_expr"], "Unit": ["Registers"]},
+        index=pd.Index(["3.1.0"], name="Metric_ID"),
+    )
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {401: rate_df, 402: plot_points_df, 301: memory_chart_df}
+    arch_config.panel_configs = {
+        300: {
+            "id": 300,
+            "title": "Memory Chart",
+            "data source": [{"metric_table": {"id": 301, "title": "Memory Chart"}}],
+        },
+        400: {
+            "id": 400,
+            "title": "Roofline",
+            "data source": [
+                {
+                    "metric_table": {
+                        "id": 401,
+                        "title": "Roofline Performance Rates",
+                    }
+                },
+                {"metric_table": {"id": 402, "title": "Roofline Plot Points"}},
+            ],
+        },
+    }
+
+    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    metrics_info, expressions = analyzer.calc_metrics_data()
+
+    info = metrics_info[workload_path]
+    assert set(info["metric_id"]) == {"3.1.0", "4.1.0", "4.2.0"}
+    plot_point = info[info["metric_id"] == "4.2.0"].iloc[0]
+    assert plot_point["name"] == "AI HBM"
+    assert plot_point["table_name"] == "Roofline"
+    assert plot_point["sub_table_name"] == "Roofline Plot Points"
+
+    exprs = expressions[workload_path]
+    plot_point_exprs = exprs[exprs["metric_id"] == "4.2.0"]
+    assert list(plot_point_exprs["value_name"]) == ["Value"]
+    assert list(plot_point_exprs["value"]) == ["ai_expr"]
+    assert set(exprs[exprs["metric_id"] == "3.1.0"]["value"]) == {"vgpr_expr"}
+
+
 LONG_FORM_PMC_PERF = (
     "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
     "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
@@ -3731,3 +3799,136 @@ def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_p
     # Also covers a layout file skipped as broken
     workload = run_memory_chart_workload(tmp_path, "gfx1030")
     assert workload.memory_chart_layout_extdata is None
+
+
+# =============================================================================
+# Metric coverage: every metric table is stored per kernel and per workload
+# =============================================================================
+
+
+def test_run_analysis_stores_plot_points_and_memory_chart_per_kernel_and_workload(
+    db_session, tmp_path
+):
+    workload_path = str(tmp_path)
+    arch_config = schema.ArchConfig()
+    arch_config.panel_configs = {
+        300: {
+            "id": 300,
+            "title": "Memory Chart",
+            "data source": [{"metric_table": {"id": 301, "title": "Memory Chart"}}],
+        },
+        400: {
+            "id": 400,
+            "title": "Roofline",
+            "data source": [
+                {"metric_table": {"id": 402, "title": "Roofline Plot Points"}}
+            ],
+        },
+        3000: {
+            "id": 3000,
+            "title": "Memory Bandwidth Analysis",
+            "data source": [{"metric_table": {"id": 3001, "title": "L1 Cache"}}],
+        },
+    }
+    arch_config.dfs = {
+        301: pd.DataFrame(
+            {
+                "Metric": ["VGPR"],
+                "Value": ["to_avg(raw_pmc_df['Arch_VGPR'])"],
+                "Unit": ["Registers"],
+            },
+            index=pd.Index(["3.1.0"], name="Metric_ID"),
+        ),
+        3001: pd.DataFrame(
+            {
+                "Metric": ["L1 Cache - Peak VGPR"],
+                "Value": ["to_max(raw_pmc_df['Arch_VGPR'])"],
+                "Unit": ["Registers"],
+            },
+            index=pd.Index(["30.1.0"], name="Metric_ID"),
+        ),
+        402: pd.DataFrame(
+            {
+                "Metric": ["Performance (GFLOPs)"],
+                "Value": ["to_sum(raw_pmc_df['SQ_FLOPS'])"],
+                "Unit": ["GFLOP/s"],
+            },
+            index=pd.Index(["4.2.0"], name="Metric_ID"),
+        ),
+    }
+    pmc_df = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_b"],
+        "Start_Timestamp": [0, 10, 30],
+        "End_Timestamp": [10, 30, 40],
+        "Arch_VGPR": [4.0, 8.0, 16.0],
+        "SQ_FLOPS": [1.0, 2.0, 4.0],
+    })
+
+    analyzer = make_counter_backed_database_analyzer(workload_path, ["3", "4"], [])
+    analyzer._arch_configs = {"gfx942": arch_config}
+    analyzer._pmc_df_per_workload = {workload_path: pmc_df}
+    analyzer._dispatch_data_per_workload = {
+        workload_path: pd.DataFrame([
+            {
+                "dispatch_id": dispatch_id,
+                "kernel_name": kernel_name,
+                "gpu_id": 0,
+                "start_timestamp": start,
+                "end_timestamp": end,
+            }
+            for dispatch_id, (kernel_name, start, end) in enumerate(
+                [("kernel_a", 0, 10), ("kernel_a", 10, 30), ("kernel_b", 30, 40)],
+                start=1,
+            )
+        ])
+    }
+    (
+        analyzer._metrics_info_data_per_workload,
+        analyzer._metric_expression_data_per_workload,
+    ) = analyzer.calc_metrics_data()
+    (
+        analyzer._kernel_values_data_per_workload,
+        analyzer._workload_values_data_per_workload,
+    ) = analyzer.calc_expressions()
+
+    run_analysis_with_existing_database(analyzer)
+
+    session = orm.Database.get_session()
+    kernel_values = {
+        (row.kernel.kernel_name, row.metric.metric_id): row.value
+        for row in session.query(orm.KernelMetricValue).filter(
+            orm.KernelMetricValue.value_name == "Value"
+        )
+    }
+    assert kernel_values[("kernel_a", "4.2.0")] == pytest.approx(3.0)
+    assert kernel_values[("kernel_b", "4.2.0")] == pytest.approx(4.0)
+    assert kernel_values[("kernel_a", "3.1.0")] == pytest.approx(6.0)
+    assert kernel_values[("kernel_b", "3.1.0")] == pytest.approx(16.0)
+    assert kernel_values[("kernel_a", "30.1.0")] == pytest.approx(8.0)
+    assert kernel_values[("kernel_b", "30.1.0")] == pytest.approx(16.0)
+
+    workload_values = {
+        row.metric.metric_id: row.value
+        for row in session.query(orm.WorkloadMetricValue).filter(
+            orm.WorkloadMetricValue.value_name == "Value"
+        )
+    }
+    assert workload_values["4.2.0"] == pytest.approx(7.0)
+    assert workload_values["3.1.0"] == pytest.approx(28.0 / 3.0)
+    assert workload_values["30.1.0"] == pytest.approx(16.0)
+
+    plot_point = (
+        session
+        .query(orm.MetricDefinition)
+        .filter(orm.MetricDefinition.metric_id == "4.2.0")
+        .one()
+    )
+    assert plot_point.sub_table_name == "Roofline Plot Points"
+
+
+def test_database_ignores_analyze_block_filter():
+    """analyze -b narrows only the terminal report; the database builds every
+    metric the profile collected."""
+    analyzer = db_analysis(MagicMock(verbose=0, filter_metrics=["2"]), {})
+
+    assert analyzer.analysis_metric_filter() is None

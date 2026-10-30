@@ -225,8 +225,9 @@ settings without stating that those differ.
 
 Terminal output is the default. Only choose a format when the user asks to save
 or export. `--output-format` takes `txt`, `csv`, or `db`, each of which
-disables terminal output, and `--output-name` sets the file name. See
-[analysis output format](../../docs/how-to/analyze/cli.rst).
+disables terminal output, and `--output-name` sets the file name. The `csv`
+and `db` outputs keep every metric the profile collected for every kernel,
+whatever `-b` selects. See [analysis output format](../../docs/how-to/analyze/cli.rst).
 
 ## 9. When something looks wrong
 

@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from rocprof_compute_analyze.analysis_cli import cli_analysis
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
@@ -157,6 +158,43 @@ def test_initalize_runs_corrects_specs_only_when_asked(
 
     expected_num_xcd = "4" if specs_correction else 8
     assert workload.sys_info["num_xcd"].item() == expected_num_xcd
+
+
+# ---------------------------------------------------------------------------
+# initalize_runs passes the analyze -b selection to the terminal report
+# ---------------------------------------------------------------------------
+
+
+def test_initalize_runs_applies_analyze_block_filter_to_terminal_report(
+    tmp_path, monkeypatch
+) -> None:
+    """analyze -b narrows the metric tables built for the terminal report."""
+    pd.DataFrame([{"gpu_arch": "gfx942"}]).to_csv(tmp_path / "sysinfo.csv", index=False)
+    seen_filters = []
+
+    def fake_generate_configs(self, arch, _config_dir, _list_stats, filter_metrics, *_):
+        seen_filters.append(filter_metrics)
+        self._arch_configs[arch] = SimpleNamespace(dfs={}, dfs_type={})
+        return self._arch_configs
+
+    monkeypatch.setattr(cli_analysis, "generate_configs", fake_generate_configs)
+    analyzer = cli_analysis(
+        argparse.Namespace(
+            path=[[str(tmp_path)]],
+            specs_correction=None,
+            no_roof=True,
+            normal_unit="per_kernel",
+            list_stats=False,
+            filter_metrics=["2"],
+            config_dir=str(tmp_path),
+            gpu_kernel=None,
+        ),
+        {},
+    )
+
+    analyzer.initalize_runs()
+
+    assert seen_filters == [["2"]]
 
 
 # =============================================================================
