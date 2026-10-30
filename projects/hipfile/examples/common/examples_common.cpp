@@ -7,17 +7,50 @@
 
 #include <hipfile.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cinttypes>
-#include <fcntl.h>
-#include <sys/stat.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static const uint64_t FNV1A_OFFSET = 14695981039346656037ULL;
 static const uint64_t FNV1A_PRIME  = 1099511628211ULL;
+
+int
+get_file_info(const char *path, size_t *size, size_t *alignment)
+{
+    unsigned int mask = STATX_SIZE;
+#if defined(STATX_DIOALIGN)
+    mask |= STATX_DIOALIGN;
+#endif
+    struct statx stx {};
+    if (statx(AT_FDCWD, path, 0, mask, &stx)) {
+        fprintf(stderr, "Could not statx %s (%s)\n", path, strerror(errno));
+        return 1;
+    }
+    if (!(stx.stx_mask & STATX_SIZE)) {
+        fprintf(stderr, "File size unavailable for %s\n", path);
+        return 1;
+    }
+    size_t io_alignment = BLOCK_ALIGN;
+#if defined(STATX_DIOALIGN)
+    if (stx.stx_mask & STATX_DIOALIGN) {
+        if (!is_power_of_two(stx.stx_dio_mem_align) || !is_power_of_two(stx.stx_dio_offset_align)) {
+            fprintf(stderr, "Unsupported or invalid direct-I/O alignment for %s (memory %u, offset %u)\n",
+                    path, stx.stx_dio_mem_align, stx.stx_dio_offset_align);
+            return 1;
+        }
+        io_alignment = std::max(stx.stx_dio_mem_align, stx.stx_dio_offset_align);
+    }
+#endif
+    *size      = static_cast<size_t>(stx.stx_size);
+    *alignment = io_alignment;
+    return 0;
+}
 
 void
 fill_pattern(void *buf, size_t size)
