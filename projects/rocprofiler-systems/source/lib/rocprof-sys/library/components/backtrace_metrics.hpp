@@ -18,12 +18,13 @@
 #include <timemory/utility/type_list.hpp>
 #include <timemory/variadic/types.hpp>
 
+#include <fmt/format.h>
+
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -161,9 +162,7 @@ hardware_counter_track_name(const std::string& label, std::int64_t tid)
         throw std::runtime_error("Empty description for " + label);
     }
 
-    std::stringstream track_name;
-    track_name << "Thread " << descr << " [" << tid << "] (S)";
-    return track_name.str();
+    return fmt::format("Thread {} [{}] (S)", descr, tid);
 }
 }  // namespace component
 }  // namespace rocprofsys
