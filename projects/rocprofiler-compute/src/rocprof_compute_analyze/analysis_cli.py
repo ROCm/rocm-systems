@@ -9,6 +9,8 @@ from typing import Optional
 import pandas as pd
 
 from membw_analysis.engine import run_membw_analysis
+from ml_api_tracing.analysis import process_ml_api_trace_output
+from ml_api_tracing.call_tree import iter_call_tree_paths, rollup_node_stats
 from ml_api_tracing.models import CallTreeForest, CallTreeNode
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
@@ -20,9 +22,6 @@ from utils.utils_analysis import (
     build_operator_summary,
     copy_matched_operator_subtree,
     filter_forest_by_backends,
-    iter_call_tree_paths,
-    process_ml_api_trace_output,
-    rollup_node_stats,
 )
 from utils.utils_common import validate_roofline_csv
 

@@ -18,6 +18,10 @@ test_categories:
       - test_ml_api_tracing_marker_format
       - test_ml_api_tracing_constants
       - test_ml_api_tracing_errors
+      - test_ml_api_tracing_input
+      - test_ml_api_tracing_processing
+      - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_analysis
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
@@ -110,6 +114,10 @@ test_categories:
       - test_ml_api_tracing_marker_format
       - test_ml_api_tracing_constants
       - test_ml_api_tracing_errors
+      - test_ml_api_tracing_input
+      - test_ml_api_tracing_processing
+      - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_analysis
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
@@ -220,6 +228,10 @@ test_categories:
       - test_ml_api_tracing_marker_format
       - test_ml_api_tracing_constants
       - test_ml_api_tracing_errors
+      - test_ml_api_tracing_input
+      - test_ml_api_tracing_processing
+      - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_analysis
       - test_utils_profile
       - test_common
       - test_amdsmi_interface
@@ -330,6 +342,10 @@ test_categories:
       - test_ml_api_tracing_marker_format
       - test_ml_api_tracing_constants
       - test_ml_api_tracing_errors
+      - test_ml_api_tracing_input
+      - test_ml_api_tracing_processing
+      - test_ml_api_tracing_call_tree
+      - test_ml_api_tracing_analysis
       - test_utils_profile
       - test_common
       - test_amdsmi_interface

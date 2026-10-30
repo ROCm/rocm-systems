@@ -32,14 +32,13 @@ from utils.logger import console_log, console_warning
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     ARGS_DISPLAY_MAX_VARIANTS,
-    NS_TO_MS,
     build_operator_summary,
     fold_identical_sibling_subtrees,
     format_operator_args,
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids, strip_ansi
+from utils.utils_common import NS_TO_MS, convert_filter_blocks_to_panel_ids, strip_ansi
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
 

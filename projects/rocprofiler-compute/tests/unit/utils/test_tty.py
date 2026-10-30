@@ -14,6 +14,7 @@ import pytest
 
 import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
+from ml_api_tracing.call_tree import rollup_node_stats
 from ml_api_tracing.models import CallTreeNode, KernelStats
 from utils.tty import (
     _render_membw_guidance,
@@ -31,7 +32,6 @@ from utils.tty import (
     show_call_tree,
     show_operator_summary,
 )
-from utils.utils_analysis import rollup_node_stats
 from utils.utils_common import strip_ansi
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}

@@ -3932,8 +3932,8 @@ def multiline_coverage_failure_warning(
 
 def call_trees_from_workload(workload_dir: str) -> Dict[str, List[Any]]:
     """Build analyze call trees from a profiled workload directory."""
+    from ml_api_tracing.analysis import process_ml_api_trace_output
     from utils.schema import Workload
-    from utils.utils_analysis import process_ml_api_trace_output
 
     workload = Workload()
     process_ml_api_trace_output(workload, workload_dir)
