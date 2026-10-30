@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
@@ -109,15 +110,6 @@ template <typename T>
 // Quick check for explicit scratch access: FLAT scratch_* and SMEM s_scratch_*.
 [[nodiscard]] bool is_scratch_access(std::string_view m) {
   return m.starts_with("scratch_") || m.starts_with("s_scratch_");
-}
-// RDNA4 image instructions (VIMAGE / VSAMPLE). Their decoders do not name every
-// register they access: no address VGPR is reported, vdata is four registers
-// whatever dmask selects (so a load can appear to write registers it does not),
-// an atomic's data is reported only as written, and a tfe status register is not
-// reported. The live-in and clobber analyses would get those registers wrong, so
-// admitting these instructions is deferred until the decoder models the fields.
-[[nodiscard]] bool is_unmodeled_image_access(rj_code_arch_t arch, std::string_view m) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 && m.starts_with("image_");
 }
 
 } // namespace
@@ -251,6 +243,9 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
       report(error_out, "probe body accesses scratch / private segment");
       return std::nullopt;
     }
+    // The decoder does not report an RDNA4 image instruction's address VGPRs,
+    // so the live-in analysis would miss them. Admitting these instructions is
+    // deferred until the decoder models the field.
     if (is_unmodeled_image_access(arch, m)) {
       report(error_out, "probe body has an RDNA4 image instruction, whose registers the decoder "
                         "does not fully model");

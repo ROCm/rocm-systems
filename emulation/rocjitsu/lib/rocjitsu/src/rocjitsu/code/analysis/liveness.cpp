@@ -212,6 +212,23 @@ bool accesses_sgprs_indirectly_via_movrel(KernelBlockScope blocks) {
   return false;
 }
 
+bool is_unmodeled_image_access(rj_code_arch_t arch, std::string_view mnemonic) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 && mnemonic.starts_with("image_");
+}
+
+bool accesses_vgprs_indirectly(KernelBlockScope blocks, std::span<const uint8_t> text,
+                               rj_code_arch_t arch) {
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      if (may_access_vgprs_indirectly(inst, text, arch))
+        return true;
+    }
+  }
+  return false;
+}
+
 LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
                                    std::unique_ptr<ExecMaskAnalysis> exec,
                                    LivenessAnalysisOptions options,

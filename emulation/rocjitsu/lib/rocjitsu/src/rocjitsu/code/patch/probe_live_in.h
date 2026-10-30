@@ -76,8 +76,8 @@ namespace rocjitsu {
 /// Returns std::nullopt (with a reason written to @p error_out, if non-null)
 /// when the analysis could not run: an @p abi that fails is_valid_probe_abi(),
 /// a probe object whose `.text` layout the scope walk cannot address, no decoder
-/// for @p arch, a decode failure, a probe entry that does not start a decoded
-/// block, or a body whose relative / GPR-indexed VGPR access or relative SGPR
+/// for @p arch, a decode failure (an entry inside an instruction included), or
+/// a body whose relative / GPR-indexed VGPR access or relative SGPR
 /// access means its encoded operands do not name every register it reads.
 [[nodiscard]] std::optional<RegisterSet>
 analyze_probe_live_ins(const AmdGpuCodeObject &probe_obj, const ResolvedProbeSymbol &sym,

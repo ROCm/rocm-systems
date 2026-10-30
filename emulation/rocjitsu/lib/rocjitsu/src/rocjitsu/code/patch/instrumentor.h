@@ -176,6 +176,10 @@ struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
   std::vector<std::string> warnings;
+  /// True when the patch gates refused the code object for a kernel property
+  /// the Instrumentor does not support, rather than failing to patch the queued
+  /// points.
+  bool kernel_unsupported = false;
 };
 
 /// @brief Result of Instrumentor::patch_with_debug_summaries().
@@ -253,6 +257,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// the builder stays generic.
 /// Called by Instrumentor::patch() as a defense-check (make sure users/agents
 /// do not misinterpret current DBI support) and also directly by tests
+///
+/// patch() refuses a kernel liveness cannot follow only when a point calls a
+/// probe, because this nop takes no registers. Inline code that takes
+/// registers must extend that refusal to its points.
 ///
 /// TODO: delete this when DBI supports more plans
 [[nodiscard]] bool validate_inline_nop_plan(const TrampolinePlan &plan,
@@ -398,8 +406,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// is a much more difficult task.
 ///
 /// Block decoding is lazy so the CFG is built on the first call that needs
-/// it (validate_points / find_instruction_at_offset). An Instrumentor that
-/// never gets patched also never decodes.
+/// it (validate_points, kernel_blocks or patch). An Instrumentor that is never
+/// asked for any of these calls also never decodes. When the object has one
+/// .text section and kernel descriptors, only code reachable from a kernel
+/// entry is decoded; otherwise the whole .text is.
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
@@ -436,6 +446,32 @@ public:
   /// one record per queued point in insertion order and `errors` is empty.
   [[nodiscard]] ValidationResult validate_points();
 
+  /// @brief The blocks of the kernel entered at @p entry_text_offset, in .text
+  ///        order.
+  ///
+  /// @p entry_text_offset is a byte offset within .text, as in
+  /// KernelDescriptorInfo::entry_text_offset. Returns the blocks
+  /// reachable_kernel_blocks() walks from the decoded block that starts there,
+  /// taken from the same blocks validation and patching use.
+  ///
+  /// Returns nullopt and sets *error_out when decoding fails, the object does
+  /// not have exactly one .text section, or no decoded block starts at
+  /// @p entry_text_offset.
+  ///
+  /// Queues nothing and does not spend the single patch attempt.
+  [[nodiscard]] std::optional<std::vector<const BasicBlock *>>
+  kernel_blocks(uint64_t entry_text_offset, std::string *error_out = nullptr);
+
+  /// @brief Byte offset within .text of the first instruction in @p block a
+  ///        point can anchor at, if any.
+  ///
+  /// Applies the anchor rules that do not depend on the point:
+  /// is_relocatable_anchor(), and not being among the instructions an s_clause
+  /// covers, which is counted across block boundaries. A point queued there can
+  /// still be refused for reasons that depend on its probe or on the other
+  /// points. @p block must come from kernel_blocks().
+  [[nodiscard]] std::optional<uint64_t> first_anchor(const BasicBlock &block) const;
+
   /// @brief Validate, plan, build, and apply the queued points; emit a
   ///        patched ELF.
   ///
@@ -448,14 +484,31 @@ public:
   /// error. Shares the single-attempt budget with patch_with_debug_summaries();
   /// see the class-level note.
   ///
+  /// Liveness at each anchor currently follows successors() only: no call or
+  /// return edge, and nothing past an unresolved edge
+  /// (BasicBlock::successor_issue()). A register read only in a callee, after a
+  /// call returns, or past such an edge counts as dead, so a trampoline in such
+  /// a kernel may clobber it. Liveness also sees the register an operand
+  /// encodes, not the one an `s_movrel*` / `v_movrel*` access or GPR index mode
+  /// reaches. When a point calls a probe, patch() refuses a code object with a
+  /// call, an unresolved edge (code that runs off the end of .text included),
+  /// such a relative access, or an RDNA4 image instruction, whose address VGPRs
+  /// the decoder does not report. It also refuses a kernel that preloads kernel
+  /// arguments on CDNA2 or where uses_kernarg_preload_firmware_skip() holds:
+  /// firmware can enter one 256 bytes past its descriptor entry, which is not
+  /// treated as a kernel entry. These refusals set `kernel_unsupported`.
+  ///
   /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
   /// prologue those need loads through a kernarg wrapper that no runtime builds
   /// yet.
+  ///
+  /// These refusals are the patch gates; only a test can skip them, through
+  /// InstrumentorTestAccess::skip_patch_gates().
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
   ///
-  /// Refuses the same points patch() does.
+  /// Refuses the same points and kernels patch() does.
   ///
   /// Currently intended for tests and debugging, although could eventually
   /// be used to communicate important information for the host (an ordering
@@ -470,9 +523,12 @@ private:
   bool patched_ = false;
 
   // The patch gates refuse points that need runtime support no runtime provides
-  // yet. Tests skip them through the InstrumentorTestAccess friend to exercise
-  // the gated path, whether or not they provide that support themselves; the
-  // planner's checks after the gates still run. Production callers cannot skip.
+  // yet (the kernarg wrapper), and kernels the Instrumentor does not support
+  // (the liveness and kernarg-preload limits). Tests skip them through the
+  // InstrumentorTestAccess friend to exercise the gated path. Skipping makes
+  // neither safe: a test that supplies the wrapper itself still gets no sound
+  // liveness for an unsupported kernel. The planner's checks after the gates
+  // still run. Production callers cannot skip.
   friend struct InstrumentorTestAccess;
   bool skip_patch_gates_ = false;
 
@@ -487,13 +543,23 @@ private:
   // are among the following instructions covered by an s_clause. The s_clause
   // instruction itself is rejected by is_relocatable_anchor().
   std::unordered_set<uint64_t> clause_blocked_offsets_;
+  // .text-relative entries of the object's kernels; the roots of the decode.
+  std::vector<uint64_t> kernel_entries_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);
   // in that case *error_out is set and blocks_built_ stays false so the failure
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
+  // Builds the blocks and returns the single .text section that anchor offsets
+  // are relative to. Sets *error_out and returns nullopt when decoding fails or
+  // the object does not have exactly one .text section.
+  [[nodiscard]] std::optional<std::span<const uint8_t>> anchor_text(std::string *error_out);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
+  // Diagnostic for an anchor_offset at which no decoded instruction starts,
+  // naming why: past .text, inside an instruction, or outside decoded code.
+  [[nodiscard]] std::string undecoded_anchor_error(uint64_t anchor_offset,
+                                                   uint64_t text_size) const;
 
   // The DBI entry prologue as a dispatch-only stub in the cave: the descriptor
   // is redirected to it, and it branches to the untouched original entry. Not

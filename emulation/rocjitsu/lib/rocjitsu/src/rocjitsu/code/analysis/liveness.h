@@ -23,6 +23,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -189,6 +190,23 @@ struct LivenessAnalysisOptions {
 /// RDNA `s_movrelsd_2_b32` pair form. Any other scalar indirection would need
 /// its own scan.
 [[nodiscard]] bool accesses_sgprs_indirectly_via_movrel(KernelBlockScope blocks);
+
+/// @brief Whether any instruction in @p blocks may access a VGPR its operands do
+///        not name: `v_movrel*` / `v_swaprel*`, or GPR index mode, which
+///        `s_set_gpr_idx_on` or a MODE write enables on CDNA.
+///
+/// @details LivenessAnalysis does not model that displacement either, so a
+/// caller relying on it for VGPR liveness must reject a scope where this holds.
+/// @p text and @p arch let the scan read the MODE bits a write sets.
+[[nodiscard]] bool accesses_vgprs_indirectly(KernelBlockScope blocks, std::span<const uint8_t> text,
+                                             rj_code_arch_t arch);
+
+/// @brief Whether @p mnemonic, decoded for @p arch, is an RDNA4 image
+///        instruction (VIMAGE / VSAMPLE).
+///
+/// @details Their decoders do not report the address VGPRs, so InstDefUse
+/// misses those reads and liveness can report the registers dead.
+[[nodiscard]] bool is_unmodeled_image_access(rj_code_arch_t arch, std::string_view mnemonic);
 
 /// @brief Kernel-global register usage plus deferred backward CFG liveness.
 ///
