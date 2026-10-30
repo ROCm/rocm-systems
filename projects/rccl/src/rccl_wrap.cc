@@ -115,6 +115,8 @@ RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // Broadcast DDA: unset follows the arch table (any Broadcast DDA tier), 0 off, >0 on.
 RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
+// Development only: lets Broadcast LL run on the single-node IPC DDA path (e.g. gfx950).
+RCCL_PARAM(DdaBcAllowIpc, "DDA_BC_ALLOW_IPC", 0);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
@@ -2515,7 +2517,8 @@ ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataTy
   if (!rcclDdaBcEnabled(archTable, comm->nRanks)) return ncclSuccess;
   const size_t entryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
   if (!rcclDdaEnabled(comm, bytes, entryMax, query, "BC")) return ncclSuccess;
-  if (!IsArchMatch(comm->archName, "gfx1250")) return ncclSuccess;
+  const bool fabric = IsArchMatch(comm->archName, "gfx1250");
+  if (!fabric && !(rcclParamDdaBcAllowIpc() && comm->ddaIpcMemHandler != nullptr)) return ncclSuccess;
 
   const size_t llMax = rcclDdaLLThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
   const size_t ll128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
@@ -2525,7 +2528,7 @@ ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataTy
     decision->nMaxChannels = ncclBroadcastDdaFabricLLBlocks(comm, count, datatype);
     return rcclSelectDone("BC", query, decision);
   }
-  if (ll128Max > 0 && bytes <= ll128Max && ncclBroadcastDdaFabricLL128Eligible(comm, count, datatype)) {
+  if (fabric && ll128Max > 0 && bytes <= ll128Max && ncclBroadcastDdaFabricLL128Eligible(comm, count, datatype)) {
     decision->algo = RCCL_DDA_FABRIC_LL128;
     decision->protocol = NCCL_PROTO_LL128;
     decision->nMaxChannels = ncclBroadcastDdaFabricLL128Blocks(comm, count, datatype);
