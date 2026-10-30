@@ -97,16 +97,16 @@ reason from host-trap data; it does not record one.
 ## 5. Export annotated disassembly
 
 ```bash
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> \
-    --output-format csv --output-name pc_report
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -o pc_report
 ```
 
-CSV output writes per-kernel annotated disassembly into a
+Every analyze run writes its output into a new run folder, here `./pc_report`.
+The folder holds per-kernel annotated disassembly in a
 `per_kernel_pc_sampling/` directory, with sample counts and source lines beside
-each instruction. `--output-format db` stores the same content in the analysis
-database. Both disable terminal output.
+each instruction. `analysis.db` in the same folder stores the same content.
+The report still prints to the terminal.
 
-CSV output also writes `<file>_pc_sampling.csv` beside each captured source
+The run folder also holds `<file>_pc_sampling.csv` beside each captured source
 file, with the sample counts of every source line and the ISA rows each line
 compiled to. Start there to find the hottest source line.
 

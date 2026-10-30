@@ -153,10 +153,10 @@ def test_validate_metrics(
             # Check whether metric values are correct
             code = binary_handler_analyze_rocprof_compute([
                 "analyze",
+                "--output-directory",
+                ".",
                 "--output-name",
                 f"{analysis_workload_dir}",
-                "--output-format",
-                "csv",
                 "-b",
                 *metric_ids,
                 "--path",

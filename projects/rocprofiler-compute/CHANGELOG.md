@@ -21,7 +21,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * GL1 request latency.
 
 * Added PC sampling counts per source line.
-  * `rocprof-compute analyze --output-format csv` writes `<file>_pc_sampling.csv` beside each captured source file. It lists every source line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
+  * `rocprof-compute analyze` writes `<file>_pc_sampling.csv` beside each source file it exports into the run folder. It lists every source line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
   * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
 
@@ -54,9 +54,31 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
+* Every analyze run now writes its output into a new run folder, so a rerun never overwrites earlier results.
+  * `-d/--output-directory` sets the directory the run folder is created in. It defaults to the current working directory, and missing parent directories are created.
+  * `-o/--output-name` sets the run folder name. Without it, the folder is named `rocprof_compute_analyze_<YYYYMMDD_HHMMSS>`, with `_1`, `_2`, and so on appended if that folder exists. If the `-o` folder already exists, analyze exits with an error before any analysis.
+  * Every run writes `report.txt`, `analysis.db`, and one CSV file per analysis database view into the run folder, and still prints the report to the terminal. The last line printed is the absolute path of the run folder.
+  * The roofline HTML is written to `<run folder>/1-<workload>/roofline-gpu-0.html` instead of into the workload directory.
+  * Listing options such as `--list-stats` only print and write no files.
+  * With `--torch-operator` or `--triton-operator`, the run folder holds `report.txt` but no `analysis.db` or CSV files.
+  * To migrate existing commands:
+
+    | Before | Now |
+    |---|---|
+    | `analyze -p wl` prints the report | The report is also written to `./rocprof_compute_analyze_<YYYYMMDD_HHMMSS>/report.txt` |
+    | `--output-format txt --output-name X` writes `./X.txt` | `-o X` writes `./X/report.txt` |
+    | `--output-format db --output-name X` writes `./X.db` | `-o X` writes `./X/analysis.db` |
+    | `--output-format csv --output-name X` writes `./X/*.csv` | `-o X` writes `./X/*.csv` |
+    | Rerunning with the same `--output-name` replaces the files | Exits with an error; choose a new name or omit `-o` |
+    | `<workload>/empirRoof_gpu-0.html` | `<run folder>/1-<workload>/roofline-gpu-0.html` |
+
+* Renamed the analyze-mode dispatch filter to `--kernel-iteration-range`, matching profile mode. Update any analyze command by replacing `-d/--dispatch` with `--kernel-iteration-range`.
+  * `--dispatch` is no longer accepted in analyze mode.
+  * `-d` is now the short form of `--output-directory` in analyze mode, as in profile mode.
+
 ### Removed
 
-* Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
+* Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or the `analysis.db` that every analyze run writes to explore results in ROCm Optiq.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
 
 * Removed the unused `compute_workload_roofline_data` table from the analysis database.
@@ -79,7 +101,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
-* Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. These unsupported combinations now report a clear error during option validation.
+* Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. `--list-stats` now only prints its listing.
 
 * Fixed `--torch-trace` errors in models that use lazy layers such as `nn.LazyLinear`.
 
@@ -95,6 +117,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
 ### Upcoming changes
+
+* `analyze --output-format` is deprecated and has no effect, because every analyze run writes the report, the analysis database, and the CSV files. It will be removed in a future release.
 
 ### Known issues
 

@@ -5,7 +5,6 @@
 
 import argparse
 import functools
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,14 +15,6 @@ import pytest
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 
 MODULE = "rocprof_compute_analyze.analysis_base"
-
-# An empty path list leaves pre_processing() nothing to walk but the sink setup.
-PRE_PROCESSING_ARGS = {
-    "path": [],
-    "gpu_kernel": None,
-    "gpu_id": None,
-    "gpu_dispatch_id": None,
-}
 
 
 def record_error_and_exit(errors, *args, **kwargs):
@@ -44,76 +35,6 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
         OmniAnalyze_Base(argparse.Namespace(path=paths), {}).sanitize()
 
     assert "last two components" in mock_error.call_args.args[1]
-
-
-# ---------------------------------------------------------------------------
-# pre_processing output_format dispatch
-# ---------------------------------------------------------------------------
-
-
-def test_pre_processing_txt_creates_named_file(tmp_path, monkeypatch) -> None:
-    """--output-format txt with --output-name writes <name>.txt in the cwd."""
-    mocks = common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
-    monkeypatch.setattr(OmniAnalyze_Base, "initalize_runs", lambda self: {})
-    monkeypatch.chdir(tmp_path)
-
-    analyzer = OmniAnalyze_Base(
-        argparse.Namespace(
-            output_format="txt", output_name="analysis_report", **PRE_PROCESSING_ARGS
-        ),
-        {},
-    )
-    analyzer.pre_processing()
-
-    try:
-        report = tmp_path / "analysis_report.txt"
-        assert report.is_file()
-        assert not analyzer._output.closed
-        assert Path(analyzer._output.name).resolve() == report
-        assert analyzer._output.writable()
-        assert "analysis_report.txt" in mocks["warning"].call_args.args[1]
-    finally:
-        analyzer._output.close()
-
-
-def test_pre_processing_txt_default_name_is_uuid(tmp_path, monkeypatch) -> None:
-    """Without --output-name the txt file falls back to rocprof_compute_<uuid>."""
-    common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
-    monkeypatch.setattr(OmniAnalyze_Base, "initalize_runs", lambda self: {})
-    monkeypatch.chdir(tmp_path)
-
-    analyzer = OmniAnalyze_Base(
-        argparse.Namespace(
-            output_format="txt", output_name=None, **PRE_PROCESSING_ARGS
-        ),
-        {},
-    )
-    analyzer.pre_processing()
-
-    try:
-        created = list(tmp_path.iterdir())
-        assert len(created) == 1
-        assert created[0].match("rocprof_compute_*.txt")
-    finally:
-        analyzer._output.close()
-
-
-def test_pre_processing_stdout_creates_no_file(tmp_path, monkeypatch) -> None:
-    """--output-format stdout routes to the terminal and touches no file."""
-    common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
-    monkeypatch.setattr(OmniAnalyze_Base, "initalize_runs", lambda self: {})
-    monkeypatch.chdir(tmp_path)
-
-    analyzer = OmniAnalyze_Base(
-        argparse.Namespace(
-            output_format="stdout", output_name=None, **PRE_PROCESSING_ARGS
-        ),
-        {},
-    )
-    analyzer.pre_processing()
-
-    assert analyzer._output is sys.stdout
-    assert list(tmp_path.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------
@@ -242,26 +163,3 @@ def test_sanitize_errors_when_operator_flag_without_trace(
         ).sanitize()
     assert "was not profiled" in errors[-1][1]
     assert expected_trace in errors[-1][1]
-
-
-def test_sanitize_rejects_invalid_output_name(tmp_path, monkeypatch) -> None:
-    """An --output-name outside [A-Za-z0-9_-] errors before any output is checked."""
-    workload = tmp_path / "app" / "MI300"
-    workload.mkdir(parents=True)
-    (workload / "profiling_config.yaml").write_text("", encoding="utf-8")
-    monkeypatch.setattr(f"{MODULE}.validate_workload", lambda path: None)
-    errors = []
-    monkeypatch.setattr(
-        f"{MODULE}.console_error", functools.partial(record_error_and_exit, errors)
-    )
-
-    with pytest.raises(SystemExit):
-        OmniAnalyze_Base(
-            argparse.Namespace(
-                path=[[str(workload)]], output_name="bad name", output_format="txt"
-            ),
-            {},
-        ).sanitize()
-
-    assert errors[-1][0] == "analysis"
-    assert "only alphanumeric characters" in errors[-1][1]

@@ -5,17 +5,24 @@ import argparse
 import importlib
 import shutil
 import socket
+import sqlite3
 import sys
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 import config
 from argparser import omniarg_parser
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
+)
+from rocprof_compute_analyze.output_location import (
+    ANALYSIS_DB_FILE_NAME,
+    OutputLocationError,
+    resolve_run_folder,
 )
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
@@ -53,11 +60,52 @@ from utils.utils_exceptions import WorkloadCommandError
 from utils.utils_profile import get_submodules
 
 
+class AnalysisWriter(Protocol):
+    """An analyzer that writes its artifacts into an existing run folder.
+
+    Defined here so this module can type analyzers without importing them, which
+    would load the analysis dependencies in profile mode.
+    """
+
+    def write_outputs(self, run_folder: Path) -> None: ...
+
+
+def _operator_filter_active(args: argparse.Namespace) -> bool:
+    """Return True when --torch-operator or --triton-operator is given."""
+    return args.torch_operator is not None or args.triton_operator is not None
+
+
+def _is_listing_run(args: argparse.Namespace) -> bool:
+    """Return True for analyze runs that only print a listing."""
+    return any([
+        args.list_stats,
+        getattr(args, "list_available_metrics", False),
+        args.list_torch_operators,
+        args.list_triton_operators,
+    ])
+
+
+def _write_run_folder(run_folder: Path, analyzers: list[AnalysisWriter]) -> None:
+    """Create run_folder and let each analyzer write its artifacts into it."""
+    try:
+        run_folder.mkdir(parents=True)
+    except OSError as error:
+        console_error("analysis", f"Cannot create run folder {run_folder}: {error}")
+    try:
+        for analyzer in analyzers:
+            analyzer.write_outputs(run_folder)
+    except (OSError, sqlite3.Error) as error:
+        console_error(
+            "analysis",
+            f"Writing the analysis output failed: {error}. The partial run "
+            f"folder is left at {run_folder.resolve()}",
+        )
+
+
 class RocProfCompute:
     def __init__(self) -> None:
         self.__args: Optional[argparse.Namespace] = None
         self.__profiler_mode = None
-        self.__analyze_mode = None
         self.__soc: dict[str, OmniSoC_Base] = {}
         self.__version: dict[str, Optional[str]] = {"ver": None, "ver_pretty": None}
         self.__supported_archs = mi_gpu_specs.get_gpu_series_dict()
@@ -94,8 +142,6 @@ class RocProfCompute:
         if self.__mode == "profile":
             if not getattr(self.__args, "bench_only", False):
                 self.detect_profiler()
-        elif self.__mode == "analyze":
-            self.detect_analyze()
 
         console_debug(f"Execution mode = {self.__mode}")
 
@@ -136,12 +182,6 @@ class RocProfCompute:
                 f"Incompatible profiler: {profiler_mode}. Supported profilers "
                 f"include: {get_submodules('rocprof_compute_profile')}"
             )
-
-    def detect_analyze(self) -> None:
-        if self.__args.output_format in ("db", "csv"):
-            self.__analyze_mode = "db"
-        else:
-            self.__analyze_mode = "cli"
 
     def sanitize(self) -> None:
         if self.__args.mode is None and not (
@@ -295,38 +335,23 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
-        if args.list_stats and args.output_format in ("csv", "db"):
-            console_error(
-                "--list-stats cannot be used with --output-format "
-                f"{args.output_format}. "
-                "Use --output-format stdout or txt, or remove --list-stats."
+        if args.output_format is not None:
+            console_warning(
+                "analysis",
+                "--output-format is deprecated and has no effect. Every analyze "
+                "run writes report.txt, analysis.db and the CSV files into the "
+                "run folder.",
             )
 
-        operator_filter = (
-            args.torch_operator is not None or args.triton_operator is not None
-        )
         operator_listing = args.list_torch_operators or args.list_triton_operators
-
-        if operator_filter or operator_listing:
-            if args.output_format != "stdout":
-                console_error(
-                    "ml api trace",
-                    "Operator flags (--torch-operator, --triton-operator, "
-                    "--list-torch-operators, --list-triton-operators) are only "
-                    "supported with --output-format stdout (the default). "
-                    "The matched operator call tree is printed directly to "
-                    "stdout and is not captured in txt, csv, or db output. "
-                    "Remove the --output-format option or drop the operator flags.",
-                )
-
-            if operator_filter and operator_listing:
-                console_warning(
-                    "ml api trace",
-                    "Operator filters are ignored when a --list-*-operators "
-                    "flag is used; the full operator tree will be shown. "
-                    "Drop the listing flag to apply the operator filter, or "
-                    "drop the filter to list all operators.",
-                )
+        if _operator_filter_active(args) and operator_listing:
+            console_warning(
+                "ml api trace",
+                "Operator filters are ignored when a --list-*-operators "
+                "flag is used; the full operator tree will be shown. "
+                "Drop the listing flag to apply the operator filter, or "
+                "drop the filter to list all operators.",
+            )
 
     @demarcate
     def handle_list_args(self) -> None:
@@ -679,42 +704,77 @@ class RocProfCompute:
 
     @demarcate
     def run_analysis(self) -> None:
-        # Lazy import pandas since it is only used in analysis mode.
+        """Calculate in memory, then write every artifact into a new run folder.
+
+        Listing runs only print. Every other run reports invalid input before the
+        run folder is created.
+        """
+        # Lazy import since the analyzers are only used in analysis mode.
         # This keeps analysis deps out of the profile path.
-        import pandas as pd
+        from rocprof_compute_analyze.analysis_cli import cli_analysis
 
         self.print_graphic()
-        console_log(f"Analysis mode = {self.__analyze_mode}")
+        run_folder = (
+            None if _is_listing_run(self.__args) else self._resolve_run_folder()
+        )
 
-        if self.__analyze_mode == "cli":
-            from rocprof_compute_analyze.analysis_cli import cli_analysis
+        cli_analyzer = cli_analysis(self.__args, self.__supported_archs)
+        cli_analyzer.sanitize()
+        self._load_workload_soc_specs()
+        if getattr(self.__args, "list_available_metrics", False):
+            self.list_metrics()
+        cli_analyzer.set_soc(self.__soc)
+        cli_analyzer.pre_processing()
+        if run_folder is None:
+            cli_analyzer.show_listing()
+            return
 
-            analyzer = cli_analysis(self.__args, self.__supported_archs)
-        elif self.__analyze_mode == "db":
-            from rocprof_compute_analyze.analysis_db import db_analysis
+        analyzers: list[AnalysisWriter] = [cli_analyzer]
+        db_analyzer = self._build_analysis_database(run_folder)
+        if db_analyzer is not None:
+            analyzers.insert(0, db_analyzer)
+        _write_run_folder(run_folder, analyzers)
+        console_log("analysis", f"Run folder: {run_folder.resolve()}")
 
-            analyzer = db_analysis(self.__args, self.__supported_archs)
-        else:
-            console_error(f"Unsupported analysis mode -> {self.__analyze_mode}")
+    def _resolve_run_folder(self) -> Path:
+        """Return the new run folder from -d/--output-directory and -o."""
+        args = self.__args
+        directory = Path(args.output_directory or Path.cwd())
+        try:
+            return resolve_run_folder(directory, args.output_name, datetime.now())
+        except OutputLocationError as error:
+            console_error("analysis", str(error))
 
-        # -----------------------
-        # run analysis workflow
-        # -----------------------
-        analyzer.sanitize()
+    def _load_workload_soc_specs(self) -> None:
+        """Load the SoC of every -p workload from its sysinfo.csv."""
+        import pandas as pd
 
-        # Load required SoC(s) from input
-        for path_list in analyzer.get_args().path:
+        for path_list in self.__args.path:
             base_path = path_list[0] if isinstance(path_list, list) else path_list
-
             sys_info = pd.read_csv(f"{base_path}/sysinfo.csv")
             sys_info_dict = {
                 key: value[0] for key, value in sys_info.to_dict("list").items()
             }
             self.load_soc_specs(sys_info_dict)
 
-        if getattr(self.__args, "list_available_metrics", False):
-            self.list_metrics()
+    def _build_analysis_database(self, run_folder: Path) -> Optional[AnalysisWriter]:
+        """Return the DB analyzer with its database filled in memory.
 
-        analyzer.set_soc(self.__soc)
-        analyzer.pre_processing()
-        analyzer.run_analysis()
+        Returns None with an operator filter, which the DB analyzer does not apply.
+        """
+        if _operator_filter_active(self.__args):
+            console_warning(
+                "analysis",
+                "analysis.db and the CSV files are not written with "
+                "--torch-operator or --triton-operator.",
+            )
+            return None
+
+        from rocprof_compute_analyze.analysis_db import db_analysis
+
+        db_analyzer = db_analysis(self.__args, self.__supported_archs)
+        db_analyzer.sanitize()
+        db_analyzer.set_soc(self.__soc)
+        db_analyzer.pre_processing()
+        db_analyzer.build_database(run_folder / ANALYSIS_DB_FILE_NAME)
+        return db_analyzer

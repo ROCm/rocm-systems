@@ -148,7 +148,7 @@ To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
    --------------------------------------------------------------------------------
    4. Roofline
 
-   Interactive roofline plot saved to /home/user/workloads/rocflop/MI350/empirRoof_gpu-0.html
+   Interactive roofline plot saved to /home/user/rocprof_compute_analyze_20260101_120000/1-MI350/roofline-gpu-0.html
 
    (4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points
 
@@ -476,8 +476,7 @@ More analysis options
 
 .. note::
 
-   ``--list-stats`` supports the default ``stdout`` output and ``--output-format txt``.
-   Combining it with ``--output-format csv`` or ``--output-format db`` exits with an error.
+   ``--list-stats`` only prints to the terminal. It creates no run folder and writes no files.
 
 
 **List metrics**
@@ -699,7 +698,7 @@ For both the Current Workload and the Baseline Workload, you can independently s
 * Workload Name with ``--path``
 * GPU ID filtering (multi-selection) with ``--gpu-id``
 * Kernel Name filtering (multi-selection) with ``--kernel``
-* Dispatch ID filtering (regex filtering) with ``--dispatch``
+* Dispatch ID filtering (multi-selection) with ``--kernel-iteration-range``
 * ROCm Compute Profiler panels/blocks (multi-selection) with ``--block``
 
 .. code-block:: shell
@@ -728,39 +727,53 @@ Examples:
 
 .. _analysis-output-format:
 
-Analysis output format
-======================
+Analysis output
+===============
 
-Use the ``--output-format <format>`` analyze mode option to specify the output format of the
-analysis report. Supported formats are ``stdout``, ``txt``, ``csv``, and ``db``. The default output
-format is ``stdout``.
+Every analyze run creates one new run folder and writes all of its output there. The run folder
+holds:
 
-``--list-stats`` is available only with ``stdout`` and ``txt`` output.
+* ``report.txt``: the full analysis report, as printed on the terminal.
+* ``analysis.db``: a SQLite database with all the data in the analysis report, structured
+  according to the :ref:`analysis database schema <analysis-database>`.
+* One CSV file per view of the :ref:`analysis database schema <analysis-database>`.
+* For a PC-sampled workload, each kernel's disassembly and source and the samples per source
+  line in ``per_kernel_pc_sampling/``; see :ref:`pc-sampling-per-kernel-csv` and
+  :ref:`pc-sampling-per-source-line-csv`.
+* For a single workload with roofline data, ``1-<workload>/roofline-gpu-0.html``, where
+  ``<workload>`` is the name of the workload directory given with ``-p``.
 
-* ``stdout`` format:
-   * Print analysis report to the terminal.
-   * NOTE: This option will not generate any file or folder.
+The terminal still shows the analysis report. The last line printed is the absolute path of the
+run folder.
 
-* ``txt`` format:
-   * Generate a file named ``rocprof_compute_<uuid>.txt`` in the current working directory.
-   * This file contains the entire analysis report as printed on the terminal.
-   * This is useful in case of searching across long analysis reports.
-   * NOTE: This option will disable output of analysis report to terminal.
+Use these analyze mode options to choose where the run folder goes:
 
-* ``csv`` format:
-   * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
-   * This folder contains one CSV file per view defined in the :ref:`analysis database schema <analysis-database>`.
-   * For a PC-sampled workload it also holds each kernel's disassembly and source, and the samples per source line; see :ref:`pc-sampling-per-kernel-csv` and :ref:`pc-sampling-per-source-line-csv`.
-   * This is useful for further programmatic analysis of analysis reports.
-   * NOTE: This option will disable output of analysis report to terminal.
+* ``-d``/``--output-directory <dir>``: the directory to create the run folder in. It defaults to
+  the current working directory. Missing parent directories are created, and the path is taken
+  literally.
+* ``-o``/``--output-name <name>``: the run folder name. It may contain only letters, digits,
+  ``_`` and ``-``. If the folder already exists, analyze exits with an error before any analysis,
+  so an earlier run is never overwritten.
 
-* ``db`` format:
-   * Generate a file named ``rocprof_compute_<uuid>.db`` in the current working directory.
-   * This is a SQLite database file containing all the data in the analysis report structured according to :ref:`analysis database schema <analysis-database>`.
-   * This is useful for further programmatic analysis of analysis reports.
-   * NOTE: This option will disable output of analysis report to terminal.
+Without ``-o``, the run folder is named ``rocprof_compute_analyze_<YYYYMMDD_HHMMSS>`` after the
+local time. If that folder already exists, ``_1``, ``_2``, and so on is appended.
 
-Default file/folder name ``rocprof_compute_<uuid>`` can be overridden using ``--output-name <name>`` analyze mode option. For ``csv`` format the name is used as the output folder; for ``db`` format the name is used with a ``.db`` suffix.
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -d analysis_runs -o vcopy_baseline
+
+Analyze never modifies or deletes the files of an existing run folder. Listing options such as
+``--list-stats`` and ``--list-available-metrics`` only print and create no run folder.
+
+.. note::
+
+   Analyze still writes ``pmc_kernel_top.csv`` and ``pmc_dispatch_info.csv`` into the workload
+   directory.
+
+.. note::
+
+   ``--output-format`` is deprecated and has no effect. Every run writes ``report.txt``,
+   ``analysis.db`` and the CSV files.
 
 .. _analysis-database:
 
@@ -791,7 +804,7 @@ Analysis database example
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --verbose --output-name test --output-format db -p workloads/nbody/MI300X_A1 -p workloads/nbody1/MI300X_A1
+   $ rocprof-compute analyze --verbose -o test -p workloads/nbody/MI300X_A1 -p workloads/nbody1/MI300X_A1
    DEBUG Execution mode = analyze
 
                                     __                                       _
@@ -801,7 +814,6 @@ Analysis database example
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-      INFO Analysis mode = db
       INFO ed45b0b189
    DEBUG [omnisoc init]
       INFO ed45b0b189
@@ -821,13 +833,15 @@ Analysis database example
       (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
    DEBUG Calculated metric values
    DEBUG Calculated roofline data points
-   DEBUG [analysis] generating analysis
-   DEBUG SQLite database initialized with name: test.db
-   DEBUG Initialized database: test.db
+   DEBUG SQLite database initialized in memory
+   DEBUG Initialized database: test/analysis.db
+   DEBUG [analysis] writing analysis outputs
       INFO ed45b0b189
       INFO ed45b0b189
    DEBUG Completed writing database
-   WARNING Created file: test.db
+   WARNING Created file: test/analysis.db
+   ...
+      INFO [analysis] Run folder: /app/projects/rocprofiler-compute/test
 
 
 PyTorch operator analysis
@@ -840,7 +854,8 @@ PyTorch operator analysis
    use ``rocprof-compute analyze ... --experimental`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
-These options work only with the default ``--output-format stdout``. If you
+The operator call tree is printed only to the terminal. With an operator filter,
+the run folder holds ``report.txt`` but no ``analysis.db`` or CSV files. If you
 combine ``--list-torch-operators`` with ``--torch-operator``, rocprof-compute
 lists all operators and ignores the filter.
 
@@ -929,13 +944,14 @@ the metric tables further:
 
 * ``-k`` keeps only the listed kernels. Use the ``(id N)`` shown next to each
   kernel in the operator tree.
-* ``-d`` keeps only the listed dispatches that the matching operators
-  launched.
+* ``--kernel-iteration-range`` keeps only the listed dispatches that the
+  matching operators launched.
 * ``--list-stats`` lists only the kernels that the matching operators
   launched.
 
 These options do not change the printed operator tree. Kernel IDs depend on
-``-d``, so use the same ``-d`` when you look up a kernel ID.
+``--kernel-iteration-range``, so use the same ``--kernel-iteration-range``
+when you look up a kernel ID.
 
 .. code-block:: shell-session
 

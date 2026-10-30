@@ -530,7 +530,7 @@ def test_torch_operator_with_dispatch_filter(
         "analyze",
         "--torch-operator",
         "*",
-        "--dispatch",
+        "--kernel-iteration-range",
         "1",
         "--path",
         torch_trace_profiled_workload,

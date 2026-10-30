@@ -91,7 +91,11 @@ from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
 )
-from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
+from utils.utils_common import (
+    get_version,
+    normalize_filter_to_str_list,
+    validate_roofline_csv,
+)
 from utils.utils_counter_defs import (
     extract_counters_and_variables,
     get_build_in_vars,
@@ -350,18 +354,10 @@ class db_analysis(OmniAnalyze_Base):
         report_evaluation_diagnostics()
 
     @demarcate
-    def run_analysis(self) -> None:
-        """Run CLI analysis."""
-        super().run_analysis()
-
-        # Initialize analysis database
-        # Create db uuid
-        if self.get_args().output_name:
-            db_name = f"{self.get_args().output_name}.db"
-        else:
-            db_name = f"rocprof_compute_{get_uuid()}.db"
-        Database.init(db_name)
-        console_debug(f"Initialized database: {db_name}")
+    def build_database(self, db_path: Path) -> None:
+        """Fill the in-memory analysis database; write_outputs saves it to db_path."""
+        Database.init(str(db_path))
+        console_debug(f"Initialized database: {db_path}")
 
         # Iterate over all workloads
         workload_source_snapshots: list[WorkloadSourceSnapshot] = []
@@ -480,30 +476,35 @@ class db_analysis(OmniAnalyze_Base):
             )
         )
 
-        if self.get_args().output_format == "csv":
-            Database.commit()
-            csv_result_folder = Path(db_name).with_suffix("")
-            # Before write_csv_dir, which closes the session these rows stream from.
-            per_kernel_isa_files = export_per_kernel_isa_files(
-                csv_result_directory=csv_result_folder,
-                workload_isa_exports=self._build_workload_isa_exports(workload_objs),
-            )
-            export_per_source_line_files(
-                export_directory=per_kernel_isa_files.directory,
-                isa_line_locations=per_kernel_isa_files.isa_line_locations,
-                workload_source_line_exports=(
-                    self._build_workload_source_line_exports(workload_objs)
-                ),
-            )
-            Database.write_csv_dir(csv_result_folder)
-            export_source_snapshot_files(
-                workload_source_snapshots=workload_source_snapshots,
-                export_directory=per_kernel_isa_files.directory,
-            )
-        else:
-            Database.create_views()
-            Database.commit()
-            Database.write()
+        Database.commit()
+        self._workload_objs = workload_objs
+        self._workload_source_snapshots = workload_source_snapshots
+
+    @demarcate
+    def write_outputs(self, run_folder: Path) -> None:
+        """Write analysis.db, the view CSVs and the PC-sampling exports."""
+        super().write_outputs(run_folder)
+        # The per-kernel exports stream rows from the open session.
+        per_kernel_isa_files = export_per_kernel_isa_files(
+            csv_result_directory=run_folder,
+            workload_isa_exports=self._build_workload_isa_exports(self._workload_objs),
+        )
+        export_per_source_line_files(
+            export_directory=per_kernel_isa_files.directory,
+            isa_line_locations=per_kernel_isa_files.isa_line_locations,
+            workload_source_line_exports=(
+                self._build_workload_source_line_exports(self._workload_objs)
+            ),
+        )
+        Database.create_views()
+        Database.commit()
+        Database.write()
+        Database.write_csv_dir(run_folder)
+        Database.close()
+        export_source_snapshot_files(
+            workload_source_snapshots=self._workload_source_snapshots,
+            export_directory=per_kernel_isa_files.directory,
+        )
 
     @staticmethod
     def _build_workload_isa_exports(
@@ -661,6 +662,12 @@ class db_analysis(OmniAnalyze_Base):
                 continue
             if not (Path(workload_path) / "roofline.csv").exists():
                 console_warning(f"Roofline ceilings not found for {workload_path}.")
+                continue
+            is_roofline_valid, roofline_error = validate_roofline_csv(workload_path)
+            if not is_roofline_valid:
+                console_warning(
+                    f"Skipping roofline ceilings for {workload_path}: {roofline_error}"
+                )
                 continue
 
             roofline_dict = (

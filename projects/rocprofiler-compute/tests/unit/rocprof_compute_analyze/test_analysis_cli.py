@@ -89,7 +89,6 @@ def append_args_and_exit(errors, *argv, **_kwargs):
 def cli_with_two_operator_workloads(args):
     inst = cli_analysis.__new__(cli_analysis)
     inst._profiling_config = {}
-    inst._output = None
     inst._runs = {
         "/w1": workload_with_operator_forest(),
         "/w2": workload_with_operator_forest(),
@@ -137,10 +136,15 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
         torch_list_ops=False,
         triton_list_ops=False,
         ml_api_list_ops=False,
+        list_stats=False,
     )
     inst._OmniAnalyze_Base__args = args
 
     membw_calls: list[tuple] = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.cli_analysis._build_roofline_figures",
+        lambda self: None,
+    )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_cli.run_membw_analysis",
         lambda *a, **kw: membw_calls.append(a),
@@ -322,7 +326,9 @@ def test_dispatch_filter_outside_operator_dispatches_errors(monkeypatch):
     )
     with pytest.raises(SystemExit):
         _intersect_with_user_dispatch_filter([1, 2, 3], ["9"], "PyTorch")
-    assert "No PyTorch dispatches matched the -d filter" in str(errors[-1])
+    assert "No PyTorch dispatches matched the --kernel-iteration-range filter" in str(
+        errors[-1]
+    )
 
 
 def test_apply_operator_filter_keeps_nodes_from_requested_backend():
@@ -395,7 +401,7 @@ def test_pre_processing_lists_operators_for_every_path(monkeypatch):
     assert listed_paths == ["/w1", "/w2"]
 
 
-def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
+def test_write_outputs_prints_matched_tree_for_every_path(monkeypatch, tmp_path):
     args = argparse.Namespace(
         path=[["/w1"], ["/w2"]],
         torch_operator=["*addmm*"],
@@ -410,10 +416,7 @@ def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
             if run is workload:
                 handled_paths.append(workload_path)
 
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.run_analysis",
-        lambda self: None,
-    )
+    inst._roofline_figures = None
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_cli.cli_analysis.handle_operator",
         capture_handle,
@@ -422,5 +425,5 @@ def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
         "rocprof_compute_analyze.analysis_cli.tty.show_all",
         lambda *a, **kw: None,
     )
-    inst.run_analysis()
+    inst.write_outputs(tmp_path)
     assert handled_paths == ["/w1", "/w2"]

@@ -201,14 +201,14 @@ rows from the workload as a whole, not ten rows per process.
 Per-kernel ISA and source in CSV output
 =======================================
 
-``--output-format csv`` writes, alongside the analysis tables, one file per
+Every analyze run writes, alongside the analysis tables, one file per
 kernel per code object per process holding that kernel's instruction lines with
 the samples collected on them, and exports the source those instructions were
 compiled from beside it:
 
 .. code-block:: none
 
-   <output_name>/
+   <run folder>/
        kernel.csv, pc_sampling_summary.csv, ...
        per_kernel_pc_sampling/
            <workload_name>/<workload_sub_name>/
@@ -278,7 +278,7 @@ target app was built with debug info; see the :ref:`note <pc-sampling-note>`.
 Per-source-line counts in CSV output
 ====================================
 
-Beside each exported source file, ``--output-format csv`` writes
+Beside each exported source file, analyze writes
 ``<source file name>_pc_sampling.csv``. It has one row for each line of that
 file, with the samples of every kernel and process that ran code compiled from
 that line:

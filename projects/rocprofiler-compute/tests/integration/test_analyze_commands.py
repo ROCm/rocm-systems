@@ -355,7 +355,7 @@ def test_dispatch_1(binary_handler_analyze_rocprof_compute):
             "analyze",
             "--path",
             workload_dir,
-            "--dispatch",
+            "--kernel-iteration-range",
             "1",
         ])
         assert code == 0
@@ -371,7 +371,7 @@ def test_dispatch_2(binary_handler_analyze_rocprof_compute):
             "analyze",
             "--path",
             workload_dir,
-            "--dispatch",
+            "--kernel-iteration-range",
             "2",
         ])
         assert code == 0
@@ -387,7 +387,7 @@ def test_dispatch_3(binary_handler_analyze_rocprof_compute):
             "analyze",
             "--path",
             workload_dir,
-            "--dispatch",
+            "--kernel-iteration-range",
             "3",
         ])
         assert code == 0
@@ -403,7 +403,7 @@ def test_dispatch_4(binary_handler_analyze_rocprof_compute):
             "analyze",
             "--path",
             workload_dir,
-            "--dispatch",
+            "--kernel-iteration-range",
             "2",
             "5",
         ])
@@ -420,7 +420,7 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
             "analyze",
             "--path",
             workload_dir,
-            "--dispatch",
+            "--kernel-iteration-range",
             "6",
             "7",
         ])
@@ -856,7 +856,7 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
     # Test with dispatch filtering
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
-        "--dispatch",
+        "--kernel-iteration-range",
         "1",
         "--path",
         workload_dir,
@@ -919,35 +919,10 @@ def test_list_torch_operators_no_trace_data(
 
 
 @pytest.mark.misc
-@pytest.mark.parametrize(
-    ("output_format", "output_name", "exports_per_kernel_files"),
-    [
-        pytest.param(
-            "csv",
-            "pc_sampling_source_csv",
-            True,
-            id="csv-exports-isa-and-source",
-        ),
-        pytest.param(
-            "db",
-            "pc_sampling_source_db",
-            False,
-            id="db-exports-neither",
-        ),
-    ],
-)
-def test_analyze_per_kernel_export_output_format(
-    binary_handler_analyze_rocprof_compute,
-    monkeypatch,
-    tmp_path,
-    output_format,
-    output_name,
-    exports_per_kernel_files,
-):
-    """Export each kernel's ISA and its source for CSV output only."""
+def test_analyze_per_kernel_export(binary_handler_analyze_rocprof_compute, tmp_path):
+    """Export each kernel's ISA and its source beside analysis.db in the run folder."""
     workload_path = setup_pc_sampling_source_workload(tmp_path).resolve()
-    output_path = (tmp_path / output_name).resolve()
-    monkeypatch.chdir(tmp_path)
+    output_path = (tmp_path / "runs" / "pc_sampling_source").resolve()
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -955,23 +930,21 @@ def test_analyze_per_kernel_export_output_format(
         str(workload_path),
         "--block",
         "21",
-        "--output-format",
-        output_format,
+        "--output-directory",
+        str(output_path.parent),
         "--output-name",
-        output_name,
+        output_path.name,
     ])
 
     assert code == 0
+    assert (output_path / "analysis.db").is_file()
+    assert (output_path / "report.txt").is_file()
     workload_export_path = (
         output_path
         / PER_KERNEL_DIRECTORY_NAME
         / SOURCE_WORKLOAD_NAME
         / SOURCE_WORKLOAD_SUB_NAME
     )
-    if not exports_per_kernel_files:
-        assert output_path.with_suffix(".db").is_file()
-        assert not (output_path / PER_KERNEL_DIRECTORY_NAME).exists()
-        return
 
     # Every exported file sits under the absolute path the CSV records for
     # it, so the paths below are the fixture's own capture-host paths. Each
