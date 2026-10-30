@@ -87,10 +87,26 @@ struct QuickToken
 //
 // Writes up to `out_cap` entries into `out` in stream order and returns
 // the number written. Single-threaded, no exceptions.
+//
+// scan_gfx12 / scan_mi400 optionally take a ScanState to make the scan
+// resumable. A scan that fills `out` stops right after the last captured
+// token and records where to continue; calling again with the same state and
+// a fresh output range picks up from there instead of rescanning the buffer.
+// `done` is set once the scan reached the end of the buffer.
+struct ScanState
+{
+    uint64_t pos = 0; // next token start (nibbles for gfx12, bytes for mi400)
+    bool done = false;
+};
+
 #if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
 size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
-size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
-size_t scan_mi400(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
+size_t scan_gfx12(
+    const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap, ScanState* state = nullptr
+);
+size_t scan_mi400(
+    const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap, ScanState* state = nullptr
+);
 #endif
 
 // Returns true iff the running CPU supports AVX-512 (vbmi+bw+f) and the

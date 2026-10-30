@@ -69,6 +69,36 @@ using StatusToken = gfx9::build_standalone::StatusToken;
 
 size_t scan_none(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap) { return 0; };
 
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+// Scans `buf` with the scanner for `gfxip`, growing `raw` until every token
+// fits. gfx12 and mi400 resume right after the last captured token; gfx9
+// rescans from the start with the larger buffer.
+size_t scan_into(int gfxip, const uint8_t* buf, size_t size, std::vector<QuickToken>& raw)
+{
+    if (gfxip == 12 || gfxip == 1250)
+    {
+        auto scanner = (gfxip == 12) ? &quick_scan::scan_gfx12 : &quick_scan::scan_mi400;
+        quick_scan::ScanState state{};
+        size_t ntokens = scanner(buf, size, raw.data(), raw.size(), &state);
+        while (!state.done)
+        {
+            raw.resize(raw.size() * 2);
+            ntokens += scanner(buf, size, raw.data() + ntokens, raw.size() - ntokens, &state);
+        }
+        return ntokens;
+    }
+
+    auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
+    size_t ntokens = scanner(buf, size, raw.data(), raw.size());
+    while (ntokens == raw.size())
+    {
+        raw.resize(raw.size() * 2);
+        ntokens = scanner(buf, size, raw.data(), raw.size());
+    }
+    return ntokens;
+}
+#endif
+
 uint64_t load_header_word(const void* data)
 {
     uint64_t header = 0;
@@ -460,16 +490,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 #if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
     try
     {
-        auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
-        if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
-        if (gfxip == 1250) scanner = &quick_scan::scan_mi400;
-
-        ntokens = scanner(buf, data_size, raw.data(), raw.size());
-        while (ntokens == raw.size())
-        {
-            raw.resize(raw.size() * 2);
-            ntokens = scanner(buf, data_size, raw.data(), raw.size());
-        }
+        ntokens = scan_into(gfxip, buf, data_size, raw);
     }
     catch (std::exception&)
 #endif
@@ -606,10 +627,6 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     size_t ntokens = 0;
     const uint64_t header_offset = (gfxip == 9 && chunk_index == 0) ? sizeof(uint64_t) : 0;
 #if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
-    auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
-    if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
-    if (gfxip == 1250) scanner = &quick_scan::scan_mi400;
-
     if (header_offset != 0)
     {
         buf += header_offset;
@@ -617,12 +634,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         offset_begin = (offset_begin > header_offset) ? offset_begin - header_offset : 0;
     }
 
-    ntokens = scanner(buf, offset_begin, raw.data(), raw.size());
-    while (ntokens == raw.size())
-    {
-        raw.resize(raw.size() * 2);
-        ntokens = scanner(buf, offset_begin, raw.data(), raw.size());
-    }
+    ntokens = scan_into(gfxip, buf, offset_begin, raw);
 #else
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 #endif
