@@ -431,7 +431,7 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
 
   uint8_t rdma_count = 0;
   bool driver_not_loaded = false;
-  for (uint32_t i = 0; i < ports.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; i++) {
+  for (std::size_t i = 0; i < ports.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; i++) {
     const auto& port = ports[i];
     if (!nic_system->driver_loaded(port.bdf(), DriverType::IONIC_RDMA)) {
       driver_not_loaded = true;
@@ -439,7 +439,7 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
     }
 
     const auto& ibs = port.infiniband();
-    for (uint8_t j = 0; j < ibs.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; j++) {
+    for (std::size_t j = 0; j < ibs.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; j++) {
       const auto& ib = ibs[j];
       smi_nic_rdma_dev_info_t* rdma_dev = &info->rdma_dev_info[rdma_count];
 
@@ -455,7 +455,7 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
 
       const auto& ib_ports = ib.ports();
       rdma_dev->num_rdma_ports = ib.ports_num();
-      for (uint8_t k = 0; k < ib_ports.size() && k < SMI_NIC_MAX_PORTS; k++) {
+      for (std::size_t k = 0; k < ib_ports.size() && k < SMI_NIC_MAX_PORTS; k++) {
         const auto& ib_port = ib_ports[k];
         smi_nic_rdma_port_info_t* port_info = &rdma_dev->rdma_port_info[k];
 
