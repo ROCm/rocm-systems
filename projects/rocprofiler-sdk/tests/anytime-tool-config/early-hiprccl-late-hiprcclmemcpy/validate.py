@@ -76,19 +76,21 @@ def test_dispatch_and_copy_are_tool_b_exclusive(tool_a_data, tool_b_data):
 # ---- Tool B count proofs ---------------------------------------------------
 
 
-def test_tool_b_counts_are_phase2(tool_b_data, phase2_dispatches, phase2_copies):
-    """Memory copies are deterministic (exact). Kernel dispatches are a lower bound:
-    RCCL all-reduce launches its own GPU kernels, so the count is the explicit kernels
-    plus RCCL's internal kernels."""
+def test_tool_b_counts_are_phase2(
+    tool_b_data, phase2_dispatches, phase2_copies, copy_bytes
+):
+    """Tool B captured the phase 2 work: copies in bytes, dispatches as a lower
+    bound because RCCL all-reduce launches its own GPU kernels."""
     disp = len(_buf(tool_b_data, "kernel_dispatch"))
-    copies = len(_buf(tool_b_data, "memory_copies"))
+    copied = sum(itr["bytes"] for itr in _buf(tool_b_data, "memory_copies"))
+    expected = phase2_copies * copy_bytes
     assert disp >= phase2_dispatches, (
         f"expected at least {phase2_dispatches} dispatches (phase 2 explicit kernels), "
         f"got {disp}"
     )
     assert (
-        copies == phase2_copies
-    ), f"expected {phase2_copies} memory copies (phase 2), got {copies}"
+        copied == expected
+    ), f"expected {expected} bytes of memory copies (phase 2), got {copied}"
 
 
 def test_tool_b_records_after_registration(tool_b_data):
