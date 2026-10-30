@@ -51,6 +51,7 @@ def merge_base(base_ref):
     Comparing against the tip of base_ref instead would report everything base_ref gained
     since the fork as removed, so a missing merge base is an error."""
     try:
+        # universal_newlines, not text=: text= is Python 3.7+.
         return subprocess.check_output(
             ["git", "merge-base", base_ref, "HEAD"], universal_newlines=True
         ).strip()

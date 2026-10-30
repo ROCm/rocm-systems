@@ -231,6 +231,11 @@ class AbiCheckTest(unittest.TestCase):
             ["git", "merge-base", "develop", "HEAD"], universal_newlines=True
         )
 
+    def test_merge_base_with_real_git(self):
+        # Unmocked: a mocked check_output accepts keywords this interpreter rejects.
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], universal_newlines=True)
+        self.assertEqual(abi_check.merge_base("HEAD"), head.strip())
+
     @patch("subprocess.check_output", side_effect=subprocess.CalledProcessError(1, "git"))
     def test_merge_base_missing_is_an_error(self, _):
         with contextlib.redirect_stdout(io.StringIO()):
