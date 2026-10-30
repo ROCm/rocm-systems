@@ -729,7 +729,7 @@ gfx1151                  rocjitsu         AMD Radeon Graphics (rdna3_5), from Ro
 gfx1201_r9700            rocjitsu         AMD Radeon AI PRO R9700 (rdna4), from RocJITsu's configs/gfx1201_r9700.json
 gfx90a_mi210_kmd         rocjitsu         AMD Instinct MI210 (cdna2), from RocJITsu's configs/gfx90a_mi210_kmd.json
 mi300x                   rocjitsu         AMD Instinct MI300X (cdna3), from RocJITsu's configs/gfx942_cdna3.json
-mi350x                   rocjitsu         AMD Instinct MI350X (cdna4), from RocJITsu's configs/gfx950_mi355x.json
+mi350x                   rocjitsu         AMD Instinct MI350X (cdna4), from RocJITsu's configs/gfx950_mi350x.json
 mi450x                   rocjitsu         AMD Instinct MI455X (cdna5), from RocJITsu's configs/gfx1250_mi455x.json
 ```
 
