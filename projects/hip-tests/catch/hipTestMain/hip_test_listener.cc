@@ -9,6 +9,7 @@
 #include <hip_test_params.hh>
 #include <hip_test_context.hh>
 #include <hip_test_level.hh>
+#include <hip/hip_runtime_api.h>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -46,5 +47,14 @@ class HipTestParameterListener : public Catch::EventListenerBase {
   void testRunEnded(Catch::TestRunStats const&) override { TestParameterStore::instance().clear(); }
 };
 
+/// @brief Clears the last error a test case leaves, so the next case does not see it.
+class HipTestErrorStateListener : public Catch::EventListenerBase {
+ public:
+  using Catch::EventListenerBase::EventListenerBase;
+
+  void testCaseEnded(Catch::TestCaseStats const&) override { static_cast<void>(hipGetLastError()); }
+};
+
 // Register the listener - it will be automatically activated
 CATCH_REGISTER_LISTENER(HipTestParameterListener)
+CATCH_REGISTER_LISTENER(HipTestErrorStateListener)
