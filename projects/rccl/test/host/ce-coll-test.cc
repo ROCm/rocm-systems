@@ -692,17 +692,18 @@ TEST_P(CeAlltoAllvSyncMicrotest, GatheredRecvSizeDisagreesWithPeerSendSize_Every
 
 TEST_P(CeAlltoAllvSyncMicrotest, GatheredRecvDisplacementDisagreesWithPeer_SizesStillConsistentSoEveryRankCopies) {
   const int kNRanks = 4;
+  const int kSrc = 2;
+  const int kDst = 3;
   const SizeMatrix send = EqualTotalsMatrix(std::vector<int>(kNRanks, kNRanks), kNRanks * kMiB);
   corruptGathered_ = [&](std::vector<size_t>& gathered) {
-    ncclAlltoAllvRecvDispls(gathered.data(), 3, kNRanks)[2] += 1;
+    ncclAlltoAllvRecvDispls(gathered.data(), kDst, kNRanks)[kSrc] += 1;
   };
 
   const std::vector<RankRun> runs = Run(send, CE_COLL_INTRA_BATCH_SYNC_FREQ);
 
-  for (int rank = 0; rank < kNRanks; ++rank) {
-    EXPECT_GT(runs[rank].copies, 0u) << "rank " << rank;
-    EXPECT_GT(runs[rank].barriers, 0u) << "rank " << rank;
-  }
+  EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 2));
+  ExpectRowsCopied(send, runs, kNRanks);
+  ExpectLaunchPathTaken(runs);
 }
 
 TEST_P(CeAlltoAllvSyncMicrotest, FirstRoundBarrierFails_ReturnsTheErrorWithoutLaunchingTheNextRound) {
