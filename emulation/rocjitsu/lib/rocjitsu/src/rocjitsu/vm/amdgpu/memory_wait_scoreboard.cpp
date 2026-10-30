@@ -717,11 +717,17 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
   const auto defs = std::ranges::find(classified.value(), TrackedRegisterSource::Defs,
                                       &ClassifiedEvent::registers);
   const auto model = waitcnt_model(wf.cu().arch());
-  const uint16_t order = model.succeeded() && uses_legacy_waitcnt(model.value()) &&
-                                 defs != classified.value().end() &&
-                                 defs->counter == WaitCounterKind::Load
-                             ? ordered_write_order(*defs, wf.cu().arch())
-                             : kUnordered;
+  const bool legacy = model.succeeded() && uses_legacy_waitcnt(model.value());
+  const bool has_defs = defs != classified.value().end();
+  // Legacy VMEM loads and qualified direct/parameter LDS loads each preserve
+  // writeback order within their class. The latter use EXP independently of
+  // exports and indexed LDS accesses.
+  const bool ordered_writeback = has_defs && ((legacy && defs->counter == WaitCounterKind::Load) ||
+                                              (has_ordered_lds_direct_writeback(wf.cu().arch()) &&
+                                               defs->counter == WaitCounterKind::Exp &&
+                                               defs->kind == WaitEventKind::LdsDirect));
+  const uint16_t order =
+      ordered_writeback ? ordered_write_order(*defs, wf.cu().arch()) : kUnordered;
   const bool vector_replay =
       replay && xevent->kind != WaitEventKind::Smem && (wf.mode_raw() & (1u << 25));
   for (unsigned i = 0; i < count; ++i) {
