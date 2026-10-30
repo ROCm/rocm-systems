@@ -827,7 +827,7 @@ TEST_F(domain_service_test,
     pending_standard_callbacks.emplace(
         record.correlation_id.internal,
         domains::callback::ompt::detail::pending_region<mock_sdk>{
-            record, /*begin_timestamp=*/1, function_args_t{} });
+            .record = record, .begin_timestamp = 1, .args = function_args_t{} });
 
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_)).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_)).Times(1);

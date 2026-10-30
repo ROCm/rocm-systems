@@ -633,11 +633,11 @@ struct mock_region_sink
 
 struct mock_thread_metadata_source
 {
-    std::uint64_t resolve_current_thread() const
+    [[nodiscard]] std::uint64_t resolve_current_thread() const
     {
         return test_globals::g_thread_meta_gmock->resolve_current_thread();
     }
-    std::uint64_t resolve_thread(std::thread::id tid) const
+    [[nodiscard]] std::uint64_t resolve_thread(std::thread::id tid) const
     {
         return test_globals::g_thread_meta_gmock->resolve_thread(tid);
     }

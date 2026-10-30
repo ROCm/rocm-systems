@@ -196,7 +196,8 @@ find_slot(const typename SdkBackend::callback_tracing_record_t& record)
     if(record.operation != SdkBackend::OMPT_ID_parallel_begin &&
        record.operation != SdkBackend::OMPT_ID_parallel_end)
     {
-        return { thread_regions.standard, record.correlation_id.internal };
+        return { .regions = thread_regions.standard,
+                 .key     = record.correlation_id.internal };
     }
 
     const auto* payload =
@@ -208,8 +209,8 @@ find_slot(const typename SdkBackend::callback_tracing_record_t& record)
 
     static_assert(sizeof(std::uintptr_t) <= sizeof(std::uint64_t));
     // The address is only compared for identity, never dereferenced.
-    return { thread_regions.parallel,
-             reinterpret_cast<std::uintptr_t>(parallel_data_address) };
+    return { .regions = thread_regions.parallel,
+             .key     = reinterpret_cast<std::uintptr_t>(parallel_data_address) };
 }
 
 // Records a completed OMPT region (instant, standard, or parallel) into the trace
