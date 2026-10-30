@@ -9,6 +9,8 @@
 /// constrain modified storage. End-to-end decoded instruction callbacks live
 /// in execution_plugin_test.cpp.
 
+#include "decode_test_util.h"
+
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
@@ -800,8 +802,8 @@ TEST(RegisterAccessTest, Sgpr64AccessDoesNotCrossPhysicalBlockBoundary) {
   fx.cu->write_sgpr(adjacent_wave->sgpr_alloc().base, kAdjacentSentinel);
 
   RegisterAccess registers(*fx.wf);
-  // Ownership rejection is checked through unchanged storage below.
-  (void)registers.write_sgpr64(boundary, 0x3333444455556666ull);
+  EXPECT_TRUE(registers.write_sgpr64(boundary, 0x3333444455556666ull).succeeded());
+  EXPECT_FALSE(fx.wf->instruction_execution_failed());
 
   EXPECT_EQ(fx.cu->read_sgpr_storage(boundary), kLowSentinel);
   EXPECT_EQ(fx.cu->read_sgpr_storage(adjacent_wave->sgpr_alloc().base), kAdjacentSentinel);
@@ -1775,7 +1777,8 @@ TEST(RegisterAccessTest, ScalarBackedPartialByteStoresRejectBeforeObservation) {
 }
 
 TEST(RegisterAccessTest, OperandStoreRejectsInvalidWindowBeforeShiftingLaneMask) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, 1, kVgprsPerWave, 32);
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+             /*wave_size=*/32);
   ASSERT_NE(fx.wf, nullptr);
   cdna4::Operand dst(32, cdna4::OperandType::OPR_VGPR, 4);
   auto write = RegisterAccess(*fx.wf).write_operand(dst, 1);
@@ -1874,7 +1877,7 @@ TEST(RegisterAccessTest, RejectedReadRegionsReportIssuingWaveAtInstructionBounda
   }
 }
 
-TEST(RegisterAccessTest, RejectedPhysicalWritesReportIssuingWaveAtInstructionBoundary) {
+TEST(RegisterAccessTest, PhysicalWriteStatusAtInstructionBoundary) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
   Wavefront *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
@@ -1940,11 +1943,13 @@ TEST(RegisterAccessTest, RejectedPhysicalWritesReportIssuingWaveAtInstructionBou
     const bool pair = operation == Operation::Sgpr64 || operation == Operation::ConstSgpr64;
     RejectedWrite instruction(operation, pair ? issuer_last : neighbor_sgpr, neighbor_vgpr);
     std::string detail;
-    EXPECT_TRUE(fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed());
-    EXPECT_TRUE(instruction.rejected);
+    const bool ignored = operation == Operation::Sgpr || operation == Operation::Sgpr64;
+    EXPECT_EQ(fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed(), !ignored);
+    EXPECT_EQ(instruction.rejected, !ignored);
     EXPECT_EQ(fx.wf->instruction_execution_error(),
-              InstructionExecutionError::InvalidRegisterAccess);
-    EXPECT_FALSE(detail.empty());
+              ignored ? InstructionExecutionError::None
+                      : InstructionExecutionError::InvalidRegisterAccess);
+    EXPECT_EQ(detail.empty(), ignored);
     EXPECT_EQ(fx.cu->read_sgpr_storage(issuer_last), 0x11223344u);
     EXPECT_EQ(fx.cu->read_sgpr_storage(neighbor_sgpr), 0x55667788u);
     EXPECT_EQ(fx.cu->read_vgpr(neighbor_vgpr, 0), 0xAABBCCDDu);
@@ -1952,6 +1957,74 @@ TEST(RegisterAccessTest, RejectedPhysicalWritesReportIssuingWaveAtInstructionBou
     EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
     EXPECT_TRUE(fx.plugin->writes.empty());
   }
+}
+
+TEST(RegisterAccessTest, DecodedOutOfRangeSgprDestinationIsIgnored) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  ASSERT_NE(fx.wf, nullptr);
+  Wavefront *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
+  ASSERT_NE(neighbor, nullptr);
+  ASSERT_EQ(neighbor->sgpr_alloc().base, fx.sgpr_base() + 104);
+  const uint32_t neighbor_base = neighbor->sgpr_alloc().base;
+  fx.cu->write_sgpr(neighbor_base, 0xAABBCCDDu);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint32_t, 2> encoding{0xBEE80081u, 0}; // s_mov_b32 s104, 1
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, encoding.data()));
+  ASSERT_NE(instruction, nullptr);
+  std::string detail;
+  EXPECT_TRUE(fx.cu->execute_instruction(instruction.get(), *fx.wf, &detail).succeeded());
+  EXPECT_TRUE(detail.empty());
+  EXPECT_FALSE(fx.wf->instruction_execution_failed());
+  EXPECT_EQ(fx.wf->instruction_execution_error_detail(), nullptr);
+  EXPECT_EQ(fx.cu->read_sgpr_storage(neighbor_base), 0xAABBCCDDu);
+  EXPECT_FALSE(neighbor->instruction_execution_failed());
+  EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
+}
+
+TEST(RegisterAccessTest, OperandStorePreservesPendingErrorAndRecoversNextInstruction) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  const uint32_t destination = fx.vgpr_base() + 4;
+  fx.cu->write_vgpr(destination, 0, 0xAABBCCDDu);
+  class Store : public Instruction {
+  public:
+    explicit Store(bool report_error)
+        : Instruction("operand_store",
+                      [](Instruction &inst, void *ctx) {
+                        auto &self = static_cast<Store &>(inst);
+                        auto &wf = *static_cast<Wavefront *>(ctx);
+                        cdna4::Operand dst(32, cdna4::OperandType::OPR_VGPR, 4);
+                        auto write = RegisterAccess(wf).write_operand(dst, 1);
+                        if (self.report_error_)
+                          wf.report_instruction_execution_error(
+                              InstructionExecutionError::UnsupportedOperandValue,
+                              "original operand error");
+                        self.failed =
+                            write.store_native<uint32_t>(0, util::native<uint32_t>(0x55667788u), 1)
+                                .failed();
+                      }),
+          report_error_(report_error) {}
+    bool failed = false;
+
+  private:
+    bool report_error_;
+  };
+  Store rejected(true);
+  std::string detail;
+  EXPECT_TRUE(fx.cu->execute_instruction(&rejected, *fx.wf, &detail).failed());
+  EXPECT_TRUE(rejected.failed);
+  EXPECT_EQ(fx.wf->instruction_execution_error(),
+            InstructionExecutionError::UnsupportedOperandValue);
+  EXPECT_STREQ(fx.wf->instruction_execution_error_detail(), "original operand error");
+  EXPECT_EQ(detail, "original operand error");
+  EXPECT_EQ(fx.cu->read_vgpr(destination, 0), 0xAABBCCDDu);
+  Store recovered(false);
+  EXPECT_TRUE(fx.cu->execute_instruction(&recovered, *fx.wf).succeeded());
+  EXPECT_FALSE(recovered.failed);
+  EXPECT_FALSE(fx.wf->instruction_execution_failed());
+  EXPECT_EQ(fx.wf->instruction_execution_error_detail(), nullptr);
+  EXPECT_EQ(fx.cu->read_vgpr(destination, 0), 0x55667788u);
 }
 
 } // namespace

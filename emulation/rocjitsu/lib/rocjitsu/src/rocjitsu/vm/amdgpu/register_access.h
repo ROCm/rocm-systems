@@ -110,9 +110,13 @@ enum class ScalarPairMode { Preserve, Replicate32 };
 /// byte modes, lane windows, and snapshot bounds, before modifying storage or
 /// calling a visitor. They also retain InvalidRegisterAccess on the acquiring
 /// wavefront (or the physical owner for CU-bound access) for the instruction
-/// execution boundary. Acquisition notifications that preceded the failed
-/// operation are not repeated. Logical APIs require
-/// a wavefront-bound facade; logical writes require a mutable wavefront.
+/// execution boundary during synchronous instruction execution. Async MMA
+/// callbacks must use full-byte regions and correctly sized buffers so they
+/// cannot reach these reporting rejects: their queue does not consume the
+/// retained wave error, which later issuer instructions can clear.
+/// Acquisition notifications that preceded the failed operation are not
+/// repeated. Logical APIs require a wavefront-bound facade; logical writes
+/// require a mutable wavefront.
 ///
 /// Operand-view stores also refuse writes after any pending instruction error,
 /// including errors unrelated to register access. This guard is local to those
@@ -126,6 +130,9 @@ enum class ScalarPairMode { Preserve, Replicate32 };
 /// to one live wave before any callback or storage view is produced. Physical
 /// SGPR writes require a mutable Wavefront; raw VM/runtime writes belong on
 /// ComputeUnitCore and deliberately bypass this instruction-facing facade.
+/// SGPR writes also serve guest operand destinations: a range outside the
+/// acquiring wave allocation is architecturally ignored and returns success,
+/// without touching storage or reporting an instruction error.
 class RegisterAccess {
   static uint32_t byte_bit_mask(uint8_t byte_mask) {
     uint32_t bit_mask = 0;
@@ -1508,6 +1515,8 @@ public:
   // that resolves one owner for the complete range. Writes require an explicit
   // mutable wavefront so instruction code cannot silently reach raw SGPR
   // storage; VM/runtime code uses ComputeUnitCore's raw write API directly.
+  // Guest SGPR destinations also reach these writes, so out-of-allocation
+  // ranges follow the architectural ignored-write policy in ComputeUnitCore.
   [[nodiscard]] bool owns_sgpr_range(uint32_t physical_base, uint32_t physical_count) const {
     if (wf_)
       return cu_->owns_sgpr_range(*wf_, physical_base, physical_count);
@@ -1540,8 +1549,6 @@ public:
         return reject(*owner, "RegisterAccess was not constructed from mutable Wavefront");
       return Result::failure();
     }
-    if (!owns_sgpr_range(physical_reg, 1))
-      return reject(*mutable_wf_, "physical SGPR write exceeds the wave allocation");
     mutable_cu().write_sgpr(mutable_wavefront(), physical_reg, value);
     return Result::success();
   }
@@ -1552,8 +1559,6 @@ public:
         return reject(*owner, "RegisterAccess was not constructed from mutable Wavefront");
       return Result::failure();
     }
-    if (!owns_sgpr_range(physical_reg, 2))
-      return reject(*mutable_wf_, "physical SGPR write exceeds the wave allocation");
     mutable_cu().write_sgpr64(mutable_wavefront(), physical_reg, value);
     return Result::success();
   }

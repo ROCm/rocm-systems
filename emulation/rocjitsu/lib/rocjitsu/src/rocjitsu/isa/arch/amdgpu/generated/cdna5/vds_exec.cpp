@@ -390,11 +390,11 @@ void DsStore2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
   if (maybe_data0_0.failed())
     return;
-  const auto data0_0 = maybe_data0_0.value();
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
   auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
   if (maybe_data1_0.failed())
     return;
-  const auto data1_0 = maybe_data1_0.value();
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -438,11 +438,11 @@ void DsStore2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
   if (maybe_data0_0.failed())
     return;
-  const auto data0_0 = maybe_data0_0.value();
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
   auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
   if (maybe_data1_0.failed())
     return;
-  const auto data1_0 = maybe_data1_0.value();
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1757,19 +1757,19 @@ void DsStore2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
   if (maybe_data0_0.failed())
     return;
-  const auto data0_0 = maybe_data0_0.value();
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
   auto maybe_data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
   if (maybe_data0_1.failed())
     return;
-  const auto data0_1 = maybe_data0_1.value();
+  const std::span<const uint32_t> data0_1 = maybe_data0_1.value();
   auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
   if (maybe_data1_0.failed())
     return;
-  const auto data1_0 = maybe_data1_0.value();
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
   auto maybe_data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
   if (maybe_data1_1.failed())
     return;
-  const auto data1_1 = maybe_data1_1.value();
+  const std::span<const uint32_t> data1_1 = maybe_data1_1.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1817,19 +1817,19 @@ void DsStore2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
   if (maybe_data0_0.failed())
     return;
-  const auto data0_0 = maybe_data0_0.value();
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
   auto maybe_data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
   if (maybe_data0_1.failed())
     return;
-  const auto data0_1 = maybe_data0_1.value();
+  const std::span<const uint32_t> data0_1 = maybe_data0_1.value();
   auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
   if (maybe_data1_0.failed())
     return;
-  const auto data1_0 = maybe_data1_0.value();
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
   auto maybe_data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
   if (maybe_data1_1.failed())
     return;
-  const auto data1_1 = maybe_data1_1.value();
+  const std::span<const uint32_t> data1_1 = maybe_data1_1.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

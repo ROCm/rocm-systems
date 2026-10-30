@@ -10133,7 +10133,7 @@ class CodeGenerator:
                 )
                 L.append(f'  if (maybe_data{group}_{i}.failed()) return;')
                 L.append(
-                    f'  const auto data{group}_{i} = maybe_data{group}_{i}.value();'
+                    f'  const std::span<const uint32_t> data{group}_{i} = maybe_data{group}_{i}.value();'
                 )
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
