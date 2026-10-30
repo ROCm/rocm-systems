@@ -5902,12 +5902,14 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
 /// compiler fully unroll the inner matmul into straight-line native SIMD FMAs;
 /// a runtime-dimension loop is materially slower on this hot path. The path
 /// snapshots packed f16 inputs through observed register-access regions,
-/// bulk-converts them into dense f32 buffers, and publishes staged results only
-/// after every operand read. It falls back to the generic exec_f32 when:
+/// bulk-converts them into dense f32 buffers, and publishes staged results one
+/// VGPR at a time only after every operand read. It falls back to the generic
+/// exec_f32 when:
 ///   - <experimental/simd> is unavailable
 ///   - host native_simd<float> has no usable width for the output columns
 ///   - cbsz/blgp lane permutation is non-default
 ///   - RJ_FORCE_SCALAR is set
+///   - the wave is not wave64
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
