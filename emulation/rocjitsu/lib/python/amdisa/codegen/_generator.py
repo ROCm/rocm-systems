@@ -14148,11 +14148,16 @@ class CodeGenerator:
                                 )
                             )
                         if self.isa_spec.arch_name in ('rdna3', 'rdna4'):
+                            address_fallback = (
+                                'src_operands_[operand_index] != &vaddr || !inst_.nsa'
+                                if self.isa_spec.arch_name == 'rdna3'
+                                else 'src_operands_[operand_index] != &vaddr'
+                            )
                             inst_impls.append(
                                 cgen.Line(
                                     f'void {inst.fmt_name}::append_src_operand'
                                     '(std::string &out, uint8_t operand_index) const {\n'
-                                    '  if (src_operands_[operand_index] != &vaddr) {\n'
+                                    f'  if ({address_fallback}) {{\n'
                                     f'    {inst.fmt_true_enc_name}::append_src_operand('
                                     'out, operand_index);\n'
                                     '    return;\n'

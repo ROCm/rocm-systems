@@ -1154,11 +1154,13 @@ TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
     uint8_t dim;
     bool a16;
     uint32_t expected_bits;
+    const char *address;
   };
-  for (const Case test : {Case{.dim = amdgpu::kImageDim1d, .a16 = false, .expected_bits = 32},
-                          Case{.dim = amdgpu::kImageDim1d, .a16 = true, .expected_bits = 32},
-                          Case{.dim = amdgpu::kImageDim2d, .a16 = false, .expected_bits = 64},
-                          Case{.dim = amdgpu::kImageDim2d, .a16 = true, .expected_bits = 32}}) {
+  for (const Case test :
+       {Case{.dim = amdgpu::kImageDim1d, .a16 = false, .expected_bits = 32, .address = "v2"},
+        Case{.dim = amdgpu::kImageDim1d, .a16 = true, .expected_bits = 32, .address = "v2"},
+        Case{.dim = amdgpu::kImageDim2d, .a16 = false, .expected_bits = 64, .address = "v[2:3]"},
+        Case{.dim = amdgpu::kImageDim2d, .a16 = true, .expected_bits = 32, .address = "v2"}}) {
     for (bool load : {false, true}) {
       SCOPED_TRACE(testing::Message()
                    << "dim=" << unsigned{test.dim} << " a16=" << test.a16 << " load=" << load);
@@ -1169,6 +1171,15 @@ TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
       const Operand *vaddr = inst->src_operand(load ? 0 : 1);
       ASSERT_NE(vaddr, nullptr);
       EXPECT_EQ(vaddr->size_bits(), test.expected_bits);
+      std::string expected =
+          std::string(load ? "image_load v8, " : "image_store v8, ") + test.address + ", s[8:15]";
+      if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+        expected += std::string{" dmask:0x1 dim:SQ_RSRC_IMG_"} +
+                    (test.dim == amdgpu::kImageDim1d ? "1D" : "2D") + " unorm";
+        if (test.a16)
+          expected += " a16";
+      }
+      EXPECT_EQ(inst->disassemble(), expected);
     }
   }
 }

@@ -93,7 +93,7 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
 }
 
 void ImageLoadMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
-  if (src_operands_[operand_index] != &vaddr) {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
     Mimg::append_src_operand(out, operand_index);
     return;
   }
@@ -312,7 +312,7 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
 }
 
 void ImageStoreMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
-  if (src_operands_[operand_index] != &vaddr) {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
     Mimg::append_src_operand(out, operand_index);
     return;
   }
