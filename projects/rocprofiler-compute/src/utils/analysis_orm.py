@@ -36,7 +36,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
+from sqlalchemy.orm import (
+    Session,
+    aliased,
+    declarative_base,
+    relationship,
+    sessionmaker,
+)
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.expression import Subquery
@@ -80,6 +86,10 @@ class Workload(Base):
     code_object_stores = relationship("CodeObjectStore", back_populates="workload")
     # Workload can have multiple source files
     source_files = relationship("SourceFile", back_populates="workload")
+    # Workload has at most one memory bandwidth analysis, when block 30 was profiled
+    membw_analysis = relationship(
+        "MembwAnalysis", back_populates="workload", uselist=False
+    )
 
 
 class MetricDefinition(Base):
@@ -529,6 +539,130 @@ class WorkloadMetricValue(Base):
     # Relationships
     metric = relationship("MetricDefinition", back_populates="workload_metric_values")
     workload = relationship("Workload", back_populates="workload_metric_values")
+
+
+class MembwAnalysis(Base):
+    """The memory bandwidth analysis of one workload.
+
+    Holds the availability and the tree's arch. The tree is stored in MembwNode,
+    and the guidance blocks shown beside it in MembwGuidanceBlock.
+    """
+
+    __tablename__ = f"{PREFIX}membw_analysis"
+
+    membw_analysis_uuid = Column(Integer, primary_key=True)
+    # One memory bandwidth analysis per workload.
+    workload_id = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}workload.workload_id"),
+        nullable=False,
+        unique=True,
+    )
+    arch = Column(String)
+    # One of full, partial or unavailable.
+    availability = Column(String)
+    # Null when every metric the tree reads has a value.
+    availability_reason = Column(Text, nullable=True)
+
+    # Analysis belongs to one workload
+    workload = relationship("Workload", back_populates="membw_analysis")
+    # Analysis owns its tree nodes, in no particular order
+    nodes = relationship("MembwNode", back_populates="membw_analysis")
+    # Analysis owns its guidance blocks, which are read in block_order
+    guidance_blocks = relationship(
+        "MembwGuidanceBlock",
+        back_populates="membw_analysis",
+        order_by="MembwGuidanceBlock.block_order",
+    )
+
+
+class MembwNode(Base):
+    """One node of a memory bandwidth tree, flattened in preorder.
+
+    parent_node_uuid links a node to its parent, and node_order is the node's
+    position in the preorder walk of its whole tree. Children keep their order
+    because they follow their parent in that walk.
+    """
+
+    __tablename__ = f"{PREFIX}membw_node"
+    # One node per position in an analysis's tree.
+    __table_args__ = (UniqueConstraint("membw_analysis_uuid", "node_order"),)
+
+    membw_node_uuid = Column(Integer, primary_key=True)
+    membw_analysis_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}membw_analysis.membw_analysis_uuid"),
+        nullable=False,
+    )
+    # Null for a root node.
+    parent_node_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}membw_node.membw_node_uuid"), nullable=True
+    )
+    node_order = Column(Integer)
+    node_id = Column(String)  # e.g. gl1_tcp_stall
+    label = Column(String)  # e.g. TCP stall
+    # GL1, GL2 or EA, or empty for a node outside those levels.
+    level = Column(String)
+    # One of active, inactive or indeterminate.
+    state = Column(String)
+    # Null when the node has no guidance template.
+    guidance_id = Column(String, nullable=True)
+
+    # Node belongs to one analysis
+    membw_analysis = relationship("MembwAnalysis", back_populates="nodes")
+    # Node has at most one parent, and its children are the nodes naming it
+    parent = relationship(
+        "MembwNode", remote_side=[membw_node_uuid], back_populates="children"
+    )
+    children = relationship("MembwNode", back_populates="parent")
+    # Node owns the evidence metrics shown with it, in metric_order
+    supporting_metrics = relationship(
+        "MembwSupportingMetric",
+        back_populates="node",
+        order_by="MembwSupportingMetric.metric_order",
+    )
+
+
+class MembwSupportingMetric(Base):
+    """One evidence metric shown with a memory bandwidth tree node."""
+
+    __tablename__ = f"{PREFIX}membw_supporting_metric"
+    # One row per position among a node's metrics.
+    __table_args__ = (UniqueConstraint("membw_node_uuid", "metric_order"),)
+
+    membw_supporting_metric_uuid = Column(Integer, primary_key=True)
+    membw_node_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}membw_node.membw_node_uuid"), nullable=False
+    )
+    metric_order = Column(Integer)
+    metric_key = Column(String)  # The metric's name, e.g. L2 Cache Efficiency
+    # Null when the metric has no value.
+    value = Column(Float, nullable=True)
+    unit = Column(String)  # e.g. Percent
+    display = Column(String)  # The value as shown, or N/A
+
+    # Metric belongs to one node
+    node = relationship("MembwNode", back_populates="supporting_metrics")
+
+
+class MembwGuidanceBlock(Base):
+    """One guidance block of a memory bandwidth analysis, in display order."""
+
+    __tablename__ = f"{PREFIX}membw_guidance_block"
+    # One block per position in an analysis.
+    __table_args__ = (UniqueConstraint("membw_analysis_uuid", "block_order"),)
+
+    membw_guidance_block_uuid = Column(Integer, primary_key=True)
+    membw_analysis_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}membw_analysis.membw_analysis_uuid"),
+        nullable=False,
+    )
+    block_order = Column(Integer)
+    text = Column(Text)
+
+    # Block belongs to one analysis
+    membw_analysis = relationship("MembwAnalysis", back_populates="guidance_blocks")
 
 
 class Metadata(Base):
@@ -1066,6 +1200,7 @@ class Database:
         ).subquery()
 
         source_chain_subquery = Database._source_chain_subquery()
+        parent_node = aliased(MembwNode, name="parent_node")
 
         definitions: dict[str, Select[Any]] = {
             "kernel": select(
@@ -1197,6 +1332,41 @@ class Database:
                 source_chain_subquery,
                 InstructionLine.instruction_uuid
                 == source_chain_subquery.c.instruction_uuid,
+            ),
+            # One row per tree node, with its parent's order and each evidence
+            # metric. A node without metrics still gets one row.
+            "membw_node": select(
+                Workload.workload_id.label("workload_id"),
+                Workload.name.label("workload_name"),
+                MembwAnalysis.arch,
+                MembwAnalysis.availability,
+                MembwAnalysis.availability_reason,
+                MembwNode.node_order,
+                parent_node.node_order.label("parent_node_order"),
+                MembwNode.node_id,
+                MembwNode.label,
+                MembwNode.level,
+                MembwNode.state,
+                MembwNode.guidance_id,
+                MembwSupportingMetric.metric_order,
+                MembwSupportingMetric.metric_key,
+                MembwSupportingMetric.value,
+                MembwSupportingMetric.unit,
+                MembwSupportingMetric.display,
+            )
+            .select_from(MembwNode)
+            .join(
+                MembwAnalysis,
+                MembwNode.membw_analysis_uuid == MembwAnalysis.membw_analysis_uuid,
+            )
+            .join(Workload, MembwAnalysis.workload_id == Workload.workload_id)
+            .outerjoin(
+                parent_node,
+                MembwNode.parent_node_uuid == parent_node.membw_node_uuid,
+            )
+            .outerjoin(
+                MembwSupportingMetric,
+                MembwNode.membw_node_uuid == MembwSupportingMetric.membw_node_uuid,
             ),
             "source_lines": select(
                 SourceFile.workload_id.label("workload_id"),

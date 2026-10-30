@@ -20,6 +20,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scalar data cache utilization, latency, stall rate, and bandwidth.
   * GL1 request latency.
 
+* Added the memory bandwidth analysis to the analysis database. For a workload profiled with `--experimental --membw-analysis`, `--output-format db` stores the availability, the bottleneck tree, and the guidance blocks in the `compute_membw_*` tables. `--output-format csv` writes the tree as `membw_node.csv` (the `compute_membw_node_view` view), without the guidance text. Other workloads store no membw rows.
+
 * Added PC sampling counts per source line.
   * `rocprof-compute analyze --output-format csv` writes `<file>_pc_sampling.csv` beside each captured source file. It lists every source line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.

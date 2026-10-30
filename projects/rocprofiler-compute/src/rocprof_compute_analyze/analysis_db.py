@@ -2,18 +2,35 @@
 # SPDX-License-Identifier:  MIT
 
 import ast
+import itertools
 import json
 import re
 import warnings
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, DefaultDict, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import (
+    Any,
+    DefaultDict,
+    Dict,
+    Iterator,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import numpy as np
 import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
+from membw_analysis.engine import run_membw_analysis
+from membw_analysis.models import (
+    MEMBW_TABLE_IDS,
+    BottleneckNode,
+    MemBwAnalysisResult,
+)
 from memory_chart.loader import Layouts
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
@@ -317,6 +334,63 @@ def memory_chart_layout_extdata(gpu_arch: str) -> Optional[dict[str, Any]]:
     return json.loads(layout.path.read_text(encoding="utf-8"))
 
 
+def membw_metric_tables(
+    arch_dfs: Dict[int, pd.DataFrame],
+    workload_values: pd.DataFrame,
+) -> Dict[int, pd.DataFrame]:
+    """Build the panel 3000 tables that run_membw_analysis reads for one workload.
+
+    Each table keeps the Metric, Avg and Unit columns of the CLI path. Avg is the
+    workload's Avg value of the metric, or None when the workload has none.
+    """
+    avg_rows = workload_values[workload_values["value_name"] == "Avg"]
+    avg_by_metric_id = dict(zip(avg_rows["metric_id"], avg_rows["value"]))
+    membw_tables: Dict[int, pd.DataFrame] = {}
+    for table_id in MEMBW_TABLE_IDS:
+        template = arch_dfs.get(table_id)
+        if template is None:
+            continue
+        membw_tables[table_id] = pd.DataFrame({
+            "Metric": template["Metric"].tolist(),
+            "Avg": [avg_by_metric_id.get(metric_id) for metric_id in template.index],
+            "Unit": template["Unit"].tolist(),
+        })
+    return membw_tables
+
+
+def _add_membw_nodes(
+    analysis: orm.MembwAnalysis,
+    nodes: Tuple[BottleneckNode, ...],
+    parent: Optional[orm.MembwNode],
+    node_orders: Iterator[int],
+) -> None:
+    """Add these sibling nodes and their subtrees, each node before its children."""
+    for node in nodes:
+        node_row = orm.MembwNode(
+            membw_analysis=analysis,
+            parent=parent,
+            node_order=next(node_orders),
+            node_id=node.id,
+            label=node.label,
+            level=node.level,
+            state=node.state,
+            guidance_id=node.guidance_id,
+        )
+        Database.get_session().add(node_row)
+        for metric_order, metric in enumerate(node.supporting):
+            Database.get_session().add(
+                orm.MembwSupportingMetric(
+                    node=node_row,
+                    metric_order=metric_order,
+                    metric_key=metric.key,
+                    value=metric.value,
+                    unit=metric.unit,
+                    display=metric.display,
+                )
+            )
+        _add_membw_nodes(analysis, node.children, node_row, node_orders)
+
+
 class db_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -346,6 +420,7 @@ class db_analysis(OmniAnalyze_Base):
             self._workload_values_data_per_workload,
         ) = self.calc_expressions()
         self._roofline_data_per_kernel = self.calc_roofline_data()
+        self._membw_result_per_workload = self.calc_membw_analysis()
 
         report_evaluation_diagnostics()
 
@@ -470,6 +545,11 @@ class db_analysis(OmniAnalyze_Base):
 
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
+
+            # Add the memory bandwidth analysis, when block 30 was profiled
+            membw_result = self._membw_result_per_workload.get(workload_path)
+            if membw_result is not None:
+                self.add_membw_analysis(workload_obj, membw_result)
 
         version = get_version(rocprof_compute_home)
         Database.get_session().add(
@@ -623,6 +703,29 @@ class db_analysis(OmniAnalyze_Base):
                     value=value.value,
                 )
             )
+
+    @staticmethod
+    def add_membw_analysis(
+        workload_obj: orm.Workload,
+        membw_result: MemBwAnalysisResult,
+    ) -> None:
+        """Add one workload's memory bandwidth analysis: header, tree and blocks."""
+        analysis = orm.MembwAnalysis(
+            workload=workload_obj,
+            arch=membw_result.arch,
+            availability=membw_result.availability,
+            availability_reason=membw_result.availability_reason,
+        )
+        Database.get_session().add(analysis)
+        for block_order, block_text in enumerate(membw_result.guidance_blocks):
+            Database.get_session().add(
+                orm.MembwGuidanceBlock(
+                    membw_analysis=analysis,
+                    block_order=block_order,
+                    text=block_text,
+                )
+            )
+        _add_membw_nodes(analysis, membw_result.nodes, None, itertools.count())
 
     def calc_pmc_df_data(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
@@ -1334,6 +1437,32 @@ class db_analysis(OmniAnalyze_Base):
             base["value"] = pct
             new_rows.append(base)
         return new_rows
+
+    def calc_membw_analysis(self) -> Dict[str, MemBwAnalysisResult]:
+        """Evaluate the memory bandwidth tree of each workload when block 30 was
+        profiled. The tree reads the workload's evaluated values, as the CLI does.
+        """
+        membw_result_per_workload: Dict[str, MemBwAnalysisResult] = {}
+        if not self.membw_analysis_collected():
+            return membw_result_per_workload
+
+        for workload_path, workload in self._runs.items():
+            gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
+            membw_tables = membw_metric_tables(
+                self._arch_configs[gpu_arch].dfs,
+                self._workload_values_data_per_workload.get(
+                    workload_path,
+                    pd.DataFrame(columns=["metric_id", "value_name", "value"]),
+                ),
+            )
+            # The profiling config is the first workload's, so a workload without
+            # block 30 values has no membw result even when the config collected it
+            if not any(table["Avg"].notna().any() for table in membw_tables.values()):
+                continue
+            membw_result = run_membw_analysis(membw_tables, gpu_arch)
+            if membw_result is not None:
+                membw_result_per_workload[workload_path] = membw_result
+        return membw_result_per_workload
 
     def calc_metrics_data(
         self,

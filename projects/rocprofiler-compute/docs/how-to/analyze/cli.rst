@@ -757,6 +757,7 @@ format is ``stdout``.
 * ``db`` format:
    * Generate a file named ``rocprof_compute_<uuid>.db`` in the current working directory.
    * This is a SQLite database file containing all the data in the analysis report structured according to :ref:`analysis database schema <analysis-database>`.
+   * For a workload profiled with ``--experimental --membw-analysis``, the database also holds the memory bandwidth analysis; see :ref:`membw-analysis-database`.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 
