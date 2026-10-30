@@ -269,14 +269,9 @@ def test_handle_operator_prints_matched_subtree(capsys, monkeypatch):
 
 def test_apply_operator_filter_missed_glob_errors(monkeypatch):
     errors = []
-
-    def record_error(*argv, **_kwargs):
-        errors.append(argv)
-        raise SystemExit(1)
-
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_cli.console_error",
-        record_error,
+        functools.partial(append_args_and_exit, errors),
     )
     stub_trace_ml_api(monkeypatch)
     args = argparse.Namespace(
