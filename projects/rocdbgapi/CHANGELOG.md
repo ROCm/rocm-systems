@@ -3,7 +3,19 @@
 Full documentation for AMD Debugger API is available at
 [rocm.docs.amd.com/rocdbgapi](https://rocm.docs.amd.com/projects/ROCdbgapi/en/latest/index.html).
 
-## rocm-dbgapi-0.82.1 for ROCm-X
+## rocm-dbgapi-0.83.0 for ROCm-X
+### Added
+- Debugging properties through `amd_dbgapi_property_id_t`.  They can be
+  listed, queried, and set through:
+  - `amd_dbgapi_property_list()`
+  - `amd_dbgapi_property_get_info()`
+  - `amd_dbgapi_process_set_property()`
+  Currently, three properties, all process related, are dealt:
+  - Precise memory exception reporting
+  - Precise ALU exception reporting
+  - Local memory out-of-range access reporting
+
+## rocm-dbgapi-0.82.1 for ROCm-10.2
 ### Added
 - A CMake based GoogleTest and GMock unit test suite under `test/`, controlled
   by the new `ENABLE_TESTS` and `ENABLE_UNIT_TESTS` options (both off by
