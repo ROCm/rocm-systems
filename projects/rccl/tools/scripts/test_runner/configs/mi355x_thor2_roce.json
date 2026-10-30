@@ -5489,6 +5489,19 @@
           "name": "GIN_AllGather_Symmetric",
           "description": "Symmetric-memory multi-node AllGather (RailRing_LsaST): GIN ring over the rail team + LSA store broadcast; requires >=2 ranks/node across >=2 nodes",
           "test_filter": "GinMPIDeviceTests.AllGather_Symmetric*"
+        },
+        {
+          "name": "GIN_AllGather_RailRing_MultiChunk",
+          "description": "RailRing_LsaST AllGather of 787459 floats per rank on one CTA: rotated chunk start, wrap at the end of the block and a 4108-byte final chunk, two varied runs per placement",
+          "test_filter": "GinMPIDeviceTests.AllGather_RailRing_MultiChunk",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "1"
+          }
+        },
+        {
+          "name": "GIN_AllGather_RailRing_ByteTail",
+          "description": "RailRing_LsaST AllGather on uint8 counts 17/1021/4101/12301, out of place and in place: the LSA broadcast's misaligned byte head and 1-byte tail must land exactly on every peer",
+          "test_filter": "GinMPIDeviceTests.AllGather_RailRing_ByteTail"
         }
       ]
     },
@@ -5558,6 +5571,14 @@
           "test_filter": "SymmetricKernelCorruptionTest.MisalignedBuffers_FourBytePackTier"
         },
         {
+          "name": "Symk_AllReduceSubWordSkew",
+          "description": "Forced AllReduce_RSxLD_AGxST at 2 CTAs on fp16 and fp8 inputs skewed 1-4 bytes: per-element head and tail, 4-byte tier, guard bytes",
+          "test_filter": "SymmetricKernelCorruptionTest.AllReduceSubWord_SkewedHeadAndFourByteTier",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "2"
+          }
+        },
+        {
           "name": "Symk_AllGatherStoreCrossover",
           "description": "AllGather switches from LL to the store kernel at 1 MB on gfx950, skipped on other architectures",
           "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom1MB"
@@ -5566,6 +5587,14 @@
           "name": "Symk_AllGatherStoreData",
           "description": "Forced AllGather_ST with position-dependent data across its byte, 4-byte and 16-byte tiers and in-place",
           "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
+        },
+        {
+          "name": "Symk_AllReduceLLTailWave",
+          "description": "Forced AllReduce_AGxLL_R at 1 CTA: multi-epoch counts with a short last epoch, odd counts and a one-float input skew (unaligned arm), guard elements, bounded wait",
+          "test_filter": "SymmetricKernelCorruptionTest.AllReduceLL_PinnedTailWave",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "1"
+          }
         },
         {
           "name": "Symk_GroupedAllGatherVaryingSizes",
