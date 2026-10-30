@@ -257,18 +257,19 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
 };
 
-// Hostile host state must survive both the scalar reference and SIMD execution.
+// Migrated RDNA paths assume default controls and may raise sticky flags.
+// Legacy CDNA paths still promise isolation from nondefault host state.
 struct SubtractionHostEnvironment {
   std::fenv_t saved{};
 #if RJ_HOST_ARCH_X86
   uint32_t saved_mxcsr = _mm_getcsr();
 #endif
-  SubtractionHostEnvironment() {
+  explicit SubtractionHostEnvironment(bool uses_arith) {
     EXPECT_EQ(std::feholdexcept(&saved), 0);
-    EXPECT_EQ(std::fesetround(FE_UPWARD), 0);
+    EXPECT_EQ(std::fesetround(uses_arith ? FE_TONEAREST : FE_UPWARD), 0);
     EXPECT_EQ(std::feraiseexcept(FE_DIVBYZERO), 0);
 #if RJ_HOST_ARCH_X86
-    _mm_setcsr(_mm_getcsr() | (1u << 6) | (1u << 15));
+    _mm_setcsr(uses_arith ? 0x1f80u : _mm_getcsr() | (1u << 6) | (1u << 15));
 #endif
   }
   ~SubtractionHostEnvironment() {
@@ -308,10 +309,11 @@ public:
 // Lanes reported per (write, register, bytes, rounding, flags, control), merging
 // the per-lane events of scalar execution with SIMD's per-view events.
 std::map<std::array<uint64_t, 6>, uint64_t>
-observed_coverage(const std::vector<std::array<uint64_t, 7>> &events) {
+observed_coverage(const std::vector<std::array<uint64_t, 7>> &events, bool uses_arith) {
   std::map<std::array<uint64_t, 6>, uint64_t> coverage;
   for (const auto &event : events)
-    coverage[{event[0], event[1], event[3], event[4], event[5], event[6]}] |= event[2];
+    coverage[{event[0], event[1], event[3], event[4], uses_arith ? 0 : event[5],
+              uses_arith ? event[6] & ~uint64_t(0x3f) : event[6]}] |= event[2];
   return coverage;
 }
 
@@ -387,12 +389,17 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
           }
           observer->events.clear();
           {
-            SubtractionHostEnvironment host;
+            SubtractionHostEnvironment host(rdna);
             const auto before = SubtractionHostEnvironment::snapshot();
             const bool succeeded = fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
             const auto after = SubtractionHostEnvironment::snapshot();
             EXPECT_TRUE(succeeded);
-            EXPECT_EQ(after, before);
+            if (rdna) {
+              EXPECT_EQ(after[0], before[0]);
+              EXPECT_EQ(after[2] & ~0x3f, before[2] & ~0x3f);
+            } else {
+              EXPECT_EQ(after, before);
+            }
           }
           // Snapshotting storage must not add events to the observed execution.
           const auto events = observer->events;
@@ -409,7 +416,8 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
         // Scalar execution reports each lane, SIMD each register view. Both must
         // cover the same registers and lanes, and every callback must see the
         // caller's FP environment.
-        EXPECT_EQ(observed_coverage(actual.second), observed_coverage(reference.second));
+        EXPECT_EQ(observed_coverage(actual.second, rdna),
+                  observed_coverage(reference.second, rdna));
         if (!e64 && (exec & 1u)) {
           // 1 - 2^-25 is exactly halfway below 1. This independent rounding
           // witness also catches GCC moving the SIMD subtraction across MODE.

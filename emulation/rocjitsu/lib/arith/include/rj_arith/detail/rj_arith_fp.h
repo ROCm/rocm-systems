@@ -582,9 +582,12 @@ int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *excp_flag_user);
 
 // Unary FP64 arithmetic uses the same low/high VGPR layout, Compatibility
-// resolution and loose-only support as FP64 FMA above. Unary APIs currently
-// reject nondefault guest rounding. Guest
-// input/output-denormal flags control flushing. RDNA3 disables OMOD when IEEE
+// resolution and host-environment contract as FP64 FMA above. Guest rounding
+// controls FRACT subtraction and output scaling; the integral operation itself
+// has the direction named by its mnemonic. FP64 SQRT/RCP/RSQ instead reject
+// directed rounding flags with RJ_ARITH_ERROR_INVALID_FLAGS, including with OMOD.
+// Guest denormal flags control flushing.
+// RDNA3 disables OMOD when IEEE
 // is set or output denormals are preserved; RDNA4 applies OMOD independently.
 // Supports A ABS/NEG,
 // OMOD and CLAMP, with loose semantics. RNDNE rounds ties to even; FRACT computes
