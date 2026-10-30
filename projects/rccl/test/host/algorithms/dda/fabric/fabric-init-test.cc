@@ -405,45 +405,55 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_PeerTablesHoldOwnScratch
 }
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_ZeroesScratchAndEpochCells) {
-  // Zero-fill is hipMemsetAsync on a private stream. The ledger only records
-  // synchronous hipMemset, which the barrier still uses for its flag buffer.
-  struct AsyncMemset {
+  // ncclCuMemAlloc already zero-fills the new scratch and syncs its stream, and
+  // the emulator returns one stream address for every create. Memsets and syncs
+  // go in one list so both of init's fills must land on one stream after its
+  // previous sync, and a sync of that stream must follow them.
+  enum class Step { Memset, Sync };
+  struct FillStep {
+    Step step;
     void* dst;
     int value;
     size_t bytes;
     hipStream_t stream;
   };
-  std::vector<AsyncMemset> asyncMemsets;
+  std::vector<FillStep> steps;
   auto emulatedMemset = g_hipMemsetAsync;
   ScopedHook memsetAsync(g_hipMemsetAsync,
-                         [&asyncMemsets, emulatedMemset](void* dst, int value, size_t bytes, hipStream_t stream) {
-                           asyncMemsets.push_back({dst, value, bytes, stream});
+                         [&steps, emulatedMemset](void* dst, int value, size_t bytes, hipStream_t stream) {
+                           steps.push_back({Step::Memset, dst, value, bytes, stream});
                            return emulatedMemset(dst, value, bytes, stream);
                          });
-  std::vector<hipStream_t> synced;
   auto emulatedSync = g_hipStreamSynchronize;
-  ScopedHook sync(g_hipStreamSynchronize, [&synced, emulatedSync](hipStream_t stream) {
-    synced.push_back(stream);
+  ScopedHook sync(g_hipStreamSynchronize, [&steps, emulatedSync](hipStream_t stream) {
+    steps.push_back({Step::Sync, nullptr, 0, 0, stream});
     return emulatedSync(stream);
   });
 
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
-  const AsyncMemset* scratch = nullptr;
-  const AsyncMemset* epoch = nullptr;
-  for (const AsyncMemset& m : asyncMemsets) {
-    if (m.dst == comm_->ddaScratch) scratch = &m;
-    if (m.dst == comm_->ddaLLEpochDev) epoch = &m;
+  const size_t epochBytes = static_cast<size_t>(comm_->ddaLLEpochLen) * sizeof(uint32_t);
+  const auto epoch = std::find_if(steps.begin(), steps.end(), [&](const FillStep& step) {
+    return step.step == Step::Memset && step.dst == comm_->ddaLLEpochDev && step.value == 0 &&
+           step.bytes == epochBytes;
+  });
+  ASSERT_NE(epoch, steps.end()) << "epoch cells never zeroed";
+  ASSERT_NE(epoch->stream, nullptr);
+
+  auto isEpochStreamSync = [&](const FillStep& step) {
+    return step.step == Step::Sync && step.stream == epoch->stream;
+  };
+  const auto fillSync = std::find_if(epoch, steps.end(), isEpochStreamSync);
+  ASSERT_NE(fillSync, steps.end()) << "epoch stream not synchronized after the epoch fill";
+  auto fillStart = steps.begin();
+  for (auto it = steps.begin(); it != epoch; ++it) {
+    if (isEpochStreamSync(*it)) fillStart = it + 1;
   }
-  ASSERT_NE(scratch, nullptr) << "scratch never zeroed";
-  EXPECT_EQ(scratch->value, 0);
-  EXPECT_EQ(scratch->bytes, static_cast<size_t>(kScratchBytes));
-  ASSERT_NE(epoch, nullptr) << "epoch cells never zeroed";
-  EXPECT_EQ(epoch->value, 0);
-  EXPECT_EQ(epoch->bytes, static_cast<size_t>(comm_->ddaLLEpochLen) * sizeof(uint32_t));
-  ASSERT_NE(scratch->stream, nullptr);
-  EXPECT_EQ(epoch->stream, scratch->stream);
-  EXPECT_NE(std::find(synced.begin(), synced.end(), scratch->stream), synced.end());
+
+  EXPECT_TRUE(std::any_of(fillStart, fillSync, [&](const FillStep& step) {
+    return step.step == Step::Memset && step.dst == comm_->ddaScratch && step.value == 0 &&
+           step.bytes == static_cast<size_t>(kScratchBytes) && step.stream == epoch->stream;
+  })) << "scratch not zeroed on the epoch stream within the synchronized fill";
 }
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_BarrierUsesCommGeometry) {
@@ -583,6 +593,31 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_RanksAtCap_SetsUpFabricPath) {
   EXPECT_EQ(static_cast<size_t>(comm_->ddaLLEpochLen), epochLen);
 }
 
+TEST_F(FabricInitCommInitMicrotest, CommInit_PeerNotReady_FallsBackWithoutFabricState) {
+  // MirrorAllGather copies this rank's slot to every peer. On the ready
+  // exchange, the second sizeof(int) gather, one peer reports 0.
+  int intGathers = 0;
+  int readyFlag = -1;
+  auto mirror = g_bootstrapAllGather;
+  ScopedHook gather(g_bootstrapAllGather,
+                    [this, &intGathers, &readyFlag, mirror](void* state, void* allData, int size) {
+                      ncclResult_t result = mirror(state, allData, size);
+                      if (result == ncclSuccess && size == static_cast<int>(sizeof(int)) && ++intGathers == 2) {
+                        auto* slots = static_cast<int*>(allData);
+                        readyFlag = slots[comm_->rank];
+                        slots[PeerRanks(comm_->nRanks, comm_->rank)[0]] = 0;
+                      }
+                      return result;
+                    });
+
+  EXPECT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+
+  EXPECT_EQ(intGathers, 2);
+  EXPECT_EQ(readyFlag, 1);
+  ExpectNoFabricState(*comm_);
+  EXPECT_TRUE(AllReleased());
+}
+
 // ---------------------------------------------------------------------------
 // ncclDdaFabricCommInit: failure
 // ---------------------------------------------------------------------------
@@ -596,22 +631,37 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_BlockCapGatherFails_ReturnsErrorWit
   EXPECT_TRUE(AllReleased());
 }
 
-// Current behaviour, tracked as AICOMRCCL-2827: a rank that fails here falls back
-// alone, skipping exchanges its peers still enter.
+// Current behaviour, tracked as AICOMRCCL-2827: a rank that fails before the
+// barrier's pointer exchange skips exchanges its peers still enter. A failure
+// from FabricGpuBarrier::mallocAndInit on records ready=0 and still enters the
+// ready allgather; `publishesNotReady` marks those cases.
 struct FailCase {
   const char* name;
   std::function<void()> install;
+  bool publishesNotReady;
 };
 
 class FabricInitFailMicrotest : public FabricInitMicrotest, public ::testing::WithParamInterface<FailCase> {};
 
 TEST_P(FabricInitFailMicrotest, CommInit_StepFails_FallsBackWithoutFabricStateOrLeaks) {
   GetParam().install();
+  // This rank's slot on every sizeof(int) allgather. The block cap is the first;
+  // a later 0 is the ready flag.
+  std::vector<int> intSlots;
+  auto mirror = g_bootstrapAllGather;
+  ScopedHook gather(g_bootstrapAllGather, [this, &intSlots, mirror](void* state, void* allData, int size) {
+    if (size == static_cast<int>(sizeof(int))) intSlots.push_back(static_cast<int*>(allData)[comm_->rank]);
+    return mirror(state, allData, size);
+  });
 
   EXPECT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
   ExpectNoFabricState(*comm_);
   EXPECT_TRUE(AllReleased());
+  if (GetParam().publishesNotReady) {
+    EXPECT_NE(std::find(intSlots.begin(), intSlots.end(), 0), intSlots.end())
+        << "this rank never published a ready flag of 0";
+  }
 }
 
 constexpr size_t kPeerTableBytes = kNRanks * sizeof(void*);
@@ -629,7 +679,8 @@ INSTANTIATE_TEST_SUITE_P(
                          return size == static_cast<size_t>(kScratchBytes);
                        },
                        hipErrorOutOfMemory);
-                 }},
+                 },
+                 false},
         FailCase{"ScratchExchange",
                  [] {
                    int calls = 0;
@@ -638,12 +689,14 @@ INSTANTIATE_TEST_SUITE_P(
                        [calls](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
                                unsigned long long) mutable { return ++calls == 1; },
                        hipErrorInvalidValue);
-                 }},
+                 },
+                 false},
         FailCase{"PeerTableAlloc",
                  [] {
                    FailWhen(
                        g_hipMalloc, [](void**, size_t size) { return size == kPeerTableBytes; }, hipErrorOutOfMemory);
-                 }},
+                 },
+                 false},
         FailCase{"PeerTableCopy",
                  [] {
                    // The barrier's table has the same size; fail only init's.
@@ -658,15 +711,17 @@ INSTANTIATE_TEST_SUITE_P(
                        g_hipMemcpy,
                        [table](void* dst, const void*, size_t, hipMemcpyKind) { return dst == *table; },
                        hipErrorInvalidValue);
-                 }},
-        FailCase{"PeerTableHostAlloc", [] { g_hostAllocs.failBytes = kPeerTableBytes; }},
+                 },
+                 false},
+        FailCase{"PeerTableHostAlloc", [] { g_hostAllocs.failBytes = kPeerTableBytes; }, false},
         FailCase{"PeerTableHostCopy",
                  [] {
                    FailWhen(
                        g_hipMemcpy,
                        [](void*, const void*, size_t, hipMemcpyKind kind) { return kind == hipMemcpyHostToHost; },
                        hipErrorInvalidValue);
-                 }},
+                 },
+                 false},
         FailCase{"Barrier",
                  [] {
                    FailWhen(
@@ -674,20 +729,23 @@ INSTANTIATE_TEST_SUITE_P(
                        [](hipMemGenericAllocationHandle_t*, size_t size, const hipMemAllocationProp*,
                           unsigned long long) { return size < static_cast<size_t>(kScratchBytes); },
                        hipErrorOutOfMemory);
-                 }},
-        FailCase{"ScratchZeroing", [] { FailFabricScratchZeroing(); }},
+                 },
+                 true},
+        FailCase{"ScratchZeroing", [] { FailFabricScratchZeroing(); }, true},
         FailCase{"EpochAlloc",
                  [] {
                    FailWhen(
                        g_hipMalloc, [](void**, size_t size) { return size == kEpochBytes; }, hipErrorOutOfMemory);
-                 }},
+                 },
+                 true},
         FailCase{"EpochZeroing",
                  [] {
                    FailWhen(
                        g_hipMemsetAsync,
                        [](void*, int, size_t bytes, hipStream_t) { return bytes == kEpochBytes; },
                        hipErrorInvalidValue);
-                 }}),
+                 },
+                 true}),
     ParamName<FailCase>);
 
 // ---------------------------------------------------------------------------
