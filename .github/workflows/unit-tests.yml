@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 name: Scoped Unit Tests
 
 on:
@@ -10,12 +13,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  # Metadata edits get an isolated group and cannot cancel validation.
+  group: ${{ github.workflow }}-${{ github.event.action == 'edited' && !github.event.changes.base && format('metadata-{0}', github.run_id) || github.event.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   test:
-    name: unit-tests / ${{ matrix.suite }}
+    # Skipped metadata jobs have a separate name, preserving required results.
+    if: github.event.action != 'edited' || github.event.changes.base
+    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'metadata-only / test' || format('unit-tests / {0}', matrix.suite) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
@@ -33,12 +39,30 @@ jobs:
             run: python -B -m unittest discover -s .github/actions/changed-files/tests -v
 
           - suite: formatting
-            include: '^\.github/workflows/'
+            include: '^(\.github/workflows/|tools/systems_pr_bot/)'
             sparse-checkout: |
               .github/actions/changed-files
               .github/workflows
-            dependencies: pyyaml
-            run: python -B -m unittest discover -s .github/workflows/tests -v
+              tools/systems_pr_bot
+            dependencies: pyyaml requests
+            node-version: 22
+            run: |
+              python -B -m unittest discover -s .github/workflows/tests -v
+              npm ci --prefix .github/workflows/tests --ignore-scripts --no-audit --no-fund
+              npm test --prefix .github/workflows/tests
+
+          - suite: formatting-integration
+            include: '^(\.github/(actions/changed-files/|workflows/)|\.(pre-commit-config\.yaml|clang-format)\Z|shared/cuid/\.(pre-commit-config\.yaml|clang-format|codespellrc|gersemirc)\Z|projects/rocprofiler-compute/(tools/|\.(pre-commit-config\.yaml|clang-format)\Z))'
+            sparse-checkout: |
+              .github/actions/changed-files
+              .github/workflows
+              runtimes
+              emulation/mirage
+              emulation/rocjitsu
+              shared/cuid
+              projects/rocprofiler-compute
+            dependencies: pyyaml pre-commit
+            run: python -B .github/workflows/tests/formatting_integration_test.py -v
     steps:
       - name: Checkout scope inspector
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,6 +91,12 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
+
+      - name: Set up Node
+        if: steps.scope.outputs.affected == 'true' && matrix.node-version != ''
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node-version }}
 
       - name: Install test dependencies
         if: steps.scope.outputs.affected == 'true' && matrix.dependencies != ''

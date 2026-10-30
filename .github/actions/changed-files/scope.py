@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Select work from a complete, pinned Git merge-base diff."""
 
 import argparse
