@@ -599,8 +599,8 @@ __device__ ATTR_NO_INLINE void rocshmem_ulong_broadcast_wg(
     int nelems, int pe_root);
 
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_broadcast_wg(
-    rocshmem_team_t team, unsigned long long *dest,
-    const unsigned long long *source, int nelems, int pe_root);
+    rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source,
+    int nelems, int pe_root);
 
 /**
  * @name ROCSHMEM_CTX_BROADCASTMEM_WG
