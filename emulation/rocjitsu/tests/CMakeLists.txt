@@ -2090,7 +2090,6 @@ set(_rj_interposer_dup_tests
     Dup3RoutesKfdAndRejectsSameFd
     ReopenAfterPrimaryOverwriteKeepsBackend
     SerializedReopenUnderContentionStaysRoutable
-    FcntlDupfdReplacesStaleDrmTracking
     VforkChildCloseKeepsParentKfdRoutable
     ProcMapsNamesRemoteKfdMarker
 )
@@ -2134,17 +2133,28 @@ set(_rj_interposer_drm_tests
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock
 )
+set(_rj_interposer_gem_tests
+    LowAddressMappingHonorsMap32Bit
+    SparseReservationsPreserveRangesAndFileOwnership
+    GemNamespaceIsPrivateButSharedByDuplicates
+    IndependentDrmFilesRejectOverlappingMappings
+    UnmapWithWrongHandleFails
+    ReplaceEvictsOverlappingDifferentSizeRange
+    ReplaceTransfersOwnershipAcrossOldOwnerClose
+    ClearUpdatesOwnerBookkeeping
+)
 # On a vptr check cache miss, the UBSan runtime briefly opens a pipe to test
 # whether a vtable address is readable. Emulator threads can miss at any time,
 # so the pipe can take a descriptor number that a test expects to be free, a
 # dup2 or dup3 onto that number can close the pipe while the runtime writes to
 # it, and the runtime aborts if no descriptor is available. Register tests that
-# depend on specific descriptor numbers or exhaust the table only when vptr
-# checks are off: in unsanitized builds, GCC UBSan builds by default, and builds
-# with RJ_UBSAN_VPTR=OFF.
+# reclaim a closed descriptor number or exhaust the table, in any suite of
+# interposer_dup_test, only when vptr checks are off: in unsanitized builds, GCC
+# UBSan builds by default, and builds with RJ_UBSAN_VPTR=OFF.
 if(NOT (RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR))
     list(
         APPEND _rj_interposer_dup_tests
+        FcntlDupfdReplacesStaleDrmTracking
         Dup2PreservesHiddenEventBacking
         Dup3PreservesHiddenEventBacking
         Dup2PreservesHiddenAllocationBacking
@@ -2159,6 +2169,11 @@ if(NOT (RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR))
         CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
         MappingStillSucceedsAtTheDescriptorLimit
         PrimeImportRejectsADescriptorThatIsNotADmabuf
+    )
+    list(
+        APPEND _rj_interposer_gem_tests
+        ReusedDmabufFdMintsDistinctHandles
+        MapSucceedsAfterExportFdClosed
     )
 endif()
 rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
@@ -2328,19 +2343,7 @@ rj_add_interposer_test_suite(
     PosixSpawnFromAMultithreadedParent
 )
 
-rj_add_interposer_test_suite(
-    InterposerGemTest
-    LowAddressMappingHonorsMap32Bit
-    SparseReservationsPreserveRangesAndFileOwnership
-    GemNamespaceIsPrivateButSharedByDuplicates
-    IndependentDrmFilesRejectOverlappingMappings
-    ReusedDmabufFdMintsDistinctHandles
-    UnmapWithWrongHandleFails
-    MapSucceedsAfterExportFdClosed
-    ReplaceEvictsOverlappingDifferentSizeRange
-    ReplaceTransfersOwnershipAcrossOldOwnerClose
-    ClearUpdatesOwnerBookkeeping
-)
+rj_add_interposer_test_suite(InterposerGemTest ${_rj_interposer_gem_tests})
 
 set(_rj_interposer_syncobj_tests
     VmTimelineWaitObservesSynchronousMapAndUnmap
