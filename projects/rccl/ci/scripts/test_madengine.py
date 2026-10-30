@@ -923,19 +923,23 @@ def run_ab_in_one_allocation(
         """
         log.error("Releasing the allocation: %s", reason)
         try:
-            granted_job = alloc_info.read_text().split()[0]
-        except (OSError, IndexError):
-            granted_job = ""  # still queued; killing salloc withdraws it
-        if granted_job:
             try:
-                subprocess.run(["scancel", granted_job], timeout=60)
-            except (OSError, subprocess.SubprocessError) as exc:
-                log.warning("scancel %s failed: %s", granted_job, exc)
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        proc.wait()
+                granted_job = alloc_info.read_text().split()[0]
+            except (OSError, IndexError):
+                granted_job = ""  # still queued; killing salloc withdraws it
+            if granted_job:
+                try:
+                    subprocess.run(["scancel", granted_job], timeout=60)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    log.warning("scancel %s failed: %s", granted_job, exc)
+        finally:
+            # A second signal during scancel raises out of this function; the
+            # group must still be killed and reaped.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
 
     # Actions cancels a run with SIGINT and escalates to SIGTERM. SIGINT
     # already arrives as KeyboardInterrupt, but SIGTERM ends the interpreter
@@ -1191,7 +1195,9 @@ def check_ab_regression(
         f"{ratio:.4f} ({ratio - 1:+.1%}), threshold: -{threshold:.0%}"
     )
 
-    if ratio - 1 < -threshold:
+    # Not `ratio - 1 < -threshold`: the subtraction rounds, so a loss of
+    # exactly the threshold failed for some inputs and passed for others.
+    if ratio < 1 - threshold:
         return True, f"REGRESSION DETECTED — {msg}"
 
     return False, f"No regression — {msg}"
