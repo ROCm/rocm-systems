@@ -504,23 +504,41 @@ TEST(RegisterAccessTest, WriteRegionSetLanesSnapshotsOverlappingInput) {
   ASSERT_NE(fx.wf, nullptr);
   ASSERT_EQ(fx.wf->wf_size(), 32u);
   const uint32_t reg = fx.vgpr_base() + 7;
+  const auto storage_of = [&](uint32_t r) {
+    return reinterpret_cast<const uint32_t *>(std::as_const(*fx.cu).raw_vgpr_data(r));
+  };
+  const auto seed = [](int32_t word) {
+    return word < 0 ? 0xCCDD0000u + static_cast<uint32_t>(64 + word)
+                    : 0xAABB0000u + static_cast<uint32_t>(word);
+  };
   RegisterAccess regs(*fx.wf);
-  for (uint64_t mask : {0xffffffffULL, 0xaaaaaaaaULL}) {
-    for (uint8_t byte_mask : {0xFu, 0x5u}) {
-      // A wave32 occupies half of this physical wave64 register. The source
-      // starts one word later to exercise overlapping source and destination.
-      for (uint32_t lane = 0; lane < 64; ++lane)
-        fx.cu->write_vgpr(reg, lane, 0xAABB0000u + lane);
-      const auto *storage =
-          reinterpret_cast<const uint32_t *>(std::as_const(*fx.cu).raw_vgpr_data(reg));
-      auto writes = regs.write_vgpr_region(reg, 1, mask, byte_mask);
-      writes.set_lanes(0, std::span<const uint32_t>(storage + 1, 32));
-      const uint32_t bit_mask = byte_mask == 0xF ? 0xffffffffu : 0x00ff00ffu;
-      for (uint32_t lane = 0; lane < 64; ++lane) {
-        uint32_t expected = 0xAABB0000u + lane;
-        if (lane < 32 && (mask & (uint64_t{1} << lane)))
-          expected = (expected & ~bit_mask) | ((0xAABB0001u + lane) & bit_mask);
-        EXPECT_EQ(fx.cu->read_vgpr_storage(reg, lane), expected);
+  // A source one word after the destination is read before the forward store
+  // loop reaches it. A source one word before is overwritten by the previous
+  // lane's store, so a masked store that reads the source directly fails.
+  for (int32_t offset : {1, -1}) {
+    for (uint64_t mask : {0xffffffffULL, 0xaaaaaaaaULL}) {
+      for (uint8_t byte_mask : {0xFu, 0x5u}) {
+        SCOPED_TRACE(::testing::Message() << "offset " << offset << " mask 0x" << std::hex << mask
+                                          << " byte mask 0x" << +byte_mask);
+        // A wave32 occupies half of each physical wave64 register.
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          fx.cu->write_vgpr(reg - 1, lane, seed(static_cast<int32_t>(lane) - 64));
+          fx.cu->write_vgpr(reg, lane, seed(static_cast<int32_t>(lane)));
+        }
+        // A source that starts before the destination reads the preceding
+        // register's last word, so the seeded registers must be adjacent.
+        ASSERT_EQ(storage_of(reg - 1) + 64, storage_of(reg));
+        auto writes = regs.write_vgpr_region(reg, 1, mask, byte_mask);
+        writes.set_lanes(0, std::span<const uint32_t>(storage_of(reg) + offset, 32));
+        const uint32_t bit_mask = byte_mask == 0xF ? 0xffffffffu : 0x00ff00ffu;
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          EXPECT_EQ(fx.cu->read_vgpr_storage(reg - 1, lane), seed(static_cast<int32_t>(lane) - 64));
+          uint32_t expected = seed(static_cast<int32_t>(lane));
+          if (lane < 32 && (mask & (uint64_t{1} << lane)))
+            expected =
+                (expected & ~bit_mask) | (seed(static_cast<int32_t>(lane) + offset) & bit_mask);
+          EXPECT_EQ(fx.cu->read_vgpr_storage(reg, lane), expected);
+        }
       }
     }
   }
