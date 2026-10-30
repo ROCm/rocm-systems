@@ -81,6 +81,8 @@ void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
   ++g_rcclScaleCollLl128BuffSizeCalls;
   comm->buffSizes[NCCL_PROTO_LL128] *= g_rcclScaleCollLl128BuffSizeFactor;
 }
+int g_rcclLl128StepScale = 1;
+int rcclLl128StepScale(struct ncclComm*) { return g_rcclLl128StepScale; }
 void rcclUpdateCollectiveChannels(struct ncclComm*, size_t, const struct ncclTaskColl*, int&) {
   ++g_rcclUpdateCollectiveChannelsCalls;
 }
@@ -354,6 +356,7 @@ void ResetRcclWrapFakes() {
   g_rcclUpdateRemoteFlushAlgoProtoChannels = 0;
   g_rcclScaleCollLl128BuffSizeCalls = 0;
   g_rcclScaleCollLl128BuffSizeFactor = 1;
+  g_rcclLl128StepScale = 1;
   g_rcclUpdateCollectiveChannelsCalls = 0;
   g_rcclSetPipeliningCalls = 0;
   g_rcclUpdateThreadThresholdCalls = 0;

@@ -171,6 +171,7 @@ void rcclGetMaxNthreads(struct ncclComm* comm, int maxNthreads[]);
 void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes, int& nThreads);
 void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]);
 void rcclScaleCollLl128BuffSize(struct ncclComm* comm);
+int rcclLl128StepScale(struct ncclComm* comm);
 NCCL_API(ncclResult_t, rcclGetAlgoInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
          int collNetSupport, int nvlsSupport, int numPipeOps, int* algo, int* protocol, int* maxChannels);
 // Buffer/op-aware implementation query. Unlike rcclGetAlgoInfo(), this reports

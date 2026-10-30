@@ -97,6 +97,7 @@ struct p2pResources {
   ncclShmHandle_t handle;
   ncclShmIpcDesc_t desc;
   uint32_t* next_hdp_reg;  // Next GPU in ring (for p2p transport use only)
+  bool isP2p;              // Send/recv connection; sizes its FIFO with ncclConnBuffSize
 };
 
 // cuMem API support
@@ -465,6 +466,7 @@ ncclResult_t p2pSendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
   struct ncclP2pRequest req;
   NCCLCHECK(ncclCalloc(&resources, 1));
   send->transportResources = resources;
+  resources->isP2p = graph == NULL;
   int useRead, intermediateRank;
   NCCLCHECK(p2pGetInfo(comm, myInfo, peerInfo, &useRead, &intermediateRank));
   if (useMemcpy) useRead = 0;
@@ -568,6 +570,7 @@ ncclResult_t p2pRecvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
   struct ncclP2pRequest req;
   NCCLCHECK(ncclCalloc(&resources, 1));
   recv->transportResources = resources;
+  resources->isP2p = graph == NULL;
   int useRead, intermediateRank;
   NCCLCHECK(p2pGetInfo(comm, myInfo, peerInfo, &useRead, &intermediateRank));
 
@@ -580,7 +583,7 @@ ncclResult_t p2pRecvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
   int recvSize = sizeof(struct ncclRecvMem);
   // For P2P Read the SIMPLE buffer is tagged on the end of the ncclSendMem structure
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-    if (!(info->read && p == NCCL_PROTO_SIMPLE)) recvSize += comm->buffSizes[p];
+    if (!(info->read && p == NCCL_PROTO_SIMPLE)) recvSize += ncclConnBuffSize(comm, resources->isP2p, p);
   }
   ALIGN_SIZE(recvSize, CUDA_IPC_MIN);
 
@@ -648,7 +651,7 @@ static ncclResult_t p2pSendConnect(struct ncclComm* comm, struct ncclConnect* co
       send->conn.buffs[p] = (char*)(resources->sendDevMem + 1);
     } else {
       send->conn.buffs[p] = buff;
-      buff += comm->buffSizes[p];
+      buff += ncclConnBuffSize(comm, resources->isP2p, p);
     }
   }
   send->conn.stepSize = comm->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS;
@@ -708,7 +711,7 @@ ncclResult_t p2pRecvConnect(struct ncclComm* comm, struct ncclConnect* connectIn
       recv->conn.buffs[p] = (char*)(remDevMem + 1);
     } else {
       recv->conn.buffs[p] = buff;
-      buff += comm->buffSizes[p];
+      buff += ncclConnBuffSize(comm, resources->isP2p, p);
     }
   }
   return ncclSuccess;

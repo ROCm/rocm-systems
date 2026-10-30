@@ -1857,6 +1857,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int treeCompact;
     bool pivotA2AEnabled;
     bool ll128Enabled;
+    int ll128StepScale;
     char hostname[128];
     int p2pnChannelsPerPeer;
     int p2pMaxPeers;
@@ -2416,6 +2417,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->topo->ll128Enabled = comm->topo->ll128Enabled || rcclParamLL128ForceEnable() ||
                              IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
+  allGather3Data[rank].ll128StepScale = rcclLl128StepScale(comm);
 
   if (comm->ncclNet && comm->ncclNet->devices) {
     int gpu;
@@ -2644,12 +2646,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclCalloc(&allTopoRanks, comm->nRanks), ret, fail);
   int nc;
   nc = allGather3Data[0].nc;
+  comm->ll128StepScale = allGather3Data[0].ll128StepScale;
   for (int i = 0; i < nranks; i++) {
     allTopoRanks[i] = &allGather3Data[i].topoRanks;
     nc = std::min(allGather3Data[i].nc, nc);
     // Make sure we align all ranks so that the tuning is consistent across ranks
     comm->topo->pivotA2AEnabled = comm->topo->pivotA2AEnabled && allGather3Data[i].pivotA2AEnabled;
     comm->topo->ll128Enabled = comm->topo->ll128Enabled && allGather3Data[i].ll128Enabled;
+    comm->ll128StepScale = std::min(comm->ll128StepScale, allGather3Data[i].ll128StepScale);
     for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
       graphs[a]->nChannels = std::min(allGather3Data[i].graphInfo[a].nChannels, graphs[a]->nChannels);
       graphs[a]->sameChannels = std::min(allGather3Data[i].graphInfo[a].sameChannels, graphs[a]->sameChannels);

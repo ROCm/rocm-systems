@@ -9801,6 +9801,7 @@ struct Tr_AllGatherInfo {
   int treeCompact;
   bool pivotA2AEnabled;
   bool ll128Enabled;
+  int ll128StepScale;
   char hostname[128];
   int p2pnChannelsPerPeer;
   int p2pMaxPeers;
@@ -10166,6 +10167,21 @@ TEST_F(InitMicrotest, InitTransportsRank_Ll128ForceEnabled_TurnsLl128OnForAnyArc
   const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_TRUE(c.get()->topo->ll128Enabled);
+}
+
+// Both ends of a connection size its LL128 FIFO, so every rank must settle on the same (smallest) step scale.
+TEST_F(InitMicrotest, InitTransportsRank_Ll128StepScale_RanksAgreeOnTheSmallest) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");
+  g_rcclLl128StepScale = 4;
+  int selfRow = 0;
+  const auto gathers = Tr_InstallGathers(c, {}, [&](int r, Tr_AllGatherInfo& row) {
+    if (r == 0) selfRow = row.ll128StepScale;
+    if (r == 2) row.ll128StepScale = 2;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, selfRow) << "this rank publishes rcclLl128StepScale";
+  EXPECT_EQ(2, c.get()->ll128StepScale);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_Gfx950TwoRanksOneNode_UsesSixteenChannels) {

@@ -3432,6 +3432,7 @@ protected:
         // (every buffSizes[p] == 0) and a read/write mix-up is unobservable.
         comm_.buffSizes[NCCL_PROTO_LL]    = 0x1000;
         comm_.buffSizes[NCCL_PROTO_LL128] = 0x2000;
+        comm_.p2pLl128BuffSize            = 0x2000;  // send/recv (graph == NULL) connections size LL128 with this
 
         backing_.assign(sizeof(ncclRecvMem) + 4096, 0);
     }
@@ -3956,6 +3957,26 @@ TEST_F(P2pSetupMicrotest, RecvSetupThenConnect_WritePath_WiresConnBuffers)
     EXPECT_NE(recv.conn.head, nullptr);
 
     p2pTransport.recv.free(&comm_, &recv);
+}
+
+// With a scaled-up collective LL128 buffer, a send/recv connection (no graph) lays out its LL128 FIFO with
+// p2pLl128BuffSize, which the send/recv kernels step through; a collective connection keeps buffSizes.
+TEST_F(P2pSetupMicrotest, RecvSetupThenConnect_SendRecvConnKeepsSendRecvLl128Size)
+{
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+    comm_.buffSizes[NCCL_PROTO_LL128] = 4 * comm_.p2pLl128BuffSize;
+    ncclTopoGraph graph{};
+
+    for (ncclTopoGraph* g : {static_cast<ncclTopoGraph*>(nullptr), &graph}) {
+        ncclConnector recv{};
+        ASSERT_EQ(p2pTransport.recv.setup(&comm_, g, &myInfo_, &peer_, &connect_info_, &recv, 0, 0), ncclSuccess);
+        ASSERT_EQ(p2pTransport.recv.connect(&comm_, &connect_info_, comm_.nRanks, /*rank=*/0, &recv), ncclSuccess);
+        const int expected = g ? comm_.buffSizes[NCCL_PROTO_LL128] : comm_.p2pLl128BuffSize;
+        EXPECT_EQ(expected, recv.conn.buffs[NCCL_PROTO_SIMPLE] - recv.conn.buffs[NCCL_PROTO_LL128])
+            << (g ? "collective" : "send/recv");
+        p2pTransport.recv.free(&comm_, &recv);
+    }
 }
 
 TEST_F(P2pSetupMicrotest, RecvSetupThenConnect_ReadPath_TakesRemoteSimpleBuffer)

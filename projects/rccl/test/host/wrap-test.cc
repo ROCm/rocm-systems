@@ -961,41 +961,18 @@ TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx1250UsesWiderLL128Line) {
       });
 }
 
-// gfx950 keeps the 64B line of other gfx9xx archs (28 elems/thread), but when
-// the comm can select LL128 its buffer is 4x deeper: 112 elems, 1,835,008
-// bytes at 256 threads. Literals for the same reason as 28 and 120 above.
-// Isolated for the same reason too.
-TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx950LL128BufferGrowsOnlyWhenLL128Enabled) {
+// The default LL128 buffer is also the send/recv one, so gfx950 keeps 28
+// elems/thread with LL128 enabled; rcclScaleCollLl128BuffSize deepens only the
+// collective buffer. Literals and isolation for the same reasons as above.
+TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx950LL128EnabledKeepsDefaultBuffer) {
   RUN_ISOLATED_TEST(
-      "Wrap_SetDefaultBuffSizes_Gfx950LL128BufferGrowsOnlyWhenLL128Enabled",
+      "Wrap_SetDefaultBuffSizes_Gfx950LL128EnabledKeepsDefaultBuffer",
       []() {
         ncclComm* comm = MakeCommWithArch("gfx950");
-        int disabledSizes[NCCL_NUM_PROTOCOLS] = {0};
-        rcclSetDefaultBuffSizes(comm, disabledSizes);
-        EXPECT_EQ(28 * RCCL_GFX950_MAX_NTHREADS * NCCL_STEPS * (int)sizeof(uint64_t),
-                  disabledSizes[NCCL_PROTO_LL128]);
-
-        comm->topo->ll128Enabled = true;
-        int enabledSizes[NCCL_NUM_PROTOCOLS] = {0};
-        rcclSetDefaultBuffSizes(comm, enabledSizes);
-        EXPECT_EQ(112 * RCCL_GFX950_MAX_NTHREADS * NCCL_STEPS * (int)sizeof(uint64_t),
-                  enabledSizes[NCCL_PROTO_LL128]);
-        EXPECT_EQ(disabledSizes[NCCL_PROTO_LL], enabledSizes[NCCL_PROTO_LL]);
-        EXPECT_EQ(disabledSizes[NCCL_PROTO_SIMPLE], enabledSizes[NCCL_PROTO_SIMPLE]);
-        DeleteCommWithArch(comm);
-      });
-}
-
-// The 4x LL128 buffer is gfx950-only: gfx942 with LL128 enabled keeps 28.
-TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx942LL128EnabledKeepsDefaultBuffer) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SetDefaultBuffSizes_Gfx942LL128EnabledKeepsDefaultBuffer",
-      []() {
-        ncclComm* comm = MakeCommWithArch("gfx942");
         comm->topo->ll128Enabled = true;
         int defaultBuffSizes[NCCL_NUM_PROTOCOLS] = {0};
         rcclSetDefaultBuffSizes(comm, defaultBuffSizes);
-        EXPECT_EQ(28 * RCCL_DEFAULT_MAX_NTHREADS * NCCL_STEPS * (int)sizeof(uint64_t),
+        EXPECT_EQ(28 * RCCL_GFX950_MAX_NTHREADS * NCCL_STEPS * (int)sizeof(uint64_t),
                   defaultBuffSizes[NCCL_PROTO_LL128]);
         DeleteCommWithArch(comm);
       });
@@ -1661,6 +1638,75 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneScalesLl128Buffer
         EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 64 * perNode));
         EXPECT_EQ(48, RemoteFlushChannels(comm, 64 * perNode));
         DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_LL128_STEP_SCALE defaults to 4 on gfx950 and 1 elsewhere; 1-16 overrides it, anything else keeps the default.
+TEST(WrapMicrotestIsolated, Ll128StepScale_ArchDefaultAndOverride) {
+  RUN_ISOLATED_TEST(
+      "Wrap_Ll128StepScale_ArchDefaultAndOverride",
+      []() {
+        ncclComm* gfx950 = MakeCommWithArch("gfx950");
+        ncclComm* gfx942 = MakeCommWithArch("gfx942");
+        EXPECT_EQ(4, rcclLl128StepScale(gfx950));
+        EXPECT_EQ(1, rcclLl128StepScale(gfx942));
+        for (int64_t value : {int64_t(1), int64_t(2), int64_t(16)}) {
+          ScopedHook loadParam(g_loadParam, ForceParam("RCCL_LL128_STEP_SCALE", value));
+          EXPECT_EQ(value, rcclLl128StepScale(gfx950)) << value;
+          EXPECT_EQ(value, rcclLl128StepScale(gfx942)) << value;
+        }
+        for (int64_t value : {int64_t(0), int64_t(17)}) {
+          ScopedHook loadParam(g_loadParam, ForceParam("RCCL_LL128_STEP_SCALE", value));
+          EXPECT_EQ(4, rcclLl128StepScale(gfx950)) << value << " is out of range";
+          EXPECT_EQ(1, rcclLl128StepScale(gfx942)) << value << " is out of range";
+        }
+        DeleteCommWithArch(gfx950);
+        DeleteCommWithArch(gfx942);
+      });
+}
+
+// The agreed step scale deepens only the collective LL128 buffer, and only when the comm can select LL128.
+TEST(WrapMicrotestIsolated, ScaleCollLl128BuffSize_StepScaleLeavesSendRecvBuffer) {
+  RUN_ISOLATED_TEST(
+      "Wrap_ScaleCollLl128BuffSize_StepScaleLeavesSendRecvBuffer",
+      []() {
+        ncclComm* comm = MakeRemoteFlushTuneComm(1, 8);
+        comm->ll128StepScale = 4;
+        rcclScaleCollLl128BuffSize(comm);
+        EXPECT_EQ(4 * kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]);
+        EXPECT_EQ(kLl128BuffSize, comm->p2pLl128BuffSize) << "send/recv keeps the default";
+        DeleteCommWithArch(comm);
+        struct Case {
+          const char* what;
+          int ll128StepScale;
+          bool ll128Enabled;
+        };
+        for (const Case& c : {Case{"LL128 disabled", 4, false}, Case{"scale 1", 1, true}, Case{"not agreed", 0, true}}) {
+          comm = MakeRemoteFlushTuneComm(1, 8);
+          comm->ll128StepScale = c.ll128StepScale;
+          comm->topo->ll128Enabled = c.ll128Enabled;
+          rcclScaleCollLl128BuffSize(comm);
+          EXPECT_EQ(kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << c.what;
+          EXPECT_EQ(kLl128BuffSize, comm->p2pLl128BuffSize) << c.what;
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// With RCCL_IB_GDR_FLUSH_FLAG_TUNE the collective buffer takes the larger of the two scales, not their product.
+TEST(WrapMicrotestIsolated, ScaleCollLl128BuffSize_StepScaleAndFlagTuneDoNotCompound) {
+  RUN_ISOLATED_TEST(
+      "Wrap_ScaleCollLl128BuffSize_StepScaleAndFlagTuneDoNotCompound",
+      []() {
+        ScopedHook loadParam(g_loadParam, ForceFlagTune());
+        for (auto [stepScale, expected] : {std::pair{1, 4}, std::pair{4, 4}, std::pair{8, 8}}) {
+          ncclComm* comm = MakeRemoteFlushTuneComm(2, 16);
+          comm->ll128StepScale = stepScale;
+          rcclScaleCollLl128BuffSize(comm);
+          EXPECT_EQ(expected * kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << "step scale " << stepScale;
+          EXPECT_EQ(kLl128BuffSize, comm->p2pLl128BuffSize) << "step scale " << stepScale;
+          DeleteCommWithArch(comm);
+        }
       });
 }
 

@@ -51,6 +51,8 @@ extern int g_rcclUpdateRemoteFlushAlgoProtoChannels;
 // rcclScaleCollLl128BuffSize fake: counts calls and multiplies buffSizes[NCCL_PROTO_LL128] by the factor.
 extern int g_rcclScaleCollLl128BuffSizeCalls;
 extern int g_rcclScaleCollLl128BuffSizeFactor;
+// rcclLl128StepScale fake: the step scale this rank publishes in AllGather3.
+extern int g_rcclLl128StepScale;
 extern int g_rcclUpdateCollectiveChannelsCalls;
 extern int g_rcclSetPipeliningCalls;
 extern int g_rcclUpdateThreadThresholdCalls;

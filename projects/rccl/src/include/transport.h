@@ -130,6 +130,12 @@ struct ncclTransport {
   struct ncclTransportComm recv;
 };
 
+// Per-protocol FIFO size of a connection. Send/recv connections (set up without a graph) get the send/recv LL128
+// size, which the send/recv kernels step through. Both ends derive the buffer layout from this on their own.
+static inline int ncclConnBuffSize(struct ncclComm* comm, bool isP2p, int p) {
+  return p == NCCL_PROTO_LL128 && isP2p ? comm->p2pLl128BuffSize : comm->buffSizes[p];
+}
+
 ncclResult_t ncclTransportP2pConnect(struct ncclComm* comm, int channelId, int nrecv, int* peerRecv, int nsend,
                                      int* peerSend, int connIndex);
 ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex,
