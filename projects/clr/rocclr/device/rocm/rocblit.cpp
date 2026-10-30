@@ -339,6 +339,9 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
                                      (reinterpret_cast<const_address>(src) + srcOffset), srcAgent,
                                      size[0], wait_events.size(), wait_events.data(), active);
           if (status != HSA_STATUS_SUCCESS) {
+            // The rows already issued still decrement the signal; resetting the slot before they
+            // finish would let them complete its next use early
+            WaitForIssuedOps(active, kInitVal - (z * size[1] + y));
             gpu().Barriers().ResetCurrentSignal();
             LogPrintfError("DMA buffer failed with code %d", status);
             return false;
