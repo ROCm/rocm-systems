@@ -13,7 +13,41 @@ import pytest
 from amdisa.codegen.execute.rj_arith_float import (
     FMA_F32,
     gen_float_fma32,
+    gen_float_unary32,
 )
+
+
+def test_other_architectures_keep_existing_path():
+    for arch in ('rdna1', 'rdna2', 'rdna3_5', 'cdna4', 'cdna5'):
+        assert gen_float_unary32(context(arch, 'V_CEIL_F32', ['dst'], ['src'])) is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_float_methods_use_policy_and_no_legacy_fast_path(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = 0
+    for encoding in ('vop1', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            if 'arith::execute_float_unary32' not in body:
+                continue
+            assert 'RJ_SIMD' not in body, match[1]
+            assert 'try_execute_' not in body, match[1]
+            assert 'amdgpu::execute_v_' not in body, match[1]
+            assert 'arithmetic_flags()' in body, match[1]
+            checked += 1
+    assert checked == 60
 
 
 @pytest.mark.parametrize('arch,count', [('rdna3', 30), ('rdna4', 34)])
@@ -302,13 +336,31 @@ def test_packed_selection_architecture_and_state_binding(arch, name):
 def test_dot4_formats_and_c_modifiers(name):
     from amdisa.codegen.execute.rj_arith_float import gen_float_dot32
 
-    body = gen_float_dot32(context('rdna4', name, ['d'], ['a', 'b', 'c'], enc_name='ENC_VOP3P', opsel_exprs=('low', 'high')))
+    body = gen_float_dot32(
+        context(
+            'rdna4',
+            name,
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('low', 'high'),
+        )
+    )
     assert 'rj_arith_' + name.lower() in body
     assert 'inst_.neg & 4' in body and 'RJ_ARITH_DOT_NEG_C' in body
     assert 'inst_.neg_hi & 4' in body and 'RJ_ARITH_DOT_ABS_C' in body
     assert 'arithmetic_flags()' in body
     assert (
-        gen_float_dot32(context('rdna3', name, ['d'], ['a', 'b', 'c'], enc_name='ENC_VOP3P', opsel_exprs=('low', 'high')))
+        gen_float_dot32(
+            context(
+                'rdna3',
+                name,
+                ['d'],
+                ['a', 'b', 'c'],
+                enc_name='ENC_VOP3P',
+                opsel_exprs=('low', 'high'),
+            )
+        )
         is None
     )
 
@@ -358,7 +410,10 @@ def test_half_dot_packed_sources_and_partial_accumulator(arch, name):
     assert 'dot2_src_needs_half_replication(inst_.src1)' in body
     assert 'dot2_src_needs_half_replication(inst_.src2) ? 4u : 0u' in body
     assert 'arithmetic_flags()' in body
-    assert gen_half_dot(context('cdna4', name, ['d'], ['a', 'b', 'c'], is_vop3=True)) is None
+    assert (
+        gen_half_dot(context('cdna4', name, ['d'], ['a', 'b', 'c'], is_vop3=True))
+        is None
+    )
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -561,6 +616,33 @@ def test_all_half_fma_bodies_route_rj_arith(arch):
     assert count == 8
 
 
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_trig_all_encodings_route_rj_arith_instead_of_shared_legacy_helpers(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    count = 0
+    for encoding in ('vop1', 'vop3'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void V(?:Sin|Cos)F(16|32)Vop[13]::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            source,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_float_unary' + match[1] in body
+            assert 'arithmetic_flags()' in body
+            assert 'amdgpu::execute_v_' not in body
+            assert 'try_execute_' not in body and 'ROCJITSU_TRY_SIMD' not in body
+            count += 1
+    assert count == 16
+
+
 @pytest.mark.parametrize('arch,count', [('rdna3', 20), ('rdna4', 36)])
 def test_ternary_selection_routes_all_encodings_and_modifiers(arch, count):
     from amdisa.codegen.execute.rj_arith_float import (
@@ -614,6 +696,38 @@ def test_ternary_selection_routes_all_encodings_and_modifiers(arch, count):
         assert 'ROCJITSU_TRY_SIMD' not in body
         seen += 1
     assert seen == count
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('name', ['V_LDEXP_F64', 'V_TRIG_PREOP_F64'])
+def test_float64_word_uses_pair_and_integer_adapter(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float64_word
+
+    body = gen_float64_word(context(arch, name, ['dst'], ['a', 'b'], is_vop3=True))
+    assert 'execute_float64_word' in body
+    assert 'arithmetic_flags()' in body
+    assert 'RJ_ARITH_ALU_ABS_B' not in body
+    assert 'RJ_ARITH_ALU_NEG_B' not in body
+    assert (
+        gen_float64_word(context('cdna4', name, ['dst'], ['a', 'b'], is_vop3=True))
+        is None
+    )
+    assert gen_float64_word(context(arch, name, ['dst'], ['a'], is_vop3=True)) is None
+    assert ('/*ldexp=*/true' in body) == (name == 'V_LDEXP_F64')
+    path = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+        / 'vop3_exec.cpp'
+    )
+    source = path.read_text()
+    cls = 'VLdexpF64' if name == 'V_LDEXP_F64' else 'VTrigPreopF64'
+    start = source.index('void ' + cls + 'Vop3::execute_impl')
+    end = source.index('\n}', start)
+    body = source[start:end]
+    assert 'execute_float64_word' in body
+    assert 'try_execute_' not in body
+    assert 'amdgpu::execute_v_' not in body
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])

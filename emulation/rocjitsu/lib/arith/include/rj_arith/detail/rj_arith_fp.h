@@ -860,6 +860,9 @@ int rj_arith_v_fract_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user);
 
+// FP64 SQRT/RCP/RSQ retain the native nearest-rounded approximations used by
+// the legacy executor under the default host environment. Guest ROUND controls
+// OMOD, not these core approximations; exact semantics remain unsupported.
 int rj_arith_v_sqrt_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                             uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_sqrt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,

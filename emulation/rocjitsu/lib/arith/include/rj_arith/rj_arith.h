@@ -8,6 +8,7 @@
 #include "detail/rj_arith_common.h"
 #include "detail/rj_arith_dot.h"
 #include "detail/rj_arith_fp.h"
+#include "detail/rj_arith_math.h"
 #include "detail/rj_arith_wmma.h"
 // IWYU pragma: end_exports
 

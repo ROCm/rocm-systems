@@ -125,7 +125,8 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
       value = prepare_omod_f64(value, mode);
       if constexpr (rocjitsu::arith::is_selection(Op) || Op == Fp64::Trunc || Op == Fp64::Ceil ||
                     Op == Fp64::Rndne || Op == Fp64::Floor || Op == Fp64::Fract ||
-                    Op == Fp64::FrexpMant) {
+                    Op == Fp64::FrexpMant || Op == Fp64::Rcp || Op == Fp64::Rsq ||
+                    Op == Fp64::Sqrt) {
         value = selection_omod_round(value, _mm256_mul_pd(value, scale), flags);
       } else {
         value = _mm256_mul_pd(value, scale);

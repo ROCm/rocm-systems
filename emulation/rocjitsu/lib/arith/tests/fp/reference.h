@@ -136,19 +136,6 @@ template <typename Call> void expect_invalid_fp_requests(Call call) {
   EXPECT_EQ(call(0, 1ULL << 63), RJ_ARITH_ERROR_INVALID_FLAGS);
 }
 
-// FP64 FMA and unary APIs reject nondefault guest rounding in Loose/Compatibility.
-// The caller checks that rejected requests preserve operand and status storage.
-template <typename Call> void expect_invalid_fp64_rounding(Call call) {
-  for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
-      for (uint64_t rounding :
-           {RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
-        EXPECT_EQ(call(cpu | semantics | rounding, 0), RJ_ARITH_ERROR_INVALID_FLAGS);
-      }
-    }
-  }
-}
-
 // FMA validates malformed controls before rejecting an unsupported status request.
 template <typename Call> void expect_invalid_fma_requests(Call call) {
   expect_invalid_fp_requests(call);
