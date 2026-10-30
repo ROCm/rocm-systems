@@ -74,6 +74,9 @@ class Workload(Base):
     profiling_config_extdata = Column(JSON)
     # Memory chart layout file, unchanged; see src/memory_chart/README.md
     memory_chart_layout_extdata = Column(JSON)
+    # Sum of kernel durations in ns after the gpu and dispatch filters, before -k.
+    # A kernel's top-stats Pct is its duration_ns_sum over this.
+    total_duration_ns = Column(Integer)
 
     # Workload can have multiple kernels
     kernels = relationship("Kernel", back_populates="workload")
@@ -1276,6 +1279,7 @@ class Database:
                 Kernel.kernel_uuid.label("kernel_uuid"),
                 Kernel.workload_id.label("workload_id"),
                 Workload.name.label("workload_name"),
+                Workload.total_duration_ns.label("workload_total_duration_ns"),
                 Kernel.kernel_name,
                 Kernel.short_name,
                 func.count(Dispatch.dispatch_id).label("dispatch_count"),
@@ -1304,6 +1308,7 @@ class Database:
                 Kernel.kernel_uuid,
                 Kernel.workload_id,
                 Workload.name,
+                Workload.total_duration_ns,
                 Kernel.kernel_name,
                 Kernel.short_name,
             ),

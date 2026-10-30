@@ -32,6 +32,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
   * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
 
+* The analysis database stores each workload's total kernel duration, after the `--gpu-id` and `--dispatch` filters but before `-k`. `compute_kernel_view` repeats it as `workload_total_duration_ns`, so a kernel's top-stats Percent is its `duration_ns_sum` divided by that total. A workload with no dispatches stores NULL.
+
 ### Changed
 
 * The analysis database from `--output-format db` and `csv` now stores every metric the profile collected for each kernel that passes the filters and for the workload, including the roofline plot points and the memory chart values. `-b` no longer narrows these outputs, so it only selects the terminal report. Analysis is slower on workloads with many kernels, because every metric is evaluated for each kernel.
@@ -121,6 +123,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.
 
 ### Resolved issues
+
+* A malformed `--dispatch` bound such as `> x` now stops with an error in the top stats and the analysis database. It used to keep every dispatch silently in the top stats and fail with an unhelpful traceback in the database.
 
 * Fixed the analysis database values from `analyze --output-format db` and `csv` so they match the terminal calculation.
   * `Percent of Peak` rows are stored for every metric flagged for it that has a value and a peak column. Before this fix, no database stored them.

@@ -82,7 +82,16 @@ def dispatch_threshold(dispatch_id: FilterId) -> Optional[int]:
     """Return n for a '> n' dispatch filter, or None for a plain dispatch id.
 
     This is the only place that reads the '> n' grammar, so every caller accepts
-    and rejects the same ids.
+    and rejects the same ids. A '>' id without a whole-number bound, such as
+    '> x', exits with a readable message.
     """
     match = re.match(r"\s*>\s*(\d+)", str(dispatch_id))
-    return int(match.group(1)) if match else None
+    if match:
+        return int(match.group(1))
+    if str(dispatch_id).lstrip().startswith(">"):
+        console_error(
+            "analysis",
+            f"{dispatch_id} is an invalid dispatch filter. "
+            "Use '> n' to keep the dispatches after dispatch n.",
+        )
+    return None

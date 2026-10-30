@@ -71,6 +71,7 @@ from utils.file_io import (
     load_pc_sampling_results,
     process_pc_sampling_kernel_traces,
     rank_kernels_by_total_duration,
+    workload_total_duration_ns,
 )
 from utils.filter_validation import (
     dispatch_threshold,
@@ -228,6 +229,18 @@ def to_unrounded(
     The database keeps every digit, so the number of digits is ignored.
     """
     return value
+
+
+def pc_sampling_dispatch_trace(
+    tool_data_records: list[dict[str, Any]],
+) -> pd.DataFrame:
+    """Return the combined sampling trace named like the counter frame's dispatch rows.
+
+    The trace names the column Dispatch_Id, while the filters read Dispatch_ID.
+    """
+    return process_pc_sampling_kernel_traces(tool_data_records).rename(
+        columns={"Dispatch_Id": "Dispatch_ID"}
+    )
 
 
 class MetricInfoRow(NamedTuple):
@@ -467,13 +480,28 @@ class db_analysis(OmniAnalyze_Base):
             if self.pc_sampling_collected()
             else {}
         )
+        # Built once: the workload total and the dispatch data both read it
+        self._pc_sampling_trace_per_workload = (
+            {
+                workload_path: pc_sampling_dispatch_trace(
+                    self._pc_sampling_tool_data_per_workload.get(workload_path, [])
+                )
+                for workload_path in self._runs
+            }
+            if self.pc_sampling_only()
+            else {}
+        )
         self._pmc_df_per_workload = self.calc_pmc_df_data()
+        # Before apply_pmc_filters, which drops the kernels that -k leaves out
+        self._workload_total_duration_per_workload = self.calc_workload_total_durations(
+            self._pc_sampling_trace_per_workload
+        )
         self._pmc_df_per_workload = self.apply_pmc_filters()
         # Same guard as the CLI, on the filtered counters, before anything is written.
         for workload_path, pmc_df in self._pmc_df_per_workload.items():
             check_gui_active_counter(self._runs[workload_path].sys_info.iloc[0], pmc_df)
         self._dispatch_data_per_workload = self.calc_dispatch_data(
-            self._pc_sampling_tool_data_per_workload
+            self._pc_sampling_trace_per_workload
         )
         (
             self._metrics_info_data_per_workload,
@@ -514,6 +542,9 @@ class db_analysis(OmniAnalyze_Base):
                 memory_chart_layout_extdata=memory_chart_layout_extdata(
                     sys_info["gpu_arch"]
                 ),
+                total_duration_ns=self._workload_total_duration_per_workload[
+                    workload_path
+                ],
             )
             Database.get_session().add(workload_obj)
             workload_objs.append(workload_obj)
@@ -1720,7 +1751,7 @@ class db_analysis(OmniAnalyze_Base):
 
     def calc_dispatch_data(
         self,
-        tool_data_per_workload: dict[str, list[dict[str, Any]]],
+        pc_sampling_traces: dict[str, pd.DataFrame],
     ) -> dict[str, pd.DataFrame]:
         dispatch_data_per_workload: dict[str, pd.DataFrame] = {}
 
@@ -1728,7 +1759,7 @@ class db_analysis(OmniAnalyze_Base):
             if self.pc_sampling_only():
                 dispatch_data_per_workload[workload_path] = (
                     self._build_pc_sampling_dispatch_data(
-                        tool_data_per_workload.get(workload_path, []),
+                        pc_sampling_traces.get(workload_path, pd.DataFrame()),
                         self._runs[workload_path],
                     )
                 )
@@ -1748,6 +1779,34 @@ class db_analysis(OmniAnalyze_Base):
             console_debug("Calculated dispatch data")
 
         return dispatch_data_per_workload
+
+    def calc_workload_total_durations(
+        self,
+        pc_sampling_traces: dict[str, pd.DataFrame],
+    ) -> dict[str, Optional[int]]:
+        """Total kernel duration in ns of each workload, before the ``-k`` filter.
+
+        Call it while the counter frames are still unfiltered. A sampling-only
+        workload has no counter frame, so its total comes from the trace.
+        """
+        total_duration_per_workload: dict[str, Optional[int]] = {}
+
+        for workload_path, workload in self._runs.items():
+            if self.pc_sampling_only():
+                dispatch_frame = pc_sampling_traces.get(workload_path, pd.DataFrame())
+            else:
+                dispatch_frame = self._pmc_df_per_workload.get(
+                    workload_path, pd.DataFrame()
+                )
+            total_duration_per_workload[workload_path] = workload_total_duration_ns(
+                dispatch_frame,
+                workload.filter_gpu_ids,
+                workload.filter_dispatch_ids,
+            )
+
+        console_debug("Calculated workload total durations")
+
+        return total_duration_per_workload
 
     @staticmethod
     def _kernel_by_symbol(
@@ -1776,10 +1835,10 @@ class db_analysis(OmniAnalyze_Base):
 
     @staticmethod
     def _build_pc_sampling_dispatch_data(
-        tool_data_records: list[dict[str, Any]],
+        trace_df: pd.DataFrame,
         workload: schema.Workload,
     ) -> pd.DataFrame:
-        """Convert combined sampling traces to the database dispatch schema.
+        """Convert a combined sampling trace to the database dispatch schema.
 
         The filters run here because a sampling-only workload has no counter
         frame for them to reach the database through.
@@ -1791,13 +1850,11 @@ class db_analysis(OmniAnalyze_Base):
             "start_timestamp",
             "end_timestamp",
         ]
-        trace_df = process_pc_sampling_kernel_traces(tool_data_records)
         if trace_df.empty:
             return pd.DataFrame(columns=columns)
 
-        # The trace names the column Dispatch_Id, the filters read Dispatch_ID.
         trace_df = filter_dispatch_frame(
-            trace_df.rename(columns={"Dispatch_Id": "Dispatch_ID"}),
+            trace_df,
             workload.filter_gpu_ids,
             workload.filter_kernel_ids,
             workload.filter_dispatch_ids,

@@ -291,6 +291,24 @@ def test_kernel_view_aggregates(db_session):
     assert row == (3, 60, 10, 30, 20.0)
 
 
+def test_kernel_view_exposes_the_workload_total_duration(db_session):
+    """Each kernel row carries the workload total, so Pct is kernel sum over total."""
+    workload = Workload(name="w", sub_name="s", total_duration_ns=100)
+    db_session.add(workload)
+    add_kernel_with_durations(db_session, workload, "a", [10, 20, 30])
+    add_kernel_with_durations(db_session, workload, "b", [40])
+    Database.create_views()
+    db_session.commit()
+
+    rows = db_session.execute(
+        text(
+            "SELECT kernel_name, duration_ns_sum, workload_total_duration_ns "
+            "FROM compute_kernel_view ORDER BY kernel_name"
+        )
+    ).fetchall()
+    assert rows == [("a", 60, 100), ("b", 40, 100)]
+
+
 def test_kernel_view_exposes_short_name(db_session):
     """The kernel view carries the short name naming the export folder."""
     workload = Workload(name="w", sub_name="s")

@@ -35,6 +35,7 @@ from rocprof_compute_analyze.analysis_db import (
     db_analysis,
     filter_dispatch_frame,
     membw_metric_tables,
+    pc_sampling_dispatch_trace,
     report_evaluation_diagnostics,
 )
 from utils import analysis_orm as orm
@@ -266,12 +267,19 @@ def make_pc_sampling_database_analyzer(
     analyzer._roofline_ceiling_rows_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
     analyzer._pc_sampling_tool_data_per_workload = tool_data_per_workload
-    analyzer._dispatch_data_per_workload = {
-        workload_path: analyzer._build_pc_sampling_dispatch_data(
-            tool_data_records, analyzer._runs[workload_path]
-        )
+    traces = {
+        workload_path: pc_sampling_dispatch_trace(tool_data_records)
         for workload_path, tool_data_records in tool_data_per_workload.items()
     }
+    analyzer._dispatch_data_per_workload = {
+        workload_path: analyzer._build_pc_sampling_dispatch_data(
+            trace, analyzer._runs[workload_path]
+        )
+        for workload_path, trace in traces.items()
+    }
+    analyzer._workload_total_duration_per_workload = (
+        analyzer.calc_workload_total_durations(traces)
+    )
     analyzer._roofline_data_per_kernel = {}
     analyzer._membw_result_per_workload = {}
     return analyzer
@@ -321,6 +329,8 @@ def make_counter_backed_database_analyzer(
             }
         ])
     }
+    # The one dispatch above runs for 10 ns, and no filter drops it.
+    analyzer._workload_total_duration_per_workload = {workload_path: 10}
     analyzer._roofline_data_per_kernel = {workload_path: pd.DataFrame()}
     analyzer._membw_result_per_workload = {}
     analyzer._metrics_info_data_per_workload = {}
@@ -1571,6 +1581,170 @@ def test_calc_dispatch_data_covers_only_rows_surviving_every_filter():
 
 
 # =============================================================================
+# Workload total duration: the Pct denominator, taken before -k
+# =============================================================================
+
+
+def make_workload_total_analyzer(
+    workload_path,
+    pmc_df,
+    filter_gpu_ids=(),
+    filter_kernel_ids=(),
+    filter_dispatch_ids=(),
+):
+    """Build a counter-backed analyzer holding one unfiltered counter frame."""
+    analyzer = db_analysis(
+        SimpleNamespace(output_name=None, output_format="database"),
+        {},
+    )
+    analyzer._runs = {
+        workload_path: schema.Workload(
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
+            filter_gpu_ids=list(filter_gpu_ids),
+            filter_kernel_ids=list(filter_kernel_ids),
+            filter_dispatch_ids=list(filter_dispatch_ids),
+        )
+    }
+    analyzer._profiling_config = {}
+    analyzer._pmc_df_per_workload = {workload_path: pmc_df}
+    return analyzer
+
+
+def make_pmc_database_analyzer(
+    workload_path,
+    pmc_df,
+    filter_gpu_ids=(),
+    filter_kernel_ids=(),
+    filter_dispatch_ids=(),
+):
+    """Build a counter-backed analyzer that filters its frame as pre_processing does."""
+    analyzer = make_workload_total_analyzer(
+        workload_path,
+        pmc_df,
+        filter_gpu_ids=filter_gpu_ids,
+        filter_kernel_ids=filter_kernel_ids,
+        filter_dispatch_ids=filter_dispatch_ids,
+    )
+    analyzer._roofline_ceilings_per_workload = {}
+    analyzer._pc_sampling_tool_data_per_workload = {}
+    analyzer._workload_total_duration_per_workload = (
+        analyzer.calc_workload_total_durations({})
+    )
+    analyzer._pmc_df_per_workload = analyzer.apply_pmc_filters()
+    analyzer._dispatch_data_per_workload = analyzer.calc_dispatch_data({})
+    analyzer._roofline_data_per_kernel = {workload_path: pd.DataFrame()}
+    analyzer._metrics_info_data_per_workload = {}
+    analyzer._kernel_values_data_per_workload = {}
+    analyzer._workload_values_data_per_workload = {}
+    return analyzer
+
+
+@pytest.mark.parametrize(
+    ("filter_gpu_ids", "filter_kernel_ids", "filter_dispatch_ids", "expected_total"),
+    [
+        ([], [], [], 2500),
+        (["0"], [], [], 2500),
+        ([], [], ["1"], 1000),
+        ([], [], ["> 1"], 1500),
+        ([], [1], [], 2500),
+        ([], [0], ["1"], 1000),
+    ],
+    ids=[
+        "unfiltered",
+        "gpu",
+        "dispatch_id",
+        "dispatch_bound",
+        "kernel_filter_only",
+        "kernel_filter_with_dispatch",
+    ],
+)
+def test_calc_workload_total_durations_ignores_the_kernel_filter(
+    filter_gpu_ids, filter_kernel_ids, filter_dispatch_ids, expected_total
+):
+    """The total follows the gpu and dispatch filters, and -k never changes it."""
+    analyzer = make_workload_total_analyzer(
+        "/fake/workload",
+        make_repeated_dispatch_frame(),
+        filter_gpu_ids=filter_gpu_ids,
+        filter_kernel_ids=filter_kernel_ids,
+        filter_dispatch_ids=filter_dispatch_ids,
+    )
+
+    totals = analyzer.calc_workload_total_durations({})
+
+    assert totals == {"/fake/workload": expected_total}
+
+
+def test_calc_workload_total_durations_totals_sampling_trace_before_kernel_filter(
+    tmp_path,
+):
+    """A sampling-only workload's total covers every kernel the trace holds."""
+
+    def make_timed_tool_data():
+        # Dispatch 0 runs for 300 ns and dispatch 1 for 500 ns.
+        tool_data = make_pc_sampling_tool_data()
+        dispatch_records = tool_data["buffer_records"]["kernel_dispatch"]
+        for record, end_timestamp in zip(dispatch_records, [300, 500]):
+            record["end_timestamp"] = end_timestamp
+        return tool_data
+
+    workload_path = str(tmp_path / "workloads" / ISA_WORKLOAD_NAME)
+    unfiltered = make_pc_sampling_only_database_analyzer(
+        workload_path, [make_timed_tool_data()]
+    )
+    kernel_filtered = make_pc_sampling_only_database_analyzer(
+        workload_path, [make_timed_tool_data()], filter_kernel_ids=[0]
+    )
+
+    assert len(kernel_filtered._dispatch_data_per_workload[workload_path]) < len(
+        unfiltered._dispatch_data_per_workload[workload_path]
+    )
+    assert unfiltered._workload_total_duration_per_workload[workload_path] == 800
+    assert kernel_filtered._workload_total_duration_per_workload[workload_path] == 800
+
+
+def test_run_analysis_stores_the_pct_inputs_for_a_kernel_filtered_workload(
+    db_session, tmp_path
+):
+    """Pct from the stored rows equals the top-stats Percent of the kept kernel."""
+    raw_pmc = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c", "kernel_b"],
+        "GPU_ID": [0, 0, 1, 0, 0],
+        "Dispatch_ID": [1, 2, 3, 4, 5],
+        "Start_Timestamp": [0, 0, 0, 0, 0],
+        "End_Timestamp": [500, 300, 100, 200, 300],
+    })
+    analyzer = make_pmc_database_analyzer(
+        str(tmp_path / "workload"),
+        raw_pmc,
+        filter_gpu_ids=["0"],
+        filter_kernel_ids=[0],
+    )
+
+    run_analysis_with_materialized_views(analyzer)
+
+    stored_workload = db_session.query(orm.Workload).one()
+    assert stored_workload.total_duration_ns == 1300
+    rows = db_session.execute(
+        text(
+            "SELECT kernel_name, duration_ns_sum, workload_total_duration_ns "
+            "FROM compute_kernel_view"
+        )
+    ).fetchall()
+    assert [row[0] for row in rows] == ["kernel_b"]
+    kernel_top_df, _ = create_df_kernel_top_stats(
+        df_in=raw_pmc,
+        raw_data_dir=str(tmp_path),
+        filter_gpu_ids=["0"],
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
+    expected_percent = kernel_top_df.set_index("Kernel_Name").loc["kernel_b", "Percent"]
+    _, duration_sum, total_duration = rows[0]
+    assert duration_sum / total_duration * 100 == pytest.approx(expected_percent)
+
+
+# =============================================================================
 # Noise-clamp warning + summary tests
 # =============================================================================
 
@@ -2173,11 +2347,13 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     analyzer._roofline_ceiling_rows_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
     analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
+    trace_df = pc_sampling_dispatch_trace(tool_data_records)
     analyzer._dispatch_data_per_workload = {
-        workload_path: analyzer._build_pc_sampling_dispatch_data(
-            tool_data_records, workload
-        )
+        workload_path: analyzer._build_pc_sampling_dispatch_data(trace_df, workload)
     }
+    analyzer._workload_total_duration_per_workload = (
+        analyzer.calc_workload_total_durations({workload_path: trace_df})
+    )
     analyzer._roofline_data_per_kernel = {}
     analyzer._membw_result_per_workload = {}
 
