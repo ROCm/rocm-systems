@@ -126,9 +126,8 @@ GPU and dispatch filters restrict the data and are shown as the scope of the agg
 A run with ``-k`` writes no ``memory-chart-gpu-0.html``, because its database keeps only the
 selected kernels' chart rows. Run without ``-k`` for the memory chart page.
 
-Every analyze run writes the report whatever ``--output-format`` is, because that option
-has no effect. Including ``--view table``, a workload with memory chart data gets a report.
-A PC-sampling-only workload gets none.
+A workload with memory chart data gets this HTML on every analyze run, including with
+``--view table``, whatever ``--output-format`` is. A PC-sampling-only workload gets none.
 
 .. _cli-memory-chart-viewing:
 
@@ -765,7 +764,9 @@ Analysis output
 Every analyze run creates one new run folder and writes all of its output there. The run folder
 holds:
 
-* ``report.txt``: the full analysis report, with every profiled block.
+* ``report.txt``: the full analysis report, with every profiled block. With several ``-p`` paths
+  it is the comparison report, and each workload folder also gets a ``report.txt`` that holds
+  that workload alone.
 * ``analysis.db``: a SQLite database with all the data in the analysis report, structured
   according to the :ref:`analysis database schema <analysis-database>`.
   Metric values are stored unrounded and in base units: time in ns, bandwidth in Bytes/s, compute
@@ -777,23 +778,42 @@ holds:
   chart values; ``-b`` does not narrow the database.
   For a workload profiled with ``--experimental --membw-analysis``, the database also holds the
   memory bandwidth analysis; see :ref:`membw-analysis-database`.
-* The roofline ceilings of each workload are in the view ``compute_roofline_ceiling_view``, also
-  written as ``roofline_ceiling.csv``. It has one row per memory level for bandwidth, and one row
-  per data type and pipe (VALU, MFMA or WMMA) for compute. Each value is in Bytes/s, FLOP/s or
-  IOP/s, taken from the device-0 row of ``roofline.csv``. A workload with no valid
-  ``roofline.csv`` has no ceiling rows.
-* One CSV file per view of the :ref:`analysis database schema <analysis-database>`. The CSV files
-  hold every metric the profile collected for each kernel and for the workload.
-* For a PC-sampled workload, each kernel's disassembly and source and the samples per source
-  line in ``per_kernel_pc_sampling/``; see :ref:`pc-sampling-per-kernel-csv` and
-  :ref:`pc-sampling-per-source-line-csv`.
-* For each workload with roofline data, ``<n>-<workload>/roofline-gpu-0.html``, where ``<n>`` is the
-  workload's position among the ``-p`` paths and ``<workload>`` is the name of its directory.
-* For each workload profiled with ``--torch-trace``, ``--triton-trace`` or ``--ml-api-trace``,
-  ``<n>-<workload>/ml-api-trace.csv``, the joined ML API marker and counter rows of the trace.
-* For each workload with memory chart data, ``<n>-<workload>/memory-chart-gpu-0.html``, where ``<n>``
-  is the workload's position among the ``-p`` paths; not written for a run with ``-k``.
-  See :ref:`cli-memory-chart-html`.
+* One folder per ``-p`` workload, named ``<n>-<workload>``, where ``<n>`` is the workload's
+  position among the ``-p`` paths and ``<workload>`` is the name of its directory. Each folder
+  holds the CSV files, HTML plots and kernel folders described below.
+
+.. code-block:: text
+
+   <run-folder>/
+   ├── analysis.db
+   ├── report.txt                              full report; comparison report with several -p
+   ├── 1-<workload>/
+   │   ├── report.txt                          this workload alone; only with more than one -p
+   │   ├── kernels.csv                         index, full name, folder, duration, Pct
+   │   ├── dispatches.csv                      each dispatch and its kernel index
+   │   ├── metrics-summary.csv                 workload metrics
+   │   ├── roofline.csv                        ceilings and per-kernel points, when roofline data exists
+   │   ├── roofline-gpu-0.html                 when roofline data exists
+   │   ├── memory-chart-gpu-0.html             not written for a run with -k
+   │   ├── ml-api-trace.csv                    when the profile has an ML API trace
+   │   ├── pc-sampling-summary.csv             kernels with samples, when some kernel has PC samples
+   │   ├── kernel-000-<name>/
+   │   │   ├── kernel-000-<name>-metrics.csv
+   │   │   ├── kernel-000-<name>-pc-sampling-isa.csv   ISA with per-line samples, when sampled
+   │   │   └── kernel-000-<name>-pc-sampling-src.csv   source lines with samples, when sampled
+   │   └── kernel-001-<name>/
+   │       └── ...
+   └── 2-<workload>/
+       └── ...
+
+The kernel folders are numbered in top-stats order, by total duration, largest first. The
+number has at least three digits, and more when the workload has more kernels. ``<name>`` is the
+demangled function name without template arguments or parameters. Every character outside
+``[A-Za-z0-9_]`` becomes ``_``, and the name is cut to 64 characters. ``kernels.csv`` gives the
+full kernel name, so use it to match a folder to its kernel.
+
+The CSV files hold base units, with a missing value as an empty cell. The per-kernel ISA and
+source files are written only for kernels that have PC samples; see :ref:`pc-sampling-per-kernel-csv`.
 
 The terminal shows the top stats, the system information and the System Speed-of-Light section,
 followed by any blocks selected with ``-b``. It also names the roofline HTML file when one is saved.
@@ -825,8 +845,9 @@ Analyze never modifies or deletes the files of an existing run folder. Listing o
 
 .. note::
 
-   ``--output-format`` is deprecated and has no effect. Every run writes ``report.txt``,
-   ``analysis.db`` and the CSV files. ``-g`` is deprecated and has no effect as well.
+   ``--output-format`` is deprecated and has no effect: analyze prints a warning and ignores its
+   value. Every run writes the run folder above whatever the value is. ``-g`` is deprecated and
+   has no effect as well.
 
 .. _analysis-database:
 

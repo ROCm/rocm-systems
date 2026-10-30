@@ -215,19 +215,21 @@ and writes all of the following into it:
    * - File
      - Description
    * - ``report.txt``
-     - The full analysis report. The terminal shows the top stats, system information and System Speed-of-Light sections, plus any blocks selected with ``-b``.
+     - The full analysis report. The terminal shows the top stats, system information and System Speed-of-Light sections, plus any blocks selected with ``-b``. With several ``-p`` paths, each workload folder also gets a ``report.txt`` for that workload alone.
    * - ``analysis.db``
-     - SQLite analysis database with all the data in the analysis report.
-   * - ``*.csv``
-     - One CSV file per analysis database view.
+     - SQLite analysis database with all the data in the analysis report, for every workload of the run.
+   * - ``<n>-<workload>/*.csv``
+     - Per workload: ``kernels.csv``, ``dispatches.csv`` and ``metrics-summary.csv``, with one folder per kernel holding its metrics. PC-sampling and roofline CSV files are added when that data exists.
    * - ``<n>-<workload>/roofline-gpu-<id>.html``
      - Standalone Plotly roofline plot, written for each workload that includes roofline data. See :ref:`standalone-roofline`.
+   * - ``<n>-<workload>/memory-chart-gpu-<id>.html``
+     - Memory chart page for each workload with memory chart data. See :ref:`cli-memory-chart-html`.
    * - ``<n>-<workload>/ml-api-trace.csv``
      - Joined ML API marker and counter rows, written for each workload profiled with ``--torch-trace``, ``--triton-trace`` or ``--ml-api-trace``.
 
 Choose the parent directory of the run folder with ``-d``/``--output-directory`` and its name with
 ``-o``/``--output-name``. See :ref:`analysis-output-format` for details. Analyze only reads the
-workload directory, so it can be read-only. ``--output-format`` is deprecated and has no effect.
+workload directory, so it can be read-only. ``--output-format`` is deprecated and has no effect: analyze warns and ignores its value.
 
 .. _glance-supported-hardware:
 

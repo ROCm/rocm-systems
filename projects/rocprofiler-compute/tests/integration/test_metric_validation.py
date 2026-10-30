@@ -1,41 +1,44 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+from pathlib import Path
+
 import common
 import pandas as pd
 
 from tests.integration import common as integration_common
 
 
+def read_workload_csv(analysis_workload_dir, csv_name):
+    """Read one CSV of the workload folder, 1-<workload>, of an analyze run folder."""
+    (workload_folder,) = Path(analysis_workload_dir).glob("1-*")
+    return pd.read_csv(workload_folder / csv_name, dtype={"Metric_ID": str})
+
+
+def get_metric_value(analysis_workload_dir, data):
+    metrics_df = read_workload_csv(analysis_workload_dir, data["bw_csv"])
+    metric_rows = metrics_df[metrics_df["Metric_ID"] == data["bw_metric_id"]]
+    return metric_rows[data["bw_value_name"]].values[0]
+
+
 def get_hbm_data_transfer(analysis_workload_dir, data):
-    bw_df = pd.read_csv(f"{analysis_workload_dir}/{data['bw_csv']}")
-    bw_rows = bw_df[
-        (bw_df["metric_id"] == data["bw_metric_id"])
-        & (bw_df["value_name"] == data["bw_value_name"])
-    ]
-    bw = bw_rows["value"].values[0]
-    duration_ns = pd.read_csv(f"{analysis_workload_dir}/{data['duration_csv']}")[
-        data["duration_column"]
-    ].values[0]
+    bw = get_metric_value(analysis_workload_dir, data)
+    kernels_df = read_workload_csv(analysis_workload_dir, data["duration_csv"])
+    duration_ns = kernels_df[data["duration_column"]].sum()
     # Bandwidth is stored in Bytes/s and the duration in ns, so bytes moved are
     # bw * duration_ns / 1e9 and GB moved are that divided by another 1e9.
     return bw * duration_ns / 1e18
 
 
 def get_hbm_bandwidth_peak(analysis_workload_dir, data):
-    bw_df = pd.read_csv(f"{analysis_workload_dir}/{data['bw_csv']}")
-    bw_rows = bw_df[
-        (bw_df["metric_id"] == data["bw_metric_id"])
-        & (bw_df["value_name"] == data["bw_value_name"])
-    ]
     # Stored in Bytes/s, while the expected values below are in GB/s.
-    return bw_rows["value"].values[0] / 1e9
+    return get_metric_value(analysis_workload_dir, data) / 1e9
 
 
-# workload -> gfx -> metric definition. CSV references point at the per-view
-# CSVs produced by analyze: workload/kernel-level metric values live in
-# workload_metric.csv / kernel_metric.csv (filter by metric_id + value_name),
-# kernel-level dispatch durations live in kernel.csv.
+# workload -> gfx -> metric definition. CSV references point at the files of the
+# workload folder that analyze writes: workload-level metric values live in
+# metrics-summary.csv (one row per metric_id, one column per value_name), and
+# kernel dispatch durations live in kernels.csv (Duration_ns per kernel).
 VALIDATE_METRICS = {
     "memcopy": {
         "command": ["tests/memcopy"],
@@ -48,11 +51,11 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI200",
-                    "bw_csv": "workload_metric.csv",
+                    "bw_csv": "metrics-summary.csv",
                     "bw_metric_id": "4.1.8",
                     "bw_value_name": "Value",
-                    "duration_csv": "kernel.csv",
-                    "duration_column": "duration_ns_sum",
+                    "duration_csv": "kernels.csv",
+                    "duration_column": "Duration_ns",
                 },
             },
         ],
@@ -63,11 +66,11 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI300",
-                    "bw_csv": "workload_metric.csv",
+                    "bw_csv": "metrics-summary.csv",
                     "bw_metric_id": "4.1.9",
                     "bw_value_name": "Value",
-                    "duration_csv": "kernel.csv",
-                    "duration_column": "duration_ns_sum",
+                    "duration_csv": "kernels.csv",
+                    "duration_column": "Duration_ns",
                 },
             },
         ],
@@ -78,11 +81,11 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI350",
-                    "bw_csv": "workload_metric.csv",
+                    "bw_csv": "metrics-summary.csv",
                     "bw_metric_id": "4.1.11",
                     "bw_value_name": "Value",
-                    "duration_csv": "kernel.csv",
-                    "duration_column": "duration_ns_sum",
+                    "duration_csv": "kernels.csv",
+                    "duration_column": "Duration_ns",
                 },
             },
         ],
@@ -109,7 +112,7 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI300",
-                    "bw_csv": "workload_metric.csv",
+                    "bw_csv": "metrics-summary.csv",
                     "bw_metric_id": "4.1.9",
                     "bw_value_name": "Peak (Empirical)",
                 },

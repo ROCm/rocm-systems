@@ -3,18 +3,23 @@
 
 """Analyze writes every artifact into one new run folder and nowhere else."""
 
+import errno
 import os
 import re
 import shutil
 import stat
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from tests.integration.common import RUN_FOLDER_PREFIX, last_output_line
 from utils.utils_common import strip_ansi
 
 VCOPY_WORKLOAD = Path(__file__).resolve().parents[1] / "workloads/vcopy/MI300X_A1"
+MEM_LEVELS_WORKLOAD = (
+    Path(__file__).resolve().parents[1] / "workloads/mem_levels_HBM/MI200"
+)
 
 PANEL_HEADING = re.compile(r"^(\d+)\. ", re.MULTILINE)
 
@@ -87,7 +92,7 @@ def test_named_run_folder_is_created_with_missing_parents(
     assert code == 0
     assert (run_folder / "report.txt").is_file()
     assert (run_folder / "analysis.db").is_file()
-    assert (run_folder / "kernel.csv").is_file()
+    assert (run_folder / "1-MI300X_A1" / "kernels.csv").is_file()
     assert last_output_line(capsys.readouterr().out).endswith(
         f"Run folder: {run_folder.resolve()}"
     )
@@ -391,3 +396,208 @@ def test_invalid_block_creates_no_run_folder(
 
     assert code == 1
     assert not run_folder.parent.exists()
+
+
+def workload_folder_names(run_folder):
+    """Return the names of the subfolders of a run folder."""
+    return sorted(path.name for path in run_folder.iterdir() if path.is_dir())
+
+
+def file_names(folder):
+    """Return the names of the files directly inside a folder."""
+    return sorted(path.name for path in folder.iterdir() if path.is_file())
+
+
+@pytest.mark.misc
+def test_single_run_writes_the_fixed_layout(
+    binary_handler_analyze_rocprof_compute, tmp_path
+):
+    """One workload gets the root report and DB, and one folder of files."""
+    workload_path = copy_workload(tmp_path)
+    run_folder = tmp_path / "runs" / "run1"
+
+    code = run_into(binary_handler_analyze_rocprof_compute, workload_path, run_folder)
+
+    assert code == 0
+    assert sorted(path.name for path in run_folder.iterdir()) == [
+        "1-MI300X_A1",
+        "analysis.db",
+        "report.txt",
+    ]
+    workload_folder = run_folder / "1-MI300X_A1"
+    assert file_names(workload_folder) == [
+        "dispatches.csv",
+        "kernels.csv",
+        "memory-chart-gpu-0.html",
+        "metrics-summary.csv",
+    ]
+    kernels = pd.read_csv(workload_folder / "kernels.csv")
+    assert workload_folder_names(workload_folder) == sorted(kernels["Folder"])
+    for folder in kernels["Folder"]:
+        assert (workload_folder / folder / f"{folder}-metrics.csv").is_file()
+    # The fixture has no roofline.csv and no PC sampling, so neither is written.
+    assert not list(run_folder.rglob("roofline*"))
+    assert not list(run_folder.rglob("*pc-sampling*"))
+
+
+@pytest.mark.misc
+def test_comparison_run_writes_a_report_per_workload(
+    binary_handler_analyze_rocprof_compute, tmp_path
+):
+    """Two -p workloads get a comparison report at the root and one report each."""
+    first_path = copy_workload(tmp_path)
+    second_path = tmp_path / "vcopy" / "MI200"
+    shutil.copytree(VCOPY_WORKLOAD.parent / "MI200", second_path)
+    run_folder = tmp_path / "runs" / "compare"
+    single_folder = tmp_path / "runs" / "single"
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(first_path),
+        "--path",
+        str(second_path),
+        "--output-directory",
+        str(run_folder.parent),
+        "--output-name",
+        run_folder.name,
+    ])
+    assert code == 0
+    assert (
+        run_into(binary_handler_analyze_rocprof_compute, first_path, single_folder) == 0
+    )
+
+    assert sorted(path.name for path in run_folder.iterdir()) == [
+        "1-MI300X_A1",
+        "2-MI200",
+        "analysis.db",
+        "report.txt",
+    ]
+    for workload_folder in ("1-MI300X_A1", "2-MI200"):
+        assert (run_folder / workload_folder / "report.txt").is_file()
+        assert (run_folder / workload_folder / "memory-chart-gpu-0.html").is_file()
+        assert (run_folder / workload_folder / "kernels.csv").is_file()
+    # The report of a workload in a comparison is the report it gets alone.
+    assert (run_folder / "1-MI300X_A1" / "report.txt").read_text(encoding="utf-8") == (
+        single_folder / "report.txt"
+    ).read_text(encoding="utf-8")
+
+
+@pytest.mark.misc
+def test_roofline_run_writes_the_roofline_html_in_the_workload_folder(
+    binary_handler_analyze_rocprof_compute, tmp_path
+):
+    """A workload with roofline.csv gets its roofline HTML beside the CSV files."""
+    workload_path = tmp_path / "mem_levels_HBM" / "MI200"
+    shutil.copytree(MEM_LEVELS_WORKLOAD, workload_path)
+    run_folder = tmp_path / "runs" / "roofline"
+
+    code = run_into(binary_handler_analyze_rocprof_compute, workload_path, run_folder)
+
+    assert code == 0
+    workload_folder = run_folder / "1-MI200"
+    assert (workload_folder / "roofline.csv").is_file()
+    assert (workload_folder / "roofline-gpu-0.html").is_file()
+
+
+@pytest.mark.misc
+@pytest.mark.parametrize("output_format", ["stdout", "txt", "csv", "db"])
+def test_output_format_warns_and_is_ignored(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys, output_format
+):
+    """--output-format is a deprecated no-op: it warns and writes the usual folder."""
+    workload_path = copy_workload(tmp_path)
+    run_folder = tmp_path / "runs" / "run1"
+
+    code = run_into(
+        binary_handler_analyze_rocprof_compute,
+        workload_path,
+        run_folder,
+        "--output-format",
+        output_format,
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    output = strip_ansi(captured.out + captured.err)
+    assert "--output-format is deprecated and has no effect" in output
+    assert sorted(path.name for path in run_folder.iterdir()) == [
+        "1-MI300X_A1",
+        "analysis.db",
+        "report.txt",
+    ]
+
+
+@pytest.mark.misc
+def test_block_is_not_deprecated(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys
+):
+    """-b selects terminal output without a deprecation warning."""
+    workload_path = copy_workload(tmp_path)
+
+    code = run_into(
+        binary_handler_analyze_rocprof_compute,
+        workload_path,
+        tmp_path / "runs" / "run1",
+        "-b",
+        "7",
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    output = strip_ansi(captured.out + captured.err)
+    assert "is deprecated" not in output
+
+
+@pytest.mark.misc
+def test_write_failure_leaves_the_partial_run_folder_and_names_it(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys, monkeypatch
+):
+    """A write that fails part way keeps the partial run folder and names it."""
+    workload_path = copy_workload(tmp_path)
+    run_folder = tmp_path / "runs" / "run1"
+
+    def fail_after_first_folder(folder, workload_paths, kernel_rankings):
+        (folder / "1-MI300X_A1").mkdir()
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.write_workload_folders",
+        fail_after_first_folder,
+    )
+
+    code = run_into(binary_handler_analyze_rocprof_compute, workload_path, run_folder)
+
+    assert code == 1
+    assert (run_folder / "1-MI300X_A1").is_dir()
+    assert not (run_folder / "analysis.db").exists()
+    captured = capsys.readouterr()
+    output = strip_ansi(captured.out + captured.err)
+    assert str(run_folder.resolve()) in output
+    assert "No space left on device" in output
+
+
+@pytest.mark.misc
+def test_html_write_failure_leaves_the_partial_run_folder_and_names_it(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys, monkeypatch
+):
+    """A memory chart HTML write that fails keeps the run folder and names it."""
+    workload_path = copy_workload(tmp_path)
+    run_folder = tmp_path / "runs" / "run1"
+    real_write_text = Path.write_text
+
+    def fail_on_memory_chart_html(self, *args, **kwargs):
+        if self.name.startswith("memory-chart-gpu-"):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_on_memory_chart_html)
+
+    code = run_into(binary_handler_analyze_rocprof_compute, workload_path, run_folder)
+
+    assert code == 1
+    assert not (run_folder / "analysis.db").exists()
+    captured = capsys.readouterr()
+    output = strip_ansi(captured.out + captured.err)
+    assert str(run_folder.resolve()) in output
+    assert "No space left on device" in output

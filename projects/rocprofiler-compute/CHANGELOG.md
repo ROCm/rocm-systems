@@ -7,7 +7,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* The analysis database stores each workload's roofline ceilings in the new `compute_roofline_ceiling` table and `compute_roofline_ceiling_view` view, written as `roofline_ceiling.csv`.
+* The analysis database stores each workload's roofline ceilings in the new `compute_roofline_ceiling` table and `compute_roofline_ceiling_view` view. The ceilings are also in the `roofline.csv` of the workload folder.
   * There is one bandwidth row per memory level, MALL included, and one compute row per data type and pipe (VALU, MFMA or WMMA), for every positive benchmark mean in the device-0 row of `roofline.csv`.
   * Values are in base units: Bytes/s for bandwidth, FLOP/s for floating-point compute, and IOP/s for integer compute.
   * A workload with no valid `roofline.csv` has no ceiling rows.
@@ -27,10 +27,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scalar data cache utilization, latency, stall rate, and bandwidth.
   * GL1 request latency.
 
-* Added the memory bandwidth analysis to the analysis database. For a workload profiled with `--experimental --membw-analysis`, `--output-format db` stores the availability, the bottleneck tree, and the guidance blocks in the `compute_membw_*` tables. `--output-format csv` writes the tree as `membw_node.csv` (the `compute_membw_node_view` view), without the guidance text. Other workloads store no membw rows.
+* Added the memory bandwidth analysis to the analysis database. For a workload profiled with `--experimental --membw-analysis`, `--output-format db` stores the availability, the bottleneck tree, and the guidance blocks in the `compute_membw_*` tables. The `compute_membw_node_view` view lists the tree without the guidance text. Analyze writes no membw CSV file. Other workloads store no membw rows.
 
 * Added PC sampling counts per source line.
-  * `rocprof-compute analyze` writes `<file>_pc_sampling.csv` beside each source file it exports into the run folder. It lists every source line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
+  * `rocprof-compute analyze` writes `kernel-NNN-<name>-pc-sampling-src.csv` in the folder of each sampled kernel. It lists every source line of the kernel with the samples of the instructions compiled from it, and where those instructions sit in the kernel's ISA file.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
   * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
 
@@ -47,7 +47,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * New `compute_metadata` columns `normal_unit`, `specs_correction`, `kernel_filter`, `kernel_iteration_range` and `gpu_id` record the analyze options that change the stored values, as the CLI parsed them. `normal_unit` always holds a value (`per_kernel` when `-n` is not given). The other four are NULL when their option is not given.
   * No existing table or view lost a column.
 
-* The analysis database from `--output-format db` and `csv` now stores every metric the profile collected for each kernel that passes the filters and for the workload, including the roofline plot points and the memory chart values. `-b` no longer narrows these outputs, so it only selects the terminal report. Analysis is slower on workloads with many kernels, because every metric is evaluated for each kernel.
+* The analysis database and the CSV files of every analyze run now store every metric the profile collected for each kernel that passes the filters and for the workload, including the roofline plot points and the memory chart values. `-b` no longer narrows these outputs, so it only selects the terminal report. Analysis is slower on workloads with many kernels, because every metric is evaluated for each kernel.
 
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
 
@@ -79,7 +79,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Every analyze run now writes its output into a new run folder, so a rerun never overwrites earlier results.
   * `-d/--output-directory` sets the directory the run folder is created in. It defaults to the current working directory, and missing parent directories are created.
   * `-o/--output-name` sets the run folder name. Without it, the folder is named `rocprof_compute_analyze_<YYYYMMDD_HHMMSS>`, with `_1`, `_2`, and so on appended if that folder exists. If the `-o` folder already exists, analyze exits with an error before any analysis.
-  * Every run writes `report.txt`, `analysis.db`, and one CSV file per analysis database view into the run folder. The terminal shows the top stats, system information, and System Speed-of-Light sections, plus the blocks, tables, or metrics selected with `-b/--block`. The last line printed is the absolute path of the run folder.
+  * Every run writes `report.txt` and `analysis.db` into the run folder, and one folder per workload, named `<n>-<workload>`. Each workload folder holds `kernels.csv`, `dispatches.csv`, `metrics-summary.csv`, one folder per kernel, and the PC-sampling, roofline, memory chart and ML API trace files when that data exists. With several `-p` paths, `report.txt` at the root is the comparison, and each workload folder also gets a `report.txt` for that workload alone. The terminal shows the top stats, system information, and System Speed-of-Light sections, plus the blocks, tables, or metrics selected with `-b/--block`. The last line printed is the absolute path of the run folder.
   * `report.txt`, `analysis.db`, and the CSV files always hold every profiled block. Analyze-mode `-b/--block` only selects what the terminal shows.
   * The roofline HTML is written to `<run folder>/1-<workload>/roofline-gpu-0.html` instead of into the workload directory.
   * Listing options such as `--list-stats` only print and write no files.
@@ -92,7 +92,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     | `analyze -p wl -b X` prints only block `X` after the top stats and system info, and the report holds only `X` | The terminal shows Speed-of-Light and `X` after the top stats and system info; `report.txt` holds every block |
     | `--output-format txt --output-name X` writes `./X.txt` | `-o X` writes `./X/report.txt` |
     | `--output-format db --output-name X` writes `./X.db` | `-o X` writes `./X/analysis.db` |
-    | `--output-format csv --output-name X` writes `./X/*.csv` | `-o X` writes `./X/*.csv` |
+    | `--output-format csv --output-name X` writes `./X/*.csv` | `-o X` writes `./X/analysis.db` and `./X/<n>-<workload>/*.csv` |
+    | `kernel.csv`, `pc_sampling_summary.csv`, `source_lines.csv` and `roofline_ceiling.csv` beside `analysis.db` | `<n>-<workload>/kernels.csv`, `pc-sampling-summary.csv` and `roofline.csv`. Source lines are in each kernel's `-pc-sampling-src.csv`, and ceilings are in `roofline.csv` |
+    | `per_kernel_pc_sampling/<workload>/<run>/<kernel>_uuid_<uuid>/isa_code_object_id_<code object>_pid_<pid>.csv` | `<n>-<workload>/kernel-NNN-<name>/kernel-NNN-<name>-pc-sampling-isa.csv`, one file per kernel. Its `Code object id` and `Pid` columns tell the code objects and processes apart |
+    | `per_kernel_pc_sampling/.../source/<path>` (copied source files) | Not written. The `Source file` column of the source CSV names each file |
+    | `<file>_pc_sampling.csv` | `kernel-NNN-<name>/kernel-NNN-<name>-pc-sampling-src.csv` |
+    | `membw_node.csv` | The `compute_membw_node_view` view in `analysis.db` |
+    | `analyze -p a -p b` writes one `report.txt` at the root | Root `report.txt` is the comparison, plus `<n>-<workload>/report.txt` for each workload |
+    | `--output-format X` picks the output | Prints a warning and the value is ignored. Every run writes the same run folder |
     | Rerunning with the same `--output-name` replaces the files | Exits with an error; choose a new name or omit `-o` |
     | `<workload>/empirRoof_gpu-0.html` | `<run folder>/1-<workload>/roofline-gpu-0.html` |
     | `<workload>/pmc_kernel_top.csv` and `<workload>/pmc_dispatch_info.csv` | Not written. The top stats are built in memory and shown in the terminal and `report.txt` |
@@ -141,6 +148,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
 
 * Removed the unused `compute_workload_roofline_data` table from the analysis database.
+
+* Removed the flat analysis CSV files of the run folder (`kernel.csv`, `pc_sampling_summary.csv`, `source_lines.csv`, `roofline_ceiling.csv` and the other view files), the `per_kernel_pc_sampling/` tree with its copied source files, and `membw_node.csv`. The same data is in each workload folder's CSV files and in `analysis.db`.
 
 * Removed the CLI analyze calculation: the in-memory evaluation of the metric tables, the roofline AI calculation used only by the terminal roofline, and the `-g` single-metric debug tracker.
   * The terminal and `report.txt` no longer print the CLI path's per-metric evaluation warnings, such as missing empirical peak warnings.
@@ -197,7 +206,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Upcoming changes
 
-* `analyze --output-format` is deprecated and has no effect, because every analyze run writes the report, the analysis database, and the CSV files. It will be removed in a future release.
+* `analyze --output-format` is deprecated and has no effect, because every analyze run writes the report, the analysis database, and the CSV files. Analyze prints a warning and ignores the value. It will be removed in a future release.
 
 ### Known issues
 

@@ -803,8 +803,8 @@ Examples:
         type=block_token_or_alias,
         help=(
             "\t\tAlso print the given metric id(s) from --list-metrics or block\n"
-            "\t\talias(es) on the terminal. report.txt always has every block. "
-            "csv and db outputs keep every metric the profile collected."
+            "\t\talias(es) on the terminal. report.txt, analysis.db and the CSV\n"
+            "\t\tfiles always keep every block and metric the profile collected."
         ),
     )
     analyze_group.add_argument(

@@ -123,14 +123,14 @@ def test_report_keeps_kernel_statistics_order(
 
     model = model_at(report_at(workload))
 
-    with (run_folder_of(workload) / "kernel.csv").open(
+    with (report_at(workload).parent / "kernels.csv").open(
         newline="", encoding="utf-8"
     ) as file:
         rows = list(csv.DictReader(file))
 
     # Top stats list the kernels by total duration, largest first.
-    rows.sort(key=lambda row: float(row["duration_ns_sum"]), reverse=True)
-    names = [row["kernel_name"] for row in rows]
+    rows.sort(key=lambda row: float(row["Duration_ns"]), reverse=True)
+    names = [row["Kernel_Name"] for row in rows]
 
     assert len(names) == 3
     assert [kernel["name"] for kernel in model["kernels"]] == names

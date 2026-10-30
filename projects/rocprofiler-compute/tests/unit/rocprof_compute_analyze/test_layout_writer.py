@@ -284,8 +284,22 @@ def write_run(
     paths = workload_paths or [WORKLOAD_PATH]
     if kernel_rankings is None:
         kernel_rankings = {path: duration_ranking(path) for path in paths}
-    write_workload_folders(run_folder, paths, kernel_rankings)
+    write_workload_folders(run_folder, workload_ids_of(paths), kernel_rankings)
     return run_folder
+
+
+def workload_ids_of(paths: List[str]) -> Dict[str, int]:
+    """Return the analysis DB id of each workload path, as build_database stored it."""
+    session = Database.get_session()
+    return {
+        path: session.execute(
+            select(Workload.workload_id).where(
+                Workload.name == path.split("/")[-2],
+                Workload.sub_name == path.split("/")[-1],
+            )
+        ).scalar_one()
+        for path in paths
+    }
 
 
 def read_csv(csv_path: Path) -> List[List[str]]:
@@ -336,7 +350,7 @@ def build_real_run(workload_name: str, tmp_path: Path) -> Path:
         analyzer.build_database(run_folder / "analysis.db")
         write_workload_folders(
             run_folder,
-            [workload_path],
+            analyzer.workload_ids(),
             analyzer._kernel_rankings_per_workload,
         )
     finally:
@@ -427,15 +441,19 @@ def test_kernel_index_is_its_top_stats_rank_when_k_leaves_kernels_out(
     assert not (workload_folder / VECCOPY_FOLDER).exists()
 
 
-def test_kernel_missing_from_the_top_stats_ranking_stops_the_write(
-    db_session, tmp_path
-):
-    """A kernel with rows in the DB but no place in the ranking is an error."""
+def test_kernel_missing_from_the_top_stats_ranking_stops_before_the_write(db_session):
+    """A kernel with rows in the DB but no place in the ranking is an error.
+
+    The check runs in the build phase, before any run folder is created.
+    """
     workload = make_workload(db_session)
     add_kernel(db_session, workload, VECCOPY_NAME, [300])
+    Database.commit()
 
     with pytest.raises(SystemExit):
-        write_run(tmp_path, kernel_rankings={WORKLOAD_PATH: [SCALE_NAME]})
+        layout_writer.check_workload_folders(
+            workload_ids_of([WORKLOAD_PATH]), {WORKLOAD_PATH: [SCALE_NAME]}
+        )
 
 
 def test_mangled_kernel_folder_uses_the_demangled_name_and_kernels_csv_the_raw_one(

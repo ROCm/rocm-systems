@@ -105,15 +105,18 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -o pc_report
 ```
 
 Every analyze run writes its output into a new run folder, here `./pc_report`.
-The folder holds per-kernel annotated disassembly in a
-`per_kernel_pc_sampling/` directory, with sample counts and source lines beside
-each instruction. `analysis.db` in the same folder stores the same content.
-The terminal shows the top stats, system info, and Speed-of-Light; the full
-report, PC sampling included, is `report.txt` in the same folder.
+The workload folder `<n>-<workload>/` holds `pc-sampling-summary.csv`, one row
+per sampled kernel. Each sampled kernel has its own folder
+`kernel-NNN-<name>/` with `kernel-NNN-<name>-pc-sampling-isa.csv`, the
+disassembly with sample counts on each instruction line, and
+`kernel-NNN-<name>-pc-sampling-src.csv`, the sample counts of each source line.
+`kernels.csv` maps each folder to its kernel. `analysis.db` in the same folder
+stores the same content. The terminal shows the top stats, system info, and
+Speed-of-Light; the full report, PC sampling included, is `report.txt` in the
+same folder.
 
-The run folder also holds `<file>_pc_sampling.csv` beside each captured source
-file, with the sample counts of every source line and the ISA rows each line
-compiled to. Start there to find the hottest source line.
+Start with the `-pc-sampling-src.csv` of the hottest kernel to find the hottest
+source line.
 
 ## 6. When there are too few samples
 

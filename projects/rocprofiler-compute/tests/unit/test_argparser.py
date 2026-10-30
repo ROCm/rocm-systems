@@ -215,6 +215,37 @@ def test_analyze_output_format_still_parses():
     assert args.output_format == "csv"
 
 
+def analyze_option_help(option, capsys):
+    """Return the analyze help entry of one option, from its line to the next option."""
+    lines = help_text(HOME, ["analyze"], capsys).splitlines()
+    start = next(
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("  ")
+        and (line.lstrip().startswith(option) or f", {option}" in line)
+    )
+    end = next(
+        (
+            index
+            for index in range(start + 1, len(lines))
+            if lines[index].startswith("  -")
+        ),
+        len(lines),
+    )
+    return "\n".join(lines[start:end])
+
+
+def test_analyze_output_format_help_is_marked_deprecated(capsys):
+    """The no-op --output-format says so in its help."""
+    assert "(DEPRECATED)" in analyze_option_help("--output-format", capsys)
+
+
+@pytest.mark.parametrize("flag", ["-b", "--block"])
+def test_analyze_block_help_is_not_deprecated(flag, capsys):
+    """-b stays functional, so its help carries no deprecation marker."""
+    assert "DEPRECATED" not in analyze_option_help(flag, capsys)
+
+
 @pytest.mark.parametrize("flag", ["-b", "--block"])
 def test_analyze_block_accepts_ids_and_aliases(flag):
     args = build_args(["analyze", "-p", "/tmp/workload", flag, "7", "2.1.0", "sol"])

@@ -22,7 +22,7 @@ from memory_chart.html.views import (
 from utils import analysis_orm as orm
 from utils import schema
 from utils.html_report import report_shell as html_report
-from utils.logger import console_log, console_warning
+from utils.logger import console_log
 from utils.utils_common import normalize_filter_to_str_list
 
 MODEL_ID = "mem-chart-model"
@@ -79,8 +79,11 @@ def _write_report(
     scope: ChartScope,
     normalization: str,
     output_path: Path,
-) -> Optional[Path]:
-    """Write the offline page to output_path, creating its folder if needed."""
+) -> Path:
+    """Write the offline page to output_path, creating its folder if needed.
+
+    A write error propagates, so the run folder write reports it.
+    """
     document = build_mem_chart_document(
         views,
         heading="3. Memory Chart",
@@ -88,15 +91,8 @@ def _write_report(
         normalization=normalization,
     )
 
-    try:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(document, encoding="utf-8")
-    except OSError as error:
-        console_warning(
-            "memory chart", f"Failed to write HTML report {output_path}: {error}"
-        )
-        return None
-
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(document, encoding="utf-8")
     console_log("memory chart", f"Saved HTML report: {output_path}")
     return output_path
 

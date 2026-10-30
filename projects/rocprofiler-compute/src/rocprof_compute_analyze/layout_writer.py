@@ -13,11 +13,10 @@ the top-stats ranking the caller passes in, which lists every kernel.
 pc-sampling-summary.csv opens with a '#' note line above its header, so read it
 with comment='#' or skip its first line.
 
-The kernel ISA and source files are not written by the pc_sampling exporters.
-Those write one file per kernel, code object and process with the instruction
-locations of a separate export, and one source file per source path with ISA
-references. The one-folder-per-kernel layout uses neither. The column names are
-shared through build_header and the exporters' column tuples.
+Each kernel's PC-sampling ISA file is written here, one per kernel folder. Its
+column names are defined in this module (ISA_BASE_COLUMNS and
+ISA_TRAILING_COLUMNS), with the stall columns added by build_header from
+pc_sampling_csv_export.
 """
 
 import csv
@@ -42,7 +41,6 @@ from sqlalchemy.engine import Row
 
 import utils.analysis_orm as orm
 from pc_sampling.pc_sampling_csv_export import build_header
-from pc_sampling.per_kernel_isa_export import BASE_COLUMNS, TRAILING_COLUMNS
 from pc_sampling.source_snapshot_analysis import (
     SOURCE_FRAME_SEPARATOR,
     UNKNOWN_SOURCE_LINE_TOKEN,
@@ -76,6 +74,22 @@ PC_SAMPLING_NARROWING_NOTE = (
     "do not apply to them yet."
 )
 UNATTRIBUTABLE_INSTRUCTIONS_LABEL = "Unattributable instructions"
+ISA_BASE_COLUMNS = (
+    "Instruction line number",
+    "Code object offset",
+    "Instruction line",
+    "Instruction type",
+    "Total count",
+    "Active count",
+    "Stall count",
+    "Wave occupancy percent",
+    "Active thread percent",
+)
+ISA_TRAILING_COLUMNS = (
+    "Source",
+    "Code object id",
+    "Pid",
+)
 
 KERNELS_HEADER = ["Index", "Kernel_Name", "Folder", "Duration_ns", "Pct"]
 DISPATCHES_HEADER = [
@@ -105,18 +119,43 @@ PC_SAMPLING_MEASURE_COLUMNS = ("Total count", "Active count", "Stall count")
 PC_SAMPLING_SUMMARY_LEADING_COLUMNS = ("Index", "Kernel_Name", "Folder")
 
 
+def check_workload_folders(
+    workload_ids: Mapping[str, int],
+    kernel_rankings: Mapping[str, Sequence[str]],
+) -> None:
+    """Exit before the run folder exists if a workload's kernels lack a ranking.
+
+    workload_ids maps each -p workload path to its analysis DB id, and
+    kernel_rankings maps it to its kernel names in top-stats order. The
+    kernel ids of -k index that ranking, so every kernel the DB stores must be
+    in it.
+    """
+    for workload_path, workload_id in workload_ids.items():
+        ranked_names = set(kernel_rankings[workload_path])
+        unranked_names = sorted(
+            {row.kernel_name for row in _kernel_rows(workload_id)} - ranked_names
+        )
+        if unranked_names:
+            console_error(
+                "analysis",
+                f"Kernels missing from the top-stats ranking of {workload_path}: "
+                f"{unranked_names}",
+            )
+
+
 def write_workload_folders(
     run_folder: Path,
-    workload_paths: Sequence[str],
+    workload_ids: Mapping[str, int],
     kernel_rankings: Mapping[str, Sequence[str]],
 ) -> List[Path]:
     """Write one folder per -p workload, in -p order, into the run folder.
 
     The folder of the workload at position N, counting from 1, is named by
-    workload_folder_name. Each workload's rows are found in the open analysis
-    DB by the name pair that build_database stored. kernel_rankings maps each
-    workload path to its kernel names in top-stats order, as the analysis
-    calc_kernel_rankings gives them, so a kernel's index is its id for -k.
+    workload_folder_name. workload_ids maps each workload path to the id of its
+    rows in the open analysis DB, and check_workload_folders has already
+    checked the kernel_rankings, which map each workload path to its kernel
+    names in top-stats order, as the analysis calc_kernel_rankings gives them,
+    so a kernel's index is its id for -k.
 
     Returns:
         The workload folders that were written.
@@ -125,11 +164,12 @@ def write_workload_folders(
         console_error("analysis", "No active database session for the run folder")
     stall_reasons_by_workload = Database.get_stall_reasons_by_workload()
     workload_folders = []
-    for position, workload_path in enumerate(workload_paths, start=1):
+    for position, (workload_path, workload_id) in enumerate(
+        workload_ids.items(), start=1
+    ):
         workload_folder = run_folder / workload_folder_name(
             position, Path(workload_path)
         )
-        workload_id = _find_workload_id(workload_path)
         workload_folder.mkdir()
         _write_workload_folder(
             workload_id,
@@ -153,30 +193,6 @@ def write_ml_api_trace_csv(workload_folder: Path, trace: pd.DataFrame) -> Path:
     trace_path = workload_folder / ML_API_TRACE_FILE_NAME
     trace.to_csv(trace_path, index=False, na_rep="", encoding="utf-8")
     return trace_path
-
-
-def _find_workload_id(workload_path: str) -> int:
-    """Return the id of the analysis DB row that build_database wrote for a workload."""
-    # Mirrors the name pair build_database stores for each workload.
-    name = workload_path.split("/")[-2]
-    sub_name = workload_path.split("/")[-1]
-    workload_id = (
-        Database
-        .get_session()
-        .execute(
-            select(orm.Workload.workload_id).where(
-                orm.Workload.name == name,
-                orm.Workload.sub_name == sub_name,
-            )
-        )
-        .scalar_one_or_none()
-    )
-    if workload_id is None:
-        console_error(
-            "analysis",
-            f"No analysis database rows were stored for workload {workload_path}",
-        )
-    return workload_id
 
 
 def _write_workload_folder(
@@ -212,19 +228,10 @@ def _write_workload_folder(
     _write_pc_sampling(workload_id, workload_folder, kernels, stall_reasons)
 
 
-def _kernel_folders(
-    workload_id: int, kernel_ranking: List[str]
-) -> List["KernelFolder"]:
-    """Return the workload's kernels that ran, in top-stats order, with their folders.
-
-    A kernel's index is its place in kernel_ranking, which lists every kernel of
-    the workload. A kernel that -k leaves out has no rows here, so the indexes
-    of the others still match their ids. A kernel's duration is the sum of its
-    dispatches. Pct is that sum over the workload's filtered total duration, in
-    percent, and NULL without a total.
-    """
+def _kernel_rows(workload_id: int) -> List[Row]:
+    """Return the workload's kernels that have dispatches, with their durations."""
     duration_ns = func.sum(orm.Dispatch.end_timestamp - orm.Dispatch.start_timestamp)
-    rows = (
+    return (
         Database
         .get_session()
         .execute(
@@ -247,13 +254,21 @@ def _kernel_folders(
         )
         .all()
     )
+
+
+def _kernel_folders(
+    workload_id: int, kernel_ranking: List[str]
+) -> List["KernelFolder"]:
+    """Return the workload's kernels that ran, in top-stats order, with their folders.
+
+    A kernel's index is its place in kernel_ranking, which lists every kernel of
+    the workload. A kernel that -k leaves out has no rows here, so the indexes
+    of the others still match their ids. A kernel's duration is the sum of its
+    dispatches. Pct is that sum over the workload's filtered total duration, in
+    percent, and NULL without a total.
+    """
+    rows = _kernel_rows(workload_id)
     rows_by_name = {row.kernel_name: row for row in rows}
-    unranked_names = sorted(set(rows_by_name) - set(kernel_ranking))
-    if unranked_names:
-        console_error(
-            "analysis",
-            f"Kernels missing from the top-stats ranking: {unranked_names}",
-        )
     demangled_names = demangle_kernel_names(row.kernel_name for row in rows)
     index_width = kernel_index_width(len(kernel_ranking))
     kernels = []
@@ -603,7 +618,7 @@ def _write_pc_sampling(
         kernel_folder = workload_folder / kernel.folder_name
         _write_csv(
             kernel_folder / f"{kernel.folder_name}{PC_SAMPLING_ISA_FILE_SUFFIX}",
-            build_header(BASE_COLUMNS, stall_reasons, TRAILING_COLUMNS),
+            build_header(ISA_BASE_COLUMNS, stall_reasons, ISA_TRAILING_COLUMNS),
             _isa_csv_rows(instruction_lines),
         )
         _write_source_file(

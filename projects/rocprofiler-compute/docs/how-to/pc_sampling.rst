@@ -204,34 +204,30 @@ rows from the workload as a whole, not ten rows per process.
 
 .. _pc-sampling-per-kernel-csv:
 
-Per-kernel ISA and source in CSV output
-=======================================
+PC-sampling files in the run folder
+===================================
 
-Every analyze run writes, alongside the analysis tables, one file per
-kernel per code object per process holding that kernel's instruction lines with
-the samples collected on them, and exports the source those instructions were
-compiled from beside it:
+For a workload with PC samples, every analyze run writes ``pc-sampling-summary.csv`` into the
+workload folder. It has one row for each kernel with samples. Each such kernel also gets an ISA
+file and a source file in its own folder:
 
 .. code-block:: none
 
    <run folder>/
-       kernel.csv, pc_sampling_summary.csv, ...
-       per_kernel_pc_sampling/
-           <workload_name>/<workload_sub_name>/
-               source/<source path with the leading separator dropped>
-               source/<source path with the leading separator dropped>_pc_sampling.csv
-               <short_name>_uuid_<kernel_uuid>/
-                   isa_code_object_id_<code_object_id>_pid_<pid>.csv
+       1-<workload>/
+           pc-sampling-summary.csv
+           kernel-000-vecCopy/
+               kernel-000-vecCopy-metrics.csv
+               kernel-000-vecCopy-pc-sampling-isa.csv
+               kernel-000-vecCopy-pc-sampling-src.csv
 
-A folder leads with the kernel's short name, the identifier its C++ signature
-demangles down to, so ``vecCopy_2(double*, double*, double*, int, int)`` is
-filed under ``vecCopy_2_uuid_7``. Overloads and template instantiations share a
-short name, so the ``kernel_uuid`` suffix keeps each folder unique. ``kernel.csv``
-carries ``kernel_uuid`` alongside ``short_name`` and ``kernel_name``, so it maps
-a folder back to the kernel it holds. One kernel has more than one file when it
-was compiled into several code objects, or when several processes ran it.
+The folder names are described in :ref:`analysis-output-format`, and ``kernels.csv`` gives the
+full name of each kernel. One kernel has one ISA file even when it was compiled into several code
+objects or run by several processes. The ``Code object id`` and ``Pid`` columns tell those rows
+apart. Analyze does not copy source files into the run folder.
 
-Each file holds one row per instruction line, ordered by code object offset:
+Each ISA file holds one row per instruction line of its kernel. The line numbers count from 1
+across the whole file:
 
 .. list-table::
    :header-rows: 1
@@ -276,48 +272,45 @@ reason was not seen at that offset.
 An instruction that no sample landed on keeps its row, with empty counts. It
 still carries an ``Instruction type``.
 
-The ``Source`` column and the ``source/`` folder are populated only when the
-target app was built with debug info; see the :ref:`note <pc-sampling-note>`.
+The ``Source`` column is populated only when the target app was built with debug info; see the
+:ref:`note <pc-sampling-note>`.
+
+``pc-sampling-summary.csv`` starts with a ``#`` line that says PC samples are narrowed by ``-k``
+only, then its header. Its ``Total count``, ``Active count``, ``Stall count`` and
+``Stall <REASON>`` columns are sums over the kernel's instruction lines, across every code object
+and process.
 
 .. _pc-sampling-per-source-line-csv:
 
-Per-source-line counts in CSV output
-====================================
+Per-source-line counts in the source file
+=========================================
 
-Beside each exported source file, analyze writes
-``<source file name>_pc_sampling.csv``. It has one row for each line of that
-file, with the samples of every kernel and process that ran code compiled from
-that line:
+Each kernel's ``<folder>-pc-sampling-src.csv`` has one row for each source line its samples reach.
+The row sums the samples of every instruction compiled from that line, across processes:
 
 .. list-table::
    :header-rows: 1
 
    * - Column
      - Description
+   * - ``Source file``
+     - Source path the profile recorded for the line.
    * - ``Source line number``
      - Source line number in the source file.
    * - ``Source line``
-     - Text of the line.
+     - Text of the line, when the source is available.
    * - ``Total count``, ``Active count``, ``Stall count``, ``Stall <REASON>``
      - Sums over the instructions compiled from this line.
-   * - ``Wave occupancy percent``, ``Active thread percent``
-     - Averages over the samples of those instructions.
-   * - ``ISA references``
-     - Rows of those instructions in the per-kernel ISA files, as
-       ``<kernel folder>/<ISA file>:<instruction line numbers>``, with one ISA
-       file per line of the cell.
 
 An instruction from inlined code counts in full toward every source line of its
 inline stack. For example, an instruction that reads ``blockDim.x`` counts toward
 both the HIP header lines that implement it and the application line that reads
 it.
 
-Some instructions have no source line number, shown as ``<file>:?`` in the
-per-kernel ISA files. A file with such instructions starts with an
-``Unattributable instructions`` row. Its ``Total count`` is the number of samples
-lost because those instructions have no source line number, and its
-``ISA references`` lists the instructions. Its other columns are empty. See the
-:ref:`note <pc-sampling-note>` for why the compiler leaves out the source line
+Some instructions have no source line number. Their samples go to one row with empty
+``Source file`` and ``Source line number`` cells and the label ``Unattributable instructions`` in
+``Source line``. Its counts are the samples lost because those instructions have no source line
+number. See the :ref:`note <pc-sampling-note>` for why the compiler leaves out the source line
 number.
 
 .. _pc-sampling-note:
@@ -325,5 +318,5 @@ number.
 .. note::
 
   * PC sampling now only shows assembly instructions collected in our record of pc samples and not all instructions of compiled code are represented.
-  * Source information requires the target app to be built with debug info (for example ``hipcc -g``). Without it, samples map to assembly only: profile mode captures no source files, the terminal table's ``source_line`` shows ``N/A``, and the ``Source`` column of the per-kernel CSV is empty.
+  * Source information requires the target app to be built with debug info (for example ``hipcc -g``). Without it, samples map to assembly only: profile mode captures no source files, the terminal table's ``source_line`` shows ``N/A``, and the ``Source`` column of the per-kernel ISA CSV (``-pc-sampling-isa.csv``) is empty.
   * The ``Source`` column can show ``?`` instead of a line number, such as ``kernel.cpp:?``. The compiler does this when it builds one instruction from several source lines. To find the source of such an instruction, look at the source lines of the instructions it depends on. For example, a wait instruction such as ``s_waitcnt`` depends on earlier memory and LDS operations, such as ``global_*``, ``buffer_*``, ``s_load*`` or ``ds_*`` instructions.

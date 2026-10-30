@@ -106,17 +106,21 @@ def test_save_csv(
     ])
     assert code == 0
 
-    csv_dir = Path(analysis_workload_dir)
-    assert csv_dir.is_dir()
+    run_folder = Path(analysis_workload_dir)
+    assert run_folder.is_dir()
+    assert (run_folder / "analysis.db").is_file()
 
-    expected_view_csvs = ["kernel.csv", "kernel_metric.csv", "workload_metric.csv"]
-    for csv_name in expected_view_csvs:
-        csv_path = csv_dir / csv_name
-        assert csv_path.is_file(), f"Missing per-view CSV: {csv_path}"
+    analysis_folders = sorted(run_folder.glob("1-*"))
+    assert len(analysis_folders) == 1, f"Expected one workload folder: {run_folder}"
+    analysis_folder = analysis_folders[0]
+    expected_csvs = ["kernels.csv", "metrics-summary.csv"]
+    for csv_name in expected_csvs:
+        csv_path = analysis_folder / csv_name
+        assert csv_path.is_file(), f"Missing workload CSV: {csv_path}"
         df = pd.read_csv(csv_path)
-        assert len(df.index) >= 1, f"Per-view CSV is empty: {csv_path}"
-
-    assert (csv_dir / "analysis.db").is_file()
+        assert len(df.index) >= 1, f"Workload CSV is empty: {csv_path}"
+    for kernel_folder in pd.read_csv(analysis_folder / "kernels.csv")["Folder"]:
+        assert (analysis_folder / kernel_folder).is_dir(), kernel_folder
 
     common.clean_output_dir(config["cleanup"], analysis_workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)

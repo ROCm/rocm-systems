@@ -5,6 +5,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
@@ -14,6 +15,7 @@ from rocprof_compute_analyze.analysis_cli import (
     cli_analysis,
     parse_operator_patterns,
 )
+from rocprof_compute_analyze.output_location import workload_folder_name
 from utils import parser, schema
 from utils.terminal_selection import TerminalSelection
 from utils.utils_analysis import CallTreeNode, KernelStats, iter_call_tree_paths
@@ -84,6 +86,12 @@ def append_args_and_exit(errors, *argv, **_kwargs):
     """Stand-in for console_error: record the call, then exit like it does."""
     errors.append(argv)
     raise SystemExit(1)
+
+
+def make_workload_folders(run_folder, workload_paths):
+    """Create the workload folders that the layout writer creates before the reports."""
+    for position, workload_path in enumerate(workload_paths, start=1):
+        (run_folder / workload_folder_name(position, Path(workload_path))).mkdir()
 
 
 def cli_with_two_operator_workloads(args):
@@ -451,8 +459,12 @@ def test_write_outputs_prints_matched_tree_for_every_path(monkeypatch, tmp_path)
         "rocprof_compute_analyze.analysis_cli.tty.show_all",
         lambda *a, **kw: None,
     )
+    make_workload_folders(tmp_path, ["/w1", "/w2"])
+
     inst.write_outputs(tmp_path)
-    assert handled_paths == ["/w1", "/w2", "/w1", "/w2"]
+
+    # The root report, each workload's own report, then the terminal
+    assert handled_paths == ["/w1", "/w2", "/w1", "/w2", "/w1", "/w2"]
 
 
 def test_write_outputs_writes_full_report_and_prints_the_terminal_selection(
@@ -482,16 +494,52 @@ def test_write_outputs_writes_full_report_and_prints_the_terminal_selection(
         lambda _runs, output: path_outputs.append(output),
     )
 
+    make_workload_folders(tmp_path, ["/w1", "/w2"])
+
     inst.write_outputs(tmp_path)
 
-    (report_output, report_selection), (stdout_output, stdout_selection) = (
-        show_all_calls
-    )
-    assert report_output.name == str(tmp_path / "report.txt")
-    assert report_selection is None
+    *report_calls, (stdout_output, stdout_selection) = show_all_calls
+    # Each workload's report comes before the root comparison, which narrows the frames
+    assert [report_output.name for report_output, _selection in report_calls] == [
+        str(tmp_path / "1-w1" / "report.txt"),
+        str(tmp_path / "2-w2" / "report.txt"),
+        str(tmp_path / "report.txt"),
+    ]
+    assert all(selection is None for _output, selection in report_calls)
     assert stdout_output is sys.stdout
     assert stdout_selection is inst._terminal_selection
     assert path_outputs == [sys.stdout]
+
+
+def test_write_outputs_writes_only_the_root_report_for_one_workload(
+    monkeypatch, tmp_path
+):
+    """A single -p gets report.txt at the root and no per-workload report."""
+    args = argparse.Namespace(
+        path=[["/w1"]],
+        torch_operator=None,
+        triton_operator=None,
+        list_stats=False,
+    )
+    inst = cli_with_two_operator_workloads(args)
+    inst._report_runs = {"/w1": schema.Workload()}
+    report_names = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.tty.show_all",
+        lambda _args, _runs, _config, output, _profiling, **kwargs: report_names.append(
+            output.name
+        ),
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.tty.print_roofline_html_path",
+        lambda _runs, _output: None,
+    )
+
+    inst.write_outputs(tmp_path)
+
+    # The terminal view is printed to stdout, so only the root report is a file.
+    assert report_names == [str(tmp_path / "report.txt"), sys.stdout.name]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["report.txt"]
 
 
 def test_write_outputs_saves_each_traced_workloads_ml_api_trace(monkeypatch, tmp_path):
@@ -516,6 +564,8 @@ def test_write_outputs_saves_each_traced_workloads_ml_api_trace(monkeypatch, tmp
         "rocprof_compute_analyze.analysis_cli.tty.show_all",
         lambda *a, **kw: None,
     )
+
+    make_workload_folders(tmp_path, ["/w1", "/w2"])
 
     inst.write_outputs(tmp_path)
 

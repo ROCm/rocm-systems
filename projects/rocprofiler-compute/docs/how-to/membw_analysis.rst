@@ -203,10 +203,10 @@ A workload profiled with ``--experimental --membw-analysis`` stores its memory
 bandwidth analysis in every analyze run's ``analysis.db``; no ``--output-format``
 is needed, as that option is a deprecated no-op. The analysis database holds the
 availability and reason, every node of the bottleneck tree with its supporting
-metrics, and the guidance blocks in the order they are shown. Every run also writes
-``membw_node.csv``: the ``compute_membw_node_view`` view lists the tree one node
-per row, with the parent node's order for each node, and has no guidance text.
-Workloads without membw data have no rows.
+metrics, and the guidance blocks in the order they are shown. The
+``compute_membw_node_view`` view lists the tree one node per row, with the parent
+node's order for each node, and has no guidance text. The analysis is not written as
+a CSV file. Workloads without membw data have no rows.
 
 Further resources
 =================

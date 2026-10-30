@@ -38,6 +38,9 @@ class RecordingAnalyzer:
     def build_database(self, db_path):
         self.calls.append((self.name, "build_database", db_path))
 
+    def check_workload_folders(self):
+        """The layout check runs in the build phase; the stand-in has no layout."""
+
     def build_report_frames(self):
         self.calls.append((self.name, "build_report_frames"))
         self.report_runs = {}

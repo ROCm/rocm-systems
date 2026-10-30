@@ -52,24 +52,18 @@ from pc_sampling.pc_sampling_analysis import (
     aggregate_instruction_lines,
     load_aggregated_pc_sampling,
 )
-from pc_sampling.per_kernel_isa_export import (
-    WorkloadIsaExport,
-    export_per_kernel_isa_files,
-)
-from pc_sampling.per_source_line_export import (
-    WorkloadSourceLineExport,
-    export_per_source_line_files,
-)
 from pc_sampling.source_snapshot_analysis import (
     SourceFrame,
-    WorkloadSourceSnapshot,
-    export_source_snapshot_files,
     load_source_path_map,
     parse_source_frames,
     read_source_file_digest_and_lines,
     resolve_snapshot_path,
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from rocprof_compute_analyze.layout_writer import (
+    check_workload_folders,
+    write_workload_folders,
+)
 from rocprof_compute_analyze.output_location import workload_folder_name
 from rocprof_compute_analyze.pc_sampling_section import (
     build_pc_sampling_section,
@@ -315,18 +309,6 @@ class SourceFrameCollector:
                     frame_index=frame_index,
                 )
             )
-
-    def captured_source_paths(self) -> tuple[str, ...]:
-        """Return the absolute paths whose snapshot copy this workload holds.
-
-        A path the snapshot does not hold, and a frame naming a relative path,
-        carries no digest and has no copy to export.
-        """
-        return tuple(
-            absolute_path
-            for absolute_path, source_file in self._source_files.items()
-            if source_file.md5_checksum is not None
-        )
 
     def _get_or_create_source_line(self, frame: SourceFrame) -> orm.SourceLine:
         """Return the row for one frame's line, creating it if absent.
@@ -590,7 +572,6 @@ class db_analysis(OmniAnalyze_Base):
         benchmark_rows_per_workload = self.calc_roofline_benchmark_rows()
 
         # Iterate over all workloads
-        workload_source_snapshots: list[WorkloadSourceSnapshot] = []
         workload_objs: list[orm.Workload] = []
         for workload_path in self._runs.keys():
             # Add workload
@@ -715,14 +696,6 @@ class db_analysis(OmniAnalyze_Base):
                 source_frames,
                 sys_info,
             )
-            workload_source_snapshots.append(
-                WorkloadSourceSnapshot(
-                    workload_path=Path(workload_path),
-                    workload_name=workload_obj.name,
-                    workload_sub_name=workload_obj.sub_name,
-                    absolute_source_paths=source_frames.captured_source_paths(),
-                )
-            )
 
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
@@ -745,7 +718,17 @@ class db_analysis(OmniAnalyze_Base):
         Database.create_views()
         Database.commit()
         self._workload_objs = workload_objs
-        self._workload_source_snapshots = workload_source_snapshots
+
+    def workload_ids(self) -> Dict[str, int]:
+        """Analysis DB id of each workload, keyed by -p path, after build_database."""
+        return {
+            workload_path: workload_obj.workload_id
+            for workload_path, workload_obj in zip(self._runs, self._workload_objs)
+        }
+
+    def check_workload_folders(self) -> None:
+        """Exit before the run folder exists if a kernel has no top-stats place."""
+        check_workload_folders(self.workload_ids(), self._kernel_rankings_per_workload)
 
     def kernel_rankings(self) -> dict[str, list[str]]:
         """Kernel names of each workload before the -k filter, in -k id order."""
@@ -759,13 +742,9 @@ class db_analysis(OmniAnalyze_Base):
         every number the terminal and report.txt show is the value the database
         stores. They are kept in report_runs, keyed by run path.
         """
-        workload_ids = {
-            workload_path: workload_obj.workload_id
-            for workload_path, workload_obj in zip(self._runs, self._workload_objs)
-        }
         self.report_runs = build_report_runs(
             Database.get_session(),
-            workload_ids,
+            self.workload_ids(),
             self._arch_configs,
             self.get_args().time_unit,
         )
@@ -811,68 +790,20 @@ class db_analysis(OmniAnalyze_Base):
 
     @demarcate
     def write_outputs(self, run_folder: Path) -> None:
-        """Write analysis.db, the view CSVs, the PC-sampling exports and HTML plots."""
+        """Write analysis.db, every workload folder and the HTML plots into run_folder.
+
+        The workload folders and plots are read from the open session, and
+        analysis.db is backed up last, once nothing else needs the session.
+        """
         super().write_outputs(run_folder)
-        # The per-kernel exports stream rows from the open session.
-        per_kernel_isa_files = export_per_kernel_isa_files(
-            csv_result_directory=run_folder,
-            workload_isa_exports=self._build_workload_isa_exports(self._workload_objs),
-        )
-        export_per_source_line_files(
-            export_directory=per_kernel_isa_files.directory,
-            isa_line_locations=per_kernel_isa_files.isa_line_locations,
-            workload_source_line_exports=(
-                self._build_workload_source_line_exports(self._workload_objs)
-            ),
+        write_workload_folders(
+            run_folder,
+            self.workload_ids(),
+            self._kernel_rankings_per_workload,
         )
         self._write_html_plots(run_folder)
         Database.write()
-        Database.write_csv_dir(run_folder)
         Database.close()
-        export_source_snapshot_files(
-            workload_source_snapshots=self._workload_source_snapshots,
-            export_directory=per_kernel_isa_files.directory,
-        )
-
-    @staticmethod
-    def _build_workload_isa_exports(
-        workload_objs: list[orm.Workload],
-    ) -> list[WorkloadIsaExport]:
-        """Pair each workload's stall reasons with its instruction rows."""
-        stall_reasons_by_workload = Database.get_stall_reasons_by_workload()
-        workload_isa_exports = []
-        for workload_obj in workload_objs:
-            stall_reasons = stall_reasons_by_workload.get(workload_obj.workload_id, [])
-            workload_isa_exports.append(
-                WorkloadIsaExport(
-                    workload_id=workload_obj.workload_id,
-                    stall_reasons=stall_reasons,
-                    isa_rows=Database.stream_per_kernel_isa_rows(
-                        workload_obj.workload_id, stall_reasons
-                    ),
-                )
-            )
-        return workload_isa_exports
-
-    @staticmethod
-    def _build_workload_source_line_exports(
-        workload_objs: List[orm.Workload],
-    ) -> List[WorkloadSourceLineExport]:
-        """Pair each workload's stall reasons with its source line rows."""
-        stall_reasons_by_workload = Database.get_stall_reasons_by_workload()
-        workload_source_line_exports = []
-        for workload_obj in workload_objs:
-            stall_reasons = stall_reasons_by_workload.get(workload_obj.workload_id, [])
-            workload_source_line_exports.append(
-                WorkloadSourceLineExport(
-                    workload_id=workload_obj.workload_id,
-                    stall_reasons=stall_reasons,
-                    source_line_rows=Database.stream_per_source_line_rows(
-                        workload_obj.workload_id, stall_reasons
-                    ),
-                )
-            )
-        return workload_source_line_exports
 
     def run_analysis_metrics(
         self,
@@ -964,8 +895,8 @@ class db_analysis(OmniAnalyze_Base):
     def _write_html_plots(self, run_folder: Path) -> None:
         """Write each workload's roofline and memory-chart HTML from the open session.
 
-        Each workload gets its own run-folder subfolder, named by its -p position.
-        The roofline path is recorded on the report frame so the terminal can print it.
+        Each workload's folder, named by its -p position, already exists. The
+        roofline path is recorded on the report frame so the terminal can print it.
         """
         socs = self.get_socs() or {}
         for position, (workload_path, workload_obj) in enumerate(
@@ -976,7 +907,6 @@ class db_analysis(OmniAnalyze_Base):
             workload_folder = run_folder / workload_folder_name(
                 position, Path(workload_path)
             )
-            workload_folder.mkdir(parents=True, exist_ok=True)
             roofline_path = workload_folder / f"roofline-gpu-{ROOFLINE_DEVICE_ID}.html"
             if gpu_arch in socs:
                 written = write_roofline_html(

@@ -286,7 +286,7 @@ def test_pc_sampling_analyze_csv_output(
     binary_handler_analyze_rocprof_compute,
     tmp_path,
 ) -> None:
-    """Preserve PC sampling totals and dispatch counts in CSV output."""
+    """Preserve PC sampling totals and dispatch counts in the workload folder."""
     workload_dir = Path(
         integration_common.setup_workload_dir(PC_SAMPLING_WORKLOAD)
     ).resolve()
@@ -305,24 +305,36 @@ def test_pc_sampling_analyze_csv_output(
         ])
         assert code == 0
 
-        summary_csv = csv_dir / "pc_sampling_summary.csv"
-        assert summary_csv.is_file()
-        csv_pc_sampling = pd.read_csv(summary_csv)
-        csv_kernel = pd.read_csv(csv_dir / "kernel.csv")
-        assert len(csv_pc_sampling) == 19
-        assert csv_pc_sampling["count"].sum() == 857
-        assert set(csv_pc_sampling["pid"]) == {698961}
-        assert csv_pc_sampling["active_thread_percent"].eq(100.0).all()
-        assert csv_pc_sampling["wave_occupancy_percent"].gt(0).all()
-        assert csv_pc_sampling["wave_occupancy_percent"].le(100).all()
-        assert csv_kernel.iloc[0]["dispatch_count"] == 3
-        csv_source_lines = pd.read_csv(csv_dir / "source_lines.csv")
-        assert set(csv_source_lines["file_path"]) == {
+        workload_folder = next(csv_dir.glob("1-*"))
+        summary = pd.read_csv(workload_folder / "pc-sampling-summary.csv", comment="#")
+        kernels = pd.read_csv(workload_folder / "kernels.csv")
+        dispatches = pd.read_csv(workload_folder / "dispatches.csv")
+        isa_frames = {
+            path.parent.name: pd.read_csv(path)
+            for path in workload_folder.glob("kernel-*/*-pc-sampling-isa.csv")
+        }
+        sampled_lines = pd.concat(
+            frame.dropna(subset=["Total count"]) for frame in isa_frames.values()
+        )
+        source_frames = [
+            pd.read_csv(path)
+            for path in workload_folder.glob("kernel-*/*-pc-sampling-src.csv")
+        ]
+
+        # One summary row per kernel with samples, and one ISA and source file each
+        assert len(summary) == len(isa_frames) == len(source_frames) > 0
+        assert summary["Total count"].sum() == 857
+        assert set(sampled_lines["Pid"]) == {698961}
+        assert sampled_lines["Active thread percent"].eq(100.0).all()
+        assert sampled_lines["Wave occupancy percent"].gt(0).all()
+        assert sampled_lines["Wave occupancy percent"].le(100).all()
+        assert (dispatches["Kernel_Index"] == 0).sum() == 3
+        assert set(pd.concat(source_frames)["Source file"].dropna()) == {
             VCOPY_SOURCE,
             HIP_RUNTIME_SOURCE,
         }
-        # Every sampling row must resolve to a kernel the kernel view exposes.
-        assert set(csv_pc_sampling["kernel_uuid"]) <= set(csv_kernel["kernel_uuid"])
+        # Every sampled kernel is listed in kernels.csv under its folder
+        assert set(summary["Folder"]) <= set(kernels["Folder"])
     finally:
         common.clean_output_dir(True, str(workload_dir))
 

@@ -4,8 +4,9 @@
 """PC-sampling section of the analyze report, built from the analysis database.
 
 The rows come from the PC-sampling summary view, the same rows that
-pc_sampling_summary.csv holds. The display layout is the table 21.1 layout that
-the parsed tool records produce, so both sources show the same columns.
+<n>-<workload>/pc-sampling-summary.csv holds. The display layout is the table
+21.1 layout that the parsed tool records produce, so both sources show the same
+columns.
 """
 
 import json

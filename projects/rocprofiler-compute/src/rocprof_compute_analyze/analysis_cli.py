@@ -5,7 +5,7 @@ import argparse
 import contextlib
 import sys
 from pathlib import Path
-from typing import Optional, TextIO
+from typing import Dict, List, Optional, TextIO
 
 import pandas as pd
 
@@ -167,27 +167,18 @@ class cli_analysis(OmniAnalyze_Base):
 
     @demarcate
     def write_outputs(self, run_folder: Path) -> None:
-        """Write the ML API traces and report.txt, then print the terminal summary.
+        """Write the ML API traces and report files, then print the terminal summary.
 
         Every table comes from the report frames the analysis DB built. The
-        terminal shows the standard sections and the -b selection; report.txt has
-        every section.
+        terminal shows the standard sections and the -b selection; the report
+        files have every section.
         """
         super().write_outputs(run_folder)
-        args = self.get_args()
         self._write_ml_api_traces(run_folder)
-        with (run_folder / REPORT_FILE_NAME).open("w", encoding="utf-8") as report:
-            tty.show_all(
-                args,
-                self._report_runs,
-                self._first_arch_config(),
-                report,
-                self._profiling_config,
-            )
-            self._show_operator_view(report)
-        self._show_operator_view(sys.stdout)
+        self._write_reports(run_folder)
+        self._show_operator_view(sys.stdout, self._workload_paths())
         tty.show_all(
-            args,
+            self.get_args(),
             self._report_runs,
             self._first_arch_config(),
             sys.stdout,
@@ -255,7 +246,16 @@ class cli_analysis(OmniAnalyze_Base):
 
     def _first_arch_config(self) -> schema.ArchConfig:
         """Return the arch config of the first -p workload, which drives rendering."""
-        return self._arch_configs[self._first_gpu_arch()]
+        return self._arch_config_of(self._workload_paths()[0])
+
+    def _arch_config_of(self, workload_path: str) -> schema.ArchConfig:
+        """Return the arch config of one -p workload's GPU."""
+        gpu_arch = self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
+        return self._arch_configs[gpu_arch]
+
+    def _workload_paths(self) -> List[str]:
+        """Return the -p workload paths, in the order they were given."""
+        return [path_info[0] for path_info in self.get_args().path]
 
     def _ml_api_trace_profiled(self) -> bool:
         """True when the profile recorded an ML API trace for any backend."""
@@ -275,26 +275,67 @@ class cli_analysis(OmniAnalyze_Base):
 
     def _write_ml_api_traces(self, run_folder: Path) -> None:
         """Save each traced workload's ML API trace in its run-folder subfolder."""
-        args = self.get_args()
-        for position, path_info in enumerate(args.path, start=1):
-            workload = self._runs[path_info[0]]
+        for position, workload_path in enumerate(self._workload_paths(), start=1):
+            workload = self._runs[workload_path]
             if not workload.ml_api_trace_pairs:
                 continue
             workload_folder = run_folder / workload_folder_name(
-                position, Path(path_info[0])
+                position, Path(workload_path)
             )
-            workload_folder.mkdir(parents=True, exist_ok=True)
             write_ml_api_trace_csv(workload_folder, workload.ml_api_trace_df)
 
-    def _show_operator_view(self, output: TextIO) -> None:
-        """Print the matched operator trees, with their kernel rows, to output."""
+    def _write_reports(self, run_folder: Path) -> None:
+        """Write report.txt at the run root, and per workload with several -p.
+
+        The root report covers every -p workload, as a comparison when there are
+        several. Each workload folder's report covers that workload alone.
+        """
+        workload_paths = self._workload_paths()
+        # A comparison narrows the report frames in place to the metrics every
+        # run shares, so each workload's own report is written before it.
+        if len(workload_paths) > 1:
+            for position, workload_path in enumerate(workload_paths, start=1):
+                self._write_report_file(
+                    run_folder
+                    / workload_folder_name(position, Path(workload_path))
+                    / REPORT_FILE_NAME,
+                    {workload_path: self._report_runs[workload_path]},
+                    self._arch_config_of(workload_path),
+                    [workload_path],
+                )
+        self._write_report_file(
+            run_folder / REPORT_FILE_NAME,
+            self._report_runs,
+            self._first_arch_config(),
+            workload_paths,
+        )
+
+    def _write_report_file(
+        self,
+        report_path: Path,
+        report_runs: Dict[str, schema.Workload],
+        arch_config: schema.ArchConfig,
+        workload_paths: List[str],
+    ) -> None:
+        """Write the given runs' sections and their operator view to report_path."""
+        with report_path.open("w", encoding="utf-8") as report:
+            tty.show_all(
+                self.get_args(),
+                report_runs,
+                arch_config,
+                report,
+                self._profiling_config,
+            )
+            self._show_operator_view(report, workload_paths)
+
+    def _show_operator_view(self, output: TextIO, workload_paths: List[str]) -> None:
+        """Print the matched operator trees of the workloads, with their kernel rows."""
         backends = self._operator_filter_backends()
         if not backends:
             return
         args = self.get_args()
         with contextlib.redirect_stdout(output):
-            for path_info in args.path:
-                workload_path = path_info[0]
+            for workload_path in workload_paths:
                 report_run = self._report_runs[workload_path]
                 self.handle_operator(
                     args,

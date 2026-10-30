@@ -492,6 +492,21 @@ def test_torch_operator_addmm_selects_kernels(
     assert (run_folder / "analysis.db").is_file()
     assert (run_folder / "report.txt").is_file()
     assert list(run_folder.glob("*/ml-api-trace.csv"))
+    # The workload folder has the same layout as any other run: one folder per
+    # kernel, named as kernels.csv names it, and each holds its metrics.
+    (workload_folder,) = run_folder.glob("1-*")
+    with (workload_folder / "kernels.csv").open(newline="", encoding="utf-8") as f:
+        kernel_folders = [row["Folder"] for row in csv.DictReader(f)]
+    assert kernel_folders
+    assert (workload_folder / "metrics-summary.csv").is_file()
+    assert sorted(
+        path.name for path in workload_folder.iterdir() if path.is_dir()
+    ) == sorted(kernel_folders)
+    for kernel_folder in kernel_folders:
+        assert (
+            workload_folder / kernel_folder / f"{kernel_folder}-metrics.csv"
+        ).is_file()
+    assert not (run_folder / "kernel.csv").exists()
     assert "Matched PyTorch Operators:" in (run_folder / "report.txt").read_text(
         encoding="utf-8"
     )

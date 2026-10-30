@@ -775,5 +775,6 @@ class RocProfCompute:
         db_analyzer.set_soc(self.__soc)
         db_analyzer.pre_processing()
         db_analyzer.build_database(run_folder / ANALYSIS_DB_FILE_NAME)
+        db_analyzer.check_workload_folders()
         db_analyzer.build_report_frames()
         return db_analyzer

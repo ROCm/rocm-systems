@@ -225,15 +225,16 @@ settings without stating that those differ.
 
 Every analyze run prints the top stats, system info, Speed-of-Light, and any
 `-b` blocks, and saves the full report. It creates a new run
-folder holding `report.txt`, `analysis.db`, and one CSV per analysis view, and
-its last line gives the folder's absolute path. `-d/--output-directory` sets the
+folder holding `report.txt`, `analysis.db`, and one folder per workload with
+its CSV files, HTML plots and one folder per kernel. With several `-p` paths,
+each workload folder also gets a `report.txt` for that workload alone. The last
+line gives the folder's absolute path. `-d/--output-directory` sets the
 parent directory, and `-o/--output-name` sets the folder name. An existing
 `-o` folder is an error, so pick a new name for each run. The `analysis.db` and
 the CSV files keep every metric the profile collected, whatever `-b` selects.
 Analyze writes only to the run folder, so a read-only profile analyzes the same
-way. Do not pass
-`--output-format`; it is deprecated and has no effect. See
-[analysis output](../../docs/how-to/analyze/cli.rst).
+way. Do not pass `--output-format`; it is deprecated, analyze warns, and the
+value is ignored. See [analysis output](../../docs/how-to/analyze/cli.rst).
 
 ## 9. When something looks wrong
 

@@ -7,13 +7,11 @@ After changing a table, column, foreign key, or view, regenerate the diagrams
 under docs/data/analyze/ with tools/schema_visualizer.py and commit them.
 """
 
-import csv
 import json
 import math
 import sqlite3
 from collections.abc import Iterator
 from contextlib import closing
-from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import (
@@ -30,7 +28,6 @@ from sqlalchemy import (
     case,
     cast,
     create_engine,
-    distinct,
     func,
     select,
     text,
@@ -63,7 +60,7 @@ Base = declarative_base()
 
 class Workload(Base):
     __tablename__ = f"{PREFIX}workload"
-    # The pair names the workload's source export folder, so it must be unique.
+    # The pair names the workload's folder in the run folder, so it must be unique.
     __table_args__ = (UniqueConstraint("name", "sub_name"),)
 
     workload_id = Column(Integer, primary_key=True)
@@ -758,7 +755,7 @@ class Metadata(Base):
 def per_kernel_isa_file_key_columns() -> list[Any]:
     """Return the columns naming the file a per-kernel ISA row is written to.
 
-    The exporter splits each row at the end of this list, so the select and the
+    The layout writer splits each row at the end of this list, so the select and the
     split have to agree. Building the select from this one list is what keeps
     them in step.
     """
@@ -769,19 +766,6 @@ def per_kernel_isa_file_key_columns() -> list[Any]:
         Kernel.short_name.label("kernel_short_name"),
         CodeObjectStore.code_object_id.label("code_object_id"),
         CodeObjectStore.pid.label("pid"),
-    ]
-
-
-def per_source_line_file_key_columns() -> List[Any]:
-    """Return the columns that name the file a per-source-line row is written to.
-
-    The per-source-line query selects these columns first, and the exporter
-    uses their count to split them off each row.
-    """
-    return [
-        Workload.name.label("workload_name"),
-        Workload.sub_name.label("workload_sub_name"),
-        SourceFile.file_path.label("file_path"),
     ]
 
 
@@ -845,7 +829,7 @@ class Database:
     def write(cls) -> None:
         """Back up the in-memory database to disk at the configured path.
 
-        The session stays open so other exports can still read it; call close()
+        The session stays open so other readers can still use it; call close()
         when done. Disk errors propagate so the caller can report them.
         """
         if cls._session is None:
@@ -857,29 +841,6 @@ class Database:
                 memory_conn.backup(disk_conn)
         console_debug("Completed writing database")
         console_warning(f"Created file: {cls._db_name}")
-
-    @classmethod
-    def write_csv_dir(cls, csv_dir: Path) -> None:
-        """Stream each view's rows directly into a CSV file in csv_dir.
-
-        Uses the raw sqlite3 cursor and csv.writer so the full result set
-        is never held in memory at once. The session stays open; call close()
-        when done.
-        """
-        if cls._session is None:
-            console_error("No active database session")
-        csv_dir.mkdir(parents=True, exist_ok=True)
-        # session.connection() is a SQLAlchemy Connection; its .connection
-        # attribute is the underlying sqlite3.Connection.
-        raw_conn = cls._session.connection().connection
-        for view_name, sql in cls.get_view_sql().items():
-            cursor = raw_conn.execute(sql)
-            csv_path = csv_dir / f"{view_name}.csv"
-            with csv_path.open("w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow([column[0] for column in cursor.description])
-                writer.writerows(cursor)
-            console_warning(f"Created file: {csv_path}")
 
     @classmethod
     def close(cls) -> None:
@@ -894,7 +855,7 @@ class Database:
         """Return the stall reasons each workload's samples actually carry.
 
         A host_trap workload records none, so it maps to an empty list and its
-        exports carry no stall columns.
+        its ISA files carry no stall columns.
         """
         stall_reasons_by_workload: dict[int, list[str]] = {}
         for workload_id, reason in cls._session.execute(
@@ -914,26 +875,11 @@ class Database:
     ) -> Iterator[tuple[Any, ...]]:
         """Yield one workload's instruction lines, grouped file by file.
 
-        Rows arrive in the order the exporter writes them, through the raw
+        Rows arrive in the order the layout writer writes them, through the raw
         sqlite3 cursor so the full result set is never held in memory.
         """
         yield from cls._stream_rows(
             cls._per_kernel_isa_statement(workload_id, stall_reasons)
-        )
-
-    @classmethod
-    def stream_per_source_line_rows(
-        cls,
-        workload_id: int,
-        stall_reasons: List[str],
-    ) -> Iterator[Tuple[Any, ...]]:
-        """Yield every source line of one workload's captured source files.
-
-        The rows arrive in the order the exporter writes them, through the raw
-        sqlite3 cursor, so the full result set is never held in memory.
-        """
-        yield from cls._stream_rows(
-            cls._per_source_line_statement(workload_id, stall_reasons)
         )
 
     @classmethod
@@ -1149,71 +1095,6 @@ class Database:
                 CodeObjectStore.pid,
                 InstructionLine.code_object_offset,
             )
-        )
-
-    @staticmethod
-    def _per_source_line_statement(
-        workload_id: int,
-        stall_reasons: List[str],
-    ) -> Select[Any]:
-        """Select every source line of one workload's captured source files.
-
-        Each source line has its sample state and the uuids of the instructions
-        whose inline stack includes that source line. This includes the "?"
-        row of each file, which holds the instructions without a source line
-        number.
-        """
-        return (
-            select(
-                *per_source_line_file_key_columns(),
-                SourceLine.line_number,
-                SourceLine.content,
-                PCSampleState.total_count.label("count"),
-                PCSampleState.issue_count,
-                PCSampleState.stall_count,
-                PCSampleState.wave_occupancy_percent,
-                PCSampleState.active_thread_percent,
-                *Database._stall_reason_columns(stall_reasons),
-                # DISTINCT removes the repeats that the stall-reason join adds.
-                # A source line without instructions gets an empty string.
-                func.coalesce(
-                    func.group_concat(distinct(InstructionSourceLine.instruction_uuid)),
-                    "",
-                ).label("instruction_uuids"),
-            )
-            .select_from(SourceLine)
-            .join(
-                SourceFile,
-                SourceLine.source_file_uuid == SourceFile.source_file_uuid,
-            )
-            .join(Workload, SourceFile.workload_id == Workload.workload_id)
-            # A source line without samples has empty counts.
-            .outerjoin(
-                PCSampleState,
-                SourceLine.source_line_uuid == PCSampleState.source_line_uuid,
-            )
-            .outerjoin(
-                PCSampleStallReason,
-                PCSampleState.pc_sample_state_uuid
-                == PCSampleStallReason.pc_sample_state_uuid,
-            )
-            .outerjoin(
-                PCSampleStallReasonLookup,
-                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
-                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
-            )
-            .outerjoin(
-                InstructionSourceLine,
-                SourceLine.source_line_uuid == InstructionSourceLine.source_line_uuid,
-            )
-            .where(SourceFile.workload_id == workload_id)
-            # Only captured files are exported.
-            .where(SourceFile.md5_checksum.is_not(None))
-            # The stall-reason and instruction joins add rows, so group them
-            # back into one row per source line.
-            .group_by(SourceLine.source_line_uuid)
-            # SQLite sorts NULL first, so the "?" row of a file comes first.
-            .order_by(SourceFile.file_path, SourceLine.line_number)
         )
 
     @staticmethod

@@ -11,8 +11,6 @@ import common
 import pandas as pd
 import pytest
 
-from pc_sampling.per_kernel_isa_export import PER_KERNEL_DIRECTORY_NAME
-from pc_sampling.per_source_line_export import SOURCE_LINE_FILE_SUFFIX
 from tests.integration import common as integration_common
 
 config = {}
@@ -35,6 +33,7 @@ PC_SAMPLING_SOURCE_WORKLOAD = (
 )
 SOURCE_WORKLOAD_NAME = "pc_sampling_source_workload"
 SOURCE_WORKLOAD_SUB_NAME = "run_001"
+VCOPY_SOURCE_PATH = "/app/projects/rocprofiler-compute/sample/vcopy.cpp"
 
 
 def setup_pc_sampling_source_workload(tmp_path):
@@ -920,7 +919,7 @@ def test_list_torch_operators_no_trace_data(
 
 @pytest.mark.misc
 def test_analyze_per_kernel_export(binary_handler_analyze_rocprof_compute, tmp_path):
-    """Export each kernel's ISA and its source beside analysis.db in the run folder."""
+    """Each sampled kernel's ISA and source sit in its folder beside analysis.db."""
     workload_path = setup_pc_sampling_source_workload(tmp_path).resolve()
     output_path = (tmp_path / "runs" / "pc_sampling_source").resolve()
 
@@ -939,40 +938,20 @@ def test_analyze_per_kernel_export(binary_handler_analyze_rocprof_compute, tmp_p
     assert code == 0
     assert (output_path / "analysis.db").is_file()
     assert (output_path / "report.txt").is_file()
-    workload_export_path = (
-        output_path
-        / PER_KERNEL_DIRECTORY_NAME
-        / SOURCE_WORKLOAD_NAME
-        / SOURCE_WORKLOAD_SUB_NAME
-    )
+    assert not (output_path / "per_kernel_pc_sampling").exists()
+    workload_folder = output_path / f"1-{SOURCE_WORKLOAD_SUB_NAME}"
+    kernels = pd.read_csv(workload_folder / "kernels.csv")
+    assert sorted(
+        path.name for path in workload_folder.iterdir() if path.is_dir()
+    ) == sorted(kernels["Folder"])
 
-    # Every exported file sits under the absolute path the CSV records for
-    # it, so the paths below are the fixture's own capture-host paths. Each
-    # copy has its per-source-line file beside it.
-    exported_sources = {
-        Path("app/projects/rocprofiler-compute/sample/vcopy.cpp"),
-        Path(
-            "rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel"
-            "/include/hip/amd_detail/amd_hip_runtime.h"
-        ),
-    }
-    assert set(common.read_binary_file_tree(workload_export_path / "source")) == {
-        *exported_sources,
-        *(
-            source.with_name(f"{source.name}{SOURCE_LINE_FILE_SUFFIX}")
-            for source in exported_sources
-        ),
-    }
-
-    # Each ISA folder is one kernel of kernel.csv, named by its short name and
-    # its recorded uuid.
-    isa_paths = sorted(workload_export_path.rglob("isa_*.csv"))
+    # Every sampled kernel holds an ISA file and a source file under its folder.
+    isa_paths = sorted(workload_folder.rglob("*-pc-sampling-isa.csv"))
     assert isa_paths
-    kernel_frame = pd.read_csv(output_path / "kernel.csv")
-    assert {isa_path.parent.name for isa_path in isa_paths} <= {
-        f"{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
-        for kernel_row in kernel_frame.itertuples()
-    }
+    for isa_path in isa_paths:
+        kernel_folder = isa_path.parent
+        assert isa_path.name == f"{kernel_folder.name}-pc-sampling-isa.csv"
+        assert (kernel_folder / f"{kernel_folder.name}-pc-sampling-src.csv").is_file()
 
     with isa_paths[0].open(newline="", encoding="utf-8") as isa_file:
         header, *rows = list(csv.reader(isa_file))
@@ -986,3 +965,10 @@ def test_analyze_per_kernel_export(binary_handler_analyze_rocprof_compute, tmp_p
     assert [row[0] for row in rows] == [
         str(line_number) for line_number in range(1, len(rows) + 1)
     ]
+
+    # The source files name the captured sources by the paths the profile recorded.
+    source_frames = [
+        pd.read_csv(path) for path in workload_folder.rglob("*-pc-sampling-src.csv")
+    ]
+    sampled_sources = set(pd.concat(source_frames)["Source file"].dropna())
+    assert VCOPY_SOURCE_PATH in sampled_sources

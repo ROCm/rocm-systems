@@ -46,9 +46,9 @@
       "sample": "vmem.hip",
       "expected_behavior": [
         "runs analyze and reads the run folder it prints",
-        "notes that the per-kernel disassembly is written under per_kernel_pc_sampling"
+        "notes that the per-kernel disassembly is written to <n>-<workload>/kernel-NNN-<name>/kernel-NNN-<name>-pc-sampling-isa.csv"
       ],
-      "logs_contain": ["per_kernel_pc_sampling"]
+      "logs_contain": ["pc-sampling-isa.csv"]
     },
     {
       "id": "pcs-host-trap-stall-reason",
