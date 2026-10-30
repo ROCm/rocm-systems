@@ -8,7 +8,7 @@ import sys
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional, TextIO
+from typing import Any, Dict, List, Optional, TextIO
 
 import pandas as pd
 
@@ -66,9 +66,9 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
 
 def _check_ml_api_selectors_for_workload(
     workload_path: str,
-    list_operators: Optional[list[str]],
-    operator_patterns: Optional[dict[str, list[str]]],
-    profiling_config: Optional[dict[str, Any]] = None,
+    list_operators: Optional[List[str]],
+    operator_patterns: Optional[Dict[str, List[str]]],
+    profiling_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Reject --list-operators / --operator this workload did not collect."""
     if list_operators is None and operator_patterns is None:
