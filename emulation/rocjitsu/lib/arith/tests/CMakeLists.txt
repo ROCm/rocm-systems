@@ -25,6 +25,28 @@ foreach(
     instruction
     IN
     ITEMS
+        v_swmmac_bf16_16x16x32_bf16_w32
+        v_swmmac_bf16_16x16x32_bf16_w64
+        v_swmmac_f16_16x16x32_f16_w32
+        v_swmmac_f16_16x16x32_f16_w64
+        v_swmmac_f32_16x16x32_bf16_w32
+        v_swmmac_f32_16x16x32_bf16_w64
+        v_swmmac_f32_16x16x32_bf8_bf8_w32
+        v_swmmac_f32_16x16x32_bf8_bf8_w64
+        v_swmmac_f32_16x16x32_bf8_fp8_w32
+        v_swmmac_f32_16x16x32_bf8_fp8_w64
+        v_swmmac_f32_16x16x32_f16_w32
+        v_swmmac_f32_16x16x32_f16_w64
+        v_swmmac_f32_16x16x32_fp8_bf8_w32
+        v_swmmac_f32_16x16x32_fp8_bf8_w64
+        v_swmmac_f32_16x16x32_fp8_fp8_w32
+        v_swmmac_f32_16x16x32_fp8_fp8_w64
+        v_swmmac_i32_16x16x32_iu4_w32
+        v_swmmac_i32_16x16x32_iu4_w64
+        v_swmmac_i32_16x16x32_iu8_w32
+        v_swmmac_i32_16x16x32_iu8_w64
+        v_swmmac_i32_16x16x64_iu4_w32
+        v_swmmac_i32_16x16x64_iu4_w64
         v_wmma_bf16_16x16x16_bf16_w32
         v_wmma_bf16_16x16x16_bf16_w32_gfx12
         v_wmma_bf16_16x16x16_bf16_w64

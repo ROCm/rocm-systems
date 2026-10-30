@@ -14,6 +14,10 @@ add_library(
     fp/half_fma.cpp
     dot/scalar_repair.cpp
     register/dpp.cpp
+    wmma/swmmac16.cpp
+    wmma/swmmac8.cpp
+    wmma/swmmac_float.cpp
+    wmma/swmmac_integer.cpp
     wmma/wmma.cpp
     wmma/wmma_fp8_integer.cpp
     wmma/wmma_replicated.cpp
