@@ -215,6 +215,12 @@ def test_analyze_output_format_still_parses():
     assert args.output_format == "csv"
 
 
+@pytest.mark.parametrize("flag", ["-b", "--block"])
+def test_analyze_block_accepts_ids_and_aliases(flag):
+    args = build_args(["analyze", "-p", "/tmp/workload", flag, "7", "2.1.0", "sol"])
+    assert args.filter_metrics == ["7", "2.1.0", "sol"]
+
+
 # =============================================================================
 # analyze --verify-deps
 # =============================================================================

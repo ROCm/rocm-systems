@@ -223,7 +223,8 @@ settings without stating that those differ.
 
 ## 8. Save a report
 
-Every analyze run prints the report and also saves it. It creates a new run
+Every analyze run prints the top stats, system info, Speed-of-Light, and any
+`-b` blocks, and saves the full report. It creates a new run
 folder holding `report.txt`, `analysis.db`, and one CSV per analysis view, and
 its last line gives the folder's absolute path. `-d/--output-directory` sets the
 parent directory, and `-o/--output-name` sets the folder name. An existing

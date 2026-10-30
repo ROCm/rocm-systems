@@ -57,7 +57,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Every analyze run now writes its output into a new run folder, so a rerun never overwrites earlier results.
   * `-d/--output-directory` sets the directory the run folder is created in. It defaults to the current working directory, and missing parent directories are created.
   * `-o/--output-name` sets the run folder name. Without it, the folder is named `rocprof_compute_analyze_<YYYYMMDD_HHMMSS>`, with `_1`, `_2`, and so on appended if that folder exists. If the `-o` folder already exists, analyze exits with an error before any analysis.
-  * Every run writes `report.txt`, `analysis.db`, and one CSV file per analysis database view into the run folder, and still prints the report to the terminal. The last line printed is the absolute path of the run folder.
+  * Every run writes `report.txt`, `analysis.db`, and one CSV file per analysis database view into the run folder. The terminal shows the top stats, system information, and System Speed-of-Light sections, plus the blocks, tables, or metrics selected with `-b/--block`. The last line printed is the absolute path of the run folder.
+  * `report.txt`, `analysis.db`, and the CSV files always hold every profiled block. Analyze-mode `-b/--block` only selects what the terminal shows.
   * The roofline HTML is written to `<run folder>/1-<workload>/roofline-gpu-0.html` instead of into the workload directory.
   * Listing options such as `--list-stats` only print and write no files.
   * With `--torch-operator` or `--triton-operator`, the run folder holds `report.txt` but no `analysis.db` or CSV files.
@@ -65,7 +66,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
     | Before | Now |
     |---|---|
-    | `analyze -p wl` prints the report | The report is also written to `./rocprof_compute_analyze_<YYYYMMDD_HHMMSS>/report.txt` |
+    | `analyze -p wl` prints the report | The terminal shows the report up to System Speed-of-Light; the full report is in `./rocprof_compute_analyze_<YYYYMMDD_HHMMSS>/report.txt` |
+    | `analyze -p wl -b X` prints only block `X` after the top stats and system info, and the report holds only `X` | The terminal shows Speed-of-Light and `X` after the top stats and system info; `report.txt` holds every block |
     | `--output-format txt --output-name X` writes `./X.txt` | `-o X` writes `./X/report.txt` |
     | `--output-format db --output-name X` writes `./X.db` | `-o X` writes `./X/analysis.db` |
     | `--output-format csv --output-name X` writes `./X/*.csv` | `-o X` writes `./X/*.csv` |

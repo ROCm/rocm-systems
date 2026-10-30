@@ -9,12 +9,15 @@ from pathlib import Path
 
 import pytest
 
+from tests.integration.common import RUN_FOLDER_PREFIX, last_output_line
+from utils.utils_common import strip_ansi
+
 VCOPY_WORKLOAD = Path(__file__).resolve().parents[1] / "workloads/vcopy/MI300X_A1"
 
 # The top-stats scratch tables are still written into the workload directory.
 WORKLOAD_SCRATCH_FILES = {"pmc_dispatch_info.csv", "pmc_kernel_top.csv"}
 
-ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+PANEL_HEADING = re.compile(r"^(\d+)\. ", re.MULTILINE)
 
 
 def copy_workload(tmp_path):
@@ -33,10 +36,30 @@ def snapshot_files(directory):
     }
 
 
-def last_output_line(captured_output):
-    """Return the last non-empty line printed, without colour codes."""
-    lines = ANSI_ESCAPE.sub("", captured_output).strip().splitlines()
-    return lines[-1].strip()
+def panel_numbers(text):
+    """Return the number of every panel heading, e.g. 2 for "2. System SOL"."""
+    return {int(number) for number in PANEL_HEADING.findall(strip_ansi(text))}
+
+
+def terminal_panels(captured_output):
+    """Return the printed panels, from the first heading up to the run folder line."""
+    text = strip_ansi(captured_output)
+    start = text.index("0. Top Stats")
+    return text[start : text.rindex(RUN_FOLDER_PREFIX)]
+
+
+def run_into(analyze, workload_path, run_folder, *options):
+    """Analyze workload_path into run_folder with any extra options."""
+    return analyze([
+        "analyze",
+        "--path",
+        str(workload_path),
+        "--output-directory",
+        str(run_folder.parent),
+        "--output-name",
+        run_folder.name,
+        *options,
+    ])
 
 
 @pytest.mark.misc
@@ -210,3 +233,87 @@ def test_removed_dispatch_option_is_rejected(
     ])
 
     assert code == 2
+
+
+@pytest.mark.misc
+def test_terminal_stops_at_speed_of_light_and_report_has_every_panel(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys
+):
+    """stdout shows panels 0-2; report.txt holds the full report."""
+    workload_path = copy_workload(tmp_path)
+    run_folder = tmp_path / "runs" / "run1"
+
+    code = run_into(binary_handler_analyze_rocprof_compute, workload_path, run_folder)
+
+    assert code == 0
+    assert panel_numbers(capsys.readouterr().out) == {0, 1, 2}
+    report_panels = panel_numbers(
+        (run_folder / "report.txt").read_text(encoding="utf-8")
+    )
+    assert {0, 1, 2}.issubset(report_panels)
+    assert max(report_panels) > 2
+
+
+@pytest.mark.misc
+@pytest.mark.parametrize("block_flag", ["-b", "--block"])
+def test_block_adds_its_section_to_the_terminal_only(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys, block_flag
+):
+    """-b prints its block after speed-of-light; report.txt is unchanged by it."""
+    workload_path = copy_workload(tmp_path)
+    plain_folder = tmp_path / "runs" / "plain"
+    block_folder = tmp_path / "runs" / "block"
+
+    assert (
+        run_into(binary_handler_analyze_rocprof_compute, workload_path, plain_folder)
+        == 0
+    )
+    capsys.readouterr()
+    code = run_into(
+        binary_handler_analyze_rocprof_compute,
+        workload_path,
+        block_folder,
+        block_flag,
+        "7",
+    )
+
+    assert code == 0
+    assert panel_numbers(capsys.readouterr().out) == {0, 1, 2, 7}
+    block_report = (block_folder / "report.txt").read_text(encoding="utf-8")
+    plain_report = (plain_folder / "report.txt").read_text(encoding="utf-8")
+    assert block_report == plain_report
+
+
+@pytest.mark.misc
+def test_block_metric_id_prints_only_that_row(
+    binary_handler_analyze_rocprof_compute, tmp_path, capsys
+):
+    """A -b metric id prints its row of the block and hides its siblings."""
+    workload_path = copy_workload(tmp_path)
+    run_folder = tmp_path / "runs" / "run1"
+
+    code = run_into(
+        binary_handler_analyze_rocprof_compute, workload_path, run_folder, "-b", "7.1.5"
+    )
+
+    assert code == 0
+    terminal = terminal_panels(capsys.readouterr().out)
+    assert "7.1.5" in terminal
+    assert "7.1.4" not in terminal
+    assert "7.1.4" in (run_folder / "report.txt").read_text(encoding="utf-8")
+
+
+@pytest.mark.misc
+def test_invalid_block_creates_no_run_folder(
+    binary_handler_analyze_rocprof_compute, tmp_path
+):
+    """An unknown -b value fails before the run folder exists."""
+    workload_path = copy_workload(tmp_path)
+    run_folder = tmp_path / "runs" / "run1"
+
+    code = run_into(
+        binary_handler_analyze_rocprof_compute, workload_path, run_folder, "-b", "SQ"
+    )
+
+    assert code == 1
+    assert not run_folder.parent.exists()

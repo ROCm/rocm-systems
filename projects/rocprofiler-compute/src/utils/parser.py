@@ -24,7 +24,6 @@ from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
-    METRIC_ID_RE,
     SUPPORTED_FIELD,
     convert_filter_blocks_to_panel_ids,
     convert_metric_id_to_panel_info,
@@ -52,15 +51,13 @@ PMC_DISPATCH_INFO_TABLE_ID: int = 2
 @demarcate
 def build_dfs(
     arch_configs: schema.ArchConfig,
-    filter_metrics: Optional[list[str]],
     sys_info: pd.Series,
     profiling_config: dict[str, Any],
     arch: Optional[str] = None,
 ) -> None:
-    """Build a dataframe template for each table in each panel. Analyze-mode
-    filter_metrics overrides profile-mode filter_blocks; tables that fail the
-    active filter are omitted from arch_configs.dfs. Alias tokens (e.g. "lds",
-    "roofline") in either filter are resolved against arch's panel aliases.
+    """Build a dataframe template for each table in each panel. Tables outside
+    the profile-mode filter_blocks are omitted from arch_configs.dfs. Alias
+    tokens (e.g. "lds", "roofline") are resolved against arch's panel aliases.
     """
 
     simple_box = {
@@ -75,18 +72,9 @@ def build_dfs(
     dfs_type: dict[int, str] = {}
     dfs_expressions: dict[int, list[str]] = {}
 
-    if filter_metrics:
-        numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
-        alias_tokens = [t for t in filter_metrics if not METRIC_ID_RE.match(str(t))]
-        user_metric_filter: Optional[list[str]] = numeric_tokens or None
-        profile_panel_filter: set[int] = convert_filter_blocks_to_panel_ids(
-            alias_tokens, arch
-        )
-    else:
-        user_metric_filter = None
-        profile_panel_filter = convert_filter_blocks_to_panel_ids(
-            profiling_config.get("filter_blocks", []), arch
-        )
+    profile_panel_filter = convert_filter_blocks_to_panel_ids(
+        profiling_config.get("filter_blocks", []), arch
+    )
 
     arch_configs.panel_configs = expand_placeholder_ranges(
         arch_configs.panel_configs, sys_info
@@ -110,7 +98,6 @@ def build_dfs(
                         data_config=data_config,
                         simple_box=simple_box,
                         panel_id=panel_id,
-                        user_metric_filter=user_metric_filter,
                         profile_panel_filter=profile_panel_filter,
                     )
                     # Filter excluded every metric in this panel; skip the empty table.
@@ -123,7 +110,6 @@ def build_dfs(
                         metric_id=file_data_source_idx,
                         panel_id=panel_id,
                         data_source_idx=file_data_source_idx,
-                        user_metric_filter=user_metric_filter,
                         profile_panel_filter=profile_panel_filter,
                     ):
                         continue
@@ -140,7 +126,6 @@ def build_dfs(
                         metric_id=file_data_source_idx,
                         panel_id=panel_id,
                         data_source_idx=file_data_source_idx,
-                        user_metric_filter=user_metric_filter,
                         profile_panel_filter=profile_panel_filter,
                     ):
                         continue
@@ -163,27 +148,16 @@ def _metric_passes_filter(
     metric_id: str,
     panel_id: int,
     data_source_idx: str,
-    user_metric_filter: Optional[list[str]],
     profile_panel_filter: set[int],
 ) -> bool:
     """Return True if a metric or table identified by metric_id passes the
-    active filter. metric_id is the file-level id for raw_csv / pc_sampling
-    tables, or the per-metric id (e.g. "2.1.0") for metric_table rows.
+    profile block filter. metric_id is the file-level id for raw_csv /
+    pc_sampling tables, or the per-metric id (e.g. "2.1.0") for metric_table rows.
     """
-    if panel_id <= 100 or data_source_idx == "0":
+    if panel_id <= 100 or data_source_idx == "0" or not profile_panel_filter:
         return True
-    if user_metric_filter is None and not profile_panel_filter:
-        return True
-    if user_metric_filter and (
-        metric_id in user_metric_filter
-        or data_source_idx in user_metric_filter
-        or str(panel_id // 100) in user_metric_filter
-    ):
-        return True
-    if profile_panel_filter:
-        file_id, _, _ = convert_metric_id_to_panel_info(metric_id)
-        return int(file_id) in profile_panel_filter
-    return False
+    file_id, _, _ = convert_metric_id_to_panel_info(metric_id)
+    return int(file_id) in profile_panel_filter
 
 
 def _build_metric_table_df(
@@ -191,7 +165,6 @@ def _build_metric_table_df(
     data_config: dict[str, Any],
     simple_box: dict[str, list[str]],
     panel_id: int,
-    user_metric_filter: Optional[list[str]],
     profile_panel_filter: set[int],
 ) -> tuple[pd.DataFrame, list[str]]:
     """Build the metric_table dataframe and its list of formula strings for
@@ -225,7 +198,6 @@ def _build_metric_table_df(
             metric_id=metric_idx,
             panel_id=panel_id,
             data_source_idx=table_data_source_idx,
-            user_metric_filter=user_metric_filter,
             profile_panel_filter=profile_panel_filter,
         ):
             continue

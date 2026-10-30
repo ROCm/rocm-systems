@@ -68,9 +68,13 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
 rocprof-compute analyze \
     --path ./workloads/<name>/<gpu_model> \
     -k <kernel_id> \
+    -b 21 \
     --pc-sampling-sorting-type count \
     --pc-sampling-rows 20
 ```
+
+`-b 21` prints the PC sampling table on the terminal after Speed-of-Light.
+Without it the table is only in `report.txt` in the run folder.
 
 Sorting defaults to `count`, which puts the hottest instruction first. Use
 `offset` to read the kernel in program order instead. `--pc-sampling-rows`
@@ -104,7 +108,8 @@ Every analyze run writes its output into a new run folder, here `./pc_report`.
 The folder holds per-kernel annotated disassembly in a
 `per_kernel_pc_sampling/` directory, with sample counts and source lines beside
 each instruction. `analysis.db` in the same folder stores the same content.
-The report still prints to the terminal.
+The terminal shows the top stats, system info, and Speed-of-Light; the full
+report, PC sampling included, is `report.txt` in the same folder.
 
 The run folder also holds `<file>_pc_sampling.csv` beside each captured source
 file, with the sample counts of every source line and the ISA rows each line
