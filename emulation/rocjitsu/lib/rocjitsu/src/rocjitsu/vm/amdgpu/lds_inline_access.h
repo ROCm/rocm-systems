@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/lds_store_plans.h"
 #include "rocjitsu/vm/amdgpu/lds_writeback.h"
 
 #include <cstdint>
@@ -59,19 +60,21 @@ public:
   template <lds_writeback::DstFormat F>
   static bool load(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf);
 
-  /// @brief Plain single-address store, without a VectorMemState.
+  /// @brief Plain single-address store of format @p F, without a
+  /// VectorMemState: the gate and the EXEC dispatch inlined into the opcode's
+  /// handler, the writers behind them (lds_store_plans.h).
+  template <lds_store::StoreFormat F>
   static bool store(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf);
 
   /// @brief Every other DS form: run the routed path's access code on @p d.
   static bool complete(const Instruction &inst, VectorMemState &d, Wavefront &wf);
 
 private:
-  /// Steps 1-6 of a plain access, in lds_inline_access_steps.h: a store
-  /// completes; a load stops before its writeback, with its data read through
-  /// @p load.group and its destination in @p load.
-  template <bool IsLoad>
-  static bool access(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf,
-                     uint8_t *staging, LdsStagedLoad &load);
+  /// Steps 1-6 of a plain load, in lds_inline_access_steps.h. It stops before
+  /// the writeback, with its data read through @p load.group and its
+  /// destination in @p load.
+  static bool read(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf,
+                   uint8_t *staging, LdsStagedLoad &load);
 };
 
 } // namespace amdgpu

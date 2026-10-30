@@ -9327,18 +9327,20 @@ class CodeGenerator:
             fields.append('  .d16_hi = true,')
         if is_load and sem.d16_lo:
             fields.append('  .d16_lo = true,')
-        # Loads name their destination format, so the writeback is specialized
-        # per opcode (lds_writeback.h). Load or store is fixed by the entry point.
-        entry = 'amdgpu::LdsInlineAccess::' + ('load' if is_load else 'store')
+        # Load or store is fixed by the entry point, and each names its data
+        # format, so the writeback (lds_writeback.h) and the store writers
+        # (lds_store_plans.h) are specialized per opcode.
+        fmt = [f'.elem_size = {sem.elem_size}', f'.num_elems = {sem.num_elems}']
+        if is_load and sem.sign_extend:
+            fmt.append('.sign_extend = true')
+        if sem.d16_hi:
+            fmt.append('.d16_hi = true')
+        if is_load and sem.d16_lo:
+            fmt.append('.d16_lo = true')
         if is_load:
-            fmt = [f'.elem_size = {sem.elem_size}', f'.num_elems = {sem.num_elems}']
-            if sem.sign_extend:
-                fmt.append('.sign_extend = true')
-            if sem.d16_hi:
-                fmt.append('.d16_hi = true')
-            if sem.d16_lo:
-                fmt.append('.d16_lo = true')
-            entry += f"<amdgpu::lds_writeback::DstFormat{{{', '.join(fmt)}}}>"
+            entry = f"amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{{{', '.join(fmt)}}}>"
+        else:
+            entry = f"amdgpu::LdsInlineAccess::store<amdgpu::lds_store::StoreFormat{{{', '.join(fmt)}}}>"
         return [
             f'  if ({entry}(*this, amdgpu::LdsAccessRequest{{',
             *('  ' + f for f in fields),

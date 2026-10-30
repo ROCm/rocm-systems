@@ -180,7 +180,12 @@ std::pair<unsigned, unsigned> compare_every_ds_opcode(Target target, Build build
       // GWS operations park and wake waves across the device; both paths route them.
       if (mnemonic.starts_with("ds_gws"))
         continue;
-      for (const uint64_t exec : {~uint64_t{0}, uint64_t{0xA55AA55AA55AA55Aull}, uint64_t{0}})
+      // Full, scattered and empty EXEC, then the shapes stores dispatch on:
+      // 48-, 32- and 16-lane prefixes, one lane, two lanes.
+      for (const uint64_t exec :
+           {~uint64_t{0}, uint64_t{0xA55AA55AA55AA55Aull}, uint64_t{0},
+            uint64_t{0xFFFF'FFFF'FFFFull}, uint64_t{0xFFFF'FFFFull}, uint64_t{0xFFFFull},
+            uint64_t{1} << 37, uint64_t{0x8000'0000'0000'0001ull}})
         for (const Addresses addresses : kAllAddresses) {
           SCOPED_TRACE(testing::Message() << mnemonic << " wave" << target.wave << " data0="
                                           << unsigned(operands.data0) << " exec=" << std::hex

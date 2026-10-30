@@ -15,12 +15,6 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-bool LdsInlineAccess::store(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf) {
-  alignas(64) uint8_t staging[64 * kMaxLaneBytes];
-  LdsStagedLoad unused;
-  return access<false>(inst, req, wf, staging, unused);
-}
-
 bool LdsInlineAccess::complete(const Instruction &inst, VectorMemState &d, Wavefront &wf) {
   ComputeUnitCore &cu = wf.raw_cu();
   if (!cu.completes_lds_inline() || d.lds_dst)

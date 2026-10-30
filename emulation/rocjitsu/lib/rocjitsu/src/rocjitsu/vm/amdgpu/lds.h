@@ -23,6 +23,10 @@ namespace amdgpu {
 /// Reserved value used when an instruction lane has no valid LDS address.
 constexpr uint32_t kInvalidLdsAddress = UINT32_MAX;
 
+namespace lds_store {
+struct Access;
+} // namespace lds_store
+
 /// @brief Local Data Share (LDS) memory backing for a dispatch placement.
 ///
 /// @details CU-mode workgroups use the backing owned by one ComputeUnitCore.
@@ -255,6 +259,8 @@ public:
   }
 
 private:
+  friend struct lds_store::Access; // the plain-store writers (lds_store_plans.h)
+
   bool contains(uint32_t addr, uint32_t size) const {
     return static_cast<uint64_t>(addr) + size <= capacity_bytes_;
   }
