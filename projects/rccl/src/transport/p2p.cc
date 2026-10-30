@@ -694,6 +694,11 @@ static ncclResult_t p2pSendConnect(struct ncclComm* comm, struct ncclConnect* co
       buff += p2pBuffSize(comm->cudaArch, comm->buffSizes, p, resources->useCe);
     }
   }
+  if (resources->useCe && (size_t)(buff - (char*)remDevMem) > info->p2pBuff.size) {
+    WARN("P2P CE buffer size mismatch: sender needs %zu bytes but receiver mapped %zu",
+         (size_t)(buff - (char*)remDevMem), info->p2pBuff.size);
+    return ncclInvalidUsage;
+  }
   send->conn.stepSize = p2pSimpleStepSize(comm->cudaArch, comm->buffSizes, resources->useCe);
 
   if (resources->useCe) {
@@ -962,7 +967,7 @@ static ncclResult_t p2pSendProxyFree(struct ncclProxyConnection* connection, str
         proxyState->p2pCeStream = nullptr;
       }
       for (int i = 0; i < NCCL_STEPS; i++) {
-        CUDACHECK(cudaEventDestroy(proxyInfo->events[i]));
+        if (proxyInfo->events[i] != nullptr) CUDACHECK(cudaEventDestroy(proxyInfo->events[i]));
       }
       free(proxyInfo);
     }

@@ -61,6 +61,7 @@ test_categories:
       - "TopoGpuDev.*"
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
+      - "P2pCeChannelCapTests.*"
       - "ChannelDefaults.*"
       - "Search*.*"
       - "NetIbCastUdma.*"

@@ -15,7 +15,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
-* Fixed hangs with `NCCL_P2P_USE_CUDA_MEMCPY=1`. Copy Engine copies use a non-blocking proxy stream, cross-process staging buffers use legacy IPC instead of the slow cuMem/VMM import path, and the Copy Engine transport carries only send/recv-based operations, so collectives keep the kernel P2P transport.
+* Fixed hangs with `NCCL_P2P_USE_CUDA_MEMCPY=1`. Copy Engine connections use one shared non-blocking stream per proxy thread, cross-process staging buffers use legacy IPC instead of the slow cuMem/VMM import path, and the Copy Engine transport carries only send/recv-based operations, so collectives keep the kernel P2P transport.
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
 

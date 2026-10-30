@@ -28,6 +28,7 @@ TEST(P2pCeChannelCapTests, OverrideIsPowerOfTwoAndBoundedByPool)
 {
     EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/128, true, true, /*configuredCap=*/7), 4);
     EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/2, true, true, /*configuredCap=*/8), 2);
+    EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/8, /*pool=*/128, true, true, /*configuredCap=*/16), 8);
 }
 
 TEST(P2pCeChannelCapTests, OnlySendRecvConnectionsUseTheCopyEngine)

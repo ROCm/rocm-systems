@@ -3445,8 +3445,15 @@ protected:
         connect_.emplace(g_proxyConnect, MarkProxyConnInitialized());
         proxy_.emplace(g_proxyCallBlocking,
             [this](struct ncclComm*, struct ncclProxyConnector*, int type,
-                   void*, int, void* resp, int respSize) -> ncclResult_t {
+                   void* req, int reqSize, void* resp, int respSize) -> ncclResult_t {
                 lastProxyMsg_ = type;
+                if (req && reqSize == int(sizeof(ncclP2pRequest))) {
+                    lastP2pRequest_ = *static_cast<ncclP2pRequest*>(req);
+                    sawP2pRequest_ = true;
+                }
+                if (type == ncclProxyMsgConnect && req && reqSize == int(sizeof(void*))) {
+                    lastConnectBuffer_ = *static_cast<void**>(req);
+                }
                 if (resp && static_cast<std::size_t>(respSize) >= sizeof(ncclP2pBuff)) {
                     auto* b = static_cast<ncclP2pBuff*>(resp);
                     b->directPtr = backing_.data();
@@ -3502,6 +3509,9 @@ protected:
     ncclConnect connect_info_{};
     ncclConnector send_{};
     int lastProxyMsg_ = -1;
+    ncclP2pRequest lastP2pRequest_{};
+    bool sawP2pRequest_ = false;
+    void* lastConnectBuffer_ = nullptr;
 
     std::optional<ScopedHook<ncclResult_t(struct ncclComm*, int, int, int, struct ncclProxyConnector*)>> connect_;
     std::optional<ScopedHook<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, int, void*, int, void*, int)>> proxy_;
@@ -3877,6 +3887,8 @@ TEST_F(P2pSetupMicrotest, RecvSetup_CrossProcessCopyEngine_ForcesLegacyIpc)
     EXPECT_TRUE(resources->useCe);
     EXPECT_TRUE(resources->forceLegacyIpc);
     EXPECT_EQ(resources->type, P2P_IPC);
+    ASSERT_TRUE(sawP2pRequest_);
+    EXPECT_EQ(lastP2pRequest_.forceLegacyIpc, 1);
 
     p2pTransport.recv.free(&comm_, &recv);
 }
@@ -3995,6 +4007,57 @@ TEST_F(P2pSetupMicrotest, SendSetupThenConnect_WritePath_WiresConnBuffers)
     EXPECT_NE(send_.conn.buffs[NCCL_PROTO_SIMPLE], nullptr);
     EXPECT_EQ(send_.proxyConn.proxyProgress, nullptr);
 
+    p2pTransport.send.free(&comm_, &send_);
+}
+
+TEST_F(P2pSetupMicrotest, SendConnect_CopyEngineGfx1250WiresFourMiBStepsAndOffsets)
+{
+    InstallHappyProxy();
+    comm_.cudaArch = 1250;
+    comm_.buffSizes[NCCL_PROTO_LL] = 4096;
+    comm_.buffSizes[NCCL_PROTO_LL128] = 8192;
+    comm_.buffSizes[NCCL_PROTO_SIMPLE] = 4 * 1024 * 1024;
+    constexpr size_t kCeStep = 4 * 1024 * 1024;
+    constexpr size_t kCeBuffer = NCCL_STEPS * kCeStep;
+    backing_.assign(sizeof(ncclRecvMem) + comm_.buffSizes[NCCL_PROTO_LL] +
+                      comm_.buffSizes[NCCL_PROTO_LL128] + kCeBuffer,
+                    0);
+    std::vector<char> ceBuffer(kCeBuffer);
+    ncclRecvMem ceRecvMem{};
+    p2pShm devShm{};
+
+    auto* info = reinterpret_cast<p2pConnectInfo*>(&connect_info_);
+    info->rank = 0;
+    info->read = 0;
+    info->p2pBuff.directPtr = backing_.data();
+    info->p2pBuff.size = backing_.size();
+
+    auto* resources = static_cast<p2pResources*>(std::calloc(1, sizeof(p2pResources)));
+    resources->useCe = true;
+    resources->proxyInfo.ceRecvMem = &ceRecvMem;
+    resources->proxyInfo.devShm = &devShm;
+    resources->proxyInfo.ceDevBuff = ceBuffer.data();
+    send_.transportResources = resources;
+
+    ASSERT_EQ(ncclSuccess, p2pSendConnect(&comm_, &connect_info_, comm_.nRanks, /*rank=*/0, &send_));
+    char* expectedRemoteSimple = reinterpret_cast<char*>(
+      static_cast<ncclRecvMem*>(info->p2pBuff.directPtr) + 1) +
+      comm_.buffSizes[NCCL_PROTO_LL] + comm_.buffSizes[NCCL_PROTO_LL128];
+    EXPECT_EQ(lastConnectBuffer_, expectedRemoteSimple);
+    EXPECT_EQ(send_.conn.stepSize, int(kCeStep));
+    EXPECT_EQ(send_.conn.buffs[NCCL_PROTO_SIMPLE], ceBuffer.data());
+
+    p2pTransport.send.free(&comm_, &send_);
+
+    info->p2pBuff.size = backing_.size() - 1;
+    resources = static_cast<p2pResources*>(std::calloc(1, sizeof(p2pResources)));
+    resources->useCe = true;
+    resources->proxyInfo.ceRecvMem = &ceRecvMem;
+    resources->proxyInfo.devShm = &devShm;
+    resources->proxyInfo.ceDevBuff = ceBuffer.data();
+    send_.transportResources = resources;
+    EXPECT_EQ(ncclInvalidUsage,
+              p2pSendConnect(&comm_, &connect_info_, comm_.nRanks, /*rank=*/0, &send_));
     p2pTransport.send.free(&comm_, &send_);
 }
 
@@ -7371,10 +7434,19 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxySetup_MemcpyEnabled_AllocatesCeStat
                 if (dptr) *dptr = &shmDevStorage;
                 return ncclSuccess;
             });
+        constexpr size_t kCeStep = 4 * 1024 * 1024;
+        std::vector<char> ceBuffer(NCCL_STEPS * kCeStep);
+        size_t allocatedBytes = 0;
+        ScopedHook deviceAlloc(g_hipExtMallocWithFlags, [&](void** ptr, size_t bytes, unsigned) {
+            allocatedBytes = bytes;
+            *ptr = ceBuffer.data();
+            return hipSuccess;
+        });
 
         ncclProxyConnection conn{};
         ncclProxyState      state{};
-        state.buffSizes[NCCL_PROTO_SIMPLE] = 0x1000;
+        state.cudaArch = 1250;
+        state.buffSizes[NCCL_PROTO_SIMPLE] = 4 * 1024 * 1024;
 
         p2pShmProxyInfo resp{};
         int             done = 0;
@@ -7387,6 +7459,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxySetup_MemcpyEnabled_AllocatesCeStat
         auto* info = static_cast<p2pShmProxyInfo*>(conn.transportResources);
         EXPECT_EQ(info->shm, &shmHostStorage);      // SHM segment recorded
         EXPECT_NE(info->ceDevBuff, nullptr);        // device copy buffer allocated
+        EXPECT_EQ(allocatedBytes, NCCL_STEPS * kCeStep);
         // The proxy info was published into the response for the peer.
         EXPECT_EQ(resp.shm, info->shm);
     });
@@ -7434,9 +7507,18 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxyFree_MemcpyResources_TearsDownCeSta
         ncclProxyConnection conn{};
         conn.needsProxyProgress = 1;   // set by the CE arm of send proxySetup
         ncclProxyState      state{};
+        const hipStream_t ownedStream = reinterpret_cast<hipStream_t>(0x66);
+        int streamDestroys = 0;
+        ScopedHook streamDestroy(g_hipStreamDestroy, [&](hipStream_t stream) {
+            ++streamDestroys;
+            EXPECT_EQ(stream, ownedStream);
+            return hipSuccess;
+        });
         auto* info = static_cast<p2pShmProxyInfo*>(
             std::calloc(1, sizeof(p2pShmProxyInfo)));
         info->ceRecvMem = nullptr;   // ncclCudaHostFree(nullptr) is a no-op
+        info->stream = ownedStream;
+        info->ownsStream = true;
         // Sentinel device buffer so the ncclCudaFree release is observable in
         // g_freeCalls (the shutdown guard short-circuits before HIP but the
         // recording shim still logs the pointer).
@@ -7451,6 +7533,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxyFree_MemcpyResources_TearsDownCeSta
         // release in production drops this entry.
         EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
             {FreeKind::CudaFree, reinterpret_cast<void*>(0x8000)}}));
+        EXPECT_EQ(streamDestroys, 1);
         rcclShutdownFlag().store(false, std::memory_order_release);
         // production free(proxyInfo) already released `info`.
     });
@@ -7680,31 +7763,33 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_SimpleProtocol_CopiesAndComple
         g_hipEventQueryRequiresRecord = true;
 
         ncclProxyState state{};
-        state.buffSizes[NCCL_PROTO_SIMPLE] = 8 * NCCL_STEPS;
+        state.cudaArch = 1250;
+        state.buffSizes[NCCL_PROTO_SIMPLE] = 4 * 1024 * 1024;
 
         ncclRecvMem ceRecvMem{};
         ceRecvMem.tail = 64;   // GPU has produced well past the transmit cursor
         // The slot the proxy will transmit carries a payload; production must
         // move exactly these bytes from the device buffer into the recv FIFO.
-        constexpr int kPayloadBytes = 8;   // == stepSize (buffSizes[SIMPLE] / NCCL_STEPS)
-        ceRecvMem.connFifo[0].size = kPayloadBytes;
+        constexpr int kPayloadBytes = 8;
+        constexpr size_t kCeStep = 4 * 1024 * 1024;
+        ceRecvMem.connFifo[1].size = kPayloadBytes;
         p2pShm shm{};
 
         p2pShmProxyInfo info{};
-        info.step      = 0;
+        info.step      = 1;  // exercise a non-zero CE slot offset
         info.ceRecvMem = &ceRecvMem;
         info.shm       = &shm;
-        char recvFifo[64] = {};
-        char ceDevBuff[64] = {};
+        std::vector<char> recvFifo(2 * kCeStep);
+        std::vector<char> ceDevBuff(2 * kCeStep);
         // Seed the source with a recognisable payload and leave the destination
         // zeroed, so a real copy is the only thing that can make them match.
         const char payload[kPayloadBytes] = {'C', 'E', 'c', 'o', 'p', 'y', '!', '\n'};
-        std::memcpy(ceDevBuff, payload, kPayloadBytes);
-        info.recvFifo = recvFifo;
-        info.ceDevBuff = ceDevBuff;
+        std::memcpy(ceDevBuff.data() + kCeStep, payload, kPayloadBytes);
+        info.recvFifo = recvFifo.data();
+        info.ceDevBuff = ceDevBuff.data();
         // A distinct event handle for the slot the proxy will transmit, so the
         // record->query dependency has something to key on.
-        info.events[0] = reinterpret_cast<hipEvent_t>(0x1);
+        info.events[1] = reinterpret_cast<hipEvent_t>(0x1);
 
         // Make the async-copy seam actually move bytes (the default fake only
         // returns a status). We assert on the bytes that land, not on the fact
@@ -7734,9 +7819,10 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_SimpleProtocol_CopiesAndComple
         EXPECT_EQ(args.done, 1);                        // the sub completed
         EXPECT_EQ(args.state, ncclProxyOpNone);         // op finished
         EXPECT_EQ(shm.recvMem.tail, args.subs[0].base + args.subs[0].done);
+        EXPECT_EQ(args.subs[0].base, 1u);
         // The observable job of the copy engine: the payload produced by the
         // GPU is now present in the recv FIFO. This fails if the proxy skips
         // the transfer, regardless of which primitive performs it.
-        EXPECT_EQ(0, std::memcmp(recvFifo, payload, kPayloadBytes));
+        EXPECT_EQ(0, std::memcmp(recvFifo.data() + kCeStep, payload, kPayloadBytes));
     });
 }
