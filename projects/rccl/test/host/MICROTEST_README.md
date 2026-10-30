@@ -1190,6 +1190,35 @@ several invocations of that binary, because the kernel caps one argv entry at
 `MAX_ARG_STRLEN` (128 KiB) and rejects a longer `exec` outright with `E2BIG`,
 which the biggest binary's 2,199 case names would exceed.
 
+### Where the children's output goes
+
+The children do **not** print to the dispatcher's console. Each one's stdout and
+stderr are redirected to `<report>.logs/<Qualifier>.log` — a run writing
+`host_tests_micro.xml` leaves `host_tests_micro.logs/MicroInit.log` beside it —
+and the dispatcher's own console keeps only the one banner line per binary,
+naming the log:
+
+```
+----- MicroCrypt (34 cases) -> /b/host_tests_micro.logs/MicroCrypt.log -----
+```
+
+One file per binary rather than one shared transcript: the binaries run one
+after another but each prints thousands of lines, and the question asked of
+this output is always "what did *this* binary print", which a merged log
+answers only by scrolling. A binary whose selection was split across several
+invocations still writes one log — the parts append. A binary that writes no
+report has its log named in the merged report's failure text too, since that is
+the case where its own output is the only evidence left.
+
+The directory is derived from `--gtest_output` so a run's logs sit beside the
+artefact they explain, and two runs writing different reports into one directory
+cannot overwrite each other's logs. `RCCL_HOST_DISPATCH_LOG_DIR` puts them
+somewhere else; `RCCL_HOST_DISPATCH_LOG_DIR=-` turns the redirection off and
+lets the children inherit the console, which is what running one binary's cases
+by hand wants. A log directory that cannot be created is a warning, not a
+failure — a missing transcript must not cost a passing run — and the children
+fall back to the console.
+
 ### What the children inherit
 
 gtest configures itself from `GTEST_*` variables as well as from flags, and that

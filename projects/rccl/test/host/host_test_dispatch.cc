@@ -61,6 +61,22 @@ constexpr std::string_view kQualifierStrip = "rccl-UnitTests";
 // in one object-free, hash-agnostic file, so no consumer has to pair profiles with binaries.
 constexpr std::string_view kCoverageTracefile = "host-coverage.lcov";
 
+// Appended to the merged report's own name to form the directory the children's console output
+// is written into, one <Qualifier>.log per fronted binary. A directory and not one shared file:
+// the children run one after another but each writes thousands of lines, and the question asked
+// of this output is always "what did THIS binary print", which a shared transcript answers only
+// by scrolling. Named after the report so a run's logs sit beside the artefact they explain and
+// two runs writing different reports in one directory cannot overwrite each other's logs.
+constexpr std::string_view kLogDirectorySuffix = ".logs";
+
+// Used when the caller asked for no report at all, so there is no name to derive one from.
+constexpr std::string_view kDefaultLogDirectory = "host-test-dispatch.logs";
+
+// Overrides that directory; "-" turns the redirection off and lets the children inherit this
+// process's stdout and stderr, which is what a developer running one binary's cases by hand
+// wants and what the dispatcher did before the logs existed.
+constexpr std::string_view kLogDirectoryEnv = "RCCL_HOST_DISPATCH_LOG_DIR";
+
 // Source files kept out of the exported coverage. The tests' own code is not the thing under
 // test, and nvtx is vendored. Overridable for a consumer that wants a different view.
 constexpr std::string_view kCoverageIgnoreRegex = "(/test/|nvtx)";
@@ -1023,8 +1039,46 @@ Enumeration enumerate(const std::string &directory, const std::vector<std::strin
     return enumeration;
 }
 
-// Run *path* with *args*, inheriting stdio, and return its exit status (128+signal if killed).
-int runChild(const std::string &path, const std::vector<std::string> &args)
+// The directory the children's logs belong in for a run whose merged report is *outputPath*.
+//
+// "/p/host_tests_micro.xml" gives "/p/host_tests_micro.logs"; an empty path (no report asked
+// for) gives the fixed name in the current directory, because there is nothing to derive one
+// from. The suffix replaces the report's extension rather than being appended to the whole
+// name, so the directory cannot be mistaken for a report by a glob that matches *.xml.
+std::string childLogDirectory(std::string_view outputPath)
+{
+    if (outputPath.empty()) {
+        return std::string(kDefaultLogDirectory);
+    }
+    const fs::path report{std::string(outputPath)};
+    const fs::path parent = report.parent_path();
+    const std::string name = report.stem().string() + std::string(kLogDirectorySuffix);
+    return (parent.empty() ? fs::path(name) : parent / name).string();
+}
+
+// Where *qualifier*'s console output goes within *directory*.
+std::string childLogPath(std::string_view directory, std::string_view qualifier)
+{
+    return (fs::path(std::string(directory)) / fmt::format("{}.log", qualifier)).string();
+}
+
+// The log directory this run should use, given the merged report at *outputPath* and the
+// environment. Empty when the caller asked for the children's output on the console instead.
+std::string resolveLogDirectory(std::string_view outputPath, const char *override_)
+{
+    if (override_ == nullptr || *override_ == '\0') {
+        return childLogDirectory(outputPath);
+    }
+    return std::string_view(override_) == "-" ? std::string() : std::string(override_);
+}
+
+// Run *path* with *args* and return its exit status (128+signal if killed).
+//
+// *logPath*, when set, is the file the child's stdout and stderr are redirected to; it is opened
+// in the CHILD, after the fork, so a file this process could not open costs that one binary its
+// transcript rather than the run. Empty means inherit this process's stdio.
+int runChild(const std::string &path, const std::vector<std::string> &args,
+             const std::string &logPath = "")
 {
     std::vector<char *> argv;
     argv.push_back(const_cast<char *>(path.c_str()));
@@ -1052,6 +1106,23 @@ int runChild(const std::string &path, const std::vector<std::string> &args)
         stripGtestVariablesInChild(strip);
         if (!profile.empty()) {
             setenv("LLVM_PROFILE_FILE", profile.c_str(), 1);
+        }
+        if (!logPath.empty()) {
+            // O_APPEND and not O_TRUNC: a binary whose selection was split across several
+            // invocations writes one log between them all. The parent truncates it once, before
+            // the first part.
+            const int fd = open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+            if (fd < 0) {
+                fmt::print(stderr, "host-test-dispatch: cannot write {}: {} -- {} will print to"
+                                   " the console instead\n",
+                           logPath, std::strerror(errno), path);
+            } else {
+                dup2(fd, STDOUT_FILENO);
+                dup2(fd, STDERR_FILENO);
+                if (fd > STDERR_FILENO) {
+                    close(fd);
+                }
+            }
         }
         execv(path.c_str(), argv.data());
         fmt::print(stderr, "host-test-dispatch: exec {} failed: {}\n", path,
@@ -1553,6 +1624,22 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // The children's console output, one file per binary. Created up front so a directory that
+    // cannot be made is said once, here, rather than once per child; failing to make it turns
+    // the redirection off, because a missing transcript must not cost a passing run.
+    std::string logDir =
+        resolveLogDirectory(options.outputPath, std::getenv(std::string(kLogDirectoryEnv).c_str()));
+    if (!logDir.empty()) {
+        std::error_code ec;
+        fs::create_directories(logDir, ec);
+        if (ec && !fs::is_directory(logDir)) {
+            fmt::print(stderr, "host-test-dispatch: cannot create {}: {} -- the binaries will"
+                               " print to the console instead\n",
+                       logDir, ec.message());
+            logDir.clear();
+        }
+    }
+
     std::vector<SuiteFragment> fragments;
     std::vector<std::string> ran;
     int failures = 0;
@@ -1583,10 +1670,19 @@ int main(int argc, char **argv)
             const std::string part_note =
                 filters.size() > 1 ? fmt::format(", part {}/{}", part + 1, filters.size())
                                    : std::string();
-            fmt::print("----- {} ({} cases{}) -----\n", selection.qualifier,
-                       selection.cases.size(), part_note);
+            const std::string logPath =
+                logDir.empty() ? std::string() : childLogPath(logDir, selection.qualifier);
+            if (part == 0 && !logPath.empty()) {
+                // Truncated once per binary, not once per part: the parts append to one log.
+                std::ofstream truncate(logPath, std::ios::binary | std::ios::trunc);
+            }
+            // The log is named on the console whether or not the binary fails, so the transcript
+            // of a run that passed is as findable as the one of a run that did not.
+            fmt::print("----- {} ({} cases{}){} -----\n", selection.qualifier,
+                       selection.cases.size(), part_note,
+                       logPath.empty() ? std::string() : fmt::format(" -> {}", logPath));
             std::fflush(stdout);
-            const int status = runChild(selection.path, childArgs);
+            const int status = runChild(selection.path, childArgs, logPath);
 
             bool cleanReport = false;
             if (std::optional<SuiteFragment> fragment =
@@ -1597,9 +1693,14 @@ int main(int argc, char **argv)
             } else {
                 // No report: the binary died or never started. Its cases are unaccounted for, so
                 // the run has to fail even if the exit status somehow did not say so.
+                // The log is named in the failure itself: a results consumer showing only the
+                // merged report is where this is usually read, and "no report" is exactly the
+                // case where the binary's own output is the only evidence left.
                 fragments.push_back(crashFragment(
                     selection.qualifier,
-                    fmt::format("binary wrote no gtest report (exit status {})", status)));
+                    fmt::format("binary wrote no gtest report (exit status {}){}", status,
+                                logPath.empty() ? std::string()
+                                                : fmt::format("; output in {}", logPath))));
                 ++failures;
             }
             if (status != 0) {

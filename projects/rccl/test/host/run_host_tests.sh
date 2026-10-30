@@ -150,6 +150,10 @@ do_host_tests() {
 
   # The two binaries this script runs directly. Each writes its own JUnit XML
   # (host_tests*.xml, all uploaded) and appends to the single console LOG_FILE.
+  # What the front door's own children print goes to host_tests_micro.logs/<Qualifier>.log
+  # instead of into LOG_FILE, which keeps LOG_FILE a readable index of the run rather than ~40
+  # binaries' output interleaved under one timestamp stream. See MICROTEST_README.md,
+  # "Where the children's output goes".
   #
   # rccl-UnitTestsHostAll is the front door for the ~40 rccl-UnitTestsMicro*
   # binaries: it discovers them beside itself at run time, runs the ones holding

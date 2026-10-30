@@ -800,6 +800,45 @@ TEST(HostDispatchEnvironmentMicrotest, ShardingVariablesSurviveInTheDispatcherIt
     EXPECT_STREQ(getenv("GTEST_TOTAL_SHARDS"), "4");
 }
 
+// ── child logs ──────────────────────────────────────────────────────
+
+TEST(HostDispatchLogMicrotest, LogsLandBesideTheMergedReport)
+{
+    // The report is the artefact a harness uploads and a reader opens first, so the transcripts
+    // explaining it are kept in a directory named after it, in the same place.
+    EXPECT_EQ(childLogDirectory("/p/host_tests_micro.xml"), "/p/host_tests_micro.logs");
+    EXPECT_EQ(childLogDirectory("/p/host_tests_micro.json"), "/p/host_tests_micro.logs");
+}
+
+TEST(HostDispatchLogMicrotest, AReportInTheCurrentDirectoryKeepsItsLogsThere)
+{
+    EXPECT_EQ(childLogDirectory("host_tests_micro.xml"), "host_tests_micro.logs");
+}
+
+TEST(HostDispatchLogMicrotest, NoReportStillGetsLogs)
+{
+    // A caller that asked for no report still wants the binaries' output somewhere; there is no
+    // report name to derive a directory from, so the fixed one is used.
+    EXPECT_EQ(childLogDirectory(""), "host-test-dispatch.logs");
+}
+
+TEST(HostDispatchLogMicrotest, EachBinaryWritesItsOwnLog)
+{
+    EXPECT_EQ(childLogPath("/p/host_tests_micro.logs", "MicroInit-uncached"),
+              "/p/host_tests_micro.logs/MicroInit-uncached.log");
+}
+
+TEST(HostDispatchLogMicrotest, TheEnvironmentCanMoveTheLogsOrTurnThemOff)
+{
+    // Unset and empty both mean "use the default"; a directory names where to put them instead;
+    // "-" is the opt-out that leaves the children on this process's stdout, which is what
+    // running one binary's cases by hand wants.
+    EXPECT_EQ(resolveLogDirectory("/p/report.xml", nullptr), "/p/report.logs");
+    EXPECT_EQ(resolveLogDirectory("/p/report.xml", ""), "/p/report.logs");
+    EXPECT_EQ(resolveLogDirectory("/p/report.xml", "/tmp/logs"), "/tmp/logs");
+    EXPECT_EQ(resolveLogDirectory("/p/report.xml", "-"), "");
+}
+
 // ── coverageDirectory ───────────────────────────────────────────────
 
 TEST(HostDispatchCoverageMicrotest, ProfileDirectoryIsTakenFromThePattern)

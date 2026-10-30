@@ -101,3 +101,5 @@ jobs:
           path: |
             projects/rccl/test/host/host_tests.log
             projects/rccl/test/host/host_tests.xml
+            # The fronted binaries print here, not into host_tests.log.
+            projects/rccl/test/host/host_tests_micro.logs/
