@@ -77,6 +77,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.
 
+* PC sampling now writes disassembly only for dispatched kernels, so profiling output is much smaller.
+
 ### Resolved issues
 
 * Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. These unsupported combinations now report a clear error during option validation.

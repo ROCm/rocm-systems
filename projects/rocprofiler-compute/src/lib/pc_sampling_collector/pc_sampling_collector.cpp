@@ -103,14 +103,23 @@ void pc_sampling_collector_impl_t::on_code_object_load(
     }
 }
 
-void pc_sampling_collector_impl_t::finalize(code_object_writer_t& writer)
+void pc_sampling_collector_impl_t::finalize(code_object_writer_t& writer,
+                                            const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols)
 {
     for (const auto& id : m_translator->get_code_object_ids())
     {
-        writer.start_code_obj(id);
+        // Code objects with no dispatched kernel are left out entirely.
+        bool        started = false;
         const auto& symbols = m_translator->get_symbols(id);
         for (const auto& sym : symbols)
         {
+            if (dispatched_symbols.count({id, sym.name}) == 0)
+                continue;
+            if (!started)
+            {
+                writer.start_code_obj(id);
+                started = true;
+            }
             writer.start_symbol(sym);
             uint64_t       pc  = sym.virtual_address;
             const uint64_t end = sym.virtual_address + sym.size;
@@ -124,7 +133,8 @@ void pc_sampling_collector_impl_t::finalize(code_object_writer_t& writer)
             }
             writer.end_symbol();
         }
-        writer.end_code_obj();
+        if (started)
+            writer.end_code_obj();
     }
 }
 
