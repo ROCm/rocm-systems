@@ -54,6 +54,7 @@ enum class InstructionExecutionError : uint8_t {
   None,
   InvalidInstructionEncoding,
   UnsupportedOperandValue,
+  MissingExecutionBackend,
   UnimplementedInstruction,
 };
 

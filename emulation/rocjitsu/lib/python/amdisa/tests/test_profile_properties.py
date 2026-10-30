@@ -1552,3 +1552,104 @@ def test_execution_operands_override_all_base_value_accessors(
         'write_lane64',
     ):
         assert re.search(rf'\b{method}\([^;]+\) const override;', operand_header)
+
+
+@pytest.mark.parametrize(
+    'arch,profile',
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+    ],
+)
+def test_operand_execution_rejections_are_retained_and_admitted(
+    tmp_path, arch, profile
+):
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name=arch,
+            generated_dir_name=arch,
+            cpp_namespace=arch,
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=profile,
+        ),
+        str(tmp_path),
+    )
+    generator.gen_operand()
+    model = (tmp_path / arch / 'operand.cpp').read_text()
+    execution = (tmp_path / arch / 'operand_exec.cpp').read_text()
+    assert 'throw ' not in model
+    assert 'throw ' not in execution
+    assert 'rocjitsu::Operand::execution_backend_available()' in model
+    assert 'execution_backend_ != nullptr' in model
+    for method in (
+        'read_lane_chunk',
+        'write_lane_chunk',
+        'read_scalar',
+        'read_lane',
+        'write_scalar',
+        'write_lane',
+        'read_lane64',
+        'write_lane64',
+        'read_scalar64',
+        'write_scalar64',
+    ):
+        body = model.split(f'Operand::{method}(', 1)[1].split('\n}', 1)[0]
+        assert re.search(
+            r'if \(!callback\) \{\s*report_missing_execution_backend\(wf\);\s*return(?: 0)?;',
+            body,
+        )
+    for method in ('write_lane_exec', 'write_lane64_exec'):
+        body = execution.split(f'Operand::{method}(', 1)[1].split(
+            '\nuint64_t Operand::', 1
+        )[0]
+        assert 'if (!is_writable())' in body
+        assert 'InstructionExecutionError::UnsupportedOperandValue' in body
+
+    generator._split_execution_classes = ['OneInstruction']
+    generator.gen_execution_backend()
+    backend = (tmp_path / arch / 'execution_backend_exec.cpp').read_text()
+    body = backend.split('void execute_with_backend(', 1)[1].split(
+        'constexpr size_t', 1
+    )[0]
+    assert body.index('execution_backend_available()') < body.index('.execute_impl(')
+    assert 'instruction.src_operand(i)->execution_backend_available()' in body
+    assert 'instruction.dst_operand(i)->execution_backend_available()' in body
+    assert 'InstructionExecutionError::MissingExecutionBackend' in body
+
+
+@pytest.mark.parametrize('profile_type', [CdnaProfile, Rdna4Profile])
+def test_unsplit_operand_write_rejections_retain_failure(tmp_path, profile_type):
+    class UnsplitProfile(profile_type):
+        @property
+        def split_execution_sources(self):
+            return False
+
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name='test',
+            generated_dir_name='test',
+            cpp_namespace='test',
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=UnsplitProfile(),
+        ),
+        str(tmp_path),
+    )
+    generator.gen_operand()
+    source = (tmp_path / 'test' / 'operand.cpp').read_text()
+    for method in ('write_lane', 'write_lane64'):
+        body = source.split(f'Operand::{method}(', 1)[1].split(
+            '\nuint64_t Operand::', 1
+        )[0]
+        assert 'if (!is_writable())' in body
+        assert 'InstructionExecutionError::UnsupportedOperandValue' in body
+        assert 'throw ' not in body

@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/operand.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <array>
 
@@ -15,11 +16,28 @@ namespace cdna3 {
 namespace {
 
 template <typename Derived> void execute_with_backend(Instruction &instruction, void *context) {
+  auto &wf = *static_cast<Isa::Context *>(context);
+  if (wf.instruction_execution_failed())
+    return;
+  for (int i = 0; i < instruction.num_src_operands(); ++i) {
+    if (!instruction.src_operand(i)->execution_backend_available()) {
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::MissingExecutionBackend);
+      return;
+    }
+  }
+  for (int i = 0; i < instruction.num_dst_operands(); ++i) {
+    if (!instruction.dst_operand(i)->execution_backend_available()) {
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::MissingExecutionBackend);
+      return;
+    }
+  }
   // execute_impl may construct temporary operands (for example,
   // indexed SOP1/VOP1 sources). Re-enter the ISA scope so those
   // operands capture the same backend as decode-time operands.
   ScopedIsaExecutionBackend scope(&execution_backend());
-  static_cast<Derived &>(instruction).execute_impl(*static_cast<Isa::Context *>(context));
+  static_cast<Derived &>(instruction).execute_impl(wf);
 }
 
 constexpr size_t kInstructionCallbackCount = static_cast<size_t>(InstructionExecutionId::Count);

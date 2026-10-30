@@ -2,11 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/vector_reg.h"
 
 #include <cassert>
 
 namespace rocjitsu {
+
+void Operand::report_missing_execution_backend(const amdgpu::Wavefront &wf) {
+  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::MissingExecutionBackend);
+}
 
 Result Operand::emit_encoding_error(const util::DiagnosticEmitter &emit_error) const {
   switch (encoding_error_) {
