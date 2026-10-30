@@ -207,6 +207,23 @@ constexpr Choice kAdditiveHelperChoices[] = {{1, 1, 0},  {1, 2, 0},  {1, 4, 0}, 
                                              {8, 9, 0},  {8, 17, 0}, {8, 25, 0}, {8, 25, 2},
                                              {8, 25, 4}, {8, 25, 8}, {8, 25, 16}};
 
+// Call with ASSERT_TRUE before consuming output, which is unchanged on failure.
+[[nodiscard]] testing::AssertionResult resolve_valid_execution_threads(
+    config::ExecutionThreadAllocation &output, const config::ExecutionThreadRequest &request,
+    uint32_t host_threads, uint32_t xcds, std::span<const uint32_t> dispatch_capacities,
+    bool async_supported, std::span<const Choice> choices, bool clocked = false) {
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<config::ExecutionThreadAllocation> result =
+      config::resolve_execution_threads(request, host_threads, xcds, dispatch_capacities,
+                                        async_supported, choices, diagnostic.emitter(), clocked);
+  if (result.failed())
+    return testing::AssertionFailure() << diagnostic.message();
+  output = std::move(result).value();
+  return testing::AssertionSuccess();
+}
+
+using test::resolve_valid_execution_threads;
+
 TEST(ExecutionThreadBudgetTest, SelectsLargestFittingGranule) {
   struct Case {
     uint32_t budget, engines, dispatch, helpers;
@@ -221,25 +238,29 @@ TEST(ExecutionThreadBudgetTest, SelectsLargestFittingGranule) {
   for (auto c : cases) {
     SCOPED_TRACE(c.budget);
     for (bool explicit_budget : {false, true}) {
-      auto plan = config::resolve_execution_threads({.budget = explicit_budget ? c.budget : 0},
-                                                    explicit_budget ? 128 : c.budget, 8, capacities,
-                                                    true, kAdditiveHelperChoices);
+      config::ExecutionThreadAllocation plan;
+      ASSERT_TRUE(resolve_valid_execution_threads(plan, {.budget = explicit_budget ? c.budget : 0},
+                                                  explicit_budget ? 128 : c.budget, 8, capacities,
+                                                  true, kAdditiveHelperChoices));
       EXPECT_EQ(plan.engines, c.engines);
       EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{c.dispatch}));
       EXPECT_EQ(plan.helpers, c.helpers);
     }
   }
-  auto unknown =
-      config::resolve_execution_threads({}, 0, 8, capacities, true, kAdditiveHelperChoices);
+  config::ExecutionThreadAllocation unknown;
+  ASSERT_TRUE(
+      resolve_valid_execution_threads(unknown, {}, 0, 8, capacities, true, kAdditiveHelperChoices));
   EXPECT_EQ(unknown.engines, 1u);
   EXPECT_EQ(unknown.dispatch, (std::vector<uint32_t>{1}));
   EXPECT_EQ(unknown.helpers, 0u);
   const Choice larger[] = {{8, 25, 0}, {8, 33, 8}};
-  auto automatic = config::resolve_execution_threads({}, 64, 8, capacities, true, larger);
+  config::ExecutionThreadAllocation automatic;
+  ASSERT_TRUE(resolve_valid_execution_threads(automatic, {}, 64, 8, capacities, true, larger));
   EXPECT_EQ(automatic.dispatch, (std::vector<uint32_t>{33}));
   EXPECT_EQ(automatic.helpers, 8u);
-  auto explicit_plan =
-      config::resolve_execution_threads({.budget = 40}, 64, 8, capacities, true, larger);
+  config::ExecutionThreadAllocation explicit_plan;
+  ASSERT_TRUE(resolve_valid_execution_threads(explicit_plan, {.budget = 40}, 64, 8, capacities,
+                                              true, larger));
   EXPECT_EQ(explicit_plan.dispatch, (std::vector<uint32_t>{25}));
   EXPECT_EQ(explicit_plan.helpers, 0u);
 }
@@ -247,7 +268,8 @@ TEST(ExecutionThreadBudgetTest, SelectsLargestFittingGranule) {
 TEST(ExecutionThreadBudgetTest, ConfigCanStopAtAFewThreads) {
   const Choice choices[] = {{1, 1, 0}, {1, 2, 0}, {1, 4, 0}};
   const std::array capacities{64u};
-  auto plan = config::resolve_execution_threads({}, 64, 1, capacities, false, choices);
+  config::ExecutionThreadAllocation plan;
+  ASSERT_TRUE(resolve_valid_execution_threads(plan, {}, 64, 1, capacities, false, choices));
   EXPECT_EQ(plan.engines, 1u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{4}));
   EXPECT_EQ(plan.helpers, 0u);
@@ -256,12 +278,13 @@ TEST(ExecutionThreadBudgetTest, ConfigCanStopAtAFewThreads) {
 TEST(ExecutionThreadBudgetTest, AccountsForEveryGpuAndTopologyClamps) {
   const Choice choices[] = {{1, 1, 0}, {2, 5, 2}, {8, 17, 8}};
   const std::array capacities{36u, 36u};
-  auto plan = config::resolve_execution_threads({}, 32, 16, capacities, true, choices);
+  config::ExecutionThreadAllocation plan;
+  ASSERT_TRUE(resolve_valid_execution_threads(plan, {}, 32, 16, capacities, true, choices));
   EXPECT_EQ(plan.engines, 2u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{5, 5}));
   EXPECT_EQ(plan.helpers, 2u); // 2 + 2*(5-1) + 2 = 12; the next entry costs 48.
   const std::array tiny{2u};
-  plan = config::resolve_execution_threads({}, 32, 1, tiny, false, choices);
+  ASSERT_TRUE(resolve_valid_execution_threads(plan, {}, 32, 1, tiny, false, choices));
   EXPECT_EQ(plan.engines, 1u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{2}));
   EXPECT_EQ(plan.helpers, 0u);
@@ -269,22 +292,23 @@ TEST(ExecutionThreadBudgetTest, AccountsForEveryGpuAndTopologyClamps) {
 
 TEST(ExecutionThreadBudgetTest, ExplicitOverridesAndSafeFallback) {
   const std::array capacities{64u};
-  auto plan = config::resolve_execution_threads({.engines = 8, .dispatch = 33, .helpers = 8}, 4, 8,
-                                                capacities, true, kAdditiveHelperChoices);
+  config::ExecutionThreadAllocation plan;
+  ASSERT_TRUE(resolve_valid_execution_threads(plan, {.engines = 8, .dispatch = 33, .helpers = 8}, 4,
+                                              8, capacities, true, kAdditiveHelperChoices));
   EXPECT_EQ(plan.engines, 8u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{33}));
   EXPECT_EQ(plan.helpers, 8u);
-  plan = config::resolve_execution_threads({.dispatch = 1, .helpers = 0}, 32, 8, capacities, true,
-                                           kAdditiveHelperChoices);
+  ASSERT_TRUE(resolve_valid_execution_threads(plan, {.dispatch = 1, .helpers = 0}, 32, 8,
+                                              capacities, true, kAdditiveHelperChoices));
   EXPECT_EQ(plan.engines, 8u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{1}));
   EXPECT_EQ(plan.helpers, 0u);
-  plan = config::resolve_execution_threads({}, 64, 8, capacities, true, {});
+  ASSERT_TRUE(resolve_valid_execution_threads(plan, {}, 64, 8, capacities, true, {}));
   EXPECT_EQ(plan.engines, 1u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{1}));
   EXPECT_EQ(plan.helpers, 0u);
-  plan =
-      config::resolve_execution_threads({}, 4, 8, capacities, true, kAdditiveHelperChoices, true);
+  ASSERT_TRUE(resolve_valid_execution_threads(plan, {}, 4, 8, capacities, true,
+                                              kAdditiveHelperChoices, true));
   EXPECT_EQ(plan.engines, 4u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{1}));
   EXPECT_EQ(plan.helpers, 0u);
@@ -292,14 +316,46 @@ TEST(ExecutionThreadBudgetTest, ExplicitOverridesAndSafeFallback) {
 
 TEST(ExecutionThreadBudgetTest, RejectsInvalidRequestsAndGranules) {
   const std::array capacities{36u};
-  for (int helpers : {-2, 129})
-    EXPECT_THROW(
-        config::resolve_execution_threads({.helpers = helpers}, 64, 8, capacities, true, {}),
-        std::invalid_argument);
-  for (Choice choice : {Choice{0, 1, 0}, Choice{1, 0, 0}, Choice{1, 1, 129}})
-    EXPECT_THROW(
-        config::resolve_execution_threads({}, 64, 8, capacities, true, std::span(&choice, 1)),
-        std::invalid_argument);
+  for (bool clocked : {false, true}) {
+    for (int helpers : {-2, 129}) {
+      util::StringDiagnostic diagnostic;
+      util::FailureOr<config::ExecutionThreadAllocation> result = config::resolve_execution_threads(
+          {.helpers = helpers}, 64, 8, capacities, true, {}, diagnostic.emitter(), clocked);
+      EXPECT_TRUE(result.failed());
+      EXPECT_EQ(diagnostic.message(), "async_helper_threads must be -1 or between 0 and 128");
+    }
+  }
+  for (Choice choice : {Choice{0, 1, 0}, Choice{1, 0, 0}, Choice{1, 1, 129}}) {
+    util::StringDiagnostic diagnostic;
+    util::FailureOr<config::ExecutionThreadAllocation> result = config::resolve_execution_threads(
+        {}, 64, 8, capacities, true, std::span(&choice, 1), diagnostic.emitter());
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(diagnostic.message(), "thread_allocations require num_threads >= 1, "
+                                    "cpu_dispatch_threads >= 1 and async_helper_threads <= 128");
+  }
+}
+
+TEST(ExecutionThreadBudgetTest, ConfigLoadingPropagatesInvalidAllocation) {
+  for (const auto &[field, message] :
+       {std::pair{R"("async_helper_threads":129,)",
+                  "async_helper_threads must be -1 or between 0 and 128"},
+        std::pair{R"("thread_allocations":[{"num_threads":0,"cpu_dispatch_threads":1}],)",
+                  "thread_allocations require num_threads >= 1, "
+                  "cpu_dispatch_threads >= 1 and async_helper_threads <= 128"}}) {
+    std::string json = config_json_with_num_threads(CONFIG_1XCD_PATH, 1);
+    // Replace the preset table so the invalid entry is the one evaluated.
+    const size_t table = json.find("\"thread_allocations\"");
+    ASSERT_NE(table, std::string::npos);
+    const size_t table_end = json.find(']', table);
+    ASSERT_NE(table_end, std::string::npos);
+    json.erase(table, table_end - table + 2);
+    json.insert(json.find('{') + 1, field);
+    util::StringDiagnostic diagnostic;
+    util::FailureOr<config::LoadedConfig> result =
+        config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(), 8);
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(diagnostic.message(), message);
+  }
 }
 
 TEST(ExecutionThreadBudgetTest, AutomaticPlansStayWithinAffinityAndCapacity) {
@@ -307,8 +363,9 @@ TEST(ExecutionThreadBudgetTest, AutomaticPlansStayWithinAffinityAndCapacity) {
     for (uint32_t xcds : {1u, 2u, 3u, 4u, 7u, 8u, 16u, 32u})
       for (bool async : {false, true}) {
         const std::array capacities{2u, 36u};
-        auto plan = config::resolve_execution_threads({}, host, xcds, capacities, async,
-                                                      kAdditiveHelperChoices);
+        config::ExecutionThreadAllocation plan;
+        ASSERT_TRUE(resolve_valid_execution_threads(plan, {}, host, xcds, capacities, async,
+                                                    kAdditiveHelperChoices));
         uint64_t used = plan.engines + plan.helpers;
         for (size_t i = 0; i < capacities.size(); ++i) {
           EXPECT_GE(plan.dispatch[i], 1u);
@@ -330,7 +387,8 @@ TEST(ExecutionThreadBudgetTest, MetadataMatchesBuiltTopology) {
     auto settings = std::move(settings_result).value();
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config(path, loaded, 48));
-    auto plan = settings.resolve(48);
+    config::ExecutionThreadAllocation plan;
+    ASSERT_TRUE(resolve_valid_execution_threads(plan, settings, 48));
     EXPECT_EQ(plan.engines, loaded.execution_threads.engines);
     EXPECT_EQ(plan.dispatch, loaded.execution_threads.dispatch);
     EXPECT_EQ(plan.helpers, loaded.execution_threads.helpers);
@@ -480,7 +538,8 @@ TEST(ExecutionThreadBudgetTest, MultiGpuPresetsKeepSerialDefaultsAndAllowDispatc
       EXPECT_EQ(choice.engines, 1u) << name;
     for (uint32_t budget = 1; budget <= 64; ++budget) {
       settings.request.budget = budget;
-      auto plan = settings.resolve(64);
+      config::ExecutionThreadAllocation plan;
+      ASSERT_TRUE(resolve_valid_execution_threads(plan, settings, 64));
       EXPECT_EQ(plan.engines, 1u) << name;
       ASSERT_EQ(plan.dispatch.size(), gpus);
       uint32_t total = plan.engines;
@@ -492,9 +551,13 @@ TEST(ExecutionThreadBudgetTest, MultiGpuPresetsKeepSerialDefaultsAndAllowDispatc
     }
     settings.request.budget = 32;
     settings.request.dispatch = 0;
-    EXPECT_EQ(settings.resolve(64).dispatch, std::vector<uint32_t>(gpus, 32 / gpus));
+    config::ExecutionThreadAllocation automatic_dispatch;
+    ASSERT_TRUE(resolve_valid_execution_threads(automatic_dispatch, settings, 64));
+    EXPECT_EQ(automatic_dispatch.dispatch, std::vector<uint32_t>(gpus, 32 / gpus));
     settings.request.dispatch = 4;
-    EXPECT_EQ(settings.resolve(64).dispatch, std::vector<uint32_t>(gpus, 4));
+    config::ExecutionThreadAllocation explicit_dispatch;
+    ASSERT_TRUE(resolve_valid_execution_threads(explicit_dispatch, settings, 64));
+    EXPECT_EQ(explicit_dispatch.dispatch, std::vector<uint32_t>(gpus, 4));
   }
 }
 
@@ -507,11 +570,13 @@ TEST(ExecutionThreadBudgetTest, OlderCdnaPresetsUseDispatchWorkers) {
     ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
     auto settings = std::move(settings_result).value();
     settings.request.budget = 1;
-    auto serial = settings.resolve(64);
+    config::ExecutionThreadAllocation serial;
+    ASSERT_TRUE(resolve_valid_execution_threads(serial, settings, 64));
     EXPECT_EQ(serial.engines, 1u);
     EXPECT_EQ(serial.dispatch, (std::vector<uint32_t>{1}));
     settings.request.budget = 32;
-    auto parallel = settings.resolve(64);
+    config::ExecutionThreadAllocation parallel;
+    ASSERT_TRUE(resolve_valid_execution_threads(parallel, settings, 64));
     EXPECT_EQ(parallel.engines, settings.xcds);
     EXPECT_EQ(parallel.dispatch, (std::vector<uint32_t>{25 - parallel.engines}));
   }
@@ -527,7 +592,8 @@ TEST(ExecutionThreadBudgetTest, DesktopTablesStopAtTheMeasuredCeiling) {
     auto settings = std::move(settings_result).value();
     for (uint32_t budget : {24u, 32u, 64u}) {
       settings.request.budget = budget;
-      auto plan = settings.resolve(128);
+      config::ExecutionThreadAllocation plan;
+      ASSERT_TRUE(resolve_valid_execution_threads(plan, settings, 128));
       EXPECT_EQ(plan.engines, 1u);
       EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{24}));
     }
@@ -553,7 +619,8 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
       SCOPED_TRACE(name);
       SCOPED_TRACE(c.budget);
       settings.request.budget = c.budget;
-      auto plan = settings.resolve(64);
+      config::ExecutionThreadAllocation plan;
+      ASSERT_TRUE(resolve_valid_execution_threads(plan, settings, 64));
       EXPECT_EQ(plan.engines, c.engines);
       EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{c.dispatch}));
       EXPECT_EQ(plan.helpers, 0u);
@@ -573,7 +640,8 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorke
     ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
     auto settings = std::move(settings_result).value();
     for (uint32_t affinity = 1; affinity <= 128; ++affinity) {
-      const auto plan = settings.resolve(affinity);
+      config::ExecutionThreadAllocation plan;
+      ASSERT_TRUE(resolve_valid_execution_threads(plan, settings, affinity));
       ASSERT_EQ(plan.dispatch.size(), 1u);
       const auto cpu = plan.engines + plan.dispatch[0] - 1;
       EXPECT_LE(cpu, std::min(affinity, max_cpu));
@@ -586,11 +654,16 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorke
       }
     }
     settings.request.budget = max_cpu;
-    EXPECT_EQ(settings.resolve(128).helpers, 0u);
+    config::ExecutionThreadAllocation cpu_budget;
+    ASSERT_TRUE(resolve_valid_execution_threads(cpu_budget, settings, 128));
+    EXPECT_EQ(cpu_budget.helpers, 0u);
     settings.request.budget = max_cpu + 8;
-    EXPECT_EQ(settings.resolve(128).helpers, 8u);
+    config::ExecutionThreadAllocation helper_budget;
+    ASSERT_TRUE(resolve_valid_execution_threads(helper_budget, settings, 128));
+    EXPECT_EQ(helper_budget.helpers, 8u);
     settings.request.helpers = 0;
-    const auto disabled = settings.resolve(128);
+    config::ExecutionThreadAllocation disabled;
+    ASSERT_TRUE(resolve_valid_execution_threads(disabled, settings, 128));
     EXPECT_EQ(disabled.engines, 8u);
     EXPECT_EQ(disabled.dispatch, (std::vector<uint32_t>{max_cpu - 7}));
     EXPECT_EQ(disabled.helpers, 0u);
