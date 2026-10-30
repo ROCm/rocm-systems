@@ -22,7 +22,10 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDsFromDX9MediaAdapterKHR,
                cl_device_id* devices, cl_uint* num_devices)) {
   cl_int errcode;
   // Accept an array of DX9 devices here as the spec mention of array of num_media_adapters size.
-  IDirect3DDevice9Ex** d3d9_device = static_cast<IDirect3DDevice9Ex**>(media_adapters);
+  // The element type varies with the matching entry in media_adapters_type - D3D9 gives an
+  // IDirect3DDevice9*, D3D9EX an IDirect3DDevice9Ex* and DXVA an IDXVAHD_Device* - so this
+  // stays opaque and is interpreted by the device backend.
+  void** d3d9_device = static_cast<void**>(media_adapters);
   cl_device_id* gpu_devices = NULL;
   cl_uint num_gpu_devices = 0;
   static const bool VALIDATE_ONLY = true;
@@ -61,33 +64,45 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDsFromDX9MediaAdapterKHR,
       std::vector<amd::Device*> compatible_devices;
       for (cl_uint i = 0; i < num_gpu_devices; ++i) {
         cl_device_id device = gpu_devices[i];
-        amd::Context::Flags context_flag;
-        amd::Context::DeviceFlagIdx devIdx;
-        switch (media_adapters_type[i]) {
-          case CL_ADAPTER_D3D9_KHR:
-            context_flag = amd::Context::Flags::D3D9DeviceKhr;
-            devIdx = amd::Context::DeviceFlagIdx::D3D9DeviceKhrIdx;
-            break;
-          case CL_ADAPTER_D3D9EX_KHR:
-            context_flag = amd::Context::Flags::D3D9DeviceEXKhr;
-            devIdx = amd::Context::DeviceFlagIdx::D3D9DeviceEXKhrIdx;
-            break;
-          case CL_ADAPTER_DXVA_KHR:
-            context_flag = amd::Context::Flags::D3D9DeviceVAKhr;
-            devIdx = amd::Context::DeviceFlagIdx::D3D9DeviceVAKhrIdx;
-            break;
+        if (!is_valid(device)) {
+          continue;
         }
 
+        // Since there can be multiple DX9 adapters passed in the array we need to validate
+        // interopability with each. A device that matches any adapter is reported once.
         for (cl_uint j = 0; j < num_media_adapters; ++j) {
-          // Since there can be multiple DX9 adapters passed in the array we need to validate
-          // interopability with each.
+          amd::Context::Flags context_flag;
+          amd::Context::DeviceFlagIdx devIdx;
+          switch (media_adapters_type[j]) {
+            case CL_ADAPTER_D3D9_KHR:
+              context_flag = amd::Context::Flags::D3D9DeviceKhr;
+              devIdx = amd::Context::DeviceFlagIdx::D3D9DeviceKhrIdx;
+              break;
+            case CL_ADAPTER_D3D9EX_KHR:
+              context_flag = amd::Context::Flags::D3D9DeviceEXKhr;
+              devIdx = amd::Context::DeviceFlagIdx::D3D9DeviceEXKhrIdx;
+              break;
+            case CL_ADAPTER_DXVA_KHR:
+              context_flag = amd::Context::Flags::D3D9DeviceVAKhr;
+              devIdx = amd::Context::DeviceFlagIdx::D3D9DeviceVAKhrIdx;
+              break;
+            default:
+              errcode = CL_INVALID_VALUE;
+              delete[] gpu_devices;
+              return errcode;
+          }
+
+          if (!amd::D3D9Object::isAdapterTypeSupported(media_adapters_type[j])) {
+            continue;
+          }
+
           void* external_device[amd::Context::DeviceFlagIdx::LastDeviceFlagIdx] = {};
           external_device[devIdx] = d3d9_device[j];
 
-          if (is_valid(device) && (media_adapters_type[j] == CL_ADAPTER_D3D9EX_KHR) &&
-              as_amd(device)->bindExternalDevice(context_flag, external_device, NULL,
+          if (as_amd(device)->bindExternalDevice(context_flag, external_device, NULL,
                                                  VALIDATE_ONLY)) {
             compatible_devices.push_back(as_amd(device));
+            break;
           }
         }
       }
@@ -150,6 +165,16 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromDX9MediaSurfaceKHR,
     return clMemObj;
   }
 
+  // The context must have been created from a DX9 media adapter, otherwise there is no
+  // graphics device to share with. Mirrors the equivalent check in cl_d3d11.cpp.
+  if (!((*as_amd(context)).info().flags_ &
+        (amd::Context::D3D9DeviceKhr | amd::Context::D3D9DeviceEXKhr |
+         amd::Context::D3D9DeviceVAKhr))) {
+    *not_null(errcode_ret) = CL_INVALID_CONTEXT;
+    LogWarning("\"context\" was not created from a DX9 media adapter");
+    return clMemObj;
+  }
+
   if (!surface_info) {
     *not_null(errcode_ret) = CL_INVALID_VALUE;
     LogWarning("parameter \"pD3DResource\" is a NULL pointer");
@@ -187,7 +212,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromDX9MediaSurfaceKHR,
   }
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
-    LogWarning("there are no devices in context to support images");
+    LogPrintfWarning("there are no devices in context to support images (%zu device(s))",
+                     devices.size());
     return (cl_mem)0;
   }
   // Verify the resource is a 2D image
@@ -229,6 +255,8 @@ cl_mem amd::clCreateImage2DFromD3D9ResourceAMD(amd::Context& amdContext, cl_mem_
   cl_int errcode =
       amd::D3D9Object::initD3D9Object(amdContext, adapter_type, surface_info, plane, obj);
   if (CL_SUCCESS != errcode) {
+    LogPrintfError("D3D9 interop: initD3D9Object(adapter=0x%x, plane=%u) failed: %d", adapter_type,
+                   plane, errcode);
     *not_null(errcode_ret) = errcode;
     return (cl_mem)0;
   }
@@ -274,8 +302,14 @@ void amd::SyncD3D9Objects(std::vector<amd::Memory*>& memObjects) {
   }
   amd::ScopedLock sl(d3d9Obj->getResLock());
   query->Issue(D3DISSUE_END);
+  // S_FALSE means the query has not retired yet; anything else ends the wait. Spinning on
+  // "not S_OK" would never terminate once the device is lost.
   BOOL data = FALSE;
-  while (S_OK != query->GetData(&data, sizeof(BOOL), D3DGETDATA_FLUSH)) {
+  HRESULT queryHr;
+  while (S_FALSE == (queryHr = query->GetData(&data, sizeof(BOOL), D3DGETDATA_FLUSH))) {
+  }
+  if (FAILED(queryHr)) {
+    LogPrintfError("D3D9 interop: IDirect3DQuery9::GetData failed: 0x%xh", queryHr);
   }
 }
 

@@ -94,6 +94,7 @@
  *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
  *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
  * - 1.37 - hsa_amd_memory_async_batch_copy: HSA_AMD_MEMORY_COPY_OP_RECT
+ * - 1.37 - hsa_amd_external_semaphore_handle_create
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
 #define HSA_AMD_INTERFACE_VERSION_MINOR 37
@@ -3575,10 +3576,55 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
     hsa_amd_external_semaphore_t *out_sem);
 
 /**
- * @brief Releases an imported external semaphore. Keep the handle alive
- * as long as any queued signal/wait that references it may still be
- * in flight, and as long as the higher-level (HIP / rocclr) wrapper that
- * owns the same syncobj.
+ * @brief Descriptor passed to hsa_amd_external_semaphore_handle_create.
+ */
+typedef struct {
+  hsa_amd_external_semaphore_handle_type_t type;  // only OPAQUE_WIN32 today
+  uint64_t initial_value;                         // starting fence value
+  uint32_t timeline;                              // 0 = binary semaphore
+} hsa_amd_external_semaphore_create_descriptor_t;
+
+/**
+ * @brief Creates a semaphore owned by this agent and exportable to
+ * another API (e.g. Vulkan) - the mirror of
+ * hsa_amd_external_semaphore_handle_open.
+ *
+ * Returns two things describing one object. @p out_sem is the same
+ * opaque flavour the import path produces, so
+ * hsa_amd_queue_signal_external_semaphore / _wait_external_semaphore and
+ * hsa_amd_external_semaphore_handle_close all apply to it unchanged.
+ * @p out_os_handle is a NEW OS handle that the CALLER owns and must
+ * close; hsa_amd_external_semaphore_handle_close does NOT close it,
+ * because the importing API does not take ownership and may outlive the
+ * semaphore.
+ *
+ * @param[in] agent A GPU agent whose node will own the syncobj.
+ * @param[in] desc Descriptor naming the handle type and initial value.
+ * @param[out] out_sem On success, the created semaphore.
+ * @param[out] out_os_handle On success, a new caller-owned OS handle.
+ *
+ * @retval HSA_STATUS_SUCCESS Created.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT Agent is not a GPU, or its
+ *   KMD node has no associated WDDM device.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem/out_os_handle null.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED The handle type is unsupported
+ *   (only OPAQUE_WIN32 is wired; a KMT handle is process-local and cannot
+ *   carry sharing attributes), or libhsakmt lacks the create/destroy
+ *   thunks (incl. the Linux/KFD stub).
+ * @retval HSA_STATUS_ERROR Underlying KMD create or export failed.
+ */
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_create(
+    hsa_agent_t agent,
+    const hsa_amd_external_semaphore_create_descriptor_t *desc,
+    hsa_amd_external_semaphore_t *out_sem,
+    void **out_os_handle);
+
+/**
+ * @brief Releases an imported or created external semaphore. Keep the
+ * handle alive as long as any queued signal/wait that references it may
+ * still be in flight, and as long as the higher-level (HIP / rocclr)
+ * wrapper that owns the same syncobj. Does not close any OS handle
+ * returned by hsa_amd_external_semaphore_handle_create.
  */
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem);
