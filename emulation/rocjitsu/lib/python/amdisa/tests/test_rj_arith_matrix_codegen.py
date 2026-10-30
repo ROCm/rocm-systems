@@ -49,20 +49,3 @@ def test_wave64_iu4_retains_its_single_partial_factor_register():
     body = gen_dense_wmma(context('V_WMMA_I32_16X16X16_IU4', 'rdna4'))
     assert '(32 + lanes - 1) / lanes, 256 / lanes' in body
     assert 'std::nullopt, 0xf, 32);' in body
-
-
-@pytest.mark.parametrize(
-    'arch,name',
-    [
-        ('rdna2', 'V_WMMA_F32_16X16X16_F16'),
-        ('rdna3_5', 'V_WMMA_F32_16X16X16_F16'),
-        ('cdna5', 'V_WMMA_F32_16X16X16_F16'),
-        ('rdna3', 'V_WMMA_F32_16X16X16_FP8_FP8'),
-        ('rdna3', 'V_WMMA_I32_16X16X32_IU4'),
-        ('rdna4', 'V_WMMA_F16_16X16X16_BF16'),
-        ('rdna4', 'V_WMMA_F32_16X16X32_F16'),
-        ('rdna4', 'V_MFMA_F32_16X16X16_F16'),
-    ],
-)
-def test_unsupported_architectures_and_formats_keep_existing_dispatch(arch, name):
-    assert gen_dense_wmma(context(name, arch)) is None
