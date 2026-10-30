@@ -3247,7 +3247,7 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
     // Dispatch a barrier packet into the queue
     gpu_.dispatchBarrierPacket(kBarrierPacketHeader, kSkipSignal, chunk_signal);
     // Get the next chunk
-    active_chunk_ = ++active_chunk_ % num_chunk_signals_;
+    active_chunk_ = (active_chunk_ + 1) % num_chunk_signals_;
     // Make sure the new active chunk is free
     bool test = WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait(), /*yield=*/false,
                               gpu_.dev().QueueDeviceSignals());

@@ -989,7 +989,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
 	if (!desc || !res || desc->device_handle == NULL)
 		return HSAKMT_STATUS_INVALID_HANDLE;
 
-	pr_debug("[%s] type:%s handle:%lx size:%lx", __func__,
+	pr_debug("[%s] type:%s handle:%p size:%lx", __func__,
 		(desc->type == HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME) 	? "GEM_FLINK" :
 		(desc->type == HSA_EXTERNAL_HANDLE_KMS) 			? "KMS" :
 		(desc->type == HSA_EXTERNAL_HANDLE_DMA_BUF) 		? "DMA_BUF" :
