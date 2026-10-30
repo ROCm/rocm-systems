@@ -95,9 +95,7 @@ class DdaMPI_AllGatherLL128 : public DdaFabricMPITest
 protected:
     using SizeFn = std::function<size_t(const ncclComm*, int)>;
 
-    // Gathers sizeFor(comm, nRanks) bytes per rank kIterations times with fresh data and checks
-    // every call took LL128. A nonzero `threads` also checks the block size of the launch.
-    // Must be the last statement of the test body: the coordinated skips and asserts return from here.
+    // Checks kIterations LL128 gathers of sizeFor() bytes per rank, and `threads` if set; must end the test body.
     void runAllGather(const SizeFn& sizeFor, bool inPlace, unsigned threads = 0, const char* maxBlocks = nullptr)
     {
         if(!validateTestPrerequisites(kMinProcessesForMPI))

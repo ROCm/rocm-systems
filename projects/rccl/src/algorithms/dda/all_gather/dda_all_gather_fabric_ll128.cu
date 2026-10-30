@@ -21,8 +21,7 @@
 #include <cstdint>
 #include <utility>
 
-// Block sizes picked from the bytes each rank pushes ((nRanks - 1) x per-rank) when the override
-// is unset or invalid: small blocks spread few slices over more CUs, big ones keep more in flight.
+// Block size from bytes pushed, (nRanks - 1) x per-rank: small blocks spread few slices over more CUs.
 constexpr unsigned kDdaLL128AGLargeThreads = 512;
 constexpr unsigned kDdaLL128AGMidThreads = 256;
 constexpr unsigned kDdaLL128AGSmallThreads = 128;

@@ -260,8 +260,7 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_ThreadsOverrideMustBeAWarpMultip
   EXPECT_EQ(RunOne(8 * kSliceData / 4).grid.y, 1u);
 }
 
-// Without an override the block size follows the bytes each rank pushes, (nRanks - 1) x per-rank bytes:
-// 128 threads up to 4 MiB, 256 up to 16 MiB, 512 above.
+// No override: threads follow pushed bytes, (nRanks - 1) x per-rank: 128 to 4 MiB, 256 to 16 MiB, 512 above.
 TEST_F(DdaAllGatherFabricLL128Microtest, Launch_ThreadsFollowPushedBytes) {
   for (int nRanks : {5, 9}) {
     comm().nRanks = nRanks;

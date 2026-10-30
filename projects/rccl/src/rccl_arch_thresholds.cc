@@ -193,8 +193,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLLMaxPerRank = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    32ULL*1024,          // [2] AllGather       -- LL beats LL128 up to 256K on 8 ranks (16-64
-                         //                        ranks follow the per-rank share, not re-measured)
+    32ULL*1024,          // [2] AllGather       -- LL beats LL128 up to 256K on 8 ranks; 16-64 ranks not re-measured
     256ULL*1024,         // [3] ReduceScatter   -- LL past 2M/4M/8M/16M at 8/16/32/64 trails LL128 up to 2x
     1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
     0,                   // [5] SendRecv        -- not used
@@ -239,8 +238,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .arTreeLL128Unlimited = true,                   // Tree LL128 beats Tree Simple 1.3-2.9x at 32M-16G
   .arTreeMaxPerRank = 1ULL*1024*1024,             // Tree beats Ring 1.4-2.3x to 8M/16M/32M/64M
   .arTreeLLMaxPerRank = 32ULL*1024,               // Tree LL beats LL128 1.2-1.6x to 256K/512K/1M/2M
-  .agRingLL128MaxPerRank = 32ULL*1024*1024,       // Ring LL128 to 256M on 8 ranks; Simple wins from 512M
-                                                  // (16-64 ranks not re-measured)
+  .agRingLL128MaxPerRank = 32ULL*1024*1024,       // Ring LL128 to 256M, Simple from 512M; measured on 8 ranks
   .rsRingLL128MinPerRank = 512ULL*1024,           // Ring LL128 beats LL from 1M per rank
   .rsRingLL128MaxPerRank = 8ULL*1024*1024,        // 2/4-byte types: Simple wins past 8M per rank
   .rsRingLL128MaxPerRank1B = 32ULL*1024*1024,     // fp8: LL128 holds to 32M per rank

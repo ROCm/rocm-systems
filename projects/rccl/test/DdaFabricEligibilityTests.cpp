@@ -553,8 +553,7 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL_UnalignedCount)
         mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32));
 }
 
-// The cap comes from the gfx1250 table the fixture's archName selects: 256 KiB total
-// below 8 ranks, nRanks x 32 KiB from 8.
+// The cap comes from the fixture's gfx1250 table: 256 KiB total below 8 ranks, nRanks x 32 KiB from 8.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL_AtThresholdEligible)
 {
     for (int nRanks : {4, 8})
@@ -768,8 +767,7 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
 
-// Below 8 ranks the gfx1250 table caps the whole message at 128 MiB; the rank-scaled
-// caps from 8 ranks are covered by DdaFabricLL128EligibilityTest.
+// Below 8 ranks the gfx1250 table caps the whole message at 128 MiB; DdaFabricLL128EligibilityTest covers 8+ ranks.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL128_AtThresholdEligible)
 {
     mockComm_.comm.nRanks = 4;
