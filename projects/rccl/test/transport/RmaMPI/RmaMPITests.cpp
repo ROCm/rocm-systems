@@ -523,9 +523,7 @@ TEST_P(RmaMPITest, MixedIPutIGetIPutSignal)
     }
 }
 
-// Aggregated puts on a context share one doorbell and only the last of them
-// raises a completion, so every earlier put completes through the sequence
-// number that completion carries rather than through a completion of its own.
+// Earlier aggregated puts complete through the tail completion's sequence number, not a completion of their own.
 TEST_P(RmaMPITest, AggregatedIPutsCompleteBySequence)
 {
     if(!SetUpFixture(2, 2))
@@ -555,9 +553,9 @@ TEST_P(RmaMPITest, AggregatedIPutsCompleteBySequence)
     ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kBufSize, &recvMh, &recvGh));
 
     Barrier();
+    std::vector<void*> reqs(kInflightN, nullptr);
     if(worldRank_ == 0)
     {
-        std::vector<void*> reqs(kInflightN, nullptr);
         for(int i = 0; i < kInflightN; ++i)
         {
             ASSERT_EQ(ncclSuccess,
@@ -567,7 +565,18 @@ TEST_P(RmaMPITest, AggregatedIPutsCompleteBySequence)
                                  /*peerRank=*/1, &reqs[i],
                                  ncclRmaOptFlagsAggregateRequests));
         }
+    }
 
+    // The batch stays queued until the first test() rings the doorbell.
+    Barrier();
+    if(worldRank_ == 1 && RetiresBatchOnTailCompletion())
+    {
+        EXPECT_TRUE(AllSentinel(recvBuf, kBufSize, 0)) << "batch posted before test()";
+    }
+    Barrier();
+
+    if(worldRank_ == 0)
+    {
         // The first request of each context is unsignaled: polling it rings
         // that context's doorbell and waits for the batch tail's completion.
         for(int c = 0; c < nCtx; ++c)
@@ -606,9 +615,7 @@ TEST_P(RmaMPITest, AggregatedIPutsCompleteBySequence)
     }
 }
 
-// An unsignaled RDMA READ completes through the completion of a later write and
-// atomic in the same batch, so its data must already be in place once test()
-// reports it done.
+// An unsignaled RDMA READ completes via a later write and atomic, so its data is in place when test() reports done.
 TEST_P(RmaMPITest, AggregatedMixedBatchCompletesInPostingOrder)
 {
     if(!SetUpFixture(2, 2))
@@ -650,24 +657,39 @@ TEST_P(RmaMPITest, AggregatedMixedBatchCompletesInPostingOrder)
     ASSERT_EQ(ncclSuccess, RegMr(psRecvBuf,  kSize,       &psRecvMh,  &psRecvGh));
     ASSERT_EQ(ncclSuccess, RegMr(sigBuf,     kSignalSize, &sigMh,     &sigGh));
 
+    // Ctx2 must not repeat Ctx1: post the batch on the last context.
+    const int ctx = NumContexts() - 1;
+
     Barrier();
+    void *getReq = nullptr, *putReq = nullptr, *psReq = nullptr;
     if(worldRank_ == 0)
     {
-        void *getReq = nullptr, *putReq = nullptr, *psReq = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  IGet( /*context=*/0, 0, getMh, kSize, 0, getMh, 1, &getReq,
+                  IGet( /*context=*/ctx, 0, getMh, kSize, 0, getMh, 1, &getReq,
                        ncclRmaOptFlagsAggregateRequests));
         ASSERT_EQ(ncclSuccess,
-                  IPut( /*context=*/0, 0, putSendMh, kSize, 0, putRecvMh, 1, &putReq,
+                  IPut( /*context=*/ctx, 0, putSendMh, kSize, 0, putRecvMh, 1, &putReq,
                        ncclRmaOptFlagsAggregateRequests));
         ASSERT_EQ(ncclSuccess,
-                  IPutSignal( /*context=*/0,
+                  IPutSignal( /*context=*/ctx,
                                    0, psSendMh, kSize,
                                    0, psRecvMh, 1,
                                    0, sigMh, /*signalValue=*/0,
                                    NCCL_NET_SIGNAL_OP_INC, &psReq,
                                    ncclRmaOptFlagsAggregateRequests));
+    }
 
+    // The batch stays queued until the first test() rings the doorbell.
+    Barrier();
+    if(worldRank_ == 1 && RetiresBatchOnTailCompletion())
+    {
+        EXPECT_TRUE(AllSentinel(putRecvBuf, kSize, 0)) << "batch posted before test()";
+        EXPECT_EQ(ReadSignal(sigBuf), 0u) << "batch posted before test()";
+    }
+    Barrier();
+
+    if(worldRank_ == 0)
+    {
         EXPECT_TRUE(PollUntilDone(getReq));
         EXPECT_TRUE(VerifyBuf(getBuf, kSize, /*seed=*/0x42))
             << "iget reported done before its data landed";

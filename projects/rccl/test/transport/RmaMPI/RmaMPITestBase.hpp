@@ -403,10 +403,7 @@ protected:
         return done != 0;
     }
 
-    // The net_ib proxy signals only the last work request of a batch, so one
-    // completion retires every request queued ahead of it. ib-cast keeps its own
-    // proxy that signals every request, and a smaller NCCL_RMA_IB_WR_BATCHSIZE
-    // splits the batch, so neither retires a whole batch at once.
+    // Only net_ib at the default batch size signals just a batch's tail, so one completion retires the whole batch.
     bool RetiresBatchOnTailCompletion() const
     {
         return rma_ == &ncclRmaIbProxy && std::getenv("NCCL_RMA_IB_WR_BATCHSIZE") == nullptr;
