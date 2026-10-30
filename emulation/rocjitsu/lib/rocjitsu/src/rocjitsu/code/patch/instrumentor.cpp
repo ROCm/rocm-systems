@@ -1368,7 +1368,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   probe_summaries.reserve(resolved.probes.size());
   for (const ProbeCallable &probe : resolved.probes) {
     std::string probe_err;
-    auto summary = build_probe_clobber_summary(probe, *resolved.wave_size, &probe_err);
+    std::optional<ProbeClobberSummary> summary =
+        build_probe_clobber_summary(probe, *resolved.wave_size, &probe_err);
     if (!summary) {
       result.errors.push_back(std::move(probe_err));
       continue;
