@@ -22,6 +22,7 @@
 // These tests exercise the fixed code paths with inputs that would have
 // triggered corruption before the fix.
 
+#include "DdaFabricMPITestFixture.hpp" // DdaFabricMPI::waitStreamBounded, abortJobUnlessAllRanksDrained
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
@@ -32,6 +33,8 @@
 #include "rccl_common.h"  // rcclSymKGetInfo, rcclAddonAlgos_t
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -535,7 +538,8 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedOps_Sub8ByteAlignment)
 //
 // Forces ReduceScatter_LL, the only caller of ncclLLA2ASession::send, and
 // sends values unique per (rank, index) so a lane or slot permutation in the
-// send path lands a wrong value in a checked output element.
+// send path lands a wrong value in a checked output element. Also forces
+// AllReduce_AGxLL_R, whose last epoch narrows the bcast slot stride.
 // ===========================================================================
 
 // A slot shift that leaves a slot unwritten hangs recvReduce instead of failing; only the runner timeout shows it.
@@ -628,6 +632,150 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatterLL_PositionDependentData)
         {
             ADD_FAILURE() << "ReduceScatter_LL mismatch at recvCount=" << recvCount << " index=" << errIdx
                           << " expected=" << expVal << " got=" << actVal;
+        }
+        // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next LL kernel.
+        ASSERT_MPI_TRUE(ok);
+    }
+}
+
+// One CTA of 256 threads moves 256 8-byte packs per LL epoch, so 1100 floats end in a 38-pack wave and 2050 in a
+// 1-pack wave, where the slot stride shrinks; odd counts and a one-float input skew take the unaligned arm.
+TEST_F(SymmetricKernelCorruptionTest, AllReduceLL_PinnedTailWave)
+{
+    // AllReduce_AGxLL_R needs a single LSA team: at most 8 ranks on one node.
+    constexpr int kMaxRanks = 8;
+    if(!validateTestPrerequisites(2, kMaxRanks, false, 1, 1))
+    {
+        GTEST_SKIP() << "Need 2 to " << kMaxRanks << " MPI ranks on a single node";
+    }
+
+    // NCCL_PARAM caches NCCL_SYM_CTAS at its first read, so only the launch environment pins it reliably.
+    constexpr int     kCtas   = 1;
+    const char*       ctasEnv = std::getenv("NCCL_SYM_CTAS");
+    const std::string noCtas  = mpiCoordinatedSkipReason(ctasEnv == nullptr || std::atoi(ctasEnv) != kCtas,
+                                                        "Needs NCCL_SYM_CTAS=1 in the launch environment");
+    if(!noCtas.empty())
+    {
+        GTEST_SKIP() << noCtas;
+    }
+
+    // Read at communicator init, so the guard must outlive createTestCommunicator.
+    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "AllReduce_AGxLL_R");
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    struct Case
+    {
+        size_t count;
+        size_t skew; // input offset in floats
+    };
+    const std::vector<Case> cases = {{1100, 0}, {1101, 0}, {2050, 0}, {2051, 0}, {1100, 1}, {2050, 1}};
+    constexpr size_t        kMaxCount = 2051;
+    constexpr size_t        kMaxSkew  = 1;
+    // The output sits 4 floats in, keeping it 8-byte aligned with a guard before it.
+    constexpr size_t kOutOff  = 4;
+    constexpr size_t kGuard   = 16;
+    constexpr float  kSendPad = -3.0f;
+    constexpr float  kRecvPad = -7.0f;
+
+    // value(s, i) = i * 8 + s is injective; the largest sum over 8 ranks is about 2^17, so float addition is exact.
+    auto value = [](int src, size_t idx) {
+        return static_cast<float>(idx * kMaxRanks + static_cast<size_t>(src));
+    };
+
+    const size_t sendWinElts = kMaxSkew + kMaxCount + kGuard;
+    const size_t recvWinElts = kOutOff + kMaxCount + kGuard;
+
+    // Window registration is collective, so allocate once and agree on the outcome before any rank can skip.
+    SymBuf            sendSym;
+    SymBuf            recvSym;
+    const std::string noSym
+        = allocSymBufsSkipReason({{sendWinElts * sizeof(float), &sendSym}, {recvWinElts * sizeof(float), &recvSym}});
+    if(!noSym.empty())
+    {
+        GTEST_SKIP() << noSym;
+    }
+
+    // Without symmetricSupport the forced kernel is ineligible; skip with that reason instead of on ncclInvalidUsage.
+    ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(getActiveCommunicator(), &props));
+    int symmetric = props.deviceApiSupport ? 1 : 0;
+    ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!symmetric)
+    {
+        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem/VMM unavailable)";
+    }
+
+    bool first = true;
+    for(const Case& c : cases)
+    {
+        float* send = static_cast<float*>(sendSym.ptr) + c.skew;
+        float* recv = static_cast<float*>(recvSym.ptr) + kOutOff;
+
+        ASSERT_MPI_EQ(hipSuccess,
+                      initializeBufferWithPattern<float>(sendSym.ptr, sendWinElts, [&](size_t j) {
+                          return j >= c.skew && j < c.skew + c.count ? value(rank, j - c.skew) : kSendPad;
+                      }));
+        ASSERT_MPI_EQ(hipSuccess,
+                      initializeBufferWithPattern<float>(recvSym.ptr, recvWinElts, [](size_t) { return kRecvPad; }));
+
+        // Only the first call may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
+        ncclResult_t res = ncclAllReduce(send, recv, c.count, ncclFloat, ncclSum, getActiveCommunicator(),
+                                         getActiveStream());
+        // A slot no peer writes leaves recvReduce spinning; abort the job rather than wait for the runner timeout.
+        if(res == ncclSuccess)
+        {
+            const std::string what = "AllReduce_AGxLL_R count=" + std::to_string(c.count)
+                                     + " skew=" + std::to_string(c.skew);
+            DdaFabricMPI::abortJobUnlessAllRanksDrained(
+                DdaFabricMPI::waitStreamBounded(getActiveStream(), std::chrono::seconds(60)), what.c_str());
+        }
+        const std::string ineligible
+            = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first,
+                                       "AllReduce_AGxLL_R symmetric kernel not eligible on this topology");
+        if(!ineligible.empty())
+        {
+            GTEST_SKIP() << ineligible;
+        }
+        first = false;
+        ASSERT_MPI_EQ(ncclSuccess, res);
+
+        // A fallback to another backend or CTA count would not reach the tail waves above.
+        int algo{-1}, proto{-1}, nChannels{};
+        ASSERT_MPI_EQ(ncclSuccess,
+                      rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, c.count, ncclFloat, ncclSum,
+                                          send, recv, /*graphCapturing=*/0, &algo, &proto, &nChannels));
+        ASSERT_MPI_EQ(static_cast<int>(RCCL_SYMMETRIC), algo);
+        ASSERT_MPI_EQ(NCCL_PROTO_LL, proto);
+        ASSERT_MPI_EQ(kCtas, nChannels);
+
+        const size_t count    = c.count;
+        auto         expected = [nRanks, count, &value](size_t j) {
+            if(j < kOutOff || j >= kOutOff + count)
+            {
+                return kRecvPad;
+            }
+            float sum = 0.0f;
+            for(int s = 0; s < nRanks; ++s)
+            {
+                sum += value(s, j - kOutOff);
+            }
+            return sum;
+        };
+
+        size_t errIdx{};
+        float  expVal{}, actVal{};
+        bool   ok = verifyBufferData<float>(recvSym.ptr, recvWinElts, expected, 0, 0, &errIdx, &expVal, &actVal);
+        if(!ok)
+        {
+            const bool inOutput = errIdx >= kOutOff && errIdx < kOutOff + count;
+            ADD_FAILURE() << "AllReduce_AGxLL_R mismatch at count=" << count << " skew=" << c.skew << ", "
+                          << (inOutput ? "output index " : "guard at window index ")
+                          << (inOutput ? errIdx - kOutOff : errIdx) << " expected=" << expVal << " got=" << actVal;
         }
         // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next LL kernel.
         ASSERT_MPI_TRUE(ok);
