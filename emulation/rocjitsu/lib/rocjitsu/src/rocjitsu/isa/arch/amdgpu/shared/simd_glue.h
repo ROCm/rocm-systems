@@ -1182,7 +1182,9 @@ inline util::native<double> fma_f64_mode_simd(util::native<double> src0, util::n
   }
 
   util::native<double> result;
-  {
+  if (fp_mode::native_arithmetic_matches(round_mode, denorm_mode)) {
+    result = util::stdx::fma(src0, src1, src2);
+  } else {
     fp_mode::ScopedEnvironment environment(round_mode);
     result = util::stdx::fma(src0, src1, src2);
   }
