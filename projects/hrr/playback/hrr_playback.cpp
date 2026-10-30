@@ -1336,7 +1336,8 @@ static bool write_root_manifest(const fs::path& root,
 //
 // Returns false if this is not a multi-process root, leaving the caller to
 // handle the path as a single archive. Sets exit_code only when it returns true.
-static bool repair_root(const std::string& archive_path, int& exit_code) {
+static bool repair_root(const std::string& archive_path, uint64_t host_cap,
+                        int& exit_code) {
   fs::path root(archive_path);
   if (fs::exists(root / "events.bin")) return false;
   // The root is the path the user named, so any link in it is theirs and is
@@ -1387,9 +1388,11 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
     }
 
     // Scoped per iteration so each archive's events are released before the
-    // next is read — these run to gigabytes apiece.
+    // next is read — these run to gigabytes apiece. Each pid gets its own
+    // --max-host-bytes budget, released with its archive.
+    hrr::ByteBudget budget(host_cap);
     hrr::Archive archive;
-    if (!hrr::load_archive(dir.string(), archive)) {
+    if (!hrr::load_archive(dir.string(), archive, &budget)) {
       fprintf(stderr, "[HRR] repair: cannot load %s; skipping\n", dir.string().c_str());
       failed++;
       continue;
@@ -1496,12 +1499,13 @@ static void print_usage(const char* argv0) {
     "  --max-threads N       Refuse a --multi-thread replay of an archive recording\n"
     "                        more than N threads. Default 256.\n"
     "  --max-events N        Refuse an archive with more than N events. Default 50000000.\n"
-    "  --max-host-bytes N    End the replay when host memory held for the archive\n"
+    "  --max-host-bytes N    Refuse an archive that would hold more than N bytes once\n"
+    "                        loaded, and end the replay when host memory held for it\n"
     "                        (blob caches, pinned buffers, read-backs) would pass N\n"
     "                        bytes. Default 17179869184 (16 GiB).\n"
-    "  --max-wall-seconds S  End the replay after S seconds (0 = no limit; at most\n"
-    "                        31536000, 365 days).\n"
-    "                        Default 3600.\n"
+    "  --max-wall-seconds S  End the run after S seconds, loading the archive\n"
+    "                        included (0 = no limit; at most 31536000, 365 days).\n"
+    "                        --repair is not limited. Default 3600.\n"
     "  --trace-kernels       Print one compact line before every kernel launch\n"
     "  --trace-sync          Print sync begin/done markers around kernel syncs\n"
     "  --progress-kernels N  Print heartbeat every N launched kernels\n"
@@ -1737,6 +1741,23 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // Wall-clock limit for the whole run, started before the archive is read: the
+  // load is bounded by it too (--info included), and it can be blocked in a
+  // read or a HIP call that no flag interrupts, so the watchdog ends the
+  // process. --repair keeps its own pace; it has no replay to bound and its
+  // load is still capped in bytes.
+  hrr::WallClockWatchdog wall_watchdog(
+      std::chrono::milliseconds(do_repair ? 0 : max_wall_secs * 1000),
+      [max_wall_secs] {
+        fprintf(stderr,
+                "[HRR] Fatal: still running after %llu s "
+                "(--max-wall-seconds); ending it\n",
+                (unsigned long long)max_wall_secs);
+        fflush(stdout);
+        fflush(stderr);
+        std::_Exit(124);
+      });
+
   // --info on an archive root prints the common process summary. Direct
   // pid-<pid> paths continue through load_archive for detailed event info.
   if (show_info && print_root_info(archive_path))
@@ -1746,11 +1767,11 @@ int main(int argc, char** argv) {
   // Direct pid-<pid> paths fall through to the single-archive path below.
   if (do_repair) {
     int repair_exit = 0;
-    if (repair_root(archive_path, repair_exit)) return repair_exit;
+    if (repair_root(archive_path, ctx.host_budget.cap(), repair_exit)) return repair_exit;
   }
 
   hrr::Archive archive;
-  if (!hrr::load_archive(archive_path, archive)) return 1;
+  if (!hrr::load_archive(archive_path, archive, &ctx.host_budget)) return 1;
 
   // --info: print summary and exit without touching the GPU
   if (show_info) {
@@ -1788,19 +1809,6 @@ int main(int argc, char** argv) {
       return 1;
     }
   }
-
-  // Wall-clock limit for the whole replay. The replay can be blocked inside a
-  // HIP call that no flag interrupts, so the watchdog ends the process.
-  hrr::WallClockWatchdog wall_watchdog(
-      std::chrono::milliseconds(max_wall_secs * 1000), [max_wall_secs] {
-        fprintf(stderr,
-                "[HRR] Fatal: replay still running after %llu s "
-                "(--max-wall-seconds); ending it\n",
-                (unsigned long long)max_wall_secs);
-        fflush(stdout);
-        fflush(stderr);
-        std::_Exit(124);
-      });
 
   // Capture-address placement: hold every recorded hipMalloc and
   // hipMallocAsync range before hipInit, so the runtime cannot take it.

@@ -209,7 +209,7 @@ inline ssize_t rpc_recv_msg(int sock, void *data, size_t data_len, int *fds = nu
 /// @param buffer Buffer to read into.
 /// @param total_bytes Number of bytes to read.
 /// @retval true All bytes were read successfully.
-/// @retval false Connection closed or recv(2) returned an error (errno is set).
+/// @retval false Connection closed or recvmsg(2) returned an error (errno is set).
 /// @note Deliberately reports no byte count, unlike rpc_send_exact(). A sender
 /// needs the zero-versus-partial distinction because a frame that never started
 /// leaves the stream aligned; a receiver does not, because by the time a reply
@@ -220,7 +220,11 @@ inline bool rpc_recv_exact(int sock, void *buffer, size_t total_bytes) {
   auto *cursor = static_cast<uint8_t *>(buffer);
   size_t remaining = total_bytes;
   while (remaining > 0) {
-    ssize_t bytes_read = recv(sock, cursor, remaining, 0);
+    iovec iov{cursor, remaining};
+    msghdr msg{};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    ssize_t bytes_read = recvmsg(sock, &msg, 0);
     if (bytes_read < 0 && errno == EINTR)
       continue;
     if (bytes_read <= 0)
@@ -241,7 +245,9 @@ inline bool rpc_recv_exact(int sock, void *buffer, size_t total_bytes) {
 /// parseable needs this: a failure at zero bytes puts nothing on the wire, any
 /// other failure leaves the peer parsing a truncated frame.
 /// @retval true All bytes were sent successfully.
-/// @retval false Connection closed or send(2) returned an error (errno is set).
+/// @retval false Connection closed or sendmsg(2) returned an error (errno is set).
+/// @note Uses the same syscall as descriptor-bearing frames so a transport that
+/// permits SCM_RIGHTS traffic does not also require send(2) or sendto(2).
 inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes,
                            size_t *bytes_sent_out = nullptr) {
   auto *cursor = static_cast<const uint8_t *>(buffer);
@@ -252,7 +258,7 @@ inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes,
     return complete;
   };
   while (remaining > 0) {
-    ssize_t bytes_sent = send(sock, cursor, remaining, MSG_NOSIGNAL);
+    ssize_t bytes_sent = rpc_send_msg(sock, cursor, remaining);
     if (bytes_sent < 0 && errno == EINTR)
       continue;
     if (bytes_sent <= 0)
