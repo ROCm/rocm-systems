@@ -61,16 +61,30 @@ private:
   CopyFunction copy_ = nullptr;
 };
 
-/// @brief The in-bounds global requests attempted by one tensor DMA instruction.
+/// @brief One contiguous run of LDS bytes touched by a tensor DMA transfer.
+struct TensorDmaLdsRange {
+  uint32_t address = 0; ///< Absolute CU LDS byte address.
+  uint32_t bytes = 0;
+
+  bool operator==(const TensorDmaLdsRange &) const = default;
+};
+
+/// @brief The global and LDS accesses performed by one tensor DMA instruction.
 ///
 /// @details The address view contains only in-bounds global element base
 /// addresses, in the exact order in which the implementation attempted them.
-/// Duplicates are preserved. The callback is emitted only after the instruction
-/// and any descriptor-requested atomic-barrier arrival return normally. Memory
-/// access outcomes are intentionally not filtered, matching the observer's
-/// boundary.
+/// Duplicates are preserved. The LDS ranges describe the bytes the transfer
+/// wrote (loads) or read (stores), in element order, with adjacent elements
+/// merged. A load writes every element, zero-filling those outside the tensor,
+/// so its LDS ranges can be nonempty when the address view is empty. A store
+/// reads only in-bounds elements. Bytes outside the wave's LDS allocation are
+/// not transferred and are omitted. The callback is emitted once for every
+/// tensor DMA instruction that completes, after any descriptor-requested
+/// atomic-barrier arrival, including a NULL tensor or a tile that moves no
+/// data: each still completes on TENSORcnt. Memory access outcomes are
+/// intentionally not filtered, matching the observer's boundary.
 ///
-/// The view borrows execution-owned context and is valid only for the duration
+/// The views borrow execution-owned context and are valid only for the duration
 /// of the callback. A consumer that keeps addresses must copy them during the
 /// callback.
 struct TensorDmaMemoryAccessObservation {
@@ -92,6 +106,10 @@ struct TensorDmaMemoryAccessObservation {
   uint32_t data_size = 0;         ///< Raw element-size code; bytes = 1 << data_size.
   int64_t tensor_dim0_stride = 0; ///< Descriptor dimension-zero stride in bytes.
   int64_t tensor_dim1_stride = 0; ///< Descriptor dimension-one stride in bytes.
+  std::span<const TensorDmaLdsRange> lds_ranges{}; ///< LDS bytes written or read.
+  /// PC of the tensor DMA instruction. Differs from pc when a deferred transfer
+  /// completes after the wavefront has advanced past the instruction.
+  uint64_t instruction_pc = 0;
 };
 
 } // namespace rocjitsu::amdgpu
