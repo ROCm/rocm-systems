@@ -60,6 +60,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
 
+* Renamed the roofline options to start with `--roofline`. The old names still work for now but print a warning, so update your commands:
+  * `--roof-only` → `--roofline`
+  * `--bench-only` → `--roofline-bench-only`
+  * `--device` → `--roofline-device`
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -103,6 +108,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 * Comma-separated `--specs-correction` pairs are deprecated and will be removed in a future release. Separate the pairs with spaces instead.
+
+* The old roofline option names (`--roof-only`, `--bench-only`, and `--device`) will be removed in a future release. Use the new `--roofline-*` names instead.
 
 ### Known issues
 
