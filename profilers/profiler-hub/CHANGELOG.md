@@ -24,6 +24,7 @@ downstream consumer of the library.
 
 - Windows/MSVC build support. When SQLite is fetched, Windows downloads the
   official amalgamation zip instead of running `./configure`.
+- `storage_t` accepts a RocPD schema version. The two-argument constructor still writes schema 3.0.1. `version_t{}` selects the newest embedded schema. An unknown version fails initialization.
 
 ### Changed
 
