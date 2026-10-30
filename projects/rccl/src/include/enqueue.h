@@ -61,6 +61,9 @@ struct rcclAddonLaunchState {
   // Whether the prologue offered the stop event, which is what lets the epilogue tell a taken event from one
   // that was never on offer. False while capturing, where a fused stop event is not bound.
   bool eventOffered;
+  // RCCL_ADDON_DONE_EVENT_ORDERING. When false the launch neither waits on nor records doneEvent, leaving
+  // cross-stream ordering of the collective to the application.
+  bool doneEventOrdering;
   bool capturing;
   struct ncclCudaGraph graph;
   // Set once sharedRes->deviceStream is acquired; the epilogue must release it on every path.
