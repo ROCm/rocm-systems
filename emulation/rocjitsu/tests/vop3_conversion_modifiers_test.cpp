@@ -129,8 +129,9 @@ TEST(RdnaVop3ConversionTest, FloatToHalfPreservesOverflowMode) {
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
             const auto &c = cases[lane % std::size(cases)];
-            const uint32_t expected =
-                exec & (1ull << lane) ? (fp16_ovfl ? c.saturated : c.normal) : 0xdeadbeefu;
+            const uint32_t expected = exec & (1ull << lane)
+                                          ? 0xdead0000u | (fp16_ovfl ? c.saturated : c.normal)
+                                          : 0xdeadbeefu;
             EXPECT_EQ(cu->read_vgpr(vb + 2, lane), expected)
                 << "arch=" << arch << " input=" << c.input << " fp16_ovfl=" << fp16_ovfl
                 << " scalar=" << force_scalar << " exec=" << exec << " lane=" << lane;
@@ -683,9 +684,7 @@ TEST_P(Vop3ConversionModifierTest, UnaryNormalizedHalfRoundsOnceAndAppliesModifi
       {0x3801, 0x801f, 0x400f}, {0xb801, 0x801f, 0x400f}, {0x3c00, 0xffff, 0x7fff},
       {0xbc00, 0xffff, 0x7fff}, {0x3c01, 0xffff, 0x7fff}, {0xbc01, 0xffff, 0x7fff},
       {0x7c00, 0xffff, 0x7fff}, {0xfc00, 0xffff, 0x7fff}, {0x7e01, 0, 0}};
-  const bool early_rdna =
-      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
-  const bool preserve_high = !gfx9() && !early_rdna;
+  const bool preserve_high = !gfx9();
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
     amdgpu::GpuMemory memory("unary_normalized_memory");
@@ -771,6 +770,7 @@ TEST_P(Vop3ConversionModifierTest, FrexpExponentIsSignedIntegerWithoutOutputModi
   const bool early_rdna =
       GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
   const bool true16 = !gfx9() && !early_rdna;
+  const bool preserve_high = !gfx9();
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
     amdgpu::GpuMemory memory("frexp_exponent_memory");
@@ -825,10 +825,10 @@ TEST_P(Vop3ConversionModifierTest, FrexpExponentIsSignedIntegerWithoutOutputModi
                   const bool flushed = c.subnormal && !(mode & 0x40u);
                   const int32_t exponent = flushed ? 0 : f64 ? c.f64_exponent : c.f16_exponent;
                   const uint32_t half = static_cast<uint16_t>(exponent);
-                  const uint32_t expected = f64      ? static_cast<uint32_t>(exponent)
-                                            : high   ? (half << 16) | 0xa5a5u
-                                            : true16 ? 0xa5a50000u | half
-                                                     : half;
+                  const uint32_t expected = f64             ? static_cast<uint32_t>(exponent)
+                                            : high          ? (half << 16) | 0xa5a5u
+                                            : preserve_high ? 0xa5a50000u | half
+                                                            : half;
                   EXPECT_EQ(cu->read_vgpr(vb + 4, lane),
                             exec & (1ull << lane) ? expected : 0xa5a5a5a5u)
                       << "lane=" << lane << " exponent=" << exponent;
@@ -854,9 +854,7 @@ TEST_P(Vop3ConversionModifierTest, FrexpMantissaFlushesSubnormalSourcesUnderMode
   constexpr Case cases[] = {{0x3c00, 0x3800, 0x3ff0000000000000, 0x3fe0000000000000, false},
                             {0x0001, 0x3800, 0x0000000000000001, 0x3fe0000000000000, true},
                             {0x83ff, 0xbbfe, 0x800fffffffffffff, 0xbfeffffffffffffe, true}};
-  const bool early_rdna =
-      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
-  const bool preserve_high = !gfx9() && !early_rdna;
+  const bool preserve_high = !gfx9();
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
     amdgpu::GpuMemory memory("frexp_mantissa_memory");
@@ -1005,7 +1003,7 @@ TEST_P(Vop3ConversionModifierTest, HalfInputConversionsApplyModifiersAndMode) {
   };
   const bool early_rdna =
       GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
-  const bool preserve_half = !early_rdna && !gfx9();
+  const bool preserve_half = !gfx9();
   const bool always_quiet =
       GetParam() == ROCJITSU_CODE_ARCH_RDNA4 || GetParam() == ROCJITSU_CODE_ARCH_CDNA5;
   for (bool force_scalar : {false, true}) {
