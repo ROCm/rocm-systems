@@ -27,12 +27,15 @@ THE SOFTWARE.
 // flight keep the decoder busy across longer read, parse, and synchronize times, as with large batches on GPUs with
 // many JPEG cores, at the cost of GPU memory.
 static constexpr int kNumBatchSlots = 4;
+// Cap on the images each worker has in flight, so large batches get fewer slots (down to one) instead of growing GPU
+// memory with every slot.
+static constexpr int kMaxInFlightImages = 64;
 
 struct DecodeInfo {
     std::vector<std::string> file_paths;
     RocJpegHandle rocjpeg_handle;
     std::vector<RocJpegStreamHandle> rocjpeg_stream_handles;
-    std::vector<RocJpegImage> output_images; // kNumBatchSlots * batch_size, batch_size per slot
+    std::vector<RocJpegImage> output_images; // num_batch_slots * batch_size, batch_size per slot
     std::vector<std::vector<uint32_t>> allocated_channel_sizes;
     uint64_t num_decoded_images;
     double images_per_sec;
@@ -197,8 +200,9 @@ void SyncBatches(DecodeInfo &decode_info, std::vector<BatchSlot> &slots, BatchRi
  * @param save_images A boolean flag indicating whether to save the decoded images.
  * @param output_file_path The file path where the decoded images will be saved.
  * @param batch_size The number of images to be processed in each batch.
+ * @param num_batch_slots The number of batches that can be in flight at once.
  */
-void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDecodeParams &decode_params, bool save_images, std::string &output_file_path, int batch_size, int device_id) {
+void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDecodeParams &decode_params, bool save_images, std::string &output_file_path, int batch_size, int num_batch_slots, int device_id) {
 
     uint8_t num_components;
     uint32_t channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
@@ -214,7 +218,7 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
     auto& output_images = decode_info.output_images;
     auto& allocated_channel_sizes = decode_info.allocated_channel_sizes;
 
-    std::vector<BatchSlot> slots(kNumBatchSlots);
+    std::vector<BatchSlot> slots(num_batch_slots);
     for (auto &slot : slots) {
         slot.decode_params.resize(batch_size, decode_params);
         slot.images.resize(batch_size);
@@ -223,7 +227,7 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
         slot.subsamplings.resize(batch_size);
         slot.base_file_names.resize(batch_size);
     }
-    BatchRing ring(kNumBatchSlots);
+    BatchRing ring(num_batch_slots);
     std::thread sync_thread(SyncBatches, std::ref(decode_info), std::ref(slots), std::ref(ring), std::ref(rocjpeg_utils),
                             decode_params.output_format, save_images, std::cref(output_file_path), device_id);
 
@@ -351,6 +355,7 @@ int main(int argc, char **argv) {
         std::cerr << "ERROR: The batch size must be greater than 0!" << std::endl;
         return EXIT_FAILURE;
     }
+    const int num_batch_slots = std::max(1, std::min(kNumBatchSlots, kMaxInFlightImages / batch_size));
     if (!RocJpegUtils::GetFilePaths(input_path, file_paths, is_dir, is_file)) {
         std::cerr << "ERROR: Failed to get input file paths!" << std::endl;
         return EXIT_FAILURE;
@@ -406,9 +411,9 @@ int main(int argc, char **argv) {
             CHECK_ROCJPEG(rocJpegStreamCreate(&stream_handle));
         }
         // Each in-flight batch slot of the worker gets its own set of output buffers.
-        decode_info_per_thread[i].output_images.resize(kNumBatchSlots * batch_size);
-        decode_info_per_thread[i].allocated_channel_sizes.assign(kNumBatchSlots * batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
-        for (int b = 0; b < kNumBatchSlots * batch_size; b++) {
+        decode_info_per_thread[i].output_images.resize(num_batch_slots * batch_size);
+        decode_info_per_thread[i].allocated_channel_sizes.assign(num_batch_slots * batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
+        for (int b = 0; b < num_batch_slots * batch_size; b++) {
             for (int n = 0; n < ROCJPEG_MAX_COMPONENT; n++) {
                 if (kPreAllocSizes[n] > 0) {
                     CHECK_HIP(hipMalloc(&decode_info_per_thread[i].output_images[b].channel[n], kPreAllocSizes[n]));
@@ -439,7 +444,7 @@ int main(int argc, char **argv) {
     std::cout << "Decoding started with " << num_threads << " threads, please wait!" << std::endl;
     auto overall_start_time = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < num_threads; ++i) {
-        thread_pool.ExecuteJob(std::bind(DecodeImages, std::ref(decode_info_per_thread[i]), rocjpeg_utils, std::ref(decode_params), save_images, std::ref(output_file_path), batch_size, device_id));
+        thread_pool.ExecuteJob(std::bind(DecodeImages, std::ref(decode_info_per_thread[i]), rocjpeg_utils, std::ref(decode_params), save_images, std::ref(output_file_path), batch_size, num_batch_slots, device_id));
     }
     thread_pool.JoinThreads();
     auto overall_end_time = std::chrono::high_resolution_clock::now();
