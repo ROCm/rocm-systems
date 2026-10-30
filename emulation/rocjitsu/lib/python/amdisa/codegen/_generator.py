@@ -6688,6 +6688,8 @@ class CodeGenerator:
         has_abs = profile.has_abs_modifier(inst.enc_name)
         self._enc_name = enc_name
 
+        from amdisa.codegen.execute.rj_arith_vector import gen_integer_dot
+
         from amdisa.codegen.execute.rj_arith_division import gen_division
 
         rj_arith_division = gen_division(
@@ -6711,11 +6713,32 @@ class CodeGenerator:
             gen_packed_fma16,
             gen_mixed_fma,
             gen_packed_binary16,
+            gen_float_dot32,
+            gen_half_dot,
         )
 
         if result_writer is None:
             rj_arith_body = (
-                gen_packed_binary16(
+                gen_integer_dot(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                )
+                or gen_half_dot(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_dot32(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                )
+                or gen_packed_binary16(
                     self.isa_spec.arch_name,
                     inst.name,
                     dst_ops,
@@ -14026,6 +14049,9 @@ class CodeGenerator:
                         )
                         # rj-arith owns SIMD selection for migrated instructions. Never
                         # run a legacy arithmetic probe ahead of the rj-arith body.
+                        from amdisa.codegen.execute.rj_arith_vector import (
+                            INTEGER_DOT_NAMES,
+                        )
                         from amdisa.codegen.execute.rj_arith_division import (
                             DIVISION_NAMES,
                         )
@@ -14036,6 +14062,7 @@ class CodeGenerator:
                             'rdna4',
                         ) and (
                             inst.name in DIVISION_NAMES
+                            or inst.name in INTEGER_DOT_NAMES
                             or (
                                 inst.name in FLOAT_NAMES and _mask_result_writer is None
                             )
@@ -14649,7 +14676,17 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
+                from amdisa.codegen.execute.rj_arith_vector import INTEGER_DOT_NAMES
 
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    (i.name in INTEGER_DOT_NAMES for i in all_insts)
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h',
+                            False,
+                        )
+                    )
                 has_matrix_exec = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))

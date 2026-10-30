@@ -38,8 +38,9 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
     auto result = _mm256_setzero_si256();
     for (int half = 0; half < (Packed ? 2 : 1); ++half) {
       uint32_t m = instruction_flag_cases[half];
-      auto x = half_input<preserve_nan_inputs>(a_words, m & RJ_ARITH_ALU_HIGH_A ? 16 : 0, m);
-      auto y = half_input<preserve_nan_inputs>(b_words, m & RJ_ARITH_ALU_HIGH_B ? 16 : 0, m >> 1);
+      auto x = half_input<false, preserve_nan_inputs>(a_words, m & RJ_ARITH_ALU_HIGH_A ? 16 : 0, m);
+      auto y =
+          half_input<false, preserve_nan_inputs>(b_words, m & RJ_ARITH_ALU_HIGH_B ? 16 : 0, m >> 1);
       if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)) {
         // FP16 subnormals are normal FP32 values after conversion. Compare the
         // promoted magnitude against FP16's minimum normal, retaining the sign.
@@ -114,7 +115,7 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
         }
         value = clamped;
       }
-      auto encoded = half_narrow<legacy>(value, flags & RJ_ARITH_FP16_OVFL);
+      auto encoded = half_narrow<false, legacy>(value, flags & RJ_ARITH_FP16_OVFL);
       if constexpr (Packed && arithmetic) {
         if (preserve_input_snan && !(m & RJ_ARITH_ALU_CLAMP)) {
           // Restore selected raw sNaNs after F16C has quieted them.

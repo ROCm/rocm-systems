@@ -11,14 +11,49 @@
 #include <stdint.h>
 
 namespace rocjitsu::arith {
+// Loose FP16/BF16 DOT2 with a selected 16-bit result half.
+// Preserve the other destination half and inactive lanes; D may alias inputs.
+// Requires the named CPU features and validated instruction controls.
+void half_dot_x86_64_v4(bool bf16, bool saturate, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                        const uint32_t *a, const uint32_t *b, const uint32_t *c);
+
+// Loose four-product FP8/BF8 dot with FP32 accumulation.
+// Preserve inactive lanes; D may alias inputs.
+// Requires the named CPU features and validated instruction controls.
+void fp8_dot_x86_64_v4(bool bf8_a, bool bf8_b, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                       const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
+
+// Loose FP16/BF16 DOT2 with a selected 16-bit result half.
+// Preserve the other destination half and inactive lanes; D may alias inputs.
+// Requires the named CPU features and validated instruction controls.
+void half_dot_x86_64_v3(bool bf16, bool saturate, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                        const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // Loose FP8/BF8 WMMA in gfx12 Wave32 layout. D may alias any input.
 // Requires the named CPU features and validated instruction controls.
 template <bool Bf8A, bool Bf8B>
 void fp8_wmma_x86_64_v3(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                         const uint32_t *const *c);
+
+// Loose four-product FP8/BF8 dot with FP32 accumulation.
+// Preserve inactive lanes; D may alias inputs.
+// Requires the named CPU features and validated instruction controls.
+void fp8_dot_x86_64_v3(bool bf8_a, bool bf8_b, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                       const uint32_t *a, const uint32_t *b, const uint32_t *c);
+
+// Loose two-product FP16/BF16 dot with FP32 accumulation and half selectors.
+// Preserve inactive lanes; D may alias inputs.
+// Requires the named CPU features and validated instruction controls.
+void dot2_x86_64_v3(bool bf16, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                    const uint32_t *a, const uint32_t *b, const uint32_t *c);
+
+// Exact packed INT4/INT8 dot with wrapping or saturating INT32 accumulation.
+// Half selection is resolved by the caller; preserve inactive lanes and aliases.
+// Requires the named CPU features and validated instruction controls.
+void integer_dot_x86_64_v3(int bits, bool unsigned_acc, uint32_t exec_mask, uint32_t modifiers,
+                           uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // Exact integer WMMA in gfx12 Wave32 layout, with staged CLAMP. D may alias inputs.
 // Requires the named CPU features and validated instruction controls.
@@ -99,6 +134,11 @@ void half_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
+// Loose BF16 DOT2 using widened FP32 FMA, with half selectors.
+// Preserve inactive lanes; D may alias inputs.
+// Requires the named CPU features and validated instruction controls.
+void dot2_bf16_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
+                         const uint32_t *b, const uint32_t *c);
 
 // Compute A*literal+B when (Operands == rocjitsu::arith::FmaOperands::MultiplyLiteral), otherwise
 // A*B+literal. Operands must be MultiplyLiteral or AddLiteral. Preserve inactive lanes. Requires

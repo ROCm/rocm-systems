@@ -218,6 +218,106 @@ def test_packed_selection_architecture_and_state_binding(arch, name):
     assert 'arithmetic_reports_fp_status()' in body
 
 
+@pytest.mark.parametrize(
+    'name',
+    [
+        'V_DOT4_F32_FP8_FP8',
+        'V_DOT4_F32_FP8_BF8',
+        'V_DOT4_F32_BF8_FP8',
+        'V_DOT4_F32_BF8_BF8',
+    ],
+)
+def test_dot4_formats_and_c_modifiers(name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_dot32
+
+    body = gen_float_dot32(
+        'rdna4', name, ['d'], ['a', 'b', 'c'], 'ENC_VOP3P', ('low', 'high')
+    )
+    assert 'rj_arith_' + name.lower() in body
+    assert 'inst_.neg & 4' in body and 'RJ_ARITH_DOT_NEG_C' in body
+    assert 'inst_.neg_hi & 4' in body and 'RJ_ARITH_DOT_ABS_C' in body
+    assert 'arithmetic_flags()' in body
+    assert (
+        gen_float_dot32(
+            'rdna3', name, ['d'], ['a', 'b', 'c'], 'ENC_VOP3P', ('low', 'high')
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize('arch, count', [('rdna3', 6), ('rdna4', 12)])
+def test_generated_float_dot_methods_replace_all_legacy_paths(arch, count):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = 0
+    for encoding in ('vop2', 'vop3p'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (VDot(?:2(?:acc)?F32|4F32)\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            source,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_' in body, match[1]
+            assert 'ROCJITSU_TRY_SIMD' not in body, match[1]
+            assert 'amdgpu::execute_v_dot' not in body, match[1]
+            assert 'amdgpu::gfx' not in body, match[1]
+            checked += 1
+    assert checked == count
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('name', ['V_DOT2_F16_F16', 'V_DOT2_BF16_BF16'])
+def test_half_dot_packed_sources_and_partial_accumulator(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_half_dot
+
+    body = gen_half_dot(arch, name, ['d'], ['a', 'b', 'c'], True)
+    arch_suffix = '_gfx12' if arch == 'rdna4' else ''
+    api = 'rj_arith_' + name.lower()
+    assert api + '_w32' + arch_suffix + ', ' + api + '_w64' + arch_suffix in body
+    for source in 'ABC':
+        assert 'RJ_ARITH_ALU_ABS_' + source in body
+        assert 'RJ_ARITH_ALU_NEG_' + source in body
+    assert 'RJ_ARITH_ALU_HIGH_C' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+    assert 'RJ_ARITH_ALU_HIGH_A' not in body and 'RJ_ARITH_ALU_HIGH_B' not in body
+    assert 'pk16_src_needs_narrowing(inst_.src0, a.size_bits())' in body
+    assert 'dot2_src_needs_half_replication(inst_.src1)' in body
+    assert 'dot2_src_needs_half_replication(inst_.src2) ? 4u : 0u' in body
+    assert 'arithmetic_flags()' in body
+    assert gen_half_dot('cdna4', name, ['d'], ['a', 'b', 'c'], True) is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_half_dot_regular_and_dpp_bodies_use_rj_arith(arch):
+    source = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+        / 'vop3_exec.cpp'
+    ).read_text()
+    checked = 0
+    for match in re.finditer(
+        r'void (VDot2(?:F16F16|Bf16Bf16)Vop3)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+        source,
+    ):
+        end, depth = match.end(), 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        body = source[match.end() : end - 1]
+        assert 'arith::execute_dot2_f16' in body
+        assert 'fp_mode::dot2_' not in body
+        assert 'ROCJITSU_TRY_SIMD' not in body
+        checked += 1
+    assert checked == 4
+
+
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 @pytest.mark.parametrize(
     'name', ['V_ADD_F16', 'V_SUB_F16', 'V_SUBREV_F16', 'V_MUL_F16', 'V_LDEXP_F16']

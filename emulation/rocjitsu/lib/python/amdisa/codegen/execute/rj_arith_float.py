@@ -222,6 +222,17 @@ PACKED_BINARY16_NAMES = {
 }
 
 
+DOT2_F32_NAMES = {'V_DOT2_F32_F16', 'V_DOT2_F32_BF16', 'V_DOT2ACC_F32_F16'}
+
+
+DOT4_F32_NAMES = {
+    'V_DOT4_F32_FP8_FP8',
+    'V_DOT4_F32_FP8_BF8',
+    'V_DOT4_F32_BF8_FP8',
+    'V_DOT4_F32_BF8_BF8',
+}
+
+
 BINARY_ARITHMETIC_F16 = {
     'V_ADD_F16',
     'V_SUB_F16',
@@ -248,6 +259,9 @@ FMA_F16 = {'V_FMA_F16', 'V_FMAC_F16', 'V_FMAAK_F16', 'V_FMAMK_F16'}
 
 
 BINARY_F16 = BINARY_ARITHMETIC_F16 | BINARY_SELECTION_F16
+
+
+HALF_DOT_NAMES = {'V_DOT2_F16_F16', 'V_DOT2_BF16_BF16'}
 
 
 TERNARY_SELECTION_RDNA3 = {
@@ -511,6 +525,130 @@ def gen_packed_binary16(arch, mnemonic, dst, src, enc_name, opsel_exprs):
     return '\n'.join(lines)
 
 
+def gen_float_dot32(arch, mnemonic, dst, src, enc_name, opsel_exprs):
+    if arch not in ('rdna3', 'rdna4') or len(dst) != 1:
+        return None
+    if mnemonic in DOT4_F32_NAMES:
+        if arch != 'rdna4' or enc_name != 'ENC_VOP3P' or len(src) != 3:
+            return None
+        # RDNA4 ISA 7.7: only C has sign modifiers; NEG_HI[2] is ABS_C.
+        low, high = opsel_exprs
+        api = 'rj_arith_' + mnemonic.lower()
+        return '\n'.join(
+            [
+                '  const uint64_t modifiers = ((inst_.neg & 4) ? RJ_ARITH_DOT_NEG_C : 0u) |',
+                '      ((inst_.neg_hi & 4) ? RJ_ARITH_DOT_ABS_C : 0u) |',
+                f'      (({low} & 1) ? RJ_ARITH_DOT_LO_A_HIGH : 0u) |',
+                f'      (({low} & 2) ? RJ_ARITH_DOT_LO_B_HIGH : 0u) |',
+                f'      (({high} & 1) ? 0u : RJ_ARITH_DOT_HI_A_LOW) |',
+                f'      (({high} & 2) ? 0u : RJ_ARITH_DOT_HI_B_LOW);',
+                f'  amdgpu::arith::execute_ternary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+                '      wf.cu().arithmetic_flags(), modifiers,',
+                f'      {dst[0]}, {", ".join(src)});',
+            ]
+        )
+    if mnemonic not in DOT2_F32_NAMES:
+        return None
+    accumulate = mnemonic == 'V_DOT2ACC_F32_F16'
+    if accumulate:
+        if arch != 'rdna3' or enc_name != 'ENC_VOP2' or len(src) != 2:
+            return None
+    elif enc_name != 'ENC_VOP3P' or len(src) != 3:
+        return None
+    bf16 = mnemonic == 'V_DOT2_F32_BF16'
+    terms = []
+    if not accumulate:
+        low, high = opsel_exprs
+        terms = [
+            '((inst_.neg & 4) ? RJ_ARITH_DOT_NEG_C : 0u)',
+            '((inst_.neg_hi & 4) ? RJ_ARITH_DOT_ABS_C : 0u)',
+            '(inst_.clamp ? RJ_ARITH_DOT_CLAMP : 0u)',
+        ]
+        for index, source in enumerate('AB'):
+            terms += [
+                f'(({low} & {1 << index}) ? RJ_ARITH_DOT_LO_{source}_HIGH : 0u)',
+                f'(({high} & {1 << index}) ? 0u : RJ_ARITH_DOT_HI_{source}_LOW)',
+                f'((inst_.neg & {1 << index}) ? RJ_ARITH_DOT_NEG_LO_{source} : 0u)',
+                f'((inst_.neg_hi & {1 << index}) ? RJ_ARITH_DOT_NEG_HI_{source} : 0u)',
+            ]
+    narrow, replicate = [], []
+    for index in range(1 if accumulate else 2):
+        selector = f'inst_.src{index}'
+        if bf16:
+            broadcast = f'amdgpu::dot2_src_needs_half_replication({selector})'
+            replicate.append(f'({broadcast} ? {1 << index}u : 0u)')
+            # BF16 broadcasts upper16(FP32). GFX11 integer inline constants
+            # also use upper16; GFX12 integer constants instead use low16.
+            condition = (
+                broadcast
+                if arch == 'rdna3'
+                else f'amdgpu::is_inline_float_src({selector})'
+            )
+        else:
+            condition = f'amdgpu::pk16_src_needs_narrowing({selector}, {src[index]}.size_bits())'
+        narrow.append(f'({condition} ? {1 << index}u : 0u)')
+    api = (
+        'rj_arith_v_dot2_f32_'
+        + ('bf16' if bf16 else 'f16')
+        + ('_gfx12' if arch == 'rdna4' else '')
+    )
+    addend = dst[0] if accumulate else src[2]
+    return '\n'.join(
+        [
+            '  const uint64_t modifiers = '
+            + (' |\n      '.join(terms) if terms else '0')
+            + ';',
+            '  const unsigned narrow_sources = ' + ' | '.join(narrow) + ';',
+            '  const unsigned replicate_sources = '
+            + (' | '.join(replicate) if replicate else '0')
+            + ';',
+            f'  amdgpu::arith::execute_dot2_f32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+            '      wf.cu().arithmetic_flags(), modifiers,',
+            f'      {dst[0]}, {src[0]}, {src[1]}, {addend}, {str(bf16).lower()}, narrow_sources, replicate_sources,',
+            '      wf.cu().arithmetic_reports_fp_status());',
+        ]
+    )
+
+
+def gen_half_dot(arch, mnemonic, dst, src, is_vop3):
+    if arch not in ('rdna3', 'rdna4') or mnemonic not in HALF_DOT_NAMES:
+        return None
+    if not is_vop3 or len(dst) != 1 or len(src) != 3:
+        return None
+    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    bf16 = str(mnemonic == 'V_DOT2_BF16_BF16').lower()
+    lines = [
+        '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
+        '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
+        '      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |',
+        '      ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) |',
+        '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
+        '      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |',
+        '      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) |',
+        '      ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u) |',
+        '      ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);',
+    ]
+    narrow, replicate = [], []
+    for index in range(2):
+        selector = f'inst_.src{index}'
+        narrow.append(
+            f'(amdgpu::pk16_src_needs_narrowing({selector}, {src[index]}.size_bits()) ? {1 << index}u : 0u)'
+        )
+        replicate.append(
+            f'(amdgpu::dot2_src_needs_half_replication({selector}) ? {1 << index}u : 0u)'
+        )
+    replicate.append('(amdgpu::dot2_src_needs_half_replication(inst_.src2) ? 4u : 0u)')
+    lines += [
+        '  const unsigned narrow_sources = ' + ' | '.join(narrow) + ';',
+        '  const unsigned replicate_sources = ' + ' | '.join(replicate) + ';',
+        f'  amdgpu::arith::execute_dot2_f16(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        '      wf.cu().arithmetic_flags(), modifiers,',
+        f'      {dst[0]}, {", ".join(src)}, {bf16}, narrow_sources, replicate_sources,',
+        '      wf.cu().arithmetic_reports_fp_status());',
+    ]
+    return '\n'.join(lines)
+
+
 def gen_float_binary16(arch, mnemonic, dst, src, is_vop3):
     if arch not in ('rdna3', 'rdna4') or mnemonic not in BINARY_F16:
         return None
@@ -688,8 +826,11 @@ FLOAT_NAMES = (
     | BINARY_F64['rdna3']
     | BINARY_F64['rdna4']
     | BINARY_SELECTION_F16
+    | DOT2_F32_NAMES
+    | DOT4_F32_NAMES
     | FMA_F16
     | FMA_F32
+    | HALF_DOT_NAMES
     | MIXED_FMA_NAMES
     | PACKED_BINARY16_NAMES
     | PACKED_FMA16_NAMES
