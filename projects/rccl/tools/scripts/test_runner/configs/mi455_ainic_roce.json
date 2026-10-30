@@ -7020,7 +7020,7 @@
           "test_filter": "DdaMPI_BroadcastTransition.LLThenLL128ThenLL:DdaMPI_BroadcastTransition.BackToBackNoSync"
         },
         {
-          "name": "DDA_Fabric_Broadcast_LL128StaleFlags",
+          "name": "DDA_Fabric_Broadcast_Transition_LL128LeftoversDoNotPassLLPoll",
           "description": "DDA fabric Broadcast LL128 payload planted with the flag of a later LL call in the same bank; the LL call must still return its own data",
           "test_filter": "DdaMPI_BroadcastTransition.LL128LeftoversDoNotPassLLPoll"
         },
