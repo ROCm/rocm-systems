@@ -49,6 +49,7 @@ target_include_directories(
 
 target_link_libraries(
     rocprofiler-systems-parser
+    PUBLIC $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
     PRIVATE
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-common-library>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
