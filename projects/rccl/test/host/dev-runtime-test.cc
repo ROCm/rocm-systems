@@ -6745,7 +6745,8 @@ TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
 // ncclDevrCommCreateInternal is where a queued create is actually carried out.
 // This suite covers its GIN request validation, which runs before any resource
 // is touched and rejects combinations the communicator cannot serve, and the
-// resource-window sizing that follows it, up to the cuMemCreate call.
+// resource-window sizing that follows it, up to the cuMemCreate call. A devcomm
+// that asks for no resources has no window to create, so its build completes.
 //
 // The rest of the devcomm build -- symmetric-memory window creation, GIN
 // window registration, barriers -- is not covered here beyond a failed GIN
@@ -6825,17 +6826,22 @@ TEST_F(DevrCommCreateInternalTest, FullGinRequestedOnRailOnlyComm_ReturnsInvalid
 
 // Branch: the deprecated ginForceEnable is equivalent to asking for a full
 // connection, so it fails the same support check rather than being ignored.
-//
-// The counterpart -- the same requirements with the flag clear, which requests
-// nothing and passes the gate -- is not tested: passing the gate is only
-// observable once the devcomm build completes, and this fixture stops that
-// build at the resource-window cuMemCreate.
 TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   reqs.ginForceEnable = true;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;  // overridden by the flag
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// Branch: the same requirements with the flag clear request nothing, so they
+// pass the gate that GinForceEnable_BehavesAsFullConnection fails.
+TEST_F(DevrCommCreateInternalTest, GinForceEnableClear_PassesGate) {
+  reqs.ginForceEnable = false;
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+
+  EXPECT_EQ(Create(), ncclSuccess);
 }
 
 // Integration point: the resource-window allocation must use the rounded
@@ -6893,6 +6899,19 @@ TEST_F(DevrCommCreateInternalTest, WorldGinBarrierOnRail_RejectedWithoutLatching
   EXPECT_EQ(Create(), ncclInvalidArgument);
   EXPECT_EQ(connect.calls, 0);
   EXPECT_FALSE(comm->devrState.ginEnabled);
+}
+
+// Branch: GIN already enabled on the comm by an earlier devComm. A devComm
+// that requests no GIN connection must not get GIN dev-comm setup (AICOMRCCL-3230).
+TEST_F(DevrCommCreateInternalTest, NoGinRequestedOnGinEnabledComm_SkipsGinDevCommSetup) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->devrState.ginEnabled = true;
+  ScopedHook setup(g_devrGinDevCommSetup,
+                   [](ncclComm*, ncclDevCommRequirements const*, ncclDevComm*, uint32_t) { return ncclSuccess; });
+
+  EXPECT_EQ(Create(), ncclSuccess);
+  EXPECT_EQ(setup.calls, 0);
 }
 
 
