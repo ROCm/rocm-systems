@@ -37,6 +37,7 @@ from rocprof_compute_analyze.analysis_db import (
 from utils import analysis_orm as orm
 from utils import schema
 from utils.file_io import create_df_kernel_top_stats
+from utils.metrics.expression import build_eval_string
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -374,6 +375,166 @@ def cleanup_database() -> None:
         current_engine.dispose()
     orm.Database._session = None
     orm.Database._engine = None
+
+
+def make_metric_value_analyzer(workload_path):
+    """Build an analyzer with one metric per base-unit case and stored values."""
+    analyzer = make_counter_backed_database_analyzer(workload_path, ["3"], [])
+    analyzer._metrics_info_data_per_workload = {
+        workload_path: pd.DataFrame([
+            {
+                "name": "HBM Bandwidth",
+                "metric_id": "4.1.9",
+                "description": "Scaled bandwidth",
+                "unit": "GB/s",
+                "table_name": "Roofline",
+                "sub_table_name": "Bandwidth",
+            },
+            {
+                "name": "VALU FLOPs",
+                "metric_id": "2.1.0",
+                "description": "Scaled compute rate",
+                "unit": "GFLOP/s",
+                "table_name": "System Speed-of-Light",
+                "sub_table_name": "System Speed-of-Light",
+            },
+            {
+                "name": "Read BW (Bytes)",
+                "metric_id": "17.1.1",
+                "description": "Already in base units",
+                "unit": "Bytes/s",
+                "table_name": "L2",
+                "sub_table_name": "Bandwidth",
+            },
+            {
+                "name": "Utilization",
+                "metric_id": "3.1.0",
+                "description": "Percent",
+                "unit": "Percent",
+                "table_name": "Memory",
+                "sub_table_name": "Utilization",
+            },
+            {
+                "name": "Kernel Time",
+                "metric_id": "7.2.0",
+                "description": "Duration",
+                "unit": "Nanoseconds",
+                "table_name": "Wavefront",
+                "sub_table_name": "Timing",
+            },
+            {
+                "name": "Scratch Allocation",
+                "metric_id": "6.1.0",
+                "description": "Scratch per wave",
+                "unit": "KB per Wave",
+                "table_name": "Memory Chart",
+                "sub_table_name": "Scratch",
+            },
+        ])
+    }
+    analyzer._kernel_values_data_per_workload = {
+        workload_path: pd.DataFrame([
+            {
+                "metric_id": "4.1.9",
+                "kernel_name": "vecCopy",
+                "value_name": "Value",
+                "value": 1 / 3,
+            },
+            {
+                "metric_id": "4.1.9",
+                "kernel_name": "vecCopy",
+                "value_name": "Peak (Empirical)",
+                "value": 5324.8,
+            },
+            {
+                "metric_id": "4.1.9",
+                "kernel_name": "vecCopy",
+                "value_name": "Percent of Peak",
+                "value": 6.25,
+            },
+            {
+                "metric_id": "2.1.0",
+                "kernel_name": "vecCopy",
+                "value_name": "Avg",
+                "value": 2.25,
+            },
+            {
+                "metric_id": "17.1.1",
+                "kernel_name": "vecCopy",
+                "value_name": "Avg",
+                "value": 1 / 3,
+            },
+            {
+                "metric_id": "3.1.0",
+                "kernel_name": "vecCopy",
+                "value_name": "Value",
+                "value": 99.5,
+            },
+            {
+                "metric_id": "7.2.0",
+                "kernel_name": "vecCopy",
+                "value_name": "Avg",
+                "value": 12.5,
+            },
+            {
+                "metric_id": "6.1.0",
+                "kernel_name": "vecCopy",
+                "value_name": "Value",
+                "value": 2.5,
+            },
+        ])
+    }
+    analyzer._workload_values_data_per_workload = {
+        workload_path: pd.DataFrame([
+            {
+                "metric_id": "4.1.9",
+                "value_name": "Value",
+                "value": 0.1,
+            },
+        ])
+    }
+    return analyzer
+
+
+def store_metric_values(tmp_path, decimal, time_unit):
+    """Store the metric values under one set of display options.
+
+    Returns the stored metric definitions and values, in a comparable form.
+    """
+    cleanup_database()
+    orm.Database.init(":memory:")
+    try:
+        analyzer = make_metric_value_analyzer(str(tmp_path))
+        analyzer.get_args().decimal = decimal
+        analyzer.get_args().time_unit = time_unit
+        run_analysis_with_existing_database(analyzer)
+
+        session = orm.Database.get_session()
+        kernel_values = sorted(
+            (
+                value.metric.metric_id,
+                value.metric.unit,
+                value.value_name,
+                value.value,
+            )
+            for value in session.query(orm.KernelMetricValue).all()
+        )
+        workload_values = sorted(
+            (
+                value.metric.metric_id,
+                value.metric.unit,
+                value.value_name,
+                value.value,
+            )
+            for value in session.query(orm.WorkloadMetricValue).all()
+        )
+        dispatches = sorted(
+            (dispatch.dispatch_id, dispatch.start_timestamp, dispatch.end_timestamp)
+            for dispatch in session.query(orm.Dispatch).all()
+        )
+        return kernel_values, workload_values, dispatches
+    finally:
+        cleanup_database()
 
 
 # =============================================================================
@@ -4279,3 +4440,84 @@ def test_peak_absent_from_a_valid_roofline_is_null_without_failure_warning(
     ):
         report_evaluation_diagnostics()
     failure_warning_mock.assert_not_called()
+
+
+# =============================================================================
+# Stored values: unrounded, base units, independent of display options
+# =============================================================================
+
+
+def test_evaluate_round_keeps_every_digit():
+    """ROUND in a config expression is for display, so the DB keeps full precision."""
+    pmc_df = pd.DataFrame({"Counter1": [1, 2]})
+    expression = build_eval_string("ROUND(AVG(Counter1), 0)")
+
+    result = db_analysis.evaluate(
+        "test_metric",
+        expression,
+        pmc_df,
+        {},
+    )
+
+    assert result == 1.5
+
+
+def test_builtin_num_active_cus_keeps_integer_rounding():
+    """numActiveCUs uses ROUND as integer arithmetic, so it still rounds to an integer.
+
+    Its formula feeds ROUND into MOD and TO_INT. Keeping every digit would
+    change the count, so this guards against applying the DB-only unrounded
+    ROUND to built-in variables.
+    """
+    # 4 * 75 / 8 = 37.5 active waves. ROUND gives 38, and the formula gives
+    # 38 / 32 * 8 + MIN(MOD(38, 32), 8) = 15.5, which TO_INT turns into 15.
+    pmc_df = pd.DataFrame({"SQ_BUSY_CU_CYCLES": [75], "GRBM_GUI_ACTIVE": [8]})
+    sys_info = {
+        "gpu_arch": "gfx942",
+        "num_xcd": 1,
+        "max_waves_per_cu": 32,
+        "cu_per_gpu": 304,
+    }
+
+    db_analysis.calc_builtin_vars(
+        pmc_df, sys_info, ["$numActiveCUs", "$GRBM_GUI_ACTIVE_PER_XCD"]
+    )
+
+    assert sys_info["numActiveCUs"] == 15
+
+
+def test_run_analysis_stores_values_in_base_units(tmp_path):
+    """Scaled config units are stored as base units, and only their values change."""
+    kernel_values, workload_values, _ = store_metric_values(tmp_path, 2, "ns")
+
+    stored = {
+        (metric_id, value_name): (unit, value)
+        for metric_id, unit, value_name, value in kernel_values
+    }
+    # GB/s is bytes per ns, so the stored Bytes/s value is 1e9 times larger.
+    assert stored[("4.1.9", "Value")] == ("Bytes/s", (1 / 3) * 1e9)
+    assert stored[("4.1.9", "Peak (Empirical)")] == ("Bytes/s", 5324.8 * 1e9)
+    assert stored[("2.1.0", "Avg")] == ("FLOP/s", 2.25 * 1e9)
+    # Percent of Peak is a ratio of two values in the same unit, so it keeps its scale.
+    assert stored[("4.1.9", "Percent of Peak")] == ("Bytes/s", 6.25)
+    # Units that are already base units are stored as they are, unrounded.
+    assert stored[("17.1.1", "Avg")] == ("Bytes/s", 1 / 3)
+    assert stored[("3.1.0", "Value")] == ("Percent", 99.5)
+    assert stored[("7.2.0", "Avg")] == ("Nanoseconds", 12.5)
+    # KB per Wave is stored as Bytes per Wave, so the value is 1024 times larger.
+    assert stored[("6.1.0", "Value")] == ("Bytes per Wave", 2.5 * 1024)
+
+    assert workload_values == [("4.1.9", "Bytes/s", "Value", 0.1 * 1e9)]
+
+
+def test_run_analysis_stored_values_ignore_decimal_and_time_unit(tmp_path):
+    """The database holds the same values whatever --decimal and --time-unit say.
+
+    This is a regression guard. The DB path never reads those options, so the
+    test passes on base code too. It fails if a later change makes the stored
+    values depend on them.
+    """
+    default_options = store_metric_values(tmp_path, 2, "ns")
+    other_options = store_metric_values(tmp_path, 6, "us")
+
+    assert other_options == default_options

@@ -748,6 +748,11 @@ holds:
 * ``report.txt``: the full analysis report, with every profiled block.
 * ``analysis.db``: a SQLite database with all the data in the analysis report, structured
   according to the :ref:`analysis database schema <analysis-database>`.
+  Metric values are stored unrounded and in base units: time in ns, bandwidth in Bytes/s, compute
+  rates in FLOP/s and IOP/s, and intensity in FLOPs/Byte. The configured units GB/s, GFLOP/s,
+  GIOP/s and KB per Wave are stored as Bytes/s, FLOP/s, IOP/s and Bytes per Wave. The roofline
+  table ``compute_kernel_roofline_data`` keeps GFLOP/s and FLOPs/Byte. ``--decimal`` and
+  ``--time-unit`` change the terminal output only, not the database.
 * One CSV file per view of the :ref:`analysis database schema <analysis-database>`.
 * For a PC-sampled workload, each kernel's disassembly and source and the samples per source
   line in ``per_kernel_pc_sampling/``; see :ref:`pc-sampling-per-kernel-csv` and

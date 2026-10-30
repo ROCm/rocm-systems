@@ -79,6 +79,7 @@ from utils.metrics.aggregation import (
     to_std,
     to_sum,
 )
+from utils.metrics.base_units import base_unit, to_base_unit_value
 from utils.metrics.common import EVAL_BUILTINS, ValuDualIssueDetector
 from utils.metrics.evaluation_pipeline import (
     check_gui_active_counter,
@@ -197,6 +198,17 @@ def _select_dispatch_ids(
     return dispatch_frame.loc[
         dispatch_frame["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)
     ]
+
+
+def to_unrounded(
+    value: Union[pd.Series, float], digits: int
+) -> Union[pd.Series, float]:
+    """Stand-in for ROUND(value, digits) in metric expressions.
+
+    The configs round for display, and the terminal applies --decimal there.
+    The database keeps every digit, so the number of digits is ignored.
+    """
+    return value
 
 
 class MetricInfoRow(NamedTuple):
@@ -614,20 +626,24 @@ class db_analysis(OmniAnalyze_Base):
                     name=metric_info.name,
                     metric_id=metric_info.metric_id,
                     description=metric_info.description,
-                    unit=metric_info.unit,
+                    unit=base_unit(metric_info.unit),
                     table_name=metric_info.table_name,
                     sub_table_name=metric_info.sub_table_name,
                     workload=workload_obj,
                 )
                 Database.get_session().add(metric_objs[value.metric_id])
 
-            # Add kernel-level metric value
+            # Add kernel-level metric value, stored in the base unit of its metric
             Database.get_session().add(
                 orm.KernelMetricValue(
                     metric=metric_objs[value.metric_id],
                     kernel=kernel_objs[kernel_key],
                     value_name=value.value_name,
-                    value=value.value,
+                    value=to_base_unit_value(
+                        metrics_info_dict[value.metric_id].unit,
+                        value.value_name,
+                        value.value,
+                    ),
                 )
             )
 
@@ -647,7 +663,11 @@ class db_analysis(OmniAnalyze_Base):
                     metric=metric_objs[value.metric_id],
                     workload=workload_obj,
                     value_name=value.value_name,
-                    value=value.value,
+                    value=to_base_unit_value(
+                        metrics_info_dict[value.metric_id].unit,
+                        value.value_name,
+                        value.value,
+                    ),
                 )
             )
 
@@ -1046,7 +1066,12 @@ class db_analysis(OmniAnalyze_Base):
         sys_info: dict[str, Any],  # noqa ANN401
         parse: bool = False,
         emit_variance_warnings: bool = False,
+        integer_round: bool = False,
     ) -> Any:  # noqa ANN401
+        # ROUND is a no-op unless integer_round is set, so metric values keep
+        # every digit. Built-in variables pass integer_round, since they use
+        # ROUND as integer arithmetic (numActiveCUs feeds MOD and TO_INT).
+        round_fn = to_round if integer_round else to_unrounded
         if parse:
             original_value = value
             value = re.sub(
@@ -1086,7 +1111,7 @@ class db_analysis(OmniAnalyze_Base):
                         "to_min": to_min,
                         "to_mod": to_mod,
                         "to_quantile": to_quantile,
-                        "to_round": to_round,
+                        "to_round": round_fn,
                         "to_std": to_std,
                         "to_sum": to_sum,
                         "to_noise_clamp": to_noise_clamp,
@@ -1161,13 +1186,13 @@ class db_analysis(OmniAnalyze_Base):
         for key, value in build_in_vars.items():
             if "PER_XCD" in key:
                 sys_info[key] = db_analysis.evaluate(
-                    key, value, pmc_df, sys_info, parse=True
+                    key, value, pmc_df, sys_info, parse=True, integer_round=True
                 )
         # Variable dependent on PER_XCD variables
         for key, value in build_in_vars.items():
             if "PER_XCD" not in key:
                 sys_info[key] = db_analysis.evaluate(
-                    key, value, pmc_df, sys_info, parse=True
+                    key, value, pmc_df, sys_info, parse=True, integer_round=True
                 )
 
     @staticmethod

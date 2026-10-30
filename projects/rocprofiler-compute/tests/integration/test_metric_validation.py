@@ -17,7 +17,9 @@ def get_hbm_data_transfer(analysis_workload_dir, data):
     duration_ns = pd.read_csv(f"{analysis_workload_dir}/{data['duration_csv']}")[
         data["duration_column"]
     ].values[0]
-    return bw * duration_ns / 1e9
+    # Bandwidth is stored in Bytes/s and the duration in ns, so bytes moved are
+    # bw * duration_ns / 1e9 and GB moved are that divided by another 1e9.
+    return bw * duration_ns / 1e18
 
 
 def get_hbm_bandwidth_peak(analysis_workload_dir, data):
@@ -26,7 +28,8 @@ def get_hbm_bandwidth_peak(analysis_workload_dir, data):
         (bw_df["metric_id"] == data["bw_metric_id"])
         & (bw_df["value_name"] == data["bw_value_name"])
     ]
-    return bw_rows["value"].values[0]
+    # Stored in Bytes/s, while the expected values below are in GB/s.
+    return bw_rows["value"].values[0] / 1e9
 
 
 # workload -> gfx -> metric definition. CSV references point at the per-view
