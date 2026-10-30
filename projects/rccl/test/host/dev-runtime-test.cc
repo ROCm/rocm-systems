@@ -3007,10 +3007,7 @@ TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_PopulatesEachSegmentPerBac
   }
 }
 
-// Each segment's ginDevWins is backend-major: backend b's connections sit at
-// [b * NCCL_GIN_MAX_CONNECTIONS, (b + 1) * NCCL_GIN_MAX_CONNECTIONS). Window
-// (b, s) must carry exactly backend b's slice of segment s, not another
-// backend's, another connection's, or the host-side handles.
+// Branch: GIN on, so window (b, s) gets backend b's ginDevWins slice of segment s, never ginHostWins.
 TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_CopiesEachBackendsDeviceWindows) {
   comm->devrState.ginEnabled = true;
   auto devToken = [](int seg, int backend, int conn) {
