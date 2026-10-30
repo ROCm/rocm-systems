@@ -3,20 +3,25 @@
 
 """Build the self-contained memory chart page from evaluated chart views."""
 
-import hashlib
 import re
 from argparse import Namespace
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from memory_chart import loader
+from memory_chart.html.db_rows import read_workload_chart_rows
 from memory_chart.html.views import (
+    ChartScope,
     ChartView,
     ChartViewSet,
     MembwDetail,
     SlotValue,
     build_chart_views,
+    build_chart_views_from_db,
+    chart_metric_ids,
+    stored_chart_tables,
 )
+from utils import analysis_orm as orm
 from utils import schema
 from utils.html_report import report_shell as html_report
 from utils.logger import console_log, console_warning
@@ -25,14 +30,26 @@ from utils.utils_common import normalize_filter_to_str_list
 MODEL_ID = "mem-chart-model"
 _ASSETS_DIR = Path(__file__).parent / "assets"
 
+# The file is always device 0 whatever the filters, as roofline-gpu-0.html is
+# device 0 (ROOFLINE_DEVICE_ID in utils/roofline_calc.py); this constant is separate
+MEMORY_CHART_GPU_ID = 0
+
+
+def memory_chart_html_name() -> str:
+    """The file name of one workload's memory chart, memory-chart-gpu-<N>.html."""
+    return f"memory-chart-gpu-{MEMORY_CHART_GPU_ID}.html"
+
 
 def write_mem_chart_report(
     workload: schema.Workload,
     arch_config: schema.ArchConfig,
     args: Namespace,
-    workload_dir: Path,
+    output_path: Path,
 ) -> Optional[Path]:
-    """Write one offline report when an analyzed memory chart is available."""
+    """Write the report from an in-memory workload, when it has a memory chart.
+
+    This is the CLI input until the cutover moves the caller onto the database.
+    """
     if not any(300 < table_id < 400 for table_id in workload.dfs):
         return None
 
@@ -42,26 +59,79 @@ def write_mem_chart_report(
         return None
 
     views = build_chart_views(workload, arch_config, args)
+    return _write_report(views, _scope_of(workload), args.normal_unit, output_path)
+
+
+def write_mem_chart_report_from_db(
+    workload_row: orm.Workload,
+    arch_config: schema.ArchConfig,
+    args: Namespace,
+    scope: ChartScope,
+    output_path: Path,
+) -> Optional[Path]:
+    """Write the report from one workload's stored metric rows.
+
+    The rows come from the analysis database the workload belongs to. The scope
+    is the run's filters; C1 must read it from profiling_config_extdata. Returns
+    None when the rows cannot reproduce the counters' page: a -k run, whose rows
+    keep only the selected kernels; a run with no stored panel 3 table, as the
+    counters path skips it; or no stored memory chart layout.
+    """
+    if scope.kernel_ids:
+        console_log(
+            "memory chart",
+            "Skipping HTML report: -k runs store only the selected kernels",
+        )
+        return None
+
+    rows = read_workload_chart_rows(workload_row, chart_metric_ids(arch_config))
+    if not any(
+        300 < table_id < 400 for table_id in stored_chart_tables(rows, arch_config)
+    ):
+        return None
+
+    if rows.layout_json is None:
+        console_log("memory chart", f"Skipping HTML report: no layout for {rows.arch}")
+        return None
+
+    views = build_chart_views_from_db(rows, arch_config, args, scope)
+    return _write_report(views, scope, args.normal_unit, output_path)
+
+
+def _write_report(
+    views: ChartViewSet,
+    scope: ChartScope,
+    normalization: str,
+    output_path: Path,
+) -> Optional[Path]:
+    """Write the offline page to output_path, creating its folder if needed."""
     document = build_mem_chart_document(
         views,
         heading="3. Memory Chart",
-        scope_note=_scope_note(workload),
-        normalization=args.normal_unit,
-    )
-
-    path = _mem_chart_html_path(
-        workload_dir, workload.filter_gpu_ids, workload.filter_dispatch_ids
+        scope_note=_scope_note(scope),
+        normalization=normalization,
     )
 
     try:
-        workload_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(document, encoding="utf-8")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(document, encoding="utf-8")
     except OSError as error:
-        console_warning("memory chart", f"Failed to write HTML report {path}: {error}")
+        console_warning(
+            "memory chart", f"Failed to write HTML report {output_path}: {error}"
+        )
         return None
 
-    console_log("memory chart", f"Saved HTML report: {path}")
-    return path
+    console_log("memory chart", f"Saved HTML report: {output_path}")
+    return output_path
+
+
+def _scope_of(workload: schema.Workload) -> ChartScope:
+    """The filters of an in-memory workload, which scope its chart."""
+    return ChartScope(
+        gpu_ids=list(workload.filter_gpu_ids),
+        dispatch_ids=list(workload.filter_dispatch_ids),
+        kernel_ids=list(workload.filter_kernel_ids),
+    )
 
 
 def build_mem_chart_document(
@@ -119,31 +189,11 @@ def _filter_ids(value: object) -> List[str]:
     )
 
 
-def _mem_chart_html_path(
-    workload_dir: Path, gpu_ids: object, dispatch_ids: object
-) -> Path:
-    """Name a report for its effective GPU and dispatch filters."""
-    gpu_tokens = _filter_ids(gpu_ids)
-    dispatch_tokens = _filter_ids(dispatch_ids)
-
-    gpu_group = f"_gpu-{'_'.join(gpu_tokens)}" if gpu_tokens else ""
-    joined_dispatch = "_".join(dispatch_tokens)
-    dispatch_group = f"_d-{joined_dispatch}" if dispatch_tokens else ""
-
-    stem = f"mem_chart{gpu_group}{dispatch_group}"
-    if len(stem) > 200 and dispatch_tokens:
-        digest = hashlib.sha1(joined_dispatch.encode("utf-8")).hexdigest()[:8]
-        dispatch_group = f"_d-{len(dispatch_tokens)}ids-{digest}"
-        stem = f"mem_chart{gpu_group}{dispatch_group}"
-
-    return workload_dir / f"{stem}.html"
-
-
-def _scope_note(workload: schema.Workload) -> str:
+def _scope_note(chart_scope: ChartScope) -> str:
     """Describe the filters that scope the aggregate view."""
     scope: List[str] = []
-    gpu_ids = _filter_ids(workload.filter_gpu_ids)
-    dispatch_ids = _filter_ids(workload.filter_dispatch_ids)
+    gpu_ids = _filter_ids(chart_scope.gpu_ids)
+    dispatch_ids = _filter_ids(chart_scope.dispatch_ids)
 
     if gpu_ids:
         scope.append(f"GPU {', '.join(gpu_ids)}")

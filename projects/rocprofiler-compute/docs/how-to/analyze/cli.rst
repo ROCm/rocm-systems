@@ -118,14 +118,13 @@ There are three high-level GPU analysis views:
 
 .. _cli-memory-chart-html:
 
-Analyzing a Memory Chart writes an offline ``mem_chart.html`` into the workload's
-subfolder of the run folder, ``<n>-<workload>/``. Open it in a browser to select a
-kernel or use **Show all** for the aggregate view.
+Analyzing a Memory Chart writes an offline ``memory-chart-gpu-0.html`` into the workload's
+subfolder of the run folder, ``<n>-<workload>/``. The file name does not change with the
+filters. Open it in a browser to select a kernel or use **Show all** for the aggregate view.
 
 ``-k`` sets the initial view when it selects exactly one kernel; all analyzed
-kernels remain available. GPU and dispatch filters restrict the data and add
-filename suffixes, such as ``mem_chart_gpu-0_d-3_4.html``. Repeated analysis
-overwrites the same file.
+kernels remain available. GPU and dispatch filters restrict the data and are shown
+as the scope of the aggregate view.
 
 Every analyze run writes the report whatever ``--output-format`` is, because that option
 has no effect. Including ``--view table``, a workload with memory chart data gets a report.
@@ -790,7 +789,7 @@ holds:
   :ref:`pc-sampling-per-source-line-csv`.
 * For a single workload with roofline data, ``1-<workload>/roofline-gpu-0.html``, where
   ``<workload>`` is the name of the workload directory given with ``-p``.
-* For each workload with memory chart data, ``<n>-<workload>/mem_chart.html``, where ``<n>``
+* For each workload with memory chart data, ``<n>-<workload>/memory-chart-gpu-0.html``, where ``<n>``
   is the workload's position among the ``-p`` paths; see :ref:`cli-memory-chart-html`.
 
 The terminal shows the top stats, the system information and the System Speed-of-Light section,

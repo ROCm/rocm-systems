@@ -132,9 +132,11 @@ stored unchanged in the `memory_chart_layout_extdata` column of `compute_workloa
 is null when the workload's GPU has no layout. Each metric of a workload has a row in
 `compute_metric_definition`. For a layout metric, use the workload's row whose
 `name` is the metric name and whose `metric_id` starts with `3.`. That row has the unit.
-The value the terminal chart shows is in `compute_workload_metric_value`, in the row
+The database keeps the value unrounded, in `compute_workload_metric_value`, in the row
 for that definition with `value_name` `Value`. `compute_kernel_metric_value` has the
-same value for each kernel.
+same value for each kernel. The terminal chart rounds the value to the digits of the
+metric's `ROUND(value, digits)` expression in its config, so a tool that draws the chart
+rounds the same way.
 
 Values are raw, in the unit of the definition, such as `Bytes/s` or `Percent`. A metric
 with no row, for example when `--block` leaves out panel 3, has no value; show it as

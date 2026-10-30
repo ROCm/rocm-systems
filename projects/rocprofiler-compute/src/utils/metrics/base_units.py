@@ -66,3 +66,19 @@ def to_base_unit_value(
     if not isinstance(value, numbers.Real):
         return value
     return value * SCALED_UNITS[unit][1]
+
+
+def from_base_unit_value(
+    unit: Optional[str],
+    value_name: str,
+    value: Union[float, str, None],
+) -> Union[float, str, None]:
+    """Return one stored value in its config unit, the inverse of to_base_unit_value.
+
+    Missing values, text and Percent of Peak are returned unchanged.
+    """
+    if unit not in SCALED_UNITS or value_name in UNSCALED_VALUE_NAMES:
+        return value
+    if not isinstance(value, numbers.Real):
+        return value
+    return value / SCALED_UNITS[unit][1]

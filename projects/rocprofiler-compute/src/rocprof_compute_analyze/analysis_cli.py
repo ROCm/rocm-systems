@@ -9,7 +9,7 @@ from typing import Any, NamedTuple, Optional
 import pandas as pd
 
 from membw_analysis.engine import run_membw_analysis
-from memory_chart.html.report import write_mem_chart_report
+from memory_chart.html.report import memory_chart_html_name, write_mem_chart_report
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from rocprof_compute_analyze.output_location import (
     REPORT_FILE_NAME,
@@ -504,7 +504,9 @@ class cli_analysis(OmniAnalyze_Base):
                 run,
                 self._arch_configs[run_arch],
                 args,
-                run_folder / workload_folder_name(position, Path(path_info[0])),
+                run_folder
+                / workload_folder_name(position, Path(path_info[0]))
+                / memory_chart_html_name(),
             )
 
     def list_operators(

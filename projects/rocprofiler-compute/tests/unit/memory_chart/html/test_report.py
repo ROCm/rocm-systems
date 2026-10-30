@@ -3,7 +3,6 @@
 
 """Architecture-independent unit tests for the HTML memory chart report."""
 
-import hashlib
 import json
 import logging
 import re
@@ -20,8 +19,8 @@ from memory_chart.html import report
 from memory_chart.html.diagram import diagram_payload
 from memory_chart.html.report import (
     MODEL_ID,
-    _mem_chart_html_path,
     build_mem_chart_document,
+    memory_chart_html_name,
     write_mem_chart_report,
 )
 from memory_chart.html.views import (
@@ -250,34 +249,9 @@ def test_metrics_disclosure_starts_collapsed() -> None:
     assert "<summary>Metrics</summary>" in document
 
 
-@pytest.mark.parametrize(
-    ("gpu_ids", "dispatch_ids", "filename"),
-    [
-        ([], [], "mem_chart.html"),
-        ("0", [], "mem_chart_gpu-0.html"),
-        (0, [], "mem_chart_gpu-0.html"),
-        (["1", "0", "1"], [], "mem_chart_gpu-0_1.html"),
-        ([], ["> 5"], "mem_chart_d-gt5.html"),
-        (["2", "0"], ["10", "3", "3"], "mem_chart_gpu-0_2_d-3_10.html"),
-    ],
-)
-def test_mem_chart_html_path_normalizes_filters(
-    tmp_path: Path, gpu_ids: object, dispatch_ids: object, filename: str
-) -> None:
-    """Normalize GPU and dispatch filters when constructing report filenames."""
-    assert _mem_chart_html_path(tmp_path, gpu_ids, dispatch_ids) == tmp_path / filename
-
-
-def test_mem_chart_html_path_hashes_long_dispatch_group(tmp_path: Path) -> None:
-    """Keep long dispatch filter filenames within filesystem limits."""
-    ids = [str(index) for index in range(300)]
-    path = _mem_chart_html_path(tmp_path, ["0"], ids)
-    joined = "_".join(ids)
-    digest = hashlib.sha1(joined.encode("utf-8")).hexdigest()[:8]
-
-    assert path.name == f"mem_chart_gpu-0_d-300ids-{digest}.html"
-    assert len(path.name.encode("utf-8")) < 255
-    assert path == _mem_chart_html_path(tmp_path, ["0"], list(reversed(ids)))
+def test_memory_chart_file_name_is_one_per_workload() -> None:
+    """Name the report memory-chart-gpu-<N>.html, whatever the filters."""
+    assert memory_chart_html_name() == "memory-chart-gpu-0.html"
 
 
 def test_write_mem_chart_report_skips_without_memory_chart_data(
@@ -295,9 +269,14 @@ def test_write_mem_chart_report_skips_without_memory_chart_data(
     monkeypatch.setattr(report, "build_chart_views", build_views)
 
     args = Namespace(normal_unit="per_kernel")
-    assert write_mem_chart_report(workload, schema.ArchConfig(), args, tmp_path) is None
+    assert (
+        write_mem_chart_report(
+            workload, schema.ArchConfig(), args, tmp_path / memory_chart_html_name()
+        )
+        is None
+    )
     assert build_calls == []
-    assert not list(tmp_path.glob("mem_chart*.html"))
+    assert not list(tmp_path.glob("memory-chart*.html"))
 
 
 def test_write_mem_chart_report_skips_without_arch_layout(
@@ -321,11 +300,16 @@ def test_write_mem_chart_report_skips_without_arch_layout(
     caplog.set_level(logging.INFO)
 
     args = Namespace(normal_unit="per_kernel")
-    assert write_mem_chart_report(workload, schema.ArchConfig(), args, tmp_path) is None
+    assert (
+        write_mem_chart_report(
+            workload, schema.ArchConfig(), args, tmp_path / memory_chart_html_name()
+        )
+        is None
+    )
     assert "no layout for gfx950" in caplog.text
     assert len(caplog.records) == 1
     assert build_calls == []
-    assert not list(tmp_path.glob("mem_chart*.html"))
+    assert not list(tmp_path.glob("memory-chart*.html"))
 
 
 def test_write_mem_chart_report_writes_report(
@@ -343,9 +327,11 @@ def test_write_mem_chart_report_writes_report(
     )
     monkeypatch.setattr(loader, "has_layout", lambda _arch: True)
 
-    path = write_mem_chart_report(workload, schema.ArchConfig(), args, tmp_path)
+    path = write_mem_chart_report(
+        workload, schema.ArchConfig(), args, tmp_path / memory_chart_html_name()
+    )
 
-    assert path == tmp_path / "mem_chart.html"
+    assert path == tmp_path / "memory-chart-gpu-0.html"
     assert path is not None
 
     model = embedded_model(path.read_text(encoding="utf-8"))
@@ -369,13 +355,14 @@ def test_write_mem_chart_report_overwrites_stale_output(
     )
     monkeypatch.setattr(loader, "has_layout", lambda _arch: True)
 
-    path = write_mem_chart_report(workload, schema.ArchConfig(), args, tmp_path)
+    output = tmp_path / memory_chart_html_name()
+    path = write_mem_chart_report(workload, schema.ArchConfig(), args, output)
     assert path is not None
 
     stale_marker = "STALE MEMORY CHART REPORT CONTENT"
     path.write_text(stale_marker, encoding="utf-8")
 
-    assert write_mem_chart_report(workload, schema.ArchConfig(), args, tmp_path) == path
+    assert write_mem_chart_report(workload, schema.ArchConfig(), args, output) == path
 
     contents = path.read_text(encoding="utf-8")
     assert contents.startswith("<!DOCTYPE html>")
@@ -385,7 +372,7 @@ def test_write_mem_chart_report_overwrites_stale_output(
 def test_write_mem_chart_report_preserves_filter_scope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Name filtered reports by their scope and include it in the report."""
+    """Keep the file name fixed and include the filter scope in the report."""
     workload = schema.Workload(
         sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
         dfs={301: pd.DataFrame()},
@@ -401,10 +388,10 @@ def test_write_mem_chart_report_preserves_filter_scope(
         workload,
         schema.ArchConfig(),
         Namespace(normal_unit="per_kernel"),
-        tmp_path,
+        tmp_path / memory_chart_html_name(),
     )
 
-    assert filtered_path == tmp_path / "mem_chart_gpu-0_1_d-gt5.html"
+    assert filtered_path == tmp_path / "memory-chart-gpu-0.html"
     assert filtered_path is not None
     assert embedded_model(filtered_path.read_text(encoding="utf-8"))["scopeNote"] == (
         "GPU 0, 1 · dispatches > 5"
@@ -435,12 +422,12 @@ def test_write_mem_chart_report_logs_write_error(
             workload,
             schema.ArchConfig(),
             Namespace(normal_unit="per_kernel"),
-            tmp_path,
+            tmp_path / memory_chart_html_name(),
         )
         is None
     )
 
-    assert str(tmp_path / "mem_chart.html") in caplog.text
+    assert str(tmp_path / "memory-chart-gpu-0.html") in caplog.text
     assert "disk full" in caplog.text
 
 
@@ -464,5 +451,27 @@ def test_write_mem_chart_report_propagates_evaluation_error(
             workload,
             schema.ArchConfig(),
             Namespace(normal_unit="per_kernel"),
-            tmp_path,
+            tmp_path / memory_chart_html_name(),
         )
+
+
+def test_write_mem_chart_report_creates_the_workload_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Write into a workload subfolder of the run folder that does not exist yet."""
+    workload = schema.Workload(
+        sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        dfs={301: pd.DataFrame()},
+    )
+    monkeypatch.setattr(
+        report, "build_chart_views", lambda *_: make_views("kernel zero")
+    )
+    monkeypatch.setattr(loader, "has_layout", lambda _arch: True)
+    output = tmp_path / "1-workload" / memory_chart_html_name()
+
+    path = write_mem_chart_report(
+        workload, schema.ArchConfig(), Namespace(normal_unit="per_kernel"), output
+    )
+
+    assert path == output
+    assert output.exists()

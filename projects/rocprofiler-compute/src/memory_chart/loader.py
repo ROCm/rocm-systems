@@ -220,6 +220,25 @@ def layout_from_json(path: Path, data: dict[str, Any]) -> Layout:
     return layout
 
 
+def layout_from_stored(data: dict[str, Any]) -> Layout:
+    """Check a layout copy stored in the analysis database and index its blocks.
+
+    The layout's name is the stem of the shipped file it matches, since the
+    diagram names the chart by that stem. A copy that matches no shipped file is
+    named after its first architecture.
+    """
+    shipped = next(
+        (path for path in layout_files() if _read_json(path) == data),
+        None,
+    )
+    path = shipped if shipped is not None else Path(f"{data['archs'][0]}.json")
+    return layout_from_json(path, data)
+
+
+def _read_json(path: Path) -> Any:  # noqa: ANN401
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 # ---------------------------------------------------------------------------
 # Reading the file
 # ---------------------------------------------------------------------------

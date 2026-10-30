@@ -19,6 +19,7 @@ from memory_chart.loader import (
     PanelConfigs,
     has_layout,
     layout_files,
+    layout_from_stored,
     load_layout,
 )
 from memory_chart.units import display_unit, panel_units
@@ -306,3 +307,16 @@ def test_unreadable_layout_is_rejected(tmp_path, text, message):
         path.write_text(text, encoding="utf-8")
     with pytest.raises(LayoutError, match=message):
         load_layout(path)
+
+
+def test_stored_layout_takes_the_name_of_the_shipped_file_it_matches():
+    """The diagram names the chart by the file stem, so a stored copy keeps it."""
+    layout = layout_from_stored(gfx950_data())
+    assert layout.path.stem == "gfx950"
+    assert layout.archs == tuple(gfx950_data()["archs"])
+
+
+def test_stored_layout_matching_no_shipped_file_is_named_by_its_arch():
+    """A copy from another layout version still loads, named after its first arch."""
+    data = changed(description="A layout no shipped file has")
+    assert layout_from_stored(data).path.name == "gfx950.json"

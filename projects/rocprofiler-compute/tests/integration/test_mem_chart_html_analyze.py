@@ -13,9 +13,19 @@ from typing import Callable, List, Optional, Tuple
 import common
 import pandas as pd
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
-from memory_chart.html.report import MODEL_ID
+from memory_chart.html.report import (
+    MODEL_ID,
+    memory_chart_html_name,
+    write_mem_chart_report_from_db,
+)
+from memory_chart.html.views import ChartScope
+from rocprof_compute_analyze import analysis_cli
+from rocprof_compute_analyze.output_location import ANALYSIS_DB_FILE_NAME
 from tests.integration import common as integration_common
+from utils import analysis_orm as orm
 
 WORKLOADS = Path(common.ROOT).resolve() / "tests" / "workloads"
 
@@ -62,7 +72,9 @@ def run_folder_of(workload: Path) -> Path:
     return run_folders[0]
 
 
-def report_at(workload: Path, name: str = "mem_chart.html", position: int = 1) -> Path:
+def report_at(
+    workload: Path, name: str = memory_chart_html_name(), position: int = 1
+) -> Path:
     """Return a workload's report in its subfolder of the run folder."""
     return run_folder_of(workload) / f"{position}-{workload.name}" / name
 
@@ -95,7 +107,7 @@ def test_report_is_standalone_document(
     ])
     assert code == 0
 
-    html = (report_at(workload, "mem_chart.html")).read_text(encoding="utf-8")
+    html = report_at(workload).read_text(encoding="utf-8")
     assert html.startswith("<!DOCTYPE html>")
     assert html.rstrip().endswith("</html>")
     assert "<style>" in html
@@ -116,7 +128,7 @@ def test_report_keeps_kernel_statistics_order(
     ])
     assert code == 0
 
-    model = model_at(report_at(workload, "mem_chart.html"))
+    model = model_at(report_at(workload))
 
     with (run_folder_of(workload) / "kernel.csv").open(
         newline="", encoding="utf-8"
@@ -169,7 +181,7 @@ def test_kernel_filter_sets_initial_selection_without_shortening_list(
     ])
     assert code == 0
 
-    model = model_at(report_at(workload, "mem_chart.html"))
+    model = model_at(report_at(workload))
     assert model["initialKernel"] == initial
     assert len(model["kernels"]) == 3
 
@@ -177,7 +189,7 @@ def test_kernel_filter_sets_initial_selection_without_shortening_list(
 def test_dispatch_filter_limits_report(
     binary_handler_analyze_rocprof_compute, multi_kernel_workload
 ) -> None:
-    """Apply dispatch filters to report contents and filenames."""
+    """Apply dispatch filters to report contents, not to the file name."""
     workload = multi_kernel_workload
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -191,7 +203,7 @@ def test_dispatch_filter_limits_report(
     ])
     assert code == 0
 
-    model = model_at(report_at(workload, "mem_chart_d-1_2.html"))
+    model = model_at(report_at(workload))
 
     assert {kernel["name"] for kernel in model["kernels"]} == {"kernel_1", "kernel_2"}
     assert model["scopeNote"] == "dispatches 1, 2"
@@ -200,7 +212,7 @@ def test_dispatch_filter_limits_report(
 def test_gpu_filter_scopes_report(
     binary_handler_analyze_rocprof_compute, workload_factory
 ) -> None:
-    """Include the selected GPU in the report's filename and scope note."""
+    """Include the selected GPU in the report's scope note."""
     workload = workload_factory("vcopy", "MI350")
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -213,7 +225,7 @@ def test_gpu_filter_scopes_report(
     ])
     assert code == 0
 
-    model = model_at(report_at(workload, "mem_chart_gpu-0.html"))
+    model = model_at(report_at(workload))
     assert model["scopeNote"] == "GPU 0"
 
 
@@ -244,7 +256,7 @@ def test_supported_architectures_and_table_view(
     ])
     assert code == 0
 
-    model = model_at(report_at(workload, "mem_chart.html"))
+    model = model_at(report_at(workload))
     assert model["layout"]["arch"] == layout_arch
 
 
@@ -261,7 +273,7 @@ def test_listing_does_not_write_html(
     ])
     assert code == 0
 
-    assert not list(workload.parent.rglob("mem_chart*.html"))
+    assert not list(workload.parent.rglob("memory-chart*.html"))
 
 
 def test_multiple_paths_write_one_report_each(
@@ -307,8 +319,8 @@ def test_report_is_written_whatever_the_selection_or_format(
     ])
     assert code == 0
 
-    assert report_at(workload, "mem_chart.html").exists()
-    assert not list(workload.glob("mem_chart*.html"))
+    assert report_at(workload).exists()
+    assert not list(workload.glob("memory-chart*.html"))
 
 
 def test_pc_sampling_only_does_not_write_html(
@@ -325,7 +337,7 @@ def test_pc_sampling_only_does_not_write_html(
     ])
     assert code == 0
 
-    assert not list(workload.parent.rglob("mem_chart*.html"))
+    assert not list(workload.parent.rglob("memory-chart*.html"))
 
 
 @pytest.mark.parametrize(
@@ -359,4 +371,105 @@ def test_terminal_output_coexists_with_html_generation(
         assert "HBM Read BW" in output
 
     assert f"Saved HTML report: {report_at(workload)}" in output
-    assert report_at(workload, "mem_chart.html").exists()
+    assert report_at(workload).exists()
+
+
+def render_both_inputs(
+    binary_handler_analyze_rocprof_compute,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    workload: Path,
+    extra: List[str],
+) -> dict:
+    """Run analyze and render each run's page from the counters and from the rows."""
+    rendered: dict = {}
+    write_from_counters = analysis_cli.write_mem_chart_report
+
+    def write_both_inputs(run, arch_config, args, output_path):
+        path = write_from_counters(run, arch_config, args, output_path)
+        engine = create_engine(
+            f"sqlite:///{output_path.parent.parent / ANALYSIS_DB_FILE_NAME}"
+        )
+        database = Session(engine)
+        try:
+            workload_row = database.query(orm.Workload).one()
+            scope = ChartScope(
+                gpu_ids=run.filter_gpu_ids,
+                dispatch_ids=run.filter_dispatch_ids,
+                kernel_ids=run.filter_kernel_ids,
+            )
+            rows_path = write_mem_chart_report_from_db(
+                workload_row,
+                arch_config,
+                args,
+                scope,
+                tmp_path / f"from-rows-{output_path.parent.name}.html",
+            )
+        finally:
+            database.close()
+            engine.dispose()
+        rendered["counters"] = path
+        rendered["rows"] = rows_path
+        return path
+
+    monkeypatch.setattr(analysis_cli, "write_mem_chart_report", write_both_inputs)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "-p",
+        str(workload),
+        "-b",
+        "3",
+        *extra,
+    ])
+    assert code == 0
+
+    return rendered
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        pytest.param([], id="unfiltered"),
+        pytest.param(["--gpu-id", "0"], id="gpu-filter"),
+        pytest.param(["--kernel-iteration-range", "1", "2"], id="dispatch-filter"),
+    ],
+)
+def test_database_rows_render_the_same_page_as_the_counters(
+    binary_handler_analyze_rocprof_compute,
+    multi_kernel_workload,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    extra: List[str],
+) -> None:
+    """Rendering from the analysis database rows gives the page of today's input."""
+    rendered = render_both_inputs(
+        binary_handler_analyze_rocprof_compute,
+        monkeypatch,
+        tmp_path,
+        multi_kernel_workload,
+        extra,
+    )
+
+    counters_page = rendered["counters"].read_text(encoding="utf-8")
+    rows_page = rendered["rows"].read_text(encoding="utf-8")
+    assert rows_page == counters_page
+
+
+def test_database_rows_skip_kernel_filtered_runs(
+    binary_handler_analyze_rocprof_compute,
+    multi_kernel_workload,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Skip the database page of a -k run, whose rows keep only the selected kernels."""
+    rendered = render_both_inputs(
+        binary_handler_analyze_rocprof_compute,
+        monkeypatch,
+        tmp_path,
+        multi_kernel_workload,
+        ["-k", "1"],
+    )
+
+    assert rendered["rows"] is None
+    assert len(model_at(rendered["counters"])["kernels"]) == 3

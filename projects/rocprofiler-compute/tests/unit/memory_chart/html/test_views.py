@@ -3,6 +3,7 @@
 
 """Tests for aggregate and per-kernel HTML memory chart values."""
 
+import json
 from argparse import Namespace
 from collections import OrderedDict
 from dataclasses import FrozenInstanceError, replace
@@ -17,6 +18,7 @@ from membw_analysis.models import (
     SupportingMetric,
 )
 from memory_chart.html import views
+from memory_chart.html.db_rows import KernelRows, WorkloadChartRows
 from memory_chart.html.diagram import SlotSpec
 from memory_chart.loader import Layouts
 from memory_chart.render import progress_bar
@@ -597,3 +599,94 @@ def test_stall_annotations_follow_resolved_metadata_instead_of_block_names():
     )
 
     assert [a.block_id for a in detail.annotations] == ["hbm"]
+
+
+def make_stored_inputs() -> Tuple[WorkloadChartRows, ArchConfig, Namespace]:
+    """Stored rows for three chart metrics, with one template cell left empty."""
+    config = ArchConfig()
+    config.dfs[301] = pd.DataFrame(
+        {
+            "Metric": ["Hit", "Scratch", "Empty"],
+            "Value": [
+                build_eval_string("ROUND(SUM(Counter), 1)"),
+                build_eval_string("SUM(Counter)"),
+                "",
+            ],
+            "Unit": ["Percent", "KB per Wave", "Registers"],
+        },
+        index=pd.Index(["3.1.0", "3.1.1", "3.1.2"], name="Metric_ID"),
+    )
+    config.dfs_type[301] = "metric_table"
+    config.panel_configs = OrderedDict({
+        300: {
+            "data source": [
+                {
+                    "metric_table": {
+                        "id": 301,
+                        "title": "Memory Chart",
+                        "header": {},
+                        "metric": {
+                            "Hit": {"unit": "Percent"},
+                            "Scratch": {"unit": "KB per Wave"},
+                            "Empty": {"unit": "Registers"},
+                        },
+                    }
+                }
+            ]
+        }
+    })
+    args = Namespace(
+        time_unit=None,
+        cols=None,
+        include_cols=[],
+        decimal=2,
+        verbose=0,
+        report_diff=0,
+        debug=False,
+        normal_unit="per_kernel",
+    )
+    stored = WorkloadChartRows(
+        arch="gfx950",
+        layout_json=json.loads(Layouts.for_arch("gfx950").path.read_text("utf-8")),
+        aggregate={
+            "3.1.0": {"Value": 45.678},
+            "3.1.1": {"Value": 2560.0},
+            "3.1.2": {"Value": None},
+        },
+        kernels=(KernelRows("kernel alpha", {"3.1.0": {"Value": 10.26}}),),
+    )
+    return stored, config, args
+
+
+def test_stored_rows_fill_chart_cells_as_the_terminal_shows_them() -> None:
+    """Round to the to_round digits, convert to config units, and show gaps as N/A."""
+    stored, config, args = make_stored_inputs()
+
+    result = views.build_chart_views_from_db(stored, config, args, views.ChartScope())
+
+    table = result.aggregate.tables[0]
+    assert table.rows == (
+        ("Hit", 45.7, "Percent"),
+        ("Scratch", 2.5, "KB per Wave"),
+        ("Empty", "N/A", "Registers"),
+    )
+
+
+def test_stored_rows_give_kernel_views_in_stored_order() -> None:
+    """Kernel views read each kernel's own rows and keep the stored order."""
+    stored, config, args = make_stored_inputs()
+
+    result = views.build_chart_views_from_db(
+        stored, config, args, views.ChartScope(kernel_ids=[0])
+    )
+
+    assert result.kernels == (views.KernelEntry(0, "kernel alpha"),)
+    assert result.initial_kernel == 0
+    assert result.kernel_views[0].tables[0].rows[0][:2] == ("Hit", 10.3)
+
+
+def test_chart_metric_ids_are_the_chart_table_rows() -> None:
+    """The ids the database reader fetches are the rows of the chart tables."""
+    _, config, _ = make_stored_inputs()
+
+    assert views.chart_metric_ids(config) == ["3.1.0", "3.1.1", "3.1.2"]

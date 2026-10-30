@@ -34,7 +34,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * The analysis database stores each workload's total kernel duration, after the `--gpu-id` and `--dispatch` filters but before `-k`. `compute_kernel_view` repeats it as `workload_total_duration_ns`, so a kernel's top-stats Percent is its `duration_ns_sum` divided by that total. A workload with no dispatches stores NULL.
 
-* Added offline Memory Chart HTML reports (`mem_chart*.html`) to CLI analysis, with aggregate and per-kernel views. Each report is written into the workload's subfolder of the run folder.
+* Added offline Memory Chart HTML reports to CLI analysis, with aggregate and per-kernel views. Each workload gets one `memory-chart-gpu-0.html` in its subfolder of the run folder, whatever the GPU and dispatch filters.
 
 ### Changed
 

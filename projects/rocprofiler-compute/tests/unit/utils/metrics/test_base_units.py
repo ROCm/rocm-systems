@@ -14,6 +14,7 @@ from config import analysis_configs_dir
 from utils.metrics.base_units import (
     SCALED_UNITS,
     base_unit,
+    from_base_unit_value,
     to_base_unit_value,
 )
 
@@ -119,3 +120,29 @@ def test_every_scaled_config_unit_has_a_base_unit_rule():
     }
     assert scaled_in_configs, "expected scaled units in the shipped configs"
     assert scaled_in_configs <= set(SCALED_UNITS)
+
+
+@pytest.mark.parametrize(
+    ("config_unit", "value"),
+    [("KB per Wave", 2.5), ("GB/s", 1.5), ("Bytes/s", 1 / 3), ("Percent", 42.5)],
+)
+def test_from_base_unit_value_inverts_to_base_unit_value(config_unit, value):
+    """Reading a stored value back gives the value the config computed."""
+    stored = to_base_unit_value(config_unit, "Value", value)
+    assert from_base_unit_value(config_unit, "Value", stored) == value
+
+
+def test_from_base_unit_value_divides_kb_per_wave_by_1024():
+    """Bytes per Wave read back as KB per Wave is exact, since 1024 is a power of 2."""
+    assert from_base_unit_value("KB per Wave", "Value", 2560.0) == 2.5
+
+
+def test_from_base_unit_value_keeps_percent_of_peak_unscaled():
+    """A percent of peak is stored unscaled, so reading it back keeps its scale."""
+    assert from_base_unit_value("GB/s", "Percent of Peak", 42.5) == 42.5
+
+
+@pytest.mark.parametrize("value", [None, "N/A", "text"])
+def test_from_base_unit_value_passes_non_numbers_through(value):
+    """Missing values and text stay as they are."""
+    assert from_base_unit_value("KB per Wave", "Value", value) is value
