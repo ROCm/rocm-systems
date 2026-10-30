@@ -352,7 +352,6 @@ signal_less_prime_env()
     // application is dispatching -- makes the cached value deterministic and takes
     // the environ scan off every concurrent thread.
     signal_less_feature_enabled();
-    hub_max_pending_per_gpu();
     close_drain_budget_ns();
     quiesce_budget_ns();
 }

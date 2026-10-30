@@ -860,9 +860,9 @@ is_dispatch_packet(const rocprofiler_packet& pkt)
 //
 // keys_out is indexed BY PACKET INDEX, so registration uses this ownership
 // snapshot instead of re-deriving keys from a second doorbell lookup. Eligibility
-// checks capacity and slot quarantine (lock-free in the common case); registration
-// validates keys atomically before publication and replays signal instrumentation
-// on refusal.
+// checks slot quarantine and the admission latch (lock-free in the common case);
+// registration validates keys atomically before publication and replays signal
+// instrumentation on refusal.
 bool
 signal_less_batch_eligible(Queue*                                            queue,
                            const rocprofiler_packet*                         packets,
@@ -909,7 +909,7 @@ signal_less_batch_eligible(Queue*                                            que
     // doorbell_tls handoff process_doorbell_impl set before calling the interceptor.
     auto*      _st       = get_doorbell_tls().state;
     const bool _eligible = kfd::owner_registry().slot_uniquely_owned(_gpu, _slot) &&
-                           kfd::signal_less_hub().can_register_batch(_gpu, _slot, dispatch_count) &&
+                           kfd::signal_less_hub().can_register_batch(_gpu, _slot) &&
                            !(_st != nullptr && _st->admission_closed);
 
     if(_eligible)
@@ -1527,9 +1527,9 @@ write_interceptor(Queue*                                queue,
         if(_signal_less_batch &&
            !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs)))
         {
-            // Reachable when concurrent submitters race past the advisory capacity
-            // hint into the last of the per-GPU cap, on a slot quarantined between
-            // eligibility and here, or on a live-key collision. The batch skipped its
+            // Reachable when the slot was quarantined or the process-wide disable
+            // latch was set between eligibility and here, or on a live-key collision
+            // (same key already PENDING under an open window). The batch skipped its
             // signal instrumentation, so replay exactly the !_signal_less_batch signal
             // path per dispatch and fall through to the normal signal-path completion.
             // No id retirement here: register_batch did not consume _signal_less_regs on
@@ -1556,9 +1556,9 @@ write_interceptor(Queue*                                queue,
             // Clear BEFORE the post-loop block so it builds the async waiter unchanged.
             _signal_less_batch = false;
             // No record is lost (the signal path completes these), so this is
-            // informational, and it can fire on every batch while the hub sits at
-            // its cap: log the 1st, 2nd, 4th, 8th, ... refusal, not every one.
-            // The exact total is in the register-refused counter.
+            // informational, and it only fires on the rare quarantine/disable/
+            // collision races: log the 1st, 2nd, 4th, 8th, ... refusal, not every
+            // one. The exact total is in the register-refused counter.
             static auto _refusals = std::atomic<uint64_t>{0};
             const auto  _nth      = _refusals.fetch_add(1, std::memory_order_relaxed) + 1;
             ROCP_WARNING_IF((_nth & (_nth - 1)) == 0) << fmt::format(

@@ -18,7 +18,9 @@ set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     utils.hpp
     kfd_dlog_uapi.h
     dlog_drain.hpp
-    record_pipe.hpp
+    record_chunk_pool.hpp
+    record_stream.hpp
+    record_processor.hpp
     stream_geometry.hpp
     correlation_types.hpp
     doorbell_map.hpp

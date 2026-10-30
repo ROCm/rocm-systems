@@ -21,24 +21,28 @@
 // THE SOFTWARE.
 
 // Unit tests for the dispatch-log ring drain against a hand-built in-memory ring.
-// Geometry mirrors GFX12: num_regions=2, region_record_count=2048.
+// Geometry mirrors GFX12: num_regions=2, region_record_count=2048. The reader
+// stage copies into a record_stream sink (P3): a fake session drives dlog_pass
+// exactly as copy_records does, and the copy-out step turns published slots back
+// into a plain record vector for pair_records.
 
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
-#include "lib/rocprofiler-sdk/kfd/record_pipe.hpp"
+#include "lib/rocprofiler-sdk/kfd/record_processor.hpp"
+#include "lib/rocprofiler-sdk/kfd/record_stream.hpp"
 #include "lib/rocprofiler-sdk/kfd/stream_geometry.hpp"
 
 #include <gtest/gtest.h>
 
-#include <deque>
-
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <map>
+#include <set>
 #include <string>
-#include <thread>
 #include <vector>
+
+#include <sys/mman.h>
 
 namespace
 {
@@ -100,33 +104,110 @@ struct recorder
         };
     }
 };
-// The two production stages back to back: reader copies the ring, processor pairs it.
+
+// The counting mapping policy: counts maps/unmaps and poisons fresh pages with
+// 0xA5, so reads past `published` show.
+struct test_mapping
+{
+    static inline std::atomic<size_t> map_calls{0};
+    static inline std::atomic<size_t> map_successes{0};
+    static inline std::atomic<size_t> unmap_calls{0};
+
+    static void reset()
+    {
+        map_calls.store(0, std::memory_order_relaxed);
+        map_successes.store(0, std::memory_order_relaxed);
+        unmap_calls.store(0, std::memory_order_relaxed);
+    }
+
+    static void* map(size_t bytes) noexcept
+    {
+        map_calls.fetch_add(1, std::memory_order_relaxed);
+        void* const p =
+            ::mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if(p == MAP_FAILED) return nullptr;
+        std::memset(p, 0xA5, bytes);
+        map_successes.fetch_add(1, std::memory_order_relaxed);
+        return p;
+    }
+
+    static void unmap(void* p, size_t bytes) noexcept
+    {
+        unmap_calls.fetch_add(1, std::memory_order_relaxed);
+        ::munmap(p, bytes);
+    }
+};
+
+using drain_stream = basic_record_stream<test_mapping>;
+
+// copy_out sink that flattens the published runs into one vector, the shape
+// pair_records consumes.
+struct sink_vector
+{
+    std::vector<fw_record>* out;
+    void                    operator()(const fw_record* p, size_t n, uint64_t) const
+    {
+        out->insert(out->end(), p, p + n);
+    }
+};
+
+// copy_pipes sink adapter: delegates every append to the real stream, then
+// fires the producer-progress hook, so a test can advance the ring DURING the
+// copy (after the snapshot) the way the production reader's producer races.
+struct progress_stream
+{
+    drain_stream*          real    = nullptr;
+    std::function<void()>* publish = nullptr;
+    void                   append(const void* p, size_t n, reader_alloc_log& log)
+    {
+        real->append(p, n, log);
+        if(publish != nullptr) (*publish)();
+    }
+};
+
+// The two production stages back to back: reader copies the ring into the
+// session's stream, processor pairs the copied-out records.
 struct drain_state
 {
-    ring_cursors cursors = {};
-    pair_state   pairing = {};
+    ring_cursors           cursors = {};
+    pair_state             pairing = {};
+    drain_stream           stream  = {};
+    reader_alloc_log       log     = {};
+    std::vector<fw_record> batch   = {};
 };
-// Copy one ring into `batch` (clearing it first) and return the copied count.
+// Copy one ring into `st.stream` (one pass of dlog_pass, without the marker
+// rules -- the pairing tests below append markers explicitly), publish, copy out
+// into st.batch, and return the copied count.
 uint64_t
-copy_ring(fake_ring& ring, ring_cursors& cur, std::vector<copied_record>& batch)
+copy_ring(fake_ring& ring, drain_state& st)
 {
-    batch.clear();
-    // ring.wptr.data() is a uint64_t* passed as the const volatile void* wptr base;
-    // copy_pipes strides it by 8 bytes per region via load_wptr_low32.
-    return copy_pipes(
-        ring.records.data(), ring.num_regions, ring.rrc, ring.wptr.data(), cur, batch);
+    if(!st.stream.armed())
+    {
+        EXPECT_TRUE(st.stream.preallocate(4));
+    }
+    st.batch.clear();
+    const auto copied = copy_pipes(ring.records.data(),
+                                   ring.num_regions,
+                                   ring.rrc,
+                                   ring.wptr.data(),
+                                   st.cursors,
+                                   st.stream,
+                                   st.log);
+    st.stream.publish();
+    st.stream.copy_out(sink_vector{&st.batch}, 4);
+    return copied;
 }
 uint64_t
 run_drain(fake_ring& ring, drain_state& st, recorder& rec, uint64_t now_ns = 1000)
 {
-    auto batch = std::vector<copied_record>{};
-    copy_ring(ring, st.cursors, batch);
-    return pair_records(batch.data(), batch.size(), st.pairing, now_ns, rec.on_record());
+    copy_ring(ring, st);
+    return pair_records(st.batch.data(), st.batch.size(), st.pairing, now_ns, rec.on_record());
 }
 // Prime a fresh ring: first drain syncs each pipe cursor to the origin.
 void
-prime(fake_ring& ring, drain_state& st)
+prime_ring(fake_ring& ring, drain_state& st)
 {
+    EXPECT_TRUE(st.stream.preallocate(4));
     recorder rec0;
     run_drain(ring, st, rec0);
 }
@@ -140,7 +221,7 @@ struct env
     env(uint32_t nreg = 2, uint32_t rrc = 2048)
     : ring(nreg, rrc)
     {
-        prime(ring, st);
+        prime_ring(ring, st);
     }
     uint64_t drain() { return run_drain(ring, st, rec); }
 };
@@ -148,15 +229,26 @@ struct env
 // One GPU's ring + cursors + copied batch, primed to origin; copy() refills the batch.
 struct gpu_ring
 {
-    fake_ring                  ring;
-    ring_cursors               cur;
-    std::vector<copied_record> batch;
+    fake_ring              ring;
+    ring_cursors           cur    = {};
+    drain_stream           stream = {};
+    reader_alloc_log       log    = {};
+    std::vector<fw_record> batch  = {};
     gpu_ring(uint32_t rrc, uint32_t nreg = 1)
     : ring(nreg, rrc)
     {
-        copy_ring(ring, cur, batch);  // prime cursor to origin
+        stream.preallocate(4);
+        copy();  // prime cursor to origin
     }
-    uint64_t copy() { return copy_ring(ring, cur, batch); }
+    uint64_t copy()
+    {
+        batch.clear();
+        const auto copied = copy_pipes(
+            ring.records.data(), ring.num_regions, ring.rrc, ring.wptr.data(), cur, stream, log);
+        stream.publish();
+        stream.copy_out(sink_vector{&batch}, 4);
+        return copied;
+    }
 };
 }  // namespace
 
@@ -304,11 +396,11 @@ TEST(dlog_drain, evict_stale_starts)
 TEST(dlog_drain, pending_starts_size_cap_evicts_oldest)
 {
     auto mk_start = [](uint32_t dispatch_id, uint64_t ts) {
-        auto c             = copied_record{};
-        c.rec.record_type  = kRecStart;
-        c.rec.doorbell_off = 4100;
-        c.rec.dispatch_id  = dispatch_id;
-        c.rec.ts_lo        = static_cast<uint32_t>(ts);
+        auto c         = fw_record{};
+        c.record_type  = kRecStart;
+        c.doorbell_off = 4100;
+        c.dispatch_id  = dispatch_id;
+        c.ts_lo        = static_cast<uint32_t>(ts);
         return c;
     };
 
@@ -319,7 +411,7 @@ TEST(dlog_drain, pending_starts_size_cap_evicts_oldest)
     // Three distinct keys, each in its own batch so seen_at_ns strictly increases.
     for(uint32_t i = 1; i <= 3; ++i)
     {
-        auto batch = std::vector<copied_record>{mk_start(i, 10 * i)};
+        auto batch = std::vector<fw_record>{mk_start(i, 10 * i)};
         pair_records(batch.data(), batch.size(), pairing, /*now_ns=*/1000 * i, rec.on_record());
     }
 
@@ -331,7 +423,7 @@ TEST(dlog_drain, pending_starts_size_cap_evicts_oldest)
     // A recurring key is exempt: it cannot grow the map, and evicting there could
     // pick the very key being refreshed.
     const uint64_t k3    = (uint64_t{4100} << 32) | 3u;
-    auto           again = std::vector<copied_record>{mk_start(3, 99)};
+    auto           again = std::vector<fw_record>{mk_start(3, 99)};
     pair_records(again.data(), again.size(), pairing, /*now_ns=*/4000, rec.on_record());
     EXPECT_EQ(pairing.pending_starts.size(), 2u);
     EXPECT_EQ(pairing.starts_cap_evicted, 1u) << "no eviction for a recurring key";
@@ -344,18 +436,17 @@ TEST(dlog_drain, pending_starts_size_cap_evicts_oldest)
 // pair, not be evicted first and complete start-unknown.
 TEST(dlog_drain, start_cap_spares_a_start_whose_eop_is_in_the_same_batch)
 {
-    const uint32_t db      = 4100;
-    auto           pairing = pair_state{};
+    const uint32_t db          = 4100;
+    auto           pairing     = pair_state{};
     pairing.max_pending_starts = 1;
     auto rec                   = recorder{};
 
-    const auto retained = copied_record{fw_record{100, 0, kRecStart, 9, db}, 0};
+    const auto retained = fw_record{100, 0, kRecStart, 9, db};
     pair_records(&retained, 1, pairing, 1000, rec.on_record());
     ASSERT_EQ(pairing.pending_starts.size(), 1u);
 
     // dispatch 1 sorts before dispatch 9, so its START is processed first.
-    const auto batch = std::vector<copied_record>{{fw_record{200, 0, kRecStart, 1, db}, 0},
-                                                  {fw_record{300, 0, kRecEop, 9, db}, 0}};
+    const auto batch = std::vector<fw_record>{{200, 0, kRecStart, 1, db}, {300, 0, kRecEop, 9, db}};
     EXPECT_EQ(pair_records(batch.data(), batch.size(), pairing, 2000, rec.on_record()), 1u);
     ASSERT_EQ(rec.pairs.count(std::make_pair(db, 9u)), 1u);
     EXPECT_EQ(rec.pairs[std::make_pair(db, 9u)].first, 100u);
@@ -388,7 +479,7 @@ TEST(dlog_drain, start_age_index_tracks_replay_completion_and_equal_tick_drop)
     state.record_start((uint64_t{4100} << 32) | 7, 300, 500);
     ASSERT_EQ(state.start_ages.size(), 1u);
     EXPECT_EQ(state.start_ages.begin()->first, 500u);
-    const auto completion = copied_record{fw_record{400, 0, kRecEop, 7, 4100}, 0};
+    const auto completion = fw_record{400, 0, kRecEop, 7, 4100};
     EXPECT_EQ(pair_records(&completion, 1, state, 2000, sink.on_record()), 1u);
     EXPECT_TRUE(state.start_ages.empty());
     EXPECT_TRUE(state.pending_starts.empty());
@@ -405,9 +496,9 @@ TEST(dlog_drain, invalid_geometry_rejected)
 {
     drain_state st;
     recorder    rec;
-    auto        batch = std::vector<copied_record>{};
-    EXPECT_EQ(copy_pipes(nullptr, 0, 2048, nullptr, st.cursors, batch), 0u);
-    EXPECT_EQ(copy_pipes(nullptr, kMaxRegions + 1, 2048, nullptr, st.cursors, batch), 0u);
+    EXPECT_EQ(copy_pipes(nullptr, 0, 2048, nullptr, st.cursors, st.stream, st.log), 0u);
+    EXPECT_EQ(copy_pipes(nullptr, kMaxRegions + 1, 2048, nullptr, st.cursors, st.stream, st.log),
+              0u);
     fake_ring ring(2, 3000);  // region_record_count not a power of two
     EXPECT_EQ(run_drain(ring, st, rec), 0u);
     EXPECT_TRUE(rec.pairs.empty());
@@ -684,23 +775,6 @@ TEST(dlog_drain, copier_advances_rptr_without_pairing)
     EXPECT_EQ(rec.eops_without_start.size(), 1u);
 }
 
-// The record's region is preserved; region 0 copies first so cross-region pairs match.
-TEST(dlog_drain, copied_records_carry_their_region)
-{
-    gpu_ring g(2048, 2);
-    g.ring.put(0, 0, kRecStart, 1, 4100, 10);
-    g.ring.wptr[0] = 1;
-    g.ring.put(1, 0, kRecEop, 1, 4100, 20);
-    g.ring.wptr[1] = 1;
-    ASSERT_EQ(g.copy(), 2u);
-    ASSERT_EQ(g.batch.size(), 2u);
-    EXPECT_EQ(g.batch[0].region, 0u);
-    EXPECT_EQ(g.batch[1].region, 1u);
-    pair_state pairing;
-    recorder   rec;
-    EXPECT_EQ(pair_records(g.batch.data(), g.batch.size(), pairing, 1000, rec.on_record()), 1u);
-}
-
 // The pairing census counts starts/eops/unmatched/overwrites.
 TEST(dlog_drain, pairing_census_counts_starts_eops_and_overwrites)
 {
@@ -820,10 +894,10 @@ TEST(dlog_drain, older_or_duplicate_start_does_not_refresh_age)
 {
     auto state = pair_state{};
     auto sink  = recorder{};
-    auto start = copied_record{fw_record{200, 0, kRecStart, 7, 4100}, 0};
+    auto start = fw_record{200, 0, kRecStart, 7, 4100};
     pair_records(&start, 1, state, 1000, sink.on_record());
     pair_records(&start, 1, state, 2000, sink.on_record());
-    start.rec.ts_lo = 100;
+    start.ts_lo = 100;
     pair_records(&start, 1, state, 3000, sink.on_record());
     ASSERT_EQ(state.pending_starts.size(), 1u);
     EXPECT_EQ(state.pending_starts.begin()->second.start_ticks, 200u);
@@ -838,22 +912,22 @@ TEST(dlog_drain, replayed_start_ages_from_newest)
 {
     pair_state st;
     auto       make_start = [](uint32_t db, uint32_t id, uint64_t ts) {
-        copied_record cr{};
-        cr.rec.ts_lo        = static_cast<uint32_t>(ts & 0xFFFFFFFFu);
-        cr.rec.ts_hi        = static_cast<uint32_t>(ts >> 32);
-        cr.rec.record_type  = kRecStart;
-        cr.rec.dispatch_id  = id;
-        cr.rec.doorbell_off = db;
-        return cr;
+        fw_record r{};
+        r.ts_lo        = static_cast<uint32_t>(ts & 0xFFFFFFFFu);
+        r.ts_hi        = static_cast<uint32_t>(ts >> 32);
+        r.record_type  = kRecStart;
+        r.dispatch_id  = id;
+        r.doorbell_off = db;
+        return r;
     };
     auto           nop = [](const drained_record&) {};
     const uint32_t db  = 4100;
     // first START at now=0; replays at 1000 and 2000 move seen_at_ns to 2000.
-    std::vector<copied_record> b0{make_start(db, 7, 100)};
+    std::vector<fw_record> b0{make_start(db, 7, 100)};
     pair_records(b0.data(), b0.size(), st, /*now_ns=*/0, nop);
-    std::vector<copied_record> b1{make_start(db, 7, 200)};
+    std::vector<fw_record> b1{make_start(db, 7, 200)};
     pair_records(b1.data(), b1.size(), st, /*now_ns=*/1000, nop);
-    std::vector<copied_record> b2{make_start(db, 7, 300)};
+    std::vector<fw_record> b2{make_start(db, 7, 300)};
     pair_records(b2.data(), b2.size(), st, /*now_ns=*/2000, nop);
     ASSERT_EQ(st.pending_starts.size(), 1u);
     EXPECT_EQ(st.pending_starts.begin()->second.start_ticks, 300u);
@@ -897,8 +971,8 @@ TEST(dlog_drain, snapshot_lookahead_pairs_eop_with_late_copied_start)
 {
     auto       state      = pair_state{};
     auto       sink       = recorder{};
-    const auto completion = copied_record{fw_record{200, 0, kRecEop, 7, 4100}, 1};
-    const auto start      = copied_record{fw_record{100, 0, kRecStart, 7, 4100}, 0};
+    const auto completion = fw_record{200, 0, kRecEop, 7, 4100};
+    const auto start      = fw_record{100, 0, kRecStart, 7, 4100};
 
     EXPECT_EQ(pair_records(&completion, 1, state, 1000, sink.on_record(), true, 1), 0u);
     EXPECT_EQ(sink.records, 0u);
@@ -915,11 +989,11 @@ TEST(dlog_drain, snapshot_lookahead_pairs_eop_with_late_copied_start)
 
 TEST(dlog_drain, snapshot_lookahead_recovers_latest_replay_before_completion)
 {
-    auto       state  = pair_state{};
-    auto       sink   = recorder{};
-    const auto first  = std::vector<copied_record>{{fw_record{100, 0, kRecStart, 7, 4100}, 0},
-                                                  {fw_record{300, 0, kRecEop, 7, 4100}, 1}};
-    const auto replay = copied_record{fw_record{200, 0, kRecStart, 7, 4100}, 0};
+    auto       state = pair_state{};
+    auto       sink  = recorder{};
+    const auto first =
+        std::vector<fw_record>{{100, 0, kRecStart, 7, 4100}, {300, 0, kRecEop, 7, 4100}};
+    const auto replay = fw_record{200, 0, kRecStart, 7, 4100};
     pair_records(first.data(), first.size(), state, 1000, sink.on_record(), true, 1);
     EXPECT_EQ(sink.records, 0u);
     EXPECT_EQ(pair_records(&replay, 1, state, 2000, sink.on_record(), true, 2), 0u);
@@ -932,13 +1006,12 @@ TEST(dlog_drain, snapshot_lookahead_recovers_latest_replay_before_completion)
 
 TEST(dlog_drain, snapshot_lookahead_preserves_reused_keys_and_equal_tick_order)
 {
-    auto       state      = pair_state{};
-    auto       emitted    = std::vector<drained_record>{};
-    auto       sink       = [&](const drained_record& record) { emitted.push_back(record); };
-    const auto first      = std::vector<copied_record>{{fw_record{200, 0, kRecEop, 7, 4100}, 1},
-                                                  {fw_record{200, 0, kRecStart, 7, 4100}, 1},
-                                                  {fw_record{400, 0, kRecEop, 7, 4100}, 1}};
-    const auto late_start = copied_record{fw_record{100, 0, kRecStart, 7, 4100}, 0};
+    auto       state   = pair_state{};
+    auto       emitted = std::vector<drained_record>{};
+    auto       sink    = [&](const drained_record& record) { emitted.push_back(record); };
+    const auto first   = std::vector<fw_record>{
+        {200, 0, kRecEop, 7, 4100}, {200, 0, kRecStart, 7, 4100}, {400, 0, kRecEop, 7, 4100}};
+    const auto late_start = fw_record{100, 0, kRecStart, 7, 4100};
     pair_records(first.data(), first.size(), state, 1000, sink, true, 1);
     EXPECT_TRUE(emitted.empty());
     EXPECT_EQ(pair_records(&late_start, 1, state, 2000, sink, true, 2), 0u);
@@ -956,7 +1029,7 @@ TEST(dlog_drain, snapshot_lookahead_idle_marker_flushes_unknown_start_once)
 {
     auto       state      = pair_state{};
     auto       sink       = recorder{};
-    const auto completion = copied_record{fw_record{200, 0, kRecEop, 7, 4100}, 1};
+    const auto completion = fw_record{200, 0, kRecEop, 7, 4100};
     pair_records(&completion, 1, state, 1000, sink.on_record(), true, 1);
     EXPECT_EQ(sink.records, 0u);
     pair_records(nullptr, 0, state, 2000, sink.on_record(), true, 2);
@@ -970,18 +1043,6 @@ TEST(dlog_drain, snapshot_lookahead_idle_marker_flushes_unknown_start_once)
 
 TEST(dlog_drain, snapshot_lookahead_handles_producer_progress_during_copy)
 {
-    struct copy_output
-    {
-        std::vector<copied_record> records;
-        std::function<void()>      publish;
-
-        void emplace_back(copied_record record)
-        {
-            records.push_back(record);
-            publish();
-        }
-    };
-
     constexpr uint32_t dispatch_count = 4096;
     constexpr uint32_t doorbell       = 4100;
     for(uint32_t regions : {2u, 4u})
@@ -1011,15 +1072,28 @@ TEST(dlog_drain, snapshot_lookahead_handles_producer_progress_during_copy)
             }
         };
 
+        // The reader stage through a stream-sink adapter that fires the
+        // producer-progress hook after every append, restoring the interleaving
+        // the vector-sink version of this test exercised: copy_pipes reads only
+        // the wptr snapshot, so records written DURING the copy are left for
+        // the next pass.
+        drain_stream stream;
+        ASSERT_TRUE(stream.preallocate(4));
+        reader_alloc_log       log;
+        std::vector<fw_record> batch;
+        std::function<void()>  publish_hook = publish;
+        progress_stream        sink{&stream, &publish_hook};
         for(uint64_t epoch = 1; epoch < dispatch_count * 3; ++epoch)
         {
-            auto       output = copy_output{{}, publish};
-            const auto count  = copy_pipes(
-                ring.records.data(), regions, ring.rrc, ring.wptr.data(), cursors, output);
+            batch.clear();
+            const auto count = copy_pipes(
+                ring.records.data(), regions, ring.rrc, ring.wptr.data(), cursors, sink, log);
+            stream.publish();
+            stream.copy_out(sink_vector{&batch}, 4);
             copied += count;
             pair_records(
-                output.records.data(),
-                output.records.size(),
+                batch.data(),
+                batch.size(),
                 pairing,
                 epoch * 1000,
                 [&](const drained_record& record) { emitted.push_back(record); },
@@ -1047,286 +1121,287 @@ TEST(dlog_drain, snapshot_lookahead_handles_producer_progress_during_copy)
     }
 }
 
-TEST(record_pipe, fence_includes_deferred_completions_but_not_newer_epochs)
+// ---------------------------------------------------------------------------
+// The reader pass (dlog_pass) and the fence over streams.
+// ---------------------------------------------------------------------------
+
+// A minimal session for dlog_pass: the drain-facing fields of dlog_session.
+// Default-constructible (not movable), so it can live in the fixed arrays the
+// processor-side helpers iterate.
+struct pass_session
 {
-    auto pipe           = record_pipe<2>{};
-    auto deferred_epoch = std::atomic<uint64_t>{UINT64_MAX};
-    ASSERT_NE(pipe.acquire(), nullptr);
-    pipe.publish();
-    EXPECT_FALSE(processor_drained_through(pipe, deferred_epoch, 10));
+    struct info_t
+    {
+        uint32_t num_regions         = 1;
+        uint32_t region_record_count = 64;
+        uint64_t buffer_size         = uint64_t{1} * 64 * kFwRecBytes;
+    };
+    info_t           info                  = {};
+    ring_cursors     cursors               = {};
+    drain_stream     stream                = {};
+    reader_alloc_log alloc_log             = {};
+    bool             pairing_flush_pending = false;
+
+    void setup(uint32_t nreg, uint32_t rrc, size_t spares = 4)
+    {
+        info.num_regions         = nreg;
+        info.region_record_count = rrc;
+        info.buffer_size         = uint64_t{nreg} * rrc * kFwRecBytes;
+        EXPECT_TRUE(stream.preallocate(spares));
+    }
+    // One pass over the ring, exactly as copy_records drives it.
+    uint64_t pass(const fake_ring& ring, uint64_t drain_epoch, uint64_t now_ns)
+    {
+        return dlog_pass(ring.records.data(), ring.wptr.data(), *this, drain_epoch, now_ns);
+    }
+};
+
+// One pass = records, then one marker, then one publish: published() moves once,
+// ends at the marker, and the copy-out sees a closed segment (the 6.1 assert).
+TEST(dlog_pass, one_pass_publishes_records_then_marker)
+{
+    test_mapping::reset();
+    fake_ring                   ring(1, 64);
+    std::array<pass_session, 1> ss{};
+    ss[0].setup(1, 64);
+    auto&                         s = ss[0];
+    std::array<stream_backlog, 1> backlogs{};
+    // Prime pass: rptr := wptr, nothing copied, nothing pending, no marker.
+    EXPECT_EQ(s.pass(ring, 0, 1000), 0u);
+    EXPECT_FALSE(s.pairing_flush_pending);
+    const uint64_t c0 = s.stream.published();
+
+    ring.put(0, 0, kRecStart, 7, 4100, 10);
+    ring.put(0, 1, kRecEop, 7, 4100, 20);
+    ring.wptr[0] = 2;
+    EXPECT_EQ(s.pass(ring, 4, 2000), 2u);
+    EXPECT_TRUE(s.pairing_flush_pending);
+    EXPECT_EQ(s.stream.published(), c0 + 3) << "one publish: the records plus the marker";
+    EXPECT_EQ(s.cursors.rptr[0], 2u) << "rptr == the wptr snapshot";
+    // The published prefix ends at the marker: the production copy-out closes the
+    // segment; the 6.1 assert inside would abort on a mutant that published
+    // before the marker.
+    copy_out_all(ss, backlogs, 1);
+    ASSERT_EQ(backlogs[0].closed.size(), 1u);
+    EXPECT_EQ(backlogs[0].closed[0].records.size(), 2u);
+    EXPECT_EQ(backlogs[0].closed[0].epoch, 5u);
+    EXPECT_EQ(backlogs[0].closed[0].seen_at_ns, 2000u);
+    EXPECT_EQ(backlogs[0].closed[0].end_pos, c0 + 3);
+    EXPECT_TRUE(backlogs[0].open.records.empty());
+}
+
+// 5.2 over consecutive passes: data -> DATA; then idle -> exactly one
+// IDLE_FLUSH; then idle -> nothing, no publish; pairing_flush_pending follows
+// the base :684-685 rules.
+TEST(dlog_pass, marker_table_over_consecutive_passes)
+{
+    test_mapping::reset();
+    fake_ring                   ring(1, 64);
+    std::array<pass_session, 1> ss{};
+    ss[0].setup(1, 64);
+    auto&                         s = ss[0];
+    std::array<stream_backlog, 1> backlogs{};
+
+    EXPECT_EQ(s.pass(ring, 0, 1000), 0u);  // prime
+    EXPECT_FALSE(s.pairing_flush_pending);
+
+    // Copied > 0: a DATA marker (a segment with records) closes the pass.
+    ring.put(0, 0, kRecEop, 7, 4100, 10);
+    ring.wptr[0] = 1;
+    EXPECT_EQ(s.pass(ring, 1, 2000), 1u);
+    EXPECT_TRUE(s.pairing_flush_pending);
+    copy_out_all(ss, backlogs, 1);
+    ASSERT_EQ(backlogs[0].closed.size(), 1u);
+    EXPECT_EQ(backlogs[0].closed[0].records.size(), 1u);
+
+    // Copied == 0 with a pending flush: exactly one IDLE_FLUSH (empty segment).
+    EXPECT_EQ(s.pass(ring, 2, 3000), 0u);
+    EXPECT_FALSE(s.pairing_flush_pending);
+    copy_out_all(ss, backlogs, 1);
+    ASSERT_EQ(backlogs[0].closed.size(), 2u);
+    EXPECT_EQ(backlogs[0].closed[1].records.size(), 0u) << "the idle flush closes an empty segment";
+    EXPECT_EQ(backlogs[0].closed[1].seen_at_ns, 3000u);
+
+    // Copied == 0, nothing pending: no marker, no publish at all.
+    const uint64_t published_before = s.stream.published();
+    EXPECT_EQ(s.pass(ring, 3, 4000), 0u);
+    EXPECT_FALSE(s.pairing_flush_pending);
+    EXPECT_EQ(s.stream.published(), published_before)
+        << "an idle pass with nothing pending publishes nothing";
+    copy_out_all(ss, backlogs, 1);
+    EXPECT_EQ(backlogs[0].closed.size(), 2u) << "no empty segment for the idle pass";
+}
+
+// Marker contents: epoch == drain_epoch + 1 sampled at pass start, seen_at_ns
+// is the pass-start clock (sampled before the copy, base :671-672).
+TEST(dlog_pass, marker_carries_epoch_and_pass_start_clock)
+{
+    test_mapping::reset();
+    fake_ring    ring(1, 64);
+    pass_session s;
+    s.setup(1, 64);
+    s.pass(ring, 0, 1000);  // prime
+
+    ring.put(0, 0, kRecStart, 7, 4100, 10);
+    ring.wptr[0] = 1;
+    EXPECT_EQ(s.pass(ring, 41, 2000), 1u);
+    std::vector<fw_record> out;
+    s.stream.copy_out(sink_vector{&out}, 4);
+    ASSERT_EQ(out.size(), 2u);
+    const auto m = decode_marker(out.back());
+    EXPECT_EQ(m.epoch, 42u) << "drain_epoch + 1, sampled at pass start";
+    EXPECT_EQ(m.seen_at_ns, 2000u) << "the pass-start clock, sampled before the copy";
+}
+
+// 5.3: with pass_reserve spares, a maximal pass plus its marker from any fill
+// makes zero map calls (2.5 MiB geometry and the 10 MiB R = 1 variant).
+TEST(dlog_pass, maximal_pass_from_any_fill_needs_no_allocation)
+{
+    constexpr size_t                    kK      = drain_stream::kK;
+    const std::pair<uint64_t, uint32_t> geoms[] = {{2621440, 4}, {10485760, 1}};
+    for(const auto& [ring_bytes, regions] : geoms)
+    {
+        const uint32_t rrc     = static_cast<uint32_t>(ring_bytes / (uint64_t{20} * regions));
+        const size_t   reserve = dlog_pass_reserve(ring_bytes, regions, kK);
+        ASSERT_GT(reserve, 0u);
+        SCOPED_TRACE(::testing::Message() << "ring=" << ring_bytes << " regions=" << regions);
+        for(const size_t fill : {size_t{0}, size_t{1}, kK - 1})
+        {
+            SCOPED_TRACE(::testing::Message() << "fill=" << fill);
+            test_mapping::reset();
+            fake_ring    ring(regions, rrc);
+            pass_session s;
+            s.setup(regions, rrc, reserve);
+            const size_t maps_before = test_mapping::map_calls.load();
+            // Attached at ring start: rptr primed to 0, so the whole ring below
+            // wptr is unread.
+            s.cursors               = {};
+            s.cursors.rptr_init     = true;
+            s.pairing_flush_pending = false;
+
+            // Offset the stream's fill: the pass starts mid-chunk.
+            std::vector<fw_record> pad(fill);
+            for(size_t i = 0; i < fill; ++i)
+                pad[i] = fw_record{static_cast<uint32_t>(i), 0, kRecPadding, 0, 0};
+            s.stream.append(pad.data(), pad.size(), s.alloc_log);
+            s.stream.publish();
+
+            // Maximal ring content: N-1 unread records per region.
+            for(uint32_t r = 0; r < regions; ++r)
+                for(uint32_t i = 0; i + 1 < rrc; ++i)
+                    ring.put(r, i, kRecStart, i, 4100 + r, i);
+            for(uint32_t r = 0; r < regions; ++r)
+                ring.wptr[r] = rrc - 1;
+
+            EXPECT_EQ(s.pass(ring, 0, 1000), uint64_t{regions} * (rrc - 1));
+            EXPECT_EQ(s.alloc_log.reader_allocs.load(), 0u)
+                << "the spares must cover a maximal pass";
+            EXPECT_EQ(test_mapping::map_calls.load(), maps_before)
+                << "an unexpected reader map: pass_reserve is too small";
+        }
+    }
+}
+
+// 7.3: processor_drained_through over streams, ported from the pipe fence tests.
+// The predicate iterates sessions, so the streams sit in minimal wrappers.
+struct fence_session
+{
+    drain_stream stream = {};
+};
+
+TEST(dlog_fence, drained_through_over_streams)
+{
+    test_mapping::reset();
+    std::array<fence_session, 2> ss{};
+    ASSERT_TRUE(ss[0].stream.preallocate(2));
+    ASSERT_TRUE(ss[1].stream.preallocate(2));
+    auto                         deferred_epoch = std::atomic<uint64_t>{UINT64_MAX};
+    reader_alloc_log             log;
+    const std::vector<fw_record> recs{fw_record{1, 0, kRecEop, 7, 4100}};
+
+    // Capture a target; the processor is behind on processed.
+    ss[0].stream.append(recs.data(), recs.size(), log);
+    ss[0].stream.publish();
+    std::array<uint64_t, 2> target{};
+    target[0] = ss[0].stream.published();
+    EXPECT_FALSE(processor_drained_through(ss, 2, target.data(), deferred_epoch, 10));
+    ss[0].stream.copy_out([](const fw_record*, size_t, uint64_t) {}, 2);
+    ss[0].stream.publish_processed(ss[0].stream.taken());
+    // Taken and processed, but the held epoch sits at the boundary: an epoch
+    // <= through still holds lookahead records, an epoch > through does not.
     deferred_epoch.store(10, std::memory_order_release);
-    pipe.pop();
-    EXPECT_FALSE(processor_drained_through(pipe, deferred_epoch, 10));
-    EXPECT_TRUE(processor_drained_through(pipe, deferred_epoch, 9));
+    EXPECT_FALSE(processor_drained_through(ss, 2, target.data(), deferred_epoch, 10));
+    EXPECT_TRUE(processor_drained_through(ss, 2, target.data(), deferred_epoch, 9));
     deferred_epoch.store(UINT64_MAX, std::memory_order_release);
-    EXPECT_TRUE(processor_drained_through(pipe, deferred_epoch, 10));
+    EXPECT_TRUE(processor_drained_through(ss, 2, target.data(), deferred_epoch, 10));
+
+    // An uncaptured new stream is ignored: count stays at the capture size.
+    ss[1].stream.append(recs.data(), recs.size(), log);
+    ss[1].stream.publish();
+    EXPECT_TRUE(processor_drained_through(ss, 1, target.data(), deferred_epoch, 10));
 }
 
-// A fence samples published_count() once; batches published after that sample
-// cannot extend it, even though the pipe never reads empty.
-TEST(record_pipe, fence_target_is_not_extended_by_newer_batches)
+// A fence samples the target once; records published after that sample cannot
+// extend it, even though the stream never reads empty.
+TEST(dlog_fence, target_is_not_extended_by_newer_publishes)
 {
-    auto pipe = record_pipe<4>{};
-    auto held = std::atomic<uint64_t>{UINT64_MAX};
-    ASSERT_NE(pipe.acquire(), nullptr);
-    pipe.publish();
-    const auto target = pipe.published_count();
-    ASSERT_NE(pipe.acquire(), nullptr);
-    pipe.publish();  // newer traffic, after the fence's sample
-    EXPECT_FALSE(processor_drained_through(pipe, held, 5, target));
-    pipe.pop();
-    EXPECT_TRUE(processor_drained_through(pipe, held, 5, target));
-    EXPECT_FALSE(processor_drained_through(pipe, held, 5)) << "an untargeted check wants empty";
+    test_mapping::reset();
+    std::array<fence_session, 1> ss{};
+    ASSERT_TRUE(ss[0].stream.preallocate(2));
+    auto                         held = std::atomic<uint64_t>{UINT64_MAX};
+    reader_alloc_log             log;
+    const std::vector<fw_record> recs{fw_record{1, 0, kRecEop, 7, 4100}};
+    ss[0].stream.append(recs.data(), recs.size(), log);
+    ss[0].stream.publish();
+    std::array<uint64_t, 1> target{};
+    target[0] = ss[0].stream.published();
+    // Newer traffic, after the fence's sample.
+    ss[0].stream.append(recs.data(), recs.size(), log);
+    ss[0].stream.publish();
+    ss[0].stream.copy_out([](const fw_record*, size_t, uint64_t) {}, 2);
+    EXPECT_FALSE(processor_drained_through(ss, 1, target.data(), held, 5));
+    ss[0].stream.publish_processed(target[0]);
+    EXPECT_TRUE(processor_drained_through(ss, 1, target.data(), held, 5));
 }
 
-// Spilling swaps the overflow batch into the slot, so the slot's old buffer comes
-// back (cleared, capacity intact) for reuse instead of being freed.
-TEST(record_pipe, spill_recycles_slot_buffers)
+// The fence reads processed BEFORE the held epoch: a processor that stores the
+// epoch before publishing processed must not be missed by an early epoch load.
+// The scripted fake fires the epoch store between the two fence loads, so the
+// correct order observes epoch 5 <= through and waits; a mutant that loads the
+// epoch first sees the stale UINT64_MAX and passes the fence.
+TEST(dlog_fence, processed_is_read_before_the_held_epoch)
 {
-    auto pipe = record_pipe<2>{};
-    for(int i = 0; i < 2; ++i)
+    std::atomic<uint64_t> epoch{UINT64_MAX};
+    std::atomic<uint64_t> processed{1};
+    struct scripted_stream
     {
-        auto* slot = pipe.acquire();
-        ASSERT_NE(slot, nullptr);
-        slot->records.resize(64);
-        pipe.publish();
-    }
-    pipe.pop();
-    pipe.pop();
-
-    auto overflow = std::deque<record_batch>{};
-    overflow.emplace_back().gpu_id = 7;
-    auto spare = std::vector<record_batch>{};
-    EXPECT_TRUE(spill_overflow_to_pipe(pipe, overflow, nullptr, &spare));
-    ASSERT_EQ(spare.size(), 1u);
-    EXPECT_TRUE(spare.front().records.empty());
-    EXPECT_GE(spare.front().records.capacity(), 64u);
-    auto* got = pipe.peek();
-    ASSERT_NE(got, nullptr);
-    EXPECT_EQ(got->gpu_id, 7u);
-}
-
-TEST(record_pipe, idle_marker_preserves_epoch_through_overflow)
-{
-    auto  pipe        = record_pipe<2>{};
-    auto  overflow    = std::deque<record_batch>{};
-    auto  unpublished = std::atomic<uint64_t>{1};
-    auto& data        = overflow.emplace_back();
-    data.records.push_back({fw_record{200, 0, kRecEop, 7, 4100}, 1});
-    data.drain_epoch   = 1;
-    auto& marker       = overflow.emplace_back();
-    marker.drain_epoch = 2;
-    EXPECT_TRUE(spill_overflow_to_pipe(pipe, overflow, &unpublished));
-    EXPECT_EQ(unpublished.load(), 0u);
-    auto state = pair_state{};
-    auto sink  = recorder{};
-    while(auto* batch = pipe.peek())
-    {
-        pair_records(batch->records.data(),
-                     batch->records.size(),
-                     state,
-                     1000,
-                     sink.on_record(),
-                     true,
-                     batch->drain_epoch);
-        pipe.pop();
-    }
-    EXPECT_EQ(sink.records, 1u);
-    EXPECT_TRUE(state.deferred_records.empty());
-    EXPECT_EQ(state.deferred_epoch, UINT64_MAX);
-}
-
-// --- Bounded SPSC handoff between the ring-copier and the record processor ---
-
-// Batches come out in the order they went in, with their contents intact.
-TEST(record_pipe, preserves_batch_order_and_contents)
-{
-    auto pipe = record_pipe<4>{};
-    EXPECT_TRUE(pipe.empty());
-    EXPECT_EQ(pipe.peek(), nullptr);
-    for(uint32_t b = 0; b < 3; ++b)
-    {
-        auto* slot = pipe.acquire();
-        ASSERT_NE(slot, nullptr);
-        slot->now_ns = 1000 + b;
-        for(uint32_t i = 0; i < 4; ++i)
+        std::atomic<uint64_t>* epoch_sink    = nullptr;
+        std::atomic<uint64_t>* processed_src = nullptr;
+        mutable bool           fired         = false;
+        bool                   armed() const { return true; }
+        uint64_t               processed() const
         {
-            auto r            = copied_record{};
-            r.rec.dispatch_id = b * 10 + i;
-            slot->records.emplace_back(r);
-        }
-        pipe.publish();
-    }
-    EXPECT_EQ(pipe.size(), 3u);
-    for(uint32_t b = 0; b < 3; ++b)
-    {
-        auto* got = pipe.peek();
-        ASSERT_NE(got, nullptr);
-        EXPECT_EQ(got->now_ns, 1000u + b);
-        ASSERT_EQ(got->records.size(), 4u);
-        for(uint32_t i = 0; i < 4; ++i)
-            EXPECT_EQ(got->records[i].rec.dispatch_id, b * 10 + i);
-        pipe.pop();
-    }
-    EXPECT_TRUE(pipe.empty());
-}
-
-// The producer NEVER blocks: when full, acquire() returns null so the caller drops.
-TEST(record_pipe, producer_never_blocks_when_the_consumer_stalls)
-{
-    auto pipe = record_pipe<4>{};
-    for(size_t i = 0; i < pipe.capacity(); ++i)  // fill completely; consumer never runs
-    {
-        auto* slot = pipe.acquire();
-        ASSERT_NE(slot, nullptr);
-        pipe.publish();
-    }
-    EXPECT_EQ(pipe.size(), pipe.capacity());
-    uint64_t dropped = 0;
-    for(int i = 0; i < 100; ++i)
-        if(pipe.acquire() == nullptr) ++dropped;
-    EXPECT_EQ(dropped, 100u);
-    EXPECT_EQ(pipe.size(), pipe.capacity());
-    pipe.pop();  // one pop frees exactly one slot
-    EXPECT_NE(pipe.acquire(), nullptr);
-}
-
-// Recycled slots arrive cleared, so a stale record is never processed twice.
-TEST(record_pipe, recycled_slots_are_cleared)
-{
-    auto  pipe = record_pipe<2>{};
-    auto* a    = pipe.acquire();
-    ASSERT_NE(a, nullptr);
-    a->records.emplace_back(copied_record{});
-    a->records.emplace_back(copied_record{});
-    pipe.publish();
-    ASSERT_NE(pipe.peek(), nullptr);
-    pipe.pop();
-    auto* reused = pipe.acquire();
-    ASSERT_NE(reused, nullptr);
-    EXPECT_TRUE(reused->records.empty());
-    EXPECT_EQ(reused->now_ns, 0u);
-}
-
-// Real threads: SPSC nothing lost/duplicated, order kept. Run under TSan.
-TEST(record_pipe, spsc_threads_lose_and_duplicate_nothing)
-{
-    constexpr uint32_t kBatches = 2000;
-    auto               pipe     = record_pipe<8>{};
-    auto               produced = std::atomic<uint32_t>{0};
-    auto               dropped  = std::atomic<uint32_t>{0};
-    auto               stop     = std::atomic<bool>{false};
-    auto               consumer = std::thread{[&pipe, &stop]() {
-        uint32_t expect = 0;
-        while(!stop.load(std::memory_order_acquire) || !pipe.empty())
-        {
-            auto* b = pipe.peek();
-            if(!b) continue;
-            if(!b->records.empty())  // contents must be exactly what was written
+            if(!fired)
             {
-                EXPECT_EQ(b->records[0].rec.dispatch_id, b->records.size() - 1);
+                fired = true;
+                // The concurrent processor store lands here: between the fence's
+                // two loads.
+                epoch_sink->store(5, std::memory_order_release);
             }
-            EXPECT_EQ(b->now_ns, expect);
-            ++expect;
-            pipe.pop();
+            return processed_src->load(std::memory_order_acquire);
         }
-    }};
-    for(uint32_t i = 0; i < kBatches; ++i)
+    };
+    struct scripted_session
     {
-        record_batch* slot = nullptr;
-        while((slot = pipe.acquire()) == nullptr)  // retry rather than block
-            ++dropped;
-        slot->now_ns      = produced.load(std::memory_order_relaxed);
-        auto r            = copied_record{};
-        r.rec.dispatch_id = 0;
-        slot->records.emplace_back(r);
-        slot->records[0].rec.dispatch_id = static_cast<uint32_t>(slot->records.size() - 1);
-        produced.fetch_add(1, std::memory_order_relaxed);
-        pipe.publish();
-    }
-    stop.store(true, std::memory_order_release);
-    consumer.join();
-    EXPECT_EQ(produced.load(), kBatches);
-    EXPECT_TRUE(pipe.empty());
+        scripted_stream stream;
+    };
+    std::array<scripted_session, 1> ss{};
+    ss[0].stream.epoch_sink    = &epoch;
+    ss[0].stream.processed_src = &processed;
+    std::array<uint64_t, 1> target{1};
+    EXPECT_FALSE(processor_drained_through(ss, 1, target.data(), epoch, 10));
+    EXPECT_TRUE(ss[0].stream.fired) << "the store must have landed between the loads";
 }
-
-// spill_overflow_to_pipe() moves as many FIFO batches as fit and reports empty-ness.
-TEST(record_pipe, spill_overflow_hands_off_fifo_and_reports_remaining)
-{
-    auto pipe     = record_pipe<4>{};
-    auto overflow = std::deque<record_batch>{};
-    for(uint32_t i = 0; i < 10; ++i)
-        overflow.emplace_back().gpu_id = i;
-    EXPECT_FALSE(spill_overflow_to_pipe(pipe, overflow));  // fills 4, 6 remain
-    EXPECT_EQ(pipe.size(), pipe.capacity());
-    EXPECT_EQ(overflow.size(), 6u);
-    uint32_t expected = 0;
-    while(!overflow.empty() || !pipe.empty())
-    {
-        auto* got = pipe.peek();
-        ASSERT_NE(got, nullptr);
-        EXPECT_EQ(got->gpu_id, expected++);
-        pipe.pop();
-        spill_overflow_to_pipe(pipe, overflow);
-    }
-    EXPECT_EQ(expected, 10u);
-    EXPECT_TRUE(overflow.empty());
-    EXPECT_TRUE(spill_overflow_to_pipe(pipe, overflow));  // nothing queued -> no-op
-}
-
-// Shutdown data-loss regression: the processor reads ONLY the pipe, so overflow must
-// be pumped through before reader_done or copied batches are silently lost.
-TEST(record_pipe, shutdown_drains_overflow_before_declaring_done)
-{
-    constexpr uint32_t kTotal      = 500;
-    auto               pipe        = record_pipe<8>{};
-    auto               overflow    = std::deque<record_batch>{};
-    auto               reader_done = std::atomic<bool>{false};
-    auto               consumed    = std::atomic<uint32_t>{0};
-    // Processor: exits only after reader_done AND empty pipe; never touches overflow.
-    auto processor = std::thread{[&]() {
-        while(true)
-        {
-            auto* b = pipe.peek();
-            if(b == nullptr)
-            {
-                if(reader_done.load(std::memory_order_acquire))
-                {
-                    if(pipe.peek() == nullptr) break;
-                    continue;
-                }
-                std::this_thread::sleep_for(std::chrono::microseconds{50});
-                continue;
-            }
-            consumed.fetch_add(1, std::memory_order_relaxed);
-            pipe.pop();
-        }
-    }};
-    // Reader: copy every batch out; anything that does not fit queues in overflow.
-    for(uint32_t i = 0; i < kTotal; ++i)
-    {
-        record_batch* dst = overflow.empty() ? pipe.acquire() : nullptr;
-        if(dst != nullptr)
-        {
-            dst->gpu_id = i;
-            pipe.publish();
-        }
-        else
-        {
-            overflow.emplace_back().gpu_id = i;
-            spill_overflow_to_pipe(pipe, overflow);
-        }
-    }
-    // The fix: pump remaining overflow into the pipe, THEN declare done.
-    while(!spill_overflow_to_pipe(pipe, overflow))
-        std::this_thread::sleep_for(std::chrono::microseconds{50});
-    ASSERT_TRUE(overflow.empty()) << "overflow must be empty before reader_done";
-    reader_done.store(true, std::memory_order_release);
-    processor.join();
-    EXPECT_EQ(consumed.load(), kTotal)
-        << "a batch copied from the ring never reached the processor";
-}
-
 // Exact stream-geometry validation (validate_stream_geometry). Canonical layout:
 //   records[buffer_size] | wptr[num_regions*8] | pad-to-page
 
@@ -1553,9 +1628,11 @@ TEST(dlog_drain, d1_cross_batch_stale_eop_leaves_start_and_later_eop_pairs)
 // equal_tick_drops == 0, one retained START.
 TEST(dlog_drain, d1_same_batch_equal_tick_is_order_independent)
 {
-    const uint32_t db  = 4100;
-    auto           run = [&](bool eop_first) {
-        env e(1, 2048);
+    const uint32_t db = 4100;
+    // The envs hold a non-movable stream, so both are built in place and filled.
+    env  se(1, 2048);  // {S, E}
+    env  es(1, 2048);  // {E, S}
+    auto fill = [&](env& e, bool eop_first) {
         if(eop_first)
         {
             e.ring.put(0, 0, kRecEop, 7, db, 55);
@@ -1568,10 +1645,9 @@ TEST(dlog_drain, d1_same_batch_equal_tick_is_order_independent)
         }
         e.ring.wptr[0] = 2;
         e.drain();
-        return e;
     };
-    auto se = run(false);  // {S, E}
-    auto es = run(true);   // {E, S}
+    fill(se, false);
+    fill(es, true);
     // Identical outcome: the EOP ran first against an empty key -> startless,
     // the trailing START is retained; no equal-tick drop in either order.
     EXPECT_EQ(se.rec.eops_without_start.size(), 1u);

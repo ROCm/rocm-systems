@@ -29,11 +29,12 @@
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
 #include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 #include "lib/rocprofiler-sdk/kfd/owner_registry.hpp"
-#include "lib/rocprofiler-sdk/kfd/record_pipe.hpp"
+#include "lib/rocprofiler-sdk/kfd/record_processor.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <deque>
@@ -70,6 +71,12 @@ TEST(SubmitGate, unavailable_emitter_preserves_batch_ownership)
 namespace
 {
 using namespace rocprofiler::kfd;
+
+// Session-like wrapper so the processor helpers can iterate one stream.
+struct gate_session
+{
+    record_stream stream = {};
+};
 
 // Payload that tracks its own lifetime, so a test can prove exactly one owner at
 // all times and that cleanup runs exactly once.
@@ -375,7 +382,7 @@ TEST(DispatchHub, gc_closed_windows_spares_open_windows_and_kept_keys)
 
     closed->gc_deadline_ns = 0;
     closed->t_close.store(500, std::memory_order_release);
-    const auto keep = hub_t::key_set{key_of(7, 2)};
+    const auto keep      = hub_t::key_set{key_of(7, 2)};
     auto [leaked, stats] = hub.gc_closed_windows(/*now_ns=*/1, &keep);
     EXPECT_EQ(stats.dispatches, 1u) << "only the unkept closed-window entry";
     EXPECT_TRUE(hub.is_ledgered(71));
@@ -549,6 +556,79 @@ TEST(DispatchHub, disable_latch_refuses_registration_and_drain_ledgers)
         << "register_batch rejects on the disable latch";
     EXPECT_FALSE(hub.can_register_batch({key_of(5, 2)}));
     reset_disable();
+}
+
+// A permanently quarantined slot must be refused by the enqueue-side hint, not
+// only by register_batch: otherwise every batch on a queue that reuses the slot
+// would skip its signals, be refused, and replay them.
+TEST(DispatchHub, quarantine_hint_refuses_quarantined_slot)
+{
+    reset_disable();
+    auto hub = hub_t{};
+    hub.quarantine_slot(0, 12);
+    EXPECT_FALSE(hub.can_register_batch(0, 12)) << "quarantined slot";
+    EXPECT_TRUE(hub.can_register_batch(0, 13)) << "other slot on the same GPU";
+    EXPECT_TRUE(hub.can_register_batch(1, 12)) << "same slot number on another GPU";
+    EXPECT_FALSE(hub.can_register_batch({key_of(12, 1)}));
+    auto batch = std::vector<hub_t::registration>{};
+    batch.emplace_back(reg_of(key_of(12, 1), mk_window(12, 100), 121));
+    auto leaked = std::vector<hub_t::leaked>{};
+    EXPECT_FALSE(hub.register_batch(std::move(batch), leaked));
+    EXPECT_TRUE(leaked.empty());
+    EXPECT_EQ(hub.pending_count(), 0u);
+    ASSERT_EQ(batch.size(), 1u);
+    EXPECT_EQ(batch.front().correlation_id, 121u);
+}
+
+// The enqueue-side hint observes the lifecycle gates (mode, disable, fork child)
+// exactly like register_batch does.
+TEST(DispatchHub, quarantine_hint_observes_lifecycle_gates)
+{
+    reset_disable();
+    auto hub = hub_t{};
+    EXPECT_TRUE(hub.can_register_batch(0, 1));
+    hub.set_mode(session_mode::stopping);
+    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    hub.set_mode(session_mode::running);
+    signal_less_disable_latch().store(true);
+    EXPECT_FALSE(hub.can_register_batch(0, 1));
+    reset_disable();
+    hub.abandon_in_child();
+    EXPECT_FALSE(hub.can_register_batch(0, 1));
+}
+
+// Same-key open-window registration from N concurrent submitters admits exactly
+// one and mutates nothing for the losers: the m_mu atomicity register_batch
+// promises, independent of any admission capacity.
+TEST(DispatchHub, concurrent_same_key_registration_admits_exactly_one)
+{
+    reset_disable();
+    auto             hub          = hub_t{};
+    auto             ready        = std::atomic<size_t>{0};
+    auto             admitted     = std::atomic<size_t>{0};
+    auto             workers      = std::vector<std::thread>{};
+    auto             window       = mk_window(11, 100);
+    constexpr size_t worker_count = 16;
+
+    for(uint32_t dispatch = 1; dispatch <= worker_count; ++dispatch)
+        workers.emplace_back([&, dispatch]() {
+            auto batch  = std::vector<hub_t::registration>{};
+            auto leaked = std::vector<hub_t::leaked>{};
+            batch.emplace_back(reg_of(key_of(11, 1), window, dispatch));
+            ready.fetch_add(1, std::memory_order_release);
+            while(ready.load(std::memory_order_acquire) != worker_count)
+                std::this_thread::yield();
+            hub.can_register_batch(0, 11);
+            if(hub.register_batch(std::move(batch), leaked))
+                admitted.fetch_add(1, std::memory_order_relaxed);
+        });
+    for(auto& worker : workers)
+        worker.join();
+
+    EXPECT_EQ(admitted.load(), 1u);
+    EXPECT_EQ(hub.pending_count(), 1u);
+    EXPECT_TRUE(end_start(hub, key_of(11, 1), 150, 200).has_value());
+    EXPECT_EQ(hub.pending_count(), 0u);
 }
 
 // The result-vs-loss race under real concurrency: a prover racing a thread that
@@ -931,75 +1011,96 @@ TEST(fork_safety, forked_child_short_circuits_and_survives_normal_exit)
 }
 
 // ---------------------------------------------------------------------------
-// D9 (F7) per-GPU cap ARITHMETIC seam. hub_cap_need is the pure branch the review
-// flagged: it must never form `live + batch` (overflow) or subtract into a wrap on
-// a healthy GPU (the underflow that would evict everything). Spec 1191-1202,1227-1230.
-// ---------------------------------------------------------------------------
-TEST(HubCapArithmetic, checked_shortfall_never_wraps)
-{
-    // cap 1, empty GPU: a one-entry batch fits; a two-entry batch needs one victim.
-    EXPECT_EQ(hub_cap_need(/*live=*/0, /*batch=*/1, /*cap=*/1), 0u);
-    EXPECT_EQ(hub_cap_need(0, 2, 1), 1u);
-
-    // A batch LARGER than the whole cap must report the exact shortfall, never wrap
-    // into "no shortfall" (the `live + batch - cap` overflow bug).
-    EXPECT_EQ(hub_cap_need(0, 5, 2), 3u);
-
-    // live == cap exactly with a one-entry batch takes the shortfall path.
-    EXPECT_EQ(hub_cap_need(1, 1, 1), 1u);
-    EXPECT_EQ(hub_cap_need(10, 1, 10), 1u);
-
-    // live < cap on a healthy GPU takes ZERO victims -- the underflow regression the
-    // `live + batch - cap` form causes (it would wrap to a huge need here).
-    EXPECT_EQ(hub_cap_need(1, 1, 10), 0u);
-    EXPECT_EQ(hub_cap_need(5, 1, 10), 0u);
-
-    // live > cap: exact overflow-free shortfall.
-    EXPECT_EQ(hub_cap_need(12, 3, 10), 5u);
-}
-
-// ---------------------------------------------------------------------------
-// D2 (F4) GC gate predicate + counter protocol. The predicate is pure (all four
-// combos); the reserve->publish counter balance is exercised through the real
-// copy/spill helpers. Spec 1324-1329.
+// D2/7.2 GC gate over streams. The predicate is pure (the gate closes on a pass
+// in flight, an uncopied publish, or an undecoded backlog); the copy -> copy_out
+// balance is exercised through the real stream. Spec 1324-1329.
 // ---------------------------------------------------------------------------
 TEST(GcGate, predicate_truth_table)
 {
-    EXPECT_TRUE(gc_gate_open(/*inflight=*/0, /*pipe_empty=*/true));  // only open state
-    EXPECT_FALSE(gc_gate_open(1, true)) << "copied-but-unpublished record in flight";
-    EXPECT_FALSE(gc_gate_open(0, false)) << "pipe not drained";
-    EXPECT_FALSE(gc_gate_open(3, false));
+    // Minimal duck-typed session/backlog fakes: the gate reads the .stream's
+    // armed, taken, published and the backlog's closed only.
+    struct fake_stream
+    {
+        bool     armed_     = true;
+        uint64_t taken_     = 0;
+        uint64_t published_ = 0;
+        bool     armed() const { return armed_; }
+        uint64_t taken() const { return taken_; }
+        uint64_t published() const { return published_; }
+    };
+    struct fake_session
+    {
+        fake_stream stream;
+    };
+    struct fake_backlog
+    {
+        std::deque<stream_segment> closed;
+    };
+    std::array<fake_session, 1> streams{};
+    std::array<fake_backlog, 1> backlogs{};
+
+    EXPECT_TRUE(gc_gate_open_streams(/*pass_open=*/false, streams, backlogs, 1));
+    EXPECT_FALSE(gc_gate_open_streams(/*pass_open=*/true, streams, backlogs, 1))
+        << "a drain pass is in flight";
+    streams[0].stream.published_ = 3;
+    EXPECT_FALSE(gc_gate_open_streams(false, streams, backlogs, 1))
+        << "published records not yet copied out";
+    streams[0].stream.taken_ = 3;
+    backlogs[0].closed.emplace_back();
+    EXPECT_FALSE(gc_gate_open_streams(false, streams, backlogs, 1))
+        << "a closed segment is still queued for pairing";
+    backlogs[0].closed.clear();
+    EXPECT_TRUE(gc_gate_open_streams(false, streams, backlogs, 1));
+    streams[0].stream.armed_ = false;
+    EXPECT_TRUE(gc_gate_open_streams(false, streams, backlogs, 1))
+        << "an unarmed slot is skipped by the gate";
 }
 
-// The reader-published in-flight counter is reserved before a record leaves the
-// ring and discharged at publish, so a full copy->publish cycle nets to 0 and the
-// gate reopens; while a batch sits unpublished in overflow the counter stays > 0.
-TEST(GcGate, spill_publish_balances_the_inflight_counter)
+// The reader publishes between passes and the processor copies out and pairs, so
+// the gate opens again after each full cycle; while the pass is open or the
+// backlog holds a segment, GC stays closed.
+TEST(GcGate, publish_and_copy_out_cycle_reopens_the_gate)
 {
-    auto pipe     = record_pipe<4>{};
-    auto overflow = std::deque<record_batch>{};
-    auto inflight = std::atomic<uint64_t>{0};
+    std::array<gate_session, 1> streams{};
+    ASSERT_TRUE(streams[0].stream.preallocate(2));
+    std::array<stream_backlog, 1> backlogs{};
+    reader_alloc_log              log;
+    const std::vector<fw_record>  recs{fw_record{1, 0, kRecEop, 7, 4100}};
 
-    // Two batches parked in overflow, reserved by the (simulated) copy: 3 + 2 = 5.
-    auto b0 = record_batch{};
-    b0.records.resize(3);
-    auto b1 = record_batch{};
-    b1.records.resize(2);
-    overflow.emplace_back(std::move(b0));
-    overflow.emplace_back(std::move(b1));
-    inflight.fetch_add(5, std::memory_order_release);  // reserve-per-region analogue
+    // Reader: a publish inside a pass. The pass-open flag closes the gate even
+    // though the backlog is still empty.
+    streams[0].stream.append(recs.data(), recs.size(), log);
+    streams[0].stream.append_marker({1, 1000}, log);
+    streams[0].stream.publish();
+    EXPECT_FALSE(gc_gate_open_streams(true, streams, backlogs, 1));
+    EXPECT_FALSE(gc_gate_open_streams(false, streams, backlogs, 1))
+        << "an uncopied publish closes the gate (taken < published)";
 
-    EXPECT_FALSE(gc_gate_open(inflight.load(std::memory_order_acquire), pipe.empty()))
-        << "GC gated while copied records sit unpublished in overflow";
+    // Processor: copy out and decode. The queued segment closes the gate.
+    streams[0].stream.copy_out(
+        [&](const fw_record* p, size_t n, uint64_t pos) { backlogs[0].absorb(p, n, pos); }, 2);
+    EXPECT_FALSE(gc_gate_open_streams(false, streams, backlogs, 1))
+        << "a closed segment is queued for pairing";
 
-    ASSERT_TRUE(spill_overflow_to_pipe(pipe, overflow, &inflight));
-    EXPECT_EQ(inflight.load(std::memory_order_acquire), 0u) << "every reservation discharged";
-    EXPECT_FALSE(pipe.empty()) << "batches are now visible to the processor";
-
-    // Drain the pipe; only then is the gate open.
-    while(pipe.peek() != nullptr)
-        pipe.pop();
-    EXPECT_TRUE(gc_gate_open(inflight.load(std::memory_order_acquire), pipe.empty()));
+    // Pair the segment and publish; the cycle is complete, so the gate opens.
+    auto pairing = pair_state{};
+    auto emitted = std::vector<drained_record>{};
+    auto seg     = std::move(backlogs[0].closed.front());
+    backlogs[0].closed.pop_front();
+    process_unit(
+        streams[0].stream,
+        backlogs[0],
+        pairing,
+        seg,
+        1000,
+        [&](const drained_record& rec) { emitted.push_back(rec); },
+        []() {},
+        []() {});
+    // With lookahead the segment's EOP is held for the next segment, so nothing
+    // is emitted yet -- but the position is published and the backlog drained.
+    EXPECT_EQ(emitted.size(), 0u);
+    EXPECT_EQ(pairing.deferred_records.size(), 1u);
+    EXPECT_TRUE(gc_gate_open_streams(false, streams, backlogs, 1));
 }
 
 // ---------------------------------------------------------------------------
