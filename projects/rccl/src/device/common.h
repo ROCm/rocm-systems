@@ -116,6 +116,30 @@ extern __shared__ ulong2
 #endif
 #endif
 
+// gfx1250 named barriers back the sub-block barriers in the primitives: one per
+// group, plus NCCL_PAT_NAMED_BARRIER shared by all PAT workers. This must stay the
+// only named-barrier variable: the compiler numbers hardware barrier IDs per
+// module, and device-linker shards only agree on those IDs if each slot maps to
+// the same ID in every shard.
+#if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
+  __has_builtin(__builtin_amdgcn_s_barrier_init) && __has_builtin(__builtin_amdgcn_s_barrier_join) && \
+  __has_builtin(__builtin_amdgcn_s_barrier_signal_var)
+#define RCCL_HAVE_NAMED_BARRIERS 1
+#else
+#define RCCL_HAVE_NAMED_BARRIERS 0
+#endif
+
+#if RCCL_HAVE_NAMED_BARRIERS
+#define NCCL_PAT_NAMED_BARRIER NCCL_MAX_GROUPS
+#define NCCL_NUM_NAMED_BARRIERS (NCCL_MAX_GROUPS + 1)
+static_assert(NCCL_NUM_NAMED_BARRIERS <= 16, "gfx1250 has 16 named barriers per workgroup");
+#ifdef RCCL_DEVICE_LINKER
+__shared__ __amdgpu_named_workgroup_barrier_t ncclNamedBarriers[NCCL_NUM_NAMED_BARRIERS];
+#else
+extern __shared__ __amdgpu_named_workgroup_barrier_t ncclNamedBarriers[NCCL_NUM_NAMED_BARRIERS];
+#endif
+#endif
+
 #if RCCL_TDM_STAGE_BYTES_PER_WARP
 __device__ inline void* ncclTdmStageForWarp(int warp) {
   return ncclShmem.tdmStage + warp * RCCL_TDM_STAGE_BYTES_PER_WARP;
@@ -568,6 +592,10 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       if (tid == WARP_SIZE) ncclShmem.barrier_pat = 0;
       ncclShmem.groups[tid - WARP_SIZE].barrier = 0;
     }
+#if RCCL_HAVE_NAMED_BARRIERS
+    // Any non-zero count works; every arrive passes the real wave count.
+    for (int b = 0; b < NCCL_NUM_NAMED_BARRIERS; b++) __builtin_amdgcn_s_barrier_init(&ncclNamedBarriers[b], 1);
+#endif
     break;
   case 2:
 #ifdef ENABLE_FAULT_INJECTION

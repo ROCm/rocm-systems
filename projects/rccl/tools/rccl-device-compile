@@ -79,6 +79,25 @@ def _parse_metadata_resources(lines):
     return resources
 
 
+_NAMED_BARRIER_SET_RE = re.compile(r'\s*\.set\s+\S*num_named_barrier,\s*(.*)')
+_INT_LITERAL_RE = re.compile(r'(?<![\w.])\d+(?![\w.])')
+
+
+def _max_named_barriers(lines):
+    """Largest named-barrier count named by any .set in the assembly.
+
+    The YAML metadata does not carry this count. Every integer in the .set
+    expression counts, because operands such as max(9, sym) can name symbols
+    that only resolve in another shard."""
+    best = 0
+    for line in lines:
+        m = _NAMED_BARRIER_SET_RE.match(line)
+        if m:
+            for value in _INT_LITERAL_RE.findall(m.group(1)):
+                best = max(best, int(value))
+    return best
+
+
 def _find_devfunc_symbol(lines):
     for line in lines:
         m = re.match(r'\s+\.type\s+(.*ncclDevFunc[^,]+),\s*@function', line)
@@ -141,6 +160,7 @@ def extract_device_function(asm_lines):
 
     kernel_sym = _find_kernel_symbol(asm_lines)
     resources = _parse_metadata_resources(asm_lines)
+    resources['num_named_barrier'] = _max_named_barriers(asm_lines)
     resources['function_name'] = unmangled
     resources['mangled_name'] = mangled
 
@@ -186,6 +206,7 @@ def extract_device_function(asm_lines):
 RESOURCE_KEYS = [
     'vgpr_count', 'agpr_count', 'sgpr_count',
     'private_segment_fixed_size', 'group_segment_fixed_size',
+    'num_named_barrier',
 ]
 
 
@@ -262,7 +283,7 @@ def _patch_abs_symbols(lines, max_res):
             continue
         m = re.match(r'(\s*\.set\s+\S+)\.(num_named_barrier),\s*(.*)', line)
         if m:
-            result.append(f'{m.group(1)}.num_named_barrier, 0\n')
+            result.append(f'{m.group(1)}.num_named_barrier, {max_res.get("num_named_barrier", 0)}\n')
             continue
         m = re.match(r'(\s*\.set\s+\S+)\.(private_seg_size),\s*(.*)', line)
         if m:
@@ -347,6 +368,10 @@ def _patch_gpr_maximums(lines, max_res):
         if m:
             result.append(f'{m.group(1)}{max_res["next_free_sgpr"]}\n')
             continue
+        m = re.match(r'(\s*\.set\s+amdgpu\.max_num_named_barrier,\s*)\d+', line)
+        if m:
+            result.append(f'{m.group(1)}{max_res.get("num_named_barrier", 0)}\n')
+            continue
         result.append(line)
     return result
 
@@ -407,6 +432,9 @@ def _drop_local_no_dead_strip(lines):
 def patch_dispatcher(asm_lines, max_res):
     """Patch dispatcher assembly with aggregated resource values.
     Returns patched lines."""
+    # The dispatcher initializes the named barriers itself, so it reserves its own count too.
+    max_res = dict(max_res, num_named_barrier=max(max_res.get('num_named_barrier', 0),
+                                                  _max_named_barriers(asm_lines)))
     lines = _patch_abs_symbols(asm_lines, max_res)
     lines = _patch_amdhsa_kernel_directives(lines, max_res)
     lines = _patch_gpr_maximums(lines, max_res)
