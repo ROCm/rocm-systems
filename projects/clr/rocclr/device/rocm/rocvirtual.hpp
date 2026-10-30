@@ -110,16 +110,6 @@ inline void WaitForIssuedOps(hsa_signal_t signal, hsa_signal_value_t unissued_op
   }
 }
 
-inline void fetchSignalTime(hsa_signal_t signal, hsa_agent_t gpu_device, uint64_t* start,
-                            uint64_t* end) {
-  if (start != nullptr && end != nullptr) {
-    hsa_amd_profiling_dispatch_time_t time = {};
-    Hsa::profiling_get_dispatch_time(gpu_device, signal, &time);
-    *start = time.start;
-    *end = time.end;
-  }
-}
-
 // Timestamp for keeping track of some profiling information for various commands
 // including EnqueueNDRangeKernel and clEnqueueCopyBuffer.
 class Timestamp : public amd::ReferenceCountedObject {
@@ -465,6 +455,16 @@ class VirtualGPU : public device::VirtualDevice {
     //! flush, and releases pins whose waiters have passed
     void Reclaim();
 
+    //! A slot whose use Reclaim proved retired, and the armed slots ahead of current_id_ before it
+    struct RetiredSlot {
+      size_t slot;
+      size_t num_armed_before;
+    };
+
+    //! Caches the timing of the retired device-memory uses a Timestamp will read, with one pass
+    //! of overlapping streaming loads instead of a bus round trip per signal
+    void CacheRetiredTiming(const RetiredSlot* retired, size_t num_retired);
+
     //! A use whose packet was published with the barrier bit. Its completion proves that every
     //! earlier packet on the HW queue completed.
     struct FenceUse {
@@ -526,9 +526,9 @@ class VirtualGPU : public device::VirtualDevice {
     const size_t max_signals_;        //!< Ring size beyond which reuse waits on a signal
     std::vector<ProfilingSignal*> spare_signals_;  //!< Armed signals for growth and swaps
     std::vector<ProfilingSignal*> host_signals_;   //!< Armed host-memory signals for timing
-    //! Retired signals swapped out while shared. Reusing them avoids destroying and recreating
-    //! device-memory signals.
-    std::vector<ProfilingSignal*> parked_signals_;
+    //! Retired signals swapped out while shared, oldest first. Reusing them avoids destroying and
+    //! recreating device-memory signals.
+    std::deque<ProfilingSignal*> parked_signals_;
     PinnedWaits open_pins_;                        //!< Pins from the last WaitingSignal call
     std::deque<PinnedWaits> closed_pins_;          //!< Pins waiting for their consumers
     ProfilingSignal* unflushed_store_ = nullptr;  //!< Last direct store not yet flushed
