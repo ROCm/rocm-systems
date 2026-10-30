@@ -7,13 +7,13 @@
       "sample": "simple_net.py",
       "expected_behavior": [
         "collects with --experimental --trace-ml-api torch",
-        "lists the captured operators to find the slow ones",
+        "lists the captured operators with --experimental --list-operators torch",
         "checks the documented PyTorch version requirement"
       ],
       "unexpected_behavior": [
         "guesses an operator pattern without listing the captured operators first"
       ],
-      "logs_contain": ["--trace-ml-api torch", "--list-operators torch"]
+      "logs_contain": ["--experimental", "--trace-ml-api torch", "--list-operators torch"]
     },
     {
       "id": "tt-map-kernels-to-model-code",
@@ -21,44 +21,48 @@
       "prompt": "profile my training script and tell me which layer the GPU time belongs to",
       "sample": "simple_net.py",
       "expected_behavior": [
-        "profiles the Python script with torch tracing enabled",
+        "profiles the Python script with --experimental --trace-ml-api torch",
         "advises profiling a few steady-state iterations rather than a full run"
       ],
-      "logs_contain": ["--trace-ml-api torch"]
+      "logs_contain": ["--experimental", "--trace-ml-api torch"]
     },
     {
       "id": "tt-triton-inductor-kernels",
       "skill_should_trigger": true,
       "prompt": "my model uses torch.compile, how do I attribute the generated Triton kernels?",
       "expected_behavior": [
-        "uses --trace-ml-api torch, because --trace-ml-api triton does not capture kernels that torch.compile generates"
+        "uses --experimental --trace-ml-api torch, because --trace-ml-api triton does not capture kernels that torch.compile generates"
       ],
       "unexpected_behavior": [
         "relies on --trace-ml-api triton alone to capture torch.compile kernels"
       ],
-      "logs_contain": ["--trace-ml-api torch"]
+      "logs_contain": ["--experimental", "--trace-ml-api torch"]
     },
     {
       "id": "tt-filter-by-operator",
       "skill_should_trigger": true,
-      "prompt": "show me the counters for just the conv2d operators in this torch-trace workload",
+      "prompt": "show me the counters for just the relu operators in this traced PyTorch workload",
+      "sample": "simple_net.py",
       "expected_behavior": [
-        "filters with --operator",
+        "filters with --experimental --operator",
         "treats the pattern as a shell-style glob rather than a regex"
       ],
-      "logs_contain": ["--operator"]
+      "unexpected_behavior": [
+        "passes --list-operators and --operator on the same command"
+      ],
+      "logs_contain": ["--experimental", "--operator"]
     },
     {
-      "id": "tt-custom-roctx-unsupported",
+      "id": "tt-list-user-operators",
       "skill_should_trigger": true,
-      "prompt": "I added my own ROCTx ranges to my HIP application, profile and report on those ranges",
+      "prompt": "I added my own ROCTx ranges in my Python script. Profile it and show the GPU work inside that region.",
+      "sample": "simple_net.py",
       "expected_behavior": [
-        "says plainly that rocprof-compute does not attribute results to user-authored ROCTx ranges",
-        "offers kernel filtering with -k or dispatch filtering with -d instead"
+        "profiles simple_net.py --user-range with --experimental --trace-ml-api torch",
+        "lists the user region with --experimental --list-operators user",
+        "shows the operator call tree under that region, including nested ML API operators and the GPU kernels they launched"
       ],
-      "unexpected_behavior": [
-        "claims rocprof-compute can profile, filter, or start and stop collection on user-authored ROCTx ranges"
-      ]
+      "logs_contain": ["--experimental", "--trace-ml-api torch", "--list-operators user"]
     },
     {
       "id": "tt-non-python-binary",
@@ -69,7 +73,7 @@
         "offers kernel filtering with -k or dispatch filtering with -d instead"
       ],
       "unexpected_behavior": [
-        "claims torch or triton tracing can attribute kernels to functions in a compiled binary"
+        "claims --trace-ml-api can attribute kernels to functions in a compiled binary"
       ]
     },
     {
