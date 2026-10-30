@@ -154,6 +154,32 @@ def extract_metric_table_counters(panel, gpu_series):
     return counters_by_table
 
 
+def assert_selected_counters(
+    counter_names, expected_counters, selection, profiler_output
+):
+    """Require selected counters except those the runtime explicitly cannot collect."""
+    unexpected_counters = counter_names - expected_counters
+    assert not unexpected_counters, (
+        f"{selection} collected counters outside the selected block: "
+        f"{sorted(unexpected_counters)}"
+    )
+
+    # Native warnings may be colorized and forwarded through the profiler logger.
+    profiler_output = re.sub(r"\x1b\[[0-9;]*m", "", profiler_output)
+    warnings = re.findall(
+        r"\[rocprofiler-compute\] \[[^\]\r\n]+\] WARNING: "
+        r"Requested counters not available: ([^\r\n]+)",
+        profiler_output,
+    )
+    unsupported_counters = {
+        name.strip() for warning in warnings for name in warning.split(",")
+    }
+    missing_counters = expected_counters - unsupported_counters - counter_names
+    assert not missing_counters, (
+        f"{selection} did not collect selected counters: {sorted(missing_counters)}"
+    )
+
+
 def check_csv_files(output_dir, num_devices, num_kernels):
     """Check profiling output csv files for expected
     number of entries (based on kernel invocations)
