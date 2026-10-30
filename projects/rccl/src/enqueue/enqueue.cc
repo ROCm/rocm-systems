@@ -4678,7 +4678,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // while the stream is capturing and fall through to the graph-safe
       // DDA/symmetric/kernel paths.
       bool ceCapturing, ceArGraphAllowed;
-      if (info->decisionValid) {
+      // rcclSelectAlltoAll probes capture only on the way to its CE and Direct branches. A DDA (or GIN)
+      // decision returns earlier with ceCapturing unset, and reaches here when NCCL_CHECK_MODE diverts it;
+      // in place it may then take CE-Scratch below, so probe the stream for it.
+      const bool a2aDecisionWithoutCaptureProbe =
+        info->coll == ncclFuncAlltoAll && info->decisionValid && info->decision.algo != RCCL_CE_REGISTERED &&
+        info->decision.algo != RCCL_CE_SCRATCH && info->decision.algo != RCCL_DIRECT_ALLTOALL;
+      if (info->decisionValid && !a2aDecisionWithoutCaptureProbe) {
         // Already computed by ncclAllReduce_impl(), ncclReduceScatter_impl(),
         // ncclAllGather_impl(), or ncclAlltoAll_impl() via rcclSelect*().
         ceCapturing = info->decision.ceCapturing;

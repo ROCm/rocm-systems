@@ -10597,6 +10597,7 @@ TEST(WrapMicrotestIsolated, AlltoAllInPlaceHelpers_Gfx1250Only) {
         EXPECT_EQ(ncclSuccess, guard(comm, a, a, 0));
         comm->nRanks = 1;
         EXPECT_EQ(ncclSuccess, guard(comm, a, a, 64));
+        EXPECT_FALSE(rcclAlltoAllCeScratchInPlace(comm, a, a));
         EXPECT_FALSE(rcclAlltoAllRegisteredCeRefused(comm, a, a));
         DeleteCommWithArch(comm);
         for (const char* arch : {"gfx942", "gfx950"}) {

@@ -4531,6 +4531,27 @@ TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllFabricDecisionInPlace_FailsBeforeSen
   EXPECT_EQ(0, scene.cc.get()->planner.nTasksP2p);
 }
 
+// The selector returns a DDA decision before it probes capture (decision.ceCapturing stays false). Diverted here by
+// NCCL_CHECK_MODE under graph capture, an in-place call that fits the scratch must not take the graph-unsafe
+// CE-Scratch path: taskAppend probes the stream itself and the guard refuses, told it was capturing.
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllFabricDecisionInPlace_Capturing_FailsInsteadOfCeScratch) {
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  g_rcclAlltoAllCeScratchInPlace = [](const ncclComm*, const void* s, const void* r) { return s == r; };
+  for (int algo : {RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128}) {
+    A2aTaskAppendScene scene;
+    ncclInfo info = scene.InPlace(4);
+    info.decisionValid = true;
+    info.decision.algo = algo;
+    info.decision.ceCapturing = false;
+    const int guardCalls = g_rcclAlltoAllInPlaceGuardCalls;
+    EXPECT_EQ(ncclInvalidUsage, taskAppend(scene.cc.get(), &info)) << algo;
+    EXPECT_FALSE(scene.CeQueued()) << algo;
+    EXPECT_EQ(guardCalls + 1, g_rcclAlltoAllInPlaceGuardCalls) << algo;
+    EXPECT_TRUE(g_rcclAlltoAllInPlaceGuardCapturing) << algo;
+    EXPECT_EQ(0, scene.cc.get()->planner.nTasksP2p) << algo;
+  }
+}
+
 // N1: ncclAlltoAllConfig with CTA_POLICY_ZERO and registered windows. In place on gfx1250 the registered-window
 // CE AllToAll (single-node, or hierarchical) races on the user buffer, and CE-Scratch does not take registered
 // recv windows: InvalidUsage, naming the registered-window reason. Out of place, and other arches in place,

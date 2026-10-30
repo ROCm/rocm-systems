@@ -1108,7 +1108,7 @@ bool rcclForceCeScratchEnabled(const ncclComm* comm) {
 }
 
 bool rcclAlltoAllCeScratchInPlace(const ncclComm* comm, const void* sendbuff, const void* recvbuff) {
-  return IsArchMatch(comm->archName, "gfx1250") && sendbuff != nullptr && sendbuff == recvbuff &&
+  return IsArchMatch(comm->archName, "gfx1250") && sendbuff != nullptr && sendbuff == recvbuff && comm->nRanks > 1 &&
          rcclParamForceCe() != 0;
 }
 
