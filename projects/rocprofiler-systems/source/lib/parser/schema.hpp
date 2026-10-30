@@ -152,9 +152,9 @@ struct constraint
 };
 
 /**
- * Parameters, categories, and constraints described by a schema document.
+ * Parameters, categories, and constraints for one catalog.
  *
- * Categories and parameters keep their document order. Parameters are additionally
+ * Categories and parameters keep insertion order. Parameters are additionally
  * indexed by id, environment variable, and CLI argument name.
  */
 class schema

@@ -2,24 +2,24 @@
 // SPDX-License-Identifier: MIT
 
 #include "parser/schema.hpp"
-#include "parser/schema_loader.hpp"
 #include "parser/schema_validator.hpp"
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>  // NOLINT(misc-include-cleaner): json::parse
-#include <nlohmann/json_fwd.hpp>
 
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace rocprofsys::parser;
 
 namespace
 {
-constexpr double k_integer_max = 10.0;
-constexpr double k_number_min  = 0.5;
-constexpr double k_number_max  = 1.5;
+constexpr double k_integer_max       = 10.0;
+constexpr double k_number_min        = 0.5;
+constexpr double k_number_max        = 1.5;
+constexpr double k_frequency_minimum = 1.0;
+constexpr double k_frequency_maximum = 1000.0;
 
 schema_param
 make_param(param_type type)
@@ -38,43 +38,116 @@ make_enum(param_type type = param_type::enumeration)
     return param;
 }
 
+void
+add_checked(schema& value, schema_param param)
+{
+    ASSERT_TRUE(value.add_param(std::move(param)));
+}
+
+void
+add_profiler_params(schema& value)
+{
+    add_checked(value, schema_param{
+                           .id          = "output",
+                           .name        = "Output",
+                           .description = "Output path",
+                           .type        = param_type::path,
+                           .required    = true,
+                       });
+    add_checked(value, schema_param{
+                           .id                      = "trace",
+                           .name                    = "Trace",
+                           .description             = "Tracing",
+                           .type                    = param_type::boolean,
+                           .default_value           = "true",
+                           .mutually_exclusive_with = { "flat_profile" },
+                       });
+    add_checked(value, schema_param{
+                           .id            = "profile",
+                           .name          = "Profile",
+                           .description   = "Profiling",
+                           .type          = param_type::boolean,
+                           .default_value = "false",
+                       });
+    add_checked(value, schema_param{
+                           .id            = "flat_profile",
+                           .name          = "Flat",
+                           .description   = "Flat profile",
+                           .type          = param_type::boolean,
+                           .default_value = "false",
+                           .prerequisites = { "profile" },
+                       });
+    add_checked(value,
+                schema_param{
+                    .id          = "sampling_freq",
+                    .name        = "Frequency",
+                    .description = "Hz",
+                    .type        = param_type::number,
+                    .min         = k_frequency_minimum,
+                    .max         = k_frequency_maximum,
+                    .depends_on  = param_condition{ .param = "trace", .equals = "true" },
+                });
+    add_checked(value, schema_param{
+                           .id          = "mode",
+                           .name        = "Mode",
+                           .description = "Mode",
+                           .type        = param_type::enumeration,
+                           .choices     = { choice{ .value = "fast", .name = "Fast" },
+                                            choice{ .value = "slow", .name = "Slow" } },
+                       });
+    add_checked(value, schema_param{
+                           .id          = "label",
+                           .name        = "Label",
+                           .description = "Label",
+                           .type        = param_type::string,
+                       });
+}
+
+void
+add_profiler_constraints(schema& value)
+{
+    value.add_constraint(constraint{
+        .kind   = constraint_kind::mutually_exclusive,
+        .params = { "label", "mode" },
+    });
+    value.add_constraint(constraint{
+        .kind    = constraint_kind::warn,
+        .level   = severity::warning,
+        .message = "nothing collected",
+        .when =
+            condition{
+                .mode  = condition_mode::all,
+                .terms = { param_condition{ .param = "trace", .equals = "false" },
+                           param_condition{ .param = "profile", .equals = "false" } } },
+    });
+    value.add_constraint(constraint{
+        .kind    = constraint_kind::warn,
+        .level   = severity::info,
+        .message = "slow or labeled",
+        .when =
+            condition{
+                .mode  = condition_mode::any,
+                .terms = { param_condition{ .param = "mode", .equals = "slow" },
+                           param_condition{ .param = "label", .equals = "debug" } } },
+    });
+    value.add_constraint(constraint{
+        .kind          = constraint_kind::forces,
+        .message       = "flat profiles need profiling",
+        .when          = condition{ .terms = { param_condition{ .param  = "flat_profile",
+                                                                .equals = "true" } } },
+        .forced_values = { { "profile", "true" } },
+    });
+}
+
 /// Parameters and constraints shared by the validate_values() tests.
 schema
 make_profiler_schema()
 {
-    return load_schema(nlohmann::json::parse(R"({
-        "schema_version": "1.0",
-        "params": [
-            { "id": "output", "name": "Output", "description": "Output path",
-              "type": "path", "required": true },
-            { "id": "trace", "name": "Trace", "description": "Tracing",
-              "type": "bool", "default_value": true,
-              "mutually_exclusive_with": [ "flat_profile" ] },
-            { "id": "profile", "name": "Profile", "description": "Profiling",
-              "type": "bool", "default_value": false },
-            { "id": "flat_profile", "name": "Flat", "description": "Flat profile",
-              "type": "bool", "default_value": false, "requires": [ "profile" ] },
-            { "id": "sampling_freq", "name": "Frequency", "description": "Hz",
-              "type": "double", "min": 1, "max": 1000,
-              "depends_on": { "param": "trace", "equals": true } },
-            { "id": "mode", "name": "Mode", "description": "Mode", "type": "enum",
-              "choices": [ { "value": "fast", "name": "Fast" },
-                           { "value": "slow", "name": "Slow" } ] },
-            { "id": "label", "name": "Label", "description": "Label", "type": "string" }
-        ],
-        "constraints": [
-            { "kind": "mutually_exclusive", "params": [ "label", "mode" ] },
-            { "kind": "warn", "severity": "warning", "message": "nothing collected",
-              "when": { "all": [ { "param": "trace", "equals": false },
-                                 { "param": "profile", "equals": false } ] } },
-            { "kind": "warn", "severity": "info", "message": "slow or labeled",
-              "when": { "any": [ { "param": "mode", "equals": "slow" },
-                                 { "param": "label", "equals": "debug" } ] } },
-            { "kind": "forces", "message": "flat profiles need profiling",
-              "when": { "param": "flat_profile", "equals": true },
-              "set": { "profile": true } }
-        ]
-    })"));
+    schema value{};
+    value.set_version("1.0");
+    add_profiler_params(value);
+    add_profiler_constraints(value);
+    return value;
 }
 
 std::vector<violation>

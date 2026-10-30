@@ -17,11 +17,9 @@ target_sources(
     rocprofiler-systems-parser
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/schema.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/schema_loader.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.cpp
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/schema.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/schema_loader.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.hpp
 )
 
@@ -34,7 +32,6 @@ target_include_directories(
 
 target_link_libraries(
     rocprofiler-systems-parser
-    PUBLIC $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
     PRIVATE
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-common-library>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-fmt>

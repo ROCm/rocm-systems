@@ -1,13 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(
-    parser-tests
-    OBJECT
-    test_schema.cpp
-    test_schema_loader.cpp
-    test_schema_validator.cpp
-)
+add_library(parser-tests OBJECT test_schema.cpp test_schema_validator.cpp)
 
 target_link_libraries(
     parser-tests
