@@ -45,19 +45,6 @@ hip_add_exe_to_target(NAME PrintfTest
                     LINKER_LIBS ${LINKER_LIBS}
                     PROPERTY CXX_STANDARD 17)
 
-if(UNIX)
-  file(GLOB NEGATIVE_TEST_SRC
-      printf_negative_kernels.cc)
-
-  file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
-
-  #add_test(NAME Unit_Printf_Negative
-  #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
-  #         ./src ${HIP_PLATFORM} ${HIP_PATH}
-  #         printf_negative_kernels.cc 11)
-endif()
-
 # Standalone exes
 add_executable(printfFlags_exe EXCLUDE_FROM_ALL printfFlags_exe.cc)
 add_executable(printfLength_exe EXCLUDE_FROM_ALL printfLength_exe.cc)

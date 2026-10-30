@@ -17,28 +17,3 @@ elseif(HIP_PLATFORM MATCHES "amd")
                           TEST_TARGET_NAME build_tests
                           LINKER_LIBS hiprtc::hiprtc)
 endif()
-
-if(UNIX)
-file(GLOB NEGATIVE_TEST_SRC
-    "launch_bounds_compiler_error_kernels.cc"
-    "launch_bounds_parse_error_kernels.cc")
-
-file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
-
-# With clang 25+, both platforms report two errors since __launch_bounds__(0) is accepted.
-# set(EXPECTED_ERRORS 2)
-#
-#add_test(NAME Unit_Kernel_Launch_bounds_Negative_Parameters_CompilerError
-#         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
-#         ./src ${HIP_PLATFORM} ${HIP_PATH}
-#         launch_bounds_compiler_error_kernels.cc ${EXPECTED_ERRORS})
-#
-# Stale with clang 25+: negative arguments warn (-Wcuda-compat) once per compilation pass.
-#if(HIP_PLATFORM MATCHES "amd")
-#	add_test(NAME Unit_Kernel_Launch_bounds_Negative_Parameters_ParseError
-#        COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
-#        ./src ${HIP_PLATFORM} ${HIP_PATH}
-#        launch_bounds_parse_error_kernels.cc 0 0)
-#endif()
-endif()
