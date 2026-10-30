@@ -14,6 +14,7 @@ on:
       - '!**/*.rtf'
       - '!**/*.rst'
       - '!**/*.txt'
+    branches: develop
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
