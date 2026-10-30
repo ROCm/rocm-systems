@@ -56,6 +56,7 @@
 #include <memory>
 #include <vector>
 #include <bitset>
+#include <mutex>
 
 #include "impl/wddm/types.h"
 #include "wkmi.h"
@@ -187,6 +188,20 @@ public:
   bool DestroySyncobj(D3DKMT_HANDLE handle);
   bool OpenSyncobjFromNtHandle(void *nt_handle, D3DKMT_HANDLE *out_handle);
 
+#if defined(__linux__)
+  // HSA event support (Linux): creates a CPU_NOTIFICATION syncobj bound to
+  // the guest eventfd |efd|. SignalByKmd lets the host AMD KMD signal it on
+  // GPU completion, waking a guest poll() waiter on |efd|.
+  bool CreateCpuEventSyncobj(int efd, D3DKMT_HANDLE *handle);
+
+  // Reserves an event id, creates the eventfd plus its CPU_NOTIFICATION
+  // syncobj and registers the event with KMD, all under event_lock_.
+  // |*efd| is set on success for poll()/WaitOnMultipleEvents.
+  bool CreateEvent(int *efd, uint32_t type, uint32_t *event_id, uint64_t *mailbox,
+                   D3DKMT_HANDLE *syncobj);
+  bool DestroyEvent(uint32_t event_id, int efd, D3DKMT_HANDLE syncobj);
+#endif
+
   bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
   void DestroyQueue(WDDMQueue *queue);
   bool CreateHwQueue(WDDMQueue *queue);
@@ -289,6 +304,18 @@ private:
   hsa_status_t QueryNonLocalVramUsage(uint64_t *usage_bytes) const;
   hsa_status_t QueryVramUsage(uint64_t *usage_bytes);
 
+#if defined(__linux__)
+  bool CreateCpuNotificationEventLocked(int *efd, D3DKMT_HANDLE *syncobj);
+  void DestroyCpuNotificationEventLocked(int efd, D3DKMT_HANDLE syncobj);
+  void DestroyCpuNotificationEvent(int efd, D3DKMT_HANDLE syncobj);
+#endif
+
+  // Callers must hold event_lock_.
+  uint32_t AllocEventIdLocked();
+  void FreeEventIdLocked(uint32_t event_id);
+  bool RegisterEventEscape(uint32_t event_id, uint64_t handle, uint64_t *mailbox);
+  bool UnregisterEventEscape(uint32_t event_id, uint64_t handle);
+
   D3DKMT_HANDLE adapter_;
   LUID adapter_luid_;
   D3DKMT_HANDLE device_;
@@ -316,6 +343,9 @@ private:
   // GPU events fields
   uint64_t base_mailbox_va_ = 0;  //!< GPU VA returned by KMD for all mailboxes
   std::bitset<kNumberOfHsaEvents> alloced_events_;  //!< The bit map of allocated events
+
+  //! Guards alloced_events_, base_mailbox_va_ and event create/register/unregister.
+  mutable std::mutex event_lock_;
 };
 
 NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices);

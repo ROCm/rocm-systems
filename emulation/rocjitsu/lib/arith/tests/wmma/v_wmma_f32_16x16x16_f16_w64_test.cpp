@@ -5,9 +5,12 @@
 // Keeps this instruction's matrix inputs and expected results beside its aliasing and flag
 // checks.
 
+#include "common/cpu.h"
 #include "common/floating_point.h"
 #include "common/registers.h"
+#include "common/semantics.h"
 #include "rj_arith/rj_arith.h"
+#include "wmma/exact_simd.h"
 #include "wmma/helpers.h"
 #include <bit>
 #include <limits>
@@ -25,6 +28,12 @@ using Registers = rocjitsu::arith::test::Registers<64, 64>;
 // Check matrix results, operand aliases, and instruction-flag contracts across supported CPUs
 // and semantics.
 TEST(WmmaF32F16W64Gfx11, Arithmetic) {
+  rocjitsu::arith::test::expect_wmma_exact_simd<false, 64, true>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w64);
+
+  rocjitsu::arith::test::expect_matrix_modifiers<false, 64, true>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w64);
+
   std::minstd_rand random;
   uint32_t a[16][16], b[16][16], c[16][16];
   for (int row = 0; row < 16; ++row) {
@@ -96,16 +105,11 @@ TEST(WmmaF32F16W64Gfx11, Arithmetic) {
   // clang-format on
 
   rocjitsu::arith::test::expect_matrix_invalid_flags(rj_arith_v_wmma_f32_16x16x16_f16_w64, input,
-                                                     21, 0, 8, 16, 0);
+                                                     21, 0, 8, 16,
+                                                     rocjitsu::arith::test::kFloatingWmmaModifiers);
 
   // A occupies 8 registers, B 8, C/D 4. Reuse the same arithmetic
   // data for overlapping and disjoint destination ranges.
-  rocjitsu::arith::test::expect_gfx11_wmma_arithmetic(rj_arith_v_wmma_f32_16x16x16_f16_w64, input,
-                                                      golden, {0, 4, 8, 12, 16, 21});
-}
-
-TEST(WmmaF32F16W64Gfx11, UnsupportedGuestControls) {
-  rocjitsu::arith::test::expect_unsupported_guest_controls([](uint64_t flag) {
-    return rj_arith_v_wmma_f32_16x16x16_f16_w64(flag, 0, nullptr, nullptr, nullptr, nullptr);
-  });
+  rocjitsu::arith::test::expect_wmma_f32_arithmetic</*Gfx11=*/true>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w64, input, golden, {0, 4, 8, 12, 16, 21});
 }
