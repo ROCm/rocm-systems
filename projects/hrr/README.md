@@ -16,16 +16,18 @@ HRR Capture is now disabled by default on AMD platforms. The feature will be sec
 ## Capture
 
 ```bash
-HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
+HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr HIP_HRR_CAPTURE_CONTENT=1 ./my_hip_app
 ```
 
-A process that initialises HIP with capture on says so once on stderr, whatever `AMD_LOG_LEVEL` is set to: the line begins with `[HRR capture] Recording` and names the process's own directory in the archive, such as `./my_capture.hrr/pid-4242`. Child processes record to their own `pid-*` directories in the same archive. A child started with `exec` prints a line of its own; a child created with `fork()` after HIP has started does not.
+Without `HIP_HRR_CAPTURE_CONTENT=1` the capture is metadata-only: the archive keeps the call sequence, handles and sizes, and records no host buffer, by-value kernel argument or code object (each blob and code-object hash is `HRR_HASH_WITHHELD`, and a `hipSetupArgument` value is marked `HRR_PRESENT_WITHHELD`). A by-value struct argument is withheld whole, device pointers inside it included; only whole-argument pointers keep their addresses. Scalar values passed to a HIP call are kept in both modes: memset fill values, memset graph nodes included; the values `hipStreamWriteValue32/64`, `hipStreamWaitValue32/64` and `hipStreamBatchMemOp` write or wait for; attribute and limit values such as those given to `hipMemPoolSetAttribute`. The events.bin header carries `HRR_FILE_FLAG_METADATA_ONLY`, and `hrr-playback --info` reports its contents as `withheld`. See [PRIVACY.md](PRIVACY.md) for the full inventory. Replay refuses the first call that needs one of them and says that content mode would have recorded it.
+
+A process that initialises HIP with capture on says so once on stderr, whatever `AMD_LOG_LEVEL` is set to: the line begins with `[HRR capture] Recording`, names the mode and the process's own directory in the archive, such as `./my_capture.hrr/pid-4242`. Child processes record to their own `pid-*` directories in the same archive. A child started with `exec` prints a line of its own; a child created with `fork()` after HIP has started does not.
 
 Use the in-tree `libamdhip64` from the **same source commit** when testing capture changes:
 
 ```bash
 export LD_LIBRARY_PATH=<clr-build>/hipamd/lib:$LD_LIBRARY_PATH
-HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app
+HIP_HRR_CAPTURE_OUTPUT=./out.hrr HIP_HRR_CAPTURE_CONTENT=1 ./my_hip_app
 ```
 
 The capture runtime and `hrr-playback` share the generated HRR wire-format structs. For
@@ -91,6 +93,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
+| `HIP_HRR_CAPTURE_CONTENT` | off | Also record host buffers, by-value kernel argument values and code objects, which replay needs. Without it the archive is metadata-only and replay refuses the first call that needs them |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. Either way capture says on stderr whether it reads it, whatever the log level |
 | `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host memory each kernel reads before the launch, so replay can write it back. `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (default `64`) caps the allocation size. The archive then holds that host memory (see DESIGN.md, Pinned Host Snapshots) |
 

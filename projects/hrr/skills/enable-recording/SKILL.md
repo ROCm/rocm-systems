@@ -15,7 +15,7 @@ description: >-
 
 # Record a failing workload
 
-Capture writes every HIP call a process makes, plus the host buffers those calls carry, into an archive directory. That archive replays on another machine without the application, its source or its data, which is what makes a failure someone else can look at.
+Capture writes every HIP call a process makes into an archive directory. With `--content` it also writes the host buffers those calls carry, their kernel argument values and the code objects they run, and that archive replays on another machine without the application, its source or its data, which is what makes a failure someone else can look at. Without it the archive is metadata-only: it says what was called, with what sizes, and replay refuses it.
 
 This skill goes from a workload that misbehaves to an archive that has been checked. Triaging the archive afterwards is a different skill, [decode-and-triage](../decode-and-triage/SKILL.md).
 
@@ -34,6 +34,7 @@ Run `scripts/hrr_capture.sh` for every step below; paths are relative to this sk
 Each of these changes the result silently, and the first two are the ones that waste an afternoon.
 
 - **`HIP_HRR_CAPTURE_OUTPUT`**: switches capture on and names the archive. A runtime without HRR ignores it and reports nothing, which is why preflight exists. Let `run` set it rather than exporting it yourself, because a variable exported in the shell that starts a container does not reach the process inside it.
+- **`HIP_HRR_CAPTURE_CONTENT`**: records the contents replay needs. `run --content` sets it to 1; without it the archive is metadata-only, whatever else is right. One exported by hand reaches the workload too, and `verify` reads the mode off the archive, so it reports what was recorded rather than what was asked for.
 - **`HIP_VISIBLE_DEVICES`**: changes which devices the workload sees and therefore what gets recorded. This skill never sets it. HIP's ordering is not `rocm-smi`'s, so device 4 here is not necessarily GPU 4 there; if you pin a device, confirm which one you got.
 - **`LD_PRELOAD` and `LD_LIBRARY_PATH`**: decide which runtime loads. `LD_PRELOAD` wins over everything, including a binary's own `DT_RPATH`; `LD_LIBRARY_PATH` is the one that loses to it. Winning the link is not the same as working, which is why preloading a runtime into a framework wheel breaks it. See step 1.
 - **`HRR_PLAYBACK` and `ROCM_PATH`**: where `verify` looks for `hrr-playback` when `--playback` is not given, in the same order as `ensure_playback.sh`: `HRR_PLAYBACK`, then `$ROCM_PATH/bin`, then `PATH`. The first reader found is often the wrong one.
@@ -74,11 +75,13 @@ If the runtime that will load has no capture, the fix depends on what loads it. 
 ## 2. Run
 
 ```bash
-scripts/hrr_capture.sh run --output /data/captures/run.hrr -- \
+scripts/hrr_capture.sh run --content --output /data/captures/run.hrr -- \
     <the command that already reproduces the failure, unchanged>
 ```
 
-Whatever command already reproduces the failure goes after `--`, unchanged. The script preflights, sets `HIP_HRR_CAPTURE_OUTPUT`, runs the command, and reports the archive afterwards. The workload's own exit status is preserved and passed back, which also means a run that succeeds while capturing nothing exits zero: the verdict, not the exit status, says whether capture worked.
+`--content` is what makes the archive replayable: it records the host buffers, by-value kernel arguments and code objects, which is the data step 4 is about. Leave it out only when what was called is enough and the data may not be recorded at all. The archive is then metadata-only, `verify` says so, and `run` offers no replay.
+
+Whatever command already reproduces the failure goes after `--`, unchanged. The script preflights, sets `HIP_HRR_CAPTURE_OUTPUT` (and `HIP_HRR_CAPTURE_CONTENT=1` with `--content`), runs the command, and reports the archive afterwards. The workload's own exit status is preserved and passed back, which also means a run that succeeds while capturing nothing exits zero: the verdict, not the exit status, says whether capture worked.
 
 **Run this inside the container, not around it.** The script sets the environment variable on the command it launches, and a variable set in the shell that starts a container does not cross into it. Wrapping `docker run` therefore produces exactly the empty-capture symptom this skill exists to prevent. Enter the container first, with the skill directory and the output path both visible inside it, and run the three steps there. A container running as root leaves the archive owned by root on the host, where the person who owns the directory can read it and not move it, so `chown` it back afterwards.
 
@@ -109,7 +112,7 @@ A refusal is the good case. A reader from a neighbouring build can do something 
 
 Every run ends in one of four verdicts:
 
-- `Verdict: recorded`: events were written. The archive is worth keeping.
+- `Verdict: recorded`: events were written. The archive is worth keeping. A process captured without `--content` also reports `contents: withheld (metadata-only capture)`: `--info` reads it, and replay refuses it.
 - `Verdict: empty`: process directories exist but hold no events. The processes opened a capture and recorded nothing.
 - `Verdict: nothing captured`: the directory exists with no process directory in it, so no process ever opened a capture. The directory came from somewhere else, an earlier attempt or a `mkdir`, and the variable never reached the process that used the GPU: go back to preflight.
 - `Verdict: no archive`: the directory was never created, so capture never started. Either the runtime that loaded has no capture compiled in, which is the common case, or the workload died before its first HIP call. Preflight with the command tells the two apart.
@@ -128,15 +131,15 @@ An archive with several `pid-*` directories is one archive. Send the whole direc
 
 What the archive holds, per process, and it is worth reading out to whoever has to approve the transfer:
 
-- **`events.bin`**: every successful HIP call the process made, with its arguments: sizes, device addresses, stream handles, kernel names. The properties handed to `hipChooseDevice` are kept with their UUID, LUID and PCI location written as zeros.
-- **`blobs/`**: the host buffers those calls carried, byte for byte and in the clear. For a serving stack that means prompts and generated text; for training, the data and the weights that were copied to the device. Linker inputs given to `hipLinkAddData` are stored as they were passed: SPIR-V or LLVM bitcode keeps its compiler identification and, built with `-g`, its source and build directories.
-- **`code_objects/`**: the compiled GPU kernels the process loaded, which is the application's own binary code and a separate disclosure question from customer data. Their `.comment` and `.debug*` sections are zeroed and marked empty, here and in the fat binaries under `blobs/`, which removes the compiler build and the build paths and source file names that debug information carries, except in compressed (`CCOB`) fat binaries, which are stored as the application had them. What the GPU loads is not touched: kernel names stay, and so does any string the kernels keep, such as the source path a device `assert()` prints.
+- **`events.bin`**: every successful HIP call the process made, with its arguments: sizes, device addresses, stream handles, kernel names, and scalar values such as memset fill values. By-value kernel argument values only with `--content`. The properties handed to `hipChooseDevice` are kept with their UUID, LUID and PCI location written as zeros.
+- **`blobs/`**: with `--content`, the host buffers those calls carried, byte for byte and in the clear. For a serving stack that means prompts and generated text; for training, the data and the weights that were copied to the device. Linker inputs given to `hipLinkAddData` are stored as they were passed: SPIR-V or LLVM bitcode keeps its compiler identification and, built with `-g`, its source and build directories. Empty in a metadata-only archive.
+- **`code_objects/`**: with `--content`, the compiled GPU kernels the process loaded, which is the application's own binary code and a separate disclosure question from customer data. Their `.comment` and `.debug*` sections are zeroed and marked empty, here and in the fat binaries under `blobs/`, which removes the compiler build and the build paths and source file names that debug information carries, except in compressed (`CCOB`) fat binaries, which are stored as the application had them. What the GPU loads is not touched: kernel names stay, and so does any string the kernels keep, such as the source path a device `assert()` prints. Empty in a metadata-only archive.
 - **`manifest.json`**: process and parent process ids, event and blob counts, the clean-shutdown flag, the HIP and comgr versions that captured, and the device's name, architecture, memory size and clocks. Its PCI location, UUID and LUID are written blank.
 - **`regions/*.hrrr`**: the framework allocator's own layout, when a producer ran alongside capture.
 
 Apart from the few exceptions in step 2, failed HIP calls are not recorded, and nothing that never crossed a HIP call is. The archive is exactly as sensitive as the data the workload handled, so where it may go has to be agreed before it is uploaded. [PRIVACY.md](../../PRIVACY.md) is the page to hand to whoever approves it.
 
-`verify --json` gives each process's counts and sizes in a form you can attach to the request, and says whether any hardware identifier or code object build information is left (`hardware_ids`; `debug_info_files` for code objects still holding `.comment` or `.debug*` bytes; `path_files` for code objects whose loaded data holds an absolute path; `unchecked_fat_binaries` for the compressed ones it cannot read; `fat_binaries_scanned`, false when the archive's format version is not v8 to v12 and it cannot tell which blobs are fat binaries); the device details are in each `manifest.json`. For a multi-process archive, `hrr-playback --info` against the archive root prints a table covering every process at once. The cross-check in `verify` reports on one process, which is enough to judge the capture and not enough for a disclosure inventory.
+`verify --json` gives each process's counts and sizes in a form you can attach to the request, and says whether any hardware identifier or code object build information is left (`hardware_ids`; `debug_info_files` for code objects still holding `.comment` or `.debug*` bytes; `path_files` for code objects whose loaded data holds an absolute path; `unchecked_fat_binaries` for the compressed ones it cannot read; `fat_binaries_scanned`, false when the archive's format version is not v8 to v13 and it cannot tell which blobs are fat binaries); the device details are in each `manifest.json`. For a multi-process archive, `hrr-playback --info` against the archive root prints a table covering every process at once. The cross-check in `verify` reports on one process, which is enough to judge the capture and not enough for a disclosure inventory.
 
 If the content is the obstacle, three things exist and none of them is scrubbing. Re-capture the same failure driven by synthetic input, if it still reproduces. Replay the archive yourself and send only the finding, which is a few lines and carries no buffers. Or agree the handling of a production-data transfer before uploading, because that is what this is.
 
@@ -146,7 +149,7 @@ If the content is the obstacle, three things exist and none of them is scrubbing
 
 One thing still gets in the way. The triage skill's preflight compares the capture against the HIP version of the `hipconfig` on `PATH`, not against the reader you named, so on a host whose ROCm install differs from the build that captured it stops with a version prompt and wants `HRR_CONTINUE=1`. That is the check being coarse rather than a real mismatch.
 
-Offer it as soon as `verify` says `recorded`, and hand off to [decode-and-triage](../decode-and-triage/SKILL.md) on the archive just made:
+Offer it as soon as `verify` says `recorded` for an archive captured with `--content`, and hand off to [decode-and-triage](../decode-and-triage/SKILL.md) on the archive just made:
 
 ```bash
 ../decode-and-triage/scripts/triage_archive.sh --archive /data/captures/run.hrr/pid-<pid>

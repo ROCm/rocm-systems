@@ -722,6 +722,7 @@ inline std::pair<uint64_t, uint64_t> hrr_capture_direct_hsa(
   std::string out;
   { hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+    proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
     set_proc_search_path(proc);
     int ret = proc.run("\"" + direct_case + "\"");
     out = proc.getOutput();

@@ -381,6 +381,33 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostSnapshotCap) {
   }
 }
 
+// Metadata-only capture takes no pinned snapshot: over the cap no allocation is
+// noted as unreplayable, and within it no launch carries a snapshot record.
+HRR_TEST_CASE(Unit_HRR_PinnedHostMetadataOnlyNoSnapshot) {
+  for (const char* max_mb : {"1", "64"}) {
+    INFO("HIP_HRR_HOST_SNAPSHOT_MAX_MB=" << max_mb);
+    ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_metadata_only"};
+    hrr_capture_direct("Unit_HRR_PinnedHostLarge_Direct", cap.path, 5,
+                       {{"HIP_HRR_HOST_SNAPSHOT_MAX_MB", max_mb},
+                        {"HIP_HRR_CAPTURE_CONTENT", "0"}});
+    const std::string manifest =
+        read_text_file(hrr_single_process_archive(cap.path) / "manifest.json");
+    INFO("manifest.json:\n" << manifest);
+    CHECK(manifest.find("larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB") == std::string::npos);
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    REQUIRE((arc.flags & HRR_FILE_FLAG_METADATA_ONLY) != 0);
+    size_t launches = 0, snapshots = 0;
+    for (const auto& ev : arc.events) {
+      if (!ev.kernel_launch) continue;
+      ++launches;
+      snapshots += ev.kernel_launch->snapshots.size();
+    }
+    CHECK(launches > 0);
+    CHECK(snapshots == 0);
+  }
+}
+
 // A snapshot blob over --max-file-bytes ends the replay before the kernel that
 // reads it is launched on input replay never restored.
 HRR_TEST_CASE(Unit_HRR_PinnedHostBlobRefused) {
@@ -411,6 +438,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostFork) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_fork"};
   hrr::test::SpawnProc proc(hrr_self_exe());
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+  proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
   set_proc_search_path(proc);
   const int ret = proc.runWithTimeout("\"Unit_HRR_PinnedHostFork_Direct\"", 300);
   INFO("Capture exit code: " << ret);

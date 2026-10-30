@@ -53,11 +53,12 @@
       "skill_should_trigger": true,
       "prompt": "Capture worked and we have an archive. Our legal team wants to know what is inside it before we upload it to a vendor. What do we tell them?",
       "expected_behavior": [
-        "States that the recorded buffers hold the real workload data in the clear, including prompts and generated text"
+        "States that an archive captured with --content holds the recorded buffers in the clear, including prompts and generated text",
+        "States that a metadata-only archive holds no buffer contents or code objects but still names every kernel and records sizes and addresses"
       ],
       "unexpected_behavior": [
         "Claims the archive can be anonymised, scrubbed or randomised by a flag",
-        "Claims the archive holds only metadata or only API calls"
+        "Claims a metadata-only archive reveals nothing about the workload"
       ]
     },
     {

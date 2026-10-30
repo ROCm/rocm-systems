@@ -90,11 +90,13 @@ void note_unreplayable(const char* api, const char* reason);
 
 // Write a buffer as a content-addressed blob. Returns hash, or {} when the
 // writer is not open, flush() has written the trailer, or capture has stopped
-// for lack of space.
+// for lack of space. In metadata-only mode nothing is hashed or written and both
+// halves are HRR_HASH_WITHHELD, so replay can say why the blob is missing.
 // Thread-safe. Skips the write when the same bytes are already in this archive.
 Hash128 write_blob(const void* data, size_t len);
 
-// Write a code object (.hsaco) blob. Returns hash, or {} as write_blob() does.
+// Write a code object (.hsaco) blob. Returns hash, {} or the withheld hash as
+// write_blob() does.
 Hash128 write_code_object(const void* image, size_t image_size);
 
 // Number of events written so far.
