@@ -7,6 +7,9 @@ import re
 import pytest
 
 
+from amdisa.codegen.execute.rj_arith_scalar import MOVES, gen_scalar
+
+
 from amdisa.codegen.execute.rj_arith_vector import gen_vector32, gen_integer16
 
 
@@ -40,7 +43,7 @@ def test_all_move_and_selection_encodings_route_to_rj_arith(arch):
         / arch
     )
     count = 0
-    for file in ('vop1', 'vop2', 'vop3'):
+    for file in ('sop1', 'sopk', 'vop1', 'vop2', 'vop3'):
         source = (root / (file + '_exec.cpp')).read_text()
         pattern = r'void ((?:S(?:Mov|Cmov)(?:B32|B64|kI32)|VMovB(?:16|32)|VCndmaskB(?:16|32))\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{'
         for match in re.finditer(pattern, source):
@@ -54,4 +57,4 @@ def test_all_move_and_selection_encodings_route_to_rj_arith(arch):
             assert 'amdgpu::execute_s_' not in body
             assert 'amdgpu::execute_v_' not in body
             count += 1
-    assert count == 14  # Eight MOV and six CNDMASK methods.
+    assert count == 20  # Six scalar methods, eight MOV and six CNDMASK methods.

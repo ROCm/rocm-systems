@@ -3765,6 +3765,614 @@ TEST(ArithBridgeTest, RejectedFloatCompareDppDoesNotChangeExecOrExceptionState) 
   EXPECT_EQ(fixture.wave->pending_alu_causes(), 0u);
 }
 
+TEST(ArithBridgeTest, ScalarAddIgnoresExecAndCommitsCarryAfterAliasedInputs) {
+  for (bool rdna3 : {false, true}) {
+    BridgeFixture fixture(rdna3);
+    fixture.wave->set_exec(0);
+    fixture.wave->write_scc(false);
+    const auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, 0xffffffffu);
+    fixture.cu->write_sgpr(base + 1, 1u);
+    fixture.recorder->scalar_reads.clear();
+    fixture.recorder->scalar_writes.clear();
+    if (rdna3) {
+      const auto words = rocjitsu::rdna3::build_sop2(rocjitsu::rdna3::kSAddU32Sop2,
+                                                     {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
+      rocjitsu::rdna3::SAddU32Sop2 instruction(words.data());
+      instruction.execute_impl(*fixture.wave);
+    } else {
+      const auto words =
+          rdna4::build_sop2(rdna4::kSAddCoU32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
+      rdna4::SAddCoU32Sop2 instruction(words.data());
+      instruction.execute_impl(*fixture.wave);
+    }
+    ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+    EXPECT_EQ(fixture.recorder->scalar_reads, (std::vector<uint32_t>{base, base + 1}));
+    ASSERT_EQ(fixture.recorder->scalar_writes.size(), 1u);
+    EXPECT_EQ(fixture.recorder->scalar_writes[0].index, 0u);
+    EXPECT_EQ(fixture.recorder->scalar_writes[0].width, 1u);
+    EXPECT_EQ(fixture.cu->read_sgpr(base), 0u);
+    EXPECT_TRUE(fixture.wave->read_scc());
+    EXPECT_TRUE(fixture.recorder->writes.empty());
+  }
+}
+
+TEST(ArithBridgeTest, ScalarPairReadAndWritePreserveWidthsAndScc) {
+  for (bool rdna3 : {false, true}) {
+    BridgeFixture fixture(rdna3);
+    fixture.wave->set_exec(0);
+    const auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, 0x12345678u);
+    fixture.cu->write_sgpr(base + 1, 0xabcdef01u);
+    fixture.cu->write_sgpr(base + 2, 0xffff0000u);
+    fixture.cu->write_sgpr(base + 3, 0x0000ffffu);
+    fixture.recorder->scalar_reads.clear();
+    fixture.recorder->scalar_writes.clear();
+    if (rdna3) {
+      const auto words = rocjitsu::rdna3::build_sop2(rocjitsu::rdna3::kSAndB64Sop2,
+                                                     {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0});
+      rocjitsu::rdna3::SAndB64Sop2 instruction(words.data());
+      instruction.execute_impl(*fixture.wave);
+    } else {
+      const auto words =
+          rdna4::build_sop2(rdna4::kSAndB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0});
+      rdna4::SAndB64Sop2 instruction(words.data());
+      instruction.execute_impl(*fixture.wave);
+    }
+    ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+    EXPECT_EQ(fixture.recorder->scalar_reads,
+              (std::vector<uint32_t>{base, base + 1, base + 2, base + 3}));
+    ASSERT_EQ(fixture.recorder->scalar_writes.size(), 1u);
+    EXPECT_EQ(fixture.recorder->scalar_writes[0].index, 0u);
+    EXPECT_EQ(fixture.recorder->scalar_writes[0].width, 2u);
+    EXPECT_EQ(fixture.cu->read_sgpr(base), 0x12340000u);
+    EXPECT_EQ(fixture.cu->read_sgpr(base + 1), 0x0000ef01u);
+    EXPECT_TRUE(fixture.wave->read_scc());
+  }
+}
+
+TEST(ArithBridgeTest, ScalarSelectReadsOnlyChosenSourceAndPreservesScc) {
+  for (bool rdna3 : {false, true})
+    for (bool wide : {false, true})
+      for (bool scc : {false, true}) {
+        BridgeFixture fixture(rdna3);
+        fixture.wave->set_exec(0);
+        fixture.wave->write_scc(scc);
+        const auto base = fixture.wave->sgpr_alloc().base;
+        const uint32_t values[] = {0x12345678u, 0xabcdef01u, 0x98765432u, 0x10203040u};
+        for (unsigned i = 0; i < 4; ++i)
+          fixture.cu->write_sgpr(base + i, values[i]);
+        fixture.recorder->scalar_reads.clear();
+        fixture.recorder->scalar_writes.clear();
+        const auto words =
+            rdna3 ? rdna3::build_sop2(wide ? rdna3::kSCselectB64Sop2 : rdna3::kSCselectB32Sop2,
+                                      {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0})
+                  : rdna4::build_sop2(wide ? rdna4::kSCselectB64Sop2 : rdna4::kSCselectB32Sop2,
+                                      {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0});
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        const unsigned selected = scc ? 0 : 2;
+        std::vector<uint32_t> reads{base + selected};
+        if (wide)
+          reads.push_back(base + selected + 1);
+        EXPECT_EQ(fixture.recorder->scalar_reads, reads);
+        EXPECT_EQ(fixture.cu->read_sgpr(base), values[selected]);
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 1), wide ? values[selected + 1] : values[1]);
+        EXPECT_EQ(fixture.wave->read_scc(), scc);
+        ASSERT_EQ(fixture.recorder->scalar_writes.size(), 1u);
+        EXPECT_EQ(fixture.recorder->scalar_writes[0].width, wide ? 2u : 1u);
+      }
+}
+
+TEST(ArithBridgeTest, ScalarBitsetCapturesAliasedDestinationAndMasksIndex) {
+  struct Case {
+    uint16_t rdna3_op, rdna4_op;
+    bool wide, set;
+  };
+  const Case cases[] = {{rdna3::kSBitset0B32Sop1, rdna4::kSBitset0B32Sop1, false, false},
+                        {rdna3::kSBitset0B64Sop1, rdna4::kSBitset0B64Sop1, true, false},
+                        {rdna3::kSBitset1B32Sop1, rdna4::kSBitset1B32Sop1, false, true},
+                        {rdna3::kSBitset1B64Sop1, rdna4::kSBitset1B64Sop1, true, true}};
+  for (bool rdna3 : {false, true})
+    for (const auto &test : cases)
+      for (bool scc : {false, true}) {
+        BridgeFixture fixture(rdna3);
+        fixture.wave->set_exec(0);
+        fixture.wave->write_scc(scc);
+        const auto base = fixture.wave->sgpr_alloc().base;
+        const uint64_t initial = test.set ? 0x012345670000007fULL : 0xffffffffffffffffULL;
+        fixture.cu->write_sgpr(base, uint32_t(initial));
+        fixture.cu->write_sgpr(base + 1, uint32_t(initial >> 32));
+        fixture.recorder->scalar_reads.clear();
+        fixture.recorder->scalar_writes.clear();
+        const auto words = rdna3 ? rdna3::build_sop1(test.rdna3_op, {.ssrc0 = 0, .sdst = 0})
+                                 : rdna4::build_sop1(test.rdna4_op, {.ssrc0 = 0, .sdst = 0});
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        const uint64_t bit = test.wide ? 0x8000000000000000ULL : 0x80000000ULL;
+        const uint64_t expected = test.set ? initial | bit : initial & ~bit;
+        const std::vector<uint32_t> reads = test.wide ? std::vector<uint32_t>{base, base + 1, base}
+                                                      : std::vector<uint32_t>{base, base};
+        EXPECT_EQ(fixture.recorder->scalar_reads, reads);
+        EXPECT_EQ(fixture.cu->read_sgpr(base), uint32_t(expected));
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 1), uint32_t(expected >> 32));
+        EXPECT_EQ(fixture.wave->read_scc(), scc);
+        ASSERT_EQ(fixture.recorder->scalar_writes.size(), 1u);
+        EXPECT_EQ(fixture.recorder->scalar_writes[0].width, test.wide ? 2u : 1u);
+      }
+}
+
+TEST(ArithBridgeTest, ScalarQuadMasksCoverUpperWordAndCommitScc) {
+  struct Case {
+    uint16_t rdna3_op, rdna4_op;
+    bool wide;
+    uint64_t expected;
+  };
+  const Case cases[] = {{rdna3::kSQuadmaskB32Sop1, rdna4::kSQuadmaskB32Sop1, false, 5},
+                        {rdna3::kSQuadmaskB64Sop1, rdna4::kSQuadmaskB64Sop1, true, 0x8005},
+                        {rdna3::kSWqmB32Sop1, rdna4::kSWqmB32Sop1, false, 0xf0f},
+                        {rdna3::kSWqmB64Sop1, rdna4::kSWqmB64Sop1, true, 0xf000000000000f0fULL}};
+  for (bool rdna3 : {false, true})
+    for (const auto &test : cases)
+      for (bool nonzero : {false, true}) {
+        BridgeFixture fixture(rdna3);
+        fixture.wave->set_exec(0);
+        fixture.wave->write_scc(!nonzero);
+        const auto base = fixture.wave->sgpr_alloc().base;
+        fixture.cu->write_sgpr(base, nonzero ? 0x101 : 0);
+        fixture.cu->write_sgpr(base + 1, nonzero ? 0x80000000 : 0);
+        const auto words = rdna3 ? rdna3::build_sop1(test.rdna3_op, {.ssrc0 = 0, .sdst = 0})
+                                 : rdna4::build_sop1(test.rdna4_op, {.ssrc0 = 0, .sdst = 0});
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        const uint64_t expected = nonzero ? test.expected : 0;
+        EXPECT_EQ(fixture.cu->read_sgpr(base), uint32_t(expected));
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 1),
+                  test.wide ? uint32_t(expected >> 32) : (nonzero ? 0x80000000u : 0));
+        EXPECT_EQ(fixture.wave->read_scc(), nonzero);
+      }
+}
+
+TEST(ArithBridgeTest, ScalarMultiply64ReadsFullPairsBeforeAliasedWrite) {
+  for (bool scc : {false, true}) {
+    BridgeFixture fixture(false);
+    fixture.wave->set_exec(0);
+    fixture.wave->write_scc(scc);
+    const auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, 3);
+    fixture.cu->write_sgpr(base + 1, 2);
+    fixture.cu->write_sgpr(base + 2, 5);
+    fixture.cu->write_sgpr(base + 3, 7);
+    fixture.recorder->scalar_reads.clear();
+    const auto words = rdna4::build_sop2(rdna4::kSMulU64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0});
+    rdna4::SMulU64Sop2 instruction(words.data());
+    instruction.execute_impl(*fixture.wave);
+    ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+    EXPECT_EQ(fixture.recorder->scalar_reads,
+              (std::vector<uint32_t>{base, base + 1, base + 2, base + 3}));
+    EXPECT_EQ(fixture.cu->read_sgpr(base), 15u);
+    EXPECT_EQ(fixture.cu->read_sgpr(base + 1), 31u);
+    EXPECT_EQ(fixture.wave->read_scc(), scc);
+  }
+}
+
+TEST(ArithBridgeTest, ScalarCarryInputIsCapturedBeforeOutput) {
+  for (bool rdna3 : {false, true}) {
+    for (bool carry : {false, true}) {
+      BridgeFixture fixture(rdna3);
+      fixture.wave->set_exec(0);
+      fixture.wave->write_scc(carry);
+      const auto base = fixture.wave->sgpr_alloc().base;
+      fixture.cu->write_sgpr(base, 0xffffffffu);
+      fixture.cu->write_sgpr(base + 1, 0u);
+      if (rdna3) {
+        const auto words = rocjitsu::rdna3::build_sop2(rocjitsu::rdna3::kSAddcU32Sop2,
+                                                       {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
+        rocjitsu::rdna3::SAddcU32Sop2 instruction(words.data());
+        instruction.execute_impl(*fixture.wave);
+      } else {
+        const auto words =
+            rdna4::build_sop2(rdna4::kSAddCoCiU32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
+        rdna4::SAddCoCiU32Sop2 instruction(words.data());
+        instruction.execute_impl(*fixture.wave);
+      }
+      ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+      EXPECT_EQ(fixture.cu->read_sgpr(base), carry ? 0u : 0xffffffffu);
+      EXPECT_EQ(fixture.wave->read_scc(), carry);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, ScalarImmediateAddUsesSignedOverflow) {
+  struct Case {
+    uint32_t input;
+    uint16_t immediate;
+    uint32_t result;
+    bool overflow;
+  };
+  constexpr Case cases[] = {{0x7fffffffu, 1, 0x80000000u, true},
+                            {0x80000000u, 0xffff, 0x7fffffffu, true},
+                            {0xffffffffu, 1, 0, false},
+                            {0, 0xffff, 0xffffffffu, false}};
+  for (bool rdna3 : {false, true}) {
+    for (const auto &test : cases) {
+      BridgeFixture fixture(rdna3);
+      fixture.wave->set_exec(0);
+      const auto base = fixture.wave->sgpr_alloc().base;
+      fixture.cu->write_sgpr(base, test.input);
+      if (rdna3) {
+        const auto words = rocjitsu::rdna3::build_sopk(rocjitsu::rdna3::kSAddkI32Sopk,
+                                                       {.simm16 = test.immediate, .sdst = 0});
+        rocjitsu::rdna3::SAddkI32Sopk instruction(words.data());
+        instruction.execute_impl(*fixture.wave);
+      } else {
+        const auto words =
+            rdna4::build_sopk(rdna4::kSAddkCoI32Sopk, {.simm16 = test.immediate, .sdst = 0});
+        rdna4::SAddkCoI32Sopk instruction(words.data());
+        instruction.execute_impl(*fixture.wave);
+      }
+      ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+      EXPECT_EQ(fixture.cu->read_sgpr(base), test.result);
+      EXPECT_EQ(fixture.wave->read_scc(), test.overflow);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, ScalarImmediateCompareReadsButDoesNotWriteSdst) {
+  BridgeFixture fixture(true);
+  fixture.wave->set_exec(0);
+  const auto base = fixture.wave->sgpr_alloc().base;
+  fixture.cu->write_sgpr(base, 0xffffffffu);
+  fixture.recorder->scalar_reads.clear();
+  fixture.recorder->scalar_writes.clear();
+  const auto words =
+      rocjitsu::rdna3::build_sopk(rocjitsu::rdna3::kSCmpkEqI32Sopk, {.simm16 = 0xffff, .sdst = 0});
+  rocjitsu::rdna3::SCmpkEqI32Sopk instruction(words.data());
+  instruction.execute_impl(*fixture.wave);
+  ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+  EXPECT_EQ(fixture.recorder->scalar_reads, (std::vector<uint32_t>{base}));
+  EXPECT_TRUE(fixture.recorder->scalar_writes.empty());
+  EXPECT_TRUE(fixture.wave->read_scc());
+  EXPECT_EQ(fixture.cu->read_sgpr(base), 0xffffffffu);
+}
+
+TEST(ArithBridgeTest, ScalarFloatBinaryOperationsHonorSemanticsAndFailureBoundaries) {
+  struct Case {
+    uint16_t opcode;
+    uint32_t a, b, expected;
+  };
+  const Case cases[] = {{rdna4::kSAddF32Sop2, 0x40000000, 0x40400000, 0x40a00000},
+                        {rdna4::kSSubF32Sop2, 0x40000000, 0x40400000, 0xbf800000},
+                        {rdna4::kSMulF32Sop2, 0x40000000, 0x40400000, 0x40c00000},
+                        {rdna4::kSMinNumF32Sop2, 0x40000000, 0x40400000, 0x40000000},
+                        {rdna4::kSMaxNumF32Sop2, 0x40000000, 0x40400000, 0x40400000},
+                        {rdna4::kSMinimumF32Sop2, 0x40000000, 0x40400000, 0x40000000},
+                        {rdna4::kSMaximumF32Sop2, 0x40000000, 0x40400000, 0x40400000},
+                        {rdna4::kSAddF16Sop2, 0xdead4000, 0xbeef4200, 0x4500},
+                        {rdna4::kSSubF16Sop2, 0xdead4000, 0xbeef4200, 0xbc00},
+                        {rdna4::kSMulF16Sop2, 0xdead4000, 0xbeef4200, 0x4600},
+                        {rdna4::kSMinNumF16Sop2, 0xdead4000, 0xbeef4200, 0x4000},
+                        {rdna4::kSMaxNumF16Sop2, 0xdead4000, 0xbeef4200, 0x4200},
+                        {rdna4::kSMinimumF16Sop2, 0xdead4000, 0xbeef4200, 0x4000},
+                        {rdna4::kSMaximumF16Sop2, 0xdead4000, 0xbeef4200, 0x4200}};
+  for (const auto &test : cases)
+    for (auto semantics :
+         {ArithmeticSemantics::BitExactEmpiricalAllowLoose, ArithmeticSemantics::Loose,
+          ArithmeticSemantics::BitExactEmpiricalAllowLoose})
+      for (bool reporting : {false, true}) {
+        ArithmeticPolicy policy{semantics};
+        if (reporting && semantics != ArithmeticSemantics::Loose)
+          policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+        BridgeFixture fixture(false, 32, policy);
+        fixture.wave->set_exec(0);
+        fixture.wave->set_mode_raw(0xf0);
+        fixture.wave->write_scc(true);
+        fixture.wave->set_trapsts(0x80000010u);
+        const auto base = fixture.wave->sgpr_alloc().base;
+        fixture.cu->write_sgpr(base, test.a);
+        fixture.cu->write_sgpr(base + 1, test.b);
+        fixture.recorder->scalar_reads.clear();
+        fixture.recorder->scalar_writes.clear();
+        const auto words = rdna4::build_sop2(test.opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        // Reporting requires exact support; loose/fallback modes can use the loose implementation.
+        const bool supported =
+            semantics == ArithmeticSemantics::Loose ||
+            (semantics == ArithmeticSemantics::BitExactEmpiricalAllowLoose && !reporting);
+        EXPECT_EQ(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded(),
+            supported);
+        EXPECT_EQ(fixture.recorder->scalar_reads, (std::vector<uint32_t>{base, base + 1}));
+        EXPECT_EQ(fixture.recorder->scalar_writes.size(), supported ? 1u : 0u);
+        EXPECT_EQ(fixture.cu->read_sgpr(base), supported ? test.expected : test.a);
+        EXPECT_TRUE(fixture.wave->read_scc());
+        EXPECT_EQ(fixture.wave->trapsts(), 0x80000010u);
+      }
+}
+
+TEST(ArithBridgeTest, ScalarConversionsPreserveOperandFormatsAndRejectedOutputs) {
+  struct Case {
+    uint16_t opcode;
+    uint32_t a, b, expected;
+    bool packed;
+  };
+  const Case cases[] = {{rdna4::kSCvtF32I32Sop1, 0xfffffffd, 0, 0xc0400000, false},
+                        {rdna4::kSCvtF32U32Sop1, 3, 0, 0x40400000, false},
+                        {rdna4::kSCvtI32F32Sop1, 0xc0700000, 0, 0xfffffffd, false},
+                        {rdna4::kSCvtU32F32Sop1, 0x40700000, 0, 3, false},
+                        {rdna4::kSCvtF16F32Sop1, 0x3fc00000, 0, 0x3e00, false},
+                        {rdna4::kSCvtF32F16Sop1, 0xdead3e00, 0, 0x3fc00000, false},
+                        {rdna4::kSCvtHiF32F16Sop1, 0x3e00beef, 0, 0x3fc00000, false},
+                        {rdna4::kSCvtPkRtzF16F32Sop2, 0x3fc00000, 0xc0200000, 0xc1003e00, true}};
+  for (const auto &test : cases)
+    for (bool exact : {false, true}) {
+      ArithmeticPolicy policy{};
+      policy.semantics =
+          exact ? ArithmeticSemantics::BitExactEmpiricalNoFpStatus : ArithmeticSemantics::Loose;
+
+      if (policy.semantics != ArithmeticSemantics::Loose)
+        policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+      BridgeFixture fixture(false, 64, policy);
+      fixture.wave->set_exec(0);
+      fixture.wave->set_mode_raw(0xf0);
+      fixture.wave->write_scc(true);
+      fixture.wave->set_trapsts(0x80000010u);
+      const auto base = fixture.wave->sgpr_alloc().base;
+      fixture.cu->write_sgpr(base, test.a);
+      fixture.cu->write_sgpr(base + 1, test.b);
+      fixture.recorder->scalar_writes.clear();
+      const auto words = test.packed
+                             ? rdna4::build_sop2(test.opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0})
+                             : rdna4::build_sop1(test.opcode, {.ssrc0 = 0, .sdst = 0});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      EXPECT_EQ(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded(),
+          !exact);
+      EXPECT_EQ(fixture.recorder->scalar_writes.size(), exact ? 0u : 1u);
+      EXPECT_EQ(fixture.cu->read_sgpr(base), exact ? test.a : test.expected);
+      EXPECT_TRUE(fixture.wave->read_scc());
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000010u);
+    }
+}
+
+TEST(ArithBridgeTest, ScalarConversionUsesDifferentInputAndOutputDenormFields) {
+  for (bool to_half : {false, true})
+    for (bool preserve : {false, true}) {
+      BridgeFixture fixture(false);
+      fixture.wave->set_exec(0);
+      // Widening consumes FP16 input mode, narrowing consumes FP16 output mode.
+      // FP32's corresponding policy is deliberately opposite.
+      const unsigned half_bit = to_half ? 7 : 6;
+      const unsigned float_bit = to_half ? 5 : 4;
+      fixture.wave->set_mode_raw(preserve ? 1u << half_bit : 1u << float_bit);
+      const auto base = fixture.wave->sgpr_alloc().base;
+      fixture.cu->write_sgpr(base, to_half ? 0x33800000u : 1u);
+      const auto words = rdna4::build_sop1(
+          to_half ? rdna4::kSCvtF16F32Sop1 : rdna4::kSCvtF32F16Sop1, {.ssrc0 = 0, .sdst = 0});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_sgpr(base), preserve ? (to_half ? 1u : 0x33800000u) : 0u);
+    }
+}
+
+TEST(ArithBridgeTest, ScalarFmaFormsPreserveAccumulatorLiteralOrderAndGuestRounding) {
+  const uint16_t opcodes[] = {rdna4::kSFmacF32Sop2, rdna4::kSFmacF16Sop2, rdna4::kSFmaakF32Sop2,
+                              rdna4::kSFmamkF32Sop2};
+  for (unsigned op = 0; op < 4; ++op)
+    for (bool loose : {false, true})
+      for (bool reporting : {false, true}) {
+        ArithmeticPolicy policy{};
+        policy.semantics =
+            loose ? ArithmeticSemantics::Loose : ArithmeticSemantics::BitExactEmpiricalAllowLoose;
+        if (reporting && !loose)
+          policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+        BridgeFixture fixture(false, 32, policy);
+        fixture.wave->set_exec(0);
+        fixture.wave->set_mode_raw(0xf0);
+        fixture.wave->write_scc(true);
+        fixture.wave->set_trapsts(0x80000010u);
+        const auto base = fixture.wave->sgpr_alloc().base;
+        fixture.cu->write_sgpr(base, op == 1 ? 0xdead4000u : 0x40000000u);
+        fixture.cu->write_sgpr(base + 1, op == 1 ? 0xbeef4200u : 0x40400000u);
+        fixture.cu->write_sgpr(base + 2, op == 1 ? 0xabcd4400u : 0x40800000u);
+        fixture.recorder->scalar_writes.clear();
+        const uint32_t words[] = {
+            rdna4::build_sop2(opcodes[op], {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2})[0], 0x40800000u};
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        const bool supported = loose || !reporting;
+        EXPECT_EQ(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded(),
+            supported);
+        const uint32_t initial = op == 1 ? 0xabcd4400u : 0x40800000u;
+        const uint32_t expected = op == 1 ? 0x4900u : op == 3 ? 0x41300000u : 0x41200000u;
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 2), supported ? expected : initial);
+        EXPECT_EQ(fixture.recorder->scalar_writes.size(), supported ? 1u : 0u);
+        EXPECT_TRUE(fixture.wave->read_scc());
+        EXPECT_EQ(fixture.wave->trapsts(), 0x80000010u);
+      }
+  for (unsigned rounding = 0; rounding < 4; ++rounding) {
+    BridgeFixture fixture(false);
+    fixture.wave->set_exec(0);
+    fixture.wave->set_mode_raw(0xf0 | rounding);
+    const auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, 0x3f800000);
+    fixture.cu->write_sgpr(base + 1, 0x3f800000);
+    fixture.cu->write_sgpr(base + 2, 0x33800000);
+    const auto words = rdna4::build_sop2(rdna4::kSFmacF32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    EXPECT_EQ(fixture.cu->read_sgpr(base + 2), rounding == 1 ? 0x3f800001u : 0x3f800000u);
+  }
+}
+
+TEST(ArithBridgeTest, ScalarFloatComparisonsCoverEveryPredicateAndReportingPolicy) {
+  const uint16_t opcodes[2][14] = {
+      {rdna4::kSCmpLtF32Sopc, rdna4::kSCmpEqF32Sopc, rdna4::kSCmpLeF32Sopc, rdna4::kSCmpGtF32Sopc,
+       rdna4::kSCmpLgF32Sopc, rdna4::kSCmpGeF32Sopc, rdna4::kSCmpOF32Sopc, rdna4::kSCmpUF32Sopc,
+       rdna4::kSCmpNgeF32Sopc, rdna4::kSCmpNlgF32Sopc, rdna4::kSCmpNgtF32Sopc,
+       rdna4::kSCmpNleF32Sopc, rdna4::kSCmpNeqF32Sopc, rdna4::kSCmpNltF32Sopc},
+      {rdna4::kSCmpLtF16Sopc, rdna4::kSCmpEqF16Sopc, rdna4::kSCmpLeF16Sopc, rdna4::kSCmpGtF16Sopc,
+       rdna4::kSCmpLgF16Sopc, rdna4::kSCmpGeF16Sopc, rdna4::kSCmpOF16Sopc, rdna4::kSCmpUF16Sopc,
+       rdna4::kSCmpNgeF16Sopc, rdna4::kSCmpNlgF16Sopc, rdna4::kSCmpNgtF16Sopc,
+       rdna4::kSCmpNleF16Sopc, rdna4::kSCmpNeqF16Sopc, rdna4::kSCmpNltF16Sopc}};
+  // Raw IEEE witnesses; relation bits are the ISA truth table's LT/EQ/GT/UNORDERED.
+  struct Sample {
+    uint32_t a32, b32, a16, b16, relation, causes;
+    bool denormal;
+  };
+  const Sample samples[] = {{0xbf800000, 0x40000000, 0xbc00, 0x4000, 1, 0, false},
+                            {0x80000000, 0, 0x8000, 0, 2, 0, false},
+                            {0x7f800000, 0x3f800000, 0x7c00, 0x3c00, 4, 0, false},
+                            {0x7fc01234, 0, 0x7e34, 0, 8, 0, false},
+                            {0x7f801234, 0, 0x7c34, 0, 8, 1, false},
+                            {1, 0, 1, 0, 4, 2, true},
+                            {0x80000001, 0, 0x8001, 0, 1, 2, true}};
+  for (bool half : {false, true})
+    for (unsigned predicate = 1; predicate < 15; ++predicate)
+      for (bool loose : {false, true})
+        for (bool reporting : {false, true}) {
+          ArithmeticPolicy policy{};
+          policy.semantics =
+              loose ? ArithmeticSemantics::Loose : ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+
+          if (reporting && !loose)
+            policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+          BridgeFixture fixture(false, 32, policy);
+          fixture.wave->set_exec(0);
+          const auto base = fixture.wave->sgpr_alloc().base;
+          const auto words =
+              rdna4::build_sopc(opcodes[half][predicate - 1], {.ssrc0 = 0, .ssrc1 = 1});
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          for (bool flush : {false, true})
+            for (const auto &sample : samples) {
+              SCOPED_TRACE(testing::Message() << "half=" << half << " predicate=" << predicate
+                                              << " loose=" << loose << " flush=" << flush);
+              // Opposite policies for FP16 and FP32 detect use of the wrong MODE field.
+              fixture.wave->set_mode_raw((flush ? 0u : 1u) << (half ? 6 : 4) |
+                                         (flush ? 1u : 0u) << (half ? 4 : 6));
+              fixture.wave->set_trapsts(0x80000010u);
+              fixture.wave->write_scc(true);
+              fixture.cu->write_sgpr(base, half ? 0xdead0000u | sample.a16 : sample.a32);
+              fixture.cu->write_sgpr(base + 1, half ? 0xbeef0000u | sample.b16 : sample.b32);
+              fixture.recorder->scalar_reads.clear();
+              fixture.recorder->scalar_writes.clear();
+              ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                              .succeeded());
+              EXPECT_EQ(fixture.recorder->scalar_reads, (std::vector<uint32_t>{base, base + 1}));
+              EXPECT_TRUE(fixture.recorder->scalar_writes.empty());
+              const uint32_t relation = flush && sample.denormal ? 2 : sample.relation;
+              EXPECT_EQ(fixture.wave->read_scc(), (predicate & relation) != 0);
+              const uint32_t causes =
+                  !loose && reporting && !(flush && sample.denormal) ? sample.causes : 0;
+              EXPECT_EQ(fixture.wave->trapsts(), 0x80000010u | causes);
+              EXPECT_EQ(fixture.wave->exec(), 0u);
+            }
+        }
+}
+
+TEST(ArithBridgeTest, ScalarFloatRoundingUsesPrecisionModeAndPreservesScc) {
+  // Goldens for -1.5: ceil=-1, floor=-2, trunc=-1, nearest-even=-2.
+  const uint16_t opcodes[2][4] = {
+      {rdna4::kSCeilF32Sop1, rdna4::kSFloorF32Sop1, rdna4::kSTruncF32Sop1, rdna4::kSRndneF32Sop1},
+      {rdna4::kSCeilF16Sop1, rdna4::kSFloorF16Sop1, rdna4::kSTruncF16Sop1, rdna4::kSRndneF16Sop1}};
+  for (bool half : {false, true})
+    for (unsigned op = 0; op < 4; ++op)
+      for (bool loose : {false, true})
+        for (bool reporting : {false, true}) {
+          ArithmeticPolicy policy{};
+          policy.semantics =
+              loose ? ArithmeticSemantics::Loose : ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+
+          if (reporting && !loose)
+            policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+          BridgeFixture fixture(false, 64, policy);
+          fixture.wave->set_exec(0);
+          const auto base = fixture.wave->sgpr_alloc().base;
+          const auto words = rdna4::build_sop1(opcodes[half][op], {.ssrc0 = 0, .sdst = 0});
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          for (bool flush : {false, true})
+            for (unsigned sample = 0; sample < 3; ++sample) {
+              SCOPED_TRACE(testing::Message()
+                           << "half=" << half << " op=" << op << " sample=" << sample);
+              uint32_t input, expected, causes;
+              if (sample == 0) {
+                input = half ? 0xbe00 : 0xbfc00000;
+                expected = op == 0 || op == 2 ? (half ? 0xbc00 : 0xbf800000)
+                                              : (half ? 0xc000 : 0xc0000000);
+                causes = 0;
+              } else if (sample == 1) {
+                input = half ? 0x8001 : 0x80000001;
+                expected =
+                    !flush && op == 1 ? (half ? 0xbc00 : 0xbf800000) : (half ? 0x8000 : 0x80000000);
+                causes = flush ? 0 : 2;
+              } else {
+                input = half ? 0x7c34 : 0x7f801234;
+                expected = half ? 0x7e34 : 0x7fc01234;
+                causes = 1;
+              }
+              fixture.wave->set_mode_raw((flush ? 0u : 1u) << (half ? 6 : 4) |
+                                         (flush ? 1u : 0u) << (half ? 4 : 6));
+              fixture.wave->write_scc(sample != 0);
+              fixture.wave->set_trapsts(0x80000010u);
+              fixture.cu->write_sgpr(base, half ? 0xdead0000u | input : input);
+              fixture.recorder->scalar_reads.clear();
+              fixture.recorder->scalar_writes.clear();
+              ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                              .succeeded());
+              EXPECT_EQ(fixture.recorder->scalar_reads, (std::vector<uint32_t>{base}));
+              ASSERT_EQ(fixture.recorder->scalar_writes.size(), 1u);
+              EXPECT_EQ(fixture.recorder->scalar_writes[0].width, 1u);
+              EXPECT_EQ(fixture.cu->read_sgpr(base), expected);
+              EXPECT_EQ(fixture.wave->read_scc(), sample != 0);
+              EXPECT_EQ(fixture.wave->trapsts(), 0x80000010u | (!loose && reporting ? causes : 0));
+            }
+        }
+}
+
+TEST(ArithBridgeTest, ScalarCompareObservesBothRegisterPairsWithoutWritingThem) {
+  for (bool rdna3 : {false, true}) {
+    BridgeFixture fixture(rdna3);
+    fixture.wave->set_exec(0);
+    const auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, 0x1234u);
+    fixture.cu->write_sgpr(base + 1, 1u);
+    fixture.cu->write_sgpr(base + 2, 0x1234u);
+    fixture.cu->write_sgpr(base + 3, 2u);
+    fixture.recorder->scalar_reads.clear();
+    fixture.recorder->scalar_writes.clear();
+    if (rdna3) {
+      const auto words =
+          rocjitsu::rdna3::build_sopc(rocjitsu::rdna3::kSCmpEqU64Sopc, {.ssrc0 = 0, .ssrc1 = 2});
+      rocjitsu::rdna3::SCmpEqU64Sopc instruction(words.data());
+      instruction.execute_impl(*fixture.wave);
+    } else {
+      const auto words = rdna4::build_sopc(rdna4::kSCmpEqU64Sopc, {.ssrc0 = 0, .ssrc1 = 2});
+      rdna4::SCmpEqU64Sopc instruction(words.data());
+      instruction.execute_impl(*fixture.wave);
+    }
+    ASSERT_FALSE(fixture.wave->instruction_execution_failed());
+    EXPECT_EQ(fixture.recorder->scalar_reads,
+              (std::vector<uint32_t>{base, base + 1, base + 2, base + 3}));
+    EXPECT_TRUE(fixture.recorder->scalar_writes.empty());
+    EXPECT_FALSE(fixture.wave->read_scc());
+  }
+}
+
 const uint64_t exact = RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
 
 TEST(ArithBridgeTest, MatrixIgnoresExecAndPreservesAliasedInputsUntilCommit) {
@@ -5525,6 +6133,74 @@ TEST(ArithBridgeTest, MixedFmaGuestControlsAndReportingPolicy) {
       }
 }
 
+TEST(ArithBridgeTest, PseudoScalarIgnoresExecAndStagesScalarOutputs) {
+  const uint16_t ops[] = {rdna4::kVSExpF32Vop3, rdna4::kVSExpF16Vop3, rdna4::kVSLogF32Vop3,
+                          rdna4::kVSLogF16Vop3, rdna4::kVSRcpF32Vop3, rdna4::kVSRcpF16Vop3,
+                          rdna4::kVSRsqF32Vop3, rdna4::kVSRsqF16Vop3, rdna4::kVSSqrtF32Vop3,
+                          rdna4::kVSSqrtF16Vop3};
+  // Exactly representable exp2(0), log2(1), reciprocal(2), rsqrt(4), sqrt(4).
+  const float inputs[] = {0, 1, 2, 4, 4}, outputs[] = {1, 0, 0.5f, 0.5f, 2};
+  for (unsigned op = 0; op < 10; ++op)
+    for (uint32_t lanes : {32u, 64u})
+      for (unsigned policy_kind = 0; policy_kind < 5; ++policy_kind)
+        for (bool alias : {false, true})
+          for (bool modifiers : {false, true}) {
+            const bool half = op & 1;
+            ArithmeticPolicy policy{};
+            if (policy_kind == 1 || policy_kind == 4)
+              policy.semantics = ArithmeticSemantics::Loose;
+            if (policy_kind == 2) {
+              policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+            }
+            if (policy_kind >= 3)
+              if (policy.semantics != ArithmeticSemantics::Loose)
+                policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+            BridgeFixture fixture(false, lanes, policy);
+            fixture.wave->set_exec(0);
+            fixture.wave->set_mode_raw(0xff);
+            fixture.wave->set_trapsts(0x80000001);
+            fixture.wave->write_scc(true);
+            const uint32_t base = fixture.wave->sgpr_alloc().base;
+            const uint32_t destination = alias ? 0 : 4;
+            const float input = modifiers ? -inputs[op / 2] : inputs[op / 2];
+            const uint32_t raw =
+                half ? 0xa5a50000u | util::f32_to_f16(input) : std::bit_cast<uint32_t>(input);
+            fixture.cu->write_sgpr(base, raw);
+            if (!alias)
+              fixture.cu->write_sgpr(base + destination, 0xdeadbeef);
+            const auto words = rdna4::build_vop3(ops[op], {.vdst = uint8_t(destination),
+                                                           .abs = uint8_t(modifiers),
+                                                           .opsel = uint8_t(half),
+                                                           .clamp = uint8_t(modifiers),
+                                                           .src0 = 0,
+                                                           .omod = uint8_t(modifiers)});
+            auto instruction = fixture.decoder->decode_window(words);
+            ASSERT_TRUE(instruction.succeeded());
+            fixture.recorder->scalar_reads.clear();
+            fixture.recorder->scalar_writes.clear();
+            const bool rejected = policy_kind == 3 || (policy_kind == 2 && (op == 1 || op == 3));
+            EXPECT_EQ(
+                fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
+                rejected);
+            EXPECT_EQ(fixture.recorder->scalar_reads, (std::vector<uint32_t>{base}));
+            ASSERT_EQ(fixture.recorder->scalar_writes.size(), rejected ? 0u : 1u);
+            if (!rejected) {
+              EXPECT_EQ(fixture.recorder->scalar_writes[0].index, destination);
+              EXPECT_EQ(fixture.recorder->scalar_writes[0].width, 1u);
+            }
+            const float value = modifiers ? std::min(outputs[op / 2] * 2, 1.0f) : outputs[op / 2];
+            const uint32_t expected =
+                half ? util::f32_to_f16(value) : std::bit_cast<uint32_t>(value);
+            EXPECT_EQ(fixture.cu->read_sgpr(base + destination),
+                      rejected ? (alias ? raw : 0xdeadbeef) : expected);
+            EXPECT_EQ(fixture.wave->exec(), 0u);
+            EXPECT_TRUE(fixture.wave->read_scc());
+            EXPECT_EQ(fixture.wave->trapsts(), 0x80000001u);
+            EXPECT_EQ(fixture.wave->pending_alu_causes(), 0u);
+            EXPECT_TRUE(fixture.recorder->writes.empty());
+          }
+}
+
 TEST(ArithBridgeTest, RcpIflagAccumulatesArchitectureStatusAfterAliasedInputs) {
   for (bool rdna3 : {false, true})
     for (uint32_t lanes : {32u, 64u})
@@ -5817,6 +6493,117 @@ TEST(ArithBridgeTest, HalfFixupGuestRoundingNanClampAndPartialWrites) {
                           lane == last ? (expected << 16) | 0xa55a : 0x7c00a55a);
               EXPECT_EQ(fixture.wave->trapsts(), 0x20U);
             }
+}
+
+TEST(ArithBridgeTest, GuestModeInstructionsUpdateOnlyTheirNibbleRegardlessOfExecOrReporting) {
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32U, 64U})
+      for (bool denorm : {false, true})
+        for (bool loose : {false, true})
+          for (bool report : {false, true})
+            for (uint16_t immediate : {0, 1, 5, 10, 15, 0xfff2, 0xffff}) {
+              ArithmeticPolicy policy{};
+              policy.semantics = loose ? ArithmeticSemantics::Loose
+                                       : ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+
+              if (report && !loose)
+                policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+              BridgeFixture fixture(rdna3, lanes, policy);
+              constexpr uint32_t initial = 0x1234abcfU;
+              fixture.wave->set_mode_raw(initial);
+              fixture.wave->set_exec(0);
+              fixture.wave->write_scc(1);
+              const auto words =
+                  rdna3
+                      ? rdna3::build_sopp(denorm ? rdna3::kSDenormModeSopp : rdna3::kSRoundModeSopp,
+                                          {.simm16 = immediate})
+                      : rdna4::build_sopp(denorm ? rdna4::kSDenormModeSopp : rdna4::kSRoundModeSopp,
+                                          {.simm16 = immediate});
+              auto instruction = fixture.decoder->decode_window(words);
+              ASSERT_TRUE(instruction.succeeded());
+              ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                              .succeeded());
+              const unsigned shift = denorm ? 4 : 0;
+              EXPECT_EQ(fixture.wave->mode_raw(),
+                        (initial & ~(15U << shift)) | ((immediate & 15U) << shift));
+              EXPECT_EQ(fixture.wave->exec(), 0U);
+              EXPECT_EQ(fixture.wave->read_scc(), 1U);
+            }
+}
+
+TEST(ArithBridgeTest, GuestDenormInstructionControlsFollowingArithmetic) {
+  for (bool rdna3 : {false, true})
+    for (bool preserve : {false, true}) {
+      BridgeFixture fixture(rdna3);
+      fixture.wave->set_mode_raw(0);
+      fixture.wave->set_exec(0);
+      const auto mode_words =
+          rdna3
+              ? rdna3::build_sopp(rdna3::kSDenormModeSopp, {.simm16 = uint16_t(preserve ? 15 : 0)})
+              : rdna4::build_sopp(rdna4::kSDenormModeSopp, {.simm16 = uint16_t(preserve ? 15 : 0)});
+      auto mode = fixture.decoder->decode_window(mode_words);
+      ASSERT_TRUE(mode.succeeded());
+      ASSERT_TRUE(fixture.cu->execute_instruction(mode.value().get(), *fixture.wave).succeeded());
+      fixture.wave->set_exec(1);
+      fixture.cu->write_vgpr(fixture.base(), 0, 1U);
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x3f800000U);
+      const auto multiply_words =
+          rdna3 ? rdna3::build_vop3(rdna3::kVMulF32Vop3, {.vdst = 2, .src0 = 256, .src1 = 257})
+                : rdna4::build_vop3(rdna4::kVMulF32Vop3, {.vdst = 2, .src0 = 256, .src1 = 257});
+      auto multiply = fixture.decoder->decode_window(multiply_words);
+      ASSERT_TRUE(multiply.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(multiply.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), preserve ? 1U : 0U);
+    }
+}
+
+TEST(ArithBridgeTest, RelativeScalarMovesKeepResolvedSelectorsAndIgnoreExec) {
+  for (bool rdna3 : {false, true})
+    for (unsigned operation = 0; operation < 5; ++operation)
+      for (uint32_t m0 : {0U, 3U, 0x0403U, 0x00040003U})
+        for (bool alias : {false, true}) {
+          const bool wide = operation == 1 || operation == 3;
+          const unsigned width = wide ? 2 : 1;
+          const unsigned source_base = 4, destination_base = alias ? 4 : 24;
+          // Upstream MOVREL uses word offsets (B64 clears bit 0), ten-bit
+          // split offsets, SGPR0 for missing sources and no write for missing destinations.
+          const unsigned source_offset = operation == 4 ? m0 & 1023 : wide ? m0 & ~1U : m0;
+          const unsigned destination_offset = operation == 4 ? (m0 >> 16) & 1023 : source_offset;
+          const unsigned indexed_source =
+              source_base + (operation < 2 || operation == 4 ? source_offset : 0);
+          const unsigned source = indexed_source + width <= 104 ? indexed_source : 0;
+          const unsigned destination = destination_base + (operation >= 2 ? destination_offset : 0);
+          const bool write = destination + width <= 104;
+          ArithmeticPolicy policy{};
+          policy.semantics =
+              alias ? ArithmeticSemantics::Loose : ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+
+          BridgeFixture fixture(rdna3, 32, policy);
+          fixture.wave->set_exec(0);
+          fixture.wave->set_m0(m0);
+          fixture.wave->write_scc(1);
+          const uint32_t base = fixture.wave->sgpr_alloc().base;
+          for (unsigned reg = 0; reg < 64; ++reg)
+            fixture.cu->write_sgpr(base + reg, 0xabc00000U + reg);
+          const auto words = rdna3 ? rdna3::build_sop1(rdna3::kSMovrelsB32Sop1 + operation,
+                                                       {.ssrc0 = uint8_t(source_base),
+                                                        .sdst = uint8_t(destination_base)})
+                                   : rdna4::build_sop1(rdna4::kSMovrelsB32Sop1 + operation,
+                                                       {.ssrc0 = uint8_t(source_base),
+                                                        .sdst = uint8_t(destination_base)});
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          for (unsigned reg = 0; reg < 64; ++reg)
+            EXPECT_EQ(fixture.cu->read_sgpr(base + reg),
+                      0xabc00000U + (write && reg >= destination && reg < destination + width
+                                         ? source + reg - destination
+                                         : reg));
+          EXPECT_EQ(fixture.wave->exec(), 0U);
+          EXPECT_EQ(fixture.wave->read_scc(), 1U);
+        }
 }
 
 TEST(ArithBridgeTest, RelativeVectorMovesAndSwapsKeepAddressingMasksAndAliases) {
@@ -6342,6 +7129,177 @@ TEST(ArithBridgeTest, Permlane64ReadsOppositeHalfEvenWhenInactive) {
                     lanes == 64 && (lane == 0 || lane == 2) ? 0xabc00000U + (lane ^ 32)
                     : alias                                 ? 0xabc00000U + lane
                                                             : 0x3c003c00U);
+      }
+}
+
+TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinations) {
+  const uint16_t opcodes[2][2][12] = {
+      {{rdna4::kSAndSaveExecB32Sop1, rdna4::kSOrSaveExecB32Sop1, rdna4::kSXorSaveExecB32Sop1,
+        rdna4::kSNandSaveExecB32Sop1, rdna4::kSNorSaveExecB32Sop1, rdna4::kSXnorSaveExecB32Sop1,
+        rdna4::kSAndNot0SaveExecB32Sop1, rdna4::kSOrNot0SaveExecB32Sop1,
+        rdna4::kSAndNot1SaveExecB32Sop1, rdna4::kSOrNot1SaveExecB32Sop1,
+        rdna4::kSAndNot0WrExecB32Sop1, rdna4::kSAndNot1WrExecB32Sop1},
+       {rdna4::kSAndSaveExecB64Sop1, rdna4::kSOrSaveExecB64Sop1, rdna4::kSXorSaveExecB64Sop1,
+        rdna4::kSNandSaveExecB64Sop1, rdna4::kSNorSaveExecB64Sop1, rdna4::kSXnorSaveExecB64Sop1,
+        rdna4::kSAndNot0SaveExecB64Sop1, rdna4::kSOrNot0SaveExecB64Sop1,
+        rdna4::kSAndNot1SaveExecB64Sop1, rdna4::kSOrNot1SaveExecB64Sop1,
+        rdna4::kSAndNot0WrExecB64Sop1, rdna4::kSAndNot1WrExecB64Sop1}},
+      {{rdna3::kSAndSaveExecB32Sop1, rdna3::kSOrSaveExecB32Sop1, rdna3::kSXorSaveExecB32Sop1,
+        rdna3::kSNandSaveExecB32Sop1, rdna3::kSNorSaveExecB32Sop1, rdna3::kSXnorSaveExecB32Sop1,
+        rdna3::kSAndNot0SaveExecB32Sop1, rdna3::kSOrNot0SaveExecB32Sop1,
+        rdna3::kSAndNot1SaveExecB32Sop1, rdna3::kSOrNot1SaveExecB32Sop1,
+        rdna3::kSAndNot0WrExecB32Sop1, rdna3::kSAndNot1WrExecB32Sop1},
+       {rdna3::kSAndSaveExecB64Sop1, rdna3::kSOrSaveExecB64Sop1, rdna3::kSXorSaveExecB64Sop1,
+        rdna3::kSNandSaveExecB64Sop1, rdna3::kSNorSaveExecB64Sop1, rdna3::kSXnorSaveExecB64Sop1,
+        rdna3::kSAndNot0SaveExecB64Sop1, rdna3::kSOrNot0SaveExecB64Sop1,
+        rdna3::kSAndNot1SaveExecB64Sop1, rdna3::kSOrNot1SaveExecB64Sop1,
+        rdna3::kSAndNot0WrExecB64Sop1, rdna3::kSAndNot1WrExecB64Sop1}}};
+  for (bool rdna3 : {false, true})
+    for (uint32_t lanes : {32U, 64U})
+      for (bool wide : {false, true})
+        for (bool loose : {false, true})
+          for (unsigned op = 0; op < 12; ++op)
+            for (uint8_t destination : {uint8_t(0), uint8_t(2), uint8_t(126), uint8_t(127)}) {
+              if (wide && destination == 127)
+                continue;
+              SCOPED_TRACE(::testing::Message() << "rdna3=" << rdna3 << " lanes=" << lanes
+                                                << " wide=" << wide << " loose=" << loose << " op="
+                                                << op << " destination=" << unsigned(destination));
+              ArithmeticPolicy policy{};
+              policy.semantics = loose ? ArithmeticSemantics::Loose
+                                       : ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+              BridgeFixture fixture(rdna3, lanes, policy);
+              const uint32_t base = fixture.wave->sgpr_alloc().base;
+              // Alternate zero, high-only and mixed EXEC. Wave32 retains raw high
+              // state; B64 operations still calculate SCC from the whole result.
+              const uint64_t old_exec = op % 3 == 0   ? 0
+                                        : op % 3 == 1 ? 0xa55a123400000000ULL
+                                                      : 0x876543210f0ff0f0ULL;
+              const uint64_t input = 0x02468ace55aa0ff0ULL;
+              fixture.wave->set_exec_raw(old_exec);
+              fixture.wave->write_scc(1);
+              fixture.cu->write_sgpr(base, uint32_t(input));
+              fixture.cu->write_sgpr(base + 1, uint32_t(input >> 32));
+              const auto words =
+                  rdna3
+                      ? rdna3::build_sop1(opcodes[1][wide][op], {.ssrc0 = 0, .sdst = destination})
+                      : rdna4::build_sop1(opcodes[0][wide][op], {.ssrc0 = 0, .sdst = destination});
+              auto instruction = fixture.decoder->decode_window(words);
+              // The SREG destination class excludes EXEC; preserve that decoder
+              // rejection instead of manufacturing an unsupported register alias.
+              if (destination >= 126) {
+                EXPECT_FALSE(instruction.succeeded());
+                continue;
+              }
+              ASSERT_TRUE(instruction.succeeded());
+              fixture.recorder->scalar_reads.clear();
+              fixture.recorder->scalar_writes.clear();
+              ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                              .succeeded());
+              uint64_t expected = 0;
+              switch (op) {
+              case 0:
+                expected = old_exec & input;
+                break;
+              case 1:
+                expected = old_exec | input;
+                break;
+              case 2:
+                expected = old_exec ^ input;
+                break;
+              case 3:
+                expected = ~(old_exec & input);
+                break;
+              case 4:
+                expected = ~(old_exec | input);
+                break;
+              case 5:
+                expected = ~(old_exec ^ input);
+                break;
+              case 6:
+              case 10:
+                expected = old_exec & ~input;
+                break;
+              case 7:
+                expected = old_exec | ~input;
+                break;
+              case 8:
+              case 11:
+                expected = input & ~old_exec;
+                break;
+              case 9:
+                expected = input | ~old_exec;
+                break;
+              }
+              if (!wide)
+                expected = uint32_t(expected);
+              const uint64_t saved = op >= 10 ? expected : wide ? old_exec : uint32_t(old_exec);
+              uint64_t expected_raw = expected;
+              if (!wide && lanes == 32) {
+                const uint64_t high = old_exec & 0xffffffff00000000ULL;
+                expected_raw |= high;
+              }
+              EXPECT_EQ(fixture.wave->exec_raw(), expected_raw);
+              EXPECT_EQ(fixture.wave->read_scc(), expected != 0);
+              std::vector<uint32_t> reads{base};
+              if (wide)
+                reads.push_back(base + 1);
+              EXPECT_EQ(fixture.recorder->scalar_reads, reads);
+              ASSERT_EQ(fixture.recorder->scalar_writes.size(), 1U);
+              if (destination < 126) {
+                EXPECT_EQ(fixture.cu->read_sgpr(base + destination), uint32_t(saved));
+                if (wide) {
+                  EXPECT_EQ(fixture.cu->read_sgpr(base + destination + 1), uint32_t(saved >> 32));
+                }
+              }
+            }
+}
+
+TEST(ArithBridgeTest, ScalarMovesIgnoreExecAndUntakenMovesHaveNoRegisterAccesses) {
+  for (bool rdna3 : {false, true})
+    for (unsigned kind = 0; kind < 6; ++kind)
+      for (bool scc : {false, true}) {
+        BridgeFixture fixture(rdna3);
+        const bool conditional = kind & 1;
+        const bool wide = kind == 2 || kind == 3;
+        const bool immediate = kind >= 4;
+        const uint32_t base = fixture.wave->sgpr_alloc().base;
+        fixture.wave->set_exec(0);
+        fixture.wave->write_scc(scc);
+        fixture.cu->write_sgpr(base, 0x12345678);
+        fixture.cu->write_sgpr(base + 1, 0x87654321);
+        fixture.cu->write_sgpr(base + 2, 0xabcdef01);
+        fixture.cu->write_sgpr(base + 3, 0x98765432);
+        const uint16_t opcodes[2][6] = {
+            {rdna4::kSMovB32Sop1, rdna4::kSCmovB32Sop1, rdna4::kSMovB64Sop1, rdna4::kSCmovB64Sop1,
+             rdna4::kSMovkI32Sopk, rdna4::kSCmovkI32Sopk},
+            {rdna3::kSMovB32Sop1, rdna3::kSCmovB32Sop1, rdna3::kSMovB64Sop1, rdna3::kSCmovB64Sop1,
+             rdna3::kSMovkI32Sopk, rdna3::kSCmovkI32Sopk}};
+        const uint16_t opcode = opcodes[rdna3][kind];
+        const auto words = immediate
+                               ? (rdna3 ? rdna3::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
+                                        : rdna4::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0}))
+                               : (rdna3 ? rdna3::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0})
+                                        : rdna4::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}));
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        fixture.recorder->scalar_reads.clear();
+        fixture.recorder->scalar_writes.clear();
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        const bool writes = !conditional || scc;
+        std::vector<uint32_t> reads;
+        if (writes && !immediate) {
+          reads.push_back(base + 2);
+          if (wide)
+            reads.push_back(base + 3);
+        }
+        EXPECT_EQ(fixture.recorder->scalar_reads, reads);
+        EXPECT_EQ(fixture.recorder->scalar_writes.size(), writes ? 1U : 0U);
+        EXPECT_EQ(fixture.cu->read_sgpr(base),
+                  writes ? (immediate ? 0xffff8123U : 0xabcdef01U) : 0x12345678U);
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 1), writes && wide ? 0x98765432U : 0x87654321U);
+        EXPECT_EQ(fixture.wave->read_scc(), scc);
       }
 }
 

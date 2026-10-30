@@ -20,6 +20,36 @@
 
 namespace rocjitsu::amdgpu::arith {
 
+using PseudoScalarFunction = int (*)(uint64_t, uint64_t, uint32_t *, uint32_t, uint32_t *);
+
+// Execute once regardless of EXEC, reading the source before committing the
+// complete scalar destination. Rejected calls preserve destination and state.
+inline void execute_pseudo_scalar(Wavefront &wave, PseudoScalarFunction function, uint64_t flags,
+                                  uint64_t modifiers, const Operand &destination,
+                                  const Operand &source, bool half, bool report_fp_status) {
+  if (half) {
+    const unsigned denorm = wave.fp_denorm_mode_f16_f64();
+    if (!(denorm & 1))
+      flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+    if (!(denorm & 2))
+      flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+    if (wave.fp16_ovfl())
+      flags |= RJ_ARITH_FP16_OVFL;
+  }
+  RegisterAccess registers(wave);
+  const uint32_t input = registers.read_scalar(source);
+  uint32_t result = 0, causes = 0;
+  if (function(flags, modifiers, &result, input, &causes) != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar(destination, result);
+  if (report_fp_status) {
+    wave.set_trapsts(wave.trapsts() | causes);
+    wave.raise_alu_causes(causes);
+  }
+}
+
 // Translate guest denormal and IEEE controls without changing host FP controls.
 inline uint64_t float32_flags(const Wavefront &wave, uint64_t flags) {
   const uint32_t denorm = wave.fp_denorm_mode_f32();
