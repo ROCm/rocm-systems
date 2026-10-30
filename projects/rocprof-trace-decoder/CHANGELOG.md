@@ -5,6 +5,7 @@
 ### Added
 
 - Added new WMMA instruction encodings (8- and 16-cycle variants), decoded as VALU instructions.
+- Added `dispatch_id` to dispatch and occupancy records, and `ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END` events marking when all waves of a dispatch ended (RDNA). IDs are unique only within an ME/pipe.
 
 ## Changelog for version 0.2.2 | ROCm 10.2
 
