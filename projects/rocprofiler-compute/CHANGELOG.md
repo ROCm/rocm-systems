@@ -54,6 +54,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
+* The analysis database stores metric values unrounded and in base units, so `--decimal` and `--time-unit` no longer change what it holds.
+  * Metrics whose configured unit is `GB/s` or `Gbps` are stored in `Bytes/s`, `GFLOP/s` or `GFLOPs` in `FLOP/s`, `GIOP/s` or `GIOPs` in `IOP/s`, and `KB per Wave` in `Bytes per Wave`. Their stored values are 1e9 times the values in the terminal output (1024 times for `KB per Wave`), and the `unit` column of `compute_metric_definition` names the stored unit. Percent of Peak values are not scaled.
+  * Metrics that used `ROUND` in their configs, such as Wavefront Occupancy, VGPRs, and the Memory Chart counts and percentages, are stored with every digit.
+  * `compute_kernel_roofline_data` keeps its GFLOP/s and FLOPs/Byte units.
+  * The terminal output and the configs keep their units and rounding.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.

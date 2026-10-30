@@ -757,6 +757,7 @@ format is ``stdout``.
 * ``db`` format:
    * Generate a file named ``rocprof_compute_<uuid>.db`` in the current working directory.
    * This is a SQLite database file containing all the data in the analysis report structured according to :ref:`analysis database schema <analysis-database>`.
+   * Metric values are stored unrounded and in base units: time in ns, bandwidth in Bytes/s, compute rates in FLOP/s and IOP/s, and intensity in FLOPs/Byte. The configured units GB/s, GFLOP/s, GIOP/s and KB per Wave are stored as Bytes/s, FLOP/s, IOP/s and Bytes per Wave. The roofline table ``compute_kernel_roofline_data`` keeps GFLOP/s and FLOPs/Byte. ``--decimal`` and ``--time-unit`` change the terminal output only, not the database.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 
