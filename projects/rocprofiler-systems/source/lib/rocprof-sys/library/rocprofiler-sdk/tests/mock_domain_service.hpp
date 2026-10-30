@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <sys/types.h>
+#include <type_traits>
 #include <vector>
 
 namespace rocprofsys::domains::test_support
@@ -934,6 +935,7 @@ struct gmock_externals
     MOCK_METHOD(std::vector<std::shared_ptr<agent_t>>, get_agents_by_type, (int type));
 
     MOCK_METHOD(bool, is_active, ());
+    MOCK_METHOD(bool, is_finalized, ());
     MOCK_METHOD(bool, get_use_timemory, ());
     MOCK_METHOD(void, tracing_push_timemory, (std::string_view name));
     MOCK_METHOD(void, tracing_pop_timemory, (std::string_view name));
@@ -1103,8 +1105,8 @@ struct scratch_memory_sample_data_t
 struct gmock_metadata_registry
 {
     MOCK_METHOD(void, add_string, (std::string_view value));
-    MOCK_METHOD(void, add_thread_info, (const thread_info_data_t& info));
-    MOCK_METHOD(void, add_track, (const track_data_t& info));
+    MOCK_METHOD(void, ensure_thread, (const thread_info_data_t& info));
+    MOCK_METHOD(void, ensure_track, (const track_data_t& info));
     MOCK_METHOD(void, add_pmc_info, (const pmc_info_data_t& info));
     MOCK_METHOD(void, add_queue, (std::uint64_t queue_handle));
     MOCK_METHOD(void, add_stream, (std::uint64_t stream_handle));
@@ -1144,10 +1146,10 @@ struct gmock_buffer_storage
 inline std::unique_ptr<::testing::StrictMock<gmock_buffer_storage>> g_buffer_storage_mock;
 
 // Externals mirrors the real ExternalDeps policy surface used by every on_kfd_* and
-// on_kfd_*_configure, plus domain_service<>/registry<>. add_string/add_thread_info/
-// add_track/add_pmc_info/buffer_storage_store reach production code exclusively
+// on_kfd_*_configure, plus domain_service<>/registry<>. add_string/ensure_thread/
+// ensure_track/add_pmc_info/buffer_storage_store reach production code exclusively
 // through get_metadata_registry()/get_buffer_storage() below; on_records-only calls
-// (add_thread_info/add_track/kfd_sample_t storage) stay plain no-ops there -- only
+// (ensure_thread/ensure_track/kfd_sample_t storage) stay plain no-ops there -- only
 // add_string/get_agents_by_type/add_pmc_info, which on_configure() exercises, are
 // mocked. Category name/description constants for every kfd_* domain are carried
 // here since policies::domain_service::externals requires the full set regardless of
@@ -1398,6 +1400,8 @@ struct externals
 
     static bool is_active() { return true; }
 
+    static bool is_finalized() { return true; }
+
     template <typename CategoryT>
     static void tracing_push_timemory(CategoryT, std::string_view /*name*/)
     {}
@@ -1566,18 +1570,25 @@ struct externals
                 g_metadata_registry_mock->add_string(value);
             }
         }
-        void add_thread_info(const thread_info_t& info)
+        // The mocked ensure_* receive the built value so expectations compare it.
+        template <typename MakeFn>
+            requires std::is_invocable_r_v<thread_info_t, MakeFn>
+        void ensure_thread(std::uint64_t, MakeFn&& make)
         {
             if(g_metadata_registry_mock)
             {
-                g_metadata_registry_mock->add_thread_info(info);
+                g_metadata_registry_mock->ensure_thread(make());
             }
         }
-        void add_track(const track_t& info)
+        void ensure_track(std::string_view name, std::optional<std::uint64_t> thread_id,
+                          std::string_view extdata = "{}")
         {
             if(g_metadata_registry_mock)
             {
-                g_metadata_registry_mock->add_track(info);
+                g_metadata_registry_mock->ensure_track(
+                    track_t{ .track_name = std::string{ name },
+                             .thread_id  = thread_id,
+                             .extdata    = std::string{ extdata } });
             }
         }
         void add_pmc_info(const pmc_info_t& info)
@@ -1778,6 +1789,7 @@ struct mock_sdk_with_tracing : mock_sdk
 struct externals_with_tracing : externals
 {
     static bool is_active() { return g_externals_mock->is_active(); }
+    static bool is_finalized() { return g_externals_mock->is_finalized(); }
     static bool get_use_timemory() { return g_externals_mock->get_use_timemory(); }
 
     template <typename CategoryT>
@@ -1931,7 +1943,7 @@ expect_domain_uses_category(const Domain& domain, std::string_view expected_cate
     EXPECT_CALL(*g_metadata_registry_mock, add_string(expected_category_name));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_))
         .WillOnce(Return(std::uint64_t{ 0 }));
     EXPECT_CALL(

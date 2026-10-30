@@ -115,15 +115,6 @@ ncclResult_t bootstrapRecv(void* bs, int peer, int tag, void* data, int size) {
 }
 
 // ---------------------------------------------------------------------------
-// Arg checks / comm readiness.
-// ---------------------------------------------------------------------------
-ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSuccess; }
-ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
-// Seam: NCCLCHECK'd on entry to ncclCommWindowRegister_impl, so the
-// not-ready rejection is only reachable by driving it.
-
-
-// ---------------------------------------------------------------------------
 // Public registration API.
 // ---------------------------------------------------------------------------
 // Seams: ncclDevrWindowRegisterInGroup takes a local registration up front and
@@ -305,9 +296,22 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm*, ncclGinType_t* ginType) {
   if (ginType) *ginType = NCCL_GIN_TYPE_NONE;
   return ncclSuccess;
 }
-ncclResult_t ncclGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*) {
+// Seam: ncclDevrCommCreateInternal latches GIN only after this succeeds.
+static ncclResult_t DefaultGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce = DefaultGinConnectOnce;
+
+ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnectOnce(comm); }
+// Seam: reached only for a devComm that requests a GIN connection.
+static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
+                                           struct ncclDevComm*, uint32_t) {
   return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
+    g_devrGinDevCommSetup = DefaultGinDevCommSetup;
+
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+  return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
 void ncclGinDevCommClearFields(struct ncclDevComm*) {}
@@ -525,13 +529,6 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
-// Reached only once GIN is activated, which the GIN gate rejects for every
-// comm this binary builds.
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                 uint32_t) {
-  return ncclSuccess;
-}
-
 // The enqueue-rearch job path: collective_stubs.cc pins
 // ncclParamEnqueueRearchEnable to 0, so every call site takes the in-group task
 // branch instead and nothing here enqueues a job.
@@ -563,6 +560,8 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapAllGather                      = DefaultAllGather;
   g_devrBootstrapSend                           = DefaultBootstrapSend;
   g_devrBootstrapRecv                           = DefaultBootstrapRecv;
+  g_devrGinConnectOnce                          = DefaultGinConnectOnce;
+  g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;

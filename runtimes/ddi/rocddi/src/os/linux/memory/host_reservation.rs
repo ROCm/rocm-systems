@@ -5,9 +5,11 @@
 
 #![allow(unsafe_code)]
 
+use super::reservation::replace_mapping;
 use super::{HostAllocation, Reservation, page_size};
 use crate::os::linux::process_identity::check_process;
-use libc::{MAP_ANONYMOUS, MAP_FIXED, MAP_PRIVATE, MAP_SHARED, PROT_NONE, PROT_READ, PROT_WRITE};
+use libc::{MAP_ANONYMOUS, MAP_PRIVATE, MAP_SHARED, PROT_NONE, PROT_READ, PROT_WRITE};
+#[cfg(test)]
 use std::ffi::c_void;
 use std::io;
 use std::os::fd::AsRawFd;
@@ -82,40 +84,29 @@ impl HostReservation {
         let offset = i64::try_from(source_offset)
             .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
         let protection = PROT_READ | if writable { PROT_WRITE } else { 0 };
-        // SAFETY: target is a checked subrange of this exclusively borrowed
-        // reservation. The file remains live for the synchronous native call.
-        let mapped = unsafe {
-            libc::mmap(
-                address as *mut c_void,
-                length,
-                protection,
-                MAP_SHARED | MAP_FIXED,
-                file.as_raw_fd(),
-                offset,
-            )
-        };
-        if mapped == libc::MAP_FAILED {
-            return Err(io::Error::last_os_error());
-        }
+        replace_mapping(
+            &self.range,
+            address,
+            length,
+            protection,
+            MAP_SHARED,
+            file.as_raw_fd(),
+            offset,
+        )?;
         Ok(())
     }
 
     pub(crate) fn clear(&mut self, offset: u64, length: u64) -> io::Result<()> {
         let (address, length) = self.target(offset, length)?;
-        // SAFETY: This restores an inaccessible mapping inside our owned range.
-        let mapped = unsafe {
-            libc::mmap(
-                address as *mut c_void,
-                length,
-                PROT_NONE,
-                MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
-                -1,
-                0,
-            )
-        };
-        if mapped == libc::MAP_FAILED {
-            return Err(io::Error::last_os_error());
-        }
+        replace_mapping(
+            &self.range,
+            address,
+            length,
+            PROT_NONE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1,
+            0,
+        )?;
         Ok(())
     }
 
