@@ -3,9 +3,35 @@
 
 """Perfmon bucket file types, independent of the SoC allocator."""
 
-from typing import Dict, List
+from typing import Dict, List, Sequence, Tuple
 
 from utils.utils_counter_defs import counter_to_block, pmc_slot_cost
+
+# Families that share one block budget but must not share a pass.
+# gfx1250 charges SP_VALU_* and SQ_VMEM_* to SQ. SP FLOP counters return
+# zero when those families share a pass, and free SQ slots do not prevent it.
+_INCOMPATIBLE_PASS_PREFIXES: Tuple[Tuple[str, str], ...] = (("SP_VALU_", "SQ_VMEM_"),)
+
+
+def _counter_base_name(counter: str) -> str:
+    """Counter name without a channel suffix."""
+    return counter.split("[", 1)[0]
+
+
+def _has_family(names: Sequence[str], prefix: str) -> bool:
+    return any(name.startswith(prefix) for name in names)
+
+
+def _cannot_share_pass(existing: Sequence[str], incoming: str) -> bool:
+    """Return whether incoming must not join existing in one pass."""
+    bases = [_counter_base_name(name) for name in existing]
+    incoming_base = _counter_base_name(incoming)
+    for left, right in _INCOMPATIBLE_PASS_PREFIXES:
+        has_left = incoming_base.startswith(left) or _has_family(bases, left)
+        has_right = incoming_base.startswith(right) or _has_family(bases, right)
+        if has_left and has_right:
+            return True
+    return False
 
 
 class LimitedSet:
@@ -49,6 +75,13 @@ class CounterFile:
 
     def add(self, counter: str) -> bool:
         block = counter_to_block(counter)
+        present = [
+            name for limited in self.blocks.values() for name in limited.elements
+        ]
+        if counter in present:
+            return True
+        if _cannot_share_pass(present, counter):
+            return False
         cost = pmc_slot_cost(counter, present=self.blocks[block].elements)
         return self.blocks[block].add(counter, cost=cost)
 

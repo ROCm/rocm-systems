@@ -10,7 +10,7 @@ import re
 
 from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
-from utils.utils_counter_defs import SUPPORTED_DENOM
+from utils.utils_counter_defs import SUPPORTED_DENOM, extract_counters_and_variables
 
 
 class InvalidExpressionError(ValueError):
@@ -18,6 +18,8 @@ class InvalidExpressionError(ValueError):
 
 
 # ast.Attribute is deliberately omitted — it enables dunder-chain escapes.
+# visit_Attribute rewrites only _collect.<piece>; every other attribute
+# still raises InvalidExpressionError.
 ALLOWED_AST_NODES: frozenset[type] = frozenset({
     ast.Module,
     ast.Expr,
@@ -66,6 +68,213 @@ ALLOWED_AST_NODES: frozenset[type] = frozenset({
     ast.Or,
 })
 
+_WEIGHTED_AVG_CALL_RE = re.compile(
+    r"^WEIGHTED_AVG\s*\(\s*([^)]+)\s*\)$",
+    re.IGNORECASE,
+)
+_COLLECT_SUM_CALL_RE = re.compile(
+    r"^COLLECT_SUM\s*\(\s*([^)]+)\s*\)$",
+    re.IGNORECASE,
+)
+
+
+# A composite may be wrapped once so the finished parent value is rounded or
+# floored at zero after its pieces combine, e.g. ROUND(COLLECT_SUM(a, b), 0).
+_COMPOSITE_FINISH_RE = re.compile(
+    r"^(?P<func>ROUND|NOISE_CLAMP)\s*\(\s*"
+    r"(?P<inner>(?:WEIGHTED_AVG|COLLECT_SUM|COLLECT_RATIO)\s*\(.+\))"
+    r"\s*,\s*(?P<arg>\d+(?:\.\d+)?)\s*\)$",
+    re.IGNORECASE,
+)
+
+
+def split_composite_finish(formula: str) -> tuple[str, tuple[str, float] | None]:
+    """Split ``ROUND(<composite>, n)`` or ``NOISE_CLAMP(<composite>, ref)``.
+
+    Returns the inner composite text and ``(function, argument)``, or the
+    stripped formula and None when there is no finishing wrapper.
+    """
+    text = formula.strip()
+    match = _COMPOSITE_FINISH_RE.match(text)
+    if match is None:
+        return text, None
+    finish = (match.group("func").upper(), float(match.group("arg")))
+    return match.group("inner").strip(), finish
+
+
+def parse_weighted_avg_submetrics(formula: str) -> list[str] | None:
+    """Return submetric names from WEIGHTED_AVG(a, b, ...) or None if not a match."""
+    if not formula or not isinstance(formula, str):
+        return None
+    match = _WEIGHTED_AVG_CALL_RE.match(split_composite_finish(formula)[0])
+    if not match:
+        return None
+    return [part.strip() for part in match.group(1).split(",") if part.strip()]
+
+
+def parse_collect_sum_submetrics(formula: str) -> list[str] | None:
+    """Return collectable refs from COLLECT_SUM(a, b, ...) or None."""
+    if not formula or not isinstance(formula, str):
+        return None
+    match = _COLLECT_SUM_CALL_RE.match(split_composite_finish(formula)[0])
+    if not match:
+        return None
+    return [part.strip() for part in match.group(1).split(",") if part.strip()]
+
+
+_COLLECT_RATIO_CALL_RE = re.compile(
+    r"^COLLECT_RATIO\s*\(\s*(.+)\s*\)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+_REF_SIGN_RE = re.compile(r"\s*([+-])\s*")
+
+
+def _parse_ref_parts(part: str) -> list[str]:
+    """Split a COLLECT_RATIO sum on + and binary minus.
+
+    A leading minus stays on the following name so ``a - b`` is two refs.
+    """
+    refs: list[str] = []
+    sign = "+"
+    for piece in _REF_SIGN_RE.split(part.strip()):
+        if piece in {"+", "-"}:
+            sign = piece
+            continue
+        token = piece.strip()
+        if not token:
+            continue
+        refs.append(token if sign == "+" else f"-{token}")
+        sign = "+"
+    return refs
+
+
+def parse_collect_ratio_parts(formula: str) -> tuple[list[str], list[str]] | None:
+    """Parse COLLECT_RATIO(n1 + n2, d1 + d2) into (numerator_refs, denominator_refs)."""
+    if not formula or not isinstance(formula, str):
+        return None
+    match = _COLLECT_RATIO_CALL_RE.match(split_composite_finish(formula)[0])
+    if not match:
+        return None
+    inner = match.group(1).strip()
+    # Split on top-level comma (only one separator between num and den groups).
+    depth = 0
+    split_at = -1
+    for i, ch in enumerate(inner):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            split_at = i
+            break
+    if split_at < 0:
+        return None
+    num_part = inner[:split_at].strip()
+    den_part = inner[split_at + 1 :].strip()
+    if not num_part or not den_part:
+        return None
+
+    nums, dens = _parse_ref_parts(num_part), _parse_ref_parts(den_part)
+    if not nums or not dens:
+        return None
+    return nums, dens
+
+
+# The cdna built-ins name every PMC that any series' built-ins name, so an
+# extent checked without an arch is not let through by a missing built-in.
+_EXTENT_CHECK_GPU_SERIES = "MI300"
+
+
+def reject_counter_bearing_composite_extents(
+    metric_name: str,
+    body: dict,
+    gpu_series: str = _EXTENT_CHECK_GPU_SERIES,
+) -> None:
+    """Reject min/max/peak formulas that put PMCs back on a composite parent.
+
+    A YAML null min, max, or peak is allowed. A counter-bearing extent is a
+    config error: do not strip it at runtime. Counters are read the way the
+    perfmon allocator reads them, including the PMCs behind a built-in.
+    """
+    if not isinstance(body, dict):
+        return
+    formula = body.get("avg")
+    if not isinstance(formula, str):
+        formula = body.get("value")
+    if not isinstance(formula, str) or not is_composite_avg_formula(formula):
+        return
+    for extent_key in ("min", "max", "peak"):
+        extent = body.get(extent_key)
+        if not isinstance(extent, str):
+            continue
+        extent_text = extent.strip()
+        if not extent_text or extent_text == "None":
+            continue
+        counters, _builtin_vars = extract_counters_and_variables(
+            extent_text, gpu_series, include_supported_denom=False
+        )
+        if counters:
+            raise ValueError(
+                f"Composite metric {metric_name!r} {extent_key} references "
+                f"counters {sorted(counters)}; min, max, and peak on COLLECT_SUM, "
+                "COLLECT_RATIO, and WEIGHTED_AVG must not reintroduce a PMC set"
+            )
+
+
+def composite_part_refs(formula: str) -> list[str]:
+    """Names of the metrics a composite formula combines, without their sign.
+
+    Returns an empty list when formula is not a WEIGHTED_AVG, COLLECT_SUM, or
+    COLLECT_RATIO call.
+    """
+    refs = parse_weighted_avg_submetrics(formula) or parse_collect_sum_submetrics(
+        formula
+    )
+    if refs is None:
+        ratio = parse_collect_ratio_parts(formula)
+        refs = ratio[0] + ratio[1] if ratio is not None else []
+    return [ref.lstrip("-").strip() for ref in refs]
+
+
+def is_composite_avg_formula(formula: str) -> bool:
+    if not formula or not isinstance(formula, str):
+        return False
+    text = formula.strip()
+    return (
+        parse_weighted_avg_submetrics(text) is not None
+        or parse_collect_sum_submetrics(text) is not None
+        or parse_collect_ratio_parts(text) is not None
+    )
+
+
+def _is_plain_collect_piece(piece: str) -> bool:
+    """True for a normal identifier: not private, and not a dunder."""
+    if not piece.isidentifier():
+        return False
+    is_dunder = piece.startswith("__") and piece.endswith("__")
+    return not piece.startswith("_") and not is_dunder
+
+
+def _collect_piece_attribute(node: ast.Attribute) -> str | None:
+    """Return the piece id for Attribute(Name('_collect'), attr=piece)."""
+    if not isinstance(node.value, ast.Name) or node.value.id != "_collect":
+        return None
+    if not _is_plain_collect_piece(node.attr):
+        return None
+    return node.attr
+
+
+def _collect_piece_call(piece: str) -> ast.Call:
+    """One call the evaluator resolves to that collectable's own value."""
+    return ast.Call(
+        func=ast.Name(id="collect_piece", ctx=ast.Load()),
+        args=[ast.Constant(value=f"_collect.{piece}")],
+        keywords=[],
+    )
+
+
 SUPPORTED_CALL: dict[str, str] = {
     # If the below has a single arg, like(expr), it is an aggr,
     # in which case it turns into a pandas function.
@@ -99,6 +308,16 @@ class CodeTransformer(ast.NodeTransformer):
                 f"Disallowed expression element: {type(node).__name__}"
             )
         return super().generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+        # Not whitelisted. Only _collect.<piece> becomes one collect_piece call.
+        # The Name('_collect') child is not visited, so it is not a PMC column.
+        piece = _collect_piece_attribute(node)
+        if piece is None:
+            raise InvalidExpressionError(
+                f"Disallowed expression element: {type(node).__name__}"
+            )
+        return _collect_piece_call(piece)
 
     def visit_Call(self, node: ast.Call) -> ast.Call:
         if isinstance(node.func, ast.Name):
@@ -212,6 +431,8 @@ def build_eval_string(equation: str) -> str:
         return ""
 
     equation_string = str(equation)
+    if is_composite_avg_formula(equation_string):
+        return ""
 
     # build-in variable starts with '$', python can not handle it.
     # replace '$' with 'ammolite__'.

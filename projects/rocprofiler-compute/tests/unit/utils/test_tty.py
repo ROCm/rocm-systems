@@ -25,6 +25,7 @@ from utils.tty import (
     format_table_output,
     has_time_data,
     print_operator_node,
+    process_table_data,
     resolve_hidden_columns,
     show_all,
     show_call_tree,
@@ -1214,3 +1215,22 @@ def test_show_call_tree_prints_file_line_sort_and_kernel_id(capsys):
     assert "nn.Module.Linear.forward simple_torch_code.py:19" in output
     assert "aten::relu simple_torch_code.py" not in output
     assert "(id 4)" in output
+
+
+def test_process_table_data_omits_collectable_rows():
+    """CLI table rows hide ``_collect.*`` and keep a normal metric."""
+    frame = pd.DataFrame({
+        "Metric": ["VALU FLOPs", "_collect.flops"],
+        "Value": ["1.0", "2.0"],
+    })
+    runs = {"run": SimpleNamespace(dfs={201: frame})}
+    args = SimpleNamespace(time_unit=None, cols=None, decimal=2, verbose=0)
+    result = process_table_data(
+        args,
+        runs,
+        {"id": 201},
+        "metric_table",
+        ["Value"],
+        [],
+    )
+    assert list(result["Metric"]) == ["VALU FLOPs"]

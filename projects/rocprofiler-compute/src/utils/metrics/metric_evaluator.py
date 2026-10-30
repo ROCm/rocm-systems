@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import warnings
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -73,6 +74,8 @@ class MetricEvaluator:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
+        # Bound per metric table. Resolves collect_piece("_collect.<piece>").
+        self.collect_piece: Callable[[str], pd.Series] | None = None
 
     def eval_expression(self, expr: str) -> str | float | int:
         """Evaluate a single expression with proper local context."""
@@ -100,6 +103,8 @@ class MetricEvaluator:
                 "to_concat": to_concat,
                 "to_noise_clamp": to_noise_clamp,
             })
+            if self.collect_piece is not None:
+                local_expr_context["collect_piece"] = self.collect_piece
 
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", RuntimeWarning)

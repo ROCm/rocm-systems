@@ -30,6 +30,7 @@ from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLin
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
     _roofline_point_values,
+    _visible_metric_rows,
     db_analysis,
     filter_dispatch_frame,
     report_evaluation_diagnostics,
@@ -41,6 +42,7 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+from utils.metrics.pass_provenance import UNSET_EXPRESSION, PassLayout
 
 ISA_WORKLOAD_NAME = "vector_copy"
 ISA_WORKLOAD_SUB_NAME = "run"
@@ -86,6 +88,8 @@ def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
         _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
         _pmc_df_per_workload={workload_path: pmc_df},
         _arch_configs={"gfx90a": arch_config},
+        _pass_layout_per_workload={},
+        _roofline_ceilings_per_workload={},
         get_args=lambda: SimpleNamespace(),
     )
 
@@ -780,6 +784,85 @@ def test_calc_dataframe_expressions_with_builtin_vars():
     assert pd.isna(result.iloc[1])
 
 
+def test_calc_dataframe_expressions_leaves_an_unbound_metric_unset():
+    """The same-pass unset marker evaluates to None without a failure record."""
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.1"],
+        "value_name": ["avg"],
+        "value": [UNSET_EXPRESSION],
+    })
+
+    with patch(
+        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
+    ), patch(
+        "rocprof_compute_analyze.analysis_db.record_failed_expression"
+    ) as record_failed:
+        result = db_analysis.calc_dataframe_expressions(
+            pd.DataFrame({"Counter1": [1]}),
+            {"gpu_arch": "gfx942"},
+            expression_df,
+        )
+
+    assert pd.isna(result.iloc[0])
+    record_failed.assert_not_called()
+
+
+def test_roofline_points_read_each_metric_from_one_pass():
+    """A roofline point is bound to one pass; an unfilled composite stays unset."""
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TD_BUSY", "GRBM_GUI_ACTIVE"}),
+            "pmc_perf_1": frozenset({"TA_BUSY", "GRBM_GUI_ACTIVE"}),
+        },
+        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+    )
+    pmc_df = pd.DataFrame({
+        "TA_BUSY": [50.0],
+        "TD_BUSY": [30.0],
+        "GRBM_GUI_ACTIVE": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
+    })
+    roofline_df = pd.DataFrame(
+        {
+            "Metric": ["AI L1", "AI L2", "AI LDS"],
+            "Value": [
+                "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['GRBM_GUI_ACTIVE'])",
+                "COLLECT_RATIO(_collect.a, _collect.b)",
+                "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])",
+            ],
+        },
+        index=["4.0.0", "4.0.1", "4.0.2"],
+    )
+    roofline_df.attrs["collect_ratio_specs"] = {
+        "4.0.1": {"numerator": ["_collect.a"], "denominator": ["_collect.b"]},
+    }
+    names = {"l1_cache_data": "AI L1", "l2_cache_data": "AI L2", "lds": "AI LDS"}
+    expressions = dict(zip(roofline_df["Metric"], roofline_df["Value"]))
+
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="MI300",
+    ), patch(
+        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
+    ), patch("utils.metrics.pass_provenance.get_build_in_vars", return_value={}):
+        points = _roofline_point_values(
+            roofline_df,
+            names,
+            expressions,
+            {("4.0.1", "Value"): "N/A"},
+            pmc_df,
+            {"gpu_arch": "gfx942", "num_xcd": 1},
+            layout,
+        )
+
+    # TA_BUSY is on pmc_perf_1, so GRBM_GUI_ACTIVE comes from that pass too.
+    assert points["l1_cache_data"] == pytest.approx(50.0 / 200.0)
+    assert "l2_cache_data" not in points
+    assert pd.isna(points["lds"])
+
+
 def test_calc_dataframe_expressions_empty_returns_assignable_series():
     """An empty expression_df returns an empty Series, not a DataFrame."""
     expression_df = pd.DataFrame(columns=["metric_id", "value_name", "value"])
@@ -851,56 +934,6 @@ def test_calc_dataframe_expressions_same_pass_bind_uses_shadow_denominator():
 
     assert unbound.iloc[0] == 50.0  # cross-pass base GRBM=100
     assert bound.iloc[0] == 25.0  # same-pass GRBM=200
-
-
-def test_roofline_points_read_each_metric_from_one_pass():
-    """Roofline expressions use the selected counter copy, not the base column."""
-    from utils.metrics.pass_provenance import PassLayout
-
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"TD_BUSY", "GRBM_GUI_ACTIVE"}),
-            "pmc_perf_1": frozenset({"TA_BUSY", "GRBM_GUI_ACTIVE"}),
-        },
-        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
-    )
-    pmc_df = pd.DataFrame({
-        "TA_BUSY": [50.0],
-        "TD_BUSY": [30.0],
-        "GRBM_GUI_ACTIVE": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
-    })
-    expressions = {
-        "l1_cache_data": (
-            "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['GRBM_GUI_ACTIVE'])"
-        ),
-        "l2_cache_data": "COLLECT_RATIO(_collect.a, _collect.b)",
-        "lds_cache_data": "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])",
-        "hbm_data": (
-            "to_avg((raw_pmc_df['TA_BUSY'] + raw_pmc_df['TD_BUSY'])"
-            " / raw_pmc_df['GRBM_GUI_ACTIVE'])"
-        ),
-    }
-
-    with patch(
-        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
-        return_value="MI300",
-    ), patch(
-        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
-    ), patch("utils.metrics.pass_provenance.get_build_in_vars", return_value={}):
-        points = _roofline_point_values(
-            expressions,
-            pmc_df,
-            {"gpu_arch": "gfx942", "num_xcd": 1},
-            layout,
-        )
-
-    assert points["l1_cache_data"] == pytest.approx(50.0 / 200.0)
-    assert "l2_cache_data" not in points
-    assert points["lds_cache_data"] == pytest.approx(50.0 / 30.0)
-    assert pd.isna(points["hbm_data"])
 
 
 def test_calc_dataframe_expressions_computes_pass_scoped_builtins():
@@ -1094,6 +1127,49 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert list(exprs["value_name"]) == ["Avg", "Min", "Max"]
     assert list(exprs["value"]) == ["10", "5", "20"]
     assert set(exprs["metric_id"]) == {"7.1.0"}
+
+
+def test_calc_metrics_data_ingests_null_min_max():
+    """YAML null min/max is an empty expression cell, not an AttributeError."""
+    workload_path = "/fake/workload"
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["VALU FLOPs"],
+            "Avg": [" 1 "],
+            "Min": ["x"],
+            "Max": ["y"],
+            "Unit": ["Gflop"],
+        },
+        index=pd.Index(["2.1.0"], name="Metric_ID"),
+    )
+    metric_df.at["2.1.0", "Min"] = None
+    metric_df.at["2.1.0", "Max"] = None
+    assert metric_df.loc["2.1.0", "Min"] is None
+    assert metric_df.loc["2.1.0", "Max"] is None
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {201: metric_df}
+    arch_config.panel_configs = {
+        200: {
+            "id": 200,
+            "title": "Workgroup",
+            "data source": [{"metric_table": {"id": 201, "title": "VALU"}}],
+        }
+    }
+
+    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    _metrics_info, expressions = analyzer.calc_metrics_data()
+
+    exprs = expressions[workload_path]
+    by_name = dict(zip(exprs["value_name"], exprs["value"]))
+    assert by_name["Avg"] == "1"
+    assert by_name["Min"] == ""
+    assert by_name["Max"] == ""
 
 
 LONG_FORM_PMC_PERF = (
@@ -3972,3 +4048,12 @@ def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_p
     # Also covers a layout file skipped as broken
     workload = run_memory_chart_workload(tmp_path, "gfx1030")
     assert workload.memory_chart_layout_extdata is None
+
+
+def test_visible_metric_rows_drop_collectable_names():
+    frame = pd.DataFrame({
+        "Metric": ["AI HBM", "_collect.flops", "VALU FLOPs"],
+        "Value": ["", "to_sum(raw_pmc_df['SQ_A'])", "1"],
+    })
+    names = [row["Metric"] for _metric_id, row in _visible_metric_rows(frame)]
+    assert names == ["AI HBM", "VALU FLOPs"]
