@@ -3207,9 +3207,16 @@ TEST(XcntExecutionTest, ReplayOnlyCheckingRetainsCompletionOrdering) {
 }
 
 TEST(XcntExecutionTest, InvalidDiagnosticSettingsAreRejected) {
-  Gfx1250Sim sim;
-  EXPECT_THROW(sim.initialize(memory_wait_test_config("no")), std::invalid_argument);
-  EXPECT_THROW(sim.initialize(memory_wait_test_config("", "no")), std::invalid_argument);
+  for (const auto &[json, message] :
+       {std::pair{memory_wait_test_config("no"), "memory_wait_diagnostics must be warn or off"},
+        std::pair{memory_wait_test_config("", "no"), "xcnt_diagnostics must be warn or off"}}) {
+    SCOPED_TRACE(message);
+    util::StringDiagnostic diagnostic;
+    util::FailureOr<config::LoadedConfig> result =
+        config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter());
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(diagnostic.message(), message);
+  }
 }
 
 TEST(XcntExecutionTest, SingleGroupVmemIsOutsideQualifiedCoverage) {

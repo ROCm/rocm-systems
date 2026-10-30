@@ -387,6 +387,7 @@ add_executable(
     gpu_vm_translation_test.cpp
     legacy_page_table_cache_test.cpp
     config_test.cpp
+    checkpoint_restore_errors_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
