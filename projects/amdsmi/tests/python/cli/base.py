@@ -139,12 +139,10 @@ class TestCliBase(unittest.TestCase):
 
     # Exit codes a single argument may also answer with, beyond NOT_SUPPORTED
     SWEEP_TOLERATED_CODES = {
-        # Not all ASICs support setting all modes, which is an invalid set option
-        "set": {"--memory-partition": amdsmi.AmdSmiStatus.INVAL},
         # This reset is a read -- the kernel clears xgmi_error when it is read --
         # so the read's errno becomes the reset's status, and some drivers reject
         # it with EINVAL.
-        "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL},
+        "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL}
     }
 
     # Order for the amd-smi reset commands, putting --clocks last since
@@ -482,8 +480,7 @@ class TestCliBase(unittest.TestCase):
                                 for compute_partition_mode in self.compute_partition_modes:
                                     options.append(f"{items[item_index]} {compute_partition_mode}")
                             elif sub_arg == "PARTITION":  # arg --memory-partition
-                                for memory_partition_mode in self.memory_partition_modes:
-                                    options.append(f"{items[item_index]} {memory_partition_mode}")
+                                options.append(f"{items[item_index]} {{memory_partition}}")
                             elif sub_arg == "MODE":  # arg --compute-partition-mem-alloc-mode
                                 for mem_alloc_mode in ["CAPPING", "ALL"]:
                                     options.append(f"{items[item_index]} {mem_alloc_mode}")
@@ -776,6 +773,9 @@ class TestCliBase(unittest.TestCase):
                         cmd = cmd.replace(nameStr, "--profile", 1)
                     else:
                         cmd = ""
+                elif nameStr == "{memory_partition}":
+                    mode = self._active_memory_partition(gpu_index, explicit_gpu)
+                    cmd = cmd.replace(nameStr, mode, 1) if mode else ""
                 elif nameStr == "{soc_pstate}":
                     soc_pstate = self.static_data["gpu_data"][gpu_index]["soc_pstate"]
                     if type(soc_pstate) is dict:
@@ -975,6 +975,21 @@ class TestCliBase(unittest.TestCase):
             if profile is not None and profile not in status.get("available_profiles", []):
                 return False
         return True
+
+    def _active_memory_partition(self, gpu_index, explicit_gpu):
+        """The NPS mode the target devices run now, or None when they differ.
+
+        Any other mode stays staged until the next driver reload, and with current library
+        and amdgpu releases requesting the active mode does not cancel it, so the sweep
+        only requests this one. Without
+        an explicit --gpu the command runs on every device, so all must agree;
+        sub-partition handles report no mode and are left out.
+        """
+        current = self.partition_data["current_partition"]
+        indices = [gpu_index] if explicit_gpu else range(len(current))
+        modes = {current[index]["memory"] for index in indices}
+        modes &= set(self.memory_partition_modes)
+        return modes.pop() if len(modes) == 1 else None
 
     def _clk_level_count(self, clk_type, gpu_index, explicit_gpu):
         """How many levels a ``--clk-level`` mask for *clk_type* may name.

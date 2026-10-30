@@ -224,6 +224,20 @@ class TestGpuBenchmark(unittest.TestCase):
 
         return stats
 
+    def _active_memory_partition_types(self, processor):
+        # Any other mode stays staged until the next driver reload, and with current
+        # library and amdgpu releases requesting the active mode does not cancel it, so
+        # the set benchmarks time only the active mode (the library's same-mode path).
+        try:
+            active = amdsmi.amdsmi_get_gpu_memory_partition(processor)
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+            self.common.print(f"  Memory partition unreadable ({e}); set not timed")
+            return []
+        matched = [t for t in common.MEMORY_PARTITION_TYPES if t[0] == active]
+        if not matched:
+            self.common.print(f"  Memory partition {active!r} is not settable; set not timed")
+        return matched
+
     def test_performance_clean_gpu_local_data(self):
         self.common.print_func_name("")
 
@@ -3508,7 +3522,7 @@ class TestGpuBenchmark(unittest.TestCase):
                 memory_partition_type_name,
                 memory_partition_type,
                 memory_partition_type_cond,
-            ) in common.MEMORY_PARTITION_TYPES:
+            ) in self._active_memory_partition_types(processor):
                 self._log_test_start(
                     "amdsmi_set_gpu_memory_partition",
                     "Processor",
@@ -3518,13 +3532,13 @@ class TestGpuBenchmark(unittest.TestCase):
 
                 stats = self._measure_api_performance(
                     amdsmi.amdsmi_set_gpu_memory_partition,
-                    f"set_gpu_memory_partition_processor_{i}_type_{memory_partition_type_name}",
+                    f"set_gpu_memory_partition_same_mode_processor_{i}_type_{memory_partition_type_name}",
                     processor,
                     memory_partition_type,
                 )
 
                 self.perf_results[
-                    f"set_gpu_memory_partition_processor_{i}_type_{memory_partition_type_name}"
+                    f"set_gpu_memory_partition_same_mode_processor_{i}_type_{memory_partition_type_name}"
                 ] = stats
 
                 if stats["successful_runs"] > 0:
@@ -3539,7 +3553,7 @@ class TestGpuBenchmark(unittest.TestCase):
                 )
 
         self._log_performance_summary(
-            "amdsmi_set_gpu_memory_partition", "Processors", "set_gpu_memory_partition"
+            "amdsmi_set_gpu_memory_partition", "Processors", "set_gpu_memory_partition_same_mode"
         )
 
     def test_performance_set_gpu_memory_partition_mode(self):
@@ -3555,7 +3569,7 @@ class TestGpuBenchmark(unittest.TestCase):
                 memory_partition_type_name,
                 memory_partition_type,
                 memory_partition_type_cond,
-            ) in common.MEMORY_PARTITION_TYPES:
+            ) in self._active_memory_partition_types(processor):
                 self._log_test_start(
                     "amdsmi_set_gpu_memory_partition_mode",
                     "Processor",
@@ -3565,13 +3579,13 @@ class TestGpuBenchmark(unittest.TestCase):
 
                 stats = self._measure_api_performance(
                     amdsmi.amdsmi_set_gpu_memory_partition_mode,
-                    f"set_gpu_memory_partition_mode_processor_{i}_type_{memory_partition_type_name}",
+                    f"set_gpu_memory_partition_mode_same_mode_processor_{i}_type_{memory_partition_type_name}",
                     processor,
                     memory_partition_type,
                 )
 
                 self.perf_results[
-                    f"set_gpu_memory_partition_mode_processor_{i}_type_{memory_partition_type_name}"
+                    f"set_gpu_memory_partition_mode_same_mode_processor_{i}_type_{memory_partition_type_name}"
                 ] = stats
 
                 if stats["successful_runs"] > 0:
@@ -3586,7 +3600,9 @@ class TestGpuBenchmark(unittest.TestCase):
                 )
 
         self._log_performance_summary(
-            "amdsmi_set_gpu_memory_partition_mode", "Processors", "set_gpu_memory_partition_mode"
+            "amdsmi_set_gpu_memory_partition_mode",
+            "Processors",
+            "set_gpu_memory_partition_mode_same_mode",
         )
 
     def test_performance_set_gpu_od_clk_info(self):
