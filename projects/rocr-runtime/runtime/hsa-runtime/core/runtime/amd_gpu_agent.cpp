@@ -3508,6 +3508,17 @@ void GpuAgent::BindTrapHandler() {
         supported_isas()[0]->GetStepping() == 6)) {
       // No trap handler support without exception handling, soft error.
       // gfx1036 (Granite Ridge iGPU): KMD does not support the trap handler escape.
+      //
+      // Nothing is bound on this path, and the queue is also created without an event or
+      // an ErrorReason, so there is no way left to deliver a queue exception. Say so once
+      // per agent rather than failing silently - a device-side abort then parks its wave
+      // forever and presents as an unexplained hang rather than as an error.
+      log_warning_n(0,
+                    "No trap handler bound for GPU node %u (%s): the kernel driver does not "
+                    "report support for exception debugging. Queue exceptions such as a "
+                    "device-side abort will not be reported, and a kernel that aborts will "
+                    "leave its dispatch unretired, so the host may wait indefinitely.\n",
+                    node_id(), supported_isas()[0]->GetIsaName().c_str());
       return;
     }
 
