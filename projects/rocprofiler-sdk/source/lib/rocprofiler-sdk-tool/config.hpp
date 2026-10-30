@@ -179,6 +179,8 @@ struct config : output_config
     rocprofiler_thread_trace_resource_mode_t att_resource_mode_value =
         ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
 
+    bool        spm_device_mode          = get_env("ROCPROF_SPM_DEVICE_MODE", false);
+    std::string spm_gpu_index            = get_env("ROCPROF_SPM_GPU_INDEX", "");
     size_t      spm_sample_interval      = get_env<uint64_t>("ROCPROF_SPM_SAMPLE_INTERVAL", 0);
     std::string spm_sample_interval_unit = get_env("ROCPROF_SPM_SAMPLE_INTERVAL_UNIT", "none");
     rocprofiler_spm_parameter_type_t spm_sample_interval_unit_value =

@@ -142,6 +142,8 @@ struct tool_spm_counter_record_t
     using container_type = std::vector<tool_spm_counter_value_t>;
 
     uint64_t                                         thread_id     = 0;
+    bool                                             device_mode   = false;
+    rocprofiler_agent_id_t                           agent_id      = {.handle = 0};
     serialized_counter_record_t                      record        = {};
     rocprofiler_spm_dispatch_counting_service_data_t dispatch_data = {};
     rocprofiler_stream_id_t                          stream_id     = {.handle = 0};
@@ -151,6 +153,7 @@ struct tool_spm_counter_record_t
     {
         auto tmp = read();
         ar(cereal::make_nvp("thread_id", thread_id));
+        ar(cereal::make_nvp("agent_id", agent_id));
         ar(cereal::make_nvp("dispatch_data", dispatch_data));
         ar(cereal::make_nvp("records", tmp));
         ar(cereal::make_nvp("stream_id", stream_id));

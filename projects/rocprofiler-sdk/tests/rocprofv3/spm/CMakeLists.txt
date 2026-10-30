@@ -32,3 +32,4 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 add_subdirectory(json)
 add_subdirectory(rocpd)
+add_subdirectory(device-mode)

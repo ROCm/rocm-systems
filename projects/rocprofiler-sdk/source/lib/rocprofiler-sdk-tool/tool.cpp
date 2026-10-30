@@ -285,10 +285,11 @@ struct buffer_ids
     rocprofiler_buffer_id_t rocshmem_api_trace      = {};
     rocprofiler_buffer_id_t hipfile_api_trace       = {};
     rocprofiler_buffer_id_t hip_event_trace         = {};
+    rocprofiler_buffer_id_t spm_device              = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 18>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 19>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -305,7 +306,8 @@ struct buffer_ids
                                                        hip_graph_trace,
                                                        rocshmem_api_trace,
                                                        hipfile_api_trace,
-                                                       hip_event_trace};
+                                                       hip_event_trace,
+                                                       spm_device};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -2336,6 +2338,57 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
                                     dispatch_data->dispatch_info.dispatch_id);
     }
 }
+
+void
+spm_device_profile_callback(rocprofiler_context_id_t               context_id,
+                            rocprofiler_agent_id_t                 agent_id,
+                            rocprofiler_device_counting_agent_cb_t set_config,
+                            void*)
+{
+    if(auto profile = get_spm_config(agent_id))
+    {
+        set_config(context_id, *profile);
+    }
+}
+
+void
+spm_buffered_callback(rocprofiler_context_id_t,
+                      rocprofiler_buffer_id_t,
+                      rocprofiler_record_header_t** headers,
+                      size_t                        num_headers,
+                      void*,
+                      uint64_t)
+{
+    for(size_t i = 0; i < num_headers; ++i)
+    {
+        auto* header = headers[i];
+        if(!header) continue;
+
+        if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
+           header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
+        {
+            auto* record = static_cast<rocprofiler_spm_counter_record_t*>(header->payload);
+
+            auto counter_record       = tool::tool_spm_counter_record_t{};
+            counter_record.thread_id  = common::get_tid();
+            counter_record.device_mode = true;
+            counter_record.agent_id   = record->agent_id;
+
+            auto serialized_records = std::vector<tool::tool_spm_counter_value_t>{};
+
+            auto _counter_id = rocprofiler_counter_id_t{};
+            ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record->id, &_counter_id),
+                             "query record counter id");
+
+            serialized_records.emplace_back(tool::tool_spm_counter_value_t{
+                _counter_id, record->value, record->timestamp, record->id});
+
+            counter_record.write(serialized_records);
+            tool::write_ring_buffer(counter_record, domain_type::SPM_COUNTER_COLLECTION);
+        }
+    }
+}
+
 rocprofiler_client_finalize_t client_finalizer  = nullptr;
 rocprofiler_client_id_t*      client_identifier = nullptr;
 
@@ -3509,13 +3562,85 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     if(tool::get_config().spm_counter_collection)
     {
-        create_pause_resume_ctx(counter_collection_ctx, "SPM counter collection");
-        ROCPROFILER_CALL(
-            rocprofiler_spm_configure_callback_dispatch_service(
-                counter_collection_ctx, spm_dispatch_callback, nullptr, spm_data_callback, nullptr),
-            "Could not setup SPM counting service");
+        const auto use_device_spm = tool::get_config().spm_device_mode;
 
-        if(!defer_counter_start) start_context(counter_collection_ctx, "SPM counter collection");
+        create_pause_resume_ctx(counter_collection_ctx, "SPM counter collection");
+
+        if(use_device_spm)
+        {
+            ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                                       buffer_size,
+                                                       buffer_watermark,
+                                                       ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                       spm_buffered_callback,
+                                                       nullptr,
+                                                       &get_buffers().spm_device),
+                             "SPM device buffer creation");
+
+            auto spm_gpu_idx_set = std::set<uint64_t>{};
+            for(const auto& entry :
+                rocprofiler::sdk::parse::tokenize(tool::get_config().spm_gpu_index, ","))
+            {
+                try
+                {
+                    spm_gpu_idx_set.insert(std::stoi(entry));
+                } catch(std::exception& e)
+                {
+                    ROCP_FATAL << "Invalid SPM GPU Id string: " << entry << " - " << e.what();
+                }
+            }
+            const auto spm_selecting_by_gpuid = !spm_gpu_idx_set.empty();
+
+            for(auto& [id, agent] : tool_metadata->agents_map)
+            {
+                if(agent.type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+                if(spm_selecting_by_gpuid && spm_gpu_idx_set.erase(agent.gpu_index) == 0) continue;
+
+                if(!if_spm_config_match(agent.id,
+                                        tool::get_config().spm_sample_interval,
+                                        tool::get_config().spm_sample_interval_unit_value))
+                    continue;
+
+                ROCPROFILER_CALL(
+                    rocprofiler_configure_spm_device_counting_service(counter_collection_ctx,
+                                                                      get_buffers().spm_device,
+                                                                      agent.id,
+                                                                      spm_device_profile_callback,
+                                                                      nullptr),
+                    "SPM device counting service configure");
+            }
+
+            for(const auto& entry : spm_gpu_idx_set)
+                ROCP_ERROR << "Invalid SPM GPU Device Index: " << entry;
+        }
+        else
+        {
+            ROCPROFILER_CALL(
+                rocprofiler_spm_configure_callback_dispatch_service(counter_collection_ctx,
+                                                                    spm_dispatch_callback,
+                                                                    nullptr,
+                                                                    spm_data_callback,
+                                                                    nullptr),
+                "Could not setup SPM counting service");
+        }
+
+        if(!defer_counter_start)
+        {
+            if(use_device_spm)
+            {
+                auto status = rocprofiler_start_context(counter_collection_ctx);
+                if(status != ROCPROFILER_STATUS_SUCCESS &&
+                   status != ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED)
+                {
+                    ROCPROFILER_CALL(status, "start SPM device counting context");
+                }
+            }
+            else
+            {
+                start_context(counter_collection_ctx, "SPM counter collection");
+            }
+        }
     }
 
     auto rename_ctx            = rocprofiler_context_id_t{0};
@@ -3663,7 +3788,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              "Could not configure external correlation id request service");
         }
 
-        if(tool::get_config().spm_counter_collection && !tool::get_config().counter_collection)
+        if(tool::get_config().spm_counter_collection && !tool::get_config().counter_collection &&
+           !tool::get_config().spm_device_mode)
         {
             auto spm_external_corr_id_request_kinds =
                 std::array<rocprofiler_external_correlation_id_request_kind_t, 1>{

@@ -829,6 +829,19 @@ For attachment profiling of running processes:
         choices=("sclk_cycles", "refclk_cycles"),
     )
 
+    add_parser_bool_argument(
+        spm_options,
+        "--spm-device-mode",
+        help="Use device-mode SPM counting service instead of dispatch-based SPM. Collects on all GPU agents that support SPM.",
+    )
+
+    spm_options.add_argument(
+        "--spm-gpu-index",
+        help="Comma-separated list of GPU index(es) to enable SPM device-mode collection. Default: All",
+        default=None,
+        type=str,
+    )
+
     pc_sampling_options = parser.add_argument_group("PC sampling options")
 
     add_parser_bool_argument(
@@ -2338,7 +2351,7 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_PC_SAMPLING_METHOD", args.pc_sampling_method)
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
 
-    if args.spm or args.spm_sample_interval or args.spm_sample_interval_unit:
+    if args.spm or args.spm_sample_interval or args.spm_sample_interval_unit or args.spm_device_mode:
 
         if (
             not args.spm_beta_enabled
@@ -2379,6 +2392,28 @@ def run(app_args, args, **kwargs):
             update_env(
                 "ROCPROF_SPM_SAMPLE_INTERVAL_UNIT",
                 args.spm_sample_interval_unit,
+                overwrite=True,
+            )
+        if args.spm_device_mode:
+            if not args.spm or not args.spm_sample_interval or not args.spm_sample_interval_unit:
+                fatal_error(
+                    "--spm-device-mode requires --spm, --spm-sample-interval, and --spm-sample-interval-unit"
+                )
+            if args.pmc or args.pmc_groups:
+                fatal_error(
+                    "--spm-device-mode cannot be used with --pmc"
+                )
+            if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_interval:
+                fatal_error(
+                    "--spm-device-mode cannot be used with --pc-sampling"
+                )
+            update_env("ROCPROF_SPM_DEVICE_MODE", True, overwrite=True)
+        if args.spm_gpu_index:
+            if not args.spm_device_mode:
+                fatal_error("--spm-gpu-index requires --spm-device-mode")
+            update_env(
+                "ROCPROF_SPM_GPU_INDEX",
+                args.spm_gpu_index,
                 overwrite=True,
             )
 

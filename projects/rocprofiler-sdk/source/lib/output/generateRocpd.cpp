@@ -1612,6 +1612,8 @@ write_rocpd(
             {
                 for(const auto& record : spm_collection_gen.get(pctr))
                 {
+                    if(record.device_mode) continue;
+
                     const auto& dispatch_data = record.dispatch_data;
                     const auto& info          = dispatch_data.dispatch_info;
 
@@ -1896,9 +1898,8 @@ write_rocpd(
         {
             for(const auto& record : spm_collection_gen.get(ditr))
             {
-                const auto& info        = record.dispatch_data.dispatch_info;
-                auto        dispatch_id = info.dispatch_id;
-                auto        evt_id      = dispatch_evt_ids.at(dispatch_id);
+                const auto& info         = record.dispatch_data.dispatch_info;
+                auto        sample_agent = record.device_mode ? record.agent_id : info.agent_id;
 
                 auto track_id =
                     get_track_id(db, node_id, this_pid, record.thread_id, spm_name_id, "{}");
@@ -1912,28 +1913,63 @@ write_rocpd(
                 for(const auto& [timestamp, values] : values_by_timestamp)
                 {
                     auto sample_id = db.get_sample_id();
-                    get_insert_statement(db,
-                                         "rocpd_sample{{uuid}}",
-                                         {
-                                             insert_value("id", sample_id),
-                                             insert_value("track_id", track_id),
-                                             insert_value("timestamp", timestamp),
-                                             insert_value("event_id", evt_id),
-                                         });
 
-                    for(const auto* count_ptr : values)
+                    if(record.device_mode)
                     {
-                        const auto& count = *count_ptr;
-                        get_insert_statement(
-                            db,
-                            "rocpd_pmc_event{{uuid}}",
-                            {
-                                insert_value("id", idx++),
-                                insert_value("event_id", evt_id),
-                                insert_value("sample_id", sample_id),
-                                insert_value("pmc_id", spm_location_pmc_id(count, info.agent_id)),
-                                insert_value("value", count.value),
-                            });
+                        get_insert_statement(db,
+                                             "rocpd_sample{{uuid}}",
+                                             {
+                                                 insert_value("id", sample_id),
+                                                 insert_value("track_id", track_id),
+                                                 insert_value("timestamp", timestamp),
+                                                 insert_value("event_id",
+                                                              std::optional<uint64_t>{}),
+                                             });
+
+                        for(const auto* count_ptr : values)
+                        {
+                            const auto& count = *count_ptr;
+                            get_insert_statement(
+                                db,
+                                "rocpd_pmc_event{{uuid}}",
+                                {
+                                    insert_value("id", idx++),
+                                    insert_value("event_id",
+                                                 std::optional<uint64_t>{}),
+                                    insert_value("sample_id", sample_id),
+                                    insert_value("pmc_id",
+                                                 spm_location_pmc_id(count, sample_agent)),
+                                    insert_value("value", count.value),
+                                });
+                        }
+                    }
+                    else
+                    {
+                        auto evt_id = dispatch_evt_ids.at(info.dispatch_id);
+                        get_insert_statement(db,
+                                             "rocpd_sample{{uuid}}",
+                                             {
+                                                 insert_value("id", sample_id),
+                                                 insert_value("track_id", track_id),
+                                                 insert_value("timestamp", timestamp),
+                                                 insert_value("event_id", evt_id),
+                                             });
+
+                        for(const auto* count_ptr : values)
+                        {
+                            const auto& count = *count_ptr;
+                            get_insert_statement(
+                                db,
+                                "rocpd_pmc_event{{uuid}}",
+                                {
+                                    insert_value("id", idx++),
+                                    insert_value("event_id", evt_id),
+                                    insert_value("sample_id", sample_id),
+                                    insert_value("pmc_id",
+                                                 spm_location_pmc_id(count, sample_agent)),
+                                    insert_value("value", count.value),
+                                });
+                        }
                     }
                 }
             }
