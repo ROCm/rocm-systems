@@ -182,7 +182,10 @@ __global__ void TDM_gather_load_tester(const int* data, int* result) {
 __global__ void TDM_stride_encoding_tester(uint32_t* out, uint64_t dim0_stride,
                                            uint64_t dim1_stride, uint64_t dim2_stride,
                                            uint64_t dim3_stride) {
-  if (__builtin_amdgcn_processor_is("gfx1250") || __builtin_amdgcn_processor_is("gfx1251")) {
+  // Note: gfx1250-strict is a separate processor; processor_is("gfx1250") is NOT true
+  // for the gfx1250-strict target, so it must be listed explicitly.
+  if (__builtin_amdgcn_processor_is("gfx1250") ||
+      __builtin_amdgcn_processor_is("gfx1250-strict")) {
     gfx1250_TDM_GROUP1 group1;
     group1.tensorDim0Stride(dim0_stride);
     group1.tensorDim1Stride(dim1_stride);

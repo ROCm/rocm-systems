@@ -168,7 +168,10 @@ protected:
   // scratch/VSCRATCH load so v2 stays clobbered (0) and v3 reads 0; then confirm
   // the intact text restores it.
   void expect_missing_restore_clobbers_vgpr() {
-    const std::vector<uint32_t> load = build_scratch_load_dword(2, 64, a_.arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(2, 64, a_.arch);
+    ASSERT_TRUE(maybe_load.succeeded());
+    const std::vector<uint32_t> &load = maybe_load.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
@@ -297,8 +300,10 @@ protected:
   // Negative control: nop the epilogue v_readlane (the scalar restore) so s8 stays
   // clobbered (0) and v3 reads 0; then confirm the intact text restores it.
   void expect_missing_readlane_clobbers_sgpr() {
-    const std::array<uint32_t, 2> readlane =
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_readlane =
         build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    ASSERT_TRUE(maybe_readlane.succeeded());
+    const std::array<uint32_t, 2> readlane = maybe_readlane.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
@@ -534,8 +539,10 @@ protected:
   // acc0 stays clobbered (0) and v3 reads 0; then confirm the intact text
   // restores it.
   void expect_missing_restore_clobbers_accvgpr() {
-    const std::vector<uint32_t> load =
-        build_scratch_load_dword(/*acc0=*/0, 64, a_.arch, /*acc=*/true);
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(/*acc0=*/0, 64, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_load.succeeded());
+    const std::vector<uint32_t> &load = maybe_load.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
@@ -675,11 +682,18 @@ protected:
   // acc scratch load) so every value stays clobbered (0); confirm the intact text
   // restores all three.
   void expect_missing_restores_clobber_all() {
-    const std::vector<uint32_t> vload = build_scratch_load_dword(2, 64, a_.arch);
-    const std::array<uint32_t, 2> readlane =
+    const util::FailureOr<std::vector<uint32_t>> maybe_vload =
+        build_scratch_load_dword(2, 64, a_.arch);
+    ASSERT_TRUE(maybe_vload.succeeded());
+    const std::vector<uint32_t> &vload = maybe_vload.value();
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_readlane =
         build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
-    const std::vector<uint32_t> aload =
-        build_scratch_load_dword(/*acc0=*/0, 72, a_.arch, /*acc=*/true);
+    ASSERT_TRUE(maybe_readlane.succeeded());
+    const std::array<uint32_t, 2> readlane = maybe_readlane.value();
+    const util::FailureOr<std::vector<uint32_t>> maybe_aload =
+        build_scratch_load_dword(/*acc0=*/0, 72, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_aload.succeeded());
+    const std::vector<uint32_t> &aload = maybe_aload.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
@@ -810,7 +824,10 @@ protected:
     // Guard non-triviality: the bridge must be the reused spilled v0, not a dead VGPR. A live
     // VGPR can only become the bridge via the reuse fallback, so an epilogue readlane pulling
     // s8 out of v0 proves the reused-bridge path was taken.
-    const auto readlane = build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_readlane =
+        build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    ASSERT_TRUE(maybe_readlane.succeeded());
+    const auto &readlane = maybe_readlane.value();
     EXPECT_NE(std::ranges::search(patched_text_, readlane).begin(), patched_text_.end())
         << "SGPR bridge is not the reused spilled v0";
     test::DbiSim sim;
@@ -1131,7 +1148,10 @@ protected:
   // Negative control: nop the store-side EXEC=-1 toggle, so the store runs under the
   // anchor mask and v2's inactive lanes are never saved -- they lose the sentinel.
   void expect_missing_store_full_mask_loses_high_lanes() {
-    const std::vector<uint32_t> store = build_scratch_store_dword(2, 64, a_.base.arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(2, 64, a_.base.arch);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const std::vector<uint32_t> &store = maybe_store.value();
     const uint32_t toggle = build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch),
                                             scalar_inline_neg_one(a_.base.arch), a_.base.arch);
     // The in-flight-load drain now sits at the envelope top, not in the spill
