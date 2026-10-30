@@ -113,7 +113,7 @@ RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 // Broadcast DDA: unset follows the arch table (any Broadcast DDA tier), 0 off, >0 on.
 RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
-// Development only: lets Broadcast LL run on the single-node IPC DDA path (e.g. gfx950).
+// Development only: lets Broadcast DDA (LL and LL128) run on the single-node IPC path (e.g. gfx950).
 RCCL_PARAM(DdaBcAllowIpc, "DDA_BC_ALLOW_IPC", 0);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
@@ -2337,7 +2337,7 @@ ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataTy
     decision->nMaxChannels = ncclBroadcastDdaFabricLLBlocks(comm, count, datatype);
     return rcclSelectDone("BC", query, decision);
   }
-  if (fabric && ll128Max > 0 && bytes <= ll128Max && ncclBroadcastDdaFabricLL128Eligible(comm, count, datatype)) {
+  if (ll128Max > 0 && bytes <= ll128Max && ncclBroadcastDdaFabricLL128Eligible(comm, count, datatype)) {
     decision->algo = RCCL_DDA_FABRIC_LL128;
     decision->protocol = NCCL_PROTO_LL128;
     decision->nMaxChannels = ncclBroadcastDdaFabricLL128Blocks(comm, count, datatype);

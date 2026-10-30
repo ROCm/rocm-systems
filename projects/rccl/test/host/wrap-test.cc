@@ -9339,15 +9339,13 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_NonGfx1250_NeverChecksTiers) {
   });
 }
 
-TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowed_PicksLLAndNeverChecksLL128) {
-  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_IpcAllowed_PicksLLAndNeverChecksLL128", []() {
+TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowed_PicksLLThenLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_IpcAllowed_PicksLLThenLL128", []() {
     auto base = BroadcastDdaParams(INT64_MAX, INT64_MAX);
     g_loadParam = [base](const char* env, int64_t def) -> int64_t {
       return std::strcmp(env, "RCCL_DDA_BC_ALLOW_IPC") == 0 ? 1 : base(env, def);
     };
-    int ll128Calls = 0;
-    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
-                     [&](ncclComm*, size_t, ncclDataType_t) { return ++ll128Calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
     ncclComm* comm = MakeBroadcastComm("gfx950");
     comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
@@ -9358,8 +9356,29 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowed_PicksLLAndNeverChecksLL12
     ScopedHook llOff(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return false; });
     d = PoisonedDecision();
     EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+    EXPECT_EQ(NCCL_PROTO_LL128, d.protocol);
+    EXPECT_EQ(152u, d.nMaxChannels);  // ncclBroadcastDdaFabricLL128Blocks
+    comm->ddaIpcMemHandler = nullptr;
+    DeleteCommWithArch(comm);
+  });
+}
+
+// A zero LL128 cap keeps the IPC path off LL128 even with RCCL_DDA_BC_ALLOW_IPC=1.
+TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowedZeroLL128Cap_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_IpcAllowedZeroLL128Cap_ReturnsRingPlaceholder", []() {
+    auto base = BroadcastDdaParams(INT64_MAX, /*ll128Max=*/0);
+    g_loadParam = [base](const char* env, int64_t def) -> int64_t {
+      return std::strcmp(env, "RCCL_DDA_BC_ALLOW_IPC") == 0 ? 1 : base(env, def);
+    };
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm("gfx950");
+    comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
     EXPECT_EQ(NCCL_ALGO_RING, d.algo);
-    EXPECT_EQ(0, ll128Calls);
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, d.protocol);
+    EXPECT_EQ(0u, d.nMaxChannels);
     comm->ddaIpcMemHandler = nullptr;
     DeleteCommWithArch(comm);
   });
