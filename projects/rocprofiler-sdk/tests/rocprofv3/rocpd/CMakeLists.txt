@@ -337,11 +337,11 @@ rocprofiler_add_integration_validate_test(
          --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
          --csv-input-summary
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_kernels_summary.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_kernels_summary_by_rank.csv
          --csv-input-truncated
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_trunc_kernels_summary.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_trunc_kernels_summary_by_rank.csv
          --csv-input-mangled
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_mangled_kernels_summary.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_mangled_kernels_summary_by_rank.csv
     TIMEOUT 60
     LABELS "integration-tests;rocpd;kernel-name"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
