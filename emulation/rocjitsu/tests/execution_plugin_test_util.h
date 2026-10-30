@@ -64,9 +64,9 @@ public:
     return cu.sgpr_owner(reg_idx);
   }
 
-  static void route_memory_inst(amdgpu::ComputeUnitCore &cu, Instruction *inst,
-                                amdgpu::Wavefront &wf) {
-    cu.route_memory_inst(inst, wf);
+  static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu, Instruction *inst,
+                                                   amdgpu::Wavefront &wf) {
+    return cu.route_memory_inst(inst, wf);
   }
 };
 
@@ -289,6 +289,8 @@ struct CapturedAccess {
   uint64_t scratch_lane_mask = 0;
   uint64_t flat_local_lane_mask = 0;
   uint64_t flat_dds_lane_mask = 0;
+  uint64_t flat_local_oob_lane_mask = 0;
+  std::optional<uint64_t> flat_local_allocation_end;
   uint32_t scratch_element_stride_bytes = 0;
   bool non_temporal = false;
   std::vector<uint64_t> element_lane_masks;
@@ -368,6 +370,8 @@ public:
     captured.scratch_lane_mask = access.scratch_lane_mask;
     captured.flat_local_lane_mask = access.flat_local_lane_mask;
     captured.flat_dds_lane_mask = access.flat_dds_lane_mask;
+    captured.flat_local_oob_lane_mask = access.flat_local_oob_lane_mask;
+    captured.flat_local_allocation_end = access.flat_local_allocation_end;
     captured.scratch_element_stride_bytes = access.scratch_element_stride_bytes;
     captured.non_temporal = access.non_temporal;
     captured.element_lane_masks.assign(access.element_lane_masks.begin(),
