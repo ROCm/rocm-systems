@@ -2,7 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
 # See LICENSE.txt for license information
-"""Lock the 2-node unset-type suite's launch shape; a skip still reports green (AICOMRCCL-3450)."""
+"""Lock the 2-node unset-type suite's launch shapes; a skip still reports green (AICOMRCCL-3450)."""
 
 import unittest
 from pathlib import Path
@@ -11,6 +11,12 @@ from lib.test_config import TestConfigProcessor
 
 _CONFIG = Path(__file__).resolve().parents[1] / "configs" / "gin_rocshmem_backends_mellanox.json"
 _SUITE = "gin_devmpi_mixed_2node"
+
+# test_filter -> (num_ranks, num_nodes, num_gpus per node)
+_EXPECTED_SHAPES = {
+    "GinMPIDeviceTests.MixedBackends_TwoNodeUnsetType": (2, 2, 1),
+    "GinMPIDeviceTests.MixedBackends_TwoNodePerHostSplitKeepsAnvil": (4, 2, 2),
+}
 
 
 class MixedBackendsTwoNodeSuiteTest(unittest.TestCase):
@@ -33,13 +39,13 @@ class MixedBackendsTwoNodeSuiteTest(unittest.TestCase):
         for test in suite["tests"]:
             self.assertNotIn("NCCL_GIN_TYPE", test.get("env_variables", {}), test["name"])
 
-    def test_runs_only_the_two_host_case(self):
+    def test_runs_only_the_two_host_cases(self):
         tests = self.suites[0]["tests"]
-        self.assertEqual([t["test_filter"] for t in tests],
-                         ["GinMPIDeviceTests.MixedBackends_TwoNodeUnsetType"])
-        test = tests[0]
-        self.assertEqual((test["num_ranks"], test["num_nodes"], test["num_gpus"]), (2, 2, 1))
-        self.assertEqual(test["binary"], "rccl-UnitTestsMPI")
+        self.assertEqual([t["test_filter"] for t in tests], list(_EXPECTED_SHAPES))
+        for test in tests:
+            self.assertEqual((test["num_ranks"], test["num_nodes"], test["num_gpus"]),
+                             _EXPECTED_SHAPES[test["test_filter"]], test["name"])
+            self.assertEqual(test["binary"], "rccl-UnitTestsMPI", test["name"])
 
     def test_build_enables_rocshmem_gin(self):
         self.assertIn("--rocshmem-gin", self.proc.get_build_config()["install_flags"])
