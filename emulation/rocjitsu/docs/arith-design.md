@@ -157,8 +157,9 @@ Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
 The migrated families are dense and sparse WMMA, fused floating-point arithmetic, basic
-floating-point arithmetic and selection, division, dot products, math functions and
-comparisons. Other handlers retain their existing implementations.
+floating-point arithmetic and selection, division, dot products, math functions,
+comparisons and integer arithmetic. Other handlers retain their existing
+implementations.
 
 ### Guest FP controls
 

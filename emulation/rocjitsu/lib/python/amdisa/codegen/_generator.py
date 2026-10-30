@@ -6718,8 +6718,26 @@ class CodeGenerator:
         if rj_arith_compare is not None:
             return rj_arith_compare
 
-        from amdisa.codegen.execute.rj_arith_vector import gen_integer_dot
+        from amdisa.codegen.execute.rj_arith_vector import (
+            gen_vector32,
+            gen_carry32,
+            gen_wide_integer,
+            gen_integer16,
+            gen_widening_integer,
+            gen_packed_integer,
+            gen_integer_dot,
+        )
 
+        rj_arith_carry = gen_carry32(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_carry is not None:
+            return rj_arith_carry
+        rj_arith_wide = gen_wide_integer(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_wide is not None:
+            return rj_arith_wide
         from amdisa.codegen.execute.rj_arith_division import gen_division
 
         rj_arith_division = gen_division(
@@ -6756,6 +6774,24 @@ class CodeGenerator:
                     src_ops,
                     enc_name,
                     self._vop3p_opsel_exprs(),
+                )
+                or gen_packed_integer(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                    self._op_sel_hi_2_expr(inst.enc_name),
+                )
+                or gen_widening_integer(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_integer16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_vector32(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
                 )
                 or gen_half_dot(
                     self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
@@ -14080,6 +14116,12 @@ class CodeGenerator:
                         # rj-arith owns SIMD selection for migrated instructions. Never
                         # run a legacy arithmetic probe ahead of the rj-arith body.
                         from amdisa.codegen.execute.rj_arith_vector import (
+                            VECTOR32_NAMES,
+                            CARRY32_NAMES,
+                            WIDE_INTEGER_NAMES,
+                            INTEGER16_NAMES,
+                            WIDENING_INTEGER_NAMES,
+                            PACKED_INTEGER_NAMES,
                             INTEGER_DOT_NAMES,
                         )
                         from amdisa.codegen.execute.rj_arith_division import (
@@ -14097,9 +14139,18 @@ class CodeGenerator:
                         ) and (
                             inst.name in DIVISION_NAMES
                             or inst.name in COMPARE_NAMES
-                            or inst.name in INTEGER_DOT_NAMES
+                            or inst.name in CARRY32_NAMES
+                            or (inst.name in WIDE_INTEGER_NAMES)
+                            or (inst.name in INTEGER16_NAMES)
+                            or (inst.name in WIDENING_INTEGER_NAMES)
+                            or (inst.name in PACKED_INTEGER_NAMES)
+                            or (inst.name in INTEGER_DOT_NAMES)
                             or (
-                                inst.name in FLOAT_NAMES and _mask_result_writer is None
+                                (
+                                    inst.name in VECTOR32_NAMES
+                                    or inst.name in FLOAT_NAMES
+                                )
+                                and _mask_result_writer is None
                             )
                         )
                         if _rj_arith_arithmetic:
@@ -14734,10 +14785,25 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
-                from amdisa.codegen.execute.rj_arith_vector import INTEGER_DOT_NAMES
+                from amdisa.codegen.execute.rj_arith_vector import (
+                    VECTOR32_NAMES,
+                    CARRY32_NAMES,
+                    WIDE_INTEGER_NAMES,
+                    INTEGER16_NAMES,
+                    WIDENING_INTEGER_NAMES,
+                    PACKED_INTEGER_NAMES,
+                    INTEGER_DOT_NAMES,
+                )
 
                 if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
-                    (i.name in INTEGER_DOT_NAMES for i in all_insts)
+                    i.name in VECTOR32_NAMES
+                    or i.name in CARRY32_NAMES
+                    or i.name in WIDE_INTEGER_NAMES
+                    or i.name in INTEGER16_NAMES
+                    or i.name in WIDENING_INTEGER_NAMES
+                    or i.name in PACKED_INTEGER_NAMES
+                    or i.name in INTEGER_DOT_NAMES
+                    for i in all_insts
                 ):
                     cpp_includes.append(
                         (
