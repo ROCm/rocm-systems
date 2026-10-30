@@ -8,6 +8,7 @@
 
 #include <bit>
 #include <cassert>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <type_traits>
@@ -270,6 +271,13 @@ template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
 constexpr inline T ceil_div_or_one(T numerator, T divisor) {
   return divisor == 0 ? T{1} : ceil_div(numerator, divisor);
+}
+
+/// @brief Check whether [offset, offset + size) fits within [0, bound).
+/// @details An empty range at bound is valid. Subtract only after checking
+/// offset so neither a wrapped sum nor an underflow can admit an invalid range.
+constexpr inline bool is_range_in_bounds(uint64_t offset, uint64_t size, uint64_t bound) {
+  return offset <= bound && size <= bound - offset;
 }
 
 /// @brief Add two unsigned integers when the result is representable.
