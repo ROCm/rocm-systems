@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <csignal>
 #include <fcntl.h>
 #include <format>
@@ -43,14 +44,23 @@ protected:
     return bytes.succeeded() ? std::vector<uint8_t>(bytes.value().begin(), bytes.value().end())
                              : std::vector<uint8_t>{};
   }
-  int invoke(std::vector<std::string> arguments, bool limit_write = false) {
+  struct InvokeOptions {
+    bool limit_write = false;
+    bool fail_stdout = false;
+    bool fail_stderr = false;
+  };
+  int invoke(std::vector<std::string> arguments, InvokeOptions options) {
     arguments.insert(arguments.begin(), RJ_CODE_MUTATE_PATH);
     std::vector<char *> pointers;
     for (std::string &argument : arguments)
       pointers.push_back(argument.data());
     pointers.push_back(nullptr);
-    const int out = open((root_ / "stdout").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    const int err = open((root_ / "stderr").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    const int out = options.fail_stdout
+                        ? open("/dev/full", O_WRONLY)
+                        : open((root_ / "stdout").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    const int err = options.fail_stderr
+                        ? open("/dev/full", O_WRONLY)
+                        : open((root_ / "stderr").c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
     EXPECT_GE(out, 0);
     EXPECT_GE(err, 0);
     const pid_t child = fork();
@@ -59,9 +69,9 @@ protected:
         _exit(126);
       close(out);
       close(err);
-      if (limit_write) {
-        signal(SIGXFSZ, SIG_IGN);
-        const rlimit limit{512, 512};
+      if (options.limit_write) {
+        std::signal(SIGXFSZ, SIG_IGN);
+        const rlimit limit = {.rlim_cur = 512, .rlim_max = 512};
         if (setrlimit(RLIMIT_FSIZE, &limit) != 0)
           _exit(126);
       }
@@ -75,12 +85,15 @@ protected:
     int status = 0;
     if (waitpid(child, &status, 0) != child)
       return -1;
-    const std::vector<uint8_t> out_bytes = read(root_ / "stdout");
-    const std::vector<uint8_t> err_bytes = read(root_ / "stderr");
+    const std::vector<uint8_t> out_bytes =
+        options.fail_stdout ? std::vector<uint8_t>{} : read(root_ / "stdout");
+    const std::vector<uint8_t> err_bytes =
+        options.fail_stderr ? std::vector<uint8_t>{} : read(root_ / "stderr");
     stdout_.assign(out_bytes.begin(), out_bytes.end());
     stderr_.assign(err_bytes.begin(), err_bytes.end());
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
   }
+  int invoke(std::vector<std::string> arguments) { return invoke(std::move(arguments), {}); }
   std::vector<std::string> args(std::vector<std::string> extra = {}) {
     std::vector<std::string> result{"--input",     input_.string(), "--kernel",
                                     "test_kernel", "--output",      output_.string()};
@@ -139,7 +152,6 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
                      {"--exact", std::format("{:#x}", barrier.members.front().offset), "--ordinal",
                       "18446744073709551615"});
     ASSERT_EQ(invoke(args(options)), 0) << stderr_;
-    EXPECT_TRUE(stderr_.empty());
     const std::vector<uint8_t> mutant = read(output_);
     ASSERT_EQ(mutant.size(), image.size());
     const FailureOr<DropBarrierSelection> selection =
@@ -148,6 +160,10 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
     const FailureOr<DropBarrierResult> library =
         apply_drop_barrier(context, selection.value(), error);
     ASSERT_TRUE(library.succeeded()) << error.message;
+    std::string expected_stderr;
+    for (const std::string &assumption : library.value().assumptions)
+      expected_stderr += "rj_code_mutate: assumption: " + assumption + '\n';
+    EXPECT_EQ(stderr_, expected_stderr);
     EXPECT_EQ(mutant, library.value().edit_result.image);
     // Independent full-image oracle: only the selected complete members become
     // concrete-target s_nop 0 instructions. Headers, descriptors and waits stay exact.
@@ -225,12 +241,18 @@ TEST_F(FaultMutationCli, SelectionAndMalformedInputsFailWithoutPublication) {
   const std::vector<uint8_t> image =
       test::make_barrier_elf_for_target(row, test::make_barrier_words(row));
   write(input_, image);
-  for (const std::vector<std::string> &options :
-       std::vector<std::vector<std::string>>{{"--ordinal", "2"},
-                                             {"--exact", "9999", "--ordinal", "0"},
-                                             {"--exact", "12"},
-                                             {"--exact", "8"}})
-    expect_rejected(args(options));
+  expect_rejected(args({"--ordinal", "2"}));
+  EXPECT_NE(stderr_.find("code=OrdinalOutOfRange"), std::string::npos) << stderr_;
+  for (const uint64_t offset : {0, 5, 8, 12, 16, 9999}) {
+    SCOPED_TRACE(offset);
+    expect_rejected(args({"--exact", std::to_string(offset), "--ordinal", "0"}));
+    EXPECT_NE(stderr_.find("no complete barrier starts at .text offset " + std::to_string(offset) +
+                           " for this entry"),
+              std::string::npos)
+        << stderr_;
+    EXPECT_NE(stderr_.find("code=InvalidParameters"), std::string::npos) << stderr_;
+    EXPECT_EQ(stderr_.find("BadIdentity"), std::string::npos) << stderr_;
+  }
   expect_rejected({"--input", input_.string(), "--kernel", "test", "--output", output_.string()});
   for (const std::string name : {"missing.hsaco", "."})
     expect_rejected({"--input", (root_ / name).string(), "--kernel", "test_kernel", "--output",
@@ -267,6 +289,64 @@ TEST_F(FaultMutationCli, SelectionAndMalformedInputsFailWithoutPublication) {
   std::filesystem::resize_file(input_, 256 * 1024 * 1024 + 1);
   expect_rejected(args());
   EXPECT_NE(stderr_.find("bounded input"), std::string::npos);
+}
+
+TEST_F(FaultMutationCli, PreservesTypedDiscoveryAndSelectionErrors) {
+  const test::DropTargetRow &row = test::kDropRows[4];
+  std::vector<uint8_t> image =
+      test::make_barrier_elf_for_target(row, test::make_barrier_words(row));
+  write(input_, image);
+  expect_rejected(
+      {"--input", input_.string(), "--kernel", "missing", "--output", output_.string()});
+  EXPECT_NE(stderr_.find("discovery failed: code=BadIdentity"), std::string::npos) << stderr_;
+  image[EI_DATA] = 0;
+  write(input_, image);
+  expect_rejected(args());
+  EXPECT_NE(stderr_.find("discovery failed: code=UnsupportedForm"), std::string::npos) << stderr_;
+  image[EI_DATA] = ELFDATA2LSB;
+  const uint32_t unsupported = EF_AMDGPU_MACH_AMDGCN_GFX90A;
+  std::memcpy(image.data() + offsetof(Elf64_Ehdr, e_flags), &unsupported, sizeof(unsupported));
+  write(input_, image);
+  expect_rejected(args());
+  EXPECT_NE(stderr_.find("discovery failed: code=UnsupportedTarget"), std::string::npos) << stderr_;
+  write(input_, test::make_barrier_elf_for_target(row, {build_s_endpgm(row.arch)}));
+  expect_rejected(args());
+  EXPECT_NE(stderr_.find("selection failed: code=NoCandidates"), std::string::npos) << stderr_;
+}
+
+TEST_F(FaultMutationCli, FailedStdoutReturnsOutputIoError) {
+  const test::DropTargetRow &row = test::kDropRows[4];
+  const std::vector<uint8_t> image =
+      test::make_barrier_elf_for_target(row, test::make_barrier_words(row));
+  write(input_, image);
+  for (const std::vector<std::string> &arguments : std::vector<std::vector<std::string>>{
+           {"--help"},
+           {"--capabilities"},
+           {"--input", input_.string(), "--kernel", "test_kernel", "--list"},
+           args()}) {
+    SCOPED_TRACE(::testing::PrintToString(arguments));
+    EXPECT_EQ(invoke(arguments, {.fail_stdout = true}), 3) << stderr_;
+    EXPECT_NE(stderr_.find("cannot write/flush stdout"), std::string::npos) << stderr_;
+  }
+  // The complete file survives a later failure to report the mutation summary.
+  const FaultMutationContext mutant(read(output_));
+  FaultMutationError error;
+  const FailureOr<FaultBarrierInventory> remaining =
+      discover_drop_barriers(mutant, "test_kernel", error);
+  ASSERT_TRUE(remaining.succeeded()) << error.message;
+  EXPECT_EQ(remaining.value().barriers().size(), 1u);
+  EXPECT_EQ(read(input_), image);
+}
+
+TEST_F(FaultMutationCli, FailedAssumptionOutputDoesNotReportSuccess) {
+  const test::DropTargetRow &row = test::kDropRows[4];
+  const std::vector<uint8_t> image =
+      test::make_barrier_elf_for_target(row, test::make_barrier_words(row));
+  write(input_, image);
+  EXPECT_EQ(invoke(args(), {.fail_stderr = true}), 3);
+  EXPECT_TRUE(stdout_.empty());
+  EXPECT_EQ(read(output_).size(), image.size());
+  EXPECT_EQ(read(input_), image);
 }
 
 TEST_F(FaultMutationCli, RejectsIllegalWavesAndForms) {
@@ -316,6 +396,17 @@ TEST_F(FaultMutationCli, EmitsAdmittedClusterBarrierAtExactOffsetZero) {
     EXPECT_NE(stdout_.find("exact=0"), std::string::npos);
     EXPECT_NE(stdout_.find("id=-3 scope=cluster members=0:4,4:4"), std::string::npos);
     ASSERT_EQ(invoke(args({"--exact", "0", "--ordinal", "18446744073709551615"})), 0) << stderr_;
+    EXPECT_NE(stderr_.find("Same-block membership does not prove barrier convergence."),
+              std::string::npos)
+        << stderr_;
+    EXPECT_NE(stderr_.find("Execution and detector qualification have not been performed."),
+              std::string::npos)
+        << stderr_;
+    EXPECT_NE(
+        stderr_.find(
+            "Cluster barrier -3 only synchronizes a clustered dispatch; it is inert otherwise."),
+        std::string::npos)
+        << stderr_;
     const AmdGpuCodeObject source(image.data(), image.size());
     ASSERT_TRUE(source.is_valid());
     ASSERT_EQ(source.text_sections().size(), 1u);
@@ -434,7 +525,7 @@ TEST_F(FaultMutationCli, FileFailuresPreserveInputAndExistingDestination) {
   EXPECT_TRUE(std::filesystem::is_symlink(output_));
   EXPECT_FALSE(std::filesystem::exists(root_ / "missing"));
   std::filesystem::remove(output_);
-  EXPECT_EQ(invoke(args(), true), 3) << stderr_;
+  EXPECT_EQ(invoke(args(), {.limit_write = true}), 3) << stderr_;
   EXPECT_NE(stderr_.find("write/close"), std::string::npos);
   EXPECT_FALSE(std::filesystem::exists(output_));
   EXPECT_EQ(read(input_), image);

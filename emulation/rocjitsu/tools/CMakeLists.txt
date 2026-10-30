@@ -3,14 +3,6 @@
 
 include(rj_configure_target)
 
-add_executable(rj_code_mutate rj_code_mutate.cpp)
-target_link_libraries(
-    rj_code_mutate
-    PRIVATE rocjitsu_dbt_internal rocjitsu_amdgpu_isa_model_registry
-)
-rj_configure_target(rj_code_mutate PRIVATE_INCLUDES WARNINGS)
-install(TARGETS rj_code_mutate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
 set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
@@ -42,6 +34,13 @@ rj_configure_target(rocjitsu_translate_cli TOOL)
 add_executable(rj_dbt_translate rj_dbt_translate_main.cpp)
 target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_translate_cli)
 rj_configure_target(rj_dbt_translate TOOL)
+
+add_executable(rj_code_mutate rj_code_mutate.cpp)
+target_link_libraries(
+    rj_code_mutate
+    PRIVATE rocjitsu_dbt_internal rocjitsu_amdgpu_isa_model_registry
+)
+rj_configure_target(rj_code_mutate PRIVATE_INCLUDES WARNINGS)
 
 add_executable(rj_decode_benchmark rj_decode_benchmark.cpp)
 target_link_libraries(
