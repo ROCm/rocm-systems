@@ -5984,8 +5984,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       CoopAdmit state = CoopAdmit::kAdmit;
       while ((state = queue->coopAdmitCheck(grid_fraction, &busy)) == CoopAdmit::kWait) {
         k.unlock();
-        Hsa::signal_wait_scacquire(busy->signal_, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
-                                   HSA_WAIT_STATE_BLOCKED);
+        WaitForSignal(busy->signal_);
         busy->release();
         k.lock();
       }
