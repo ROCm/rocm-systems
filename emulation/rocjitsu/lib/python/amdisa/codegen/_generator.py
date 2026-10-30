@@ -14334,6 +14334,14 @@ class CodeGenerator:
                                 if self.isa_spec.arch_name == 'rdna3'
                                 else 'src_operands_[operand_index] != &vaddr'
                             )
+                            single_address_spelling = (
+                                '  if (count == 1) {\n'
+                                '    out += "v" + std::to_string(registers[0]);\n'
+                                '    return;\n'
+                                '  }\n'
+                                if self.isa_spec.arch_name == 'rdna4'
+                                else ''
+                            )
                             inst_impls.append(
                                 cgen.Line(
                                     f'void {inst.fmt_name}::append_src_operand'
@@ -14347,6 +14355,7 @@ class CodeGenerator:
                                     '  const uint32_t count = '
                                     'amdgpu::image_coordinate_register_count(\n'
                                     '      inst_.dim, bool(inst_.a16));\n'
+                                    f'{single_address_spelling}'
                                     '  out += "[";\n'
                                     '  for (uint32_t index = 0; index < count; ++index) {\n'
                                     '    if (index != 0) out += ", ";\n'

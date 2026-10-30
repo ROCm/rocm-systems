@@ -59,6 +59,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -539,9 +540,9 @@ TEST(DecoderSmokeTest, Gfx1201ImageCachePolicyUsesOperationKind) {
   };
   constexpr TestCase cases[] = {
       {{{0xD0400000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
-       "image_load v0, [v0], s[0:7] th:TH_LOAD_BYPASS scope:SCOPE_SYS"},
+       "image_load v0, v0, s[0:7] th:TH_LOAD_BYPASS scope:SCOPE_SYS"},
       {{{0xD0418000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
-       "image_store v0, [v0], s[0:7] th:TH_STORE_BYPASS scope:SCOPE_SYS"},
+       "image_store v0, v0, s[0:7] th:TH_STORE_BYPASS scope:SCOPE_SYS"},
       {{{0xD0430000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
        "image_atomic_add_uint v0, s[0:7] th:TH_ATOMIC_NT_RETURN scope:SCOPE_SYS"},
       {{{0xE446C000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
@@ -554,6 +555,25 @@ TEST(DecoderSmokeTest, Gfx1201ImageCachePolicyUsesOperationKind) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words.data()));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->disassemble(), tc.expected_disassembly);
+  }
+}
+
+TEST(DecoderSmokeTest, Gfx1201SingleImageAddressUsesCanonicalRegisterSpelling) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &[dim, a16] :
+       {std::pair{amdgpu::kImageDim1d, false}, std::pair{amdgpu::kImageDim2d, true}}) {
+    for (const bool load : {false, true}) {
+      SCOPED_TRACE(testing::Message()
+                   << "dim=" << unsigned{dim} << " a16=" << a16 << " load=" << load);
+      const auto words = rdna4::build_vimage(
+          load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage,
+          {.dim = dim, .a16 = a16, .dmask = 1, .vdata = 8, .vaddr0 = 4, .vaddr1 = 9});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(inst->disassemble(),
+                load ? "image_load v8, v4, s[0:7]" : "image_store v8, v4, s[0:7]");
+    }
   }
 }
 

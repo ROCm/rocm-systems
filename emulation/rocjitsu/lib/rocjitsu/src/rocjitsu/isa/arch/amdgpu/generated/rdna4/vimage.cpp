@@ -64,6 +64,10 @@ void ImageLoadVimage::append_src_operand(std::string &out, uint8_t operand_index
   }
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  if (count == 1) {
+    out += "v" + std::to_string(registers[0]);
+    return;
+  }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
     if (index != 0)
@@ -276,6 +280,10 @@ void ImageStoreVimage::append_src_operand(std::string &out, uint8_t operand_inde
   }
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  if (count == 1) {
+    out += "v" + std::to_string(registers[0]);
+    return;
+  }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
     if (index != 0)
