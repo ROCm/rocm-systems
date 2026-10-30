@@ -66,6 +66,7 @@ fill_catalog(reader_catalog_t&                 catalog,
     {
         const std::size_t device = agent_id - 1;
         agent                    = std::make_shared<reader_types::agent_info_t>();
+        agent->id                = agent_id;
         agent->agent_type        = "GPU";
         agent->type_index        = device;
         agent->absolute_index    = device;

@@ -394,8 +394,9 @@ ph_ctx::initialize_node_agents()
     for(const auto& agent : m_agents)
     {
         m_c_agents.push_back(ph_agent_t{
-            .id         = static_cast<std::uint32_t>(agent->type_index),
+            .id         = static_cast<std::uint32_t>(agent->id),
             .agent_type = agent->agent_type.c_str(),
+            .type_index = static_cast<std::uint32_t>(agent->type_index),
             .absolute_index =
                 static_cast<std::uint32_t>(agent->absolute_index.value_or(0)),
             .logical_index = static_cast<std::uint32_t>(agent->logical_index.value_or(0)),

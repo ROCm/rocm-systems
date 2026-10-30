@@ -126,6 +126,7 @@ extern "C"
     {
         uint32_t    id;
         const char* agent_type;
+        uint32_t    type_index;
         uint32_t    absolute_index;
         uint32_t    logical_index;
         uint32_t    uuid;

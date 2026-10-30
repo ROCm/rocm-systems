@@ -215,6 +215,43 @@ TEST_F(writer_test, register_agent_info_nic_is_readable_after_flush)
     EXPECT_EQ(agents[0]->type_index, 0);
 }
 
+TEST_F(writer_test, register_agent_info_read_back_id_is_the_row_id_not_the_type_index)
+{
+    auto writer = make_writer();
+    register_node_and_process(*writer);
+
+    // Two CPUs and a GPU whose type_index (0) equals the first CPU's: the row ids
+    // 0, 1, 2 follow registration order, so the GPU's id differs from its type_index.
+    const std::pair<const char*, std::size_t> registered[] = { { "CPU", 0 },
+                                                               { "CPU", 1 },
+                                                               { "GPU", 0 } };
+    for(const auto& [type, type_index] : registered)
+    {
+        writer_types::agent_info_t agent_info;
+        agent_info.unique_id.agent_type = type;
+        agent_info.unique_id.type_index = type_index;
+        agent_info.node_id              = 1;
+        agent_info.process_id           = 100;
+        writer->register_agent_info(agent_info);
+    }
+
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    auto reader =
+        std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
+    const auto agents = reader->get_all_agents();
+
+    ASSERT_EQ(agents.size(), 3);
+    for(const auto& agent : agents)
+    {
+        const std::size_t expected_id =
+            agent->agent_type == "GPU" ? 2 : agent->type_index;
+        EXPECT_EQ(agent->id, expected_id)
+            << agent->agent_type << " type_index " << agent->type_index;
+    }
+}
+
 TEST_F(writer_test, register_pmc_info_with_nic_target_arch_is_readable_after_flush)
 {
     auto writer = make_writer();
