@@ -635,7 +635,7 @@ def create_summary_region_queries(
                 queries[per_rank_query_name] = summary_by_rank_query
 
     # Markers
-    if "MARKER" not in region_categories:
+    if "marker" not in region_categories:
         return queries
 
     markers_query_name = "markers"
@@ -646,15 +646,19 @@ def create_summary_region_queries(
     """
 
     # Create regular summary query
-    summary_query_name, summary_query = generate_summary_query(
-        markers_query_name, markers_query, name_column="marker_name"
-    )
-    queries[summary_query_name] = summary_query
-
-    # Create per-rank summary query
-    if by_rank:
+    if not by_rank:
+        summary_query_name, summary_query = generate_summary_query(
+            markers_query_name, markers_query, name_column="marker_name"
+        )
+        queries[summary_query_name] = summary_query
+    else:
+        # Create per-rank summary query
         per_rank_query_name, summary_by_rank_query = generate_summary_query(
-            markers_query_name, markers_query, name_column="marker_name", by_rank=True
+            markers_query_name,
+            markers_query,
+            name_column="marker_name",
+            by_rank=True,
+            by_rank_env_var=get_rank_env_variable_name(connection),
         )
         queries[per_rank_query_name] = summary_by_rank_query
 
