@@ -48,6 +48,12 @@ namespace
 void
 check_power_performance_level()
 {
+    // KFD profiler interface version 2+ forces the perfmon clock on for the duration of the
+    // lock (see counters::kfd_profiler_version()), which is what profile_standard previously
+    // had to be set manually for. The manual power_dpm_force_performance_level requirement
+    // only applies to older Linux kernels.
+    if(counters::kfd_profiler_version() > 1) return;
+
     // Check if power_dpm_force_performance_level is set to profile_standard
     // for GPU agents that support counter collection. gfx1100 up to (but not
     // including) gfx1250 requires profile_standard for stable counter

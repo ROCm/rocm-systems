@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -946,4 +947,28 @@ TEST(core, create_counter)
             }
         }
     }
+}
+
+// The perfmon-clock-forcing behavior was introduced at KFD profiler interface version 2 (see the
+// KFD_IOC_PROFILER_VERSION_NUM history in kfd_ioctl.h) and, being cumulative, remains supported by
+// any version >= 2 -- not just an exact match (a future kernel reporting a newer version must not
+// disable it). This threshold is pinned to the literal 2 rather than KFD_IOC_PROFILER_VERSION_NUM:
+// that macro is the latest version the header knows about and will keep climbing for unrelated
+// ops, so comparing against it here would mask the exact bug these tests guard against (the SDK
+// built against a newer header incorrectly requiring a newer kernel than this feature needs).
+TEST(kfd_profiler_version, perfmon_clock_not_supported_below_threshold)
+{
+    EXPECT_FALSE(counters::perfmon_clock_supported_for_version(0));
+    EXPECT_FALSE(counters::perfmon_clock_supported_for_version(1));
+}
+
+TEST(kfd_profiler_version, perfmon_clock_supported_at_threshold)
+{
+    EXPECT_TRUE(counters::perfmon_clock_supported_for_version(2));
+}
+
+TEST(kfd_profiler_version, perfmon_clock_supported_above_threshold)
+{
+    EXPECT_TRUE(counters::perfmon_clock_supported_for_version(3));
+    EXPECT_TRUE(counters::perfmon_clock_supported_for_version(100));
 }
