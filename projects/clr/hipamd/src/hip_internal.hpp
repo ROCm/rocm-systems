@@ -270,23 +270,35 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
     HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                  \
   }
 
-// Helper: invalidate all capturing streams and return an error code.
-#define INVALIDATE_ALL_CAPTURING_AND_RETURN(err)                                                   \
+// Device sync is not supported during any active capture — invalidate unconditionally.
+#define CHECK_SUPPORTED_DURING_CAPTURE()                                                           \
   if (!g_allCapturingStreams.empty()) {                                                            \
     for (auto stream : g_allCapturingStreams) {                                                    \
       stream->InvalidateCapture();                                                                 \
     }                                                                                              \
-    return err;                                                                                    \
+    return hipErrorStreamCaptureUnsupported;                                                       \
   }
 
-// Device sync is not supported during capture.
-#define CHECK_SUPPORTED_DURING_CAPTURE()                                                           \
-  INVALIDATE_ALL_CAPTURING_AND_RETURN(hipErrorStreamCaptureUnsupported)
-
-// Sync APIs (hipMemset, hipMemcpy, etc.) cannot be called when stream capture is active
-// for any capture mode (Global, ThreadLocal, or Relaxed).
+// Legacy-stream sync APIs (hipMemset, hipMemcpy, etc.) invalidate captures on
+// blocking streams or Global-mode captures. NonBlocking origins with ThreadLocal
+// or Relaxed capture are exempt only if none of their participants are blocking,
+// since a blocking participant retains its implicit legacy-stream dependency.
 #define CHECK_STREAM_CAPTURING()                                                                   \
-  INVALIDATE_ALL_CAPTURING_AND_RETURN(hipErrorStreamCaptureImplicit)
+  if (!g_allCapturingStreams.empty()) {                                                            \
+    bool anyInvalidated = false;                                                                   \
+    for (auto stream : g_allCapturingStreams) {                                                    \
+      if ((stream->Flags() & hipStreamNonBlocking) &&                                              \
+          stream->GetCaptureMode() != hipStreamCaptureModeGlobal &&                                \
+          !stream->HasBlockingParticipant()) {                                                     \
+        continue;                                                                                  \
+      }                                                                                            \
+      stream->InvalidateCapture();                                                                 \
+      anyInvalidated = true;                                                                       \
+    }                                                                                              \
+    if (anyInvalidated) {                                                                          \
+      return hipErrorStreamCaptureImplicit;                                                        \
+    }                                                                                              \
+  }
 
 #define STREAM_CAPTURE(name, stream, ...)                                                          \
   hip::getStreamPerThread(stream);                                                                 \
@@ -448,6 +460,16 @@ namespace hip {
     /// Enroll this stream in the capture that `member` takes part in. Membership is tracked on
     /// the capture's origin, so this publishes into the origin's set, not into `member`'s.
     void JoinCapture(hip::Stream* member);
+    /// Returns true if any participant in this capture is a blocking stream.
+    bool HasBlockingParticipant() const {
+      std::scoped_lock lock(lock_);
+      for (auto* participant : captureStreams_) {
+        if ((participant->Flags() & hipStreamNonBlocking) == 0) {
+          return true;
+        }
+      }
+      return false;
+    }
     /// Reset capture parameters, optionally keeping an invalidated status observable.
     /// The single entry point for capture teardown, on the origin and on participants alike,
     /// and the only place the captured graph is disposed of.

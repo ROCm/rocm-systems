@@ -1987,3 +1987,99 @@ graph:
   Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch:
     <<: *level_default
     tags: [exec]
+  Unit_hipMemset_LegacyStream_GlobalCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_LegacyStream_GlobalCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_LegacyStream_ThreadLocalCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_LegacyStream_ThreadLocalCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_LegacyStream_RelaxedCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_LegacyStream_RelaxedCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemcpy_LegacyStream_ThreadLocalCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemcpy_LegacyStream_RelaxedCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemcpy_LegacyStream_GlobalCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemcpy_LegacyStream_RelaxedCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_NonBlockingOrigin_BlockingParticipant_Relaxed_Invalidated:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipMemset_NonBlockingOrigin_BlockingParticipant_ThreadLocal_Invalidated:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_SameStream_GlobalCapture_BlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_SameStream_RelaxedCapture_NonBlockingStream:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_GlobalCapture_Blocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_ThreadLocalCapture_Blocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_RelaxedCapture_Blocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_GlobalCapture_NonBlocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_ThreadLocalCapture_NonBlocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_RelaxedCapture_NonBlocking_SyncNonBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_GlobalCapture_Blocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_ThreadLocalCapture_Blocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_RelaxedCapture_Blocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_GlobalCapture_NonBlocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_ThreadLocalCapture_NonBlocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_SameThread_RelaxedCapture_NonBlocking_SyncBlocking:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_GlobalCapture_Blocking_Invalidated:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_GlobalCapture_NonBlocking_Invalidated:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_ThreadLocalCapture_Blocking_Active:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_ThreadLocalCapture_NonBlocking_Active:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_RelaxedCapture_Blocking_Active:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamSync_DiffStream_CrossThread_RelaxedCapture_NonBlocking_Active:
+    <<: *level_default
+    tags: [capture]
