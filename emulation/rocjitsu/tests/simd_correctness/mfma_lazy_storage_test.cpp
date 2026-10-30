@@ -59,6 +59,7 @@ TEST(MfmaLazyStorageTest, F16SpecOutputCrossesChunksAndOverlapsInput) {
   constexpr uint32_t destination_and_source_a = MfmaLazyStorage::registers_per_chunk() - 1;
   constexpr uint32_t source_b = 64;
   constexpr uint32_t accumulator = 128;
+  constexpr uint32_t CONST_ONE = 0x3f800000u;
   ExactFixture fixture(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
   ASSERT_NE(fixture.wf, nullptr);
   // Overwrite the whole scalar result before restoring the overlapping source.
@@ -68,7 +69,7 @@ TEST(MfmaLazyStorageTest, F16SpecOutputCrossesChunksAndOverlapsInput) {
     fixture.seed(source_b, 2, Fmt::F16, Mode::RandomInt, 99);
     fixture.seed(accumulator, 32, Fmt::F32, Mode::RandomInt, 111);
   };
-  for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x3f800000u}) {
+  for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, CONST_ONE}) {
     auto kernel = [&] {
       amdgpu::exec_f32_mfma_f16_spec<32, 32, 4, 2>(
           *fixture.cu, fixture.vbase + destination_and_source_a,
