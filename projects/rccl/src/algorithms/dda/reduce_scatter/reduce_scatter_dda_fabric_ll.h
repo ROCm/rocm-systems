@@ -158,12 +158,10 @@ __launch_bounds__(512)
 #pragma unroll
         for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
           if (base + i < nRanks) {
-            union { v4u v; uint32_t w[4]; } u;
-            u.v = got[i];
-            d0[i] = u.w[0];
-            f0[i] = u.w[1];
-            d1[i] = u.w[2];
-            f1[i] = u.w[3];
+            d0[i] = got[i][0];
+            f0[i] = got[i][1];
+            d1[i] = got[i][2];
+            f1[i] = got[i][3];
           }
         }
 #else
