@@ -6517,7 +6517,13 @@ def test_generated_vop3_compare_dpp_masks_scalar_or_exec_destination(
             == 1
         )
         assert 'amdgpu::dpp::write_vop3_compare_result(' not in cmp_body
-        assert 'execute_v_cmp_eq_u32_vop3(*this, wf, commit_result)' in cmp_body
+        if arch in ('rdna3', 'rdna4'):
+            assert (
+                'arith::execute_compare<32>(wf, rj_arith_v_cmp_eq_u32_w32,' in cmp_body
+            )
+            assert re.search(r'false,\s*commit_result\);', cmp_body)
+        else:
+            assert 'execute_v_cmp_eq_u32_vop3(*this, wf, commit_result)' in cmp_body
         assert 'write_vgpr_storage' not in cmp_body
 
         cmpx_body = _generated_method_body(vop3, 'VCmpxEqU32Vop3', 'VCmpxLeU32Vop3')
@@ -6533,7 +6539,11 @@ def test_generated_vop3_compare_dpp_masks_scalar_or_exec_destination(
         if 'void VCmpTF32Vop3::execute_impl' in vop3:
             cmp_true_body = _generated_method_body(vop3, 'VCmpTF32Vop3', 'VCmpFF64Vop3')
             assert cmp_true_body.count('commit_result') >= 2
-            assert 'execute_v_cmp_t_f32_vop3' in cmp_true_body
+            if arch == 'rdna3':
+                assert 'arith::execute_float_compare<32>' in cmp_true_body
+                assert 'rj_arith_v_cmp_t_f32_w32,' in cmp_true_body
+            else:
+                assert 'execute_v_cmp_t_f32_vop3' in cmp_true_body
 
         cmp_class_body = _generated_method_body(
             vop3, 'VCmpClassF32Vop3', 'VCmpClassF64Vop3'
