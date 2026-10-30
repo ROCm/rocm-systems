@@ -23,6 +23,7 @@ set(SRC_FILES
   bootstrap.cc
   ce_coll.cc
   ce_sdma_queue.cc
+  ce_sdma_sync.cc
   cft_dev_runtime.cc
   channel.cc
   collectives.cc
@@ -180,6 +181,7 @@ set(SRC_FILES
   include/bootstrap.h
   include/ce_coll.h
   include/ce_sdma_queue.h
+  include/ce_sdma_sync.h
   include/ce_fault_inject.h
   include/channel.h
   include/checks.h

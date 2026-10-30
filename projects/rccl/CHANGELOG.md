@@ -6,9 +6,11 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Added
 * `ncclGinFlushTimeout` and `ncclGinWaitTimeout` support on the rocSHMEM GDA and Anvil SDMA GIN backends, along with `ncclGinFlushAsync` and `ncclGinWait` on rocSHMEM GDA. Flush and wait on both backends also return when the communicator is aborted, except blocking flush on Anvil SDMA.
+* `RCCL_CE_SDMA_SYNC` (default `0`): runs the waits, copies and flag updates of the hierarchical Copy Engine `ncclAllGather` as SDMA packet chains that one command-processor wait releases, so no stream memory-operation kernel needs a CU while a GEMM occupies the GPU. Requires `GPU_STREAMOPS_CP_WAIT=1` and gfx90a, gfx942 or gfx950, and must be set on every rank; communicator initialization fails if the platform cannot run it. Persistent plans, graph capture and multicast scatters keep the memop flow.
 
 ### Changed
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.
+* RCCL links `libhsakmt` (the static library from the ROCm SDK) in every build; it was linked only with rocSHMEM or GIN. The CE SDMA queues are created through the KFD thunk.
 
 ### Removed
 
