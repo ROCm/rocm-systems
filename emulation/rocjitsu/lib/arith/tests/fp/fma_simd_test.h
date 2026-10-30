@@ -38,6 +38,23 @@ void check_fma_simd(Call call, const std::vector<uint64_t> &instruction_flag_cas
               RJ_ARITH_SUCCESS);
     EXPECT_EQ(r.v[3][0] & (Width == 16 ? 0xffffU : 0xffffffffU), 0U);
   }
+  if constexpr (Width == 16) {
+    // Directed rounding can promote a tiny half result before output flushing.
+    for (uint64_t cpu : cpus) {
+      for (bool negative : {false, true}) {
+        Registers<10, Lanes> r{};
+        r.v[0][0] = 0x0800;
+        r.v[2][0] = negative ? 0x0ab1 : 0x8ab1;
+        r.v[4][0] = negative ? 0x8400 : 0x0400;
+        uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                         RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+                         (negative ? RJ_ARITH_FP_ROUND_DOWN : RJ_ARITH_FP_ROUND_UP);
+        ASSERT_EQ(call(flags, Mask(1), 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[6][0] & 0xffffU, negative ? 0x8400U : 0x0400U);
+      }
+    }
+  }
   std::minstd_rand rng;
   for (int sample = 0; sample < (Width == 16 ? 16 : 12); ++sample) {
     Registers<10, Lanes> input;
@@ -72,10 +89,13 @@ void check_fma_simd(Call call, const std::vector<uint64_t> &instruction_flag_cas
       }
     }
     for (uint64_t instruction_flags : instruction_flag_cases) {
-      for (uint64_t fp : {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN,
-                          RJ_ARITH_FP_ROUND_ZERO, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS,
-                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, RJ_ARITH_FP16_OVFL,
-                          RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
+      for (uint64_t fp :
+           {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO,
+            RJ_ARITH_FP_ROUND_UP | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+            RJ_ARITH_FP_ROUND_DOWN | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+            RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+            RJ_ARITH_FP16_OVFL,
+            RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
         for (uint64_t semantics :
              {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
