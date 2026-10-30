@@ -242,3 +242,26 @@ def test_sanitize_errors_when_operator_flag_without_trace(
         ).sanitize()
     assert "was not profiled" in errors[-1][1]
     assert expected_trace in errors[-1][1]
+
+
+def test_sanitize_rejects_invalid_output_name(tmp_path, monkeypatch) -> None:
+    """An --output-name outside [A-Za-z0-9_-] errors before any output is checked."""
+    workload = tmp_path / "app" / "MI300"
+    workload.mkdir(parents=True)
+    (workload / "profiling_config.yaml").write_text("", encoding="utf-8")
+    monkeypatch.setattr(f"{MODULE}.validate_workload", lambda path: None)
+    errors = []
+    monkeypatch.setattr(
+        f"{MODULE}.console_error", functools.partial(record_error_and_exit, errors)
+    )
+
+    with pytest.raises(SystemExit):
+        OmniAnalyze_Base(
+            argparse.Namespace(
+                path=[[str(workload)]], output_name="bad name", output_format="txt"
+            ),
+            {},
+        ).sanitize()
+
+    assert errors[-1][0] == "analysis"
+    assert "only alphanumeric characters" in errors[-1][1]

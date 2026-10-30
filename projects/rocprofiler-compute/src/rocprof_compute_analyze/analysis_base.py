@@ -3,7 +3,6 @@
 
 import argparse
 import copy
-import re
 import sys
 from abc import abstractmethod
 from collections import OrderedDict
@@ -12,6 +11,10 @@ from typing import Any, Optional, TextIO
 
 import pandas as pd
 
+from rocprof_compute_analyze.output_location import (
+    InvalidOutputNameError,
+    validate_output_name,
+)
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
@@ -333,13 +336,10 @@ class OmniAnalyze_Base:
 
         # Ensure analysis output does not overwrite existing files
         if args.output_name:
-            if not re.match(r"^[A-Za-z0-9_-]+$", args.output_name):
-                console_error(
-                    "analysis",
-                    "Analysis output file/folder name must "
-                    "contain only alphanumeric characters "
-                    "or underscores (_), hyphens (-).",
-                )
+            try:
+                validate_output_name(args.output_name)
+            except InvalidOutputNameError as error:
+                console_error("analysis", str(error))
 
             path_to_check = args.output_name
             if args.output_format in ("txt", "db"):
