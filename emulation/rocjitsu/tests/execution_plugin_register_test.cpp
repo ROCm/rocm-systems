@@ -17,6 +17,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "util/host_target.h"
@@ -162,6 +163,8 @@ TEST(ExecutionPluginTest, MultiplyClassificationPreservesActiveReadsAndException
   for (const auto &[arch, opcode] : targets) {
     SCOPED_TRACE(static_cast<int>(arch));
     Wave32PluginFixture f(arch);
+    // Explicitly require faithful FP status for this exception test.
+    f.cu->restore_arithmetic_policy({amdgpu::ArithmeticSemantics::BitExactEmpirical});
     auto *plugin = f.attach_ordering_plugin();
     auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
     ASSERT_NE(wf, nullptr);

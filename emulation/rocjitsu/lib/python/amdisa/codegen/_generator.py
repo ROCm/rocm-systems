@@ -6695,16 +6695,33 @@ class CodeGenerator:
         self._enc_name = enc_name
 
         from amdisa.codegen.execute.rj_arith_float import (
+            gen_float_unary32,
+            gen_float_unary64,
+            gen_float64_word,
             gen_float_fma64,
+            gen_float_binary64,
+            gen_float_unary16,
+            gen_float_binary32,
+            gen_float_binary16,
             gen_float_fma32,
             gen_float_fma16,
+            gen_float_ternary_selection,
             gen_packed_fma16,
             gen_mixed_fma,
+            gen_packed_binary16,
         )
 
         if result_writer is None:
             rj_arith_body = (
-                gen_packed_fma16(
+                gen_packed_binary16(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                )
+                or gen_packed_fma16(
                     self.isa_spec.arch_name,
                     inst.name,
                     dst_ops,
@@ -6722,7 +6739,31 @@ class CodeGenerator:
                     self._vop3p_opsel_exprs(),
                     self._op_sel_hi_2_expr(inst.enc_name),
                 )
+                or gen_float_unary16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_unary32(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_unary64(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_binary64(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
                 or gen_float_fma64(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float64_word(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_binary16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_binary32(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_ternary_selection(
                     self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
                 )
                 or gen_float_fma16(
