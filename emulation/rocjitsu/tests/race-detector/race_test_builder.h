@@ -89,13 +89,13 @@ public:
 
   /// Register a tensor DMA load into LDS (tracked by tensorcnt). The load
   /// writes every range; it is validated against outstanding LDS reads.
-  void tensorLoad(int wave, std::vector<amdgpu::TensorDmaLdsRange> ranges, int elementBytes = 4) {
+  void tensorLoad(int wave, std::vector<LdsByteRange> ranges, int elementBytes = 4) {
     tensorTransfer(wave, MemoryEventType::GLOBAL_TO_LDS, ranges, elementBytes);
   }
 
   /// Register a tensor DMA store from LDS (tracked by tensorcnt). The store
   /// reads every range; it is validated against outstanding LDS writes.
-  void tensorStore(int wave, std::vector<amdgpu::TensorDmaLdsRange> ranges, int elementBytes = 4) {
+  void tensorStore(int wave, std::vector<LdsByteRange> ranges, int elementBytes = 4) {
     tensorTransfer(wave, MemoryEventType::LDS_TO_GLOBAL, ranges, elementBytes);
   }
 
@@ -336,8 +336,8 @@ public:
 
 private:
   /// A transfer has no lanes; its violations report lane -1.
-  void tensorTransfer(int wave, MemoryEventType type,
-                      std::span<const amdgpu::TensorDmaLdsRange> ranges, int elementBytes) {
+  void tensorTransfer(int wave, MemoryEventType type, std::span<const LdsByteRange> ranges,
+                      int elementBytes) {
     constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
     for (const auto &range : ranges) {
       const int addr = static_cast<int>(range.address);

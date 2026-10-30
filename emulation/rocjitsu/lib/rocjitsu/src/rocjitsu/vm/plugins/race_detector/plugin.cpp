@@ -507,8 +507,12 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaMemoryAccess(
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
   const int elementBytes = static_cast<int>(access.element_size_bytes);
 
-  // A transfer has no lanes; its violations report lane -1.
+  // A transfer has no lanes; its violations report lane -1. The core takes its
+  // own range type, independent of the observation protocol.
+  std::vector<LdsByteRange> ranges;
+  ranges.reserve(access.lds_ranges.size());
   for (const auto &range : access.lds_ranges) {
+    ranges.push_back({.address = range.address, .bytes = range.bytes});
     const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, elementBytes);
     if (bytes == 0)
       continue;
@@ -524,7 +528,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaMemoryAccess(
   rs->registerLdsRangeEvent(access.instruction_pc,
                             access.is_load ? MemoryEventType::GLOBAL_TO_LDS
                                            : MemoryEventType::LDS_TO_GLOBAL,
-                            access.lds_ranges, elementBytes, obligations, memoryOrder);
+                            ranges, elementBytes, obligations, memoryOrder);
 }
 
 void RaceDetectorPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,

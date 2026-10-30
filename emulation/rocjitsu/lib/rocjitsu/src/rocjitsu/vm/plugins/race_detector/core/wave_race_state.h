@@ -7,7 +7,6 @@
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/profiler_interface.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
-#include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -125,7 +124,7 @@ public:
   /// a tensor DMA transfer. The event has no registers. Each range is retained
   /// in whole elements of elementBytes that fit the LDS backing.
   void registerLdsRangeEvent(uint64_t pc, MemoryEventType type,
-                             std::span<const amdgpu::TensorDmaLdsRange> ranges, int elementBytes,
+                             std::span<const LdsByteRange> ranges, int elementBytes,
                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                              MemoryOrderClass memoryOrder);
 
