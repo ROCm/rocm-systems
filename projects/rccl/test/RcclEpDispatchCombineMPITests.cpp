@@ -169,11 +169,9 @@ protected:
         numExperts_ = numExperts;
         topk_       = numTopk;
 
-        std::vector<char> uid(static_cast<size_t>(ep_unique_id_size()), 0);
-        int idOk = (rank_ != 0 || ep_get_unique_id(uid.data()) == 0) ? 1 : 0;
-        ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Bcast(uid.data(), static_cast<int>(uid.size()), MPI_BYTE, 0,
-                                             MPI_COMM_WORLD));
-        ASSERT_MPI_EQ(1, idOk);
+        std::vector<char> uid;
+        BroadcastUid(&uid);
+        if (HasFatalFailure() || IsSkipped()) return;
 
         handle_ = ep_create(rank_, nRanks_, uid.data(), kTokens, kHidden, device_);
         ASSERT_MPI_TRUE(handle_ != nullptr);
@@ -190,17 +188,22 @@ protected:
         return static_cast<int>(owners.size());
     }
 
+    // Rank 0 makes a unique id and every rank gets a copy.
+    void BroadcastUid(std::vector<char>* uid)
+    {
+        uid->assign(static_cast<size_t>(ep_unique_id_size()), 0);
+        int idOk = (rank_ != 0 || ep_get_unique_id(uid->data()) == 0) ? 1 : 0;
+        ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Bcast(uid->data(), static_cast<int>(uid->size()), MPI_BYTE, 0,
+                                             MPI_COMM_WORLD));
+        ASSERT_MPI_EQ(1, idOk);
+    }
+
     // Bounded ep_create: a missed num_ranks rejection would wait in init for ranks that never join.
-    void CreateBounded(int numRanks, int maxTokens, int hidden, void** out, bool* finished)
+    void CreateBounded(const std::vector<char>& uid, int numRanks, int maxTokens, int hidden, void** out,
+                       bool* finished)
     {
         *out      = nullptr;
         *finished = false;
-        std::vector<char> uid(static_cast<size_t>(ep_unique_id_size()), 0);
-        int idOk = (rank_ != 0 || ep_get_unique_id(uid.data()) == 0) ? 1 : 0;
-        ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Bcast(uid.data(), static_cast<int>(uid.size()), MPI_BYTE, 0,
-                                             MPI_COMM_WORLD));
-        ASSERT_MPI_EQ(1, idOk);
-
         auto result = std::make_shared<std::promise<void*>>();
         std::future<void*> done = result->get_future();
         std::thread worker([result, uid, rank = rank_, numRanks, maxTokens, hidden, dev = device_]() {
@@ -422,9 +425,10 @@ TEST_F(RcclEpDispatchCombineTest, CreateRejectsOutOfRangeArguments)
         GTEST_SKIP() << "rccl_ep needs NCCL_CUMEM_ENABLE=1 and 8 ranks on a single node";
     }
 
+    constexpr int kEpMaxRanks = 16;  // rccl_ep's kMaxRanks. This file stays off rccl_ep's device headers.
     struct Case { const char* name; int numRanks; int maxTokens; int hidden; };
     const Case rejected[] = {
-        {"num_ranks kMaxRanks + 1",    17,      kTokens, kHidden},
+        {"num_ranks kMaxRanks + 1",    kEpMaxRanks + 1, kTokens, kHidden},
         {"max_tokens_per_rank 0",      nRanks_, 0,       kHidden},
         {"max_tokens_per_rank -1",     nRanks_, -1,      kHidden},
         {"hidden 7 (not a multiple)",  nRanks_, kTokens, 7},
@@ -432,11 +436,14 @@ TEST_F(RcclEpDispatchCombineTest, CreateRejectsOutOfRangeArguments)
         {"hidden 0",                   nRanks_, kTokens, 0},
         {"hidden -8",                  nRanks_, kTokens, -8},
     };
+    // A rejected create never reaches init, so all rejected cases share one id.
+    std::vector<char> uid;
+    ASSERT_EP_STEP(BroadcastUid(&uid));
     for (const Case& c : rejected) {
         SCOPED_TRACE(c.name);
         void* h        = nullptr;
         bool  finished = false;
-        ASSERT_EP_STEP(CreateBounded(c.numRanks, c.maxTokens, c.hidden, &h, &finished));
+        ASSERT_EP_STEP(CreateBounded(uid, c.numRanks, c.maxTokens, c.hidden, &h, &finished));
         ASSERT_MPI_TRUE(finished);
         if (h != nullptr) ep_destroy(h);
         ASSERT_MPI_TRUE(h == nullptr);
@@ -453,7 +460,8 @@ TEST_F(RcclEpDispatchCombineTest, CreateRejectsOutOfRangeArguments)
 
     void* h        = nullptr;
     bool  finished = false;
-    ASSERT_EP_STEP(CreateBounded(nRanks_, /*maxTokens=*/1, /*hidden=*/8, &h, &finished));
+    ASSERT_EP_STEP(BroadcastUid(&uid));
+    ASSERT_EP_STEP(CreateBounded(uid, nRanks_, /*maxTokens=*/1, /*hidden=*/8, &h, &finished));
     ASSERT_MPI_TRUE(finished);
     handle_ = h;  // TearDown destroys it
     ASSERT_MPI_TRUE(handle_ != nullptr);
