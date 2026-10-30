@@ -582,29 +582,39 @@ each call, and the caller owns the result, so a plugin may keep it.
 Formatting text for every executed instruction is expensive when little of it
 is ever printed. A plugin that needs text only when it reports something can
 instead copy the instruction's PC and encoding as it executes, and disassemble
-the copy when the report is written. The encoding has `size() / 4` words, at
-most four (the CU's 16-byte fetch window), and `raw_encoding()` is null when
-the instruction has no encoding.
+the copy when the report is written. Validate the encoding before copying it:
+`raw_encoding()` is null when the instruction has no encoding, and the copy
+needs `size()` to be a positive multiple of four bytes that fits the buffer.
+An encoding is at most four words (the CU's 16-byte fetch window). The example
+rejects anything else at capture, as the race detector does, so every stored
+copy can be disassembled.
 
 ```cpp
 // Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().
 struct LastInstruction : WavefrontState {
   uint64_t pc = 0;
   std::array<uint32_t, 4> words{};
-  size_t word_count = 0;
+  size_t word_count = 0; // Zero until the wave executes an instruction.
 };
 
 void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                       amdgpu::Wavefront &wf) override {
   auto &last = *static_cast<LastInstruction *>(wf.plugin_state(slot_index()));
+  const int bytes = inst.size();
+  if (!inst.raw_encoding() || bytes <= 0 || bytes % sizeof(uint32_t) != 0 ||
+      static_cast<size_t>(bytes) > sizeof(last.words))
+    throw std::logic_error(std::format("instruction at PC {:#x} has no valid encoding", pc));
   last.pc = pc;
-  last.word_count = inst.raw_encoding() ? inst.size() / sizeof(uint32_t) : 0;
+  last.word_count = bytes / sizeof(uint32_t);
   std::copy_n(inst.raw_encoding(), last.word_count, last.words.begin());
 }
 
 // Later, when a report about this wave needs text:
-std::string text = wf.disassemble_instruction(
-    std::span(last.words).first(last.word_count), last.pc);
+if (last.word_count != 0) {
+  std::string text = wf.disassemble_instruction(
+      std::span(last.words).first(last.word_count), last.pc);
+  // ...
+}
 ```
 
 `Wavefront::disassemble_instruction` decodes the copy with the wave's CU target
