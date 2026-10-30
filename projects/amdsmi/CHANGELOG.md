@@ -39,6 +39,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - When a WDDM sensor was unavailable, `amdsmi_get_clock_info()`, `amdsmi_get_gpu_busy_percent()`, `amdsmi_get_gpu_activity()`, `amdsmi_get_pcie_info()` and `amdsmi_get_power_cap_info()` returned a raw value or zero, or failed. Those fields now report `N/A`.
   - `amdsmi_get_clk_freq()` and `amdsmi_get_gpu_fan_speed()` return `AMDSMI_STATUS_NOT_SUPPORTED` in that case.
 
+- **Fixed `amd-smi list` and `amd-smi static` showing a placeholder UUID instead of `N/A` on WSL APUs without an ASIC serial**.  
+  - Affects APUs such as Ryzen AI Max (Strix Halo) under WSL. `amdsmi_get_gpu_device_uuid()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` in that case.
+
 ### Upcoming Changes
 
 - **CUIDs (Component Unified IDs) will replace UUIDs in an upcoming release**.  
@@ -185,9 +188,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed APU core and skin temperatures showing `0.0 °C` when the sensor is not measured**.  
   - On APUs such as Ryzen AI Max (Strix Halo), `amd-smi metric` and the library now report these readings as not available instead of a false 0 °C.
-
-- **Fixed `amd-smi list`/`amd-smi static` reporting a placeholder UUID instead of `N/A` on WSL APUs without an ASIC serial**.  
-  - On WSL2/DXG with APUs such as Ryzen AI Max (Strix Halo / gfx1151), HSA-KMT reports its "unavailable" sentinel for `UniqueID`, which was packed into a UUID-shaped string instead of surfacing `N/A`. `amdsmi_get_gpu_device_uuid()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` for that case.
 
 - **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
   - `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`) instead of the GPU-to-CPU xGMI link traffic.
