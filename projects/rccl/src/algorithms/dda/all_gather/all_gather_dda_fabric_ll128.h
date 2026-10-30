@@ -2,9 +2,8 @@
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * LL128-protocol all-gather device kernel for the DDA fabric path (gfx1250).
- * A slice is 2 KiB, eight uint64 registers per lane; a warp moves one at a
- * time. No GPU barrier; staging uses comm->ddaScratch reached via
- * comm->ddaPeerPtrsDev.
+ * A warp owns one 2 KiB slice: eight uint64 registers per lane. 
+ * No GPU barrier; staging uses comm->ddaScratch reached via comm->ddaPeerPtrsDev.
  *
  * See LICENSE.txt for license information.
  ************************************************************************/
@@ -33,64 +32,11 @@ constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
-// Packs this warp's L slices s0 + u * wstride (u < L) and pushes them to the
-// peer's slot. Kept free of branches between the loads and the stores: any branch
-// there makes each slice's loads land before the next slice's are issued.
-template <int L>
-__device__ __forceinline__ void ddaLL128AgSendSlices(const int8_t* srcBytes, uint64_t* scatterSlot,
-                                                     size_t perRankBytes, size_t s0, size_t wstride,
-                                                     uint64_t flag, int lane, bool flagLane) {
-  uint64_t regs[L][kDdaLL128WordsPerThread];
-#pragma unroll
-  for (int u = 0; u < L; ++u) {
-    const size_t dataByte = (s0 + (size_t)u * wstride) * (size_t)kDdaLL128DataBytesPerSlice;
-    const size_t rem = perRankBytes - dataByte;
-    const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-    ddaLL128LoadRegsBegin<int8_t>(regs[u], srcBytes + dataByte, eltInSlice, lane, flagLane);
-  }
-#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_sched_barrier)
-  // Without it the scheduler moves the flag-lane shuffle up between the loads, and
-  // the loads after the shuffle wait for the ones before it.
-  __builtin_amdgcn_sched_barrier(0);
-#endif
-#pragma unroll
-  for (int u = 0; u < L; ++u) {
-    ddaLL128LoadRegsFinish(regs[u], flagLane);
-    ddaLL128StoreWire(scatterSlot + (s0 + (size_t)u * wstride) * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
-                      regs[u], flag, flagLane);
-  }
-}
-
-// Polls this warp's L slices s0 + u * wstride (u < L) in the peer's slot and
-// unpacks them. Straight-line like ddaLL128AgSendSlices, so the polls of all L
-// slices are in flight together. Returns false if the comm abort flag is set.
-template <int L>
-__device__ __forceinline__ bool ddaLL128AgRecvSlices(const uint64_t* gatherSlot, int8_t* dstBytes,
-                                                     size_t perRankBytes, size_t s0, size_t wstride,
-                                                     uint64_t flag, int lane, bool flagLane,
-                                                     DdaKernelParams params) {
-  const uint64_t* wire[L];
-#pragma unroll
-  for (int u = 0; u < L; ++u) {
-    wire[u] = gatherSlot + (s0 + (size_t)u * wstride) * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
-  }
-  uint64_t vr[L][kDdaLL128WordsPerThread];
-  if (!ddaLL128PollWireN<L>(wire, vr, flag, lane, params)) return false;
-#pragma unroll
-  for (int u = 0; u < L; ++u) {
-    const size_t dataByte = (s0 + (size_t)u * wstride) * (size_t)kDdaLL128DataBytesPerSlice;
-    const size_t rem = perRankBytes - dataByte;
-    const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-    ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr[u], eltInSlice, lane, flagLane);
-  }
-  return true;
-}
-
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
-// peer; grid.y splits that peer's slices across blocks, and a warp takes one of
-// its slices at a time. Each column packs this rank's payload into its peer's
-// slot, then polls its own slot for that peer's payload and unpacks it.
-template <typename T>
+// peer; grid.y splits that peer's slices across blocks, one
+// warp per slice. Each column packs this rank's payload into its peer's slot,
+// then polls its own slot for that peer's payload and unpacks it.
+template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
@@ -98,12 +44,14 @@ __launch_bounds__(1024)
                                           T* __restrict__ recvbuff, // local user output
                                           const T* __restrict__ sendbuff, // local user input
                                           size_t perRankBytes, // per-rank payload; multiple of 16
-                                          int selfRank, int nRanks,
+                                          int selfRank, int nRanksRt,
                                           uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                           int epochLen, // number of cells in epochDev
                                           size_t slicesTotal, // slices this call uses
                                           size_t bankSize, // scratch bank size (from host)
                                           DdaKernelParams params) {
+
+  const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
   const int nPeers = (int)blockIdx.x;
   const int peer = (selfRank + nPeers + 1) % nRanks;
@@ -137,7 +85,14 @@ __launch_bounds__(1024)
 
   // Phase 1: pack and push this column's slices to the one peer it owns.
   for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    ddaLL128AgSendSlices<1>(srcBytes, scatterSlot, perRankBytes, s, wstride, flag, lane, flagLane);
+    const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
+    const size_t rem = perRankBytes - dataByte;
+    const int eltInSlice =
+      rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+    uint64_t regs[kDdaLL128WordsPerThread];
+    ddaLL128LoadRegsBatched<int8_t>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
+    ddaLL128StoreWire(
+      scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
   }
 
   // Local copy sendbuff -> recvbuff[selfRank].
@@ -154,9 +109,16 @@ __launch_bounds__(1024)
 
   // Phase 2: poll the same slices in that peer's slot and unpack.
   for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    if (!ddaLL128AgRecvSlices<1>(gatherSlot, dstBytes, perRankBytes, s, wstride, flag, lane, flagLane, params)) {
+    const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
+    const size_t rem = perRankBytes - dataByte;
+    const int eltInSlice =
+      rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+    uint64_t vr[kDdaLL128WordsPerThread];
+    if (!ddaLL128PollWireBatched(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
+                                 params)) {
       break; // not return: every thread must reach the __syncthreads below
     }
+    ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
   }
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
   asm volatile("s_wait_storecnt 0x0" ::: "memory");

@@ -21,19 +21,10 @@
 #include <cstdint>
 #include <utility>
 
-// Tuned block size, and the fallback when the env override is out of range.
+// Block size when neither a valid RCCL_DDA_LL128_AG_THREADS nor the arch table sets one.
 constexpr unsigned kDdaLL128AGDefaultThreads = 512;
-// Grid budget for this tier, applied under RCCL_DDA_FABRIC_MAXBLOCKS to messages
-// above the size below; 0 or less leaves only the fabric-wide cap.
-constexpr int kDdaLL128AGDefaultMaxBlocks = 75;
-// Total message size above which the budget applies. At 2 MiB and below it only
-// binds across hosts, where it costs more time than the CUs it saves.
-constexpr size_t kDdaLL128AGMaxBlocksAboveBytes = (size_t)2 * 1024 * 1024;
 
-RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", kDdaLL128AGDefaultThreads);
-RCCL_PARAM(DdaLL128AGMaxBlocks, "DDA_LL128_AG_MAXBLOCKS", kDdaLL128AGDefaultMaxBlocks);
-RCCL_PARAM(DdaLL128AGMaxBlocksAboveBytes, "DDA_LL128_AG_MAXBLOCKS_ABOVE_BYTES",
-           (int64_t)kDdaLL128AGMaxBlocksAboveBytes);
+RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
 
 namespace {
 
@@ -62,11 +53,6 @@ unsigned ddaLL128AGThreads(unsigned blockSize) {
   return blockSize;
 }
 
-size_t ddaLL128AGMaxBlocksAboveBytes() {
-  const int64_t UserInput = rcclParamDdaLL128AGMaxBlocksAboveBytes();
-  return UserInput >= 0 ? (size_t)UserInput : kDdaLL128AGMaxBlocksAboveBytes;
-}
-
 // Blocks in one peer column: a warp per slice, capped by the column's share of
 // the grid budget.
 unsigned ddaLL128AGBlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t totalBlockCap) {
@@ -79,17 +65,14 @@ unsigned ddaLL128AGBlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t
 }
 
 // Single source of the launch geometry: grid.x = one column per remote peer,
-// grid.y = the per-peer slice split, capped by the tier's grid budget.
+// grid.y = the per-peer slice split.
 static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, size_t perRankBytes) {
   const size_t totalBytes = perRankBytes * (size_t)comm->nRanks;
-  const unsigned threads = ddaLL128AGThreads(kDdaLL128AGDefaultThreads);
+  const int tuned = rcclDdaFabricAgLL128Threads(comm, totalBytes);
+  const unsigned threads = ddaLL128AGThreads(tuned > 0 ? (unsigned)tuned : kDdaLL128AGDefaultThreads);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
-  int nBlocksMax = comm->ddaFabricMaxBlocks;
-  const int64_t agMaxBlocks = rcclParamDdaLL128AGMaxBlocks();
-  if (totalBytes > ddaLL128AGMaxBlocksAboveBytes() && agMaxBlocks > 0 && agMaxBlocks < nBlocksMax) {
-    nBlocksMax = (int)agMaxBlocks;
-  }
+  int nBlocksMax = rcclDdaFabricAgLL128Blocks(comm, totalBytes);
   if (nBlocksMax < 1) nBlocksMax = 1;
   if (nBlocksMax < nPeers) nBlocksMax = nPeers;
   const unsigned blocksPerPeer =
@@ -124,9 +107,24 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                        stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                        perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+  // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
+  switch (nRanks) {
+  case 4:
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+    break;
+  case 8:
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+    break;
+  default:
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+    break;
+  }
 
   CUDACHECK(cudaGetLastError());
 

@@ -209,16 +209,10 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
     if (flag) regs[2 * g] = regs[2 * g - 1];
 }
 
-// ddaLL128LoadRegs in two halves (as prims_ll128's loadRegsBegin/Finish), and with
-// no per-lane branches, so that a warp can issue several slices' loads before it
-// waits on any: a load behind a branch has to land before the next one issues.
-// Every lane issues all four loads, and a lane with no chunk of its own reads one
-// that is in bounds instead: a flag lane's odd pairs read the neighbouring lane's
-// chunk, which ddaLL128LoadRegsFinish and the flag word overwrite, and lanes past
-// eltN read the slice's first chunk, which the receiver never unpacks. `src` must
-// hold at least 16 bytes.
+// ddaLL128LoadRegs without per-lane branches, so all four loads are in flight before the warp waits.
+// A lane with no chunk of its own reads an in-bounds one that is overwritten or never unpacked.
 template <typename T>
-__device__ __forceinline__ void ddaLL128LoadRegsBegin(
+__device__ __forceinline__ void ddaLL128LoadRegsBatched(
     uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
@@ -227,9 +221,11 @@ __device__ __forceinline__ void ddaLL128LoadRegsBegin(
     const int elt = ix * EltPer16B < eltN ? ix * EltPer16B : 0;
     ddaLL128Load16B(reinterpret_cast<const uint64_t*>(src + elt), regs[2 * g], regs[2 * g + 1]);
   }
-}
-
-__device__ __forceinline__ void ddaLL128LoadRegsFinish(uint64_t (&regs)[kDdaLL128WordsPerThread], bool flag) {
+#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_sched_barrier)
+  // Without it the scheduler moves the shuffle below up between the loads, and the
+  // loads after the shuffle wait for the ones before it.
+  __builtin_amdgcn_sched_barrier(0);
+#endif
 #pragma unroll
   for (int g = 1; g < kDdaLL128Pairs; g += 2)  // move flag-lane data out of odd regs
     if (flag) regs[2 * g] = regs[2 * g - 1];
@@ -268,15 +264,10 @@ __device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t 
   return true;
 }
 
-// ddaLL128PollWire over N slices at once: every slice's loads are issued before any
-// flag is checked, so their reads are in flight together. A line whose flag matched
-// is not read again, which relies on cooperative loads reading each 128-byte line as
-// one unit; plain 16-byte loads can tear across a line's lanes. Returns false if the
-// comm abort flag is set so the kernel can leave the wait.
-template <int N>
-__device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[N],
-                                                  uint64_t (&vr)[N][kDdaLL128WordsPerThread], uint64_t flag,
-                                                  int wid, DdaKernelParams params) {
+// ddaLL128PollWire with every load issued before any flag check, and no second read.
+// Skipping the second read relies on cooperative loads reading each 128-byte line as one unit.
+__device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread],
+                                                        uint64_t flag, int wid, DdaKernelParams params) {
   const bool flagLane = ddaLL128IsFlagLane(wid);
   int spins = 0;
   bool needReload;
@@ -284,17 +275,11 @@ __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[
     if (params.abortSpinTick(spins)) return false;
     needReload = false;
 #pragma unroll
-    for (int k = 0; k < N; ++k) {
+    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+      ddaLL128LoadAtomic16B(wire + u * kDdaLL128Warp, vr[u], vr[u + 1]);
 #pragma unroll
-      for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
-        ddaLL128LoadAtomic16B(wire[k] + u * kDdaLL128Warp, vr[k][u], vr[k][u + 1]);
-    }
-#pragma unroll
-    for (int k = 0; k < N; ++k) {
-#pragma unroll
-      for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
-        needReload |= flagLane && (vr[k][u + 1] != flag);
-    }
+    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+      needReload |= flagLane && (vr[u + 1] != flag);
   } while (__any(needReload));
   return true;
 }

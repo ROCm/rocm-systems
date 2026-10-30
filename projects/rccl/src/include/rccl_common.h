@@ -384,6 +384,10 @@ size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
 // Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the init cap,
 // lowered on large comms per rcclArchThresholds::ddaVmmBlockBudget.
 int rcclDdaFabricVmmBlocks(const ncclComm* comm);
+// DDA LL128 AllGather block size for this total from the arch table, or 0 when it sets none.
+int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes);
+// Blocks the DDA LL128 AllGather may launch for this total: the init cap, lowered by the arch table.
+int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes);
 
 // Cap for the DDA entry gate: the max of the LL, LL128 and VMM caps above,
 // skipping tiers turned off by RCCL_DDA_LL / RCCL_DDA_LL128. Pass this to
