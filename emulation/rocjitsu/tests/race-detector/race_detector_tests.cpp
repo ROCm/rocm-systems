@@ -1506,6 +1506,79 @@ TEST(RaceDetector, TensorDma_StoreReadsSameWaveCompletedDtlSafe) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, TensorDma_TransferWithoutRangesTakesACounterSlot) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoad(/*wave=*/0, {});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_EachTransferWithoutRangesTakesOneCounterSlot) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoad(/*wave=*/0, {});
+  b.tensorLoad(/*wave=*/0, {});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/2);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_PartialWaitRetiresAnOlderTransferWithoutRanges) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoad(/*wave=*/0, {});
+  b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(4));
+}
+
+TEST(RaceDetector, TensorDma_StoreWithoutRangesTakesACounterSlot) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorStore(/*wave=*/0, {});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_TransferWithoutRangesConflictsWithNothing) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoad(/*wave=*/0, {});
+  b.tensorStore(/*wave=*/0, {});
+  for (int wave : {0, 1}) {
+    b.checkLdsRead(wave, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    b.checkLdsWrite(wave, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  }
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_RetiredTransferWithoutRangesNoLongerCounts) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoad(/*wave=*/0, {});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
+  b.barrier();
+  b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoad(/*wave=*/0, {{.address = 64, .bytes = 16}});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(64));
+}
+
+TEST(RaceDetector, TensorDma_UnwaitedTransferWithoutRangesKeepsItsSlotAcrossBarrier) {
+  // A barrier retires only transfers their wave has waited for.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoad(/*wave=*/0, {});
+  b.barrier();
+  b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(4));
+}
+
 TEST(RaceDetector, TensorDma_RangeEdgesAreBytePrecise) {
   RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoad(/*wave=*/0, {{.address = 0, .bytes = 16}});
