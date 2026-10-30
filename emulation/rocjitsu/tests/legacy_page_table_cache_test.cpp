@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <pthread.h>
+#include <string_view>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -76,7 +77,15 @@ TEST(LegacyPageTableCacheStateTest, AdapterDoesNotInstallFailedRegistration) {
     result.page_table_cache_state = process.page_table_cache_state();
     return result;
   };
-  EXPECT_FALSE(adapter.register_address_space(7, registration(), {}, diagnostic.emitter()));
+  unsigned diagnostic_count = 0;
+  auto report = [&](std::string_view message) {
+    ++diagnostic_count;
+    EXPECT_EQ(adapter.address_space(7), nullptr);
+    diagnostic(message);
+  };
+  EXPECT_FALSE(
+      adapter.register_address_space(7, registration(), {}, util::DiagnosticEmitter(report)));
+  EXPECT_EQ(diagnostic_count, 1u);
   EXPECT_EQ(diagnostic.message(), "cached page-table policies require a shared request mutex");
   EXPECT_EQ(gpu_vm.active_address_spaces(), 0u);
   EXPECT_EQ(adapter.address_space(7), nullptr);

@@ -756,19 +756,25 @@ TEST(DeviceCacheCoherenceTest, NullCompositeDomainsPreserveChildRegistration) {
   EXPECT_TRUE(replacement->has_legacy_maintenance_backing());
 }
 
+auto maintenance_failure_sink(std::shared_ptr<rocjitsu::amdgpu::DeviceCacheCoherence> coherence,
+                              bool expected_backing, util::StringDiagnostic &diagnostics) {
+  return
+      [coherence = std::move(coherence), expected_backing, &diagnostics](std::string_view message) {
+        EXPECT_EQ(coherence->has_legacy_maintenance_backing(), expected_backing);
+        // Reenter maintenance to verify both domain locks have been released.
+        util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> nested =
+            coherence->acquire_cache_maintenance(
+                rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+        EXPECT_TRUE(nested.failed());
+        diagnostics(message);
+      };
+}
+
 TEST(DeviceCacheCoherenceTest, WritebackMaintenanceRejectsMissingLegacyBacking) {
   auto coherence = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
   L2Cache l2("l2", coherence);
   util::StringDiagnostic diagnostics;
-  auto report = [&](std::string_view message) {
-    EXPECT_FALSE(coherence->has_legacy_maintenance_backing());
-    // Reenter maintenance to verify both domain locks have been released.
-    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> nested =
-        coherence->acquire_cache_maintenance(
-            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
-    EXPECT_TRUE(nested.failed());
-    diagnostics(message);
-  };
+  auto report = maintenance_failure_sink(coherence, false, diagnostics);
   util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
       coherence->acquire_cache_maintenance(
           rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate,
@@ -1061,14 +1067,7 @@ TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes
   ASSERT_EQ(mprotect(second_mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ), 0);
   const uint64_t epoch_before_failure = coherence->current_epoch();
   util::StringDiagnostic diagnostics;
-  auto report = [&](std::string_view message) {
-    EXPECT_TRUE(coherence->has_legacy_maintenance_backing());
-    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> nested =
-        coherence->acquire_cache_maintenance(
-            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
-    EXPECT_TRUE(nested.failed());
-    diagnostics(message);
-  };
+  auto report = maintenance_failure_sink(coherence, true, diagnostics);
   util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> failed_maintenance =
       coherence->acquire_cache_maintenance(
           rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate,
@@ -1136,14 +1135,7 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
   ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ), 0);
 
   util::StringDiagnostic diagnostics;
-  auto report = [&](std::string_view message) {
-    EXPECT_TRUE(coherence->has_legacy_maintenance_backing());
-    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> nested =
-        coherence->acquire_cache_maintenance(
-            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
-    EXPECT_TRUE(nested.failed());
-    diagnostics(message);
-  };
+  auto report = maintenance_failure_sink(coherence, true, diagnostics);
   util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> failed_maintenance =
       coherence->acquire_cache_maintenance(
           rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate,

@@ -351,14 +351,19 @@ AddressSpaceHandle LegacyGpuVmAdapter::register_address_space(
     std::shared_ptr<void> frontend_lifetime, util::DiagnosticEmitter emit_error) {
   if (registration.page_table == nullptr || registration.page_table_mutex == nullptr)
     return {};
-  std::lock_guard lock(mutex_);
+  std::unique_lock lock(mutex_);
   remove_stale_locked();
   if (memory_ == nullptr || bindings_.contains(vmid))
     return {};
   auto binding =
       std::make_shared<Binding>(memory_, vmid, registration, std::move(frontend_lifetime));
-  if (binding->initialize(std::move(registration), emit_error).failed())
+  util::StringDiagnostic diagnostic;
+  if (binding->initialize(std::move(registration), diagnostic.emitter()).failed()) {
+    // Diagnostic sinks may query the adapter, so deliver outside its mutex.
+    lock.unlock();
+    (void)(emit_error.emit() << diagnostic.message()).emit();
     return {};
+  }
   const AddressSpaceHandle handle = gpu_vm_->register_address_space(
       vmid, binding, binding,
       [binding](uint64_t address, VmAccessKind) { binding->report_fault(address); }, true);
