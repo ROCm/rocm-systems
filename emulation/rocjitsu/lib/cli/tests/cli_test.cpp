@@ -139,8 +139,7 @@ TEST_F(CliTest, HelpSectionsPreserveOrderAndDoNotIntroduceScope) {
 
 TEST_F(CliTest, HelpUsesCustomOrEmptyPositionalUsage) {
   root.set_positional_usage("INPUT...");
-  FailureOr<Command *> launch =
-      root.add_command("launch", diagnostic.emitter(), PositionalMode::AfterSeparator);
+  FailureOr<Command *> launch = root.add_command("launch", diagnostic.emitter());
   ASSERT_TRUE(launch.succeeded());
   launch.value()->set_positional_usage("APP [ARGS...]");
   auto config =
@@ -152,7 +151,7 @@ TEST_F(CliTest, HelpUsesCustomOrEmptyPositionalUsage) {
   EXPECT_EQ(format_help(root), "Usage: tool [options] <command>\n"
                                "       tool [options] [--] INPUT...\n"
                                "\nCommands:\n  launch\n  status\n");
-  EXPECT_EQ(format_help(*launch.value()), "Usage: tool launch [options] -- APP [ARGS...]\n"
+  EXPECT_EQ(format_help(*launch.value()), "Usage: tool launch [options] [--] APP [ARGS...]\n"
                                           "\nOptions:\n  --config PATH\n      Config\n");
   EXPECT_EQ(format_help(*status.value()), "Usage: tool status [options]\n");
 }
@@ -240,30 +239,37 @@ TEST_F(CliTest, BuiltInValueFlagsRejectSwitchMode) {
 }
 
 TEST_F(CliTest, CustomFlagsMustOptIntoSwitchMode) {
-  class LocalFlag final : public Flag {
+  class DefaultLocalFlag final : public Flag {
   public:
-    explicit LocalFlag(bool allow_switch)
-        : Flag(FlagInfo{"--custom", {}, "", ValueMode::Switch}), allow_switch_(allow_switch) {}
+    DefaultLocalFlag() : Flag(FlagInfo{"--default", {}, "", ValueMode::Switch}) {}
     std::string format_value() const override { return {}; }
-    bool allows_switch_mode() const override { return allow_switch_; }
 
   private:
     Result parse_value(std::string_view, DiagnosticEmitter) override { return Result::success(); }
-    bool allow_switch_;
   };
 
-  EXPECT_TRUE(root.add_flag(std::make_shared<LocalFlag>(false), diagnostic.emitter()).failed());
-  EXPECT_TRUE(root.add_flag(std::make_shared<LocalFlag>(true), diagnostic.emitter()).succeeded());
+  class SwitchLocalFlag final : public Flag {
+  public:
+    SwitchLocalFlag() : Flag(FlagInfo{"--custom", {}, "", ValueMode::Switch}) {}
+    std::string format_value() const override { return {}; }
+    bool allows_switch_mode() const override { return true; }
+
+  private:
+    Result parse_value(std::string_view, DiagnosticEmitter) override { return Result::success(); }
+  };
+
+  EXPECT_TRUE(root.add_flag(std::make_shared<DefaultLocalFlag>(), diagnostic.emitter()).failed());
+  EXPECT_TRUE(root.add_flag(std::make_shared<SwitchLocalFlag>(), diagnostic.emitter()).succeeded());
 }
 
-TEST_F(CliTest, HelpSeparatesChildDispatchFromParentPositionalPolicy) {
-  Command command{"tool", PositionalMode::AfterSeparator};
+TEST_F(CliTest, HelpSeparatesChildDispatchFromParentPositionals) {
+  Command command{"tool"};
   util::StringDiagnostic local_diagnostic;
   FailureOr<Command *> run = command.add_command("run", local_diagnostic.emitter());
   ASSERT_TRUE(run.succeeded());
 
   EXPECT_EQ(format_help(command), "Usage: tool [options] <command>\n"
-                                  "       tool [options] -- [arguments...]\n"
+                                  "       tool [options] [--] [arguments...]\n"
                                   "\nCommands:\n  run\n");
   EXPECT_EQ(format_help(*run.value()), "Usage: tool run [options] [--] [arguments...]\n");
 
@@ -336,12 +342,12 @@ TEST_F(CliTest, CommandSelectionDoesNotExecuteAndSeparatorStopsSelection) {
   EXPECT_EQ(result.value().positional, (std::vector<std::string>{"child", "--whatever"}));
 }
 
-TEST_F(CliTest, NestedCommandCanRequireSeparatorBeforePositionals) {
-  FailureOr<Command *> launch =
-      root.add_command("launch", diagnostic.emitter(), PositionalMode::AfterSeparator);
+TEST_F(CliTest, NestedCommandAcceptsPositionalsAndSeparatorStopsFlagParsing) {
+  FailureOr<Command *> launch = root.add_command("launch", diagnostic.emitter());
   ASSERT_TRUE(launch.succeeded());
-  EXPECT_TRUE(run({"launch", "application"}).failed());
-  EXPECT_NE(diagnostic.message().find("tool launch: expected --"), std::string::npos);
+  FailureOr<ParsedArguments> bare = run({"launch", "application"});
+  ASSERT_TRUE(bare.succeeded());
+  EXPECT_EQ(bare.value().positional, (std::vector<std::string>{"application"}));
   FailureOr<ParsedArguments> result = run({"launch", "--", "application", "--flag"});
   ASSERT_TRUE(result.succeeded()) << diagnostic.message();
   EXPECT_EQ(result.value().command, launch.value());
@@ -349,14 +355,16 @@ TEST_F(CliTest, NestedCommandCanRequireSeparatorBeforePositionals) {
   EXPECT_EQ(result.value().positional, (std::vector<std::string>{"application", "--flag"}));
 }
 
-TEST(CliValues, LauncherRequiresSeparatorAndOwnsForwardedArguments) {
-  Command command{"launcher", PositionalMode::AfterSeparator};
+TEST(CliValues, SeparatorOwnsForwardedArguments) {
+  Command command{"launcher"};
   util::StringDiagnostic diagnostic;
   auto config = std::make_shared<StringFlag>(FlagInfo{"--config", {}, ""});
   ASSERT_TRUE(command.add_flag(config, diagnostic.emitter()).succeeded());
   const std::array<std::string_view, 1> bare{"application"};
-  EXPECT_TRUE(parse(command, bare, diagnostic.emitter()).failed());
-  EXPECT_NE(diagnostic.message().find("expected --"), std::string::npos);
+  FailureOr<ParsedArguments> bare_result = parse(command, bare, diagnostic.emitter());
+  ASSERT_TRUE(bare_result.succeeded());
+  EXPECT_FALSE(bare_result.value().saw_separator);
+  EXPECT_EQ(bare_result.value().positional, (std::vector<std::string>{"application"}));
   const std::array<std::string_view, 1> empty_separator{"--"};
   FailureOr<ParsedArguments> empty = parse(command, empty_separator, diagnostic.emitter());
   ASSERT_TRUE(empty.succeeded());
