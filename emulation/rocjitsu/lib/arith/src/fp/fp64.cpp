@@ -28,10 +28,14 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, u
     known |= RJ_ARITH_ALU_ABS_C | RJ_ARITH_ALU_NEG_C;
   }
 
-  constexpr uint64_t fp_flags = RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
-                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE |
-                                (Op == rocjitsu::arith::Fp64::Fma ? RJ_ARITH_FP_ROUND_MASK : 0) |
-                                (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
+  constexpr uint64_t fp_flags =
+      RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+      RJ_ARITH_FP_IEEE_MODE |
+      ((Op == rocjitsu::arith::Fp64::Fma || Op == rocjitsu::arith::Fp64::Add ||
+        Op == rocjitsu::arith::Fp64::Mul)
+           ? RJ_ARITH_FP_ROUND_MASK
+           : 0) |
+      (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
   if (int error = rocjitsu::arith::validate(flags, instruction_flags & ~known, fp_flags)) {
     return error;
   }
@@ -48,10 +52,11 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, u
     return RJ_ARITH_SUCCESS;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if constexpr (Op == rocjitsu::arith::Fp64::Fma) {
+  if constexpr (Op == rocjitsu::arith::Fp64::Fma || Op == rocjitsu::arith::Fp64::Add ||
+                Op == rocjitsu::arith::Fp64::Mul) {
     if ((flags & RJ_ARITH_FP_ROUND_MASK) &&
         rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-      rocjitsu::arith::fma_f64_directed_x86_64_v4(flags, exec_mask, instruction_flags, d, a, b, c);
+      rocjitsu::arith::fp64_directed_x86_64_v4(Op, flags, exec_mask, instruction_flags, d, a, b, c);
       return RJ_ARITH_SUCCESS;
     }
   }
@@ -76,7 +81,22 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, u
       y = rocjitsu::arith::fp64_flush_denorm(y);
     }
     double value;
-
+    if constexpr (Op == rocjitsu::arith::Fp64::Add || Op == rocjitsu::arith::Fp64::Mul) {
+      const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
+      const uint64_t xb = rocjitsu::arith::double_bits(x), yb = rocjitsu::arith::double_bits(y);
+      constexpr uint64_t exponent = 0x7ff0000000000000ULL;
+      if (rounding && (xb & exponent) != exponent && (yb & exponent) != exponent) {
+        // Express ADD as A*1+B and MUL as A*B+signed-zero; the latter preserves
+        // the product sign when both terms are zero.
+        const uint64_t multiplier = Op == rocjitsu::arith::Fp64::Add ? 0x3ff0000000000000ULL : yb;
+        const uint64_t addend =
+            Op == rocjitsu::arith::Fp64::Add ? yb : (xb ^ yb) & 0x8000000000000000ULL;
+        value = rocjitsu::arith::as_double(
+            rocjitsu::arith::fma_finite_f64(xb, multiplier, addend, rounding));
+      } else {
+        value = Op == rocjitsu::arith::Fp64::Add ? x + y : x * y;
+      }
+    }
     if constexpr (Op == rocjitsu::arith::Fp64::Fma) {
       double z = rocjitsu::arith::fp64_input(c, lane, instruction_flags >> 2);
       if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
@@ -93,6 +113,12 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, u
               : __builtin_fma(x, y, z);
     }
 
+    if constexpr (Op == rocjitsu::arith::Fp64::FrexpMant) {
+      uint64_t magnitude = rocjitsu::arith::double_bits(x) & 0x7fffffffffffffffULL;
+      int exponent;
+      value =
+          magnitude == 0 || magnitude >= 0x7ff0000000000000ULL ? x : __builtin_frexp(x, &exponent);
+    }
     if constexpr (Op == rocjitsu::arith::Fp64::Trunc) {
       value = __builtin_trunc(x);
     }
@@ -181,6 +207,88 @@ int arithmetic_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_f
 }
 
 } // namespace
+
+// Add the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_add_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic<rocjitsu::arith::Fp64::Add, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                      nullptr);
+}
+
+// Add the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_add_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic<rocjitsu::arith::Fp64::Add>(flags, exec_mask, instruction_flags, d, a, b,
+                                                nullptr);
+}
+
+// Multiply the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_mul_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic<rocjitsu::arith::Fp64::Mul, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                      nullptr);
+}
+
+// Multiply the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_mul_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic<rocjitsu::arith::Fp64::Mul>(flags, exec_mask, instruction_flags, d, a, b,
+                                                nullptr);
+}
 
 // Compute fused A*B+C for selected lanes.
 // Return errors before changing outputs; required FP-status reporting is unsupported.
@@ -342,6 +450,109 @@ int rj_arith_v_rsq_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                                 nullptr);
 }
 
+// Extract the requested exponent or mantissa component for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_frexp_mant_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a,
+                                        [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic<rocjitsu::arith::Fp64::FrexpMant>(flags, exec_mask, instruction_flags, d, a,
+                                                      nullptr, nullptr);
+}
+
+// Add the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_add_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic_wave64<rocjitsu::arith::Fp64::Add, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, nullptr);
+}
+
+// Add the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_add_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic_wave64<rocjitsu::arith::Fp64::Add>(flags, exec_mask, instruction_flags, d, a, b,
+                                                       nullptr);
+}
+
+// Multiply the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_mul_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic_wave64<rocjitsu::arith::Fp64::Mul, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, nullptr);
+}
+
+// Multiply the operands for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_mul_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic_wave64<rocjitsu::arith::Fp64::Mul>(flags, exec_mask, instruction_flags, d, a, b,
+                                                       nullptr);
+}
+
 // Compute fused A*B+C for selected lanes.
 // Return errors before changing outputs; required FP-status reporting is unsupported.
 int rj_arith_v_fma_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
@@ -501,6 +712,27 @@ int rj_arith_v_rsq_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
   }
   return arithmetic_wave64<rocjitsu::arith::Fp64::Rsq>(flags, exec_mask, instruction_flags, d, a,
                                                        nullptr, nullptr);
+}
+
+// Extract the requested exponent or mantissa component for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_frexp_mant_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a,
+                                        [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic_wave64<rocjitsu::arith::Fp64::FrexpMant>(flags, exec_mask, instruction_flags, d,
+                                                             a, nullptr, nullptr);
 }
 
 // Round toward zero for selected lanes.
@@ -757,4 +989,44 @@ int rj_arith_v_rsq_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   }
   return arithmetic_wave64<rocjitsu::arith::Fp64::Rsq, true>(flags, exec_mask, instruction_flags, d,
                                                              a, nullptr, nullptr);
+}
+
+// Extract the requested exponent or mantissa component for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_frexp_mant_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic<rocjitsu::arith::Fp64::FrexpMant, true>(flags, exec_mask, instruction_flags, d,
+                                                            a, nullptr, nullptr);
+}
+
+// Extract the requested exponent or mantissa component for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_frexp_mant_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic_wave64<rocjitsu::arith::Fp64::FrexpMant, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }

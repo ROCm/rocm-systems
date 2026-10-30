@@ -72,6 +72,30 @@ inline float scale_omod(float value, uint32_t modifiers) {
   return value;
 }
 
+// Apply host OMOD scaling followed by CLAMP, mapping NaNs to zero when clamping.
+// The caller must handle architectural OMOD tininess first; use alu_output_f32
+// for FP32 results that still require architectural scaling.
+inline float alu_output(float value, uint32_t modifiers) {
+  value = scale_omod(value, modifiers);
+  return modifiers & RJ_ARITH_ALU_CLAMP ? as_float(clamp_f32_bits(as_bits(value), false)) : value;
+}
+
+// Scales an FP16 arithmetic result and applies CLAMP. OMOD flushes an
+// unscaled tiny result to positive zero; halving a normal into the subnormal
+// range produces signed zero instead. The input is represented in FP32.
+inline float alu_output_f16(float value, uint32_t modifiers) {
+  if (modifiers & RJ_ARITH_ALU_OMOD_HALF) {
+    uint32_t bits = as_bits(value), magnitude = bits & 0x7fffffffu;
+    if (magnitude < 0x38800000u) {
+      value = 0;
+    } else if ((modifiers & RJ_ARITH_ALU_OMOD_HALF) == RJ_ARITH_ALU_OMOD_HALF &&
+               magnitude < 0x39000000u) {
+      value = as_float(bits & 0x80000000u);
+    }
+  }
+  return alu_output(value, modifiers);
+}
+
 // Scale a rounded FP32 result with architectural tiny-result flushing and
 // directed overflow. Integer exponent adjustment is independent of host controls.
 inline uint32_t scale_omod_f32_bits(uint32_t bits, unsigned omod, unsigned rounding) {
@@ -107,6 +131,12 @@ inline float scale_omod_f32(float value, uint32_t modifiers) {
     }
   }
   return scale_omod(value, modifiers);
+}
+
+// Apply FP32 OMOD flushing, then CLAMP. Callers preserve NaNs by clearing CLAMP.
+inline float alu_output_f32(float value, uint32_t modifiers) {
+  value = scale_omod_f32(value, modifiers);
+  return modifiers & RJ_ARITH_ALU_CLAMP ? as_float(clamp_f32_bits(as_bits(value), false)) : value;
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// FP64 FMA using AVX-512 instruction-local guest rounding, without MXCSR changes.
+// FP64 ADD/MUL/FMA using AVX-512 instruction-local guest rounding, without MXCSR changes.
 // Operand preparation and masked stores preserve the public split-VGPR layout.
 #include "fp/fp64_impl.h"
 #include "rj_arith/rj_arith.h"
@@ -81,28 +81,40 @@ __m512d output(__m512d value, uint32_t instruction_flags, uint64_t flags, unsign
   return value;
 }
 
+// Use embedded rounding for the selected arithmetic operation, with exceptions masked.
+template <int Rounding> __m512d arithmetic(Fp64 op, __m512d x, __m512d y, __m512d z) {
+  if (op == Fp64::Add) {
+    return _mm512_add_round_pd(x, y, Rounding | _MM_FROUND_NO_EXC);
+  }
+  if (op == Fp64::Mul) {
+    return _mm512_mul_round_pd(x, y, Rounding | _MM_FROUND_NO_EXC);
+  }
+  return _mm512_fmadd_round_pd(x, y, z, Rounding | _MM_FROUND_NO_EXC);
+}
+
 } // namespace
 
-void fma_f64_directed_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                                uint32_t *const *d, const uint32_t *const *a,
-                                const uint32_t *const *b, const uint32_t *const *c) {
+void fp64_directed_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask,
+                             uint32_t instruction_flags, uint32_t *const *d,
+                             const uint32_t *const *a, const uint32_t *const *b,
+                             const uint32_t *const *c) {
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   const bool flush = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   uint32_t result[2][32];
   for (int lane = 0; lane < 32; lane += 8) {
     auto x = input(a, lane, instruction_flags, flush);
     auto y = input(b, lane, instruction_flags >> 1, flush);
-    auto z = input(c, lane, instruction_flags >> 2, flush);
+    auto z = op == Fp64::Fma ? input(c, lane, instruction_flags >> 2, flush) : _mm512_setzero_pd();
     __m512d value;
     switch (rounding) {
     case 1:
-      value = _mm512_fmadd_round_pd(x, y, z, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+      value = arithmetic<_MM_FROUND_TO_POS_INF>(op, x, y, z);
       break;
     case 2:
-      value = _mm512_fmadd_round_pd(x, y, z, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+      value = arithmetic<_MM_FROUND_TO_NEG_INF>(op, x, y, z);
       break;
     default:
-      value = _mm512_fmadd_round_pd(x, y, z, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+      value = arithmetic<_MM_FROUND_TO_ZERO>(op, x, y, z);
       break;
     }
     auto bits = _mm512_castpd_si512(output(value, instruction_flags, flags, rounding));

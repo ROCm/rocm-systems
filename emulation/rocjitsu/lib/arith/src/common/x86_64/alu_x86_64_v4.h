@@ -42,6 +42,15 @@ inline __m512 flush_denorm_f32(__m512 value) {
   return _mm512_mask_mov_ps(value, tiny, _mm512_castsi512_ps(sign));
 }
 
+// Replace FP64 subnormals with zero of the same sign.
+inline __m512d flush_denorm_f64(__m512d value) {
+  auto bits = _mm512_castpd_si512(value);
+  auto magnitude = _mm512_and_si512(bits, _mm512_set1_epi64(INT64_MAX));
+  auto tiny = _mm512_cmplt_epi64_mask(magnitude, _mm512_set1_epi64(0x0010000000000000LL));
+  auto sign = _mm512_and_si512(bits, _mm512_set1_epi64(INT64_MIN));
+  return _mm512_mask_mov_pd(value, tiny, _mm512_castsi512_pd(sign));
+}
+
 // Prepare FP32 results for a nonzero OMOD: tiny values become +0, while
 // halving normal values below twice minimum normal produces signed zero.
 inline __m512 prepare_omod_f32(__m512 value, uint32_t instruction_flags) {
