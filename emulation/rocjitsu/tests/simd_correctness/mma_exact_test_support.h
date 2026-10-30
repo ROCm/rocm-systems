@@ -188,8 +188,8 @@ struct ExactFixture {
   uint32_t vbase = 0;
   uint32_t wf_size;
 
-  explicit ExactFixture(rj_code_arch_t arch, uint32_t wave)
-      : gpu_mem("mma_exact_mem"), l2("mma_exact_l2"), wf_size(wave) {
+  explicit ExactFixture(rj_code_arch_t arch, uint32_t wave_size)
+      : gpu_mem("mma_exact_mem"), l2("mma_exact_l2"), wf_size(wave_size) {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
     cfg.num_wf_slots = 1;

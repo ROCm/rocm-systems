@@ -30,7 +30,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLLMax = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    128ULL*1024,         // [2] AllGather
+    64ULL*1024,          // [2] AllGather         // [2] AllGather
     1ULL*1024*1024,      // [3] ReduceScatter -- LL ends here; LL128 starts on the next byte
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
@@ -153,7 +153,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [0] Broadcast      -- not used on gfx1250
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
-    kThreshUnlimited,     // [3] ReduceScatter
+    0,                    // [3] ReduceScatter   -- symk loses 2-5x to DDA / Ring from 2M up (4 ranks)
     0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
@@ -167,7 +167,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [0] Broadcast      -- not used on gfx1250
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
-    kThreshUnlimited,     // [3] ReduceScatter
+    0,                    // [3] ReduceScatter   -- symk loses 2-5x to DDA / Ring from 2M up (4 ranks)
     0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
@@ -269,7 +269,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     512ULL*1024,         // [2] AllGather       -- LL beats LL128 1.4-1.6x to 512K at 8 ranks; the
                          //                        crossover falls with rank count (512K at 16, ~128K
                          //                        at 32), so this is a total, not rank-scaled (DPX)
-    16ULL*1024*1024,     // [3] ReduceScatter
+    1ULL*1024*1024,      // [3] ReduceScatter   -- below 8 ranks: LL through 256 KiB/rank at 4 GPUs.
+                         //                        LL128 is 1.5-1.9x from 512 KiB/rank (DPX)
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -282,7 +283,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     64ULL*1024*1024,     // [2] AllGather       -- Ring beats it 1.1-1.4x at 128M-256M on 8/16/32 (DPX)
-    2ULL*1024*1024,      // [3] ReduceScatter
+    4ULL*1024*1024,      // [3] ReduceScatter   -- below 8 ranks: LL128 through 1 MiB/rank at 4 GPUs.
+                         //                        VMM still covers 8-16 MiB total (DPX)
     256ULL*1024*1024,    // [4] AllReduce       -- two-shot beats Ring to 256M (AICOMRCCL-2875); its scratch
                          //                        slot reaches 256M from 32 ranks, ~128M at 2-8, 240M at 16
     0,                   // [5] SendRecv        -- not used
@@ -420,8 +422,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     0,                   // [2] AllGather       -- ddaLLMax total (DPX)
-    1ULL*1024*1024,      // [3] ReduceScatter   -- LL beats DDA Simple / Ring 1.1-1.5x to 8M/16M/32M
-                         //                        at 8/16/32 (DPX)
+    256ULL*1024,         // [3] ReduceScatter   -- LL beats LL128 through 4M/8M at 16/32
+                         //                        (256K/rank). LL128 is ~2x from 8M/16M (DPX)
     1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -432,7 +434,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     0,                   // [2] AllGather       -- ddaLL128Max total (DPX)
-    512ULL*1024,         // [3] ReduceScatter   -- the LL128 slot reaches nRanks x 512K
+    1ULL*1024*1024,      // [3] ReduceScatter   -- beats Ring through 16M/32M at 16/32 (1M/rank);
+                         //                        Ring LL128 wins from 32M/64M (DPX)
     0,                   // [4] AllReduce       -- ddaLL128Max total
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -483,7 +486,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .forceCeScratch = false,
 };
 
-// gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
+// gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   // ddaLLMax: no fabric LL on gfx950.
   .ddaLLMax = {
@@ -513,7 +516,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ddaVmmMax = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    128ULL*1024*1024,     // [2] AllGather
+    64ULL*1024*1024,      // [2] AllGather
     128ULL*1024*1024,     // [3] ReduceScatter
     128ULL*1024*1024,     // [4] AllReduce
     0,                    // [5] SendRecv        -- not used
