@@ -100,20 +100,27 @@ public:
   std::vector<SystemCoherenceDomain> coherence_domains;
 
   /// Select one local node. An empty selector is valid only for one-node input.
-  /// Throws std::invalid_argument for an unknown or ambiguous selection.
-  const SystemNode &select_node(std::string_view node_id = {}) const;
+  /// Returns failure with one diagnostic for an unknown or ambiguous selection.
+  /// The returned pointer borrows this graph. Allocation failures may still throw.
+  util::FailureOr<const SystemNode *> select_node(util::DiagnosticEmitter emit_error,
+                                                  std::string_view node_id = {}) const;
 
-  /// Return local GPU instances in stable node order.
-  std::span<const SystemGpuInstance> local_gpus(std::string_view node_id = {}) const;
+  /// Return local GPU instances in stable node order, borrowing this graph.
+  /// Returns failure with one diagnostic when node selection fails.
+  util::FailureOr<std::span<const SystemGpuInstance>>
+  local_gpus(util::DiagnosticEmitter emit_error, std::string_view node_id = {}) const;
 
   /// Copy eligible local peer paths. Descriptive legacy links never qualify.
   /// Missing, ambiguous, GPU-transit, remote-tainted, or overlong paths grant
   /// no route.
-  SystemPeerRouteProjection local_peer_routes(std::string_view node_id = {}) const;
+  /// Returns failure with one diagnostic when node selection fails.
+  util::FailureOr<SystemPeerRouteProjection> local_peer_routes(util::DiagnosticEmitter emit_error,
+                                                               std::string_view node_id = {}) const;
 };
 
 /// Normalize and validate an in-scope FlatBuffers configuration. The returned
-/// graph does not retain any FlatBuffers pointers.
+/// graph does not retain any FlatBuffers pointers. Invalid input returns failure
+/// after emitting one diagnostic. Allocation and library failures may still throw.
 util::FailureOr<SystemGraph> system_graph_from_fb(const fb::SimulationConfig *config,
                                                   util::DiagnosticEmitter emit_error);
 
