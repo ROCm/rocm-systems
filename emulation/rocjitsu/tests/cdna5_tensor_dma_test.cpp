@@ -197,6 +197,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaRejectsElementCountOverflow) {
 TEST(Gfx1250ExecutionTest, TensorDmaIterationsMayReuseResidentLds) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -223,6 +224,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterationsMayReuseResidentLds) {
 TEST(Gfx1250ExecutionTest, TensorDmaRejectsOutOfRangeIterationLdsIncrement) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -247,6 +249,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaRejectsOutOfRangeIterationLdsIncrement) {
 TEST(Gfx1250ExecutionTest, TensorDmaRejectsZeroLdsAllocation) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -266,6 +269,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaRejectsZeroLdsAllocation) {
 TEST(Gfx1250ExecutionTest, TensorDmaRejectsWrappedWalkerArithmetic) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -291,6 +295,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaRejectsWrappedWalkerArithmetic) {
 TEST(Gfx1250ExecutionTest, TensorDmaRejectsWrappedDenseWalkerArithmetic) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -316,6 +321,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaRejectsWrappedDenseWalkerArithmetic) {
 TEST(Gfx1250ExecutionTest, TensorDmaAllowsSafeTileInLargerUnaddressableTensor) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -344,6 +350,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaAllowsSafeTileInLargerUnaddressableTensor) {
 TEST(Gfx1250ExecutionTest, TensorDmaAllowsSafeDenseTileInLargerUnaddressableTensor) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -368,6 +375,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaAllowsSafeDenseTileInLargerUnaddressableTens
 TEST(Gfx1250ExecutionTest, TensorDmaMaskedGatherSkipsGlobalAddressArithmetic) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -398,6 +406,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaMaskedGatherSkipsGlobalAddressArithmetic) {
 TEST(Gfx1250ExecutionTest, TensorDmaMaterializationLimitIsDiagnosable) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -434,6 +443,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaMaterializationLimitIsDiagnosable) {
 TEST(Gfx1250ExecutionTest, TensorDmaRejectsWrappedTransferAddresses) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -495,6 +505,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaOverflowSkipsCopyAndBarrier) {
 
 TEST(Gfx1250ExecutionTest, TensorDmaBarrierMustFitOwnedLds) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);

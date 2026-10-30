@@ -37,7 +37,7 @@ names since customers rarely touch them.
 A list of values is passed as one comma-separated argument.
 
 ```console
---roofline-data-types FP16,FP32,FP64
+--example-ids 0,1,2
 ```
 
 ## Help Messages
@@ -56,8 +56,8 @@ option description, starting with `Values: `. An argument with a default states
 it at the end of the description as `(Default: value)`.
 
 ```text
---roofline-data-types <types>...   Selects data <type>s to present in roofline (Default: FP32).
-                                    Values: FP4, FP6, FP8, FP16, BF16, FP32, FP64, I8, I32, I64.
---list-blocks [arch]               List all available blocks for analysis on specified GPU <arch> (Default: current GPU arch).
-                                    Values: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx1151
+--output-format <format>   Specify output format (Default: stdout).
+                            Values: stdout, txt, csv, db.
+--list-blocks [arch]       List all available blocks for analysis on specified GPU <arch> (Default: current GPU arch).
+                            Values: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, gfx1151
 ```

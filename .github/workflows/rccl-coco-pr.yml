@@ -1,7 +1,10 @@
 name: RCCL coco PR
 
-# PR build/smoke via `coco pr` on Ruby and OCI.
+# PR build/smoke via `coco pr` on Ruby and OCI. TW and Crusoe run only from
+# rccl-coco-scheduled.yml.
 # Fork PRs get no secrets, so a maintainer must dispatch this with pr_number and pr_sha.
+# Draft PRs skip the cluster queue. The RCCL PR gate passes until the PR is
+# marked ready for review, which starts the cluster jobs.
 #
 # One job per cluster: `needs` on a matrix waits for every leg, so sharing a
 # job would let a slow cluster hold up the others.
@@ -13,13 +16,16 @@ on:
   # No `paths:` filter: a path-skipped workflow reports no checks, so a required check would never pass.
   pull_request:
     branches: [develop, main, rccl-develop, rccl_develop, rocprofiler-compute-develop]
+    # ready_for_review starts the cluster jobs; converted_to_draft makes the
+    # gate pass again without waiting for another push.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
     inputs:
       coco_ref:
         description: 'ROCm/tRCCL ref for the coco harness.'
         type: string
         required: false
-        default: '1.3.x'
+        default: '1.4.x'
       dry_run:
         description: 'Resolve stacks and submissions without building or running anything.'
         type: boolean
@@ -77,7 +83,11 @@ jobs:
   setup:
     name: Setup
     needs: changes
-    if: needs.changes.outputs.rccl == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+    if: >-
+      needs.changes.outputs.rccl == 'true'
+      && (github.event_name != 'pull_request'
+          || (!github.event.pull_request.head.repo.fork
+              && !github.event.pull_request.draft))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -105,11 +115,14 @@ jobs:
         id: resolve
         uses: ./.github/actions/rccl-resolve-coco-run
         with:
-          coco_ref: ${{ inputs.coco_ref || '1.3.x' }}
+          coco_ref: ${{ inputs.coco_ref || '1.4.x' }}
           dry_run: ${{ inputs.dry_run || false }}
           pr_number: ${{ inputs.pr_number }}
           pr_sha: ${{ inputs.pr_sha }}
           pr_repo: ${{ inputs.pr_repo }}
+          # The harness must declare --baseline-sha (1.4.x and later); rolling
+          # coco_ref back to 1.3.x needs this turned off as well.
+          require_baseline_sha: 'true'
           client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
@@ -203,6 +216,7 @@ jobs:
           SETUP_RESULT: ${{ needs.setup.result }}
           RCCL_CHANGED: ${{ needs.changes.outputs.rccl }}
           IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
           GATE_RESULT: ${{ needs.gate.result }}
         run: |
           set -euo pipefail
@@ -212,6 +226,10 @@ jobs:
           fi
           if [[ "${RCCL_CHANGED}" != "true" ]]; then
             echo "No coco-relevant RCCL changes in this PR; coco smoke not required."
+            exit 0
+          fi
+          if [[ "${IS_DRAFT}" == "true" ]]; then
+            echo "Draft PR; cluster coco runs when this PR is marked ready for review."
             exit 0
           fi
           if [[ "${IS_FORK}" == "true" ]]; then

@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
@@ -21,6 +22,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -1445,6 +1447,360 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
   }
 }
 
+struct MemoryWaitOrderingTest : ::testing::Test {
+  GpuMemory memory;
+  L2Cache l2;
+  std::unique_ptr<ComputeUnitCore> cu;
+  Wavefront *wf = nullptr;
+
+  MemoryWaitOrderingTest() : memory("memory_wait_ordering_memory"), l2("memory_wait_ordering_l2") {}
+
+  void setup(rj_code_arch_t arch, bool replay = false) {
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.xcnt_diagnostics = replay ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    cu = ComputeUnitCore::create("memory_wait_ordering_cu", config, &memory, &l2);
+    wf = cu->dispatch_wf(0, 0x100, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(0b1111);
+    wf->set_m0(0);
+  }
+  void track(Instruction &inst) {
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    state.before(inst, cu->arch());
+    state.check_instruction(inst, *wf);
+    cu->track_memory_wait(inst, *wf);
+    wf->pc += 8;
+  }
+  template <size_t N> void track(const std::array<uint32_t, N> &words) {
+    util::StringDiagnostic error;
+    auto decoded = Decoder::create(cu->arch())->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    track(*decoded.value());
+  }
+  void lds_load() {
+    switch (cu->arch()) {
+    case ROCJITSU_CODE_ARCH_RDNA1:
+      return track(rdna1::build_ds(rdna1::kDsReadB32Ds, {.addr = 0, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA2:
+      return track(rdna2::build_ds(rdna2::kDsReadB32Ds, {.addr = 0, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      return track(rdna3::build_ds(rdna3::kDsLoadB32Ds, {.addr = 0, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA3_5:
+      return track(rdna3_5::build_ds(rdna3_5::kDsLoadB32Ds, {.addr = 0, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      return track(rdna4::build_vds(rdna4::kDsLoadB32Vds, {.addr = 0, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      return track(cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 0, .vdst = 2}));
+    default:
+      FAIL() << "unsupported test architecture";
+    }
+  }
+  void direct_load(bool parameter) {
+    switch (cu->arch()) {
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      return track(rdna3::build_ldsdir(
+          parameter ? rdna3::kLdsParamLoadLdsdir : rdna3::kLdsDirectLoadLdsdir, {.vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA3_5:
+      return track(rdna3_5::build_ldsdir(
+          parameter ? rdna3_5::kLdsParamLoadLdsdir : rdna3_5::kLdsDirectLoadLdsdir, {.vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      return track(rdna4::build_vdsdir(
+          parameter ? rdna4::kDsParamLoadVdsdir : rdna4::kDsDirectLoadVdsdir, {.vdst = 2}));
+    default:
+      FAIL() << "unsupported direct LDS architecture";
+    }
+  }
+  void flat_load_high() {
+    switch (cu->arch()) {
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      return track(
+          rdna3::build_flat(rdna3::kFlatLoadD16HiB16Flat, {.addr = 0, .saddr = 124, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA3_5:
+      return track(rdna3_5::build_flat(rdna3_5::kFlatLoadD16HiB16Flat,
+                                       {.addr = 0, .saddr = 124, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      return track(
+          rdna4::build_vflat(rdna4::kFlatLoadD16HiB16Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0}));
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      return track(
+          cdna5::build_vflat(cdna5::kFlatLoadD16HiB16Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0}));
+    default:
+      FAIL() << "unsupported partial FLAT architecture";
+    }
+  }
+  void flat_source_alias(bool atomic) {
+    const uint8_t address = atomic ? 0 : 2;
+    const uint8_t data = atomic ? 2 : 0;
+    const uint8_t th = atomic ? GFX12_TH_ATOMIC_RETURN : 0;
+    switch (cu->arch()) {
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      return track(
+          rdna3::build_flat(atomic ? rdna3::kFlatAtomicAddU32Flat : rdna3::kFlatLoadB32Flat,
+                            {.glc = static_cast<uint8_t>(atomic),
+                             .addr = address,
+                             .data = data,
+                             .saddr = 124,
+                             .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA3_5:
+      return track(
+          rdna3_5::build_flat(atomic ? rdna3_5::kFlatAtomicAddU32Flat : rdna3_5::kFlatLoadB32Flat,
+                              {.glc = static_cast<uint8_t>(atomic),
+                               .addr = address,
+                               .data = data,
+                               .saddr = 124,
+                               .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      return track(
+          rdna4::build_vflat(atomic ? rdna4::kFlatAtomicAddU32Vflat : rdna4::kFlatLoadB32Vflat,
+                             {.saddr = 124, .vdst = 2, .th = th, .vsrc = data, .vaddr = address}));
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      return track(
+          cdna5::build_vflat(atomic ? cdna5::kFlatAtomicAddU32Vflat : cdna5::kFlatLoadB32Vflat,
+                             {.saddr = 124, .vdst = 2, .th = th, .vsrc = data, .vaddr = address}));
+    default:
+      FAIL() << "unsupported FLAT alias architecture";
+    }
+  }
+  void flat_load() {
+    switch (cu->arch()) {
+    case ROCJITSU_CODE_ARCH_RDNA1:
+      return track(
+          rdna1::build_flat(rdna1::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA2:
+      return track(
+          rdna2::build_flat(rdna2::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      return track(
+          rdna3::build_flat(rdna3::kFlatLoadB32Flat, {.addr = 0, .saddr = 124, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA3_5:
+      return track(
+          rdna3_5::build_flat(rdna3_5::kFlatLoadB32Flat, {.addr = 0, .saddr = 124, .vdst = 2}));
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      return track(
+          rdna4::build_vflat(rdna4::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0}));
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      return track(
+          cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0}));
+    default:
+      FAIL() << "unsupported test architecture";
+    }
+  }
+};
+
+TEST_F(MemoryWaitOrderingTest, IncomingLdsRoutedFlatPreservesLdsWriteOrder) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+                    ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (uint64_t shared_lanes : {0u, 0b0101u, 0b1111u})
+      for (bool wait : {false, true}) {
+        SCOPED_TRACE(std::format("arch={} shared={} wait={}", static_cast<unsigned>(arch),
+                                 shared_lanes, wait));
+        setup(arch);
+        set_test_flat_domains(*cu, *wf, shared_lanes);
+        lds_load();
+        if (wait)
+          wf->memory_wait_scoreboard()->wait(WaitCounterKind::Ds, 0);
+        flat_load();
+        const bool ordered = arch != ROCJITSU_CODE_ARCH_RDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA2 &&
+                             shared_lanes == 0b1111;
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait || ordered ? 0u : 1u);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, SuccessiveFlatLdsResultsPreserveWriteOrder) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    setup(arch);
+    set_test_flat_domains(*cu, *wf, 0b1111);
+    flat_load();
+    flat_load();
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, NativeLdsDoesNotExemptUnqualifiedFlatWriteback) {
+  // Preserve this guard when native-LDS ordered overwrites are enabled separately.
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    setup(arch);
+    set_test_flat_domains(*cu, *wf, 0b1111);
+    flat_load();
+    lds_load();
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, LdsDirectAndParameterResultsUseQualifiedWritebackOrder) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4})
+    for (bool first_parameter : {false, true})
+      for (bool second_parameter : {false, true})
+        for (bool wait : {false, true}) {
+          SCOPED_TRACE(std::format("arch={} params={},{} wait={}", static_cast<unsigned>(arch),
+                                   first_parameter, second_parameter, wait));
+          setup(arch);
+          direct_load(first_parameter);
+          if (wait)
+            wf->memory_wait_scoreboard()->wait(WaitCounterKind::Exp, 0);
+          direct_load(second_parameter);
+          EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+        }
+}
+
+TEST_F(MemoryWaitOrderingTest, OrderedLdsOverwriteStillChecksAliasedAddressAndAtomicData) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5})
+    for (bool atomic : {false, true})
+      for (bool wait : {false, true}) {
+        SCOPED_TRACE(
+            std::format("arch={} atomic={} wait={}", static_cast<unsigned>(arch), atomic, wait));
+        setup(arch);
+        lds_load();
+        if (wait)
+          wf->memory_wait_scoreboard()->wait(WaitCounterKind::Ds, 0);
+        set_test_flat_domains(*cu, *wf, 0b1111);
+        for (unsigned lane = 0; lane < wf->wf_size(); ++lane)
+          cu->write_vgpr(wf->vgpr_alloc().base + 3, lane, 2);
+        flat_source_alias(atomic);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait ? 0u : 1u);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, PartialOverwriteRetainsUncoveredLanesAndBytes) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5})
+    for (bool disjoint_lanes : {false, true})
+      for (bool read_high : {false, true}) {
+        SCOPED_TRACE(std::format("arch={} disjoint={} high={}", static_cast<unsigned>(arch),
+                                 disjoint_lanes, read_high));
+        setup(arch);
+        set_test_flat_domains(*cu, *wf, 0b1111);
+        wf->set_exec(0b0011);
+        lds_load();
+        wf->set_exec(disjoint_lanes ? 0b0100 : 0b0001);
+        flat_load_high();
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+        auto &state = *wf->memory_wait_scoreboard();
+        state.wait(WaitCounterKind::Ds, 1);
+        if (read_high)
+          state.access({RegClass::VGPR, 2, 1}, disjoint_lanes ? 0b0100 : 0b0001, 0xc, false);
+        else
+          state.access({RegClass::VGPR, 2, 1}, 0b0011, 0x3, false);
+        // CDNA5 SRAM ECC makes the new result cover the entire DWORD.
+        const bool pending = read_high || (arch == ROCJITSU_CODE_ARCH_CDNA5 && !disjoint_lanes);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), pending ? 1u : 0u);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, SameLanePartialOverwritePreservesLowBytesBeforeWait) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    setup(arch);
+    set_test_flat_domains(*cu, *wf, 0b1111);
+    wf->set_exec(0b0001);
+    lds_load();
+    flat_load_high();
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+    // On RDNA the old low half must survive even though the new lanes cover it.
+    // On CDNA5 the full-DWORD result itself keeps the low half pending.
+    wf->memory_wait_scoreboard()->access({RegClass::VGPR, 2, 1}, 0b0001, 0x3, false);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, GdsResultDoesNotShareFlatLdsWriteOrder) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (bool wait : {false, true}) {
+      SCOPED_TRACE(static_cast<unsigned>(arch));
+      SCOPED_TRACE(wait);
+      setup(arch);
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+        track(rdna3::build_ds(rdna3::kDsLoadB32Ds, {.gds = 1, .addr = 0, .vdst = 2}));
+      else
+        track(rdna3_5::build_ds(rdna3_5::kDsLoadB32Ds, {.gds = 1, .addr = 0, .vdst = 2}));
+      if (wait)
+        wf->memory_wait_scoreboard()->wait(WaitCounterKind::Ds, 0);
+      set_test_flat_domains(*cu, *wf, 0b1111);
+      flat_load();
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait ? 0u : 1u);
+    }
+}
+
+TEST_F(MemoryWaitOrderingTest, InterleavedExportsDoNotBreakDirectLdsWriteOrder) {
+  using namespace waitcheck_detail;
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    setup(arch);
+    direct_load(/*parameter=*/false);
+    auto &state = *wf->memory_wait_scoreboard();
+    state.issue(ClassifiedEvent{WaitCounterKind::Exp, WaitEventKind::Export}, cu->arch());
+    direct_load(/*parameter=*/true);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+    state.wait(WaitCounterKind::Exp, 1);
+    state.access({RegClass::VGPR, 2, 1}, 0b1111, 0xf, false);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, FlatAndGlobalStoresShareCompletionOrderForReplay) {
+  for (bool flat_first : {false, true})
+    for (uint64_t shared_lanes : {0u, 0b0101u, 0b1111u})
+      for (unsigned threshold : {0u, 1u, 2u}) {
+        SCOPED_TRACE(std::format("flat_first={} shared={} threshold={}", flat_first, shared_lanes,
+                                 threshold));
+        setup(ROCJITSU_CODE_ARCH_CDNA5, /*replay=*/true);
+        wf->set_mode_raw(wf->mode_raw() | (1u << 25));
+        set_test_flat_domains(*cu, *wf, flat_first ? shared_lanes : 0);
+        for (unsigned lane = 0; lane < wf->wf_size(); ++lane) {
+          cu->write_vgpr(wf->vgpr_alloc().base + 4, lane, 0);
+          cu->write_vgpr(wf->vgpr_alloc().base + 5, lane,
+                         !flat_first && (shared_lanes & (uint64_t{1} << lane)) ? 2 : 8);
+        }
+        for (unsigned i = 0; i < 2; ++i) {
+          const uint8_t address = i ? 4 : 0;
+          if (flat_first != static_cast<bool>(i))
+            track(cdna5::build_vflat(cdna5::kFlatStoreB32Vflat,
+                                     {.saddr = kModernNullSelector, .vsrc = 8, .vaddr = address}));
+          else
+            track(
+                cdna5::build_vglobal(cdna5::kGlobalStoreB32Vglobal,
+                                     {.saddr = kModernNullSelector, .vsrc = 8, .vaddr = address}));
+        }
+        auto &state = *wf->memory_wait_scoreboard();
+        ASSERT_EQ(state.outstanding(WaitCounterKind::X), 2u);
+        state.wait(WaitCounterKind::Store, threshold);
+        state.access({RegClass::VGPR, 0, 2}, 1, 0xf, true);
+        // The runtime counts only routed domains: an LDS-only FLAT contributes
+        // no Store position. This pins that existing model, not the ISA's
+        // unconditional dual-counter issue rule.
+        const bool translated = threshold == 0 || (threshold == 1 && shared_lanes != 0b1111);
+        EXPECT_EQ(cu->xcnt_diagnostic_count(), translated ? 0u : 1u);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, DirectAndIndexedLdsKeepIndependentWritebackOrder) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4})
+    for (bool direct_first : {false, true}) {
+      SCOPED_TRACE(static_cast<unsigned>(arch));
+      SCOPED_TRACE(direct_first);
+      setup(arch);
+      for (unsigned i = 0; i < 2; ++i) {
+        if (direct_first != static_cast<bool>(i))
+          direct_load(/*parameter=*/false);
+        else
+          lds_load();
+      }
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+    }
+}
+
 TEST(MemoryWaitExecutionTest, IncomingFlatOverwriteUsesItsOwnOrderingAndRoutedLanes) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3}) {
     for (uint64_t shared_lanes : {0u, 0b0101u, 0b1111u}) {
@@ -2851,9 +3207,16 @@ TEST(XcntExecutionTest, ReplayOnlyCheckingRetainsCompletionOrdering) {
 }
 
 TEST(XcntExecutionTest, InvalidDiagnosticSettingsAreRejected) {
-  Gfx1250Sim sim;
-  EXPECT_THROW(sim.initialize(memory_wait_test_config("no")), std::invalid_argument);
-  EXPECT_THROW(sim.initialize(memory_wait_test_config("", "no")), std::invalid_argument);
+  for (const auto &[json, message] :
+       {std::pair{memory_wait_test_config("no"), "memory_wait_diagnostics must be warn or off"},
+        std::pair{memory_wait_test_config("", "no"), "xcnt_diagnostics must be warn or off"}}) {
+    SCOPED_TRACE(message);
+    util::StringDiagnostic diagnostic;
+    util::FailureOr<config::LoadedConfig> result =
+        config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter());
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(diagnostic.message(), message);
+  }
 }
 
 TEST(XcntExecutionTest, SingleGroupVmemIsOutsideQualifiedCoverage) {
@@ -3408,6 +3771,18 @@ TEST(MemoryWaitFootprintTest, ScalarAndInlineSourcesAreNotVectorRegisterNumbers)
   check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA5, 32, 512, cases);
 }
 
+template <typename Raw, typename Words>
+void add_vop3_dpp16_footprint_case(std::vector<std::vector<uint32_t>> &cases, const Words &base) {
+  static_assert(sizeof(Raw) == 3 * sizeof(uint32_t));
+  auto raw = std::bit_cast<Raw>(std::array<uint32_t, 3>{base[0], base[1], 0});
+  raw.vsrc0 = 2;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+  raw.bank_mask = 0xf;
+  raw.row_mask = 0x1;
+  const auto words = std::bit_cast<std::array<uint32_t, 3>>(raw);
+  cases.emplace_back(words.begin(), words.end());
+}
+
 TEST(MemoryWaitFootprintTest, DppUsesPhysicalSourceLanesAndMaskedDestinations) {
   for (const auto arch :
        {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA5}) {
@@ -3423,6 +3798,36 @@ TEST(MemoryWaitFootprintTest, DppUsesPhysicalSourceLanesAndMaskedDestinations) {
     if (arch != ROCJITSU_CODE_ARCH_CDNA4)
       cases.resize(12);
     check_vector_footprints(arch, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32, 256, cases);
+  }
+
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA5}) {
+    std::vector<std::vector<uint32_t>> cases;
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      add_vop3_dpp16_footprint_case<rdna3::Vop3VopDpp16MachineInst>(
+          cases,
+          rdna3::build_vop3(rdna3::kVCndmaskB32Vop3,
+                            {.vdst = 5, .src0 = amdgpu::SRC_DPP, .src1 = 256 + 3, .src2 = 0}));
+      for (const auto opcode : {rdna3::kVAddCoCiU32Vop3SdstEnc, rdna3::kVSubCoCiU32Vop3SdstEnc,
+                                rdna3::kVSubrevCoCiU32Vop3SdstEnc})
+        add_vop3_dpp16_footprint_case<rdna3::Vop3SdstEncVopDpp16MachineInst>(
+            cases,
+            rdna3::build_vop3_sdst_enc(
+                opcode,
+                {.vdst = 5, .sdst = 4, .src0 = amdgpu::SRC_DPP, .src1 = 256 + 3, .src2 = 0}));
+    } else {
+      add_vop3_dpp16_footprint_case<cdna5::Vop3VopDpp16MachineInst>(
+          cases,
+          cdna5::build_vop3(cdna5::kVCndmaskB32Vop3,
+                            {.vdst = 5, .src0 = amdgpu::SRC_DPP, .src1 = 256 + 3, .src2 = 0}));
+      for (const auto opcode : {cdna5::kVAddCoCiU32Vop3SdstEnc, cdna5::kVSubCoCiU32Vop3SdstEnc,
+                                cdna5::kVSubrevCoCiU32Vop3SdstEnc})
+        add_vop3_dpp16_footprint_case<cdna5::Vop3SdstEncVopDpp16MachineInst>(
+            cases,
+            cdna5::build_vop3_sdst_enc(
+                opcode,
+                {.vdst = 5, .sdst = 4, .src0 = amdgpu::SRC_DPP, .src1 = 256 + 3, .src2 = 0}));
+    }
+    check_vector_footprints(arch, 32, 256, cases);
   }
 }
 

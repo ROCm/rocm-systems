@@ -468,6 +468,9 @@ public:
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t VSKIP_BIT = 1u << 28;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
+  /// Short for conditional stack pointer, used by fork/join instructions
+  static constexpr uint32_t CSP_SHIFT = 29;
+  static constexpr uint32_t CSP_MASK = 7u << CSP_SHIFT;
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
   /// in each arch's isa.h, which all spell it member<13, 13>.
@@ -477,6 +480,16 @@ public:
   bool ieee_mode() const { return (mode_raw_ & IEEE_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
+
+  /// @brief Return MODE.CSP, the number of pending fork stack entries.
+  uint32_t cond_stack_ptr() const { return (mode_raw_ & CSP_MASK) >> CSP_SHIFT; }
+
+  /// @brief Set MODE.CSP, leaving every other MODE bit unchanged.
+  /// @param csp New stack depth; only the lowest 3 bits are used.
+  void set_cond_stack_ptr(uint32_t csp) {
+    set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT));
+  }
+
   uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
   uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
@@ -893,10 +906,15 @@ public:
   uint64_t debug_wave_id() const { return debug_wave_id_; }
   void set_debug_wave_id(uint64_t id) { debug_wave_id_ = id; }
 
-  /// @brief Read one allocated SGPR for debugger state capture.
+  /// @brief Read an SGPR relative to this wave's physical register base.
+  /// @details Reads storage without notifying execution plugins. Returns zero
+  /// when the resulting index is outside the physical register file.
   uint32_t debug_read_sgpr(uint32_t reg) const;
 
-  /// @brief Read one allocated VGPR lane for debugger state capture.
+  /// @brief Read a VGPR lane relative to this wave's physical register base.
+  /// @details Reads storage without notifying execution plugins. Returns zero
+  /// for an index outside the physical register file or a lane outside the
+  /// stored lane range.
   uint32_t debug_read_vgpr(uint32_t reg, uint32_t lane) const;
 
   /// @brief Write one allocated SGPR from debugger state restore.

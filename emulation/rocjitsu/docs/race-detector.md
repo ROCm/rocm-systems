@@ -235,8 +235,14 @@ tracks the groups separately. Functional execution splits mixed requests by
 address space, completing retryable global/scratch work before accessing LDS.
 The race plugin retains both counter obligations on its single mixed event.
 LDS validation and interval registration are bounded by the CU backing capacity.
-Out-of-bounds addresses preserve register and counter dependencies without
-recording LDS bytes. DDS has no emulator backing and faults before execution.
+For RDNA4 FLAT LDS, they also stop at the captured workgroup allocation end,
+retaining only complete memory elements; a lane whose first element does not fit
+records no LDS bytes, and an atomic requires its whole element. This end is the
+modeled `lds_base + lds_size`, including current 256-byte scheduler rounding;
+PM4 sizes may already be 512-byte multiples, and target allocation and encoding
+granules remain unmodeled. Out-of-bounds addresses preserve register and counter
+dependencies without recording LDS bytes. DDS has no emulator backing and faults
+before execution.
 
 An all-ones wait-count field is the architectural “do not wait” value. CDNA's
 four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
