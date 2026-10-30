@@ -553,8 +553,10 @@ the LDS byte runs the transfer wrote (loads) or read (stores), with adjacent
 elements merged. A load writes every element of its tile, zero-filling those
 outside the tensor, so a load whose tile lies wholly outside the tensor has LDS
 ranges but no global requests; consumers must accept an empty `addresses`. A
-store reads only in-bounds elements. Transfers with neither global requests nor
-LDS ranges, such as disabled descriptors, produce no callback. `pc` is the tensor
+store reads only in-bounds elements. Every tensor DMA instruction that completes
+produces one callback, since each completes on TENSORcnt: a NULL tensor
+(`count = 0`), a NOP tile (`tile_dim0 = 0`) or a store wholly outside the tensor
+is observed with neither global requests nor LDS ranges. `pc` is the tensor
 instruction's PC, also when a deferred transfer completes after the wavefront
 has moved past the instruction.
 Consumers must opt in through `observes_tensor_dma_memory_access()`. A consumer
